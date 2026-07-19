@@ -17,4 +17,18 @@ if (process.versions.bun !== expectedBunVersion) {
   console.warn(`Warning: Bun version ${process.versions.bun} differs from expected ${expectedBunVersion}`);
 }
 '
+bun run check:symlinks
+
+# Git represents symlinks as plain path text when Windows symlink support is
+# disabled. TypeScript then parses those placeholders as source files, so the
+# repository-wide check produces syntax errors that cannot occur in CI.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    if [ "$(git config --bool core.symlinks)" = "false" ]; then
+      echo "Skipping typecheck: Windows checkout has core.symlinks=false (CI will typecheck real symlinks)."
+      exit 0
+    fi
+    ;;
+esac
+
 bun typecheck
