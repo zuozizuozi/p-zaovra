@@ -188,7 +188,8 @@ export default {
                   subject: email,
                 },
               ])
-              .onDuplicateKeyUpdate({
+              .onConflictDoUpdate({
+                target: [AuthTable.provider, AuthTable.subject],
                 set: {
                   timeDeleted: null,
                 },

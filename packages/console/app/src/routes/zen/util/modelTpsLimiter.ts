@@ -76,7 +76,8 @@ export function createModelTpsLimiter(providers: { id: string; model: string; tp
             qualify,
             unqualify,
           })
-          .onDuplicateKeyUpdate({
+          .onConflictDoUpdate({
+            target: [ModelTpsRateLimitTable.id, ModelTpsRateLimitTable.interval],
             set: {
               qualify: sql`${ModelTpsRateLimitTable.qualify} + ${qualify}`,
               unqualify: sql`${ModelTpsRateLimitTable.unqualify} + ${unqualify}`,

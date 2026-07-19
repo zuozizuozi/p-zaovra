@@ -197,7 +197,6 @@
       "dependencies": {
         "@aws-sdk/client-sts": "3.782.0",
         "@jsx-email/render": "1.1.1",
-        "@planetscale/database": "1.19.0",
         "@zaovra-ai/console-mail": "workspace:*",
         "@zaovra-ai/console-resource": "workspace:*",
         "aws4fetch": "1.0.20",
@@ -214,7 +213,6 @@
         "@types/node": "catalog:",
         "@typescript/native-preview": "catalog:",
         "drizzle-kit": "catalog:",
-        "mysql2": "3.14.4",
         "typescript": "catalog:",
       },
     },

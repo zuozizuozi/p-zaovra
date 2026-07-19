@@ -2,19 +2,12 @@ import { Resource } from "sst"
 import { defineConfig } from "drizzle-kit"
 
 export default defineConfig({
-  out: "./migrations/",
+  out: "./migrations-postgres/",
   strict: true,
   schema: ["./src/**/*.sql.ts"],
   verbose: true,
-  dialect: "mysql",
+  dialect: "postgresql",
   dbCredentials: {
-    database: Resource.Database.database,
-    host: Resource.Database.host,
-    user: Resource.Database.username,
-    password: Resource.Database.password,
-    port: Resource.Database.port,
-    ssl: {
-      rejectUnauthorized: false,
-    },
+    url: `postgresql://${encodeURIComponent(Resource.Database.username)}:${encodeURIComponent(Resource.Database.password)}@${Resource.Database.host}:${Resource.Database.port}/${Resource.Database.database}?sslmode=require`,
   },
 })

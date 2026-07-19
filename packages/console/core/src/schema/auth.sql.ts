@@ -1,14 +1,15 @@
-import { index, mysqlEnum, mysqlTable, primaryKey, uniqueIndex, varchar } from "drizzle-orm/mysql-core"
+import { index, pgEnum, pgTable, primaryKey, uniqueIndex, varchar } from "drizzle-orm/pg-core"
 import { id, timestamps, ulid } from "../drizzle/types"
 
 export const AuthProvider = ["email", "github", "google"] as const
+const authProvider = pgEnum("auth_provider", AuthProvider)
 
-export const AuthTable = mysqlTable(
+export const AuthTable = pgTable(
   "auth",
   {
     id: id(),
     ...timestamps,
-    provider: mysqlEnum("provider", AuthProvider).notNull(),
+    provider: authProvider("provider").notNull(),
     subject: varchar("subject", { length: 255 }).notNull(),
     accountID: ulid("account_id").notNull(),
   },

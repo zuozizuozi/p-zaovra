@@ -1,10 +1,11 @@
-import { mysqlTable, uniqueIndex, varchar, int, mysqlEnum, index, bigint } from "drizzle-orm/mysql-core"
+import { bigint, index, integer, pgEnum, pgTable, uniqueIndex, varchar } from "drizzle-orm/pg-core"
 import { timestamps, ulid, utc, workspaceColumns } from "../drizzle/types"
 import { workspaceIndexes } from "./workspace.sql"
 
 export const UserRole = ["admin", "member"] as const
+const userRole = pgEnum("user_role", UserRole)
 
-export const UserTable = mysqlTable(
+export const UserTable = pgTable(
   "user",
   {
     ...workspaceColumns,
@@ -13,9 +14,9 @@ export const UserTable = mysqlTable(
     email: varchar("email", { length: 255 }),
     name: varchar("name", { length: 255 }).notNull(),
     timeSeen: utc("time_seen"),
-    color: int("color"),
-    role: mysqlEnum("role", UserRole).notNull(),
-    monthlyLimit: int("monthly_limit"),
+    color: integer("color"),
+    role: userRole("role").notNull(),
+    monthlyLimit: integer("monthly_limit"),
     monthlyUsage: bigint("monthly_usage", { mode: "number" }),
     timeMonthlyUsageUpdated: utc("time_monthly_usage_updated"),
   },

@@ -1,5 +1,4 @@
-import { sql } from "drizzle-orm"
-import { bigint, timestamp, varchar } from "drizzle-orm/mysql-core"
+import { bigint, timestamp, varchar } from "drizzle-orm/pg-core"
 
 export const ulid = (name: string) => varchar(name, { length: 30 })
 
@@ -16,7 +15,8 @@ export const id = () => ulid("id").notNull()
 
 export const utc = (name: string) =>
   timestamp(name, {
-    fsp: 3,
+    precision: 3,
+    withTimezone: true,
   })
 
 export const currency = (name: string) =>
@@ -28,6 +28,7 @@ export const timestamps = {
   timeCreated: utc("time_created").notNull().defaultNow(),
   timeUpdated: utc("time_updated")
     .notNull()
-    .default(sql`CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)`),
+    .defaultNow()
+    .$onUpdate(() => new Date()),
   timeDeleted: utc("time_deleted"),
 }

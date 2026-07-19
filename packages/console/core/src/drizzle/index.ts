@@ -1,31 +1,27 @@
-import { drizzle } from "drizzle-orm/planetscale-serverless"
+import { drizzle } from "drizzle-orm/postgres-js"
 import { Resource } from "@zaovra-ai/console-resource"
 export * from "drizzle-orm"
-import { Client } from "@planetscale/database"
-
-import { MySqlTransaction, type MySqlTransactionConfig } from "drizzle-orm/mysql-core"
-import type { PlanetScalePreparedQueryHKT, PlanetscaleQueryResultHKT } from "drizzle-orm/planetscale-serverless"
+import postgres from "postgres"
 import { Context } from "../context"
 import { memo } from "../util/memo"
 
 export namespace Database {
-  export type Transaction = MySqlTransaction<
-    PlanetscaleQueryResultHKT,
-    PlanetScalePreparedQueryHKT,
-    Record<string, never>,
-    any
-  >
-
   const client = memo(() => {
-    const result = new Client({
+    const result = postgres({
       host: Resource.Database.host,
+      port: Resource.Database.port,
+      database: Resource.Database.database,
       username: Resource.Database.username,
       password: Resource.Database.password,
+      ssl: "require",
+      prepare: false,
+      max: 1,
     })
     const db = drizzle({ client: result })
     return db
   })
 
+  export type Transaction = Parameters<Parameters<ReturnType<typeof client>["transaction"]>[0]>[0]
   export type TxOrDb = Transaction | ReturnType<typeof client>
 
   const TransactionContext = Context.create<{
@@ -66,7 +62,10 @@ export namespace Database {
     }
   }
 
-  export async function transaction<T>(callback: (tx: TxOrDb) => Promise<T>, config?: MySqlTransactionConfig) {
+  export async function transaction<T>(
+    callback: (tx: TxOrDb) => Promise<T>,
+    config?: Parameters<ReturnType<typeof client>["transaction"]>[1],
+  ) {
     try {
       const { tx } = TransactionContext.use()
       return callback(tx)

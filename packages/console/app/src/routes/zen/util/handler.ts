@@ -1144,13 +1144,13 @@ export async function handler(
                   timeFixedUpdated: sql`now()`,
                   rollingUsage: sql`
               CASE
-                WHEN UNIX_TIMESTAMP(${SubscriptionTable.timeRollingUpdated}) >= UNIX_TIMESTAMP(now()) - ${rollingWindowSeconds} THEN ${SubscriptionTable.rollingUsage} + ${cost}
+                WHEN ${SubscriptionTable.timeRollingUpdated} >= now() - ${rollingWindowSeconds} * interval '1 second' THEN ${SubscriptionTable.rollingUsage} + ${cost}
                 ELSE ${cost}
               END
             `,
                   timeRollingUpdated: sql`
               CASE
-                WHEN UNIX_TIMESTAMP(${SubscriptionTable.timeRollingUpdated}) >= UNIX_TIMESTAMP(now()) - ${rollingWindowSeconds} THEN ${SubscriptionTable.timeRollingUpdated}
+                WHEN ${SubscriptionTable.timeRollingUpdated} >= now() - ${rollingWindowSeconds} * interval '1 second' THEN ${SubscriptionTable.timeRollingUpdated}
                 ELSE now()
               END
             `,
@@ -1189,13 +1189,13 @@ export async function handler(
                   timeWeeklyUpdated: sql`now()`,
                   rollingUsage: sql`
               CASE
-                WHEN UNIX_TIMESTAMP(${LiteTable.timeRollingUpdated}) >= UNIX_TIMESTAMP(now()) - ${rollingWindowSeconds} THEN ${LiteTable.rollingUsage} + ${quotaCost}
+                WHEN ${LiteTable.timeRollingUpdated} >= now() - ${rollingWindowSeconds} * interval '1 second' THEN ${LiteTable.rollingUsage} + ${quotaCost}
                 ELSE ${quotaCost}
               END
             `,
                   timeRollingUpdated: sql`
               CASE
-                WHEN UNIX_TIMESTAMP(${LiteTable.timeRollingUpdated}) >= UNIX_TIMESTAMP(now()) - ${rollingWindowSeconds} THEN ${LiteTable.timeRollingUpdated}
+                WHEN ${LiteTable.timeRollingUpdated} >= now() - ${rollingWindowSeconds} * interval '1 second' THEN ${LiteTable.timeRollingUpdated}
                 ELSE now()
               END
             `,
@@ -1268,7 +1268,7 @@ export async function handler(
           ),
         ),
     )
-    if (lock.rowsAffected === 0) return
+    if (lock.count === 0) return
 
     await Actor.provide("system", { workspaceID: authInfo.workspaceID }, async () => {
       await Billing.reload()

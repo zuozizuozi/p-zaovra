@@ -1,8 +1,8 @@
-import { mysqlTable, varchar, uniqueIndex } from "drizzle-orm/mysql-core"
+import { pgTable, uniqueIndex, varchar } from "drizzle-orm/pg-core"
 import { timestamps, workspaceColumns } from "../drizzle/types"
 import { workspaceIndexes } from "./workspace.sql"
 
-export const ModelTable = mysqlTable(
+export const ModelTable = pgTable(
   "model",
   {
     ...workspaceColumns,

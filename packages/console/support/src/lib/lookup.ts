@@ -301,7 +301,7 @@ async function loadWorkspace(workspaceID: string): Promise<WorkspaceSection> {
       ),
   )
 
-  const planExpr = sql`JSON_UNQUOTE(JSON_EXTRACT(${UsageTable.enrichment}, '$.plan'))`
+  const planExpr = sql`${UsageTable.enrichment} ->> 'plan'`
   const usage = await Database.use((tx) =>
     tx
       .select({

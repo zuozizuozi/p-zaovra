@@ -197,7 +197,8 @@ export namespace Billing {
       tx
         .insert(CouponTable)
         .values({ email, type, timeRedeemed: sql`now()` })
-        .onDuplicateKeyUpdate({
+        .onConflictDoUpdate({
+          target: [CouponTable.email, CouponTable.type],
           set: {
             timeRedeemed: sql`now()`,
           },

@@ -2,19 +2,20 @@ import {
   bigint,
   boolean,
   index,
-  int,
-  json,
-  mysqlEnum,
-  mysqlTable,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
   primaryKey,
   uniqueIndex,
   varchar,
-} from "drizzle-orm/mysql-core"
+} from "drizzle-orm/pg-core"
 import { timestamps, ulid, utc, workspaceColumns } from "../drizzle/types"
 import { workspaceIndexes } from "./workspace.sql"
 
 export const BlackPlans = ["20", "100", "200"] as const
-export const BillingTable = mysqlTable(
+const blackPlan = pgEnum("black_plan", BlackPlans)
+export const BillingTable = pgTable(
   "billing",
   {
     ...workspaceColumns,
@@ -24,16 +25,16 @@ export const BillingTable = mysqlTable(
     paymentMethodType: varchar("payment_method_type", { length: 32 }),
     paymentMethodLast4: varchar("payment_method_last4", { length: 4 }),
     balance: bigint("balance", { mode: "number" }).notNull(),
-    monthlyLimit: int("monthly_limit"),
+    monthlyLimit: integer("monthly_limit"),
     monthlyUsage: bigint("monthly_usage", { mode: "number" }),
     timeMonthlyUsageUpdated: utc("time_monthly_usage_updated"),
     reload: boolean("reload"),
-    reloadTrigger: int("reload_trigger"),
-    reloadAmount: int("reload_amount"),
+    reloadTrigger: integer("reload_trigger"),
+    reloadAmount: integer("reload_amount"),
     reloadError: varchar("reload_error", { length: 255 }),
     timeReloadError: utc("time_reload_error"),
     timeReloadLockedTill: utc("time_reload_locked_till"),
-    subscription: json("subscription").$type<{
+    subscription: jsonb("subscription").$type<{
       status: "subscribed"
       seats: number
       plan: (typeof BlackPlans)[number]
@@ -41,11 +42,11 @@ export const BillingTable = mysqlTable(
       coupon?: string
     }>(),
     subscriptionID: varchar("subscription_id", { length: 28 }),
-    subscriptionPlan: mysqlEnum("subscription_plan", BlackPlans),
+    subscriptionPlan: blackPlan("subscription_plan"),
     timeSubscriptionBooked: utc("time_subscription_booked"),
     timeSubscriptionSelected: utc("time_subscription_selected"),
     liteSubscriptionID: varchar("lite_subscription_id", { length: 28 }),
-    lite: json("lite").$type<{
+    lite: jsonb("lite").$type<{
       useBalance?: boolean
     }>(),
   },
@@ -56,7 +57,7 @@ export const BillingTable = mysqlTable(
   ],
 )
 
-export const SubscriptionTable = mysqlTable(
+export const SubscriptionTable = pgTable(
   "subscription",
   {
     ...workspaceColumns,
@@ -67,10 +68,10 @@ export const SubscriptionTable = mysqlTable(
     timeRollingUpdated: utc("time_rolling_updated"),
     timeFixedUpdated: utc("time_fixed_updated"),
   },
-  (table) => [...workspaceIndexes(table), uniqueIndex("workspace_user_id").on(table.workspaceID, table.userID)],
+  (table) => [...workspaceIndexes(table), uniqueIndex("subscription_workspace_user_id").on(table.workspaceID, table.userID)],
 )
 
-export const LiteTable = mysqlTable(
+export const LiteTable = pgTable(
   "lite",
   {
     ...workspaceColumns,
@@ -83,10 +84,10 @@ export const LiteTable = mysqlTable(
     timeWeeklyUpdated: utc("time_weekly_updated"),
     timeMonthlyUpdated: utc("time_monthly_updated"),
   },
-  (table) => [...workspaceIndexes(table), uniqueIndex("workspace_user_id").on(table.workspaceID, table.userID)],
+  (table) => [...workspaceIndexes(table), uniqueIndex("lite_workspace_user_id").on(table.workspaceID, table.userID)],
 )
 
-export const PaymentTable = mysqlTable(
+export const PaymentTable = pgTable(
   "payment",
   {
     ...workspaceColumns,
@@ -96,7 +97,7 @@ export const PaymentTable = mysqlTable(
     paymentID: varchar("payment_id", { length: 255 }),
     amount: bigint("amount", { mode: "number" }).notNull(),
     timeRefunded: utc("time_refunded"),
-    enrichment: json("enrichment").$type<
+    enrichment: jsonb("enrichment").$type<
       | {
           type: "subscription" | "lite"
           currency?: "inr"
@@ -110,23 +111,23 @@ export const PaymentTable = mysqlTable(
   (table) => [...workspaceIndexes(table)],
 )
 
-export const UsageTable = mysqlTable(
+export const UsageTable = pgTable(
   "usage",
   {
     ...workspaceColumns,
     ...timestamps,
     model: varchar("model", { length: 255 }).notNull(),
     provider: varchar("provider", { length: 255 }).notNull(),
-    inputTokens: int("input_tokens").notNull(),
-    outputTokens: int("output_tokens").notNull(),
-    reasoningTokens: int("reasoning_tokens"),
-    cacheReadTokens: int("cache_read_tokens"),
-    cacheWrite5mTokens: int("cache_write_5m_tokens"),
-    cacheWrite1hTokens: int("cache_write_1h_tokens"),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    reasoningTokens: integer("reasoning_tokens"),
+    cacheReadTokens: integer("cache_read_tokens"),
+    cacheWrite5mTokens: integer("cache_write_5m_tokens"),
+    cacheWrite1hTokens: integer("cache_write_1h_tokens"),
     cost: bigint("cost", { mode: "number" }).notNull(),
     keyID: ulid("key_id"),
     sessionID: varchar("session_id", { length: 30 }),
-    enrichment: json("enrichment").$type<{
+    enrichment: jsonb("enrichment").$type<{
       plan: "sub" | "byok" | "lite"
     }>(),
   },
@@ -141,11 +142,12 @@ export const CouponType = [
   "GO6MONTHS100",
   "GO12MONTHS100",
 ] as const
-export const CouponTable = mysqlTable(
+const couponType = pgEnum("coupon_type", CouponType)
+export const CouponTable = pgTable(
   "coupon",
   {
     email: varchar("email", { length: 255 }),
-    type: mysqlEnum("type", CouponType).notNull(),
+    type: couponType("type").notNull(),
     timeRedeemed: utc("time_redeemed"),
   },
   (table) => [primaryKey({ columns: [table.email, table.type] })],

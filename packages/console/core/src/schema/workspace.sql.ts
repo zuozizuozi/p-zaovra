@@ -1,13 +1,13 @@
-import { json, primaryKey, mysqlTable, uniqueIndex, varchar } from "drizzle-orm/mysql-core"
+import { jsonb, pgTable, primaryKey, uniqueIndex, varchar } from "drizzle-orm/pg-core"
 import { timestamps, ulid } from "../drizzle/types"
 
-export const WorkspaceTable = mysqlTable(
+export const WorkspaceTable = pgTable(
   "workspace",
   {
     id: ulid("id").notNull().primaryKey(),
     slug: varchar("slug", { length: 255 }),
     name: varchar("name", { length: 255 }).notNull(),
-    region: json("region").$type<("us" | "eu" | "sg" | "cn")[]>(),
+    region: jsonb("region").$type<("us" | "eu" | "sg" | "cn")[]>(),
     ...timestamps,
   },
   (table) => [uniqueIndex("slug").on(table.slug)],
