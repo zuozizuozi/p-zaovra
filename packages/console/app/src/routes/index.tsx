@@ -1,8 +1,7 @@
 import "./index.css"
 import { Title, Meta } from "@solidjs/meta"
 //import { HttpHeader } from "@solidjs/start"
-import video from "../asset/lander/opencode-min.mp4"
-import videoPoster from "../asset/lander/opencode-poster.png"
+import videoPoster from "../asset/lander/zaovra-poster.png"
 import { IconCopy, IconCheck } from "../component/icon"
 import { A, createAsync } from "@solidjs/router"
 import { EmailSignup } from "~/component/email-signup"
@@ -43,7 +42,7 @@ export default function Home() {
   }
 
   return (
-    <main data-page="opencode">
+    <main data-page="zaovra">
       {/*<HttpHeader name="Cache-Control" value="public, max-age=1, s-maxage=3600, stale-while-revalidate=86400" />*/}
       <Title>{i18n.t("home.title")}</Title>
       <LocaleLinks path="/" />
@@ -115,7 +114,7 @@ export default function Home() {
                       <span data-slot="command-script">
                         <span>curl -fsSL </span>
                         <span data-slot="protocol">https://</span>
-                        <span data-slot="highlight">opencode.ai/install</span>
+                        <span data-slot="highlight">zaovra.com/install</span>
                         <span> | bash</span>
                       </span>
                       <CopyStatus />
@@ -125,7 +124,7 @@ export default function Home() {
                     <button data-copy data-slot="command" onClick={handleCopyClick}>
                       <span>
                         <span data-slot="protocol">npm i -g </span>
-                        <span data-slot="highlight">opencode-ai</span>
+                        <span data-slot="highlight">zaovra-ai</span>
                       </span>
                       <CopyStatus />
                     </button>
@@ -134,7 +133,7 @@ export default function Home() {
                     <button data-copy data-slot="command" onClick={handleCopyClick}>
                       <span>
                         <span data-slot="protocol">bun add -g </span>
-                        <span data-slot="highlight">opencode-ai</span>
+                        <span data-slot="highlight">zaovra-ai</span>
                       </span>
                       <CopyStatus />
                     </button>
@@ -143,7 +142,7 @@ export default function Home() {
                     <button data-copy data-slot="command" onClick={handleCopyClick}>
                       <span>
                         <span data-slot="protocol">brew install </span>
-                        <span data-slot="highlight">anomalyco/tap/opencode</span>
+                        <span data-slot="highlight">zuozizuozi/tap/zaovra</span>
                       </span>
                       <CopyStatus />
                     </button>
@@ -152,7 +151,7 @@ export default function Home() {
                     <button data-copy data-slot="command" onClick={handleCopyClick}>
                       <span>
                         <span data-slot="protocol">paru -S </span>
-                        <span data-slot="highlight">opencode</span>
+                        <span data-slot="highlight">zaovra</span>
                       </span>
                       <CopyStatus />
                     </button>
@@ -163,9 +162,7 @@ export default function Home() {
           </section>
 
           <section data-component="video">
-            <video src={video} autoplay playsinline loop muted preload="auto" poster={videoPoster}>
-              {i18n.t("common.videoUnsupported")}
-            </video>
+            <img src={videoPoster} alt="Zaovra workspace preview" />
           </section>
 
           <section data-component="what">

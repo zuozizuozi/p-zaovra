@@ -1,6 +1,6 @@
-# OpenCode Desktop
+# Zaovra Desktop
 
-The OpenCode Desktop app, built with Electron.
+The Zaovra Desktop app, built with Electron.
 
 ## Development
 

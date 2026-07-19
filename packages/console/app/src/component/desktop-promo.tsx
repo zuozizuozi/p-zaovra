@@ -2,7 +2,7 @@ import "./desktop-promo.css"
 import { A, useLocation } from "@solidjs/router"
 import { createSignal, Show } from "solid-js"
 import { getRequestEvent } from "solid-js/web"
-import desktopPromoVideo from "~/asset/lander/desktop-tabs-landscape.mp4"
+import desktopPromoImage from "~/asset/lander/screenshot-splash.png"
 import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
 import { strip } from "~/lib/language"
@@ -20,7 +20,7 @@ export function DesktopPromo() {
   )
   const hostname = request ? new URL(request.url).hostname : typeof window === "object" ? window.location.hostname : ""
   const primaryHost =
-    hostname === "opencode.ai" || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+    hostname === "zaovra.com" || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
 
   return (
     <Show
@@ -33,7 +33,7 @@ export function DesktopPromo() {
     >
       <aside data-component="desktop-promo">
         <A href={language.route("/download")} data-slot="desktop-promo-link">
-          <video src={desktopPromoVideo} autoplay playsinline loop muted preload="metadata" aria-hidden="true" />
+          <img src={desktopPromoImage} alt="" aria-hidden="true" />
           <span data-slot="desktop-promo-copy">
             <strong>{i18n.t("home.promo.title")}</strong>
             <span>

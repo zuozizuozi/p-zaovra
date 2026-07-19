@@ -2,7 +2,7 @@ import React from "react"
 import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion"
 import { days, launchIndex, glmWeekTokensT, segments } from "./data"
 
-// stats.opencode.ai design tokens (light theme)
+// stats.zaovra.com design tokens (light theme)
 const c = {
   bg: "#ffffff",
   ink: "#161616",
@@ -25,12 +25,11 @@ const glmColor = segments.find((s) => s.hero)!.color
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-// the correct opencode "DATA" wordmark (from stats.opencode.ai header)
+// the correct zaovra "DATA" wordmark (from stats.zaovra.com header)
 function DataWordmark({ height = 30, color = c.ink }: { height?: number; color?: string }) {
   return (
     <svg width={(height * 66) / 20} height={height} viewBox="0 0 66 20" fill="none" style={{ color }}>
-      <path opacity="0.2" d="M12 16H4V8H12V16Z" fill="currentColor" />
-      <path d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z" fill="currentColor" />
+      <path d="M1 2H15L10 7H15L8 18H1L6 12H1L6 7H1Z" fill="currentColor" />
       <path
         d="M63.3543 16L62.5119 12.8711H58.6437L57.8013 16H55.7383L59.2454 4H61.9618L65.4689 16H63.3543ZM61.0678 7.851L60.6896 5.94269H60.4489L60.0707 7.851L59.1595 11.1347H61.9962L61.0678 7.851Z"
         fill="currentColor"
@@ -245,7 +244,7 @@ export function GLM52Rise() {
               <span style={{ width: 13, height: 13, background: c.accent, display: "inline-block" }} />
               GLM-5.2
             </div>
-            <div style={{ color: c.ink }}>opencode.ai/data</div>
+            <div style={{ color: c.ink }}>zaovra.com/data</div>
           </div>
         </div>
       </div>

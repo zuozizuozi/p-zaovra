@@ -15,14 +15,13 @@ const MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Cons
 const DOT_MASK =
   "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0H2V2H0V0Z' fill='black'/%3E%3C/svg%3E\")"
 
-// verified: OpenCode Go (tier=Go, dataset=zen), June 1-30, 2026.
+// verified: Zaovra Go (tier=Go, dataset=zen), June 1-30, 2026.
 // 72.78T tokens · 651.4M requests · 11.42M sessions -> rounded headline figures.
 
 function DataWordmark({ height = 30 }: { height?: number }) {
   return (
     <svg width={(height * 66) / 20} height={height} viewBox="0 0 66 20" fill="none" style={{ color: c.ink }}>
-      <path opacity="0.2" d="M12 16H4V8H12V16Z" fill="currentColor" />
-      <path d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z" fill="currentColor" />
+      <path d="M1 2H15L10 7H15L8 18H1L6 12H1L6 7H1Z" fill="currentColor" />
       <path
         d="M63.3543 16L62.5119 12.8711H58.6437L57.8013 16H55.7383L59.2454 4H61.9618L65.4689 16H63.3543ZM61.0678 7.851L60.6896 5.94269H60.4489L60.0707 7.851L59.1595 11.1347H61.9962L61.0678 7.851Z"
         fill="currentColor"
@@ -92,7 +91,7 @@ export function JuneTotals() {
 
         {/* hero */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <div style={{ fontSize: 25, fontWeight: 600, color: c.muted, letterSpacing: 3 }}>OPENCODE GO · JUNE 2026</div>
+          <div style={{ fontSize: 25, fontWeight: 600, color: c.muted, letterSpacing: 3 }}>ZAOVRA GO · JUNE 2026</div>
           <div style={{ marginTop: 14 }}>
             <div
               style={{
@@ -136,7 +135,7 @@ export function JuneTotals() {
             fontWeight: 500,
           }}
         >
-          <div style={{ color: c.ink }}>opencode.ai/data</div>
+          <div style={{ color: c.ink }}>zaovra.com/data</div>
         </div>
       </div>
     </AbsoluteFill>

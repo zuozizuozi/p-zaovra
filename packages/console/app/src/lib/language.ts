@@ -21,8 +21,8 @@ export const LOCALES = [
 
 export type Locale = (typeof LOCALES)[number]
 
-export const LOCALE_COOKIE = "oc_locale" as const
-export const LOCALE_HEADER = "x-opencode-locale" as const
+export const LOCALE_COOKIE = "zaovra_locale" as const
+export const LOCALE_HEADER = "x-zaovra-locale" as const
 
 function fix(pathname: string) {
   if (pathname.startsWith("/")) return pathname

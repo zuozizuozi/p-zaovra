@@ -1,8 +1,8 @@
-import { Actor } from "@opencode-ai/console-core/actor.js"
-import { Referral } from "@opencode-ai/console-core/referral.js"
+import { Actor } from "@zaovra-ai/console-core/actor.js"
+import { Referral } from "@zaovra-ai/console-core/referral.js"
 import { getRequestEvent } from "solid-js/web"
 
-const REFERRAL_COOKIE = "oc_referral"
+const REFERRAL_COOKIE = "zaovra_referral"
 const REFERRAL_MAX_AGE = 60 * 60 * 24 * 30
 
 export function normalizeReferralCode(code?: string | null) {

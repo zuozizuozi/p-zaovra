@@ -1,5 +1,5 @@
 {
-  description = "OpenCode development flake";
+  description = "Zaovra development flake";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -39,11 +39,11 @@
             };
           in
           rec {
-            opencode = final.callPackage ./nix/opencode.nix {
+            zaovra = final.callPackage ./nix/zaovra.nix {
               inherit node_modules;
             };
-            opencode-desktop = final.callPackage ./nix/desktop.nix {
-              inherit opencode;
+            zaovra-desktop = final.callPackage ./nix/desktop.nix {
+              inherit zaovra;
             };
           };
       };
@@ -56,12 +56,12 @@
           };
         in
         rec {
-          default = opencode;
-          opencode = pkgs.callPackage ./nix/opencode.nix {
+          default = zaovra;
+          zaovra = pkgs.callPackage ./nix/zaovra.nix {
             inherit node_modules;
           };
-          opencode-desktop = pkgs.callPackage ./nix/desktop.nix {
-            inherit opencode;
+          zaovra-desktop = pkgs.callPackage ./nix/desktop.nix {
+            inherit zaovra;
           };
           # Updater derivation with fakeHash - build fails and reveals correct hash
           node_modules_updater = node_modules.override {

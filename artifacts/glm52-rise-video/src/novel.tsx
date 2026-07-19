@@ -7,7 +7,7 @@ const c = {
 }
 const MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 
-// verified: OpenCode Go, week of Jun 22-28, 2026 (2026-W26)
+// verified: Zaovra Go, week of Jun 22-28, 2026 (2026-W26)
 // 19,642,742,937,105 tokens / 173,651,197 requests = 113,116 tokens/request
 const AVG = 113116
 const K = Math.round(AVG / 1000) // 113
@@ -17,8 +17,7 @@ const nf = new Intl.NumberFormat("en-US")
 function DataWordmark({ height = 30 }: { height?: number }) {
   return (
     <svg width={(height * 66) / 20} height={height} viewBox="0 0 66 20" fill="none" style={{ color: c.white }}>
-      <path opacity="0.35" d="M12 16H4V8H12V16Z" fill="currentColor" />
-      <path d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z" fill="currentColor" />
+      <path d="M1 2H15L10 7H15L8 18H1L6 12H1L6 7H1Z" fill="currentColor" />
       <path
         d="M63.3543 16L62.5119 12.8711H58.6437L57.8013 16H55.7383L59.2454 4H61.9618L65.4689 16H63.3543ZM61.0678 7.851L60.6896 5.94269H60.4489L60.0707 7.851L59.1595 11.1347H61.9962L61.0678 7.851Z"
         fill="currentColor"
@@ -100,7 +99,7 @@ export function NovelTokens() {
         {/* bottom block */}
         <div>
           <div style={{ fontSize: 23, fontWeight: 600, color: c.dim, letterSpacing: 2, marginBottom: 8 }}>
-            OPENCODE GO · LAST WEEK
+            ZAOVRA GO · LAST WEEK
           </div>
           <div
             style={{
@@ -126,7 +125,7 @@ export function NovelTokens() {
             }}
           >
             <div style={{ color: c.dim }}>{nf.format(AVG)} tokens / request · last week</div>
-            <div style={{ color: c.white }}>opencode.ai/data</div>
+            <div style={{ color: c.white }}>zaovra.com/data</div>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { Component, createSignal, startTransition } from "solid-js"
-import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
-import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
-import { Icon } from "@opencode-ai/ui/icon"
+import { Dialog } from "@zaovra-ai/ui/v2/dialog-v2"
+import { TabsV2 } from "@zaovra-ai/ui/v2/tabs-v2"
+import { Icon } from "@zaovra-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { SettingsGeneralV2 } from "./general"
@@ -10,7 +10,7 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useDialog } from "@zaovra-ai/ui/context/dialog"
 
 export const DialogSettings: Component<{
   sessionID?: string

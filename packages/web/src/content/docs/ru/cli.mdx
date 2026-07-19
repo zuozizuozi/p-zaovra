@@ -1,30 +1,30 @@
 ---
 title: CLI
-description: Параметры и команда opencode CLI.
+description: Параметры и команда zaovra CLI.
 ---
 
 import { Tabs, TabItem } from "@astrojs/starlight/components"
 
-CLI opencode по умолчанию запускает [TUI](/docs/tui) при запуске без каких-либо аргументов.
+CLI zaovra по умолчанию запускает [TUI](/docs/tui) при запуске без каких-либо аргументов.
 
 ```bash
-opencode
+zaovra
 ```
 
-Но он также принимает команды, описанные на этой странице. Это позволяет вам программно взаимодействовать с opencode.
+Но он также принимает команды, описанные на этой странице. Это позволяет вам программно взаимодействовать с zaovra.
 
 ```bash
-opencode run "Explain how closures work in JavaScript"
+zaovra run "Explain how closures work in JavaScript"
 ```
 
 ---
 
 ### tui
 
-Запустите TUI opencode.
+Запустите TUI zaovra.
 
 ```bash
-opencode [project]
+zaovra [project]
 ```
 
 #### Флаги
@@ -44,36 +44,36 @@ opencode [project]
 
 ## Команды
 
-CLI opencode также имеет следующие команды.
+CLI zaovra также имеет следующие команды.
 
 ---
 
 ### agent
 
-Управляйте агентами для opencode.
+Управляйте агентами для zaovra.
 
 ```bash
-opencode agent [command]
+zaovra agent [command]
 ```
 
 ---
 
 ### attach
 
-Подключите терминал к уже работающему внутреннему серверу opencode, запущенному с помощью команд `serve` или `web`.
+Подключите терминал к уже работающему внутреннему серверу zaovra, запущенному с помощью команд `serve` или `web`.
 
 ```bash
-opencode attach [url]
+zaovra attach [url]
 ```
 
-Это позволяет использовать TUI с удаленным сервером opencode. Например:
+Это позволяет использовать TUI с удаленным сервером zaovra. Например:
 
 ```bash
 # Start the backend server for web/mobile access
-opencode web --port 4096 --hostname 0.0.0.0
+zaovra web --port 4096 --hostname 0.0.0.0
 
 # In another terminal, attach the TUI to the running backend
-opencode attach http://10.20.30.40:4096
+zaovra attach http://10.20.30.40:4096
 ```
 
 #### Флаги
@@ -84,8 +84,8 @@ opencode attach http://10.20.30.40:4096
 | <nobr><code>{"--continue"}</code></nobr> | `-c`     | Продолжить последний сеанс                                                                       |
 | <nobr><code>{"--session"}</code></nobr>  | `-s`     | Идентификатор сеанса для продолжения                                                             |
 | <nobr><code>{"--fork"}</code></nobr>     |          | Создать ответвление сеанса при продолжении (используйте с `--continue` или `--session`)          |
-| <nobr><code>{"--password"}</code></nobr> | `-p`     | Пароль базовой аутентификации (по умолчанию `OPENCODE_SERVER_PASSWORD`)                          |
-| <nobr><code>{"--username"}</code></nobr> | `-u`     | Имя пользователя базовой аутентификации (по умолчанию `OPENCODE_SERVER_USERNAME` или `opencode`) |
+| <nobr><code>{"--password"}</code></nobr> | `-p`     | Пароль базовой аутентификации (по умолчанию `ZAOVRA_SERVER_PASSWORD`)                          |
+| <nobr><code>{"--username"}</code></nobr> | `-u`     | Имя пользователя базовой аутентификации (по умолчанию `ZAOVRA_SERVER_USERNAME` или `zaovra`) |
 
 ---
 
@@ -94,7 +94,7 @@ opencode attach http://10.20.30.40:4096
 Создайте нового агента с пользовательской конфигурацией.
 
 ```bash
-opencode agent create
+zaovra agent create
 ```
 
 Эта команда поможет вам создать новый агент с настраиваемой системной подсказкой и настройкой инструмента.
@@ -106,7 +106,7 @@ opencode agent create
 Перечислите всех доступных агентов.
 
 ```bash
-opencode agent list
+zaovra agent list
 ```
 
 ---
@@ -116,20 +116,20 @@ opencode agent list
 Команда для управления учетными данными и входом в систему для провайдеров.
 
 ```bash
-opencode auth [command]
+zaovra auth [command]
 ```
 
 ---
 
 #### login
 
-opencode использует список провайдеров с [Models.dev](https://models.dev), поэтому вы можете использовать `opencode auth login` для настройки ключей API для любого поставщика, которого вы хотите использовать. Это хранится в `~/.local/share/opencode/auth.json`.
+zaovra использует список провайдеров с [Models.dev](https://models.dev), поэтому вы можете использовать `zaovra auth login` для настройки ключей API для любого поставщика, которого вы хотите использовать. Это хранится в `~/.local/share/zaovra/auth.json`.
 
 ```bash
-opencode auth login
+zaovra auth login
 ```
 
-Когда opencode запускается, он загружает поставщиков из файла учетных данных. И если в ваших средах определены какие-либо ключи или файл `.env` в вашем проекте.
+Когда zaovra запускается, он загружает поставщиков из файла учетных данных. И если в ваших средах определены какие-либо ключи или файл `.env` в вашем проекте.
 
 ---
 
@@ -138,13 +138,13 @@ opencode auth login
 Перечисляет всех проверенных поставщиков, которые хранятся в файле учетных данных.
 
 ```bash
-opencode auth list
+zaovra auth list
 ```
 
 Или короткая версия.
 
 ```bash
-opencode auth ls
+zaovra auth ls
 ```
 
 ---
@@ -154,7 +154,7 @@ opencode auth ls
 Выключает вас из провайдера, удаляя его из файла учетных данных.
 
 ```bash
-opencode auth logout
+zaovra auth logout
 ```
 
 ---
@@ -164,7 +164,7 @@ opencode auth logout
 Управляйте агентом GitHub для автоматизации репозитория.
 
 ```bash
-opencode github [command]
+zaovra github [command]
 ```
 
 ---
@@ -174,7 +174,7 @@ opencode github [command]
 Установите агент GitHub в свой репозиторий.
 
 ```bash
-opencode github install
+zaovra github install
 ```
 
 Это настроит необходимый рабочий процесс GitHub Actions и проведет вас через процесс настройки. [Подробнее](/docs/github).
@@ -186,7 +186,7 @@ opencode github install
 Запустите агент GitHub. Обычно это используется в действиях GitHub.
 
 ```bash
-opencode github run
+zaovra github run
 ```
 
 ##### Флаги
@@ -203,7 +203,7 @@ opencode github run
 Управляйте серверами протокола контекста модели.
 
 ```bash
-opencode mcp [command]
+zaovra mcp [command]
 ```
 
 ---
@@ -213,7 +213,7 @@ opencode mcp [command]
 Добавьте сервер MCP в свою конфигурацию.
 
 ```bash
-opencode mcp add
+zaovra mcp add
 ```
 
 Эта команда поможет вам добавить локальный или удаленный сервер MCP.
@@ -225,13 +225,13 @@ opencode mcp add
 Перечислите все настроенные серверы MCP и состояние их подключения.
 
 ```bash
-opencode mcp list
+zaovra mcp list
 ```
 
 Или используйте короткую версию.
 
 ```bash
-opencode mcp ls
+zaovra mcp ls
 ```
 
 ---
@@ -241,7 +241,7 @@ opencode mcp ls
 Аутентификация с помощью сервера MCP с поддержкой OAuth.
 
 ```bash
-opencode mcp auth [name]
+zaovra mcp auth [name]
 ```
 
 Если вы не укажете имя сервера, вам будет предложено выбрать один из доступных серверов с поддержкой OAuth.
@@ -249,13 +249,13 @@ opencode mcp auth [name]
 Вы также можете перечислить серверы с поддержкой OAuth и их статус аутентификации.
 
 ```bash
-opencode mcp auth list
+zaovra mcp auth list
 ```
 
 Или используйте короткую версию.
 
 ```bash
-opencode mcp auth ls
+zaovra mcp auth ls
 ```
 
 ---
@@ -265,7 +265,7 @@ opencode mcp auth ls
 Удалите учетные данные OAuth для сервера MCP.
 
 ```bash
-opencode mcp logout [name]
+zaovra mcp logout [name]
 ```
 
 ---
@@ -275,7 +275,7 @@ opencode mcp logout [name]
 Отладка проблем с подключением OAuth для сервера MCP.
 
 ```bash
-opencode mcp debug <name>
+zaovra mcp debug <name>
 ```
 
 ---
@@ -285,7 +285,7 @@ opencode mcp debug <name>
 Перечислите все доступные модели от настроенных поставщиков.
 
 ```bash
-opencode models [provider]
+zaovra models [provider]
 ```
 
 Эта команда отображает все модели, доступные у настроенных вами поставщиков, в формате `provider/model`.
@@ -295,7 +295,7 @@ opencode models [provider]
 При желании вы можете передать идентификатор поставщика, чтобы фильтровать модели по этому поставщику.
 
 ```bash
-opencode models anthropic
+zaovra models anthropic
 ```
 
 #### Флаги
@@ -305,36 +305,36 @@ opencode models anthropic
 | <nobr><code>{"--refresh"}</code></nobr> | Обновите кеш моделей на сайте models.dev.                                         |
 | <nobr><code>{"--verbose"}</code></nobr> | Используйте более подробный вывод модели (включая метаданные, такие как затраты). |
 
-Используйте флаг `--refresh` для обновления списка кэшированных моделей. Это полезно, когда к поставщику добавлены новые модели и вы хотите увидеть их в opencode.
+Используйте флаг `--refresh` для обновления списка кэшированных моделей. Это полезно, когда к поставщику добавлены новые модели и вы хотите увидеть их в zaovra.
 
 ```bash
-opencode models --refresh
+zaovra models --refresh
 ```
 
 ---
 
 ### run
 
-Запустите opencode в неинтерактивном режиме, передав приглашение напрямую.
+Запустите zaovra в неинтерактивном режиме, передав приглашение напрямую.
 
 ```bash
-opencode run [message..]
+zaovra run [message..]
 ```
 
 Это полезно для создания сценариев, автоматизации или когда вам нужен быстрый ответ без запуска полного TUI. Например.
 
-```bash "opencode run"
-opencode run Explain the use of context in Go
+```bash "zaovra run"
+zaovra run Explain the use of context in Go
 ```
 
-Вы также можете подключиться к работающему экземпляру `opencode serve`, чтобы избежать холодной загрузки сервера MCP при каждом запуске:
+Вы также можете подключиться к работающему экземпляру `zaovra serve`, чтобы избежать холодной загрузки сервера MCP при каждом запуске:
 
 ```bash
 # Start a headless server in one terminal
-opencode serve
+zaovra serve
 
 # In another terminal, run commands that attach to it
-opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
+zaovra run --attach http://localhost:4096 "Explain async/await in JavaScript"
 ```
 
 #### Флаги
@@ -351,9 +351,9 @@ opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
 | <nobr><code>{"--file"}</code></nobr>     | `-f`     | Файл(ы) для прикрепления к сообщению                                                             |
 | <nobr><code>{"--format"}</code></nobr>   |          | Формат: по умолчанию (отформатированный) или json (необработанные события JSON).                 |
 | <nobr><code>{"--title"}</code></nobr>    |          | Название сеанса (использует усеченное приглашение, если значение не указано)                     |
-| <nobr><code>{"--attach"}</code></nobr>   |          | Подключитесь к работающему серверу opencode (например, http://localhost:4096)                    |
-| <nobr><code>{"--password"}</code></nobr> | `-p`     | Пароль базовой аутентификации (по умолчанию `OPENCODE_SERVER_PASSWORD`)                          |
-| <nobr><code>{"--username"}</code></nobr> | `-u`     | Имя пользователя базовой аутентификации (по умолчанию `OPENCODE_SERVER_USERNAME` или `opencode`) |
+| <nobr><code>{"--attach"}</code></nobr>   |          | Подключитесь к работающему серверу zaovra (например, http://localhost:4096)                    |
+| <nobr><code>{"--password"}</code></nobr> | `-p`     | Пароль базовой аутентификации (по умолчанию `ZAOVRA_SERVER_PASSWORD`)                          |
+| <nobr><code>{"--username"}</code></nobr> | `-u`     | Имя пользователя базовой аутентификации (по умолчанию `ZAOVRA_SERVER_USERNAME` или `zaovra`) |
 | <nobr><code>{"--dir"}</code></nobr>      |          | Каталог для выполнения или путь на удалённом сервере при подключении                             |
 | <nobr><code>{"--variant"}</code></nobr>  |          | Вариант модели (уровень рассуждений для провайдера)                                              |
 | <nobr><code>{"--thinking"}</code></nobr> |          | Показать блоки размышлений                                                                       |
@@ -363,13 +363,13 @@ opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
 
 ### serve
 
-Запустите автономный сервер opencode для доступа к API. Полный HTTP-интерфейс можно найти в [server docs](/docs/server).
+Запустите автономный сервер zaovra для доступа к API. Полный HTTP-интерфейс можно найти в [server docs](/docs/server).
 
 ```bash
-opencode serve
+zaovra serve
 ```
 
-При этом запускается HTTP-сервер, который обеспечивает доступ API к функциям opencode без интерфейса TUI. Установите `OPENCODE_SERVER_PASSWORD`, чтобы включить базовую аутентификацию HTTP (имя пользователя по умолчанию — `opencode`).
+При этом запускается HTTP-сервер, который обеспечивает доступ API к функциям zaovra без интерфейса TUI. Установите `ZAOVRA_SERVER_PASSWORD`, чтобы включить базовую аутентификацию HTTP (имя пользователя по умолчанию — `zaovra`).
 
 #### Флаги
 
@@ -384,20 +384,20 @@ opencode serve
 
 ### session
 
-Управляйте сессиями opencode.
+Управляйте сессиями zaovra.
 
 ```bash
-opencode session [command]
+zaovra session [command]
 ```
 
 ---
 
 #### list
 
-Перечислите все сеансы opencode.
+Перечислите все сеансы zaovra.
 
 ```bash
-opencode session list
+zaovra session list
 ```
 
 ##### Флаги
@@ -411,10 +411,10 @@ opencode session list
 
 ### stats
 
-Покажите статистику использования токенов и затрат для ваших сеансов opencode.
+Покажите статистику использования токенов и затрат для ваших сеансов zaovra.
 
 ```bash
-opencode stats
+zaovra stats
 ```
 
 #### Флаги
@@ -433,7 +433,7 @@ opencode stats
 Экспортируйте данные сеанса в формате JSON.
 
 ```bash
-opencode export [sessionID]
+zaovra export [sessionID]
 ```
 
 Если вы не укажете идентификатор сеанса, вам будет предложено выбрать один из доступных сеансов.
@@ -442,30 +442,30 @@ opencode export [sessionID]
 
 ### import
 
-Импортируйте данные сеанса из файла JSON или URL-адреса общего ресурса opencode.
+Импортируйте данные сеанса из файла JSON или URL-адреса общего ресурса zaovra.
 
 ```bash
-opencode import <file>
+zaovra import <file>
 ```
 
-Вы можете импортировать из локального файла или URL-адреса общего ресурса opencode.
+Вы можете импортировать из локального файла или URL-адреса общего ресурса zaovra.
 
 ```bash
-opencode import session.json
-opencode import https://opncd.ai/s/abc123
+zaovra import session.json
+zaovra import https://opncd.ai/s/abc123
 ```
 
 ---
 
 ### web
 
-Запустите автономный сервер opencode с веб-интерфейсом.
+Запустите автономный сервер zaovra с веб-интерфейсом.
 
 ```bash
-opencode web
+zaovra web
 ```
 
-При этом запускается HTTP-сервер и открывается веб-браузер для доступа к opencode через веб-интерфейс. Установите `OPENCODE_SERVER_PASSWORD`, чтобы включить базовую аутентификацию HTTP (имя пользователя по умолчанию — `opencode`).
+При этом запускается HTTP-сервер и открывается веб-браузер для доступа к zaovra через веб-интерфейс. Установите `ZAOVRA_SERVER_PASSWORD`, чтобы включить базовую аутентификацию HTTP (имя пользователя по умолчанию — `zaovra`).
 
 #### Флаги
 
@@ -483,7 +483,7 @@ opencode web
 Запустите сервер ACP (агент-клиентский протокол).
 
 ```bash
-opencode acp
+zaovra acp
 ```
 
 Эта команда запускает сервер ACP, который обменивается данными через stdin/stdout с использованием nd-JSON.
@@ -500,10 +500,10 @@ opencode acp
 
 ### uninstall
 
-Удалите opencode и удалите все связанные файлы.
+Удалите zaovra и удалите все связанные файлы.
 
 ```bash
-opencode uninstall
+zaovra uninstall
 ```
 
 #### Флаги
@@ -519,22 +519,22 @@ opencode uninstall
 
 ### upgrade
 
-Обновляет opencode до последней версии или определенной версии.
+Обновляет zaovra до последней версии или определенной версии.
 
 ```bash
-opencode upgrade [target]
+zaovra upgrade [target]
 ```
 
 Чтобы обновиться до последней версии.
 
 ```bash
-opencode upgrade
+zaovra upgrade
 ```
 
 Для обновления до определенной версии.
 
 ```bash
-opencode upgrade v0.1.48
+zaovra upgrade v0.1.48
 ```
 
 #### Флаги
@@ -547,7 +547,7 @@ opencode upgrade v0.1.48
 
 ## Глобальные флаги
 
-CLI opencode принимает следующие глобальные флаги.
+CLI zaovra принимает следующие глобальные флаги.
 
 | Флаг                                       | Короткий | Описание                                   |
 | ------------------------------------------ | -------- | ------------------------------------------ |
@@ -560,34 +560,34 @@ CLI opencode принимает следующие глобальные флаг
 
 ## Переменные среды
 
-opencode можно настроить с помощью переменных среды.
+zaovra можно настроить с помощью переменных среды.
 
 | Переменная                            | Тип                 | Описание                                                                         |
 | ------------------------------------- | ------------------- | -------------------------------------------------------------------------------- |
-| `OPENCODE_AUTO_SHARE`                 | логическое значение | Автоматически делиться сеансами                                                  |
-| `OPENCODE_GIT_BASH_PATH`              | строка              | Путь к исполняемому файлу Git Bash в Windows                                     |
-| `OPENCODE_CONFIG`                     | строка              | Путь к файлу конфигурации                                                        |
-| `OPENCODE_TUI_CONFIG`                 | строка              | Путь к файлу конфигурации TUI                                                    |
-| `OPENCODE_CONFIG_DIR`                 | строка              | Путь к каталогу конфигурации                                                     |
-| `OPENCODE_CONFIG_CONTENT`             | строка              | Встроенное содержимое конфигурации json                                          |
-| `OPENCODE_DISABLE_AUTOUPDATE`         | логическое значение | Отключить автоматическую проверку обновлений                                     |
-| `OPENCODE_DISABLE_PRUNE`              | логическое значение | Отключить удаление старых данных                                                 |
-| `OPENCODE_DISABLE_TERMINAL_TITLE`     | логическое значение | Отключить автоматическое обновление заголовка терминала                          |
-| `OPENCODE_PERMISSION`                 | строка              | Встроенная конфигурация разрешений json                                          |
-| `OPENCODE_DISABLE_DEFAULT_PLUGINS`    | логическое значение | Отключить плагины по умолчанию                                                   |
-| `OPENCODE_DISABLE_LSP_DOWNLOAD`       | логическое значение | Отключить автоматическую загрузку LSP-сервера                                    |
-| `OPENCODE_ENABLE_EXPERIMENTAL_MODELS` | логическое значение | Включить экспериментальные модели                                                |
-| `OPENCODE_DISABLE_AUTOCOMPACT`        | логическое значение | Отключить автоматическое сжатие контекста                                        |
-| `OPENCODE_DISABLE_CLAUDE_CODE`        | логическое значение | Отключить чтение из `.claude` (подсказка + навыки)                               |
-| `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | логическое значение | Отключить чтение `~/.claude/CLAUDE.md`                                           |
-| `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | логическое значение | Отключить загрузку `.claude/skills`                                              |
-| `OPENCODE_DISABLE_MODELS_FETCH`       | логическое значение | Отключить получение моделей из удаленных источников                              |
-| `OPENCODE_FAKE_VCS`                   | строка              | Поддельный поставщик VCS для целей тестирования                                  |
-| `OPENCODE_CLIENT`                     | строка              | Идентификатор клиента (по умолчанию `cli`)                                       |
-| `OPENCODE_ENABLE_EXA`                 | логическое значение | Включить инструменты веб-поиска Exa                                              |
-| `OPENCODE_SERVER_PASSWORD`            | строка              | Включить базовую аутентификацию для `serve`/`web`                                |
-| `OPENCODE_SERVER_USERNAME`            | строка              | Переопределить имя пользователя базовой аутентификации (по умолчанию `opencode`) |
-| `OPENCODE_MODELS_URL`                 | строка              | Пользовательский URL-адрес для получения конфигурации модели                     |
+| `ZAOVRA_AUTO_SHARE`                 | логическое значение | Автоматически делиться сеансами                                                  |
+| `ZAOVRA_GIT_BASH_PATH`              | строка              | Путь к исполняемому файлу Git Bash в Windows                                     |
+| `ZAOVRA_CONFIG`                     | строка              | Путь к файлу конфигурации                                                        |
+| `ZAOVRA_TUI_CONFIG`                 | строка              | Путь к файлу конфигурации TUI                                                    |
+| `ZAOVRA_CONFIG_DIR`                 | строка              | Путь к каталогу конфигурации                                                     |
+| `ZAOVRA_CONFIG_CONTENT`             | строка              | Встроенное содержимое конфигурации json                                          |
+| `ZAOVRA_DISABLE_AUTOUPDATE`         | логическое значение | Отключить автоматическую проверку обновлений                                     |
+| `ZAOVRA_DISABLE_PRUNE`              | логическое значение | Отключить удаление старых данных                                                 |
+| `ZAOVRA_DISABLE_TERMINAL_TITLE`     | логическое значение | Отключить автоматическое обновление заголовка терминала                          |
+| `ZAOVRA_PERMISSION`                 | строка              | Встроенная конфигурация разрешений json                                          |
+| `ZAOVRA_DISABLE_DEFAULT_PLUGINS`    | логическое значение | Отключить плагины по умолчанию                                                   |
+| `ZAOVRA_DISABLE_LSP_DOWNLOAD`       | логическое значение | Отключить автоматическую загрузку LSP-сервера                                    |
+| `ZAOVRA_ENABLE_EXPERIMENTAL_MODELS` | логическое значение | Включить экспериментальные модели                                                |
+| `ZAOVRA_DISABLE_AUTOCOMPACT`        | логическое значение | Отключить автоматическое сжатие контекста                                        |
+| `ZAOVRA_DISABLE_CLAUDE_CODE`        | логическое значение | Отключить чтение из `.claude` (подсказка + навыки)                               |
+| `ZAOVRA_DISABLE_CLAUDE_CODE_PROMPT` | логическое значение | Отключить чтение `~/.claude/CLAUDE.md`                                           |
+| `ZAOVRA_DISABLE_CLAUDE_CODE_SKILLS` | логическое значение | Отключить загрузку `.claude/skills`                                              |
+| `ZAOVRA_DISABLE_MODELS_FETCH`       | логическое значение | Отключить получение моделей из удаленных источников                              |
+| `ZAOVRA_FAKE_VCS`                   | строка              | Поддельный поставщик VCS для целей тестирования                                  |
+| `ZAOVRA_CLIENT`                     | строка              | Идентификатор клиента (по умолчанию `cli`)                                       |
+| `ZAOVRA_ENABLE_EXA`                 | логическое значение | Включить инструменты веб-поиска Exa                                              |
+| `ZAOVRA_SERVER_PASSWORD`            | строка              | Включить базовую аутентификацию для `serve`/`web`                                |
+| `ZAOVRA_SERVER_USERNAME`            | строка              | Переопределить имя пользователя базовой аутентификации (по умолчанию `zaovra`) |
+| `ZAOVRA_MODELS_URL`                 | строка              | Пользовательский URL-адрес для получения конфигурации модели                     |
 
 ---
 
@@ -597,21 +597,21 @@ opencode можно настроить с помощью переменных с
 
 | Переменная                                      | Тип                 | Описание                                               |
 | ----------------------------------------------- | ------------------- | ------------------------------------------------------ |
-| `OPENCODE_EXPERIMENTAL`                         | логическое значение | Включить экспериментальные функции под общим флагом    |
-| `OPENCODE_EXPERIMENTAL_ICON_DISCOVERY`          | логическое значение | Включить обнаружение значков                           |
-| `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT`  | логическое значение | Отключить копирование при выборе в TUI                 |
-| `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` | число               | Таймаут по умолчанию для команд bash в мс              |
-| `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`        | число               | Максимальное количество токенов вывода для ответов LLM |
-| `OPENCODE_EXPERIMENTAL_FILEWATCHER`             | логическое значение | Включить просмотр файлов для всего каталога            |
-| `OPENCODE_EXPERIMENTAL_OXFMT`                   | логическое значение | Включить форматтер oxfmt                               |
-| `OPENCODE_EXPERIMENTAL_LSP_TOOL`                | логическое значение | Включить экспериментальный инструмент LSP              |
-| `OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER`     | логическое значение | Отключить просмотрщик файлов                           |
-| `OPENCODE_EXPERIMENTAL_EXA`                     | логическое значение | Включить экспериментальные функции Exa                 |
-| `OPENCODE_EXPERIMENTAL_LSP_TY`                  | логическое значение | Включить TY LSP для файлов python                      |
-| `OPENCODE_EXPERIMENTAL_PLAN_MODE`               | логическое значение | Включить режим плана                                   |
-| `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`    | логическое значение | Включить фоновые задачи субагентов                     |
-| `OPENCODE_EXPERIMENTAL_EVENT_SYSTEM`            | логическое значение | Включить экспериментальную систему событий             |
-| `OPENCODE_EXPERIMENTAL_NATIVE_LLM`              | логическое значение | Включить нативный путь запросов LLM                    |
-| `OPENCODE_EXPERIMENTAL_PARALLEL`                | логическое значение | Включить параллельное выполнение веб-поиска            |
-| `OPENCODE_EXPERIMENTAL_SCOUT`                   | логическое значение | Включить субагент Scout                                |
-| `OPENCODE_EXPERIMENTAL_WORKSPACES`              | логическое значение | Включить поддержку рабочих областей                    |
+| `ZAOVRA_EXPERIMENTAL`                         | логическое значение | Включить экспериментальные функции под общим флагом    |
+| `ZAOVRA_EXPERIMENTAL_ICON_DISCOVERY`          | логическое значение | Включить обнаружение значков                           |
+| `ZAOVRA_EXPERIMENTAL_DISABLE_COPY_ON_SELECT`  | логическое значение | Отключить копирование при выборе в TUI                 |
+| `ZAOVRA_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` | число               | Таймаут по умолчанию для команд bash в мс              |
+| `ZAOVRA_EXPERIMENTAL_OUTPUT_TOKEN_MAX`        | число               | Максимальное количество токенов вывода для ответов LLM |
+| `ZAOVRA_EXPERIMENTAL_FILEWATCHER`             | логическое значение | Включить просмотр файлов для всего каталога            |
+| `ZAOVRA_EXPERIMENTAL_OXFMT`                   | логическое значение | Включить форматтер oxfmt                               |
+| `ZAOVRA_EXPERIMENTAL_LSP_TOOL`                | логическое значение | Включить экспериментальный инструмент LSP              |
+| `ZAOVRA_EXPERIMENTAL_DISABLE_FILEWATCHER`     | логическое значение | Отключить просмотрщик файлов                           |
+| `ZAOVRA_EXPERIMENTAL_EXA`                     | логическое значение | Включить экспериментальные функции Exa                 |
+| `ZAOVRA_EXPERIMENTAL_LSP_TY`                  | логическое значение | Включить TY LSP для файлов python                      |
+| `ZAOVRA_EXPERIMENTAL_PLAN_MODE`               | логическое значение | Включить режим плана                                   |
+| `ZAOVRA_EXPERIMENTAL_BACKGROUND_SUBAGENTS`    | логическое значение | Включить фоновые задачи субагентов                     |
+| `ZAOVRA_EXPERIMENTAL_EVENT_SYSTEM`            | логическое значение | Включить экспериментальную систему событий             |
+| `ZAOVRA_EXPERIMENTAL_NATIVE_LLM`              | логическое значение | Включить нативный путь запросов LLM                    |
+| `ZAOVRA_EXPERIMENTAL_PARALLEL`                | логическое значение | Включить параллельное выполнение веб-поиска            |
+| `ZAOVRA_EXPERIMENTAL_SCOUT`                   | логическое значение | Включить субагент Scout                                |
+| `ZAOVRA_EXPERIMENTAL_WORKSPACES`              | логическое значение | Включить поддержку рабочих областей                    |

@@ -17,7 +17,7 @@ const MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Cons
 const DOT_MASK =
   "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0H2V2H0V0Z' fill='black'/%3E%3C/svg%3E\")"
 
-// verified: minimax-m3, OpenCode Go (tier=Go, dataset=zen), weekly total_tokens.
+// verified: minimax-m3, Zaovra Go (tier=Go, dataset=zen), weekly total_tokens.
 // W26 2.559T is +23.2% / +482.3B vs W25 2.077T.
 const weeks = [
   { label: "May 25", t: 0.008 },
@@ -31,8 +31,7 @@ const AXIS_MAX = 3.0
 function DataWordmark({ height = 30 }: { height?: number }) {
   return (
     <svg width={(height * 66) / 20} height={height} viewBox="0 0 66 20" fill="none" style={{ color: c.ink }}>
-      <path opacity="0.2" d="M12 16H4V8H12V16Z" fill="currentColor" />
-      <path d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z" fill="currentColor" />
+      <path d="M1 2H15L10 7H15L8 18H1L6 12H1L6 7H1Z" fill="currentColor" />
       <path
         d="M63.3543 16L62.5119 12.8711H58.6437L57.8013 16H55.7383L59.2454 4H61.9618L65.4689 16H63.3543ZM61.0678 7.851L60.6896 5.94269H60.4489L60.0707 7.851L59.1595 11.1347H61.9962L61.0678 7.851Z"
         fill="currentColor"
@@ -74,7 +73,7 @@ export function MiniMaxClimb() {
         {/* headline (static) */}
         <div style={{ marginTop: 50 }}>
           <div style={{ fontSize: 23, fontWeight: 600, color: c.muted, letterSpacing: 2 }}>
-            OPENCODE GO · WEEKLY TOKENS
+            ZAOVRA GO · WEEKLY TOKENS
           </div>
           <div
             style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 24, marginTop: 14 }}
@@ -193,7 +192,7 @@ export function MiniMaxClimb() {
             <span style={{ width: 13, height: 13, background: c.accent, display: "inline-block" }} />
             2.56T tokens last week · +482.3B added
           </div>
-          <div style={{ color: c.ink }}>opencode.ai/data</div>
+          <div style={{ color: c.ink }}>zaovra.com/data</div>
         </div>
       </div>
     </AbsoluteFill>

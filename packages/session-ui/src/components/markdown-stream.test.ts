@@ -111,7 +111,7 @@ describe("markdown stream", () => {
     ])
   })
 
-  test("preserves trailing newlines in open code fences", () => {
+  test("preserves trailing newlines in zaovra fences", () => {
     expect(stream("```ts\nconst x = 1\n", true)).toEqual([
       {
         raw: "```ts\nconst x = 1\n",

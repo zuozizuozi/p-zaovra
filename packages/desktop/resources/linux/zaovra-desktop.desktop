@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Zaovra
+Exec=/opt/Zaovra/ai.zaovra.desktop %U
+Terminal=false
+Type=Application
+Icon=ai.zaovra.desktop
+StartupWMClass=ai.zaovra.desktop
+NoDisplay=true
+Comment=Open source AI coding agent
+Categories=Development;

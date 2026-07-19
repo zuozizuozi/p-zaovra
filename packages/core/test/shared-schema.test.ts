@@ -1,35 +1,35 @@
 import { expect, test } from "bun:test"
 import { Schema } from "effect"
-import { AgentV2 } from "@opencode-ai/core/agent"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { SessionV2 } from "@opencode-ai/core/session"
-import { Agent } from "@opencode-ai/schema/agent"
-import { Location } from "@opencode-ai/schema/location"
-import { Model } from "@opencode-ai/schema/model"
-import { AgentAttachment, FileAttachment, Prompt, Source } from "@opencode-ai/schema/prompt"
-import { Provider } from "@opencode-ai/schema/provider"
-import { Project } from "@opencode-ai/schema/project"
-import { ProjectDirectories } from "@opencode-ai/schema/project-directories"
-import { PermissionV1 } from "@opencode-ai/schema/permission-v1"
-import { Session } from "@opencode-ai/schema/session"
-import { SessionInput } from "@opencode-ai/schema/session-input"
-import { SessionMessage } from "@opencode-ai/schema/session-message"
-import { Workspace } from "@opencode-ai/schema/workspace"
-import { Command } from "@opencode-ai/schema/command"
-import { Connection } from "@opencode-ai/schema/connection"
-import { Credential } from "@opencode-ai/schema/credential"
-import { FileSystem } from "@opencode-ai/schema/filesystem"
-import { Integration } from "@opencode-ai/schema/integration"
-import { LLM } from "@opencode-ai/schema/llm"
-import { Permission } from "@opencode-ai/schema/permission"
-import { Plugin } from "@opencode-ai/schema/plugin"
-import { Pty } from "@opencode-ai/schema/pty"
-import { Reference } from "@opencode-ai/schema/reference"
-import { SessionTodo } from "@opencode-ai/schema/session-todo"
-import { Skill } from "@opencode-ai/schema/skill"
-import { AbsolutePath, DateTimeUtcFromMillis, optional, statics } from "@opencode-ai/schema/schema"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { PluginV2 } from "@opencode-ai/core/plugin"
+import { AgentV2 } from "@zaovra-ai/core/agent"
+import { ModelV2 } from "@zaovra-ai/core/model"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { Agent } from "@zaovra-ai/schema/agent"
+import { Location } from "@zaovra-ai/schema/location"
+import { Model } from "@zaovra-ai/schema/model"
+import { AgentAttachment, FileAttachment, Prompt, Source } from "@zaovra-ai/schema/prompt"
+import { Provider } from "@zaovra-ai/schema/provider"
+import { Project } from "@zaovra-ai/schema/project"
+import { ProjectDirectories } from "@zaovra-ai/schema/project-directories"
+import { PermissionV1 } from "@zaovra-ai/schema/permission-v1"
+import { Session } from "@zaovra-ai/schema/session"
+import { SessionInput } from "@zaovra-ai/schema/session-input"
+import { SessionMessage } from "@zaovra-ai/schema/session-message"
+import { Workspace } from "@zaovra-ai/schema/workspace"
+import { Command } from "@zaovra-ai/schema/command"
+import { Connection } from "@zaovra-ai/schema/connection"
+import { Credential } from "@zaovra-ai/schema/credential"
+import { FileSystem } from "@zaovra-ai/schema/filesystem"
+import { Integration } from "@zaovra-ai/schema/integration"
+import { LLM } from "@zaovra-ai/schema/llm"
+import { Permission } from "@zaovra-ai/schema/permission"
+import { Plugin } from "@zaovra-ai/schema/plugin"
+import { Pty } from "@zaovra-ai/schema/pty"
+import { Reference } from "@zaovra-ai/schema/reference"
+import { SessionTodo } from "@zaovra-ai/schema/session-todo"
+import { Skill } from "@zaovra-ai/schema/skill"
+import { AbsolutePath, DateTimeUtcFromMillis, optional, statics } from "@zaovra-ai/schema/schema"
+import { ProviderV2 } from "@zaovra-ai/core/provider"
+import { PluginV2 } from "@zaovra-ai/core/plugin"
 
 test("Core reuses the canonical shared schemas", async () => {
   const [
@@ -55,27 +55,27 @@ test("Core reuses the canonical shared schemas", async () => {
     coreSchema,
     coreWorkspace,
   ] = await Promise.all([
-    import("@opencode-ai/core/command"),
-    import("@opencode-ai/core/integration/connection"),
-    import("@opencode-ai/core/credential"),
-    import("@opencode-ai/core/filesystem"),
-    import("@opencode-ai/core/integration"),
-    import("@opencode-ai/core/location"),
-    import("@opencode-ai/llm"),
-    import("@opencode-ai/core/permission"),
-    import("@opencode-ai/core/v1/permission"),
-    import("@opencode-ai/core/project/copy"),
-    import("@opencode-ai/core/pty"),
-    import("@opencode-ai/core/project/schema"),
-    import("@opencode-ai/core/reference"),
-    import("@opencode-ai/core/session/input"),
-    import("@opencode-ai/core/session/message"),
-    import("@opencode-ai/core/session/todo"),
-    import("@opencode-ai/core/session/prompt"),
-    import("@opencode-ai/core/skill"),
-    import("@opencode-ai/core/v2-schema"),
-    import("@opencode-ai/core/schema"),
-    import("@opencode-ai/core/workspace"),
+    import("@zaovra-ai/core/command"),
+    import("@zaovra-ai/core/integration/connection"),
+    import("@zaovra-ai/core/credential"),
+    import("@zaovra-ai/core/filesystem"),
+    import("@zaovra-ai/core/integration"),
+    import("@zaovra-ai/core/location"),
+    import("@zaovra-ai/llm"),
+    import("@zaovra-ai/core/permission"),
+    import("@zaovra-ai/core/v1/permission"),
+    import("@zaovra-ai/core/project/copy"),
+    import("@zaovra-ai/core/pty"),
+    import("@zaovra-ai/core/project/schema"),
+    import("@zaovra-ai/core/reference"),
+    import("@zaovra-ai/core/session/input"),
+    import("@zaovra-ai/core/session/message"),
+    import("@zaovra-ai/core/session/todo"),
+    import("@zaovra-ai/core/session/prompt"),
+    import("@zaovra-ai/core/skill"),
+    import("@zaovra-ai/core/v2-schema"),
+    import("@zaovra-ai/core/schema"),
+    import("@zaovra-ai/core/workspace"),
   ])
 
   const schemas = [

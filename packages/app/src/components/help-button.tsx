@@ -1,10 +1,9 @@
-import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
-import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
+import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
 import { createSignal, Show } from "solid-js"
 import { Drawer, DrawerClose, DrawerContent } from "@/components/ui/drawer"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
-import introducingTabsVideo from "@/assets/help/introducing-tabs.mp4"
 import homeImage from "@/assets/help/home.png"
 import tabsImage from "@/assets/help/tabs.png"
 
@@ -49,13 +48,10 @@ export function TabsInfoPopup() {
               setDrawerOpen(true)
             }}
           >
-            <video
-              src={introducingTabsVideo}
+            <img
+              src={tabsImage}
               class="absolute inset-0 h-full w-full object-cover"
-              loop
-              muted
-              autoplay
-              playsinline
+              alt=""
               aria-hidden="true"
               onContextMenu={(event) => event.preventDefault()}
             />
@@ -91,7 +87,7 @@ export function TabsInfoPopup() {
             Introducing Tabs
           </p>
           <div class="flex w-full flex-1 flex-col gap-4 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base">
-            <p>OpenCode Desktop is now built around tabs.</p>
+            <p>Zaovra Desktop is now built around tabs.</p>
             <img src={tabsImage} alt="" class="aspect-video w-full rounded-[6px] object-cover" />
             <p>
               Start a new session in a tab, or open an existing session from any of your projects. Open a new tab when

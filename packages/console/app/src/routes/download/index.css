@@ -331,7 +331,7 @@
     }
 
     [data-component="hero-video"] {
-      video {
+      img {
         display: block;
         width: 100%;
         aspect-ratio: 1;

@@ -1,11 +1,11 @@
 {
-  "name": "@opencode-ai/ui",
+  "name": "@zaovra-ai/ui",
   "version": "1.18.3",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anomalyco/opencode.git",
+    "url": "git+https://github.com/zuozizuozi/p-zaovra.git",
     "directory": "packages/ui"
   },
   "publishConfig": {
@@ -28,6 +28,7 @@
     "src/components/file-icons/sprite.svg",
     "src/components/provider-icons/sprite.svg",
     "src/assets/icons/app/*",
+    "src/assets/brand/*",
     "src/assets/fonts/*",
     "src/assets/audio/*",
     "LICENSE"
