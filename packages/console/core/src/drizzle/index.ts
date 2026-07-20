@@ -7,16 +7,21 @@ import { memo } from "../util/memo"
 
 export namespace Database {
   const client = memo(() => {
-    const result = postgres({
-      host: Resource.Database.host,
-      port: Resource.Database.port,
-      database: Resource.Database.database,
-      username: Resource.Database.username,
-      password: Resource.Database.password,
-      ssl: "require",
+    const options = {
+      ssl: "require" as const,
       prepare: false,
       max: 1,
-    })
+    }
+    const result = process.env.DATABASE_URL
+      ? postgres(process.env.DATABASE_URL, options)
+      : postgres({
+          host: Resource.Database.host,
+          port: Resource.Database.port,
+          database: Resource.Database.database,
+          username: Resource.Database.username,
+          password: Resource.Database.password,
+          ...options,
+        })
     const db = drizzle({ client: result })
     return db
   })

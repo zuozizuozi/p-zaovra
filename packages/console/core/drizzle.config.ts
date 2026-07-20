@@ -8,6 +8,8 @@ export default defineConfig({
   verbose: true,
   dialect: "postgresql",
   dbCredentials: {
-    url: `postgresql://${encodeURIComponent(Resource.Database.username)}:${encodeURIComponent(Resource.Database.password)}@${Resource.Database.host}:${Resource.Database.port}/${Resource.Database.database}?sslmode=require`,
+    url:
+      process.env.DATABASE_URL ??
+      `postgresql://${encodeURIComponent(Resource.Database.username)}:${encodeURIComponent(Resource.Database.password)}@${Resource.Database.host}:${Resource.Database.port}/${Resource.Database.database}?sslmode=require`,
   },
 })
