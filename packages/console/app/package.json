@@ -18,6 +18,7 @@
     "@kobalte/core": "catalog:",
     "@openauthjs/openauth": "catalog:",
     "@zaovra-ai/console-core": "workspace:*",
+    "@zaovra-ai/console-function": "workspace:*",
     "@zaovra-ai/console-mail": "workspace:*",
     "@zaovra-ai/console-resource": "workspace:*",
     "@zaovra-ai/ui": "workspace:*",

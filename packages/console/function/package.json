@@ -5,6 +5,9 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "exports": {
+    "./auth": "./src/auth.ts"
+  },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
