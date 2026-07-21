@@ -22,6 +22,7 @@
     "@zaovra-ai/console-mail": "workspace:*",
     "@zaovra-ai/console-resource": "workspace:*",
     "@zaovra-ai/ui": "workspace:*",
+    "hono": "catalog:",
     "@smithy/eventstream-codec": "4.2.7",
     "@smithy/util-utf8": "4.2.0",
     "@solidjs/meta": "catalog:",

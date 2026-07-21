@@ -2,11 +2,12 @@ import type { APIEvent } from "@solidjs/start/server"
 import { createAuthIssuer } from "@zaovra-ai/console-function/auth"
 import { and, Database, eq, gt, isNull, or, sql } from "@zaovra-ai/console-core/drizzle/index.js"
 import { AuthStorageTable } from "@zaovra-ai/console-core/schema/auth-storage.sql.js"
+import { Hono } from "hono"
 
 const separator = String.fromCharCode(0x1f)
 
 export function authIssuer(input: APIEvent) {
-  return createAuthIssuer({
+  const issuer = createAuthIssuer({
     async get(key) {
       const row = await Database.use((tx) =>
         tx
@@ -48,5 +49,6 @@ export function authIssuer(input: APIEvent) {
       )
       for (const row of rows) yield [row.key.split(separator), row.value]
     },
-  }).fetch(input.request)
+  })
+  return new Hono().route("/issuer", issuer).fetch(input.request)
 }
