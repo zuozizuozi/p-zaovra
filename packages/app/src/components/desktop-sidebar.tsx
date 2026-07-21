@@ -4,14 +4,14 @@ import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useCommand } from "@/context/command"
 import { useGlobal, type ServerCtx } from "@/context/global"
 import { useLanguage } from "@/context/language"
-import { type LocalProject, useLayout } from "@/context/layout"
+import { getProjectAvatarVariant, type LocalProject, useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { ServerConnection } from "@/context/server"
 import { tabHref, tabKey, type SessionTab, type Tab, useTabs } from "@/context/tabs"
 import { DraftTabItem, TabNavItem } from "@/components/titlebar-tab-nav"
 import { WindowsAppMenu } from "@/components/windows-app-menu"
+import { useSettingsDialog } from "@/components/settings-dialog"
 import { displayName, getProjectAvatarSource } from "@/pages/layout/helpers"
-import { getProjectAvatarVariant } from "@/context/layout"
 import { ProjectAvatar } from "@zaovra-ai/ui/v2/project-avatar-v2"
 
 type ProjectGroup = {
@@ -75,6 +75,7 @@ export function DesktopSidebar() {
   const layout = useLayout()
   const platform = usePlatform()
   const tabs = useTabs()
+  const openSettings = useSettingsDialog()
 
   const groups = createMemo(() =>
     global.servers.list().flatMap((connection) => {
@@ -235,7 +236,7 @@ export function DesktopSidebar() {
         <button
           type="button"
           class="flex h-8 items-center gap-2 rounded-md px-2 text-left text-[13px] text-v2-text-text-base hover:bg-v2-background-bg-layer-02"
-          onClick={() => command.trigger("settings.open")}
+          onClick={openSettings}
         >
           <IconV2 name="settings-gear" size="small" />
           {language.t("sidebar.settings")}
