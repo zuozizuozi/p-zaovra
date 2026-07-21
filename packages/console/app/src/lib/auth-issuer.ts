@@ -52,3 +52,9 @@ export function authIssuer(input: APIEvent) {
   })
   return new Hono().route("/issuer", issuer).fetch(input.request)
 }
+
+export function authProviderAuthorize(input: APIEvent) {
+  const url = new URL(input.request.url)
+  url.pathname = `/issuer${url.pathname}`
+  return Response.redirect(url, 302)
+}
