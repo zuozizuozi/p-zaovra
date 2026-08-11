@@ -30,6 +30,54 @@ Guidelines:
 
 Complete the user's search request efficiently and report your findings clearly.`
 
+const PROMPT_REVIEW = `You are an independent software reviewer. Inspect the supplied Goal, Task, acceptance criteria, code, and deterministic evidence without trusting the executor's self-assessment.
+
+You are read-only. Never modify files, run shell commands, or ask another agent to make changes. Use only read, grep, and glob when more code context is required.
+
+Return exactly one JSON object matching the schema requested in the user prompt. Do not wrap it in markdown. Every requested criterion must have one verdict. A pass requires concrete evidence; actionable failures must include concise findings with severity and file location when known.`
+
+const PROMPT_WORK_PLANNER = `You are the read-only planner for a durable software WorkGraph.
+
+Inspect the workspace before decomposing the supplied Goal. Produce a compact dependency DAG whose Tasks are independently executable and whose criterion assignments cover the requested outcome. Prefer explicit dependencies over hidden ordering assumptions. Mark independent write Tasks for worktree isolation and research-only Tasks as explore.
+
+Never edit files or execute mutating commands. Return exactly the JSON shape requested by the user prompt without markdown or commentary.`
+
+const PROMPT_WORK_ARCHITECT = `You are the read-only recovery architect for a durable software WorkGraph.
+
+Inspect the current Task graph, failed evaluations, and workspace before proposing an additive recovery DAG. Replace only blocked Tasks, preserve their acceptance-criterion coverage, respect completed work, and address the concrete failure evidence instead of repeating the same approach.
+
+Never edit files or execute mutating commands. Return exactly the JSON shape requested by the user prompt without markdown or commentary.`
+
+const PROMPT_WORK_PM = `You are the Product Manager in a durable software WorkGraph organization.
+
+Clarify the requested outcome, acceptance boundaries, dependencies, and product decisions for your assigned Task. Inspect the workspace when needed, consume only the routed Handoffs supplied to you, and produce concise evidence-backed guidance for downstream roles.
+
+You are read-only. Never modify files, execute shell commands, delegate to another agent, or broaden the Goal. Finish with the structured Handoff requested by the Task prompt.`
+
+const PROMPT_WORK_DESIGN_ARCHITECT = `You are the technical Architect in a durable software WorkGraph organization.
+
+Inspect the relevant code and routed Handoffs, define explicit boundaries, constraints, interfaces, and tradeoffs, and identify risks before implementation. Architecture decisions must be concrete enough for a Developer to execute and must stay within the assigned Task.
+
+You are read-only. Never modify files, execute shell commands, or delegate to another agent. Finish with the structured Handoff requested by the Task prompt.`
+
+const PROMPT_WORK_DEVELOPER = `You are the Developer in a durable software WorkGraph organization.
+
+Implement only the assigned Task in the current workspace. Treat routed Handoffs and the Role Contract as scoped inputs, preserve unrelated user changes, and produce concrete verification evidence. Do not create or coordinate other agents; WorkGraph owns decomposition and scheduling.
+
+Finish with the structured Handoff requested by the Task prompt.`
+
+const PROMPT_WORK_QA = `You are the independent Quality Engineer in a durable software WorkGraph organization.
+
+Challenge the assigned behavior, acceptance criteria, implementation, and routed Handoffs. Inspect actual code and tests, identify missing cases and regressions, and report only evidence-backed findings. Deterministic command verification is owned by the WorkGraph runtime.
+
+You are read-only. Never modify files, execute shell commands, or delegate to another agent. Finish with the structured Handoff requested by the Task prompt.`
+
+const PROMPT_WORK_SECURITY = `You are the independent Security Engineer in a durable software WorkGraph organization.
+
+Audit the assigned trust boundaries, permissions, data handling, and failure modes using the actual code and routed Handoffs. Distinguish verified vulnerabilities from hypotheses and state concrete constraints or mitigations.
+
+You are read-only. Never modify files, execute shell commands, or delegate to another agent. Finish with the structured Handoff requested by the Task prompt.`
+
 const PROMPT_COMPACTION = `You are an anchored context summarization assistant for coding sessions.
 
 Summarize only the conversation history you are given. The newest turns may be kept verbatim outside your summary, so focus on the older context that still matters for continuing the work.
@@ -120,6 +168,24 @@ export const Plugin = define({
       { action: "read", resource: "*.env.*", effect: "ask" },
       { action: "read", resource: "*.env.example", effect: "allow" },
     ]
+    const unattendedWorkPermissions: PermissionV2.Ruleset = [
+      { action: "question", resource: "*", effect: "deny" },
+      { action: "external_directory", resource: "*", effect: "deny" },
+      { action: "read", resource: "*.env", effect: "deny" },
+      { action: "read", resource: "*.env.*", effect: "deny" },
+      { action: "read", resource: "*.env.example", effect: "allow" },
+    ]
+    const readonlyWorkPermissions = PermissionV2.merge(
+      defaults,
+      [
+        { action: "*", resource: "*", effect: "deny" },
+        { action: "grep", resource: "*", effect: "allow" },
+        { action: "glob", resource: "*", effect: "allow" },
+        { action: "read", resource: "*", effect: "allow" },
+      ],
+      readonlyExternalDirectory,
+      unattendedWorkPermissions,
+    )
 
     yield* ctx.agent.transform((draft) => {
       draft.update(AgentV2.defaultID, (item) => {
@@ -177,8 +243,118 @@ export const Plugin = define({
               { action: "read", resource: "*", effect: "allow" },
             ],
             readonlyExternalDirectory,
+            unattendedWorkPermissions,
           ),
         )
+      })
+
+      draft.update(AgentV2.ID.make("review"), (item) => {
+        item.description = "Independent read-only reviewer for structured WorkGraph acceptance decisions."
+        item.system = PROMPT_REVIEW
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(
+          ...PermissionV2.merge(
+            defaults,
+            [
+              { action: "*", resource: "*", effect: "deny" },
+              { action: "grep", resource: "*", effect: "allow" },
+              { action: "glob", resource: "*", effect: "allow" },
+              { action: "read", resource: "*", effect: "allow" },
+            ],
+            readonlyExternalDirectory,
+            unattendedWorkPermissions,
+          ),
+        )
+      })
+
+      draft.update(AgentV2.ID.make("work-planner"), (item) => {
+        item.description = "Read-only structured planner for durable WorkGraph Task DAGs."
+        item.system = PROMPT_WORK_PLANNER
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(
+          ...PermissionV2.merge(
+            defaults,
+            [
+              { action: "*", resource: "*", effect: "deny" },
+              { action: "grep", resource: "*", effect: "allow" },
+              { action: "glob", resource: "*", effect: "allow" },
+              { action: "read", resource: "*", effect: "allow" },
+            ],
+            readonlyExternalDirectory,
+            unattendedWorkPermissions,
+          ),
+        )
+      })
+
+      draft.update(AgentV2.ID.make("work-architect"), (item) => {
+        item.description = "Read-only recovery architect for durable WorkGraph replanning."
+        item.system = PROMPT_WORK_ARCHITECT
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(
+          ...PermissionV2.merge(
+            defaults,
+            [
+              { action: "*", resource: "*", effect: "deny" },
+              { action: "grep", resource: "*", effect: "allow" },
+              { action: "glob", resource: "*", effect: "allow" },
+              { action: "read", resource: "*", effect: "allow" },
+            ],
+            readonlyExternalDirectory,
+            unattendedWorkPermissions,
+          ),
+        )
+      })
+
+      draft.update(AgentV2.ID.make("work-pm"), (item) => {
+        item.description = "Read-only Product Manager for scoped WorkGraph outcomes and decisions."
+        item.system = PROMPT_WORK_PM
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(...readonlyWorkPermissions)
+      })
+
+      draft.update(AgentV2.ID.make("work-design-architect"), (item) => {
+        item.description = "Read-only technical Architect for WorkGraph boundaries, contracts, and risks."
+        item.system = PROMPT_WORK_DESIGN_ARCHITECT
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(...readonlyWorkPermissions)
+      })
+
+      draft.update(AgentV2.ID.make("work-developer"), (item) => {
+        item.description = "Scoped implementation Agent owned and scheduled by WorkGraph."
+        item.system = PROMPT_WORK_DEVELOPER
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(
+          ...PermissionV2.merge(
+            defaults,
+            [
+              { action: "task", resource: "*", effect: "deny" },
+              { action: "todowrite", resource: "*", effect: "deny" },
+            ],
+            unattendedWorkPermissions,
+          ),
+        )
+      })
+
+      draft.update(AgentV2.ID.make("work-qa"), (item) => {
+        item.description = "Independent read-only Quality Engineer for WorkGraph Tasks."
+        item.system = PROMPT_WORK_QA
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(...readonlyWorkPermissions)
+      })
+
+      draft.update(AgentV2.ID.make("work-security"), (item) => {
+        item.description = "Independent read-only Security Engineer for WorkGraph Tasks."
+        item.system = PROMPT_WORK_SECURITY
+        item.mode = "primary"
+        item.hidden = true
+        item.permissions.push(...readonlyWorkPermissions)
       })
 
       draft.update(AgentV2.ID.make("compaction"), (item) => {

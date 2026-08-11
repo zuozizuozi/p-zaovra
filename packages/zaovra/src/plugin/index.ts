@@ -10,8 +10,6 @@ import { Config } from "@/config/config"
 import { createZaovraClient } from "@zaovra-ai/sdk"
 import { ServerAuth } from "@/server/auth"
 import { CodexAuthPlugin } from "./openai/codex"
-import { Session } from "@/session/session"
-import { NamedError } from "@zaovra-ai/core/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "zaovra-gitlab-auth"
 import { PoeAuthPlugin } from "zaovra-poe-auth"
@@ -29,8 +27,8 @@ import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } fro
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstallationChannel } from "@zaovra-ai/core/installation/version"
+import { EventV2Bridge } from "@/event-v2-bridge"
 
 type State = {
   hooks: Hooks[]
@@ -111,21 +109,26 @@ async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks:
   const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
   if (plugin) {
     await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-    hooks.push(await (plugin as PluginModule).server(input, load.options))
+    hooks.push(withoutLegacyAuth(await (plugin as PluginModule).server(input, load.options)))
     return
   }
 
   for (const server of getLegacyPlugins(load.mod)) {
-    hooks.push(await server(input, load.options))
+    hooks.push(withoutLegacyAuth(await server(input, load.options)))
   }
+}
+
+function withoutLegacyAuth(hook: Hooks): Hooks {
+  if (!hook.auth) return hook
+  return { ...hook, auth: undefined }
 }
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const events = yield* EventV2Bridge.Service
     const config = yield* Config.Service
     const flags = yield* RuntimeFlags.Service
+    const events = yield* EventV2Bridge.Service
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
@@ -133,7 +136,7 @@ const layer = Layer.effect(
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {
-          bridge.fork(events.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() }))
+          bridge.fork(Effect.logError("Plugin failed", { message }))
         }
 
         const { Server } = yield* Effect.promise(() => import("../server/server"))
@@ -143,7 +146,12 @@ const layer = Layer.effect(
           baseUrl: serverUrl?.toString() ?? "http://localhost:4096",
           directory: ctx.directory,
           headers: ServerAuth.headers(),
-          ...(serverUrl ? {} : { fetch: async (...args) => Server.Default().app.fetch(...args) }),
+          ...(serverUrl
+            ? {}
+            : {
+                fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+                  Server.Default().app.fetch(new Request(input, init))) as typeof fetch,
+              }),
         })
         const cfg = yield* config.get()
         const input: PluginInput = {
@@ -171,7 +179,7 @@ const layer = Layer.effect(
             Effect.tapError((error) => Effect.logError("failed to load internal plugin", { name: plugin.name, error })),
             Effect.option,
           )
-          if (init._tag === "Some") hooks.push(init.value)
+          if (init._tag === "Some") hooks.push(withoutLegacyAuth(init.value))
         }
 
         const plugins = flags.pure ? [] : (cfg.plugin_origins ?? [])

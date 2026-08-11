@@ -66,6 +66,60 @@ describe("SessionRunCoordinator", () => {
     ),
   )
 
+  it.effect("waits for active execution without starting idle work", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        let runs = 0
+        const coordinator = yield* SessionRunCoordinator.make({
+          drain: () =>
+            Effect.sync(() => ++runs).pipe(
+              Effect.andThen(Deferred.succeed(started, undefined)),
+              Effect.andThen(Deferred.await(gate)),
+            ),
+        })
+
+        yield* coordinator.wait("idle")
+        expect(runs).toBe(0)
+        yield* coordinator.wake("session")
+        yield* Deferred.await(started)
+        const waiting = yield* coordinator.wait("session").pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(gate, undefined)
+        yield* Fiber.join(waiting)
+        expect(runs).toBe(1)
+      }),
+    ),
+  )
+
+  it.effect("serializes an exclusive operation and preserves a pending wake", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationStarted = yield* Deferred.make<void>()
+        const operationGate = yield* Deferred.make<void>()
+        const drained = yield* Deferred.make<void>()
+        const order: string[] = []
+        const coordinator = yield* SessionRunCoordinator.make({
+          drain: () => Effect.sync(() => order.push("drain")).pipe(Effect.andThen(Deferred.succeed(drained, undefined))),
+        })
+        const operation = Effect.sync(() => order.push("exclusive")).pipe(
+          Effect.andThen(Deferred.succeed(operationStarted, undefined)),
+          Effect.andThen(Deferred.await(operationGate)),
+        )
+
+        const running = yield* coordinator.exclusive("session", operation).pipe(Effect.forkChild)
+        yield* Deferred.await(operationStarted)
+        yield* coordinator.wake("session")
+        yield* Deferred.succeed(operationGate, undefined)
+        yield* Fiber.join(running)
+        yield* Deferred.await(drained)
+
+        expect(order).toEqual(["exclusive", "drain"])
+      }),
+    ),
+  )
+
   it.effect("snapshots only active executions", () =>
     Effect.scoped(
       Effect.gen(function* () {

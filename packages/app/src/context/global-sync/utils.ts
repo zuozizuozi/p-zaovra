@@ -1,8 +1,37 @@
-import type { Agent, Project, ProviderListResponse } from "@zaovra-ai/sdk/v2/client"
+import type {
+  Agent,
+  CommandView,
+  CommandV2Info,
+  PermissionView,
+  PermissionV2Request,
+  Project,
+  ProviderListResponse,
+} from "@zaovra-ai/sdk/v2/client"
 import { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
 export { pathKey as directoryKey, type PathKey as DirectoryKey } from "@/utils/path-key"
 
 export const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+export function adaptCommand(command: CommandV2Info): CommandView {
+  return {
+    ...command,
+    model: command.model ? `${command.model.providerID}/${command.model.id}` : undefined,
+    source: "command",
+    hints: [],
+  }
+}
+
+export function adaptPermissionRequest(request: PermissionV2Request): PermissionView {
+  return {
+    id: request.id,
+    sessionID: request.sessionID,
+    permission: request.action,
+    patterns: request.resources,
+    always: request.save ?? request.resources,
+    metadata: request.metadata ?? {},
+    ...(request.source ? { tool: { messageID: request.source.messageID, callID: request.source.callID } } : {}),
+  }
+}
 
 function isAgent(input: unknown): input is Agent {
   if (!input || typeof input !== "object") return false

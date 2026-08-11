@@ -103,8 +103,15 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/P
 interface Pending {
   readonly request: Request
   readonly agent?: AgentV2.ID
+  readonly locationID: string
+  readonly owner: symbol
   readonly deferred: Deferred.Deferred<void, DeclinedError | CorrectedError>
 }
+
+// Session execution and HTTP control can be materialized through separate
+// Location layer consumers in one process. Pending approvals must still refer
+// to the same Deferred so a UI reply can resume the owning tool fiber.
+const pending = new Map<ID, Pending>()
 
 const layer = Layer.effect(
   Service,
@@ -114,15 +121,20 @@ const layer = Layer.effect(
     const agents = yield* AgentV2.Service
     const sessions = yield* SessionStore.Service
     const saved = yield* PermissionSaved.Service
-    const pending = new Map<ID, Pending>()
+    const owner = Symbol()
+    const locationID = `${location.directory}\0${location.workspaceID ?? ""}`
 
     yield* EffectRuntime.addFinalizer(() =>
-      EffectRuntime.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new DeclinedError()), {
-        discard: true,
-      }).pipe(
+      EffectRuntime.forEach(
+        Array.from(pending.values()).filter((item) => item.owner === owner),
+        (item) => Deferred.fail(item.deferred, new DeclinedError()),
+        {
+          discard: true,
+        },
+      ).pipe(
         EffectRuntime.ensuring(
           EffectRuntime.sync(() => {
-            pending.clear()
+            for (const [id, item] of pending) if (item.owner === owner) pending.delete(id)
           }),
         ),
       ),
@@ -177,7 +189,7 @@ const layer = Layer.effect(
       EffectRuntime.uninterruptible(
         EffectRuntime.gen(function* () {
           const deferred = yield* Deferred.make<void, DeclinedError | CorrectedError>()
-          const item = { request, agent, deferred }
+          const item = { request, agent, deferred, locationID, owner }
           if (pending.has(request.id)) return yield* EffectRuntime.die(`Duplicate pending permission ID: ${request.id}`)
           pending.set(request.id, item)
           yield* events
@@ -221,7 +233,7 @@ const layer = Layer.effect(
       EffectRuntime.uninterruptible(
         EffectRuntime.gen(function* () {
           const existing = pending.get(input.requestID)
-          if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
+          if (existing?.locationID !== locationID) return yield* new NotFoundError({ requestID: input.requestID })
           yield* events.publish(Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
@@ -286,15 +298,20 @@ const layer = Layer.effect(
     )
 
     const list = EffectRuntime.fn("PermissionV2.list")(function* () {
-      return Array.from(pending.values(), (item) => item.request)
+      return Array.from(pending.values())
+        .filter((item) => item.locationID === locationID)
+        .map((item) => item.request)
     })
 
     const get = EffectRuntime.fn("PermissionV2.get")(function* (id: ID) {
-      return pending.get(id)?.request
+      const item = pending.get(id)
+      return item?.locationID === locationID ? item.request : undefined
     })
 
     const forSession = EffectRuntime.fn("PermissionV2.forSession")(function* (sessionID: SessionV2.ID) {
-      return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
+      return Array.from(pending.values())
+        .filter((item) => item.locationID === locationID && item.request.sessionID === sessionID)
+        .map((item) => item.request)
     })
 
     return Service.of({ ask, assert, reply, get, forSession, list })

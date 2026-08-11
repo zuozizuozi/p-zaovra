@@ -15,12 +15,12 @@
     "dev": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",
     "build": "electron-vite build",
+    "package:check": "bun ./scripts/check-package-readiness.ts",
     "preview": "electron-vite preview",
-    "package": "electron-builder --config electron-builder.config.ts",
-    "package:mac": "electron-builder --mac --config electron-builder.config.ts",
-    "package:win": "electron-builder --win --config electron-builder.config.ts",
-    "package:linux": "electron-builder --linux --config electron-builder.config.ts",
-    "native:build": "bun install --cwd native"
+    "package": "bun run package:check && electron-builder --config electron-builder.config.ts",
+    "package:mac": "bun run package:check && electron-builder --mac --config electron-builder.config.ts",
+    "package:win": "bun run package:check && electron-builder --win --config electron-builder.config.ts",
+    "package:linux": "bun run package:check && electron-builder --linux --config electron-builder.config.ts"
   },
   "main": "./out/main/index.js",
   "dependencies": {

@@ -12,6 +12,7 @@ import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
+import { resolveProviderIntegration } from "@/utils/provider-integration"
 import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
 
 type Props = {
@@ -134,20 +135,26 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       const disabledProviders = serverSync().data.config.disabled_providers ?? []
       const nextDisabled = disabledProviders.filter((id) => id !== result.providerID)
 
-      if (result.key) {
-        await serverSDK().client.auth.set({
-          providerID: result.providerID,
-          auth: {
-            type: "api",
-            key: result.key,
-          },
-        })
-      }
-
       await serverSync().updateConfig({
         provider: { [result.providerID]: result.config },
         disabled_providers: nextDisabled,
       })
+      if (result.key) {
+        const resolved = await resolveProviderIntegration(serverSDK().client, result.providerID)
+        if (!resolved.integration?.methods.some((method) => method.type === "key")) {
+          throw new Error(`Provider ${result.providerID} does not expose a key integration`)
+        }
+        await serverSDK().client.v2.integration.connect.key(
+          {
+            integrationID: resolved.integrationID,
+            location: resolved.location,
+            key: result.key,
+            inputs: {},
+          },
+          { throwOnError: true },
+        )
+        await serverSDK().client.global.dispose()
+      }
       return result
     },
     onSuccess: (result) => {

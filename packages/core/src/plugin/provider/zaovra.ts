@@ -166,11 +166,10 @@ export const ZaovraPlugin = define<HttpClient.HttpClient | EventV2.Service | Sco
       if (!item) return
       const hasKey = Boolean(process.env.ZAOVRA_API_KEY || connected || item.provider.request.body.apiKey)
       catalog.provider.update(item.provider.id, (provider) => {
-        if (!hasKey) provider.request.body.apiKey = "public"
+        provider.disabled = hasKey ? undefined : true
       })
       if (hasKey) return
       for (const model of item.models.values()) {
-        if (!model.cost.some((cost) => cost.input > 0)) continue
         catalog.model.update(item.provider.id, model.id, (draft) => {
           draft.enabled = false
         })

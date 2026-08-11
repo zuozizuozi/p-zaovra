@@ -66,11 +66,11 @@ export type OAuthAuthorization = {
 } & (
   | {
       readonly mode: "auto"
-      readonly callback: Effect.Effect<Credential.OAuth, unknown>
+      readonly callback: Effect.Effect<Credential.Value, unknown>
     }
   | {
       readonly mode: "code"
-      readonly callback: (code: string) => Effect.Effect<Credential.OAuth, unknown>
+      readonly callback: (code: string) => Effect.Effect<Credential.Value, unknown>
     }
 )
 
@@ -156,6 +156,8 @@ export interface Interface extends State.Transformable<Draft> {
       readonly integrationID: ID
       /** Secret entered by the user. */
       readonly key: string
+      /** Answers to the key method's optional prompts, persisted as credential metadata. */
+      readonly inputs?: Inputs
       /** User-facing label for the stored credential. */
       readonly label?: string
     }) => Effect.Effect<void, AuthorizationError>
@@ -319,7 +321,7 @@ export const locationLayer = Layer.effect(
       return error instanceof Error ? error.message : String(error)
     }
 
-    const settle = Effect.fnUntraced(function* (attemptID: AttemptID, exit: Exit.Exit<Credential.OAuth, unknown>) {
+    const settle = Effect.fnUntraced(function* (attemptID: AttemptID, exit: Exit.Exit<Credential.Value, unknown>) {
       const now = yield* Clock.currentTimeMillis
       const result = yield* SynchronizedRef.modify(attempts, (current) => {
         const attempt = current.get(attemptID)
@@ -334,7 +336,8 @@ export const locationLayer = Layer.effect(
         const implementation = state.get().integrations.get(result.integrationID)?.implementations.get(result.methodID)
         yield* credentials.create({
           integrationID: result.integrationID,
-          label: result.label ?? implementation?.label?.(exit.value),
+          label:
+            result.label ?? (exit.value.type === "oauth" ? implementation?.label?.(exit.value) : undefined),
           value: exit.value,
         })
         yield* events.publish(Event.ConnectionUpdated, { integrationID: result.integrationID })
@@ -410,7 +413,11 @@ export const locationLayer = Layer.effect(
           yield* credentials.create({
             integrationID: input.integrationID,
             label: input.label,
-            value: Credential.Key.make({ type: "key", key: input.key }),
+            value: Credential.Key.make({
+              type: "key",
+              key: input.key,
+              ...(input.inputs && Object.keys(input.inputs).length > 0 ? { metadata: input.inputs } : {}),
+            }),
           })
           yield* events.publish(Event.ConnectionUpdated, { integrationID: input.integrationID })
           yield* events.publish(Event.Updated, {})

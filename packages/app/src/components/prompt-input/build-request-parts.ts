@@ -1,12 +1,13 @@
 import { getFilename } from "@zaovra-ai/core/util/path"
-import { type AgentPartInput, type FilePartInput, type Part, type TextPartInput } from "@zaovra-ai/sdk/v2/client"
+import { type Part } from "@zaovra-ai/sdk/v2/client"
 import type { FileSelection } from "@/context/file"
 import { encodeFilePath } from "@/context/file/path"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
 import { Identifier } from "@/utils/id"
 import { createCommentMetadata, formatCommentNote } from "@/utils/comment-note"
 
-type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id: string }
+type StripMessageIdentity<Value> = Value extends unknown ? Omit<Value, "sessionID" | "messageID"> : never
+type PromptRequestPart = StripMessageIdentity<Extract<Part, { type: "text" | "file" | "agent" }>>
 
 type ContextFile = {
   key: string

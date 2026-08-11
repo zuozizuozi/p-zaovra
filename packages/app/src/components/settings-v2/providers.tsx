@@ -8,6 +8,7 @@ import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
+import { disconnectProviderCredentials } from "@/utils/provider-integration"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
@@ -113,14 +114,11 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
 
   const disconnect = async (providerID: string, name: string) => {
     if (isConfigCustom(providerID)) {
-      await serverSdk()
-        .client.auth.remove({ providerID })
-        .catch(() => undefined)
+      await disconnectProviderCredentials(serverSdk().client, providerID).catch(() => undefined)
       await disableProvider(providerID, name)
       return
     }
-    await serverSdk()
-      .client.auth.remove({ providerID })
+    await disconnectProviderCredentials(serverSdk().client, providerID)
       .then(async () => {
         await serverSdk().client.global.dispose()
         showToast({

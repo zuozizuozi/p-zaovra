@@ -43,7 +43,7 @@ const VCS_DIFF_CONTEXT_LINES = 12
 const KV_SHOW_FILE_TREE = "diff_viewer_show_file_tree"
 const KV_SINGLE_PATCH = "diff_viewer_single_patch"
 const KV_VIEW = "diff_viewer_view"
-type DiffMode = "git" | "branch" | "last-turn"
+type DiffMode = "git" | "branch"
 type DiffViewerFocus = "patches" | "files"
 type DiffView = "split" | "unified"
 type SelectedHunk = { readonly fileIndex: number; readonly hunkIndex: number; readonly scrollTop: number }
@@ -83,7 +83,6 @@ function storedView(value: unknown): DiffView | undefined {
 }
 
 function diffSourceLabel(mode: DiffMode) {
-  if (mode === "last-turn") return "last turn"
   if (mode === "branch") return "main branch"
   return "working tree"
 }
@@ -112,16 +111,6 @@ function DiffViewer(props: { api: TuiPluginApi }) {
     }
   })
   const [diff] = createResource(diffInput, async (input) => {
-    if (input.mode === "last-turn") {
-      const sessionID = input.sessionID
-      if (!sessionID) return []
-      const result = await props.api.client.session.diff(
-        { sessionID, messageID: input.messageID },
-        { throwOnError: true },
-      )
-      return normalizeDiffs(result.data ?? [])
-    }
-
     const result = await props.api.client.vcs.diff(
       { directory: input.directory, mode: input.mode, context: VCS_DIFF_CONTEXT_LINES },
       { throwOnError: true },
@@ -698,11 +687,6 @@ function DiffViewer(props: { api: TuiPluginApi }) {
             },
           ]
         : []),
-      {
-        title: "Last turn",
-        value: "last-turn" as const,
-        description: "Show changes from the last assistant turn",
-      },
     ]
   })
 
@@ -778,7 +762,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
             <Match when={!diff.loading && diff.error}>
               <Separator axis="x" />
               <box flexGrow={1} paddingLeft={1}>
-                <text fg={theme().error}>Failed to load diff</text>
+                <text fg={theme().error}>{diff.error?.message ?? "Failed to load diff"}</text>
               </box>
             </Match>
             <Match when={!diff.loading}>
@@ -989,7 +973,7 @@ function DiffViewerHelpDialog() {
     {
       shortcut: useCommandShortcut("diff.switch_source"),
       action: "Switch source",
-      description: "Choose working tree, main branch, or last-turn changes",
+      description: "Choose working tree or main branch changes",
     },
     {
       shortcut: useCommandShortcut("diff.toggle_view"),

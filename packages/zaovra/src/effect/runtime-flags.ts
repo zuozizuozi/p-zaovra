@@ -14,7 +14,6 @@ const enabledByExperimental = (name: string) =>
   )
 
 export class Service extends ConfigService.Service<Service>()("@zaovra/RuntimeFlags", {
-  autoShare: bool("ZAOVRA_AUTO_SHARE"),
   pure: bool("ZAOVRA_PURE"),
   disableDefaultPlugins: bool("ZAOVRA_DISABLE_DEFAULT_PLUGINS"),
   disableEmbeddedWebUi: bool("ZAOVRA_DISABLE_EMBEDDED_WEB_UI"),

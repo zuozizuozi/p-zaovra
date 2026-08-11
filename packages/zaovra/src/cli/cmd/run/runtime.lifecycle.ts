@@ -14,7 +14,6 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { Global } from "@zaovra-ai/core/global"
 import { openEditor } from "@zaovra-ai/tui/editor"
 import { registerZaovraKeymap } from "@zaovra-ai/tui/keymap"
-import { Session as SessionApi } from "@/session/session"
 import * as Locale from "@/util/locale"
 import { resolveInteractiveStdin } from "./runtime.stdin"
 import { entrySplash, exitSplash, splashMeta } from "./splash"
@@ -33,6 +32,7 @@ import type {
 import { formatModelLabel } from "./variant.shared"
 
 const FOOTER_HEIGHT = 4
+const DEFAULT_SESSION_TITLE = /^(?:New session - |Child session - )\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 type SplashState = {
   entry: boolean
@@ -107,7 +107,7 @@ function shutdown(renderer: CliRenderer): void {
 }
 
 function splashInfo(title: string | undefined, history: RunPrompt[]) {
-  if (title && !SessionApi.isDefaultTitle(title)) {
+  if (title && !DEFAULT_SESSION_TITLE.test(title)) {
     return {
       title,
       showSession: true,

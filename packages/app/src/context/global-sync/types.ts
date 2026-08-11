@@ -1,15 +1,13 @@
 import type {
   Agent,
-  Command,
+  CommandView,
   Config,
   LspStatus,
-  McpResource,
-  McpStatus,
   Message,
   Part,
   Path,
-  PermissionRequest,
-  QuestionRequest,
+  PermissionView,
+  QuestionView,
   ReferenceInfo,
   Session,
   SessionStatus,
@@ -17,6 +15,7 @@ import type {
   Todo,
   VcsInfo,
 } from "@zaovra-ai/sdk/v2/client"
+import type { McpResource, McpStatus } from "./mcp"
 import { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
 import type { Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
@@ -35,7 +34,7 @@ export type ProjectMeta = {
 export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
-  command: Command[]
+  command: CommandView[]
   reference: ReferenceInfo[]
   project: string
   projectMeta: ProjectMeta | undefined
@@ -57,10 +56,10 @@ export type State = {
     [sessionID: string]: Todo[]
   }
   permission: {
-    [sessionID: string]: PermissionRequest[]
+    [sessionID: string]: PermissionView[]
   }
   question: {
-    [sessionID: string]: QuestionRequest[]
+    [sessionID: string]: QuestionView[]
   }
   mcp_ready: boolean
   mcp: {

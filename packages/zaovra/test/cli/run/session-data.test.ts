@@ -590,4 +590,113 @@ describe("run session data", () => {
       }),
     ])
   })
+
+  test("renders native V2 text and reasoning events", () => {
+    let data = createSessionData()
+    data = reduce(data, {
+      id: "step-1",
+      type: "session.next.step.started",
+      properties: {
+        sessionID: "session-1",
+        assistantMessageID: "msg-1",
+        timestamp: 1,
+        agent: "build",
+        model: { providerID: "openai", id: "gpt-5" },
+      },
+    }).data
+    data = reduce(data, {
+      id: "text-start",
+      type: "session.next.text.started",
+      properties: { sessionID: "session-1", assistantMessageID: "msg-1", textID: "text-1", timestamp: 2 },
+    }).data
+    const progress = reduce(data, {
+      id: "text-delta",
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "session-1",
+        assistantMessageID: "msg-1",
+        textID: "text-1",
+        delta: "hello",
+        timestamp: 3,
+      },
+    })
+    expect(progress.commits).toEqual([
+      expect.objectContaining({ kind: "assistant", text: "hello", phase: "progress", partID: "text-1" }),
+    ])
+
+    const done = reduce(progress.data, {
+      id: "text-end",
+      type: "session.next.text.ended",
+      properties: {
+        sessionID: "session-1",
+        assistantMessageID: "msg-1",
+        textID: "text-1",
+        text: "hello",
+        timestamp: 4,
+      },
+    })
+    expect(done.commits).toEqual([])
+  })
+
+  test("renders native V2 tool lifecycle events", () => {
+    const started = reduce(createSessionData(), {
+      id: "tool-called",
+      type: "session.next.tool.called",
+      properties: {
+        sessionID: "session-1",
+        assistantMessageID: "msg-1",
+        callID: "call-1",
+        tool: "custom",
+        input: { filePath: "README.md" },
+        provider: { executed: false },
+        timestamp: 1,
+      },
+    })
+    expect(started.commits).toEqual([
+      expect.objectContaining({ kind: "tool", tool: "custom", phase: "start", toolState: "running" }),
+    ])
+
+    const done = reduce(started.data, {
+      id: "tool-success",
+      type: "session.next.tool.success",
+      properties: {
+        sessionID: "session-1",
+        assistantMessageID: "msg-1",
+        callID: "call-1",
+        structured: {},
+        content: [{ type: "text", text: "contents" }],
+        provider: { executed: false },
+        timestamp: 2,
+      },
+    })
+    expect(done.commits).toEqual([
+      expect.objectContaining({ kind: "tool", tool: "custom", phase: "progress", toolState: "completed" }),
+      expect.objectContaining({ kind: "tool", tool: "custom", phase: "final", toolState: "completed" }),
+    ])
+  })
+
+  test("queues and releases native V2 permission requests", () => {
+    const asked = reduce(createSessionData(), {
+      id: "permission-event",
+      type: "permission.v2.asked",
+      properties: {
+        id: "permission-1",
+        sessionID: "session-1",
+        action: "read",
+        resources: ["README.md"],
+      },
+    })
+    expect(asked.data.permissions).toEqual([
+      expect.objectContaining({ id: "permission-1", permission: "read", patterns: ["README.md"] }),
+    ])
+    expect(asked.footer?.view).toEqual(expect.objectContaining({ type: "permission" }))
+
+    const replied = reduce(asked.data, {
+      id: "permission-reply",
+      type: "permission.v2.replied",
+      properties: { sessionID: "session-1", requestID: "permission-1", reply: "once" },
+    })
+    expect(replied.data.permissions).toEqual([])
+    expect(replied.footer?.view).toEqual({ type: "prompt" })
+  })
 })

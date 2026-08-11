@@ -1,22 +1,19 @@
 import { Button } from "@zaovra-ai/ui/button"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { Dialog } from "@zaovra-ai/ui/dialog"
-import { List, type ListRef } from "@zaovra-ai/ui/list"
+import { List } from "@zaovra-ai/ui/list"
 import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
 import { Tag } from "@zaovra-ai/ui/tag"
-import { Tooltip } from "@zaovra-ai/ui/tooltip"
 import { type Component, Show } from "solid-js"
 import { useLocal } from "@/context/local"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
-import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 
-export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props) => {
+export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = () => {
   const local = useLocal()
-  const model = props.model ?? local.model
   const dialog = useDialog()
   const directory = () => decode64(local.slug())
   const providers = useProviders(directory)
@@ -33,59 +30,11 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
   const connect = (provider: string) => openProviders(provider)
   const all = () => openProviders()
 
-  let listRef: ListRef | undefined
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") return
-    listRef?.onKeyDown(e)
-  }
-
   return (
     <Dialog
       title={language.t("dialog.model.select.title")}
       class="overflow-y-auto [&_[data-slot=dialog-body]]:overflow-visible [&_[data-slot=dialog-body]]:flex-none"
     >
-      <div class="flex flex-col gap-3 px-2.5" onKeyDown={handleKeyDown}>
-        <div class="text-14-medium text-text-base px-2.5">{language.t("dialog.model.unpaid.freeModels.title")}</div>
-        <List
-          class="px-3 [&_[data-slot=list-scroll]]:overflow-visible"
-          ref={(ref) => (listRef = ref)}
-          items={model.list}
-          current={model.current()}
-          key={(x) => `${x.provider.id}:${x.id}`}
-          itemWrapper={(item, node) => (
-            <Tooltip
-              class="w-full"
-              placement="right-start"
-              gutter={12}
-              value={
-                <ModelTooltip
-                  model={item}
-                  latest={item.latest}
-                  free={item.provider.id === "zaovra" && (!item.cost || item.cost.input === 0)}
-                />
-              }
-            >
-              {node}
-            </Tooltip>
-          )}
-          onSelect={(x) => {
-            model.set(x ? { modelID: x.id, providerID: x.provider.id } : undefined, {
-              recent: true,
-            })
-            dialog.close()
-          }}
-        >
-          {(i) => (
-            <div class="w-full flex items-center gap-x-2.5">
-              <span>{i.name}</span>
-              <Tag>{language.t("model.tag.free")}</Tag>
-              <Show when={i.latest}>
-                <Tag>{language.t("model.tag.latest")}</Tag>
-              </Show>
-            </div>
-          )}
-        </List>
-      </div>
       <div class="px-1.5 pb-1.5">
         <div class="w-full rounded-sm border border-border-weak-base bg-surface-raised-base">
           <div class="w-full flex flex-col items-start gap-4 px-1.5 pt-4 pb-4">

@@ -139,6 +139,32 @@ Recent work
     ])
   })
 
+  test("lowers durable text data attachments into model text context", () => {
+    const messages = toLLMMessages(
+      [
+        SessionMessage.User.make({
+          id: id("text-file"),
+          type: "user",
+          text: "Inspect this file",
+          files: [
+            FileAttachment.make({
+              uri: "data:text/plain;base64,aGVsbG8gd29ybGQ=",
+              mime: "text/plain",
+              name: "notes.txt",
+            }),
+          ],
+          time: { created },
+        }),
+      ],
+      model,
+    )
+
+    expect(messages[0]?.content).toEqual([
+      { type: "text", text: "Inspect this file" },
+      { type: "text", text: '<file name="notes.txt">\nhello world\n</file>' },
+    ])
+  })
+
   test("replays durable tool media into canonical tool messages without structured base64", () => {
     const messages = toLLMMessages(
       [

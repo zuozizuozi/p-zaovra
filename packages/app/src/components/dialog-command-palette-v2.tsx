@@ -23,6 +23,7 @@ import {
   type CommandPaletteEntry,
 } from "./command-palette"
 import "./dialog-command-palette-v2.css"
+import { listV2Sessions } from "@/context/v2-session-list"
 
 function groups(entries: CommandPaletteEntry[]) {
   const map = new Map<string, CommandPaletteEntry[]>()
@@ -80,7 +81,7 @@ export function DialogHomeCommandPaletteV2(props: {
     opened: serverCtx.projects.list,
     stored: () => serverCtx.sync.data.project,
     load: (search, signal) =>
-      serverCtx.sdk.client.experimental.session.list({ roots: true, search, limit: 50 }, { signal }),
+      listV2Sessions(serverCtx.sdk.client, { roots: true, search, limit: 50, order: "desc" }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
   })

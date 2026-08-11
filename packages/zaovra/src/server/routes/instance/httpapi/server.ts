@@ -6,9 +6,7 @@ import { FSUtil } from "@zaovra-ai/core/fs-util"
 import * as Observability from "@zaovra-ai/core/observability"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
-import { Auth } from "@/auth"
 import { BackgroundJob } from "@/background/job"
-import { Command } from "@/command"
 import { Config } from "@/config/config"
 import { Workspace } from "@/control-plane/workspace"
 import { Env } from "@/env"
@@ -17,35 +15,16 @@ import { Format } from "@/format"
 import { Git } from "@/git"
 import { Installation } from "@/installation"
 import { LSP } from "@/lsp/lsp"
-import { MCP } from "@/mcp"
-import { McpAuth } from "@/mcp/auth"
-import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { PluginPtyEnvironment } from "@/plugin/pty-environment"
 import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"
 import { Vcs } from "@/project/vcs"
-import { ProviderAuth } from "@/provider/auth"
 import { Provider } from "@/provider/provider"
-import { Question } from "@/question"
-import { SessionCompaction } from "@/session/compaction"
-import { Instruction } from "@/session/instruction"
-import { LLM } from "@/session/llm"
-import { SessionProcessor } from "@/session/processor"
-import { SessionPrompt } from "@/session/prompt"
-import { SessionRevert } from "@/session/revert"
-import { SessionRunState } from "@/session/run-state"
-import { Session } from "@/session/session"
-import { SessionStatus } from "@/session/status"
-import { SessionSummary } from "@/session/summary"
-import { Todo } from "@/session/todo"
-import { SessionShare } from "@/share/session"
-import { ShareNext } from "@/share/share-next"
 import { Skill } from "@/skill"
 import { Discovery } from "@/skill/discovery"
 import { Snapshot } from "@/snapshot"
 import { Storage } from "@/storage/storage"
-import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -66,6 +45,18 @@ import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import * as SessionExecutionLocal from "@zaovra-ai/core/session/execution/local"
+import { Work } from "@zaovra-ai/core/work"
+import { WorkArtifact } from "@zaovra-ai/core/work/artifact"
+import { WorkController } from "@zaovra-ai/core/work/controller"
+import { WorkExecution } from "@zaovra-ai/core/work/execution"
+import { WorkExecutionLocal } from "@zaovra-ai/core/work/execution-local"
+import { WorkRecovery } from "@zaovra-ai/core/work/recovery"
+import { WorkStore } from "@zaovra-ai/core/work/store"
+import { WorkPlacement } from "@zaovra-ai/core/work/placement"
+import { WorkWorker } from "@zaovra-ai/core/work/worker"
+import { WorkRemoteJob } from "@zaovra-ai/core/work/remote-job"
+import { TaskTool } from "@zaovra-ai/core/tool/task"
+import { TaskRecovery } from "@zaovra-ai/core/tool/task-recovery"
 import { lazy } from "@/util/lazy"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@zaovra-ai/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
@@ -89,14 +80,10 @@ import { experimentalHandlers } from "./handlers/experimental"
 import { fileHandlers } from "./handlers/file"
 import { globalHandlers } from "./handlers/global"
 import { instanceHandlers } from "./handlers/instance"
-import { mcpHandlers } from "./handlers/mcp"
-import { permissionHandlers } from "./handlers/permission"
 import { projectHandlers } from "./handlers/project"
 import { projectCopyHandlers } from "./handlers/project-copy"
 import { providerHandlers } from "./handlers/provider"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
-import { questionHandlers } from "./handlers/question"
-import { sessionHandlers } from "./handlers/session"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
 import { handlers } from "@zaovra-ai/server/handlers"
@@ -157,14 +144,10 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     experimentalHandlers,
     fileHandlers,
     instanceHandlers,
-    mcpHandlers,
     projectHandlers,
     projectCopyHandlers,
     ptyHandlers,
-    questionHandlers,
-    permissionHandlers,
     providerHandlers,
-    sessionHandlers,
     syncHandlers,
     tuiHandlers,
     workspaceHandlers,
@@ -213,7 +196,6 @@ const app = LayerNode.group([
   Npm.node,
   FSUtil.node,
   Database.node,
-  Auth.node,
   Account.node,
   Config.node,
   Env.node,
@@ -224,42 +206,21 @@ const app = LayerNode.group([
   Plugin.node,
   ModelsDev.node,
   Provider.node,
-  ProviderAuth.node,
   Agent.node,
   Skill.node,
   Discovery.node,
-  Question.node,
-  Permission.node,
   PermissionSaved.node,
-  Todo.node,
-  Session.node,
   SessionProjector.node,
-  SessionStatus.node,
   BackgroundJob.node,
   RuntimeFlags.node,
   EventV2Bridge.node,
-  SessionRunState.node,
-  SessionProcessor.node,
-  SessionCompaction.node,
-  SessionRevert.node,
-  SessionSummary.node,
-  SessionPrompt.node,
-  Instruction.node,
-  LLM.node,
   LSP.node,
-  MCP.node,
-  McpAuth.node,
-  Command.node,
   Truncate.node,
-  ToolRegistry.node,
   Format.node,
   Project.node,
   Vcs.node,
-  Workspace.node,
   Worktree.node,
   Installation.node,
-  ShareNext.node,
-  SessionShare.node,
   InstanceStore.node,
   httpClient,
   EventV2.node,
@@ -271,7 +232,36 @@ const app = LayerNode.group([
 export function createRoutes(
   corsOptions?: CorsOptions,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
-  const locationServiceMapV2 = buildLocationServiceMap()
+  const locationServiceMapV2 = Layer.unwrap(
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      return buildLocationServiceMap([[EventV2.node, Layer.succeed(EventV2.Service, events)]])
+    }),
+  )
+  const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
+  const sharedEventV2 = Layer.effect(EventV2.Service, EventV2Bridge.Service)
+  const v2Runtime = AppNodeBuilderV1.build(
+    LayerNode.group([
+      SessionV2.node,
+      Workspace.node,
+      TaskTool.node,
+      TaskRecovery.startupNode,
+      Work.node,
+      WorkArtifact.node,
+      WorkController.node,
+      WorkStore.node,
+      WorkWorker.node,
+      WorkRemoteJob.node,
+      WorkPlacement.node,
+      WorkRecovery.startupNode,
+    ]),
+    [
+      [LocationServiceMap.node, sharedLocationServiceMap],
+      [EventV2.node, sharedEventV2],
+      [SessionExecution.node, SessionExecutionLocal.node],
+      [WorkExecution.node, WorkExecutionLocal.node],
+    ],
+  ).pipe(Layer.provideMerge(locationServiceMapV2))
 
   return Layer.mergeAll(
     rootApiRoutes,
@@ -288,20 +278,14 @@ export function createRoutes(
       corsVaryFix,
       fenceLayer,
       cors(corsOptions),
-      AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2]]),
+      AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, sharedLocationServiceMap]]),
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
-    Layer.provide(
-      AppNodeBuilderV1.build(SessionV2.node, [
-        [LocationServiceMap.node, locationServiceMapV2],
-        [SessionExecution.node, SessionExecutionLocal.node],
-      ]),
-    ),
-    Layer.provide(locationServiceMapV2),
+    Layer.provide(v2Runtime),
 
     Layer.provide(AppNodeBuilderV1.build(app)),
     // Must stay last: layers provided later in this pipe build beneath earlier ones,

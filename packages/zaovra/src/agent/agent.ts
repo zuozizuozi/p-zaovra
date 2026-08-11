@@ -1,12 +1,10 @@
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
-import { PermissionV1 } from "@zaovra-ai/core/v1/permission"
 import { Config } from "@/config/config"
 import { serviceUse } from "@zaovra-ai/core/effect/service-use"
 import { Provider } from "@/provider/provider"
 
 import { generateObject, streamObject, type ModelMessage } from "ai"
 import { Truncate } from "@/tool/truncate"
-import { Auth } from "../auth"
 import { ProviderTransform } from "@/provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
@@ -14,7 +12,7 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
-import { Permission } from "@/permission"
+import { PermissionRules } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@zaovra-ai/core/global"
 import path from "path"
@@ -27,7 +25,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { AbsolutePath, type DeepMutable } from "@zaovra-ai/core/schema"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
-import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { Reference } from "@zaovra-ai/core/reference"
 import { Location } from "@zaovra-ai/core/location"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
@@ -41,7 +39,7 @@ export const Info = Schema.Struct({
   topP: Schema.optional(Schema.Finite),
   temperature: Schema.optional(Schema.Finite),
   color: Schema.optional(Schema.String),
-  permission: PermissionV1.Ruleset,
+  permission: PermissionRules.Ruleset,
   model: Schema.optional(
     Schema.Struct({
       modelID: ModelV2.ID,
@@ -89,7 +87,6 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
-    const auth = yield* Auth.Service
     const plugin = yield* Plugin.Service
     const skill = yield* Skill.Service
     const provider = yield* Provider.Service
@@ -116,7 +113,7 @@ const layer = Layer.effect(
           ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
         } satisfies Record<string, "allow" | "ask" | "deny">
 
-        const defaults = Permission.fromConfig({
+        const defaults = PermissionRules.fromConfig({
           "*": "allow",
           doom_loop: "ask",
           external_directory: {
@@ -135,16 +132,16 @@ const layer = Layer.effect(
           },
         })
 
-        const user = Permission.fromConfig(cfg.permission ?? {})
+        const user = PermissionRules.fromConfig(cfg.permission ?? {})
 
         const agents: Record<string, Info> = {
           build: {
             name: "build",
             description: "The default agent. Executes tools based on configured permissions.",
             options: {},
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 question: "allow",
                 plan_enter: "allow",
               }),
@@ -157,9 +154,9 @@ const layer = Layer.effect(
             name: "plan",
             description: "Plan mode. Disallows all edit tools.",
             options: {},
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 question: "allow",
                 plan_exit: "allow",
                 task: {
@@ -182,9 +179,9 @@ const layer = Layer.effect(
           general: {
             name: "general",
             description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 todowrite: "deny",
               }),
               user,
@@ -195,9 +192,9 @@ const layer = Layer.effect(
           },
           explore: {
             name: "explore",
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 "*": "deny",
                 grep: "allow",
                 glob: "allow",
@@ -222,9 +219,9 @@ const layer = Layer.effect(
             native: true,
             hidden: true,
             prompt: PROMPT_COMPACTION,
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 "*": "deny",
               }),
               user,
@@ -238,9 +235,9 @@ const layer = Layer.effect(
             native: true,
             hidden: true,
             temperature: 0.5,
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 "*": "deny",
               }),
               user,
@@ -253,9 +250,9 @@ const layer = Layer.effect(
             options: {},
             native: true,
             hidden: true,
-            permission: Permission.merge(
+            permission: PermissionRules.merge(
               defaults,
-              Permission.fromConfig({
+              PermissionRules.fromConfig({
                 "*": "deny",
               }),
               user,
@@ -274,7 +271,7 @@ const layer = Layer.effect(
             item = agents[key] = {
               name: key,
               mode: "all",
-              permission: Permission.merge(defaults, user),
+              permission: PermissionRules.merge(defaults, user),
               options: {},
               native: false,
             }
@@ -290,22 +287,22 @@ const layer = Layer.effect(
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
           item.options = mergeDeep(item.options, value.options ?? {})
-          item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
+          item.permission = PermissionRules.merge(item.permission, PermissionRules.fromConfig(value.permission ?? {}))
         }
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured
         for (const name in agents) {
           const agent = agents[name]
           const explicit = agent.permission.some((r) => {
-            if (r.permission !== "external_directory") return false
-            if (r.action !== "deny") return false
-            return r.pattern === Truncate.GLOB
+            if (r.action !== "external_directory") return false
+            if (r.effect !== "deny") return false
+            return r.resource === Truncate.GLOB
           })
           if (explicit) continue
 
-          agents[name].permission = Permission.merge(
+          agents[name].permission = PermissionRules.merge(
             agents[name].permission,
-            Permission.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } }),
+            PermissionRules.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } }),
           )
         }
 
@@ -382,7 +379,7 @@ const layer = Layer.effect(
         const existing = yield* InstanceState.useEffect(state, (s) => s.list())
 
         // TODO: clean this up so provider specific logic doesnt bleed over
-        const authInfo = yield* auth.get(model.providerID).pipe(Effect.orDie)
+        const authInfo = yield* provider.auth(model.providerID)
         const isOpenaiOauth = model.providerID === "openai" && authInfo?.type === "oauth"
 
         const params = {
@@ -438,16 +435,10 @@ const layer = Layer.effect(
   }),
 )
 
-const locationServiceMapNode = LayerNode.make({
-  service: LocationServiceMap.Service,
-  layer: locationServiceMapLayer,
-  deps: [],
-})
-
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, Auth.node, Plugin.node, Skill.node, Provider.node, locationServiceMapNode],
+  deps: [Config.node, Plugin.node, Skill.node, Provider.node, LocationServiceMap.node],
 })
 
 export * as Agent from "./agent"

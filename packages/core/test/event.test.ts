@@ -113,6 +113,17 @@ describe("EventV2", () => {
     }),
   )
 
+  itWithoutLocation.effect("replays recent events after a known transport cursor", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const first = yield* events.publish(GlobalMessage, { text: "first" })
+      const second = yield* events.publish(GlobalMessage, { text: "second" })
+
+      expect(events.recentAfter(first.id)).toEqual({ events: [second], complete: true })
+      expect(events.recentAfter(EventV2.ID.create())).toEqual({ events: [], complete: false })
+    }),
+  )
+
   it.effect("publishes definition version", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service

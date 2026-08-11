@@ -57,6 +57,7 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { parse } from "../../util/model"
 
 registerZaovraSpinner()
 
@@ -411,7 +412,7 @@ export function Prompt(props: PromptProps) {
           }, 5000)
 
           if (store.interrupt >= 2) {
-            void sdk.client.session.abort({
+            void sdk.client.v2.session.interrupt({
               sessionID: props.sessionID,
             })
             setStore("interrupt", 0)
@@ -536,7 +537,7 @@ export function Prompt(props: PromptProps) {
         desc: "Change the workspace for the session",
         name: "workspace.set",
         category: "Session",
-        enabled: Flag.ZAOVRA_EXPERIMENTAL_WORKSPACES,
+        enabled: Flag.ZAOVRA_EXPERIMENTAL_WORKSPACES && !props.sessionID,
         slashName: "warp",
         run: () => {
           workspace.open()
@@ -544,10 +545,11 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Move session",
-        desc: "Move to another project dir",
+        desc: "Choose the project directory for a new session",
         name: "session.move",
         category: "Session",
         slashName: "move",
+        enabled: !props.sessionID,
         run: () => {
           move.open()
         },
@@ -944,8 +946,6 @@ export function Prompt(props: PromptProps) {
   }
 
   async function submitInner() {
-    workspace.clearNotice()
-
     // IME: double-defer may fire before onContentChange flushes the last
     // composed character (e.g. Korean hangul) to the store, so read
     // plainText directly and sync before any downstream reads.
@@ -996,9 +996,8 @@ export function Prompt(props: PromptProps) {
       if (move.pending() && !directory) return false
       finishMoveProgress = Boolean(move.progress())
 
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
+      const res = await sdk.client.v2.session.create({
+        location: { directory: directory ?? sdk.directory ?? process.cwd(), workspaceID },
         agent: agent.name,
         model: {
           providerID: selectedModel.providerID,
@@ -1019,7 +1018,7 @@ export function Prompt(props: PromptProps) {
         return true
       }
 
-      sessionID = res.data.id
+      sessionID = res.data.data.id
     }
 
     const inputText = expandTrackedPastedText(
@@ -1057,57 +1056,70 @@ export function Prompt(props: PromptProps) {
 
     if (store.mode === "shell") {
       move.startSubmit()
-      void sdk.client.session.shell({
-        sessionID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          modelID: selectedModel.modelID,
-        },
-        command: inputText,
-      })
-      setStore("mode", "normal")
-    } else if (
-      inputText.startsWith("/") &&
-      sync.data.command.some((x) => x.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-    ) {
-      move.startSubmit()
-      // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
-      const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
-      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
-
-      void sdk.client.session.command({
-        sessionID,
-        command: command.slice(1),
-        arguments: args,
-        agent: agent.name,
-        model: `${selectedModel.providerID}/${selectedModel.modelID}`,
-        variant,
-        parts: nonTextParts.filter((x) => x.type === "file"),
+      sdk.client.v2.session.shell({ sessionID, command: inputText.trim() }, { throwOnError: true }).catch((error) => {
+        toast.show({ title: "Failed to run command", message: errorMessage(error), variant: "error" })
       })
     } else {
+      const [head, ...commandArguments] = inputText.split(/\s+/)
+      const command = head?.startsWith("/") ? sync.data.command.find((item) => item.name === head.slice(1)) : undefined
+      const promptText = command ? expandCommandTemplate(command.template, commandArguments.join(" ")) : inputText
+      const promptAgent = command?.agent ?? agent.name
+      const commandModel = command?.model ? parse(command.model) : undefined
+      const promptModel =
+        commandModel?.providerID && commandModel.modelID
+          ? { id: commandModel.modelID, providerID: commandModel.providerID }
+          : { id: selectedModel.modelID, providerID: selectedModel.providerID }
       move.startSubmit()
-      sdk.client.session
-        .prompt(
+      Promise.all([
+        sdk.client.v2.session.switchAgent({ sessionID, agent: promptAgent }, { throwOnError: true }),
+        sdk.client.v2.session.switchModel(
           {
             sessionID,
-            ...selectedModel,
-            agent: agent.name,
-            model: selectedModel,
-            variant,
-            parts: [
-              ...editorParts,
-              {
-                type: "text",
-                text: inputText,
-              },
-              ...nonTextParts,
-            ],
+            model: { ...promptModel, variant },
           },
           { throwOnError: true },
+        ),
+      ])
+        .then(() =>
+          sdk.client.v2.session.prompt(
+            {
+              sessionID,
+              delivery: "steer",
+              prompt: {
+                text: [...editorParts.map((part) => part.text), promptText].filter(Boolean).join("\n\n"),
+                files: nonTextParts.flatMap((part) =>
+                  part.type === "file"
+                    ? [
+                        {
+                          uri: part.url,
+                          name: part.filename,
+                          source: part.source?.text
+                            ? {
+                                text: part.source.text.value,
+                                start: part.source.text.start,
+                                end: part.source.text.end,
+                              }
+                            : undefined,
+                        },
+                      ]
+                    : [],
+                ),
+                agents: nonTextParts.flatMap((part) =>
+                  part.type === "agent"
+                    ? [
+                        {
+                          name: part.name,
+                          source: part.source
+                            ? { text: part.source.value, start: part.source.start, end: part.source.end }
+                            : undefined,
+                        },
+                      ]
+                    : [],
+                ),
+              },
+            },
+            { throwOnError: true },
+          ),
         )
         .catch((error) => {
           toast.show({
@@ -1589,13 +1601,6 @@ export function Prompt(props: PromptProps) {
                 </text>
               </box>
             </Match>
-            <Match when={workspace.notice()}>
-              {(notice) => (
-                <box paddingLeft={3}>
-                  <text fg={theme.accent}>{notice()}</text>
-                </box>
-              )}
-            </Match>
             <Match when={workspace.label()}>
               {(label) => (
                 <box paddingLeft={3} flexDirection="row" gap={1}>
@@ -1710,4 +1715,20 @@ export function Prompt(props: PromptProps) {
       />
     </>
   )
+}
+
+function expandCommandTemplate(template: string, argumentsText: string) {
+  const args = argumentsText.trim().split(/\s+/).filter(Boolean)
+  const placeholders = [...template.matchAll(/\$([1-9][0-9]*)/g)].map((match) => Number(match[1]))
+  const last = Math.max(0, ...placeholders)
+  const expanded = template
+    .replaceAll(/\$([1-9][0-9]*)/g, (_item, index: string) => {
+      const position = Number(index)
+      if (position > args.length) return ""
+      if (position === last) return args.slice(position - 1).join(" ")
+      return args[position - 1] ?? ""
+    })
+    .replaceAll("$ARGUMENTS", argumentsText)
+  if (placeholders.length > 0 || template.includes("$ARGUMENTS") || !argumentsText.trim()) return expanded.trim()
+  return `${expanded}\n\n${argumentsText}`.trim()
 }

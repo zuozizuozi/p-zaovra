@@ -48,6 +48,8 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
+import { getStore } from "./store"
+import { DISPLAY_BACKEND_KEY } from "./store-keys"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Zaovra Dev",
@@ -143,6 +145,8 @@ const main = Effect.gen(function* () {
     onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), appId),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
+  const settings = getStore()
+  const displayBackend = process.platform === "linux" ? settings.get(DISPLAY_BACKEND_KEY) : undefined
   initializeOldLayoutEligibility(app.getPath("userData"))
   logger = initLogging()
   initCrashReporter()
@@ -190,7 +194,16 @@ const main = Effect.gen(function* () {
   useEnvProxy()
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   const features = app.commandLine.getSwitchValue("enable-features")
-  app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
+  const requiredFeatures = [
+    jsCallStackFeature,
+    ...(displayBackend === "wayland" ? ["WaylandWindowDecorations"] : []),
+    ...(features ? [features] : []),
+  ]
+  app.commandLine.appendSwitch("enable-features", requiredFeatures.join(","))
+  if (displayBackend === "wayland") {
+    app.commandLine.appendSwitch("ozone-platform", "wayland")
+    app.commandLine.appendSwitch("enable-wayland-ime", "true")
+  }
   if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
 
   if (!app.requestSingleInstanceLock()) {
@@ -288,8 +301,12 @@ const main = Effect.gen(function* () {
     isFirstLaunchOnboardingPending,
     finishFirstLaunchOnboarding,
     isOldLayoutEligible,
-    getDisplayBackend: async () => null,
-    setDisplayBackend: async () => undefined,
+    getDisplayBackend: async () =>
+      process.platform === "linux" && settings.get(DISPLAY_BACKEND_KEY) === "wayland" ? "wayland" : "auto",
+    setDisplayBackend: async (backend) => {
+      if (process.platform !== "linux") return
+      settings.set(DISPLAY_BACKEND_KEY, backend === "wayland" ? "wayland" : "auto")
+    },
     parseMarkdown: async (markdown) => parseMarkdown(markdown),
     checkAppExists: (appName) => checkAppExists(appName),
     resolveAppPath: async (appName) => resolveAppPath(appName),

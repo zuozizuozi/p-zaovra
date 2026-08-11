@@ -55,6 +55,7 @@ import { ReferenceGuidance } from "@zaovra-ai/core/reference/guidance"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { Location } from "@zaovra-ai/core/location"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
+import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
@@ -225,6 +226,14 @@ const config = Layer.succeed(
       ]),
   }),
 )
+const plugins = Layer.succeed(
+  PluginV2.Service,
+  PluginV2.Service.of({
+    add: () => Effect.void,
+    remove: () => Effect.void,
+    wait: () => Effect.void,
+  }),
+)
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [Snapshot.node, Snapshot.noopLayer],
   [LayerNodePlatform.llmClient, client],
@@ -234,6 +243,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [SkillGuidance.node, skillGuidance],
   [ReferenceGuidance.node, referenceGuidance],
   [PermissionV2.node, permission],
+  [PluginV2.node, plugins],
   [Config.node, config],
 ])
 const execution = Layer.effect(
@@ -277,6 +287,7 @@ const it = testEffect(
     [
       [LayerNodePlatform.llmClient, client],
       [PermissionV2.node, permission],
+      [PluginV2.node, plugins],
       [SessionRunnerModel.node, models],
       [SystemContextRegistry.node, systemContext],
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
@@ -627,6 +638,25 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
+    }),
+  )
+
+  it.effect("records the input boundary and context epoch consumed by an assistant turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-consumption", ["Recorded"]).completeEvents
+
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Trace this turn" }), resume: false })
+      yield* session.resume(sessionID)
+
+      const assistant = (yield* session.context(sessionID)).findLast((message) => message.type === "assistant")
+      if (assistant?.type !== "assistant") return yield* Effect.die("Assistant turn was not projected")
+      expect(typeof assistant.inputSequence).toBe("number")
+      expect(typeof assistant.contextEpoch).toBe("number")
+      if (assistant.inputSequence === undefined || assistant.contextEpoch === undefined)
+        return yield* Effect.die("Assistant turn consumption boundary was not recorded")
+      expect(assistant.inputSequence).toBeGreaterThanOrEqual(assistant.contextEpoch)
     }),
   )
 
@@ -1242,6 +1272,20 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Continue" },
         { type: "assistant", finish: "error", error: { message: "prompt too long" } },
       ])
+
+      const { db } = yield* Database.Service
+      expect(
+        yield* db
+          .select({ data: EventTable.data })
+          .from(EventTable)
+          .where(eq(EventTable.type, EventV2.versionedType("session.next.compaction.failed", 1)))
+          .get()
+          .pipe(Effect.orDie),
+      ).toMatchObject({ data: { error: { message: "summary unavailable" } } })
+
+      responses = [[LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })]]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(3)
     }),
   )
 

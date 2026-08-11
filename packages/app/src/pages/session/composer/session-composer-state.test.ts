@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { PermissionRequest, QuestionRequest, Session } from "@zaovra-ai/sdk/v2/client"
+import type { PermissionView, QuestionView, Session } from "@zaovra-ai/sdk/v2/client"
 import { todoDockAtBoundary, todoState } from "./session-composer-state"
 import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
@@ -13,14 +13,14 @@ const permission = (id: string, sessionID: string) =>
   ({
     id,
     sessionID,
-  }) as PermissionRequest
+  }) as PermissionView
 
 const question = (id: string, sessionID: string) =>
   ({
     id,
     sessionID,
     questions: [],
-  }) as QuestionRequest
+  }) as QuestionView
 
 describe("sessionPermissionRequest", () => {
   test("prefers the current session permission", () => {

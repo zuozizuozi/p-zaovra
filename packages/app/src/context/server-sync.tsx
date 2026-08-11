@@ -1,11 +1,4 @@
-import type {
-  Config,
-  McpResource,
-  ZaovraClient,
-  Path,
-  Project,
-  ProviderAuthResponse,
-} from "@zaovra-ai/sdk/v2/client"
+import type { Config, ZaovraClient, Path, Project } from "@zaovra-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@zaovra-ai/core/util/path"
 import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
@@ -33,7 +26,7 @@ import { SESSION_RECENT_LIMIT } from "./global-sync/types"
 import { formatServerError } from "@/utils/server-errors"
 import { queryOptions, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query"
 import { createRefreshQueue } from "./global-sync/queue"
-import { directoryKey } from "./global-sync/utils"
+import { adaptCommand, directoryKey } from "./global-sync/utils"
 import { PathKey } from "@/utils/path-key"
 import { createDirSyncContext } from "./directory-sync"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
@@ -45,8 +38,10 @@ import { retry } from "@zaovra-ai/core/util/retry"
 import type { ServerScope } from "@/utils/server-scope"
 import { createHomeSessionIndexCache } from "./global-sync/home-session-index"
 import { persisted } from "@/utils/persist"
-import { toggleMcp } from "./global-sync/mcp"
+import { completeMcpOAuth, toggleMcp, type McpResource, type McpStatus } from "./global-sync/mcp"
 import { createServerSession } from "./server-session"
+import { usePlatform } from "./platform"
+import { listV2Sessions } from "./v2-session-list"
 
 type GlobalStore = {
   ready: boolean
@@ -54,7 +49,6 @@ type GlobalStore = {
   path: Path
   project: Project[]
   provider: NormalizedProviderListResponse
-  provider_auth: ProviderAuthResponse
   config: Config
   reload: undefined | "pending" | "complete"
 }
@@ -62,13 +56,17 @@ type GlobalStore = {
 export const loadMcpQuery = (scope: ServerScope, directory: string, sdk: ZaovraClient) =>
   queryOptions({
     queryKey: [scope, directory, "mcp"] as const,
-    queryFn: () => sdk.mcp.status().then((r) => r.data ?? {}),
+    queryFn: () =>
+      sdk.v2.mcp
+        .status({ location: { directory } }, { throwOnError: true })
+        .then((response) => response.data.data as Record<string, McpStatus>),
   })
 
 export const loadMcpResourcesQuery = (scope: ServerScope, directory: string, sdk: ZaovraClient) =>
   queryOptions<Record<string, McpResource>>({
     queryKey: [scope, directory, "mcpResources"] as const,
-    queryFn: () => sdk.experimental.resource.list().then((r) => r.data ?? {}),
+    queryFn: () =>
+      sdk.v2.mcp.resources({ location: { directory } }, { throwOnError: true }).then((response) => response.data.data),
     placeholderData: {},
   })
 
@@ -101,6 +99,7 @@ function makeQueryOptionsApi(
 export type QueryOptionsApi = ReturnType<typeof makeQueryOptionsApi>
 
 export function createServerSyncContextInner(serverSDK: ServerSDK) {
+  const platform = usePlatform()
   const language = useLanguage()
   const owner = getOwner()
   if (!owner) throw new Error("ServerSync must be created within owner")
@@ -133,7 +132,6 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       return !bootstrap.isPending
     },
     project: [],
-    provider_auth: {},
     get path() {
       const EMPTY = { state: "", config: "", worktree: "", directory: "", home: "" }
       if (pathQuery.isLoading) return EMPTY
@@ -226,8 +224,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     onMcp: (directory, setStore) => {
       void retry(() =>
         sdkFor(directory)
-          .command.list()
-          .then((x) => setStore("command", x.data ?? [])),
+          .v2.command.list({ location: { directory } }, { throwOnError: true })
+          .then((x) => setStore("command", x.data.data.map(adaptCommand))),
       ).catch((err) => {
         showToast({
           variant: "error",
@@ -282,7 +280,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
           loadRootSessionsWithFallback({
             directory,
             limit,
-            list: (query) => serverSDK.client.session.list(query),
+            list: (query) => listV2Sessions(serverSDK.client, { ...query, order: "desc" }),
           })
             .then((x) => {
               const nonArchived = (x.data ?? [])
@@ -506,13 +504,39 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         await toggleMcp({
           status,
           connect: async () => {
-            await sdk.mcp.connect({ name })
+            await sdk.v2.mcp.connect({ name, location: { directory: key } }, { throwOnError: true })
           },
           disconnect: async () => {
-            await sdk.mcp.disconnect({ name })
+            await sdk.v2.mcp.disconnect({ name, location: { directory: key } }, { throwOnError: true })
           },
           authenticate: async () => {
-            await sdk.mcp.auth.authenticate({ name })
+            const auth = children.child(key, { bootstrap: false })[0].mcp[name]
+            if (auth.status !== "needs_auth") return
+            await completeMcpOAuth({
+              begin: () =>
+                sdk.v2.integration.connect
+                  .oauth(
+                    {
+                      integrationID: auth.integrationID,
+                      methodID: auth.methodID,
+                      inputs: {},
+                      location: { directory: key },
+                    },
+                    { throwOnError: true },
+                  )
+                  .then((response) => response.data.data),
+              open: platform.openLink,
+              status: (attemptID) =>
+                sdk.v2.integration.attempt
+                  .status({ attemptID, location: { directory: key } }, { throwOnError: true })
+                  .then((response) => response.data.data),
+              ready: () =>
+                sdk.v2.integration
+                  .get({ integrationID: auth.integrationID, location: { directory: key } }, { throwOnError: true })
+                  .then((response) => (response.data.data?.connections.length ?? 0) > 0),
+              connect: () =>
+                sdk.v2.mcp.connect({ name, location: { directory: key } }, { throwOnError: true }).then(() => {}),
+            })
           },
           refresh: async () => {
             await queryClient.refetchQueries(queryOptionsApi.mcp(key))

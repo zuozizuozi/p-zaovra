@@ -60,6 +60,9 @@ export function define<R>(plugin: Plugin<R>) {
   return plugin
 }
 
+export const agentReadyID = PluginV2.ID.make("core-agent-ready")
+export const readyID = PluginV2.ID.make("core-internal-ready")
+
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
@@ -105,22 +108,30 @@ const layer = Layer.effectDiscard(
       return plugin.add(PluginV2.ID.make(loaded.id), loaded.effect)
     }
 
-    yield* State.batch(
-      Effect.gen(function* () {
-        yield* add(ConfigReferencePlugin.Plugin)
-        yield* add(AgentPlugin.Plugin)
-        yield* add(CommandPlugin.Plugin)
-        yield* add(SkillPlugin.Plugin)
-        yield* add(ModelsDevPlugin)
-        yield* add(ConfigAgentPlugin.Plugin)
-        yield* add(ConfigCommandPlugin.Plugin)
-        yield* add(ConfigSkillPlugin.Plugin)
-        for (const item of ProviderPlugins) yield* add(item)
-        yield* add(ConfigExternalPlugin.Plugin)
-        yield* add(ConfigProviderPlugin.Plugin)
-        yield* add(VariantPlugin.Plugin)
-      }),
-    ).pipe(Effect.withSpan("PluginInternal.boot"), Effect.forkScoped({ startImmediately: true }))
+    yield* Effect.gen(function* () {
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* add(AgentPlugin.Plugin)
+          yield* add(ConfigAgentPlugin.Plugin)
+        }),
+      ).pipe(Effect.withSpan("PluginInternal.agents"))
+      yield* plugin.add(agentReadyID, () => Effect.void)
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* add(ConfigReferencePlugin.Plugin)
+          yield* add(CommandPlugin.Plugin)
+          yield* add(SkillPlugin.Plugin)
+          yield* add(ModelsDevPlugin)
+          yield* add(ConfigCommandPlugin.Plugin)
+          yield* add(ConfigSkillPlugin.Plugin)
+          for (const item of ProviderPlugins) yield* add(item)
+          yield* add(ConfigExternalPlugin.Plugin)
+          yield* add(ConfigProviderPlugin.Plugin)
+          yield* add(VariantPlugin.Plugin)
+        }),
+      ).pipe(Effect.withSpan("PluginInternal.boot"))
+      yield* plugin.add(readyID, () => Effect.void)
+    }).pipe(Effect.forkScoped({ startImmediately: true }))
   }),
 )
 

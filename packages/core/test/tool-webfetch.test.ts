@@ -46,7 +46,6 @@ const toolLayer = (replacements: LayerNode.Replacements = []) =>
     ...replacements,
   ])
 const it = testEffect(toolLayer([[LayerNodePlatform.httpClient, http]]))
-const live = testEffect(toolLayer())
 
 const reset = () => {
   requests.length = 0
@@ -73,14 +72,37 @@ describe("WebFetchTool helpers", () => {
     expect(WebFetchTool.extractTextFromHTML(html)).toBe("Helloworld wide")
     expect(WebFetchTool.convertHTMLToMarkdown(html)).toBe("# Hello\n\nworld **wide**")
   })
+
+  test("classifies loopback, private, link-local, mapped, and public addresses", () => {
+    expect(WebFetchTool.isPrivateNetworkAddress("127.0.0.1")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("10.0.0.1")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("169.254.169.254")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("::1")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("fc00::1")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("fe80::1")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("::ffff:127.0.0.1")).toBe(true)
+    expect(WebFetchTool.isPrivateNetworkAddress("1.1.1.1")).toBe(false)
+    expect(WebFetchTool.isPrivateNetworkAddress("2606:4700:4700::1111")).toBe(false)
+  })
+
+  test("rejects a hostname when any DNS answer is private", async () => {
+    const resolver = () =>
+      Promise.resolve([
+        { address: "93.184.216.34", family: 4 as const },
+        { address: "10.0.0.1", family: 4 as const },
+      ])
+    await expect(WebFetchTool.validateNetworkTarget(new URL("https://example.com"), resolver)).rejects.toThrow(
+      "Local network target is not allowed",
+    )
+  })
 })
 
 describe("WebFetchTool registration", () => {
-  it.effect("registers and fetches an ordinary hostname HTTP URL without rewriting it", () =>
+  it.effect("registers and fetches an ordinary public HTTP URL without rewriting it", () =>
     Effect.gen(function* () {
       reset()
       const registry = yield* ToolRegistry.Service
-      const url = "http://example.com/public"
+      const url = "http://93.184.216.34/public"
 
       expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual(["webfetch"])
       expect(yield* settleTool(registry, call({ url, format: "text", timeout: 4 }))).toEqual({
@@ -97,50 +119,65 @@ describe("WebFetchTool registration", () => {
     }),
   )
 
-  it.effect("accepts localhost URLs with the same requested-URL permission check", () =>
+  it.effect("rejects local network URLs before permission or transport", () =>
     Effect.gen(function* () {
       reset()
       const registry = yield* ToolRegistry.Service
-      const url = "http://localhost/private"
+      const urls = [
+        "http://localhost/private",
+        "http://127.0.0.1/private",
+        "http://169.254.169.254/latest/meta-data",
+        "http://[::ffff:127.0.0.1]/private",
+      ]
+
+      for (const [index, url] of urls.entries()) {
+        expect(yield* executeTool(registry, call({ url, format: "text" }, `local-${index}`))).toEqual({
+          type: "error",
+          value: `Unable to fetch ${url}`,
+        })
+      }
+      expect(assertions).toEqual([])
+      expect(requests).toEqual([])
+    }),
+  )
+
+  it.effect("follows public redirects while validating every hop", () =>
+    Effect.gen(function* () {
+      reset()
+      const registry = yield* ToolRegistry.Service
+      const url = "https://1.1.1.1/redirect"
+      respond = (request) =>
+        Effect.succeed(
+          request.url === url
+            ? new Response("", { status: 302, headers: { location: "https://8.8.8.8/target" } })
+            : new Response("redirected", { headers: { "content-type": "text/plain" } }),
+        )
 
       expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({
         type: "text",
-        value: "hello",
+        value: "redirected",
       })
       expect(assertions).toMatchObject([
         { sessionID, action: "webfetch", resources: [url], save: ["*"], metadata: { url, format: "text" } },
       ])
-      expect(requests.map((request) => request.url)).toEqual([url])
+      expect(requests.map((request) => request.url)).toEqual([url, "https://8.8.8.8/target"])
     }),
   )
 
-  live.effect("follows redirects while approving only the requested URL", () =>
-    Effect.acquireUseRelease(
-      Effect.sync(() =>
-        Bun.serve({
-          port: 0,
-          fetch: (request) =>
-            new URL(request.url).pathname === "/redirect"
-              ? new Response("", { status: 302, headers: { location: "/target" } })
-              : new Response("redirected", { headers: { "content-type": "text/plain" } }),
-        }),
-      ),
-      (server) =>
-        Effect.gen(function* () {
-          reset()
-          const registry = yield* ToolRegistry.Service
-          const url = new URL("/redirect", server.url).toString()
+  it.effect("blocks a redirect to a local network target before the second request", () =>
+    Effect.gen(function* () {
+      reset()
+      const registry = yield* ToolRegistry.Service
+      const url = "https://1.1.1.1/redirect-private"
+      respond = () =>
+        Effect.succeed(new Response("", { status: 302, headers: { location: "http://127.0.0.1/private" } }))
 
-          expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({
-            type: "text",
-            value: "redirected",
-          })
-          expect(assertions).toMatchObject([
-            { sessionID, action: "webfetch", resources: [url], save: ["*"], metadata: { url, format: "text" } },
-          ])
-        }),
-      (server) => Effect.promise(() => server.stop(true)),
-    ),
+      expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({
+        type: "error",
+        value: `Unable to fetch ${url}`,
+      })
+      expect(requests.map((request) => request.url)).toEqual([url])
+    }),
   )
 
   it.effect("rejects non-HTTP schemes before permission or transport", () =>

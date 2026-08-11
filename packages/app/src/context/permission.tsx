@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createRoot, getOwner, onCleanup } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
-import type { PermissionRequest } from "@zaovra-ai/sdk/v2/client"
+import type { PermissionView } from "@zaovra-ai/sdk/v2/client"
 import { Persist, persisted } from "@/utils/persist"
 import type { ServerSDK } from "@/context/server-sdk"
 import type { ServerSync } from "./server-sync"
@@ -20,6 +20,7 @@ import {
   autoRespondsPermission,
   sessionAutoAccept,
 } from "./permission-auto-respond"
+import { adaptPermissionRequest } from "./global-sync/utils"
 
 type PermissionRespondFn = (input: {
   sessionID: string
@@ -154,7 +155,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       respond(input: Parameters<PermissionRespondFn>[0]) {
         selected().respond(input)
       },
-      autoResponds(permission: PermissionRequest, directory?: string) {
+      autoResponds(permission: PermissionView, directory?: string) {
         return selected().autoResponds(permission, directory)
       },
       isAutoAccepting(sessionID: string, directory?: string) {
@@ -243,12 +244,18 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
 
   const respond: PermissionRespondFn = (request) => {
     if (meta.disposed) return
-    input.sdk.client.permission.respond(request).catch(() => {
-      responded.delete(request.permissionID)
-    })
+    input.sdk.client.v2.session.permission
+      .reply({
+        sessionID: request.sessionID,
+        requestID: request.permissionID,
+        reply: request.response,
+      })
+      .catch(() => {
+        responded.delete(request.permissionID)
+      })
   }
 
-  function respondOnce(permission: PermissionRequest, directory?: string) {
+  function respondOnce(permission: PermissionView, directory?: string) {
     const now = Date.now()
     const hit = responded.has(permission.id)
     responded.delete(permission.id)
@@ -277,16 +284,16 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     return isDirectoryAutoAccepting(store.autoAccept, directory)
   }
 
-  function shouldAutoRespond(permission: PermissionRequest, directory?: string) {
+  function shouldAutoRespond(permission: PermissionView, directory?: string) {
     return autoRespondsPermission(store.autoAccept, sessions(directory), permission, directory)
   }
 
-  function isPending(permission: PermissionRequest) {
+  function isPending(permission: PermissionView) {
     const pending = input.sync.session.data.permission[permission.sessionID]
     return pending === undefined || pending.some((item) => item.id === permission.id)
   }
 
-  async function shouldAutoRespondResolved(permission: PermissionRequest, directory?: string) {
+  async function shouldAutoRespondResolved(permission: PermissionView, directory?: string) {
     const override = sessionAutoAccept(store.autoAccept, sessions(directory), permission, directory)
     if (override !== undefined) return override
     if (input.sync.session.lineage.peek(permission.sessionID)) return shouldAutoRespond(permission, directory)
@@ -296,7 +303,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   async function respondPending(
-    permission: PermissionRequest,
+    permission: PermissionView,
     directory?: string,
     current: () => boolean = () => true,
   ) {
@@ -343,13 +350,13 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
       }),
     )
 
-    input.sdk.client.permission
-      .list({ directory })
+    input.sdk.client.v2.permission.request
+      .list({ location: { directory } }, { throwOnError: true })
       .then((x) => {
         if (meta.disposed) return
         if (!isAutoAcceptingDirectory(directory)) return
-        for (const perm of x.data ?? []) {
-          if (!perm?.id) continue
+        for (const request of x.data.data) {
+          const perm = adaptPermissionRequest(request)
           void respondPending(perm, directory, () => isAutoAcceptingDirectory(directory))
         }
       })
@@ -377,14 +384,14 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
       }),
     )
 
-    input.sdk.client.permission
-      .list({ directory })
+    input.sdk.client.v2.permission.request
+      .list({ location: { directory } }, { throwOnError: true })
       .then((x) => {
         if (meta.disposed) return
         if (enableVersion.get(key) !== version) return
         if (!isAutoAccepting(sessionID, directory)) return
-        for (const perm of x.data ?? []) {
-          if (!perm?.id) continue
+        for (const request of x.data.data) {
+          const perm = adaptPermissionRequest(request)
           void respondPending(
             perm,
             directory,
@@ -411,7 +418,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   const api = {
     ready: () => !meta.disposed && ready(),
     respond,
-    autoResponds(permission: PermissionRequest, directory?: string) {
+    autoResponds(permission: PermissionView, directory?: string) {
       if (meta.disposed) return false
       return shouldAutoRespond(permission, directory)
     },

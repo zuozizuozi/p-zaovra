@@ -243,17 +243,6 @@ export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks>
           const result = await listRouters(oauthAccess)
           if (result.ok) {
             routers = result.routers
-            const updated: Record<string, string> = {
-              ...metadata,
-              routers: JSON.stringify(routers.map((r) => ({ name: r.name, uuid: r.uuid, description: r.description }))),
-              routers_fetched_at: String(Date.now()),
-            }
-            await input.client.auth
-              .set({
-                path: { id: "digitalocean" },
-                body: { type: "api", key: ctx.auth.key, metadata: updated },
-              })
-              .catch(() => {})
           } else if (result.status === 401 || result.status === 403) {
           } else if (result.status !== 0) {
           }

@@ -1,4 +1,4 @@
-import type { Event, PermissionRequest, QuestionRequest } from "@zaovra-ai/sdk/v2"
+import type { Event, PermissionView, QuestionView } from "@zaovra-ai/sdk/v2"
 import { bootstrapSessionData, createSessionData, reduceSessionData, type SessionData } from "./session-data"
 import { messagePrompt, type SessionMessages } from "./session.shared"
 import { messageTurnSummaryCommit } from "./turn-summary"
@@ -6,8 +6,8 @@ import type { FooterPatch, LocalReplayRow, RunProvider, StreamCommit } from "./t
 
 type ReplayInput = {
   messages: SessionMessages
-  permissions: PermissionRequest[]
-  questions: QuestionRequest[]
+  permissions: PermissionView[]
+  questions: QuestionView[]
   thinking: boolean
   limits: Record<string, number>
   providers?: RunProvider[]

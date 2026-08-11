@@ -17,13 +17,13 @@ import { ProviderTable } from "@zaovra-ai/console-core/schema/provider.sql.js"
 import { logger } from "./logger"
 import {
   AuthError,
+  SubscriptionRequiredError,
   CreditsError,
   MonthlyLimitError,
   UserLimitError,
   ModelError,
   RegionError,
   RateLimitError,
-  FreeUsageLimitError,
   GoUsageLimitError,
   BlackUsageLimitError,
 } from "./error"
@@ -38,9 +38,8 @@ import { anthropicHelper } from "./provider/anthropic"
 import { googleHelper } from "./provider/google"
 import { openaiHelper } from "./provider/openai"
 import { oaCompatHelper } from "./provider/openai-compatible"
-import { createRateLimiter as createIpRateLimiter } from "./ipRateLimiter"
 import { createRateLimiter as createKeyRateLimiter } from "./keyRateLimiter"
-import { createTrialLimiter } from "./trialLimiter"
+import { requireApiKey } from "./accessPolicy"
 import { createStickyTracker } from "./stickyProviderTracker"
 import { LiteData } from "@zaovra-ai/console-core/lite.js"
 import { Resource } from "@zaovra-ai/console-resource"
@@ -58,7 +57,7 @@ type RetryOptions = {
   excludeProviders: string[]
   retryCount: number
 }
-type BillingSource = "anonymous" | "free" | "byok" | "subscription" | "lite" | "balance"
+type BillingSource = "free" | "byok" | "subscription" | "lite" | "balance"
 
 function resolve(text: string, params?: Record<string, string | number>) {
   if (!params) return text
@@ -103,8 +102,7 @@ export async function handler(
     const isStream = opts.parseIsStream(url, body)
     const rawIp = input.request.headers.get("x-real-ip") ?? ""
     const ip = rawIp.includes(":") ? rawIp.split(":").slice(0, 4).join(":") : rawIp
-    const rawZenApiKey = opts.parseApiKey(input.request.headers)
-    const zenApiKey = rawZenApiKey === "public" ? undefined : rawZenApiKey
+    const zenApiKey = requireApiKey(opts.parseApiKey(input.request.headers))
     const sessionId = input.request.headers.get("x-zaovra-session") ?? ""
     const requestId = input.request.headers.get("x-zaovra-request") ?? ""
     const zaovraClient = input.request.headers.get("x-zaovra-client") ?? ""
@@ -121,17 +119,12 @@ export async function handler(
     })
     const zenData = ZenData.list(opts.modelList)
     const modelInfo = validateModel(zenData, model)
-    const trialLimiter = createTrialLimiter(modelInfo.trialProvider, ip)
-    const trialProviders = await trialLimiter?.check()
-    const rateLimiter = modelInfo.allowAnonymous
-      ? createIpRateLimiter(modelInfo.id, modelInfo.rateLimit, ip, input.request)
-      : createKeyRateLimiter(modelInfo.id, modelInfo.rateLimit, zenApiKey, input.request)
+    const rateLimiter = createKeyRateLimiter(modelInfo.id, modelInfo.rateLimit, zenApiKey, input.request)
     await rateLimiter?.check()
     const authInfo = await authenticate(modelInfo, zenApiKey)
-    const allowedRegions = authInfo?.region
+    const _allowedRegions = authInfo.region
       ? authInfo.region
       : await (async () => {
-          if (!authInfo) return
           return Actor.provide("system", { workspaceID: authInfo.workspaceID }, () =>
             Workspace.setDefaultRegion({ country: countryFromRequest(input.request) }),
           )
@@ -146,10 +139,10 @@ export async function handler(
         )
     }
     */
-    const stickyId = sessionId ? sessionId : (authInfo?.workspaceID ?? ip)
+    const stickyId = sessionId || authInfo.workspaceID
     const stickyTracker = createStickyTracker(modelInfo.id, modelInfo.stickyProvider, stickyId)
     const stickyProvider = await stickyTracker?.get()
-    const billingSource = validateBilling(authInfo, modelInfo)
+    const billingSource = validateBilling(authInfo)
     logger.metric({ source: billingSource })
     const modelTpmLimiter = createModelTpmLimiter(modelInfo.providers)
     const modelTpmLimits = await modelTpmLimiter?.check()
@@ -167,7 +160,6 @@ export async function handler(
         authInfo,
         modelInfo,
         stickyId,
-        trialProviders,
         retry,
         stickyProvider,
         modelTpmLimits,
@@ -196,7 +188,7 @@ export async function handler(
                   if (Array.isArray(v)) return [[k, v]]
                   if (typeof v === "object") return [[k, replacer(v)]]
                   if (typeof v === "string") {
-                    if (v === "$workspace") return authInfo?.workspaceID ? [[k, authInfo?.workspaceID]] : []
+                    if (v === "$workspace") return [[k, authInfo.workspaceID]]
                     if (v === "$user") return stickyId ? [[k, stickyId]] : []
                     if (v.startsWith("$header.")) {
                       const headerValue = input.request.headers.get(v.slice(8))
@@ -228,7 +220,7 @@ export async function handler(
               if (v === "$request") return headers.set(k, requestId)
               if (v === "$project") return headers.set(k, projectId)
               if (v === "$workspace") {
-                if (authInfo?.workspaceID) headers.set(k, authInfo.workspaceID)
+                headers.set(k, authInfo.workspaceID)
                 return
               }
               headers.set(k, v)
@@ -288,7 +280,7 @@ export async function handler(
       return { providerInfo, reqBody, res, startTimestamp }
     }
 
-    const { providerInfo, reqBody, res, startTimestamp } = await retriableRequest()
+    const { providerInfo, res, startTimestamp } = await retriableRequest()
 
     // Store sticky provider
     if (res.status === 200) await stickyTracker?.set(providerInfo.id)
@@ -314,7 +306,6 @@ export async function handler(
       if (usage) {
         const usageInfo = providerInfo.normalizeUsage(usage)
         const costInfo = calculateCost(modelInfo, usageInfo)
-        await trialLimiter?.track(usageInfo)
         await modelTpmLimiter?.track(providerInfo.id, providerInfo.model, usageInfo)
         await providerBudgetTracker?.track(providerInfo.id, providerInfo.budgetPriority, costInfo.totalCostInCent)
         await trackUsage(sessionId, billingSource, authInfo, modelInfo, providerInfo, usageInfo, costInfo)
@@ -368,7 +359,6 @@ export async function handler(
                 if (usage) {
                   const usageInfo = providerInfo.normalizeUsage(usage)
                   const costInfo = calculateCost(modelInfo, usageInfo)
-                  await trialLimiter?.track(usageInfo)
                   await modelTpmLimiter?.track(providerInfo.id, providerInfo.model, usageInfo)
                   await modelTpsLimiter?.track(
                     providerInfo.id,
@@ -475,6 +465,15 @@ export async function handler(
         { status: 403 },
       )
 
+    if (error instanceof SubscriptionRequiredError)
+      return new Response(
+        JSON.stringify({
+          type: "error",
+          error: { type: error.constructor.name, message: error.message },
+        }),
+        { status: 402 },
+      )
+
     // Note: both top level "type" and "error.type" fields are used by the @ai-sdk/anthropic client to render the error message.
     if (
       error instanceof AuthError ||
@@ -493,7 +492,6 @@ export async function handler(
 
     if (
       error instanceof RateLimitError ||
-      error instanceof FreeUsageLimitError ||
       error instanceof GoUsageLimitError ||
       error instanceof BlackUsageLimitError
     ) {
@@ -567,7 +565,6 @@ export async function handler(
     authInfo: AuthInfo,
     modelInfo: ModelInfo,
     stickyId: string,
-    trialProviders: string[] | undefined,
     retry: RetryOptions,
     stickyProviderId: string | undefined,
     modelTpmLimits: Record<string, number> | undefined,
@@ -582,18 +579,11 @@ export async function handler(
     const modelProvider = (() => {
       // Byok is top priority b/c if user set their own API key, we should use it
       // instead of using the sticky provider for the same session
-      if (authInfo?.provider?.credentials) {
+      if (authInfo.provider?.credentials) {
         return modelInfo.providers.find((provider) => provider.id === modelInfo.byokProvider)
       }
 
-      // Prioritize trial providers
-      let allProviders = modelInfo.providers.filter((provider) => !provider.disabled)
-      if (trialProviders) {
-        allProviders = allProviders.map((provider) => ({
-          ...provider,
-          priority: trialProviders.includes(provider.id) ? 0 : provider.priority,
-        }))
-      }
+      const allProviders = modelInfo.providers.filter((provider) => !provider.disabled)
 
       // Use fallback provider if max retries reached
       const fallbackProvider = allProviders.find((provider) => provider.id === modelInfo.fallbackProvider)
@@ -674,7 +664,7 @@ export async function handler(
           reqModel,
           providerModel: modelProvider.model,
           adjustCacheUsage: providerProps.adjustCacheUsage,
-          workspaceID: authInfo?.workspaceID,
+          workspaceID: authInfo.workspaceID,
         }
         if (format === "anthropic") return anthropicHelper(opts)
         if (format === "google") return googleHelper(opts)
@@ -684,12 +674,7 @@ export async function handler(
     }
   }
 
-  async function authenticate(modelInfo: ModelInfo, zenApiKey?: string) {
-    if (!zenApiKey) {
-      if (modelInfo.allowAnonymous) return
-      throw new AuthError(t("zen.api.error.missingApiKey"))
-    }
-
+  async function authenticate(modelInfo: ModelInfo, zenApiKey: string) {
     const data = await Database.use((tx) =>
       tx
         .select({
@@ -810,11 +795,9 @@ export async function handler(
     }
   }
 
-  function validateBilling(authInfo: AuthInfo, modelInfo: ModelInfo): BillingSource {
-    if (!authInfo) return "anonymous"
+  function validateBilling(authInfo: AuthInfo): BillingSource {
     if (authInfo.provider?.credentials) return "byok"
     if (authInfo.isFree) return "free"
-    if (modelInfo.allowAnonymous) return "free"
 
     const formatRetryTime = (seconds: number) => {
       const days = Math.floor(seconds / 86400)
@@ -944,7 +927,17 @@ export async function handler(
       }
     }
 
-    // Validate pay as you go billing
+    const subscriptionAllowsBalance = Boolean(
+      (authInfo.billing.subscription && authInfo.black && authInfo.billing.subscription.useBalance) ||
+        (opts.modelList === "lite" && authInfo.billing.lite && authInfo.lite && authInfo.billing.lite.useBalance),
+    )
+    if (!subscriptionAllowsBalance) {
+      throw new SubscriptionRequiredError(
+        `An active ZAOVRA subscription is required. Subscribe at https://zaovra.com/workspace/${authInfo.workspaceID}/go`,
+      )
+    }
+
+    // Subscribers may optionally use their balance after reaching a plan limit.
     const billing = authInfo.billing
     const billingUrl = `https://zaovra.com/workspace/${authInfo.workspaceID}/billing`
     const membersUrl = `https://zaovra.com/workspace/${authInfo.workspaceID}/members`
@@ -990,12 +983,11 @@ export async function handler(
 
   function validateModelSettings(billingSource: BillingSource, authInfo: AuthInfo) {
     if (billingSource === "lite") return
-    if (billingSource === "anonymous") return
-    if (authInfo!.isDisabled) throw new ModelError(t("zen.api.error.modelDisabled"))
+    if (authInfo.isDisabled) throw new ModelError(t("zen.api.error.modelDisabled"))
   }
 
   function updateProviderKey(authInfo: AuthInfo, providerInfo: ProviderInfo) {
-    if (!authInfo?.provider?.credentials) return
+    if (!authInfo.provider?.credentials) return
     providerInfo.apiKey = authInfo.provider.credentials
   }
 
@@ -1009,8 +1001,7 @@ export async function handler(
   }
 
   function calculateCost(modelInfo: ModelInfo, usageInfo: UsageInfo) {
-    const { inputTokens, outputTokens, reasoningTokens, cacheReadTokens, cacheWrite5mTokens, cacheWrite1hTokens } =
-      usageInfo
+    const { inputTokens, outputTokens, cacheReadTokens, cacheWrite5mTokens, cacheWrite1hTokens } = usageInfo
 
     const modelCost =
       modelInfo.cost200K &&
@@ -1084,9 +1075,6 @@ export async function handler(
       "cost.cache_write_1h": cacheWrite1hCost ? Math.round(cacheWrite1hCost) : undefined,
       "cost.total": Math.round(totalCostInCent),
     })
-
-    if (billingSource === "anonymous") return
-    authInfo = authInfo!
 
     const cost = centsToMicroCents(totalCostInCent)
 

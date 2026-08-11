@@ -1,7 +1,14 @@
 import { describe, expect, it } from "bun:test"
 import type { AgentSideConnection } from "@agentclientprotocol/sdk"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
-import type { Event, Message, ZaovraClient, Part, SessionMessageResponse, ToolPart } from "@zaovra-ai/sdk/v2"
+import type {
+  Event,
+  Message,
+  ZaovraClient,
+  Part,
+  SessionMessageAssistant,
+  ToolPart,
+} from "@zaovra-ai/sdk/v2"
 import { Effect, ManagedRuntime } from "effect"
 import { ACPEvent } from "@/acp/event"
 import * as ACPService from "@/acp/service"
@@ -78,7 +85,7 @@ function createEventStream() {
   return { push, close, stream }
 }
 
-function createHarness(messages: Record<string, SessionMessageResponse> = {}) {
+function createHarness() {
   const updates: SessionUpdateParams[] = []
   const calls = {
     eventSubscribe: 0,
@@ -92,13 +99,24 @@ function createHarness(messages: Record<string, SessionMessageResponse> = {}) {
         return Promise.resolve({ stream: events.stream(options?.signal) })
       },
     },
-    session: {
-      message: (input: { messageID: string }) => {
-        calls.message++
-        return Promise.resolve({ data: messages[input.messageID] })
+    v2: {
+      session: {
+        get: () =>
+          Promise.resolve({
+            data: {
+              data: {
+                id: "ses_loaded",
+                projectID: "project",
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: 1, updated: 1 },
+                title: "Loaded",
+                location: { directory: "/workspace" },
+              },
+            },
+          }),
+        messages: () => Promise.resolve({ data: { data: [] } }),
       },
-      get: () => Promise.resolve({ data: { id: "ses_loaded" } }),
-      messages: () => Promise.resolve({ data: [] }),
     },
   } as unknown as ZaovraClient
   const connection = {
@@ -167,61 +185,54 @@ function toolUpdated(part: ToolPart): Event {
   }
 }
 
-function assistantMessage(sessionID: string, messageID: string, partID: string, type: DeltaPartType) {
-  return {
-    info: {
-      id: messageID,
-      sessionID,
-      role: "assistant",
-      time: { created: Date.now() },
-      parentID: "msg_parent",
-      modelID: "model",
-      providerID: "provider",
-      mode: "build",
-      agent: "build",
-      path: { cwd: "/workspace", root: "/workspace" },
-      cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    },
-    parts: [
-      type === "text"
-        ? {
-            id: partID,
-            sessionID,
-            messageID,
-            type: "text",
-            text: "",
-          }
-        : {
-            id: partID,
-            sessionID,
-            messageID,
-            type: "reasoning",
-            text: "",
-            time: { start: Date.now() },
-          },
-    ],
-  } satisfies SessionMessageResponse
-}
-
 function assistantToolMessage(part: ToolPart) {
   return {
-    info: {
-      id: part.messageID,
-      sessionID: part.sessionID,
-      role: "assistant",
-      time: { created: Date.now() },
-      parentID: "msg_parent",
-      modelID: "model",
-      providerID: "provider",
-      mode: "build",
-      agent: "build",
-      path: { cwd: "/workspace", root: "/workspace" },
-      cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    },
-    parts: [part],
-  } satisfies SessionMessageResponse
+    id: part.messageID,
+    type: "assistant",
+    time: { created: Date.now() },
+    model: { id: "model", providerID: "provider" },
+    agent: "build",
+    content: [
+      {
+        id: part.callID,
+        type: "tool",
+        name: part.tool,
+        time: { created: Date.now() },
+        state:
+          part.state.status === "pending"
+            ? { status: "pending", input: "" }
+            : part.state.status === "running"
+              ? {
+                  status: "running",
+                  input: part.state.input,
+                  structured: part.state.metadata ?? {},
+                  content:
+                    typeof part.state.metadata?.output === "string"
+                      ? [{ type: "text", text: part.state.metadata.output }]
+                      : [],
+                }
+              : part.state.status === "completed"
+                ? {
+                    status: "completed",
+                    input: part.state.input,
+                    structured: part.state.metadata ?? {},
+                    content: [{ type: "text", text: part.state.output }],
+                    attachments: part.state.attachments?.flatMap((attachment) =>
+                      attachment.url && attachment.mime
+                        ? [{ uri: attachment.url, mime: attachment.mime, name: attachment.filename }]
+                        : [],
+                    ),
+                  }
+                : {
+                    status: "error",
+                    input: part.state.input,
+                    structured: part.state.metadata ?? {},
+                    content: [],
+                    error: { type: "unknown", message: part.state.error },
+                  },
+      },
+    ],
+  } satisfies SessionMessageAssistant
 }
 
 function runningTool(
@@ -409,18 +420,16 @@ describe("acp event routing", () => {
     expect(harness.updates).toHaveLength(5)
   })
 
-  it("fetches unknown part metadata once and reuses it for later deltas", async () => {
-    const harness = createHarness({
-      msg_a: assistantMessage("ses_a", "msg_a", "part_a", "text"),
-    })
+  it("does not fall back to the removed V1 message endpoint for unknown metadata", async () => {
+    const harness = createHarness()
     await Effect.runPromise(harness.session.create({ id: "ses_a", cwd: "/workspace" }))
 
     await harness.subscription.handle(partUpdated("ses_a", "msg_a", "part_a", "text"))
     await harness.subscription.handle(textDelta("ses_a", "msg_a", "part_a", "a"))
     await harness.subscription.handle(textDelta("ses_a", "msg_a", "part_a", "b"))
 
-    expect(harness.calls.message).toBe(1)
-    expect(harness.updates).toHaveLength(2)
+    expect(harness.calls.message).toBe(0)
+    expect(harness.updates).toHaveLength(0)
   })
 
   it("replays loaded session messages sequentially and continues after update failures", async () => {
@@ -460,6 +469,33 @@ describe("acp event routing", () => {
                 assistantToolMessage(completedTool("ses_loaded", "call_after", "after")),
               ],
             }),
+        },
+        v2: {
+          session: {
+            get: () =>
+              Promise.resolve({
+                data: {
+                  data: {
+                    id: "ses_loaded",
+                    projectID: "project",
+                    cost: 0,
+                    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                    time: { created: 1, updated: 1 },
+                    title: "Loaded",
+                    location: { directory: "/workspace" },
+                  },
+                },
+              }),
+            messages: () =>
+              Promise.resolve({
+                data: {
+                  data: [
+                    assistantToolMessage(completedTool("ses_loaded", "call_slow", "slow")),
+                    assistantToolMessage(completedTool("ses_loaded", "call_after", "after")),
+                  ],
+                },
+              }),
+          },
         },
       } as unknown as ZaovraClient,
       connection,
@@ -575,7 +611,11 @@ describe("acp event routing", () => {
     const harness = createHarness()
     await Effect.runPromise(harness.session.create({ id: "ses_replay", cwd: "/workspace" }))
 
-    await harness.subscription.replayMessage(assistantToolMessage(runningTool("ses_replay", "call_replay", "first")))
+    await harness.subscription.replayMessage(
+      "ses_replay",
+      "/workspace",
+      assistantToolMessage(runningTool("ses_replay", "call_replay", "first")),
+    )
     await harness.subscription.handle(toolUpdated(runningTool("ses_replay", "call_replay", "second")))
 
     expect(toolUpdates(harness.updates).filter((item) => item.update.sessionUpdate === "tool_call")).toHaveLength(1)
@@ -730,6 +770,8 @@ describe("acp event routing", () => {
 
     await harness.subscription.handle(toolUpdated(completedTool("ses_image", "call_live", "live", [attachment])))
     await harness.subscription.replayMessage(
+      "ses_image",
+      "/workspace",
       assistantToolMessage(completedTool("ses_image", "call_replayed", "replayed", [attachment])),
     )
 

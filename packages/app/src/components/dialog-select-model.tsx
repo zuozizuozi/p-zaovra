@@ -1,15 +1,5 @@
 import { Popover as Kobalte } from "@kobalte/core/popover"
-import {
-  Component,
-  ComponentProps,
-  createEffect,
-  createMemo,
-  For,
-  JSX,
-  onCleanup,
-  Show,
-  ValidComponent,
-} from "solid-js"
+import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -31,9 +21,6 @@ import { decode64 } from "@/utils/base64"
 import { handleDocumentSearchKeydown } from "@/utils/search-keydown"
 import { createEventListener } from "@solid-primitives/event-listener"
 import { matchesModelSearch } from "./dialog-select-model-search"
-
-const isFree = (provider: string, cost: { input: number } | undefined) =>
-  provider === "zaovra" && (!cost || cost.input === 0)
 
 type ModelState = ReturnType<typeof useLocal>["model"]
 type ModelItem = ReturnType<ModelState["list"]>[number]
@@ -94,7 +81,7 @@ const ModelList: Component<{
           placement="right-start"
           gutter={12}
           openDelay={0}
-          value={<ModelTooltip model={item} latest={item.latest} free={isFree(item.provider.id, item.cost)} />}
+          value={<ModelTooltip model={item} latest={item.latest} />}
         >
           {node}
         </Tooltip>
@@ -109,9 +96,6 @@ const ModelList: Component<{
       {(i) => (
         <div class="w-full flex items-center gap-x-2 text-13-regular">
           <span class="truncate">{i.name}</span>
-          <Show when={isFree(i.provider.id, i.cost)}>
-            <Tag>{language.t("model.tag.free")}</Tag>
-          </Show>
           <Show when={i.latest}>
             <Tag>{language.t("model.tag.latest")}</Tag>
           </Show>
@@ -453,14 +437,7 @@ export function ModelSelectorPopoverV2(props: {
                               placement="right-start"
                               gutter={6}
                               openDelay={0}
-                              value={
-                                <ModelTooltip
-                                  model={item}
-                                  latest={item.latest}
-                                  free={isFree(item.provider.id, item.cost)}
-                                  v2
-                                />
-                              }
+                              value={<ModelTooltip model={item} latest={item.latest} v2 />}
                             >
                               <MenuV2.RadioItem
                                 value={modelKey(item)}
@@ -475,9 +452,6 @@ export function ModelSelectorPopoverV2(props: {
                                 onSelect={() => selectModel(item)}
                               >
                                 <span class="min-w-0 truncate leading-5">{item.name}</span>
-                                <Show when={isFree(item.provider.id, item.cost)}>
-                                  <TagV2 class="shrink-0">{language.t("model.tag.free")}</TagV2>
-                                </Show>
                                 <Show when={item.latest}>
                                   <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
                                 </Show>

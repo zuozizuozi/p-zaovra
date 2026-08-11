@@ -6,6 +6,7 @@ import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { disconnectProviderCredentials } from "@/utils/provider-integration"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "./dialog-connect-provider"
@@ -119,14 +120,11 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
 
   const disconnect = async (providerID: string, name: string) => {
     if (isConfigCustom(providerID)) {
-      await serverSDK()
-        .client.auth.remove({ providerID })
-        .catch(() => undefined)
+      await disconnectProviderCredentials(serverSDK().client, providerID).catch(() => undefined)
       await disableProvider(providerID, name)
       return
     }
-    await serverSDK()
-      .client.auth.remove({ providerID })
+    await disconnectProviderCredentials(serverSDK().client, providerID)
       .then(async () => {
         await serverSDK().client.global.dispose()
         showToast({

@@ -1,4 +1,4 @@
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
 import { useSync } from "./sync"
@@ -13,6 +13,9 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
+import { useProject } from "./project"
+import { completeMcpOAuth } from "../util/mcp"
+import open from "open"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -58,6 +61,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const route = useRoute()
     const paths = useTuiPaths()
     const args = useArgs()
+    const project = useProject()
     const event = useEvent()
     const permission = usePermission()
 
@@ -509,13 +513,42 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
       async toggle(name: string) {
         const status = sync.data.mcp[name]
-        if (status?.status === "connected") {
-          // Disable: disconnect the MCP
-          await sdk.client.mcp.disconnect({ name })
-        } else {
-          // Enable/Retry: connect the MCP (handles disabled, failed, and other states)
-          await sdk.client.mcp.connect({ name })
+        const location = {
+          directory: project.instance.directory() || sdk.directory || process.cwd(),
+          workspace: project.workspace.current(),
         }
+        if (status?.status === "connected") {
+          await sdk.client.v2.mcp.disconnect({ name, location }, { throwOnError: true })
+        } else if (status?.status === "needs_auth") {
+          await completeMcpOAuth({
+            begin: () =>
+              sdk.client.v2.integration.connect
+                .oauth(
+                  {
+                    integrationID: status.integrationID,
+                    methodID: status.methodID,
+                    inputs: {},
+                    location,
+                  },
+                  { throwOnError: true },
+                )
+                .then((response) => response.data.data),
+            open,
+            status: (attemptID) =>
+              sdk.client.v2.integration.attempt
+                .status({ attemptID, location }, { throwOnError: true })
+                .then((response) => response.data.data),
+            ready: () =>
+              sdk.client.v2.integration
+                .get({ integrationID: status.integrationID, location }, { throwOnError: true })
+                .then((response) => (response.data.data?.connections.length ?? 0) > 0),
+            connect: () => sdk.client.v2.mcp.connect({ name, location }, { throwOnError: true }).then(() => {}),
+          })
+        } else {
+          await sdk.client.v2.mcp.connect({ name, location }, { throwOnError: true })
+        }
+        const refreshed = await sdk.client.v2.mcp.status({ location }, { throwOnError: true })
+        sync.set("mcp", reconcile(refreshed.data.data))
       },
     }
 

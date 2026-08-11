@@ -9,11 +9,13 @@ test("exposes every standard HTTP API group", () => {
     "location",
     "agents",
     "sessions",
+    "work",
     "messages",
     "models",
     "providers",
     "integrations",
     "credentials",
+    "mcp",
     "permissions",
     "files",
     "commands",
@@ -103,6 +105,7 @@ test("session methods use the public HTTP contract", async () => {
         )
       }
       if (url.includes("/prompt")) return Response.json(admission)
+        if (url.includes("/compact")) return Response.json({ data: { compacted: true } })
       if (url.includes("/context")) return Response.json({ data: [] })
       if (url.includes("/message/")) return Response.json({ data: modelSwitchedMessage })
       if (url.endsWith("/api/session/active")) return Response.json({ data: { ses_test: { type: "running" } } })

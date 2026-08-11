@@ -3,7 +3,7 @@
 // same process. See `test/lib/cli-process.ts` for the harness — each test uses
 // `zaovra.run(message, opts?)` to spawn `bun src/index.ts run ...` with
 // `ZAOVRA_CONFIG_CONTENT` providing the test provider config inline.
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
@@ -81,11 +81,10 @@ describe("zaovra run (non-interactive subprocess)", () => {
     30_000,
   )
 
-  // The test provider's SSE error item is interpreted by the SDK as an unknown
-  // finish, not a fatal provider/session error. Lock that distinction in so it
-  // is not accidentally used as the failure compatibility oracle.
+  // Provider failures preserve already-durable output but must surface a
+  // non-zero process result instead of looking like a successful completion.
   cliIt.concurrent(
-    "unknown stream finish preserves partial output and exits 0",
+    "unknown stream finish preserves partial output and exits nonzero",
     ({ llm, zaovra }) =>
       Effect.gen(function* () {
         yield* llm.push(
@@ -96,7 +95,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
         )
         yield* llm.fail("upstream provider exploded mid-stream")
         const result = yield* zaovra.run("trigger midstream error", { timeoutMs: 30_000 })
-        expect(result.exitCode).toBe(0)
+        expect(result.exitCode).not.toBe(0)
         expect(result.stdout).toBe("partial response\n")
         expect(result.stderr).not.toContain("upstream provider exploded mid-stream")
       }),
@@ -122,12 +121,21 @@ describe("zaovra run (non-interactive subprocess)", () => {
         }
         expect(events.map((event) => event.type)).toEqual(["step_start", "text", "step_finish"])
         expect(events.map(({ timestamp: _, sessionID: __, ...event }) => event)).toEqual([
-          { type: "step_start", part: expect.objectContaining({ type: "step-start" }) },
+          {
+            type: "step_start",
+            event: expect.objectContaining({ type: "session.next.step.started" }),
+          },
           {
             type: "text",
-            part: expect.objectContaining({ type: "text", text: "structured output" }),
+            event: expect.objectContaining({
+              type: "session.next.text.ended",
+              properties: expect.objectContaining({ text: "structured output" }),
+            }),
           },
-          { type: "step_finish", part: expect.objectContaining({ type: "step-finish" }) },
+          {
+            type: "step_finish",
+            event: expect.objectContaining({ type: "session.next.step.ended" }),
+          },
         ])
         expect(result.stdout.endsWith("\n")).toBe(true)
         expect(
@@ -185,21 +193,24 @@ describe("zaovra run (non-interactive subprocess)", () => {
         expect(events.map((event) => event.type)).toEqual([
           "step_start",
           "reasoning",
-          "text",
           "tool_use",
+          "text",
+          "tool_result",
           "step_finish",
           "step_start",
           "text",
           "step_finish",
         ])
-        expect(events.find((event) => event.type === "reasoning")?.part).toEqual(
-          expect.objectContaining({ type: "reasoning", text: "reasoning" }),
-        )
-        expect(events.find((event) => event.type === "tool_use")?.part).toEqual(
+        expect(events.find((event) => event.type === "reasoning")?.event).toEqual(
           expect.objectContaining({
-            type: "tool",
-            tool: "bash",
-            state: expect.objectContaining({ status: "completed" }),
+            type: "session.next.reasoning.ended",
+            properties: expect.objectContaining({ text: "reasoning" }),
+          }),
+        )
+        expect(events.find((event) => event.type === "tool_use")?.event).toEqual(
+          expect.objectContaining({
+            type: "session.next.tool.called",
+            properties: expect.objectContaining({ tool: "bash" }),
           }),
         )
         expect(
@@ -226,17 +237,22 @@ describe("zaovra run (non-interactive subprocess)", () => {
         const result = yield* zaovra.run("fail after output", { format: "json" })
 
         const events = zaovra.parseJsonEvents(result.stdout)
-        expect(result.exitCode).toBe(0)
+        expect(result.exitCode).not.toBe(0)
         expect(events.map((event) => event.type)).toEqual([
           "step_start",
-          "text",
           "tool_use",
+          "text",
+          "tool_result",
           "step_finish",
-          "step_start",
-          "step_finish",
+          "error",
         ])
-        expect(events[1]?.part).toEqual(expect.objectContaining({ type: "text", text: "partial json" }))
-        expect(events.at(-1)?.part).toEqual(expect.objectContaining({ type: "step-finish", reason: "unknown" }))
+        expect(events.find((event) => event.type === "text")?.event).toEqual(
+          expect.objectContaining({
+            type: "session.next.text.ended",
+            properties: expect.objectContaining({ text: "partial json" }),
+          }),
+        )
+        expect(events.at(-1)?.error).toEqual(expect.objectContaining({ message: expect.any(String) }))
       }),
     60_000,
   )
@@ -313,19 +329,23 @@ describe("zaovra run (non-interactive subprocess)", () => {
     30_000,
   )
 
-  cliIt.live(
-    "SIGINT interrupts an active non-interactive run without leaking the process",
-    ({ llm, zaovra }) =>
-      Effect.gen(function* () {
-        yield* llm.hang
-        const run = yield* zaovra.startRun("wait forever")
-        yield* llm.wait(1)
-        run.interrupt()
-        const result = yield* run.result
+  if (process.platform === "win32") {
+    test.skip("SIGINT interrupts an active non-interactive run without leaking the process", () => {})
+  } else {
+    cliIt.live(
+      "SIGINT interrupts an active non-interactive run without leaking the process",
+      ({ llm, zaovra }) =>
+        Effect.gen(function* () {
+          yield* llm.hang
+          const run = yield* zaovra.startRun("wait forever")
+          yield* llm.wait(1)
+          run.interrupt()
+          const result = yield* run.result
 
-        expect(result.exitCode).not.toBe(0)
-        expect(result.durationMs).toBeLessThan(30_000)
-      }),
-    30_000,
-  )
+          expect(result.exitCode).not.toBe(0)
+          expect(result.durationMs).toBeLessThan(30_000)
+        }),
+      30_000,
+    )
+  }
 })

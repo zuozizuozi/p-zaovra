@@ -70,6 +70,7 @@ import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } fro
 import { NewHome, LegacyHome } from "@/pages/home"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
+const WorkPage = lazy(() => import("@/pages/work"))
 
 const SessionRoute = () => {
   const settings = useSettings()
@@ -296,9 +297,17 @@ function DesktopCommands() {
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
+  const navigate = useNavigate()
 
   command.register("desktop", () => {
-    const commands: CommandOption[] = []
+    const commands: CommandOption[] = [
+      {
+        id: "work.open",
+        title: "Open WorkGraph",
+        category: "Agent",
+        onSelect: () => navigate("/work"),
+      },
+    ]
     if (platform.platform === "desktop" && platform.exportDebugLogs) {
       commands.push({
         id: "logs.export",
@@ -594,6 +603,7 @@ function Routes(props: { serverScoped?: JSX.Element }) {
             <>
               <Route path="/" component={LegacyHome} />
               <Route path="/server/:serverKey/session/:id" component={LegacyTargetSessionRoute} />
+              <Route path="/work/:goalID?" component={WorkPage} />
             </>
           }
         </Show>
@@ -604,6 +614,7 @@ function Routes(props: { serverScoped?: JSX.Element }) {
       </Route>
       <Show when={settings.general.newLayoutDesigns()}>
         <Route path="/" component={NewHome} />
+        <Route path="/work/:goalID?" component={WorkPage} />
         <Route path="/:dir/session/:id" component={NewLayoutLegacySessionRedirect} />
         <Route path="/server/:serverKey/session/:id" component={TargetSessionRoute} />
       </Show>

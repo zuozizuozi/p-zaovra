@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { QuestionRequest } from "@zaovra-ai/sdk/v2"
+import type { QuestionView } from "@zaovra-ai/sdk/v2"
 import {
   createQuestionBodyState,
   questionConfirm,
@@ -12,7 +12,7 @@ import {
   questionSync,
 } from "@/cli/cmd/run/question.shared"
 
-function req(input: Partial<QuestionRequest> = {}): QuestionRequest {
+function req(input: Partial<QuestionView> = {}): QuestionView {
   return {
     id: "question-1",
     sessionID: "session-1",

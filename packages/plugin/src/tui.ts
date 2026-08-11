@@ -4,13 +4,13 @@ import type {
   Event,
   FilePart,
   LspStatus,
-  McpStatus,
+  V2McpStatusResponse,
   Todo,
   Message,
   Part,
   Provider,
-  PermissionRequest,
-  QuestionRequest,
+  PermissionView,
+  QuestionView,
   Session,
   SessionStatus,
   TextPart,
@@ -27,6 +27,8 @@ import {
 } from "@opentui/keymap/extras"
 import type { JSX, SolidPlugin } from "@opentui/solid"
 import type { Config as PluginConfig, PluginOptions } from "./index.js"
+
+type McpStatus = V2McpStatusResponse["data"][string]
 
 export type { CliRenderer, KeyEvent, Renderable, SlotMode } from "@opentui/core"
 export { stringifyKeySequence, stringifyKeyStroke } from "@opentui/keymap"
@@ -390,8 +392,8 @@ export type TuiState = {
     todo: (sessionID: string) => ReadonlyArray<TuiSidebarTodoItem>
     messages: (sessionID: string) => ReadonlyArray<Message>
     status: (sessionID: string) => SessionStatus | undefined
-    permission: (sessionID: string) => ReadonlyArray<PermissionRequest>
-    question: (sessionID: string) => ReadonlyArray<QuestionRequest>
+    permission: (sessionID: string) => ReadonlyArray<PermissionView>
+    question: (sessionID: string) => ReadonlyArray<QuestionView>
   }
   part: (messageID: string) => ReadonlyArray<Part>
   lsp: () => ReadonlyArray<TuiSidebarLspItem>

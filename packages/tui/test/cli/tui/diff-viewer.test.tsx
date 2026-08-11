@@ -106,7 +106,6 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
   let current = initialRoute ?? startRoute
   let renderDiff: TuiRouteDefinition["render"] | undefined
   let vcsDiffInput: unknown
-  let sessionDiffInput: unknown
   const config = createTuiResolvedConfig()
   function Harness() {
     const renderer = useRenderer()
@@ -123,12 +122,6 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
           diff: async (input: unknown) => {
             vcsDiffInput = input
             return { data: vcsDiff }
-          },
-        },
-        session: {
-          diff: async (input: unknown) => {
-            sessionDiffInput = input
-            return { data: [] }
           },
         },
       } as unknown as TuiPluginApi["client"],
@@ -179,7 +172,6 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
     commands,
     current: () => current,
     vcsDiffInput: () => vcsDiffInput,
-    sessionDiffInput: () => sessionDiffInput,
   }
 }
 
@@ -219,24 +211,6 @@ test("branch diff source requests branch VCS diff", async () => {
       params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute },
     })
     expect(viewer.vcsDiffInput()).toEqual({ directory: "/repo/session", mode: "branch", context: 12 })
-    expect(viewer.sessionDiffInput()).toBeUndefined()
-  } finally {
-    viewer.app.renderer.destroy()
-  }
-})
-
-test("last-turn diff source requests session diff", async () => {
-  const viewer = await renderDiffViewer([], 20, {
-    name: "diff",
-    params: { mode: "last-turn", sessionID: "session-1", messageID: "message-1", returnRoute: startRoute },
-  })
-  try {
-    expect(viewer.current()).toEqual({
-      name: "diff",
-      params: { mode: "last-turn", sessionID: "session-1", messageID: "message-1", returnRoute: startRoute },
-    })
-    expect(viewer.sessionDiffInput()).toEqual({ sessionID: "session-1", messageID: "message-1" })
-    expect(viewer.vcsDiffInput()).toBeUndefined()
   } finally {
     viewer.app.renderer.destroy()
   }

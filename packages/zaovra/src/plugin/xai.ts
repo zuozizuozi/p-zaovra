@@ -1,5 +1,4 @@
 import type { Hooks, PluginInput } from "@zaovra-ai/plugin"
-import { OAUTH_DUMMY_KEY } from "../auth"
 import { createServer } from "http"
 import { InstallationVersion } from "@zaovra-ai/core/installation/version"
 import { OauthCallbackPage } from "@zaovra-ai/core/oauth/page"
@@ -8,6 +7,7 @@ import { OauthCallbackPage } from "@zaovra-ai/core/oauth/page"
 // non-allowlisted clients, so we reuse the Grok-CLI client_id that xAI ships
 // for desktop OAuth flows. Source of truth: hermes-agent PR #26534.
 const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
+const OAUTH_DUMMY_KEY = "zaovra-oauth-dummy-key"
 const AUTHORIZE_URL = "https://auth.x.ai/oauth2/authorize"
 const TOKEN_URL = "https://auth.x.ai/oauth2/token"
 // RFC 8628 device authorization grant. Confirmed exposed by xAI's
@@ -498,22 +498,6 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
                   .then(async (tokens) => {
                     const refreshedExpires = Date.now() + (tokens.expires_in ?? 3600) * 1000
                     const refreshedRefresh = tokens.refresh_token || refreshToken
-                    // Persist the rotated pair as best-effort. xAI has already consumed the
-                    // old refresh_token by the time we get here; an auth.set failure leaves
-                    // the on-disk state stale but the in-memory result is still valid for
-                    // this turn. The next live refresh against the stale disk state will
-                    // 4xx and force re-login — a known cross-process limitation.
-                    await input.client.auth
-                      .set({
-                        path: { id: "xai" },
-                        body: {
-                          type: "oauth",
-                          access: tokens.access_token,
-                          refresh: refreshedRefresh,
-                          expires: refreshedExpires,
-                        },
-                      })
-                      .catch(() => {})
                     return { access: tokens.access_token, refresh: refreshedRefresh, expires: refreshedExpires }
                   })
                   .finally(() => {

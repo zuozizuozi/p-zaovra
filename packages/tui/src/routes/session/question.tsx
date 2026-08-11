@@ -3,7 +3,7 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-j
 import { useRenderer } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { selectedForeground, tint, useTheme } from "../../context/theme"
-import type { QuestionAnswer, QuestionRequest } from "@zaovra-ai/sdk/v2"
+import type { QuestionAnswer, QuestionView } from "@zaovra-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useTuiConfig } from "../../config"
@@ -11,7 +11,7 @@ import { useBindings, useZaovraModeStack } from "../../keymap"
 
 const QUESTION_MODE = "question"
 
-export function QuestionPrompt(props: { request: QuestionRequest; directory?: string }) {
+export function QuestionPrompt(props: { request: QuestionView }) {
   const sdk = useSDK()
   const { theme } = useTheme()
   const renderer = useRenderer()
@@ -47,17 +47,17 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
 
   function submit() {
     const answers = questions().map((_, i) => store.answers[i] ?? [])
-    void sdk.client.question.reply({
+    void sdk.client.v2.session.question.reply({
+      sessionID: props.request.sessionID,
       requestID: props.request.id,
-      directory: props.directory,
-      answers,
+      questionV2Reply: { answers },
     })
   }
 
   function reject() {
-    void sdk.client.question.reject({
+    void sdk.client.v2.session.question.reject({
+      sessionID: props.request.sessionID,
       requestID: props.request.id,
-      directory: props.directory,
     })
   }
 
@@ -71,10 +71,10 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       setStore("custom", inputs)
     }
     if (single()) {
-      void sdk.client.question.reply({
+      void sdk.client.v2.session.question.reply({
+        sessionID: props.request.sessionID,
         requestID: props.request.id,
-        directory: props.directory,
-        answers: [[answer]],
+        questionV2Reply: { answers: [[answer]] },
       })
       return
     }

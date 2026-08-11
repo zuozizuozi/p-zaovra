@@ -10,7 +10,7 @@ import { SessionTable } from "@zaovra-ai/core/session/sql"
 import { WorkspaceTable } from "@zaovra-ai/core/control-plane/workspace.sql"
 import { eq } from "drizzle-orm"
 import { Hash } from "@zaovra-ai/core/util/hash"
-import { SessionID } from "@/session/schema"
+import { Session } from "@zaovra-ai/schema/session"
 import { WorkspaceV2 } from "@zaovra-ai/core/workspace"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -194,7 +194,7 @@ describe("Project.fromDirectory", () => {
       const rootResult = yield* projects.fromDirectory(tmp)
       const rootProject = rootResult.project
       const remoteID = remoteProjectID("github.com/acme/app")
-      const sessionID = crypto.randomUUID() as SessionID
+      const sessionID = Session.ID.make(crypto.randomUUID())
       const workspaceID = WorkspaceV2.ID.ascending()
 
       yield* db

@@ -1,13 +1,6 @@
-import { Auth } from "@/auth"
-
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { described } from "./metadata"
-import { ProviderV2 } from "@zaovra-ai/core/provider"
-
-const AuthParams = Schema.Struct({
-  providerID: ProviderV2.ID,
-})
 
 const LogQuery = Schema.Struct({
   directory: Schema.optional(Schema.String),
@@ -29,36 +22,12 @@ export const LogInput = Schema.Struct({
 })
 
 export const ControlPaths = {
-  auth: "/auth/:providerID",
   log: "/log",
 } as const
 
 export const ControlApi = HttpApi.make("control").add(
   HttpApiGroup.make("control")
     .add(
-      HttpApiEndpoint.put("authSet", ControlPaths.auth, {
-        params: AuthParams,
-        payload: Auth.Info,
-        success: described(Schema.Boolean, "Successfully set authentication credentials"),
-        error: HttpApiError.BadRequest,
-      }).annotateMerge(
-        OpenApi.annotations({
-          identifier: "auth.set",
-          summary: "Set auth credentials",
-          description: "Set authentication credentials",
-        }),
-      ),
-      HttpApiEndpoint.delete("authRemove", ControlPaths.auth, {
-        params: AuthParams,
-        success: described(Schema.Boolean, "Successfully removed authentication credentials"),
-        error: HttpApiError.BadRequest,
-      }).annotateMerge(
-        OpenApi.annotations({
-          identifier: "auth.remove",
-          summary: "Remove auth credentials",
-          description: "Remove authentication credentials",
-        }),
-      ),
       HttpApiEndpoint.post("log", ControlPaths.log, {
         query: LogQuery,
         payload: LogInput,

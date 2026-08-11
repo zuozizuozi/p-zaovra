@@ -31,7 +31,13 @@ import {
 } from "@agentclientprotocol/sdk"
 import { InstallationVersion } from "@zaovra-ai/core/installation/version"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
-import type { AssistantMessage, Message, ZaovraClient, SessionMessageResponse } from "@zaovra-ai/sdk/v2"
+import type {
+  CommandView,
+  SessionMessage,
+  SessionMessageAssistant,
+  SessionV2Info,
+  ZaovraClient,
+} from "@zaovra-ai/sdk/v2"
 import { Context, Effect, Layer, ManagedRuntime } from "effect"
 import * as ACPError from "./error"
 import { buildConfigOptions, parseModelSelection } from "./config-option"
@@ -44,7 +50,6 @@ import { ACPProfile } from "./profile"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { Provider } from "@/provider/provider"
-import type { Command } from "@/command"
 
 export const AuthMethodID = "zaovra-login"
 
@@ -111,17 +116,12 @@ export function make(input: {
       protocolVersion: 1,
       agentCapabilities: {
         loadSession: true,
-        mcpCapabilities: {
-          http: true,
-          sse: true,
-        },
         promptCapabilities: {
           embeddedContext: true,
           image: true,
         },
         sessionCapabilities: {
           close: {},
-          fork: {},
           list: {},
           resume: {},
         },
@@ -160,6 +160,7 @@ export function make(input: {
 
   const newSession = Effect.fn("ACP.newSession")(function* (params: NewSessionRequest) {
     const started = performance.now()
+    yield* ensureMcpSupported(params.mcpServers)
     const snapshot = yield* directorySnapshot(params.cwd)
     const selected = selectDefaultModel(snapshot)
     const variant = selectVariant(snapshot, selected)
@@ -167,18 +168,20 @@ export function make(input: {
     const created = yield* profiledRequest(
       "acp.newSession.session.create",
       () =>
-        input.sdk.session.create(
-          {
-            directory: params.cwd,
-            ...(modeId ? { agent: modeId } : {}),
-            model: {
-              providerID: selected.providerID,
-              id: selected.modelID,
-              ...(variant ? { variant } : {}),
+        input.sdk.v2.session
+          .create(
+            {
+              location: { directory: params.cwd },
+              ...(modeId ? { agent: modeId } : {}),
+              model: {
+                providerID: selected.providerID,
+                id: selected.modelID,
+                ...(variant ? { variant } : {}),
+              },
             },
-          },
-          { throwOnError: true },
-        ),
+            { throwOnError: true },
+          )
+          .then((response) => response.data.data),
       "session",
     )
     const state = yield* session.create({
@@ -207,16 +210,23 @@ export function make(input: {
   })
 
   const loadSession = Effect.fn("ACP.loadSession")(function* (params: LoadSessionRequest) {
+    yield* ensureMcpSupported(params.mcpServers)
     const snapshot = yield* directorySnapshot(params.cwd)
     yield* request(
-      () => input.sdk.session.get({ directory: params.cwd, sessionID: params.sessionId }, { throwOnError: true }),
+      () =>
+        input.sdk.v2.session
+          .get({ sessionID: params.sessionId }, { throwOnError: true })
+          .then((response) => response.data.data),
       "session",
     )
     const messages = yield* request(
-      () => input.sdk.session.messages({ directory: params.cwd, sessionID: params.sessionId }, { throwOnError: true }),
+      () =>
+        input.sdk.v2.session
+          .messages({ sessionID: params.sessionId, order: "asc" }, { throwOnError: true })
+          .then((response) => response.data.data),
       "session",
     )
-    const restored = restoreFromMessages(messages.map((item) => item.info))
+    const restored = restoreFromSession(params.sessionId, messages)
     const model = restored.model ?? selectDefaultModel(snapshot)
     const state = yield* session.load({
       id: params.sessionId,
@@ -230,7 +240,7 @@ export function make(input: {
 
     yield* registerMcpServers(input.sdk, registeredMcp, params.cwd, state.id, params.mcpServers)
     yield* sendAvailableCommands(input.connection, state.id, snapshot)
-    yield* replayMessages(events, messages)
+    yield* replayMessages(events, state, messages)
 
     return {
       configOptions: configOptions(snapshot, {
@@ -246,19 +256,21 @@ export function make(input: {
     const limit = 100
     const sessions = yield* request(
       () =>
-        input.sdk.session.list(
-          {
-            ...(params.cwd ? { directory: params.cwd } : {}),
-            roots: true,
-          },
-          { throwOnError: true },
-        ),
+        input.sdk.v2.session
+          .list(
+            {
+              ...(params.cwd ? { directory: params.cwd } : {}),
+              roots: true,
+            },
+            { throwOnError: true },
+          )
+          .then((response) => response.data.data),
       "session",
     )
     const serverEntries = sessions.map(
       (item): SessionInfo => ({
         sessionId: item.id,
-        cwd: item.directory,
+        cwd: item.location.directory,
         title: item.title,
         updatedAt: new Date(item.time.updated).toISOString(),
       }),
@@ -288,20 +300,23 @@ export function make(input: {
   })
 
   const resumeSession = Effect.fn("ACP.resumeSession")(function* (params: ResumeSessionRequest) {
+    yield* ensureMcpSupported(params.mcpServers ?? [])
     const snapshot = yield* directorySnapshot(params.cwd)
     yield* request(
-      () => input.sdk.session.get({ directory: params.cwd, sessionID: params.sessionId }, { throwOnError: true }),
+      () =>
+        input.sdk.v2.session
+          .get({ sessionID: params.sessionId }, { throwOnError: true })
+          .then((response) => response.data.data),
       "session",
     )
     const messages = yield* request(
       () =>
-        input.sdk.session.messages(
-          { directory: params.cwd, sessionID: params.sessionId, limit: 20 },
-          { throwOnError: true },
-        ),
+        input.sdk.v2.session
+          .messages({ sessionID: params.sessionId, limit: 20, order: "asc" }, { throwOnError: true })
+          .then((response) => response.data.data),
       "session",
     )
-    const restored = restoreFromMessages(messages.map((item) => item.info))
+    const restored = restoreFromSession(params.sessionId, messages)
     const model = restored.model ?? selectDefaultModel(snapshot)
     const state = yield* session.load({
       id: params.sessionId,
@@ -327,7 +342,7 @@ export function make(input: {
 
   const abortBackingSession = Effect.fn("ACP.abortBackingSession")(function* (current: ACPSession.Info) {
     yield* request(
-      () => input.sdk.session.abort({ directory: current.cwd, sessionID: current.id }, { throwOnError: true }),
+      () => input.sdk.v2.session.interrupt({ sessionID: current.id }, { throwOnError: true }),
       "session",
     ).pipe(
       Effect.catch((error) =>
@@ -352,47 +367,7 @@ export function make(input: {
   })
 
   const forkSession = Effect.fn("ACP.forkSession")(function* (params: ForkSessionRequest) {
-    const snapshot = yield* directorySnapshot(params.cwd)
-    const forked = yield* request(
-      () =>
-        input.sdk.session.fork(
-          {
-            directory: params.cwd,
-            sessionID: params.sessionId,
-          },
-          { throwOnError: true },
-        ),
-      "session",
-    )
-    const messages = yield* request(
-      () =>
-        input.sdk.session.messages({ directory: params.cwd, sessionID: forked.id, limit: 20 }, { throwOnError: true }),
-      "session",
-    )
-    const restored = restoreFromMessages(messages.map((item) => item.info))
-    const model = restored.model ?? selectDefaultModel(snapshot)
-    const state = yield* session.load({
-      id: forked.id,
-      cwd: params.cwd,
-      mcpServers: params.mcpServers ?? [],
-      model,
-      variant: restored.variant ?? selectVariant(snapshot, model),
-      modeId: restored.modeId ?? (snapshot.availableModes.length > 0 ? snapshot.defaultModeID : undefined),
-    })
-    sessionSnapshots.set(state.id, snapshot)
-
-    yield* registerMcpServers(input.sdk, registeredMcp, params.cwd, state.id, params.mcpServers ?? [])
-    yield* sendAvailableCommands(input.connection, state.id, snapshot)
-    yield* replayMessages(events, messages)
-
-    return {
-      sessionId: state.id,
-      configOptions: configOptions(snapshot, {
-        model: state.model ?? model,
-        variant: state.variant,
-        modeId: state.modeId,
-      }),
-    }
+    return yield* new ACPError.UnsupportedOperationError({ method: "session/fork" })
   })
 
   const setSessionConfigOption = Effect.fn("ACP.setSessionConfigOption")(function* (
@@ -501,69 +476,51 @@ export function make(input: {
       const parts = promptContentToParts(params.prompt)
       const command = detectSlashCommand(parts)
 
-      if (!command) {
-        const response = yield* request(
-          () =>
-            input.sdk.session.prompt(
+      if (command?.name === "compact") {
+        return yield* new ACPError.UnsupportedOperationError({ method: "session/summarize" })
+      }
+      if (command) return yield* new ACPError.UnsupportedOperationError({ method: "session/command" })
+
+      yield* request(
+        () =>
+          Promise.all([
+            input.sdk.v2.session.switchAgent({ sessionID: current.id, agent: modeId }, { throwOnError: true }),
+            input.sdk.v2.session.switchModel(
               {
                 sessionID: current.id,
-                model: {
-                  providerID: selected.providerID,
-                  modelID: selected.modelID,
+                model: { providerID: selected.providerID, id: selected.modelID, variant },
+              },
+              { throwOnError: true },
+            ),
+          ]),
+        "session",
+      )
+      const admitted = yield* request(
+        () =>
+          input.sdk.v2.session
+            .prompt(
+              {
+                sessionID: current.id,
+                delivery: "steer",
+                prompt: {
+                  text: parts
+                    .filter((part): part is Extract<(typeof parts)[number], { type: "text" }> => part.type === "text")
+                    .map((part) => part.text)
+                    .join("\n\n"),
+                  files: parts.flatMap((part) =>
+                    part.type === "file" ? [{ uri: part.url, name: part.filename }] : [],
+                  ),
                 },
-                ...(variant ? { variant } : {}),
-                parts,
-                ...(modeId ? { agent: modeId } : {}),
-                directory: current.cwd,
               },
               { throwOnError: true },
-            ),
-          "session",
-        )
-        yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
-        return yield* promptResponse(response.info, params.messageId)
-      }
-
-      const known = snapshot.availableCommands.find((item) => item.name === command.name)
-      if (known) {
-        const response = yield* request(
-          () =>
-            input.sdk.session.command(
-              {
-                sessionID: current.id,
-                command: known.name,
-                arguments: command.args,
-                model: `${selected.providerID}/${selected.modelID}`,
-                ...(variant ? { variant } : {}),
-                ...(modeId ? { agent: modeId } : {}),
-                directory: current.cwd,
-              },
-              { throwOnError: true },
-            ),
-          "session",
-        )
-        yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
-        return yield* promptResponse(response.info, params.messageId)
-      }
-
-      if (command.name === "compact") {
-        yield* request(
-          () =>
-            input.sdk.session.summarize(
-              {
-                sessionID: current.id,
-                directory: current.cwd,
-                providerID: selected.providerID,
-                modelID: selected.modelID,
-              },
-              { throwOnError: true },
-            ),
-          "session",
-        )
-      }
-
+            )
+            .then((response) => response.data.data),
+        "session",
+      )
+      const response = yield* waitForAssistant(input.sdk, current.id, admitted.timeCreated)
+      if (events) yield* Effect.promise(() => events.replayMessage(current.id, current.cwd, response))
       yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
-      return yield* promptResponse(undefined, params.messageId)
+      return yield* promptResponse(response, params.messageId)
     }),
     cancel,
   }
@@ -616,13 +573,25 @@ function makeUsageService(sdk: ZaovraClient) {
   const sendUpdate: UsageService.Interface["sendUpdate"] = Effect.fn("ACP.promptUsage.sendUpdate")(function* (params) {
     const messages = yield* request(
       () =>
-        sdk.session.messages(
-          {
-            sessionID: params.sessionID,
-            directory: params.directory,
-          },
-          { throwOnError: true },
-        ),
+        sdk.v2.session
+          .messages({ sessionID: params.sessionID, order: "asc" }, { throwOnError: true })
+          .then((response) =>
+            response.data.data.flatMap((message): UsageService.SessionMessage[] =>
+              message.type === "assistant"
+                ? [
+                    {
+                      info: {
+                        role: "assistant",
+                        providerID: message.model.providerID,
+                        modelID: message.model.id,
+                        cost: message.cost ?? 0,
+                        tokens: message.tokens ?? emptyTokens(),
+                      },
+                    },
+                  ]
+                : [],
+            ),
+          ),
       "session",
     ).pipe(
       Effect.map((messages) => messages as readonly UsageService.SessionMessage[]),
@@ -666,11 +635,15 @@ function makeUsageService(sdk: ZaovraClient) {
   })
 }
 
-function replayMessages(subscription: ACPEvent.Subscription | undefined, messages: SessionMessageResponse[]) {
+function replayMessages(
+  subscription: ACPEvent.Subscription | undefined,
+  session: ACPSession.Info,
+  messages: SessionMessage[],
+) {
   if (!subscription) return Effect.void
   return Effect.promise(async () => {
     for (const message of messages) {
-      await subscription.replayMessage(message).catch(() => {})
+      await subscription.replayMessage(session.id, session.cwd, message).catch(() => {})
     }
   })
 }
@@ -685,19 +658,6 @@ type SdkResponse<T> = {
   readonly data?: T
   readonly error?: unknown
 }
-
-type MessageInfo = {
-  readonly role?: Message["role"]
-  readonly model?: Extract<Message, { role: "user" }>["model"]
-  readonly providerID?: Extract<Message, { role: "assistant" }>["providerID"]
-  readonly modelID?: Extract<Message, { role: "assistant" }>["modelID"]
-  readonly variant?: Extract<Message, { role: "assistant" }>["variant"]
-  readonly mode?: Extract<Message, { role: "assistant" }>["mode"]
-  readonly agent?: Message["agent"]
-}
-
-type AssistantError = NonNullable<AssistantMessage["error"]>
-type AssistantInfo = (UsageService.AssistantTokenCost & Pick<AssistantMessage, "error">) | undefined
 
 function request<T>(fn: () => Promise<T | SdkResponse<T>>, service?: string) {
   return Effect.tryPromise({
@@ -726,7 +686,9 @@ async function loadDirectorySnapshot(sdk: ZaovraClient, directory: string) {
       ACPProfile.measure("acp.directory.mode.defaultAgent.load", () =>
         sdk.app.agents({ directory }, { throwOnError: true }),
       ),
-      ACPProfile.measure("acp.directory.command.list", () => sdk.command.list({ directory }, { throwOnError: true })),
+      ACPProfile.measure("acp.directory.command.list", () =>
+        sdk.v2.command.list({ location: { directory } }, { throwOnError: true }),
+      ),
       ACPProfile.measure("acp.directory.skill.list", () => sdk.app.skills({ directory }, { throwOnError: true })),
       ACPProfile.measure("acp.directory.defaultModel.config", () =>
         sdk.config.get({ directory }, { throwOnError: true }).catch(() => undefined),
@@ -734,7 +696,12 @@ async function loadDirectorySnapshot(sdk: ZaovraClient, directory: string) {
     ])
     const providersData = providersResponse.data!
     const agents = agentsResponse.data!
-    const commandsData = commandsResponse.data!
+    const commandsData = commandsResponse.data.data.map((command) => ({
+      ...command,
+      model: command.model ? `${command.model.providerID}/${command.model.id}` : undefined,
+      source: "command" as const,
+      hints: [],
+    }))
     const skills = skillsResponse.data!
     const providers = Object.fromEntries(providersData.providers.map((provider) => [provider.id, provider])) as Record<
       ProviderV2.ID,
@@ -761,7 +728,7 @@ async function loadDirectorySnapshot(sdk: ZaovraClient, directory: string) {
           template: skill.content,
           hints: [],
         })),
-    ] as Command.Info[]
+    ] satisfies CommandView[]
 
     return Directory.build({
       directory,
@@ -814,60 +781,37 @@ function detectSlashCommand(parts: ReturnType<typeof promptContentToParts>) {
 }
 
 const promptResponse = Effect.fn("ACP.promptResponse")(function* (
-  info: AssistantInfo,
+  info: SessionMessageAssistant | undefined,
   messageId: string | null | undefined,
 ) {
   if (!info?.error) {
     return {
-      stopReason: "end_turn" as const,
-      ...(info ? { usage: UsageService.buildUsage(info) } : {}),
+      stopReason: info?.finish === "length" ? ("max_tokens" as const) : ("end_turn" as const),
+      ...(info?.tokens ? { usage: UsageService.buildUsage({ cost: info.cost ?? 0, tokens: info.tokens }) } : {}),
       ...(messageId ? { userMessageId: messageId } : {}),
       _meta: {},
     }
   }
 
   const base = {
-    usage: UsageService.buildUsage(info),
+    ...(info.tokens ? { usage: UsageService.buildUsage({ cost: info.cost ?? 0, tokens: info.tokens }) } : {}),
     ...(messageId ? { userMessageId: messageId } : {}),
     _meta: {},
   }
 
-  if (info.error.name === "MessageAbortedError") {
+  if (info.error.message.toLowerCase().includes("abort")) {
     return {
       stopReason: "cancelled" as const,
       ...base,
     }
   }
 
-  if (info.error.name === "MessageOutputLengthError") {
-    return {
-      stopReason: "max_tokens" as const,
-      ...base,
-    }
-  }
-
-  if (info.error.name === "ContentFilterError") {
-    return {
-      stopReason: "refusal" as const,
-      ...base,
-    }
-  }
-
-  if (info.error.name === "ProviderAuthError") {
-    return yield* new ACPError.AuthRequiredError({ providerId: info.error.data.providerID })
-  }
-
   return yield* new ACPError.ServiceFailureError({
     service: "session",
-    safeMessage: promptErrorMessage(info.error),
-    errorName: info.error.name,
+    safeMessage: info.error.message,
+    errorName: info.error.type,
   })
 })
-
-function promptErrorMessage(error: AssistantError) {
-  if ("message" in error.data && typeof error.data.message === "string") return error.data.message
-  return "Zaovra prompt failed"
-}
 
 function sendUsageUpdate(
   usage: UsageService.Interface | undefined,
@@ -948,106 +892,67 @@ function sendAvailableCommands(
 }
 
 function registerMcpServers(
-  sdk: ZaovraClient,
+  _sdk: ZaovraClient,
   registered: Map<string, Set<string>>,
   directory: string,
   sessionId: string,
   servers: readonly McpServer[],
 ) {
   const started = performance.now()
-  const current = registered.get(sessionId) ?? new Set<string>()
-  registered.set(sessionId, current)
-  const pending = new Set<string>()
-
-  return Effect.all(
-    servers
-      .map((server) => ({ server, config: mcpConfig(server) }))
-      .filter((entry) => {
-        const key = mcpRegistrationKey(entry.server.name, entry.config)
-        if (current.has(key) || pending.has(key)) return false
-        pending.add(key)
-        return true
-      })
-      .map((entry) =>
-        request(
-          () =>
-            sdk.mcp.add(
-              {
-                directory,
-                name: entry.server.name,
-                config: entry.config,
-              },
-              { throwOnError: true },
-            ),
-          "mcp",
-        ).pipe(
-          Effect.tap(() => Effect.sync(() => current.add(mcpRegistrationKey(entry.server.name, entry.config)))),
-          Effect.ignore,
-        ),
-      ),
-    { concurrency: "unbounded" },
-  ).pipe(
-    Effect.tap(() =>
-      Effect.sync(() =>
-        ACPProfile.duration("acp.mcp.register", started, {
-          count: pending.size,
-        }),
-      ),
-    ),
-    Effect.asVoid,
-  )
+  if (servers.length > 0) return Effect.fail(new ACPError.UnsupportedOperationError({ method: "mcp/add" }))
+  registered.set(sessionId, new Set())
+  ACPProfile.duration("acp.mcp.register", started, { count: 0, directory })
+  return Effect.void
 }
 
-function mcpRegistrationKey(name: string, config: ReturnType<typeof mcpConfig>) {
-  return `${name}:${stableStringify(config)}`
+function ensureMcpSupported(servers: readonly McpServer[]) {
+  if (servers.length > 0) return Effect.fail(new ACPError.UnsupportedOperationError({ method: "mcp/add" }))
+  return Effect.void
 }
 
-function mcpConfig(server: McpServer) {
-  if ("type" in server) {
+function restoreFromSession(_sessionID: string, messages: readonly SessionMessage[]) {
+  const switched = messages.findLast((message) => message.type === "model-switched")
+  const assistant = messages.findLast((message): message is SessionMessageAssistant => message.type === "assistant")
+  const model = switched?.type === "model-switched" ? switched.model : assistant?.model
+  if (model) {
     return {
-      type: "remote" as const,
-      url: server.url,
-      headers: Object.fromEntries(server.headers.map((header) => [header.name, header.value])),
-    }
-  }
-  return {
-    type: "local" as const,
-    command: [server.command, ...server.args],
-    environment: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
-  }
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`
-  if (!value || typeof value !== "object") return JSON.stringify(value)
-  return `{${Object.entries(value)
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-    .join(",")}}`
-}
-
-function restoreFromMessages(messages: readonly MessageInfo[]) {
-  const user = messages.findLast(
-    (message) => message.role === "user" && message.model?.providerID && message.model.modelID,
-  )
-  if (user?.model?.providerID && user.model.modelID) {
-    return {
-      model: { providerID: user.model.providerID as ProviderV2.ID, modelID: user.model.modelID as ModelV2.ID },
-      variant: user.model.variant,
-      modeId: user.agent,
-    }
-  }
-
-  const assistant = messages.findLast((message) => message.providerID && message.modelID)
-  if (assistant?.providerID && assistant.modelID) {
-    return {
-      model: { providerID: assistant.providerID as ProviderV2.ID, modelID: assistant.modelID as ModelV2.ID },
-      variant: assistant.variant,
-      modeId: assistant.mode ?? assistant.agent,
+      model: { providerID: model.providerID as ProviderV2.ID, modelID: model.id as ModelV2.ID },
+      variant: model.variant,
+      modeId: messages.findLast((message) => message.type === "agent-switched")?.agent ?? assistant?.agent,
     }
   }
 
   return {}
+}
+
+function waitForAssistant(sdk: ZaovraClient, sessionID: string, admittedAt: number) {
+  return Effect.tryPromise({
+    try: async () => {
+      let inactive = 0
+      while (true) {
+        const [active, pending, messages] = await Promise.all([
+          sdk.v2.session.active({ throwOnError: true }),
+          sdk.v2.session.pendingInputs({ sessionID }, { throwOnError: true }),
+          sdk.v2.session.messages({ sessionID, limit: 100, order: "asc" }, { throwOnError: true }),
+        ])
+        const assistant = messages.data.data.findLast(
+          (message): message is SessionMessageAssistant =>
+            message.type === "assistant" && message.time.created >= admittedAt && message.time.completed !== undefined,
+        )
+        const running = sessionID in active.data.data
+        const queued = pending.data.data.length > 0
+        if (assistant && !running && !queued) return assistant
+        inactive = running ? 0 : inactive + 1
+        if (inactive >= 100) throw new Error("V2 session did not start after prompt admission")
+        await Bun.sleep(50)
+      }
+    },
+    catch: (error) => fromUnknownError(error, "session"),
+  })
+}
+
+function emptyTokens() {
+  return { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
 }
 
 function isSdkResponse<T>(value: T | SdkResponse<T>): value is SdkResponse<T> {

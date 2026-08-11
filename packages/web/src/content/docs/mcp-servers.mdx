@@ -239,7 +239,7 @@ Remove stored credentials:
 zaovra mcp logout my-oauth-server
 ```
 
-The `mcp auth` command will open your browser for authorization. After you authorize, Zaovra will store the tokens securely in `~/.local/share/zaovra/mcp-auth.json`.
+The `mcp auth` command opens your browser for authorization. After approval, Zaovra stores the OAuth credential in the same encrypted V2 Credential Store used by desktop and TUI integrations; no separate `mcp-auth.json` file is created.
 
 ---
 

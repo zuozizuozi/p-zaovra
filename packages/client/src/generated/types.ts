@@ -66,6 +66,14 @@ export type UnknownError = {
 export const isUnknownError = (value: unknown): value is UnknownError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
+export type WorkNotFoundError = {
+  readonly _tag: "WorkNotFoundError"
+  readonly goalID: string
+  readonly message: string
+}
+export const isWorkNotFoundError = (value: unknown): value is WorkNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "WorkNotFoundError"
+
 export type ProviderNotFoundError = {
   readonly _tag: "ProviderNotFoundError"
   readonly providerID: string
@@ -154,6 +162,7 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -164,6 +173,7 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -174,6 +184,7 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -184,16 +195,29 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
     readonly cursor?: string | undefined
   }["search"]
+  readonly roots?: {
+    readonly workspace?: string | undefined
+    readonly limit?: number | undefined
+    readonly order?: "asc" | "desc" | undefined
+    readonly search?: string | undefined
+    readonly roots?: boolean | undefined
+    readonly directory?: string | undefined
+    readonly project?: string | undefined
+    readonly subpath?: string | undefined
+    readonly cursor?: string | undefined
+  }["roots"]
   readonly directory?: {
     readonly workspace?: string | undefined
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -204,6 +228,7 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -214,6 +239,7 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -224,6 +250,7 @@ export type SessionsListInput = {
     readonly limit?: number | undefined
     readonly order?: "asc" | "desc" | undefined
     readonly search?: string | undefined
+    readonly roots?: boolean | undefined
     readonly directory?: string | undefined
     readonly project?: string | undefined
     readonly subpath?: string | undefined
@@ -482,9 +509,63 @@ export type SessionsPromptOutput = {
   }
 }["data"]
 
+export type SessionsPendingInputsInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsPendingInputsOutput = {
+  readonly data: ReadonlyArray<{
+    readonly admittedSeq: number
+    readonly id: string
+    readonly sessionID: string
+    readonly prompt: {
+      readonly text: string
+      readonly files?: ReadonlyArray<{
+        readonly uri: string
+        readonly mime: string
+        readonly name?: string
+        readonly description?: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly agents?: ReadonlyArray<{
+        readonly name: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+    }
+    readonly delivery: "steer" | "queue"
+    readonly timeCreated: number
+    readonly promotedSeq?: number
+  }>
+}["data"]
+
+export type SessionsShellInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly id?: {
+    readonly id?: string | undefined
+    readonly command: string
+    readonly resume?: boolean | undefined
+  }["id"]
+  readonly command: {
+    readonly id?: string | undefined
+    readonly command: string
+    readonly resume?: boolean | undefined
+  }["command"]
+  readonly resume?: {
+    readonly id?: string | undefined
+    readonly command: string
+    readonly resume?: boolean | undefined
+  }["resume"]
+}
+
+export type SessionsShellOutput = void
+
+export type SessionsTodosInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsTodosOutput = {
+  readonly data: ReadonlyArray<{ readonly content: string; readonly status: string; readonly priority: string }>
+}["data"]
+
 export type SessionsCompactInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
-export type SessionsCompactOutput = void
+export type SessionsCompactOutput = { readonly data: { readonly compacted: boolean } }["data"]
 
 export type SessionsWaitInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
@@ -587,6 +668,8 @@ export type SessionsContextOutput = {
         readonly type: "assistant"
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly inputSequence?: number
+        readonly contextEpoch?: number
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
           | {
@@ -687,6 +770,26 @@ export type SessionsHistoryOutput = {
     | {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.created"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly projectID: string
+          readonly parentID?: string
+          readonly agent?: string
+          readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly subpath?: string
+          readonly title: string
+          readonly slug: string
+          readonly version: string
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
         readonly type: "session.next.agent.switched"
         readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
         readonly location?: { readonly directory: string; readonly workspaceID?: string }
@@ -722,6 +825,27 @@ export type SessionsHistoryOutput = {
           readonly location: { readonly directory: string; readonly workspaceID?: string }
           readonly subdirectory?: string
         }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.updated"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly title?: string
+          readonly archived?: boolean
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.deleted"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: { readonly timestamp: number; readonly sessionID: string }
       }
     | {
         readonly id: string
@@ -842,6 +966,8 @@ export type SessionsHistoryOutput = {
           readonly assistantMessageID: string
           readonly agent: string
           readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly inputSequence?: number
+          readonly contextEpoch?: number
           readonly snapshot?: string
         }
       }
@@ -1075,6 +1201,7 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly messageID: string
           readonly reason: "auto" | "manual"
+          readonly sourceSequence?: number
         }
       }
     | {
@@ -1088,8 +1215,24 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly messageID: string
           readonly reason: "auto" | "manual"
+          readonly sourceSequence?: number
           readonly text: string
           readonly recent: string
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.compaction.failed"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly messageID: string
+          readonly reason: "auto" | "manual"
+          readonly sourceSequence: number
+          readonly error: { readonly type: "unknown"; readonly message: string }
         }
       }
     | {
@@ -1145,6 +1288,26 @@ export type SessionsEventsOutput =
   | {
       readonly id: string
       readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.created"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly projectID: string
+        readonly parentID?: string
+        readonly agent?: string
+        readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly subpath?: string
+        readonly title: string
+        readonly slug: string
+        readonly version: string
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
       readonly type: "session.next.agent.switched"
       readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
       readonly location?: { readonly directory: string; readonly workspaceID?: string }
@@ -1180,6 +1343,27 @@ export type SessionsEventsOutput =
         readonly location: { readonly directory: string; readonly workspaceID?: string }
         readonly subdirectory?: string
       }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.updated"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly title?: string
+        readonly archived?: boolean
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.deleted"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: { readonly timestamp: number; readonly sessionID: string }
     }
   | {
       readonly id: string
@@ -1300,6 +1484,8 @@ export type SessionsEventsOutput =
         readonly assistantMessageID: string
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly inputSequence?: number
+        readonly contextEpoch?: number
         readonly snapshot?: string
       }
     }
@@ -1533,6 +1719,7 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly messageID: string
         readonly reason: "auto" | "manual"
+        readonly sourceSequence?: number
       }
     }
   | {
@@ -1546,8 +1733,24 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly messageID: string
         readonly reason: "auto" | "manual"
+        readonly sourceSequence?: number
         readonly text: string
         readonly recent: string
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.compaction.failed"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly messageID: string
+        readonly reason: "auto" | "manual"
+        readonly sourceSequence: number
+        readonly error: { readonly type: "unknown"; readonly message: string }
       }
     }
   | {
@@ -1665,6 +1868,8 @@ export type SessionsMessageOutput = {
         readonly type: "assistant"
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly inputSequence?: number
+        readonly contextEpoch?: number
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
           | {
@@ -1753,6 +1958,2415 @@ export type SessionsMessageOutput = {
       }
 }["data"]
 
+export type SessionsUpdateInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly title?: { readonly title?: string | undefined; readonly archived?: boolean | undefined }["title"]
+  readonly archived?: { readonly title?: string | undefined; readonly archived?: boolean | undefined }["archived"]
+}
+
+export type SessionsUpdateOutput = {
+  readonly data: {
+    readonly id: string
+    readonly parentID?: string
+    readonly projectID: string
+    readonly agent?: string
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
+    readonly cost: number
+    readonly tokens: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
+    readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
+    readonly title: string
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly subpath?: string
+    readonly revert?: {
+      readonly messageID: string
+      readonly partID?: string
+      readonly snapshot?: string
+      readonly diff?: string
+      readonly files?: ReadonlyArray<{
+        readonly path: string
+        readonly status: "added" | "modified" | "deleted"
+        readonly additions: number
+        readonly deletions: number
+        readonly patch: string
+      }>
+    }
+  }
+}["data"]
+
+export type SessionsRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsRemoveOutput = void
+
+export type WorkListOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id: string
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | {
+            readonly type: "command"
+            readonly command: string
+            readonly timeoutMs?: number
+            readonly successExitCodes?: ReadonlyArray<number>
+          }
+        | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+    }>
+    readonly roleContracts?: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly workerID?: string
+    readonly status:
+      | "draft"
+      | "active"
+      | "pausing"
+      | "paused"
+      | "cancelling"
+      | "completed"
+      | "blocked"
+      | "cancelled"
+      | "budget_exhausted"
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    }
+    readonly usage: {
+      readonly attempts: number
+      readonly repairs: number
+      readonly turns: number
+      readonly cost: number
+    }
+    readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+    readonly revision: number
+  }>
+}["data"]
+
+export type WorkCreateInput = {
+  readonly id?: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["id"]
+  readonly location: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["location"]
+  readonly objective: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["objective"]
+  readonly acceptanceCriteria: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["acceptanceCriteria"]
+  readonly budget?: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["budget"]
+  readonly planning?: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["planning"]
+  readonly tasks?: {
+    readonly id?: string | null
+    readonly location: { readonly directory: string; readonly workspaceID?: string }
+    readonly objective: string
+    readonly acceptanceCriteria: ReadonlyArray<{
+      readonly id?: string | null
+      readonly description: string
+      readonly required: boolean
+      readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly verifier?:
+        | (
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+          )
+        | null
+    }>
+    readonly budget?: {
+      readonly maxAttemptsPerTask?: number
+      readonly maxRepairAttempts?: number
+      readonly maxParallelTasks?: number
+      readonly maxReplans?: number
+      readonly maxTurns?: number
+      readonly maxDurationMs?: number
+      readonly maxCost?: number
+    } | null
+    readonly planning?: boolean | null
+    readonly tasks?: ReadonlyArray<{
+      readonly id?: string | null
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }> | null
+  }["tasks"]
+}
+
+export type WorkCreateOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
+export type WorkActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
+
+export type WorkArtifactsOutput = {
+  readonly data: ReadonlyArray<{
+    readonly artifact: {
+      readonly digest: string
+      readonly reference: string
+      readonly size: number
+      readonly mediaType: "text/x-diff"
+    }
+    readonly referenceCount: number
+    readonly state: "active" | "collected"
+    readonly createdAt: number
+    readonly accessedAt: number
+    readonly collectedAt?: number
+  }>
+}["data"]
+
+export type WorkArtifactCollectInput = {
+  readonly minimumAgeMs: {
+    readonly minimumAgeMs: number
+    readonly dryRun: boolean
+    readonly limit?: number | undefined
+  }["minimumAgeMs"]
+  readonly dryRun: {
+    readonly minimumAgeMs: number
+    readonly dryRun: boolean
+    readonly limit?: number | undefined
+  }["dryRun"]
+  readonly limit?: {
+    readonly minimumAgeMs: number
+    readonly dryRun: boolean
+    readonly limit?: number | undefined
+  }["limit"]
+}
+
+export type WorkArtifactCollectOutput = {
+  readonly data: {
+    readonly dryRun: boolean
+    readonly scanned: number
+    readonly collected: number
+    readonly reclaimedBytes: number
+    readonly artifacts: ReadonlyArray<{
+      readonly digest: string
+      readonly reference: string
+      readonly size: number
+      readonly mediaType: "text/x-diff"
+    }>
+  }
+}["data"]
+
+export type WorkGetInput = { readonly goalID: { readonly goalID: string }["goalID"] }
+
+export type WorkGetOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
+export type WorkExpandInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly tasks: {
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn?: ReadonlyArray<string> | null
+      readonly role?: string | null
+      readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+      readonly criteria?: ReadonlyArray<string> | null
+    }>
+  }["tasks"]
+}
+
+export type WorkExpandOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
+export type WorkReplanInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly taskID: { readonly taskID: string; readonly reason: string }["taskID"]
+  readonly reason: { readonly taskID: string; readonly reason: string }["reason"]
+}
+
+export type WorkReplanOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
+export type WorkResumeInput = { readonly goalID: { readonly goalID: string }["goalID"] }
+
+export type WorkResumeOutput = void
+
+export type WorkPauseInput = { readonly goalID: { readonly goalID: string }["goalID"] }
+
+export type WorkPauseOutput = void
+
+export type WorkCancelInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly reason?: { readonly reason?: string | undefined }["reason"]
+}
+
+export type WorkCancelOutput = void
+
+export type WorkResolveUnknownInput = {
+  readonly goalID: { readonly goalID: string; readonly attemptID: string }["goalID"]
+  readonly attemptID: { readonly goalID: string; readonly attemptID: string }["attemptID"]
+  readonly resolution: { readonly resolution: "retry"; readonly reason?: string | undefined }["resolution"]
+  readonly reason?: { readonly resolution: "retry"; readonly reason?: string | undefined }["reason"]
+}
+
+export type WorkResolveUnknownOutput = void
+
+export type WorkResolveMemoryInput = {
+  readonly goalID: { readonly goalID: string }["goalID"]
+  readonly key: {
+    readonly key: string
+    readonly handoffID: string
+    readonly itemDigest: string
+    readonly reason?: string | undefined
+  }["key"]
+  readonly handoffID: {
+    readonly key: string
+    readonly handoffID: string
+    readonly itemDigest: string
+    readonly reason?: string | undefined
+  }["handoffID"]
+  readonly itemDigest: {
+    readonly key: string
+    readonly handoffID: string
+    readonly itemDigest: string
+    readonly reason?: string | undefined
+  }["itemDigest"]
+  readonly reason?: {
+    readonly key: string
+    readonly handoffID: string
+    readonly itemDigest: string
+    readonly reason?: string | undefined
+  }["reason"]
+}
+
+export type WorkResolveMemoryOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
+export type WorkUpdateMemoryInput = {
+  readonly goalID: { readonly goalID: string; readonly key: string }["goalID"]
+  readonly key: { readonly goalID: string; readonly key: string }["key"]
+  readonly kind: {
+    readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+    readonly text: string
+    readonly reference?: string | undefined
+    readonly reason?: string | undefined
+  }["kind"]
+  readonly text: {
+    readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+    readonly text: string
+    readonly reference?: string | undefined
+    readonly reason?: string | undefined
+  }["text"]
+  readonly reference?: {
+    readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+    readonly text: string
+    readonly reference?: string | undefined
+    readonly reason?: string | undefined
+  }["reference"]
+  readonly reason?: {
+    readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+    readonly text: string
+    readonly reference?: string | undefined
+    readonly reason?: string | undefined
+  }["reason"]
+}
+
+export type WorkUpdateMemoryOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
+export type WorkDeleteMemoryInput = {
+  readonly goalID: { readonly goalID: string; readonly key: string }["goalID"]
+  readonly key: { readonly goalID: string; readonly key: string }["key"]
+}
+
+export type WorkDeleteMemoryOutput = {
+  readonly data: {
+    readonly goal: {
+      readonly id: string
+      readonly location: { readonly directory: string; readonly workspaceID?: string }
+      readonly objective: string
+      readonly acceptanceCriteria: ReadonlyArray<{
+        readonly id: string
+        readonly description: string
+        readonly required: boolean
+        readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+        readonly verifier?:
+          | {
+              readonly type: "command"
+              readonly command: string
+              readonly timeoutMs?: number
+              readonly successExitCodes?: ReadonlyArray<number>
+            }
+          | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+      }>
+      readonly roleContracts?: ReadonlyArray<{
+        readonly id: string
+        readonly agentID: string
+        readonly title: string
+        readonly purpose: string
+        readonly capabilities: ReadonlyArray<
+          "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+        >
+        readonly workspaceAccess: "read_only" | "write"
+        readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+        readonly accepts: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+        readonly publishes: ReadonlyArray<
+          "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        >
+      }>
+      readonly workerID?: string
+      readonly status:
+        | "draft"
+        | "active"
+        | "pausing"
+        | "paused"
+        | "cancelling"
+        | "completed"
+        | "blocked"
+        | "cancelled"
+        | "budget_exhausted"
+      readonly budget?: {
+        readonly maxAttemptsPerTask?: number
+        readonly maxRepairAttempts?: number
+        readonly maxParallelTasks?: number
+        readonly maxReplans?: number
+        readonly maxTurns?: number
+        readonly maxDurationMs?: number
+        readonly maxCost?: number
+      }
+      readonly usage: {
+        readonly attempts: number
+        readonly repairs: number
+        readonly turns: number
+        readonly cost: number
+      }
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }
+    readonly tasks: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly title: string
+      readonly instructions: string
+      readonly dependsOn: ReadonlyArray<string>
+      readonly role: string
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly status:
+        | "pending"
+        | "ready"
+        | "running"
+        | "verifying"
+        | "reviewing"
+        | "merging"
+        | "rework"
+        | "completed"
+        | "superseded"
+        | "blocked"
+        | "cancelled"
+      readonly criteria: ReadonlyArray<string>
+      readonly attemptCount: number
+      readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
+      readonly revision: number
+    }>
+    readonly attempts: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly kind: "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+      readonly number: number
+      readonly sessionID?: string
+      readonly status: "admitted" | "running" | "succeeded" | "failed" | "interrupted" | "unknown" | "cancelled"
+      readonly ownerID?: string
+      readonly fence?: number
+      readonly inputRevision: number
+      readonly failure?: {
+        readonly kind: "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+        readonly message: string
+        readonly retryable: boolean
+        readonly details?: JsonValue
+      }
+      readonly time: { readonly created: number; readonly started?: number; readonly ended?: number }
+    }>
+    readonly evidence: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionIDs: ReadonlyArray<string>
+      readonly kind: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+      readonly producer: string
+      readonly payload: JsonValue
+      readonly digest?: string
+      readonly reference?: string
+      readonly createdAt: number
+    }>
+    readonly evaluations: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly criterionID: string
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly verdict: "pass" | "fail" | "blocked"
+      readonly evaluator: string
+      readonly evaluatorVersion: string
+      readonly findings: ReadonlyArray<{
+        readonly code?: string
+        readonly message: string
+        readonly severity: "info" | "warning" | "error"
+        readonly location?: string
+      }>
+      readonly allowsRepair: boolean
+      readonly createdAt: number
+    }>
+    readonly handoffs: ReadonlyArray<{
+      readonly id: string
+      readonly goalID: string
+      readonly taskID: string
+      readonly attemptID: string
+      readonly producer: string
+      readonly summary: string
+      readonly items: ReadonlyArray<{
+        readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+        readonly text: string
+        readonly reference?: string
+        readonly memory?: "task" | "project"
+        readonly key?: string
+        readonly expiresAt?: number
+      }>
+      readonly evidenceIDs: ReadonlyArray<string>
+      readonly recipients: ReadonlyArray<string>
+      readonly digest: string
+      readonly createdAt: number
+    }>
+    readonly roles: ReadonlyArray<{
+      readonly id: string
+      readonly agentID: string
+      readonly title: string
+      readonly purpose: string
+      readonly capabilities: ReadonlyArray<
+        "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+      >
+      readonly workspaceAccess: "read_only" | "write"
+      readonly allowedIsolation: ReadonlyArray<"shared" | "worktree">
+      readonly accepts: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+      readonly publishes: ReadonlyArray<
+        "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+      >
+    }>
+    readonly memory: {
+      readonly entries: ReadonlyArray<{
+        readonly key: string
+        readonly status: "current" | "conflicted" | "resolved"
+        readonly candidates: ReadonlyArray<{
+          readonly handoffID: string
+          readonly goalID: string
+          readonly taskID: string
+          readonly producer: string
+          readonly item: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly itemDigest: string
+          readonly evidenceIDs: ReadonlyArray<string>
+          readonly digest: string
+          readonly createdAt: number
+        }>
+        readonly resolution?: {
+          readonly id: string
+          readonly goalID: string
+          readonly location: { readonly directory: string; readonly workspaceID?: string }
+          readonly key: string
+          readonly handoffID: string
+          readonly handoffDigest: string
+          readonly itemDigest: string
+          readonly action: "select" | "replace" | "delete"
+          readonly value?: {
+            readonly kind:
+              | "result"
+              | "fact"
+              | "decision"
+              | "constraint"
+              | "risk"
+              | "artifact"
+              | "lesson"
+              | "next_action"
+            readonly text: string
+            readonly reference?: string
+            readonly memory?: "task" | "project"
+            readonly key?: string
+            readonly expiresAt?: number
+          }
+          readonly resolver: string
+          readonly reason?: string
+          readonly createdAt: number
+        }
+      }>
+      readonly resolutions: ReadonlyArray<{
+        readonly id: string
+        readonly goalID: string
+        readonly location: { readonly directory: string; readonly workspaceID?: string }
+        readonly key: string
+        readonly handoffID: string
+        readonly handoffDigest: string
+        readonly itemDigest: string
+        readonly action: "select" | "replace" | "delete"
+        readonly value?: {
+          readonly kind: "result" | "fact" | "decision" | "constraint" | "risk" | "artifact" | "lesson" | "next_action"
+          readonly text: string
+          readonly reference?: string
+          readonly memory?: "task" | "project"
+          readonly key?: string
+          readonly expiresAt?: number
+        }
+        readonly resolver: string
+        readonly reason?: string
+        readonly createdAt: number
+      }>
+    }
+  }
+}["data"]
+
 export type MessagesListInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly limit?: {
@@ -1837,6 +4451,8 @@ export type MessagesListOutput = {
         readonly type: "assistant"
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly inputSequence?: number
+        readonly contextEpoch?: number
         readonly content: ReadonlyArray<
           | { readonly type: "text"; readonly id: string; readonly text: string }
           | {
@@ -2092,7 +4708,30 @@ export type IntegrationsListOutput = {
               }
           >
         }
-      | { readonly type: "key"; readonly label?: string }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
       | { readonly type: "env"; readonly names: ReadonlyArray<string> }
     >
     readonly connections: ReadonlyArray<
@@ -2144,7 +4783,30 @@ export type IntegrationsGetOutput = {
               }
           >
         }
-      | { readonly type: "key"; readonly label?: string }
+      | {
+          readonly type: "key"
+          readonly label?: string
+          readonly prompts?: ReadonlyArray<
+            | {
+                readonly type: "text"
+                readonly key: string
+                readonly message: string
+                readonly placeholder?: string
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+            | {
+                readonly type: "select"
+                readonly key: string
+                readonly message: string
+                readonly options: ReadonlyArray<{
+                  readonly label: string
+                  readonly value: string
+                  readonly hint?: string
+                }>
+                readonly when?: { readonly key: string; readonly op: "eq" | "neq"; readonly value: string }
+              }
+          >
+        }
       | { readonly type: "env"; readonly names: ReadonlyArray<string> }
     >
     readonly connections: ReadonlyArray<
@@ -2159,8 +4821,21 @@ export type IntegrationsConnectKeyInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]
-  readonly key: { readonly key: string; readonly label?: string | undefined }["key"]
-  readonly label?: { readonly key: string; readonly label?: string | undefined }["label"]
+  readonly key: {
+    readonly key: string
+    readonly inputs?: { readonly [x: string]: string } | undefined
+    readonly label?: string | undefined
+  }["key"]
+  readonly inputs?: {
+    readonly key: string
+    readonly inputs?: { readonly [x: string]: string } | undefined
+    readonly label?: string | undefined
+  }["inputs"]
+  readonly label?: {
+    readonly key: string
+    readonly inputs?: { readonly [x: string]: string } | undefined
+    readonly label?: string | undefined
+  }["label"]
 }
 
 export type IntegrationsConnectKeyOutput = void
@@ -2287,6 +4962,73 @@ export type CredentialsRemoveInput = {
 }
 
 export type CredentialsRemoveOutput = void
+
+export type McpStatusInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type McpStatusOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly [x: string]:
+      | { readonly status: "connected"; readonly tools: number | "Infinity" | "-Infinity" | "NaN" }
+      | { readonly status: "disabled" }
+      | {
+          readonly status: "needs_auth"
+          readonly error: string
+          readonly integrationID: string
+          readonly methodID: string
+        }
+      | { readonly status: "failed"; readonly error: string }
+  }
+}
+
+export type McpResourcesInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type McpResourcesOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly [x: string]: {
+      readonly name: string
+      readonly uri: string
+      readonly description?: string | null
+      readonly mimeType?: string | null
+      readonly client: string
+    }
+  }
+}
+
+export type McpConnectInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type McpConnectOutput = void
+
+export type McpDisconnectInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type McpDisconnectOutput = void
 
 export type PermissionsListRequestsInput = {
   readonly location?: {

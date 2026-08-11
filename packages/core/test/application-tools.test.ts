@@ -66,6 +66,38 @@ describe("ApplicationTools", () => {
     }),
   )
 
+  it.effect("projects an external JSON Schema without adding a second executable tool type", () =>
+    Effect.gen(function* () {
+      const applications = yield* ApplicationTools.Service
+      const registry = yield* ToolRegistry.Service
+      yield* applications.register({
+        external_schema: Tool.make({
+          description: "External schema",
+          input: Schema.Record(Schema.String, Schema.Unknown),
+          inputJsonSchema: {
+            type: "object",
+            properties: { query: { type: "string", minLength: 3 } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          output: Schema.String,
+          execute: (input) => Effect.succeed(String(input.query)),
+        }),
+      })
+
+      expect(yield* toolDefinitions(registry)).toMatchObject([
+        {
+          name: "external_schema",
+          inputSchema: {
+            properties: { query: { type: "string", minLength: 3 } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+        },
+      ])
+    }),
+  )
+
   it.effect("exposes narrow scoped Location registration and validates names", () =>
     Effect.gen(function* () {
       const tools: Tools.Interface = yield* Tools.Service

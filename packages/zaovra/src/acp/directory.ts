@@ -1,14 +1,10 @@
-import { Agent } from "@/agent/agent"
-import { Command } from "@/command"
-import { InstanceRef } from "@/effect/instance-ref"
-import { InstanceBootstrap } from "@/project/bootstrap"
-import { InstanceStore } from "@/project/instance-store"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { Provider } from "@/provider/provider"
 import { Context, Effect, Layer, SynchronizedRef } from "effect"
-import type * as ACPError from "./error"
+import type { CommandView } from "@zaovra-ai/sdk/v2"
+import { UnsupportedOperationError, type Error } from "./error"
 
 export type ModelOption = {
   readonly providerID: ProviderV2.ID
@@ -37,17 +33,17 @@ export type Snapshot = {
   readonly variantsByModel: Readonly<Record<string, ModelVariants>>
   readonly availableModes: readonly ModeOption[]
   readonly defaultModeID: string
-  readonly availableCommands: readonly Command.Info[]
+  readonly availableCommands: readonly CommandView[]
   readonly defaultModel?: DefaultModel
 }
 
 export interface LoaderInterface {
-  readonly load: (directory: string) => Effect.Effect<Snapshot, ACPError.Error>
+  readonly load: (directory: string) => Effect.Effect<Snapshot, Error>
 }
 
 export interface Interface {
-  readonly get: (directory: string) => Effect.Effect<Snapshot, ACPError.Error>
-  readonly refresh: (directory: string) => Effect.Effect<Snapshot, ACPError.Error>
+  readonly get: (directory: string) => Effect.Effect<Snapshot, Error>
+  readonly refresh: (directory: string) => Effect.Effect<Snapshot, Error>
   readonly variants: (snapshot: Snapshot, model: DefaultModel) => ModelVariants | undefined
 }
 
@@ -64,7 +60,7 @@ export const build = (input: {
   readonly providers: Record<ProviderV2.ID, Provider.Info>
   readonly modes: readonly ModeOption[]
   readonly defaultModeID: string
-  readonly commands: readonly Command.Info[]
+  readonly commands: readonly CommandView[]
   readonly defaultModel?: DefaultModel
 }): Snapshot => {
   const modelOptions = Provider.sort(
@@ -106,46 +102,19 @@ export const build = (input: {
 
 export const loaderLayer = Layer.effect(
   Loader,
-  Effect.gen(function* () {
-    const store = yield* InstanceStore.Service
-    const provider = yield* Provider.Service
-    const agent = yield* Agent.Service
-    const command = yield* Command.Service
-
-    return Loader.of({
-      load: Effect.fn("ACPDirectoryLoader.load")(function* (directory) {
-        const ctx = yield* store.load({ directory })
-        return yield* Effect.gen(function* () {
-          const providers = yield* provider.list()
-          const [agents, defaultAgent, commands, defaultModel] = yield* Effect.all(
-            [agent.list(), agent.defaultInfo(), command.list(), provider.defaultModel().pipe(Effect.option)],
-            { concurrency: "unbounded" },
-          )
-          return build({
-            directory,
-            providers,
-            modes: agents
-              .filter((item) => item.mode !== "subagent" && item.hidden !== true)
-              .map((item) => ({
-                id: item.name,
-                name: item.name,
-                ...(item.description ? { description: item.description } : {}),
-              })),
-            defaultModeID: defaultAgent.name,
-            commands: commands.toSorted((a, b) => a.name.localeCompare(b.name)),
-            ...(defaultModel._tag === "Some" ? { defaultModel: defaultModel.value } : {}),
-          })
-        }).pipe(Effect.provideService(InstanceRef, ctx))
-      }),
-    })
-  }),
+  Effect.succeed(
+    Loader.of({
+      load: (directory) =>
+        Effect.fail(new UnsupportedOperationError({ method: `ACP directory load without V2 client: ${directory}` })),
+    }),
+  ),
 )
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const loader = yield* Loader
-    const snapshots = yield* SynchronizedRef.make(new Map<string, Effect.Effect<Snapshot, ACPError.Error>>())
+    const snapshots = yield* SynchronizedRef.make(new Map<string, Effect.Effect<Snapshot, Error>>())
 
     const cached = Effect.fnUntraced(function* (directory: string) {
       return yield* SynchronizedRef.modifyEffect(
@@ -204,7 +173,7 @@ const layer = Layer.effect(
 export const loaderNode = LayerNode.make({
   service: Loader,
   layer: loaderLayer,
-  deps: [Provider.node, Agent.node, Command.node, InstanceStore.node],
+  deps: [],
 })
 
 export const node = LayerNode.make({ service: Service, layer, deps: [loaderNode] })

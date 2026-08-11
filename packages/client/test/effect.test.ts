@@ -89,6 +89,9 @@ test("session methods retain decoded Effect inputs and outputs", async () => {
     if (url.includes("/prompt")) {
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(admission)))
     }
+    if (url.includes("/compact")) {
+      return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ data: { compacted: true } })))
+    }
     if (url.includes("/context")) {
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ data: [] })))
     }

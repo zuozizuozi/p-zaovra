@@ -1,8 +1,8 @@
 import { createZaovraClient } from "@zaovra-ai/sdk/v2"
-import { SessionID } from "@/session/schema"
+import { SessionV2 } from "@zaovra-ai/core/session"
 import { Schema } from "effect"
 
-const decodeSessionID = Schema.decodeUnknownSync(SessionID)
+const decodeSessionID = Schema.decodeUnknownSync(SessionV2.ID)
 
 export async function validateSession(input: {
   url: string
@@ -13,7 +13,7 @@ export async function validateSession(input: {
 }) {
   if (!input.sessionID) return
 
-  let sessionID: SessionID
+  let sessionID: SessionV2.ID
   try {
     sessionID = decodeSessionID(input.sessionID)
   } catch (error) {
@@ -25,5 +25,5 @@ export async function validateSession(input: {
     directory: input.directory,
     fetch: input.fetch,
     headers: input.headers,
-  }).session.get({ sessionID }, { throwOnError: true })
+  }).v2.session.get({ sessionID }, { throwOnError: true })
 }

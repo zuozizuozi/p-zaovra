@@ -107,7 +107,7 @@ export default { ...config, out: ${JSON.stringify(output)} }
 
 async function generatedMigrations(directory: string) {
   return (await Array.fromAsync(new Bun.Glob("*/migration.sql").scan({ cwd: directory })))
-    .map((file) => file.split("/")[0])
+    .map((file) => file.replaceAll("\\", "/").split("/")[0])
     .filter((name): name is string => name !== undefined)
     .sort()
 }
@@ -115,7 +115,7 @@ async function generatedMigrations(directory: string) {
 async function generatedSql(directory: string) {
   const generated = await generatedMigrations(directory)
   if (generated.length !== 1) throw new Error(`Expected one full schema migration, found ${generated.length}.`)
-  return Bun.file(path.join(directory, generated[0]!, "migration.sql")).text()
+  return Bun.file(path.join(directory, generated[0], "migration.sql")).text()
 }
 
 async function typescriptMigrations() {

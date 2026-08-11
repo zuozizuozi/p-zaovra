@@ -1,4 +1,4 @@
-import type { Event, Message, Part, PermissionRequest, QuestionRequest, ToolPart } from "@zaovra-ai/sdk/v2"
+import type { Event, Message, Part, PermissionView, QuestionView, ToolPart } from "@zaovra-ai/sdk/v2"
 import * as Locale from "@/util/locale"
 import {
   bootstrapSessionData,
@@ -17,6 +17,12 @@ const SUBAGENT_CALL_LIMIT = 32
 const SUBAGENT_ROLE_LIMIT = 32
 const SUBAGENT_ERROR_LIMIT = 16
 const SUBAGENT_ECHO_LIMIT = 8
+
+function eventSessionID(event: Event) {
+  const properties = Reflect.get(event, "properties")
+  const sessionID = properties && typeof properties === "object" ? Reflect.get(properties, "sessionID") : undefined
+  return typeof sessionID === "string" ? sessionID : undefined
+}
 
 type SessionMessage = {
   parts: Part[]
@@ -46,8 +52,8 @@ export type BootstrapSubagentInput = {
   data: SubagentData
   messages: SessionMessage[]
   children: Array<{ id: string; title?: string }>
-  permissions: PermissionRequest[]
-  questions: QuestionRequest[]
+  permissions: PermissionView[]
+  questions: QuestionView[]
 }
 
 function createDetail(sessionID: string): DetailState {
@@ -551,6 +557,7 @@ function compactDetail(detail: DetailState) {
   next.sent = copyMap(detail.data.sent, activePartIDs)
   next.end = new Set([...detail.data.end].filter((item) => activePartIDs.has(item)))
   next.echo = compactEchoMap(detail.data, messageIDs)
+  next.v2Tools = new Map(detail.data.v2Tools)
   detail.data = next
 }
 
@@ -822,7 +829,14 @@ export function reduceSubagentData(input: {
       ? event.properties.sessionID
       : event.type === "message.part.updated"
         ? event.properties.part.sessionID
-        : undefined
+        : event.type.startsWith("session.next.") ||
+            event.type === "permission.v2.asked" ||
+            event.type === "permission.v2.replied" ||
+            event.type === "question.v2.asked" ||
+            event.type === "question.v2.replied" ||
+            event.type === "question.v2.rejected"
+          ? eventSessionID(event)
+          : undefined
 
   if (!sessionID || !knownSession(input.data, sessionID)) {
     return false

@@ -1,4 +1,3 @@
-import type { PermissionV1 } from "@zaovra-ai/core/v1/permission"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 // CLI entry point for `zaovra run` and `zaovra --mini`.
 //
@@ -10,9 +9,8 @@ import { FSUtil } from "@zaovra-ai/core/fs-util"
 //   3. Interactive attach (`zaovra --mini --attach`): connects to a running
 //      zaovra server and runs interactive mode against it.
 //
-// Also supports `--command` for slash-command execution, `--format json` for
-// raw event streaming, `--continue` / `--session` for session resumption,
-// and `--fork` for forking before continuing.
+// Also supports `--command` for V2 command-template execution, `--format json`
+// for raw event streaming, and `--continue` / `--session` for resumption.
 import type { Argv } from "yargs"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -22,11 +20,14 @@ import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
-import { createZaovraClient, type ZaovraClient, type ToolPart } from "@zaovra-ai/sdk/v2"
+import { createZaovraClient, type Event, type ZaovraClient } from "@zaovra-ai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 
-type ModelInput = Parameters<ZaovraClient["session"]["prompt"]>[0]["model"]
+type ModelInput = {
+  providerID: string
+  modelID: string
+}
 
 function pick(value: string | undefined): ModelInput | undefined {
   if (!value) return undefined
@@ -75,52 +76,8 @@ function inline(info: Inline) {
   UI.println(UI.Style.TEXT_NORMAL + info.icon, UI.Style.TEXT_NORMAL + info.title + suffix)
 }
 
-function block(info: Inline, output?: string) {
-  UI.empty()
-  inline(info)
-  if (!output?.trim()) return
-  UI.println(output)
-  UI.empty()
-}
-
 function formatRunError(error: unknown) {
   return FormatError(error) ?? FormatUnknownError(error)
-}
-
-async function tool(part: ToolPart) {
-  try {
-    const { toolInlineInfo } = await import("./run/tool")
-    const next = toolInlineInfo(part)
-    if (next.mode === "block") {
-      block(next, next.body)
-      return
-    }
-
-    inline(next)
-  } catch {
-    inline({
-      icon: "\u2699",
-      title: part.tool,
-    })
-  }
-}
-
-async function toolError(part: ToolPart) {
-  try {
-    const { toolInlineInfo } = await import("./run/tool")
-    const next = toolInlineInfo(part)
-    inline({
-      icon: "✗",
-      title: `${next.title} failed`,
-      ...(next.description && { description: next.description }),
-    })
-    return
-  } catch {
-    inline({
-      icon: "✗",
-      title: `${part.tool} failed`,
-    })
-  }
 }
 
 export const RunCommand = effectCmd({
@@ -153,14 +110,6 @@ export const RunCommand = effectCmd({
         alias: ["s"],
         describe: "session id to continue",
         type: "string",
-      })
-      .option("fork", {
-        describe: "fork the session before continuing (requires --continue or --session)",
-        type: "boolean",
-      })
-      .option("share", {
-        type: "boolean",
-        describe: "share the session",
       })
       .option("model", {
         type: "string",
@@ -373,7 +322,7 @@ export const RunCommand = effectCmd({
           }
 
           const content = await (async () => {
-            if (!args.attach) return
+            if (isDirectory) return
             const handle = await open(resolvedPath, "r")
             try {
               const opened = await handle.stat()
@@ -422,31 +371,6 @@ export const RunCommand = effectCmd({
         process.exit(1)
       }
 
-      if (args.fork && !args.continue && !args.session) {
-        UI.error("--fork requires --continue or --session")
-        process.exit(1)
-      }
-
-      const rules: PermissionV1.Ruleset = interactive
-        ? []
-        : [
-            {
-              permission: "question",
-              action: "deny",
-              pattern: "*",
-            },
-            {
-              permission: "plan_enter",
-              action: "deny",
-              pattern: "*",
-            },
-            {
-              permission: "plan_exit",
-              action: "deny",
-              pattern: "*",
-            },
-          ]
-
       function title() {
         if (args.title === undefined) return
         if (args.title !== "") return args.title
@@ -455,95 +379,53 @@ export const RunCommand = effectCmd({
 
       async function session(sdk: ZaovraClient): Promise<SessionInfo | undefined> {
         if (args.session) {
-          const current = await sdk.session
+          const current = await sdk.v2.session
             .get({
               sessionID: args.session,
             })
             .catch(() => undefined)
 
-          if (!current?.data) {
+          if (!current?.data?.data) {
             UI.error("Session not found")
             process.exit(1)
           }
 
-          if (args.fork) {
-            const forked = await sdk.session.fork({
-              sessionID: args.session,
-            })
-            const id = forked.data?.id
-            if (!id) {
-              return
-            }
-
-            return {
-              id,
-              title: forked.data?.title ?? current.data.title,
-              directory: forked.data?.directory ?? current.data.directory,
-            }
-          }
-
           return {
-            id: current.data.id,
-            title: current.data.title,
-            directory: current.data.directory,
+            id: current.data.data.id,
+            title: current.data.data.title,
+            directory: current.data.data.location.directory,
           }
         }
 
-        const base = args.continue ? (await sdk.session.list()).data?.find((item) => !item.parentID) : undefined
-
-        if (base && args.fork) {
-          const forked = await sdk.session.fork({
-            sessionID: base.id,
-          })
-          const id = forked.data?.id
-          if (!id) {
-            return
-          }
-
-          return {
-            id,
-            title: forked.data?.title ?? base.title,
-            directory: forked.data?.directory ?? base.directory,
-          }
-        }
+        const base = args.continue
+          ? (await sdk.v2.session.list({ order: "desc" })).data?.data.find((item) => !item.parentID)
+          : undefined
 
         if (base) {
           return {
             id: base.id,
             title: base.title,
-            directory: base.directory,
+            directory: base.location.directory,
           }
         }
 
         const name = title()
-        const result = await sdk.session.create({
-          title: name,
-          permission: [...rules],
-        })
-        const id = result.data?.id
+        const result = await sdk.v2.session.create({ location: { directory: await current(sdk) } })
+        const id = result.data?.data.id
         if (!id) {
           return
         }
 
+        const created = name
+          ? await sdk.v2.session
+              .update({ sessionID: id, title: name })
+              .then((item) => item.data?.data ?? result.data?.data)
+          : result.data?.data
+
         return {
           id,
-          title: result.data?.title ?? name,
-          directory: result.data?.directory,
-        }
-      }
-
-      async function share(sdk: ZaovraClient, sessionID: string) {
-        const cfg = await sdk.config.get()
-        if (!cfg.data) return
-        if (cfg.data.share !== "auto" && !flags.autoShare && !args.share) return
-        const res = await sdk.session.share({ sessionID }).catch((error) => {
-          if (error instanceof Error && error.message.includes("disabled")) {
-            UI.println(UI.Style.TEXT_DANGER_BOLD + "!  " + error.message)
-          }
-          return { error }
-        })
-        if (!res.error && "data" in res && res.data?.share?.url) {
-          UI.println(UI.Style.TEXT_INFO_BOLD + "~  " + res.data.share.url)
+          title: created?.title ?? name,
+          directory: created?.location.directory,
         }
       }
 
@@ -551,8 +433,8 @@ export const RunCommand = effectCmd({
         sdk: ZaovraClient,
         input: { agent: string | undefined; model: ModelInput | undefined; variant: string | undefined },
       ): Promise<SessionInfo> {
-        const result = await sdk.session.create({
-          title: args.title !== undefined && args.title !== "" ? args.title : undefined,
+        const name = args.title !== undefined && args.title !== "" ? args.title : undefined
+        const result = await sdk.v2.session.create({
           agent: input.agent,
           model: input.model
             ? {
@@ -561,17 +443,20 @@ export const RunCommand = effectCmd({
                 variant: input.variant,
               }
             : undefined,
-          permission: [...rules],
         })
-        const id = result.data?.id
+        const id = result.data?.data.id
         if (!id) {
           throw new Error("Failed to create session")
         }
 
-        void share(sdk, id).catch(() => {})
+        const created = name
+          ? await sdk.v2.session
+              .update({ sessionID: id, title: name })
+              .then((item) => item.data?.data ?? result.data?.data)
+          : result.data?.data
         return {
           id,
-          title: result.data?.title,
+          title: created?.title,
         }
       }
 
@@ -694,185 +579,247 @@ export const RunCommand = effectCmd({
         // to stdout/UI. `client` is passed explicitly because attach mode may
         // rebind the SDK to the session's directory after the subscription is
         // created, and replies issued from inside the loop must use that client.
-        async function loop(client: ZaovraClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
+        // Durable session history is the completion source of truth. Live SSE
+        // may accelerate UI updates elsewhere, but a dropped connection must
+        // never leave a non-interactive command waiting forever.
+        async function follow(client: ZaovraClient, promptID: string) {
           const toggles = new Map<string, boolean>()
+          const tools = new Map<string, string>()
+          const permissions = new Set<string>()
+          const questions = new Set<string>()
+          let after = 0
+          let admitted = false
+          let idleChecks = 0
+          let declined = false
           let error: string | undefined
 
-          for await (const event of events.stream) {
-            if (
-              event.type === "message.updated" &&
-              event.properties.sessionID === sessionID &&
-              event.properties.info.role === "assistant" &&
-              args.format !== "json" &&
-              toggles.get("start") !== true
-            ) {
+          async function handle(event: Event) {
+            if (event.type === "session.next.step.started" && event.properties.sessionID === sessionID) {
+              if (emit("step_start", { event })) return false
+              if (toggles.get("start") === true) return false
               UI.empty()
-              UI.println(`> ${event.properties.info.agent} · ${event.properties.info.modelID}`)
+              UI.println(
+                `> ${event.properties.agent} · ${event.properties.model.providerID}/${event.properties.model.id}`,
+              )
               UI.empty()
               toggles.set("start", true)
+              return false
             }
 
-            if (event.type === "message.part.updated") {
-              const part = event.properties.part
-              if (part.sessionID !== sessionID) continue
-
-              if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
-                if (emit("tool_use", { part })) continue
-                if (part.state.status === "completed") {
-                  await tool(part)
-                  continue
-                }
-                await toolError(part)
-                UI.error(part.state.error)
+            if (event.type === "session.next.text.ended" && event.properties.sessionID === sessionID) {
+              if (emit("text", { event })) return false
+              const text = event.properties.text.trim()
+              if (!text) return false
+              if (!process.stdout.isTTY) {
+                process.stdout.write(text + EOL)
+                return false
               }
+              UI.empty()
+              UI.println(text)
+              UI.empty()
+              return false
+            }
 
-              if (
-                part.type === "tool" &&
-                part.tool === "task" &&
-                part.state.status === "running" &&
-                args.format !== "json"
-              ) {
-                if (toggles.get(part.id) === true) continue
-                await tool(part)
-                toggles.set(part.id, true)
-              }
-
-              if (part.type === "step-start") {
-                if (emit("step_start", { part })) continue
-              }
-
-              if (part.type === "step-finish") {
-                if (emit("step_finish", { part })) continue
-              }
-
-              if (part.type === "text" && part.time?.end) {
-                if (emit("text", { part })) continue
-                const text = part.text.trim()
-                if (!text) continue
-                if (!process.stdout.isTTY) {
-                  process.stdout.write(text + EOL)
-                  continue
-                }
+            if (event.type === "session.next.reasoning.ended" && event.properties.sessionID === sessionID && thinking) {
+              if (emit("reasoning", { event })) return false
+              const text = event.properties.text.trim()
+              if (!text) return false
+              const line = `Thinking: ${text}`
+              if (process.stdout.isTTY) {
                 UI.empty()
-                UI.println(text)
+                UI.println(`${UI.Style.TEXT_DIM}\u001b[3m${line}\u001b[0m${UI.Style.TEXT_NORMAL}`)
                 UI.empty()
+                return false
               }
-
-              if (part.type === "reasoning" && part.time?.end && thinking) {
-                if (emit("reasoning", { part })) continue
-                const text = part.text.trim()
-                if (!text) continue
-                const line = `Thinking: ${text}`
-                if (process.stdout.isTTY) {
-                  UI.empty()
-                  UI.println(`${UI.Style.TEXT_DIM}\u001b[3m${line}\u001b[0m${UI.Style.TEXT_NORMAL}`)
-                  UI.empty()
-                  continue
-                }
-                process.stdout.write(line + EOL)
-              }
+              process.stdout.write(line + EOL)
+              return false
             }
 
-            if (event.type === "session.error") {
-              const props = event.properties
-              if (props.sessionID !== sessionID || !props.error) continue
-              let err = String(props.error.name)
-              if ("data" in props.error && props.error.data && "message" in props.error.data) {
-                err = String(props.error.data.message)
-              }
-              error = error ? error + EOL + err : err
-              if (emit("error", { error: props.error })) continue
-              UI.error(err)
+            if (event.type === "session.next.tool.called" && event.properties.sessionID === sessionID) {
+              tools.set(event.properties.callID, event.properties.tool)
+              if (emit("tool_use", { event })) return false
+              inline({ icon: "\u2699", title: event.properties.tool })
+              return false
             }
 
-            if (
-              event.type === "session.status" &&
-              event.properties.sessionID === sessionID &&
-              event.properties.status.type === "idle"
-            ) {
-              break
+            if (event.type === "session.next.tool.success" && event.properties.sessionID === sessionID) {
+              const name = tools.get(event.properties.callID) ?? "tool"
+              tools.delete(event.properties.callID)
+              if (emit("tool_result", { event })) return false
+              inline({ icon: "\u2713", title: name })
+              return false
             }
 
-            if (event.type === "permission.asked") {
-              const permission = event.properties
-              if (permission.sessionID !== sessionID) continue
-
-              if (auto) {
-                await client.permission.reply({
-                  requestID: permission.id,
-                  reply: "once",
-                })
-              } else {
-                UI.println(
-                  UI.Style.TEXT_WARNING_BOLD + "!",
-                  UI.Style.TEXT_NORMAL +
-                    `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
-                )
-                await client.permission.reply({
-                  requestID: permission.id,
-                  reply: "reject",
-                })
-              }
+            if (event.type === "session.next.tool.failed" && event.properties.sessionID === sessionID) {
+              const name = tools.get(event.properties.callID) ?? "tool"
+              tools.delete(event.properties.callID)
+              if (emit("tool_error", { event })) return false
+              UI.error(`${name}: ${event.properties.error.message}`)
+              return false
             }
+
+            if (event.type === "session.next.step.failed" && event.properties.sessionID === sessionID) {
+              error = event.properties.error.message
+              if (!emit("error", { error: event.properties.error })) UI.error(error)
+              return true
+            }
+
+            if (event.type !== "session.next.step.ended" || event.properties.sessionID !== sessionID) return false
+            const terminal = event.properties.finish !== "tool-calls"
+            emit("step_finish", { event })
+            return terminal
           }
-          return error
+
+          async function resolvePending() {
+            const pendingPermissions = await client.v2.session.permission
+              .list({ sessionID }, { throwOnError: true })
+              .then((result) => result.data.data)
+            await Promise.all(
+              pendingPermissions
+                .filter((permission) => !permissions.has(permission.id))
+                .map(async (permission) => {
+                  permissions.add(permission.id)
+                  if (!auto) {
+                    declined = true
+                    UI.println(
+                      UI.Style.TEXT_WARNING_BOLD + "!",
+                      UI.Style.TEXT_NORMAL +
+                        `permission requested: ${permission.action} (${permission.resources.join(", ")}); auto-rejecting`,
+                    )
+                  }
+                  await client.v2.session.permission.reply({
+                    sessionID,
+                    requestID: permission.id,
+                    reply: auto ? "once" : "reject",
+                  })
+                }),
+            )
+
+            const pendingQuestions = await client.v2.session.question
+              .list({ sessionID }, { throwOnError: true })
+              .then((result) => result.data.data)
+            await Promise.all(
+              pendingQuestions
+                .filter((question) => !questions.has(question.id))
+                .map(async (question) => {
+                  questions.add(question.id)
+                  UI.println(
+                    UI.Style.TEXT_WARNING_BOLD + "!",
+                    UI.Style.TEXT_NORMAL + "interactive question requested; rejecting in non-interactive mode",
+                  )
+                  await client.v2.session.question.reject({ sessionID, requestID: question.id })
+                }),
+            )
+          }
+
+          while (true) {
+            const page = await client.v2.session
+              .history({ sessionID, after, limit: 100 }, { throwOnError: true })
+              .then((result) => result.data)
+            let terminal = false
+            for (const item of page.data) {
+              after = Math.max(after, item.durable?.seq ?? after)
+              if (!admitted) {
+                admitted = item.type === "session.next.prompt.admitted" && item.data.messageID === promptID
+                continue
+              }
+              terminal = (await handle({ id: item.id, type: item.type, properties: item.data } as Event)) || terminal
+            }
+            await resolvePending()
+            if (terminal) return error
+            if (page.hasMore) continue
+
+            const [active, pending] = await Promise.all([
+              client.v2.session.active({ throwOnError: true }).then((result) => Boolean(result.data.data[sessionID])),
+              client.v2.session
+                .pendingInputs({ sessionID }, { throwOnError: true })
+                .then((result) => result.data.data.length),
+            ])
+            idleChecks = admitted && !active && pending === 0 ? idleChecks + 1 : 0
+            if (idleChecks >= 3) {
+              if (declined) return error
+              const message = "Session execution ended without a durable terminal event"
+              if (!emit("error", { error: { message } })) UI.error(message)
+              return message
+            }
+            await Bun.sleep(50)
+          }
         }
+
         const cwd = args.attach ? (directory ?? sess.directory ?? (await current(sdk))) : (directory ?? root)
         const client = args.attach ? attachSDK(cwd) : sdk
 
-        // Validate agent if specified
-        const agent = await pickAgent(client)
+        const command = args.command
+          ? await client.v2.command
+              .list({ location: { directory: cwd } }, { throwOnError: true })
+              .then((result) => result.data.data.find((item) => item.name === args.command))
+          : undefined
+        if (args.command && !command) die(`Command not found: ${args.command}`)
+        if (command) message = expandCommandTemplate(command.template, message)
 
-        await share(client, sessionID)
+        // Validate agent if specified
+        const agent = command?.agent ?? (await pickAgent(client))
 
         if (!interactive) {
-          const events = await client.event.subscribe()
-          const completed = loop(client, events).catch((e) => {
-            console.error(e)
+          const model = command?.model
+            ? { providerID: command.model.providerID, modelID: command.model.id }
+            : pick(args.model)
+          const selected = await Promise.all([
+            agent
+              ? client.v2.session.switchAgent({ sessionID, agent }, { throwOnError: true })
+              : Promise.resolve(undefined),
+            model
+              ? client.v2.session.switchModel(
+                  {
+                    sessionID,
+                    model: {
+                      providerID: model.providerID,
+                      id: model.modelID,
+                      variant: args.variant,
+                    },
+                  },
+                  { throwOnError: true },
+                )
+              : Promise.resolve(undefined),
+          ]).catch((error) => ({ error }))
+          if ("error" in selected) {
+            if (!emit("error", { error: selected.error })) UI.error(formatRunError(selected.error))
             process.exitCode = 1
-          })
-          async function finish() {
-            if (args.attach) return
-            const error = await completed
-            if (error) process.exitCode = 1
-          }
-
-          if (args.command) {
-            const result = await client.session.command({
-              sessionID,
-              agent,
-              model: args.model,
-              command: args.command,
-              arguments: message,
-              variant: args.variant,
-            })
-            if (result.error) {
-              if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
-              process.exitCode = 1
-              return
-            }
-            await finish()
             return
           }
 
-          const model = pick(args.model)
-          const result = await client.session.prompt({
+          const result = await client.v2.session.prompt({
             sessionID,
-            agent,
-            model,
-            variant: args.variant,
-            parts: [...files, { type: "text", text: message }],
+            prompt: {
+              text: message,
+              files: files.map((file) => ({ uri: file.url, name: file.filename })),
+            },
+            delivery: "steer",
           })
           if (result.error) {
             if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
             process.exitCode = 1
             return
           }
-          await finish()
+          const promptID = result.data?.data.id
+          if (!promptID) {
+            const error = new Error("Prompt admission did not return an input ID")
+            if (!emit("error", { error })) UI.error(error.message)
+            process.exitCode = 1
+            return
+          }
+          const executionError = await follow(client, promptID).catch((error) => {
+            const message = formatRunError(error)
+            if (!emit("error", { error })) UI.error(message)
+            return message
+          })
+          if (executionError) process.exitCode = 1
           return
         }
 
-        const model = pick(args.model)
+        const model = command?.model
+          ? { providerID: command.model.providerID, modelID: command.model.id }
+          : pick(args.model)
         const { runInteractiveMode } = await import("./run/runtime")
         try {
           await runInteractiveMode({
@@ -880,7 +827,7 @@ export const RunCommand = effectCmd({
             directory: cwd,
             sessionID,
             sessionTitle: sess.title,
-            resume: Boolean(args.session || args.continue) && !args.fork,
+            resume: Boolean(args.session || args.continue),
             replay,
             replayLimit: args["replay-limit"],
             agent,
@@ -917,7 +864,6 @@ export const RunCommand = effectCmd({
             fetch: fetchFn,
             resolveAgent: localAgent,
             session,
-            share,
             createSession: createFreshSession,
             agent: args.agent,
             model,
@@ -965,7 +911,6 @@ type MiniCommandInput = {
   username?: string
   continue?: boolean
   session?: string
-  fork?: boolean
   model?: string
   agent?: string
   prompt?: string
@@ -983,8 +928,6 @@ export async function runMini(input: MiniCommandInput) {
     command: undefined,
     continue: input.continue,
     session: input.session,
-    fork: input.fork,
-    share: undefined,
     model: input.model,
     agent: input.agent,
     format: "default",
@@ -1008,4 +951,20 @@ export async function runMini(input: MiniCommandInput) {
     dangerouslySkipPermissions: false,
     demo: input.demo ?? false,
   })
+}
+
+function expandCommandTemplate(template: string, argumentsText: string) {
+  const args = argumentsText.trim().split(/\s+/).filter(Boolean)
+  const placeholders = [...template.matchAll(/\$([1-9][0-9]*)/g)].map((match) => Number(match[1]))
+  const last = Math.max(0, ...placeholders)
+  const expanded = template
+    .replaceAll(/\$([1-9][0-9]*)/g, (_item, index: string) => {
+      const position = Number(index)
+      if (position > args.length) return ""
+      if (position === last) return args.slice(position - 1).join(" ")
+      return args[position - 1] ?? ""
+    })
+    .replaceAll("$ARGUMENTS", argumentsText)
+  if (placeholders.length > 0 || template.includes("$ARGUMENTS") || !argumentsText.trim()) return expanded.trim()
+  return `${expanded}\n\n${argumentsText}`.trim()
 }

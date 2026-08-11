@@ -1,11 +1,11 @@
 import type { Hooks, PluginInput } from "@zaovra-ai/plugin"
-import { OAUTH_DUMMY_KEY } from "../auth"
 import { InstallationVersion } from "@zaovra-ai/core/installation/version"
 import { OauthCallbackPage } from "@zaovra-ai/core/oauth/page"
 import { createServer } from "http"
 import open from "open"
 
 const OAUTH_CLIENT_ID = "LOCAL_APPLICATION"
+const OAUTH_DUMMY_KEY = "zaovra-oauth-dummy-key"
 const OAUTH_CALLBACK_HOST = "127.0.0.1"
 const OAUTH_CALLBACK_PATH = "/"
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000
@@ -297,26 +297,6 @@ export async function SnowflakeCortexAuthPlugin(_input: PluginInput): Promise<Ho
 
         const oauth = auth as typeof auth & { refresh: string; access: string; expires: number; accountId?: string }
 
-        if (oauth.accountId && oauth.refresh && oauth.expires && oauth.expires <= Date.now()) {
-          try {
-            const tokens = await refreshAccessToken(oauth.accountId, oauth.refresh)
-            const refreshedRefresh = tokens.refresh_token || oauth.refresh
-            const refreshedExpires = Date.now() + (tokens.expires_in ?? 600) * 1000
-            await _input.client.auth
-              .set({
-                path: { id: "snowflake-cortex" },
-                body: {
-                  type: "oauth",
-                  access: tokens.access_token,
-                  refresh: refreshedRefresh,
-                  expires: refreshedExpires,
-                  ...(oauth.accountId && { accountId: oauth.accountId }),
-                },
-              })
-              .catch(() => {})
-          } catch {}
-        }
-
         return {
           apiKey: OAUTH_DUMMY_KEY,
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
@@ -339,18 +319,6 @@ export async function SnowflakeCortexAuthPlugin(_input: PluginInput): Promise<Ho
                   .then(async (tokens) => {
                     const refreshedRefresh = tokens.refresh_token || refreshToken
                     const refreshedExpires = Date.now() + (tokens.expires_in ?? 600) * 1000
-                    await _input.client.auth
-                      .set({
-                        path: { id: "snowflake-cortex" },
-                        body: {
-                          type: "oauth",
-                          access: tokens.access_token,
-                          refresh: refreshedRefresh,
-                          expires: refreshedExpires,
-                          ...(accountId && { accountId }),
-                        },
-                      })
-                      .catch(() => {})
                     return {
                       access: tokens.access_token,
                       refresh: refreshedRefresh,

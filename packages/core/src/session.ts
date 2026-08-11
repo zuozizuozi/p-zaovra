@@ -3,7 +3,7 @@ export * from "./session/schema"
 
 import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
 import { ListAnchor } from "@zaovra-ai/schema/session"
-import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -18,7 +18,6 @@ import { SessionMessageTable, SessionTable } from "./session/sql"
 import { SessionSchema } from "./session/schema"
 import { AbsolutePath, PositiveInt, RelativePath } from "./schema"
 import { AgentV2 } from "./agent"
-import { SessionV1 } from "./v1/session"
 import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
@@ -37,6 +36,7 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@zaovra-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@zaovra-ai/schema/durable-event-manifest"
+import { SessionTodo } from "./session/todo"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -57,6 +57,7 @@ const ListInputBase = {
   search: Schema.String.pipe(Schema.optional),
   limit: PositiveInt.pipe(Schema.optional),
   order: Schema.Literals(["asc", "desc"]).pipe(Schema.optional),
+  roots: Schema.Boolean.pipe(Schema.optional),
   anchor: ListAnchor.pipe(Schema.optional),
 }
 
@@ -78,6 +79,7 @@ export type ListInput = typeof ListInput.Type
 
 type CreateInput = {
   id?: SessionSchema.ID
+  parentID?: SessionSchema.ID
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
@@ -85,7 +87,12 @@ type CreateInput = {
 
 type CompactInput = {
   sessionID: SessionSchema.ID
-  prompt?: Prompt
+}
+
+type UpdateInput = {
+  sessionID: SessionSchema.ID
+  title?: string
+  archived?: boolean
 }
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Session.NotFoundError", {
@@ -114,6 +121,8 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly update: (input: UpdateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
     limit?: number
@@ -151,20 +160,23 @@ export interface Interface {
     delivery?: SessionInput.Delivery
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  readonly pending: (sessionID: SessionSchema.ID) => Effect.Effect<boolean, NotFoundError>
+  readonly pendingInputs: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<SessionInput.Admitted>, NotFoundError>
+  readonly todos: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<SessionTodo.Info>, NotFoundError>
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
     command: string
     resume?: boolean
-  }) => Effect.Effect<void, OperationUnavailableError>
+  }) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly skill: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
     skill: string
     resume?: boolean
   }) => Effect.Effect<void, OperationUnavailableError>
-  readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
-  readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
+  readonly compact: (input: CompactInput) => Effect.Effect<boolean, NotFoundError | SessionRunner.RunError>
+  readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
@@ -217,29 +229,24 @@ const layer = Layer.effect(
           .run()
           .pipe(Effect.orDie)
         const now = Date.now()
-        const info = SessionV1.SessionInfo.make({
-          id: sessionID,
-          slug: Slug.create(),
-          version: InstallationVersion,
-          projectID: project.id,
-          directory: input.location.directory,
-          path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
-          workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
-          title: `New session - ${new Date(now).toISOString()}`,
-          agent: input.agent,
-          model: input.model
-            ? {
-                id: ModelV2.ID.make(input.model.id),
-                providerID: input.model.providerID,
-                variant: input.model.variant,
-              }
-            : undefined,
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          time: { created: now, updated: now },
-        })
         const projected = yield* events
-          .publish(SessionV1.Event.Created, { sessionID, info }, { location: input.location })
+          .publish(
+            SessionEvent.Created,
+            {
+              sessionID,
+              timestamp: DateTime.makeUnsafe(now),
+              projectID: project.id,
+              parentID: input.parentID,
+              agent: input.agent,
+              model: input.model,
+              location: input.location,
+              subpath: RelativePath.make(path.relative(project.directory, input.location.directory).replaceAll("\\", "/")),
+              title: `New session - ${new Date(now).toISOString()}`,
+              slug: Slug.create(),
+              version: InstallationVersion,
+            },
+            { location: input.location },
+          )
           .pipe(
             Effect.as({ type: "created" } as const),
             Effect.catchDefect((defect) => {
@@ -265,6 +272,29 @@ const layer = Layer.effect(
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
       }),
+      update: Effect.fn("V2Session.update")(function* (input) {
+        const session = yield* result.get(input.sessionID)
+        yield* events.publish(
+          SessionEvent.Updated,
+          {
+            sessionID: input.sessionID,
+            timestamp: yield* DateTime.now,
+            title: input.title,
+            archived: input.archived,
+          },
+          { location: session.location },
+        )
+        return yield* result.get(input.sessionID).pipe(Effect.orDie)
+      }),
+      remove: Effect.fn("V2Session.remove")(function* (sessionID) {
+        const session = yield* result.get(sessionID)
+        yield* execution.interrupt(sessionID)
+        yield* events.publish(
+          SessionEvent.Deleted,
+          { sessionID, timestamp: yield* DateTime.now },
+          { location: session.location },
+        )
+      }),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
@@ -275,6 +305,7 @@ const layer = Layer.effect(
         if (input.workspaceID) conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
         if ("project" in input) conditions.push(eq(SessionTable.project_id, input.project))
         if (input.search) conditions.push(like(SessionTable.title, `%${input.search}%`))
+        if (input.roots) conditions.push(isNull(SessionTable.parent_id))
         if (input.anchor) {
           conditions.push(
             order === "asc"
@@ -384,8 +415,69 @@ const layer = Layer.effect(
           }),
         ),
       ),
-      shell: Effect.fn("V2Session.shell")(function* () {
-        return yield* new OperationUnavailableError({ operation: "shell" })
+      pending: Effect.fn("V2Session.pending")(function* (sessionID) {
+        yield* result.get(sessionID)
+        return (
+          (yield* SessionInput.hasPending(db, sessionID, "steer")) ||
+          (yield* SessionInput.hasPending(db, sessionID, "queue"))
+        )
+      }),
+      pendingInputs: Effect.fn("V2Session.pendingInputs")(function* (sessionID) {
+        yield* result.get(sessionID)
+        return yield* SessionInput.pending(db, sessionID)
+      }),
+      todos: Effect.fn("V2Session.todos")(function* (sessionID) {
+        const session = yield* result.get(sessionID)
+        return yield* SessionTodo.Service.use((todos) => todos.get(sessionID)).pipe(
+          Effect.provide(locations.get(session.location)),
+        )
+      }),
+      shell: Effect.fn("V2Session.shell")(function* (input) {
+        const session = yield* result.get(input.sessionID)
+        const callID = input.id ?? EventV2.ID.create()
+        const existing = (yield* result.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).find(
+          (message): message is SessionMessage.Shell => message.type === "shell" && message.callID === callID,
+        )
+        if (existing?.time.completed) return
+        if (existing) return yield* new OperationUnavailableError({ operation: "shell" })
+        yield* events.publish(
+          SessionEvent.Shell.Started,
+          {
+            sessionID: input.sessionID,
+            messageID: SessionMessage.ID.create(),
+            callID,
+            command: input.command,
+            timestamp: yield* DateTime.now,
+          },
+          { id: callID, location: session.location },
+        )
+        const output = yield* Effect.tryPromise({
+          try: async (signal) => {
+            const command =
+              process.platform === "win32"
+                ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", input.command]
+                : ["/bin/sh", "-lc", input.command]
+            const child = Bun.spawn(command, {
+              cwd: session.location.directory,
+              stdout: "pipe",
+              stderr: "pipe",
+              signal,
+            })
+            const [stdout, stderr, exit] = await Promise.all([
+              new Response(child.stdout).text(),
+              new Response(child.stderr).text(),
+              child.exited,
+            ])
+            return `${stdout}${stderr}${exit === 0 ? "" : `\nProcess exited with code ${exit}.`}`
+          },
+          catch: (error) => error,
+        }).pipe(Effect.catch((error) => Effect.succeed(`Command failed: ${error instanceof Error ? error.message : error}`)))
+        yield* events.publish(
+          SessionEvent.Shell.Ended,
+          { sessionID: input.sessionID, callID, output, timestamp: yield* DateTime.now },
+          { location: session.location },
+        )
+        if (input.resume !== false) yield* execution.wake(input.sessionID)
       }),
       skill: Effect.fn("V2Session.skill")(function* () {
         return yield* new OperationUnavailableError({ operation: "skill" })
@@ -416,11 +508,11 @@ const layer = Layer.effect(
       }),
       compact: Effect.fn("V2Session.compact")(function* (input) {
         yield* result.get(input.sessionID)
-        return yield* new OperationUnavailableError({ operation: "compact" })
+        return yield* execution.compact?.(input.sessionID) ?? Effect.succeed(false)
       }),
       wait: Effect.fn("V2Session.wait")(function* (sessionID) {
         yield* result.get(sessionID)
-        return yield* new OperationUnavailableError({ operation: "wait" })
+        return yield* execution.wait?.(sessionID) ?? Effect.void
       }),
       active: execution.active,
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {

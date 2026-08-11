@@ -28,10 +28,6 @@ export const AttachCommand = cmd({
         type: "string",
         describe: "session id to continue",
       })
-      .option("fork", {
-        type: "boolean",
-        describe: "fork the session when continuing (use with --continue or --session)",
-      })
       .option("password", {
         alias: ["p"],
         type: "string",
@@ -87,7 +83,6 @@ export const AttachCommand = cmd({
         username: args.username,
         continue: args.continue,
         session: args.session,
-        fork: args.fork,
         replay: noReplay ? false : undefined,
         replayLimit: args.replayLimit,
       })
@@ -105,12 +100,6 @@ export const AttachCommand = cmd({
     }
 
     const { TuiConfig } = await import("@/config/tui")
-    if (args.fork && !args.continue && !args.session) {
-      UI.error("--fork requires --continue or --session")
-      process.exitCode = 1
-      return
-    }
-
     const headers = ServerAuth.headers({ password: args.password, username: args.username })
     const config = await TuiConfig.get()
 
@@ -138,7 +127,6 @@ export const AttachCommand = cmd({
         args: {
           continue: args.continue,
           sessionID: args.session,
-          fork: args.fork,
         },
         directory,
         headers,

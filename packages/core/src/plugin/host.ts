@@ -181,7 +181,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
                 }
                 draft.method.update({
                   integrationID: Integration.ID.make(input.integrationID),
-                  method: { type: "key", label: input.method.label },
+                  method: { type: "key", label: input.method.label, prompts: input.method.prompts },
                 })
               },
               remove: (id, method) =>

@@ -6,16 +6,17 @@
 // footer through stream.ts.
 //
 // Prompt turns are one-at-a-time: runPromptTurn() sends the prompt, arms a
-// deferred Wait, and resolves when the session becomes idle.
-// Prefer session.status idle events, but also poll session.status because some
-// transports can miss status events while still delivering message events. If
+// deferred Wait, and resolves when the V2 Session drain is no longer active.
+// Durable session.next execution events prove the drain started; polling
+// v2.session.active then closes the race where the terminal event is delivered
+// before process-local ownership is released. If
 // the turn is aborted (user interrupt), it flushes any in-progress parts as
 // interrupted entries.
 //
 // The tick counter prevents stale idle events from resolving the wrong turn.
 // We also re-check live session status before resolving an idle event so a
 // delayed idle from an older turn cannot complete a newer busy turn.
-import type { Event, GlobalEvent, ZaovraClient } from "@zaovra-ai/sdk/v2"
+import type { Event, GlobalEvent, Message, Part, PermissionView, PermissionV2Request, ZaovraClient } from "@zaovra-ai/sdk/v2"
 import { Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import {
@@ -132,6 +133,151 @@ type TransportService = {
 
 class Service extends Context.Service<Service, TransportService>()("@zaovra/RunStreamTransport") {}
 
+function permission(request: PermissionV2Request): PermissionView {
+  return {
+    id: request.id,
+    sessionID: request.sessionID,
+    permission: request.action,
+    patterns: request.resources,
+    always: request.save ?? request.resources,
+    metadata: request.metadata ?? {},
+    tool: request.source,
+  }
+}
+
+type LegacyMessage = { info: Message; parts: Part[] }
+type V2Message = NonNullable<Awaited<ReturnType<ZaovraClient["v2"]["session"]["messages"]>>["data"]>["data"][number]
+
+function projectedMessage(message: V2Message, sessionID: string, directory: string | undefined): LegacyMessage | undefined {
+  if (message.type === "user") {
+    return {
+      info: {
+        id: message.id,
+        sessionID,
+        role: "user",
+        time: message.time,
+        agent: "",
+        model: { providerID: "", modelID: "" },
+      },
+      parts: [
+        {
+          id: `${message.id}:text`,
+          sessionID,
+          messageID: message.id,
+          type: "text",
+          text: message.text,
+          time: { start: message.time.created, end: message.time.created },
+        },
+        ...(message.files ?? []).map((file, index) => ({
+          id: `${message.id}:file:${index}`,
+          sessionID,
+          messageID: message.id,
+          type: "file" as const,
+          mime: "application/octet-stream",
+          filename: file.name,
+          url: file.uri,
+        })),
+        ...(message.agents ?? []).map((agent, index) => ({
+          id: `${message.id}:agent:${index}`,
+          sessionID,
+          messageID: message.id,
+          type: "agent" as const,
+          name: agent.name,
+        })),
+      ],
+    }
+  }
+
+  if (message.type !== "assistant") return undefined
+  const tokens = message.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  return {
+    info: {
+      id: message.id,
+      sessionID,
+      role: "assistant",
+      time: message.time,
+      parentID: "",
+      modelID: message.model.id,
+      providerID: message.model.providerID,
+      mode: "chat",
+      agent: message.agent,
+      path: { cwd: directory ?? "", root: directory ?? "" },
+      cost: message.cost ?? 0,
+      tokens,
+      variant: message.model.variant,
+      finish: message.finish,
+      error: message.error
+        ? { name: "UnknownError", data: { message: message.error.message } }
+        : undefined,
+    },
+    parts: message.content.map((part) => {
+      if (part.type === "text") {
+        return {
+          id: part.id,
+          sessionID,
+          messageID: message.id,
+          type: "text" as const,
+          text: part.text,
+          time: { start: message.time.created, end: message.time.completed },
+        }
+      }
+
+      if (part.type === "reasoning") {
+        return {
+          id: part.id,
+          sessionID,
+          messageID: message.id,
+          type: "reasoning" as const,
+          text: part.text,
+          time: { start: part.time?.created ?? message.time.created, end: part.time?.completed },
+          metadata: part.providerMetadata,
+        }
+      }
+
+      const content = "content" in part.state
+        ? part.state.content
+            .map((item) => (item.type === "text" ? item.text : item.name ? `${item.name}: ${item.uri}` : item.uri))
+            .join("\n")
+        : ""
+      const state =
+        part.state.status === "pending"
+          ? { status: "pending" as const, input: {}, raw: part.state.input }
+          : part.state.status === "running"
+            ? {
+                status: "running" as const,
+                input: part.state.input,
+                metadata: part.state.structured,
+                time: { start: part.time.ran ?? part.time.created },
+              }
+            : part.state.status === "completed"
+              ? {
+                  status: "completed" as const,
+                  input: part.state.input,
+                  output: content,
+                  title: part.name,
+                  metadata: part.state.structured,
+                  time: { start: part.time.ran ?? part.time.created, end: part.time.completed ?? part.time.created },
+                }
+              : {
+                  status: "error" as const,
+                  input: part.state.input,
+                  error: part.state.error.message,
+                  metadata: part.state.structured,
+                  time: { start: part.time.ran ?? part.time.created, end: part.time.completed ?? part.time.created },
+                }
+      return {
+        id: part.id,
+        sessionID,
+        messageID: message.id,
+        type: "tool" as const,
+        callID: part.id,
+        tool: part.name,
+        state,
+      }
+    }),
+  }
+}
+
 function sid(event: Event): string | undefined {
   if (event.type === "message.updated") {
     return event.properties.sessionID
@@ -145,19 +291,9 @@ function sid(event: Event): string | undefined {
     return event.properties.part.sessionID
   }
 
-  if (
-    event.type === "session.next.shell.started" ||
-    event.type === "session.next.shell.ended" ||
-    event.type === "permission.asked" ||
-    event.type === "permission.replied" ||
-    event.type === "question.asked" ||
-    event.type === "question.replied" ||
-    event.type === "question.rejected" ||
-    event.type === "session.error" ||
-    event.type === "session.status"
-  ) {
-    return event.properties.sessionID
-  }
+  const properties = Reflect.get(event, "properties")
+  const sessionID = properties && typeof properties === "object" ? Reflect.get(properties, "sessionID") : undefined
+  if (typeof sessionID === "string") return sessionID
 
   return undefined
 }
@@ -172,6 +308,16 @@ function isEvent(value: unknown): value is Event {
   return typeof type === "string" && !!properties && typeof properties === "object"
 }
 
+function nativeEvent(value: unknown): Event | undefined {
+  if (isEvent(value)) return value
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const id = Reflect.get(value, "id")
+  const type = Reflect.get(value, "type")
+  const data = Reflect.get(value, "data")
+  if (typeof id !== "string" || typeof type !== "string" || !data || typeof data !== "object") return undefined
+  return { id, type, properties: data } as Event
+}
+
 function isGlobalEvent(value: unknown): value is GlobalEvent {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false
@@ -182,16 +328,14 @@ function isGlobalEvent(value: unknown): value is GlobalEvent {
 }
 
 function globalPayloadEvent(value: unknown): Event | undefined {
-  if (!isGlobalEvent(value)) {
-    return undefined
-  }
+  if (!isGlobalEvent(value)) return nativeEvent(value)
 
   const payload = value.payload
   if (payload.type === "sync") {
     return undefined
   }
 
-  return isEvent(payload) ? payload : undefined
+  return nativeEvent(payload)
 }
 
 function isMatchingDisposeEvent(value: unknown, directory: string | undefined): boolean {
@@ -219,11 +363,21 @@ function active(event: Event, sessionID: string): boolean {
     return false
   }
 
-  if (event.type !== "session.status") {
-    return true
+  if (event.type.startsWith("session.next.")) {
+    return (
+      event.type.startsWith("session.next.step.") ||
+      event.type.startsWith("session.next.text.") ||
+      event.type.startsWith("session.next.reasoning.") ||
+      event.type.startsWith("session.next.tool.") ||
+      event.type === "session.next.retried"
+    )
   }
 
-  return event.properties.status.type !== "idle"
+  if (event.type === "session.status") {
+    return event.properties.status.type !== "idle"
+  }
+
+  return false
 }
 
 // Races the turn's deferred completion against an abort signal.
@@ -426,7 +580,7 @@ function createLayer(input: StreamInput) {
         const events = yield* Scope.provide(scope)(
           Effect.acquireRelease(
             Effect.promise(() =>
-              input.sdk.global.event({
+              input.sdk.v2.event.subscribe({
                 signal: abort.signal,
               }),
             ),
@@ -478,7 +632,12 @@ function createLayer(input: StreamInput) {
         }
 
         const trackBlocker = (event: Event) => {
-          if (event.type !== "permission.asked" && event.type !== "question.asked") {
+          if (
+            event.type !== "permission.asked" &&
+            event.type !== "permission.v2.asked" &&
+            event.type !== "question.asked" &&
+            event.type !== "question.v2.asked"
+          ) {
             return
           }
 
@@ -492,8 +651,11 @@ function createLayer(input: StreamInput) {
         const releaseBlocker = (event: Event) => {
           if (
             event.type !== "permission.replied" &&
+            event.type !== "permission.v2.replied" &&
             event.type !== "question.replied" &&
-            event.type !== "question.rejected"
+            event.type !== "question.rejected" &&
+            event.type !== "question.v2.replied" &&
+            event.type !== "question.v2.rejected"
           ) {
             return
           }
@@ -532,27 +694,6 @@ function createLayer(input: StreamInput) {
           state.footerView = current
         }
 
-        const resolveShellAgent = Effect.fn("RunStreamTransport.resolveShellAgent")(function* (
-          agent: string | undefined,
-        ) {
-          if (agent) {
-            return agent
-          }
-
-          const list = yield* Effect.promise(() =>
-            input.sdk.app.agents(input.directory ? { directory: input.directory } : undefined, { throwOnError: true }),
-          ).pipe(
-            Effect.map((item) => item.data ?? []),
-            Effect.orElseSucceed(() => []),
-          )
-          const next = list.find((item) => item.mode !== "subagent" && item.hidden !== true)?.name
-          if (next) {
-            return next
-          }
-
-          return yield* Effect.fail(new Error("no primary agent available for shell mode"))
-        })
-
         const recoverQuestion = Effect.fn("RunStreamTransport.recoverQuestion")(function* (partID: string) {
           if (recovering.has(partID)) {
             return
@@ -565,8 +706,10 @@ function createLayer(input: StreamInput) {
                 return
               }
 
-              const questions = yield* Effect.promise(() => input.sdk.question.list()).pipe(
-                Effect.map((item) => (item.data ?? []).filter((request) => request.sessionID === input.sessionID)),
+              const questions = yield* Effect.promise(() =>
+                input.sdk.v2.session.question.list({ sessionID: input.sessionID }),
+              ).pipe(
+                Effect.map((item) => item.data?.data ?? []),
                 Effect.orElseSucceed(() => []),
               )
               if (state.data.questions.length > 0 || !state.data.tools.has(partID)) {
@@ -600,33 +743,53 @@ function createLayer(input: StreamInput) {
 
         const messages = (sessionID: string, limit?: number) =>
           Effect.promise(() =>
-            input.sdk.session.messages({
+            input.sdk.v2.session.messages({
               sessionID,
               ...(typeof limit === "number" ? { limit } : {}),
+              order: "asc",
             }),
           ).pipe(
-            Effect.map((item) => item.data ?? []),
+            Effect.map((item) =>
+              (item.data?.data ?? [])
+                .map((message) => projectedMessage(message, sessionID, input.directory))
+                .filter((message): message is LegacyMessage => message !== undefined),
+            ),
             Effect.orElseSucceed(() => []),
           )
 
         const replayMessages = () =>
           Effect.promise(() =>
-            input.sdk.session.messages({
+            input.sdk.v2.session.messages({
               sessionID: input.sessionID,
+              order: "asc",
               ...(input.replayLimit === undefined
                 ? {}
                 : { limit: Math.max(input.replayLimit, SUBAGENT_BOOTSTRAP_LIMIT) }),
             }),
-          ).pipe(Effect.flatMap((item) => (item.error ? Effect.fail(item.error) : Effect.succeed(item.data ?? []))))
+          ).pipe(
+            Effect.flatMap((item) =>
+              item.error
+                ? Effect.fail(item.error)
+                : Effect.succeed(
+                    (item.data?.data ?? [])
+                      .map((message) => projectedMessage(message, input.sessionID, input.directory))
+                      .filter((message): message is LegacyMessage => message !== undefined),
+                  ),
+            ),
+          )
 
         const replayRequests = () =>
           Effect.all(
             [
-              Effect.promise(() => input.sdk.permission.list()).pipe(
-                Effect.flatMap((item) => (item.error ? Effect.fail(item.error) : Effect.succeed(item.data ?? []))),
+              Effect.promise(() => input.sdk.v2.session.permission.list({ sessionID: input.sessionID })).pipe(
+                Effect.flatMap((item) =>
+                  item.error ? Effect.fail(item.error) : Effect.succeed((item.data?.data ?? []).map(permission)),
+                ),
               ),
-              Effect.promise(() => input.sdk.question.list()).pipe(
-                Effect.flatMap((item) => (item.error ? Effect.fail(item.error) : Effect.succeed(item.data ?? []))),
+              Effect.promise(() => input.sdk.v2.session.question.list({ sessionID: input.sessionID })).pipe(
+                Effect.flatMap((item) =>
+                  item.error ? Effect.fail(item.error) : Effect.succeed(item.data?.data ?? []),
+                ),
               ),
             ],
             { concurrency: "unbounded" },
@@ -684,20 +847,16 @@ function createLayer(input: StreamInput) {
                     : Math.max(input.replayLimit, SUBAGENT_BOOTSTRAP_LIMIT)
                   : SUBAGENT_BOOTSTRAP_LIMIT,
               ),
-              Effect.promise(() =>
-                input.sdk.session.children({
-                  sessionID: input.sessionID,
-                }),
-              ).pipe(
-                Effect.map((item) => item.data ?? []),
+              Effect.promise(() => input.sdk.v2.session.list({ order: "desc" })).pipe(
+                Effect.map((item) => (item.data?.data ?? []).filter((session) => session.parentID === input.sessionID)),
                 Effect.orElseSucceed(() => []),
               ),
-              Effect.promise(() => input.sdk.permission.list()).pipe(
-                Effect.map((item) => item.data ?? []),
+              Effect.promise(() => input.sdk.v2.session.permission.list({ sessionID: input.sessionID })).pipe(
+                Effect.map((item) => (item.data?.data ?? []).map(permission)),
                 Effect.orElseSucceed(() => []),
               ),
-              Effect.promise(() => input.sdk.question.list()).pipe(
-                Effect.map((item) => item.data ?? []),
+              Effect.promise(() => input.sdk.v2.session.question.list({ sessionID: input.sessionID })).pipe(
+                Effect.map((item) => item.data?.data ?? []),
                 Effect.orElseSucceed(() => []),
               ),
             ],
@@ -705,6 +864,27 @@ function createLayer(input: StreamInput) {
               concurrency: "unbounded",
             },
           )
+
+          const childBlockers = yield* Effect.forEach(
+            children,
+            (child) =>
+              Effect.all(
+                [
+                  Effect.promise(() => input.sdk.v2.session.permission.list({ sessionID: child.id })).pipe(
+                    Effect.map((item) => (item.data?.data ?? []).map(permission)),
+                    Effect.orElseSucceed(() => []),
+                  ),
+                  Effect.promise(() => input.sdk.v2.session.question.list({ sessionID: child.id })).pipe(
+                    Effect.map((item) => item.data?.data ?? []),
+                    Effect.orElseSucceed(() => []),
+                  ),
+                ],
+                { concurrency: "unbounded" },
+              ),
+            { concurrency: 4 },
+          )
+          const allPermissions = [...permissions, ...childBlockers.flatMap((item) => item[0])]
+          const allQuestions = [...questions, ...childBlockers.flatMap((item) => item[1])]
 
           const sessionPermissions = permissions.filter((item) => item.sessionID === input.sessionID)
           const sessionQuestions = questions.filter((item) => item.sessionID === input.sessionID)
@@ -751,8 +931,8 @@ function createLayer(input: StreamInput) {
             data: state.subagent,
             messages: messagesList,
             children,
-            permissions,
-            questions,
+            permissions: allPermissions,
+            questions: allQuestions,
           })
 
           for (const request of [
@@ -800,11 +980,8 @@ function createLayer(input: StreamInput) {
         })
 
         const idle = Effect.fn("RunStreamTransport.idle")((fallback: boolean) =>
-          Effect.promise(() => input.sdk.session.status()).pipe(
-            Effect.map((out) => {
-              const item = out.data?.[input.sessionID]
-              return !item || item.type === "idle"
-            }),
+          Effect.promise(() => input.sdk.v2.session.active()).pipe(
+            Effect.map((out) => !out.data?.data[input.sessionID]),
             Effect.orElseSucceed(() => fallback),
           ),
         )
@@ -848,11 +1025,11 @@ function createLayer(input: StreamInput) {
         })
 
         const mark = Effect.fn("RunStreamTransport.mark")(function* (event: Event) {
-          if (
-            event.type !== "session.status" ||
-            event.properties.sessionID !== input.sessionID ||
-            event.properties.status.type !== "idle"
-          ) {
+          const terminal =
+            (event.type === "session.status" && event.properties.status.type === "idle") ||
+            event.type === "session.next.step.ended" ||
+            event.type === "session.next.step.failed"
+          if (!terminal || sid(event) !== input.sessionID) {
             return
           }
 
@@ -861,7 +1038,7 @@ function createLayer(input: StreamInput) {
             return
           }
 
-          yield* complete(next, true)
+          yield* complete(next, event.type === "session.status")
         })
 
         const poll = Effect.fn("RunStreamTransport.poll")(function* (next: Wait, signal: AbortSignal) {
@@ -1199,6 +1376,16 @@ function createLayer(input: StreamInput) {
             return
           }
 
+          if (next.prompt.mode === "shell") {
+            yield* Effect.fail(new Error("shell mode is not available in the V2 run workflow"))
+            return
+          }
+
+          if (next.prompt.command) {
+            yield* Effect.fail(new Error("slash commands are not available in the V2 run workflow"))
+            return
+          }
+
           const item: Wait = {
             tick: state.tick,
             armed: false,
@@ -1217,122 +1404,74 @@ function createLayer(input: StreamInput) {
           abort.signal.addEventListener("abort", stop, { once: true })
           yield* poll(item, turn.signal).pipe(Effect.forkIn(scope, { startImmediately: true }), Effect.asVoid)
 
+          const attachments = [
+            ...(next.includeFiles ? next.files : []),
+            ...next.prompt.parts.filter(
+              (part): part is Extract<RunPromptPart, { type: "file" }> => part.type === "file",
+            ),
+          ]
           const req = {
             sessionID: input.sessionID,
-            messageID: next.prompt.messageID,
-            agent: next.agent,
-            model: next.model,
-            variant: next.variant,
-            parts: [
-              ...(next.includeFiles ? next.files : []),
-              { type: "text" as const, text: next.prompt.text },
-              ...next.prompt.parts,
-            ],
+            id: next.prompt.messageID,
+            prompt: {
+              text: next.prompt.text,
+              files: attachments.map((part) => ({ uri: part.url, name: part.filename })),
+              agents: next.prompt.parts
+                .filter((part): part is Extract<RunPromptPart, { type: "agent" }> => part.type === "agent")
+                .map((part) => ({ name: part.name })),
+            },
+            delivery: "steer" as const,
           }
-          const command = next.prompt.command
-          const send =
-            next.prompt.mode === "shell"
-              ? Effect.sync(() => {
-                  input.trace?.write("send.shell", {
-                    sessionID: input.sessionID,
-                    command: next.prompt.text,
-                  })
-                }).pipe(
-                  Effect.andThen(
-                    resolveShellAgent(next.agent)
-                      .pipe(
-                        Effect.flatMap((agent) =>
-                          Effect.promise(() =>
-                            input.sdk.session.shell(
-                              {
-                                sessionID: input.sessionID,
-                                agent,
-                                model: next.model,
-                                command: next.prompt.text,
-                              },
-                              { signal: turn.signal, throwOnError: true },
-                            ),
-                          ),
-                        ),
-                      )
-                      .pipe(
-                        Effect.tap(() =>
-                          Effect.sync(() => {
-                            input.trace?.write("send.shell.ok", {
-                              sessionID: input.sessionID,
-                            })
-                            item.armed = true
-                            item.live = true
-                          }),
-                        ),
-                        Effect.flatMap(() => Deferred.succeed(item.done, undefined).pipe(Effect.ignore)),
-                        Effect.catch((error) => Deferred.fail(item.done, error).pipe(Effect.ignore)),
-                        Effect.forkIn(scope, { startImmediately: true }),
-                        Effect.asVoid,
-                      ),
-                  ),
-                )
-              : command
-                ? Effect.sync(() => {
-                    input.trace?.write("send.command", { sessionID: input.sessionID, command: command.name })
-                  }).pipe(
-                    Effect.andThen(
-                      Effect.promise(() =>
-                        input.sdk.session.command(
-                          {
-                            sessionID: input.sessionID,
-                            messageID: next.prompt.messageID,
-                            agent: next.agent,
-                            model: next.model ? `${next.model.providerID}/${next.model.modelID}` : undefined,
-                            variant: next.variant,
-                            command: command.name,
-                            arguments: command.arguments,
-                            parts: [
-                              ...(next.includeFiles ? next.files : []),
-                              ...next.prompt.parts.filter(
-                                (item): item is Extract<RunPromptPart, { type: "file" }> => item.type === "file",
-                              ),
-                            ],
-                          },
-                          { signal: turn.signal },
-                        ),
-                      ).pipe(
-                        Effect.tap(() =>
-                          Effect.sync(() => {
-                            input.trace?.write("send.command.ok", {
-                              sessionID: input.sessionID,
-                              command: command.name,
-                            })
-                            item.armed = true
-                            item.live = true
-                          }),
-                        ),
-                        Effect.flatMap(() => Deferred.succeed(item.done, undefined).pipe(Effect.ignore)),
-                        Effect.catch((error) => Deferred.fail(item.done, error).pipe(Effect.ignore)),
-                        Effect.forkIn(scope, { startImmediately: true }),
-                        Effect.asVoid,
-                      ),
+          const selectedModel = next.model
+          const select = Effect.all(
+            [
+              next.agent
+                ? Effect.promise(() =>
+                    input.sdk.v2.session.switchAgent(
+                      { sessionID: input.sessionID, agent: next.agent },
+                      { signal: turn.signal, throwOnError: true },
                     ),
                   )
-                : Effect.sync(() => {
-                    input.trace?.write("send.prompt", req)
-                  }).pipe(
-                    Effect.andThen(
-                      Effect.promise(() =>
-                        input.sdk.session.promptAsync(req, {
-                          signal: turn.signal,
-                        }),
-                      ),
-                    ),
-                    Effect.tap(() =>
-                      Effect.sync(() => {
-                        input.trace?.write("send.prompt.ok", {
-                          sessionID: input.sessionID,
-                        })
-                        item.armed = true
-                      }),
+                : Effect.void,
+              selectedModel
+                ? Effect.promise(() =>
+                    input.sdk.v2.session.switchModel(
+                      {
+                        sessionID: input.sessionID,
+                        model: {
+                          providerID: selectedModel.providerID,
+                          id: selectedModel.modelID,
+                          variant: next.variant,
+                        },
+                      },
+                      { signal: turn.signal, throwOnError: true },
                     ),
                   )
+                : Effect.void,
+            ],
+            { concurrency: "unbounded", discard: true },
+          )
+          const send = Effect.sync(() => {
+            input.trace?.write("send.prompt", req)
+          }).pipe(
+            Effect.andThen(select),
+            Effect.andThen(
+              Effect.promise(() =>
+                input.sdk.v2.session.prompt(req, {
+                  signal: turn.signal,
+                  throwOnError: true,
+                }),
+              ),
+            ),
+            Effect.tap(() =>
+              Effect.sync(() => {
+                input.trace?.write("send.prompt.ok", {
+                  sessionID: input.sessionID,
+                })
+                item.armed = true
+              }),
+            ),
+          )
 
           yield* send.pipe(
             Effect.flatMap(() => {
@@ -1363,12 +1502,15 @@ function createLayer(input: StreamInput) {
 
               return waitTurn(item.done, turn.signal).pipe(
                 Effect.flatMap((status) =>
-                  Effect.sync(() => {
+                  Effect.gen(function* () {
                     if (state.wait === item) {
                       state.wait = undefined
                     }
 
                     if (status === "abort") {
+                      yield* Effect.promise(() =>
+                        input.sdk.v2.session.interrupt({ sessionID: input.sessionID }),
+                      ).pipe(Effect.ignore)
                       flush("turn.abort")
                     }
                   }),
@@ -1443,9 +1585,8 @@ function createLayer(input: StreamInput) {
 // Opens an SDK event subscription and returns a SessionTransport.
 //
 // The background `watch` loop consumes every SDK event, runs it through the
-// reducer, and writes output to the footer. When a session.status idle
-// event arrives, it resolves the current turn's Wait so runPromptTurn()
-// can return.
+// reducer, and writes output to the footer. V2 execution events arm the
+// completion guard; process-local active-session polling resolves the turn.
 //
 // The transport is single-turn: only one runPromptTurn() call can be active
 // at a time. The prompt queue enforces this from above.

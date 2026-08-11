@@ -23,6 +23,7 @@ import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
+import { ConfigWork } from "./config/work"
 import { ConfigV1 } from "./v1/config/config"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
 
@@ -93,6 +94,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   commands: Schema.Record(Schema.String, ConfigCommand.Info).pipe(Schema.optional).annotate({
     description: "Named slash command definitions",
   }),
+  work: ConfigWork.Info.pipe(Schema.optional).annotate({
+    description: "Durable WorkGraph organization configuration",
+  }),
   instructions: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs supplying ambient instructions",
   }),
@@ -144,10 +148,7 @@ const layer = Layer.effect(
     const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
     const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string) {
-      const text = yield* fs.readFileStringSafe(filepath)
-      if (!text) return
-
+    const loadText = (text: string, filepath?: string) => {
       const errors: ParseError[] = []
       const input: unknown = parse(text, errors, { allowTrailingComma: true })
       if (errors.length) return
@@ -159,6 +160,12 @@ const layer = Layer.effect(
       )
       if (!info) return
       return new Document({ type: "document", path: filepath, info })
+    }
+
+    const loadFile = Effect.fnUntraced(function* (filepath: string) {
+      const text = yield* fs.readFileStringSafe(filepath)
+      if (!text) return
+      return loadText(text, filepath)
     })
 
     const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath) {
@@ -200,7 +207,13 @@ const layer = Layer.effect(
     const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.zaovra` files.
-    const configs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
+    const injected = process.env.ZAOVRA_CONFIG_CONTENT ? loadText(process.env.ZAOVRA_CONFIG_CONTENT) : undefined
+    const configs = [
+      ...(supplementary[0] ?? []),
+      ...direct,
+      ...supplementary.slice(1).flat(),
+      ...(injected ? [injected] : []),
+    ]
     // Rules use the opposite order so a user-global rule can override a
     // repository rule. Statement order inside each file stays unchanged.
     yield* policy.load(

@@ -65,7 +65,7 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
   const session = [] as URL[]
   const fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input))
-    if (url.pathname === "/session") session.push(url)
+    if (url.pathname === "/api/session") session.push(url)
     const overridden = await override?.(url)
     if (overridden) return overridden
     if (url.pathname === "/api/event" && events) return events.response()
@@ -100,8 +100,9 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
     if (url.pathname === "/project/current") return json({ id: "proj_test" })
     if (url.pathname === "/api/reference")
       return json({ location: { directory, project: { id: "proj_test", directory } }, data: [] })
+    if (["/api/mcp", "/api/mcp/resources"].includes(url.pathname)) return json({ data: {} })
     if (url.pathname === "/provider") return json({ all: [], default: {}, connected: [] })
-    if (url.pathname === "/session") return json([])
+    if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
     if (url.pathname === "/vcs") return json({ branch: "main" })
     throw new Error(`unexpected request: ${url.pathname}`)
   }) as typeof globalThis.fetch

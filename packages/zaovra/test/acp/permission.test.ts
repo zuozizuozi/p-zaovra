@@ -16,7 +16,7 @@ import { ACPEvent } from "@/acp/event"
 import { ACPSession } from "@/acp/session"
 
 type PermissionEvent = Extract<Event, { type: "permission.asked" }>
-type PermissionReplyParams = Parameters<ZaovraClient["permission"]["reply"]>[0]
+type PermissionReplyParams = Parameters<ZaovraClient["v2"]["session"]["permission"]["reply"]>[0]
 type SessionUpdateParams = Parameters<AgentSideConnection["sessionUpdate"]>[0]
 const cleanupDirs: string[] = []
 
@@ -52,10 +52,14 @@ function createHarness(
   const updates: SessionUpdateParams[] = []
   const session = makeSessionService()
   const sdk = {
-    permission: {
-      reply: (params: PermissionReplyParams) => {
-        replies.push(params)
-        return Promise.resolve({ data: true })
+    v2: {
+      session: {
+        permission: {
+          reply: (params: PermissionReplyParams) => {
+            replies.push(params)
+            return Promise.resolve({ data: true })
+          },
+        },
       },
     },
     session: {
@@ -180,7 +184,7 @@ describe("acp permissions", () => {
         { optionId: "reject", kind: "reject_once", name: "Reject" },
       ],
     })
-    expect(harness.replies).toEqual([{ requestID: "perm_1", reply: "once", directory: "/workspace" }])
+    expect(harness.replies).toEqual([{ sessionID: "ses_a", requestID: "perm_1", reply: "once" }])
   })
 
   it("uses permission metadata for non-shell titles", async () => {

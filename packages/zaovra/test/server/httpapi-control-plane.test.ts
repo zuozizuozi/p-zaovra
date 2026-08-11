@@ -6,7 +6,6 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { MoveSession } from "@zaovra-ai/core/control-plane/move-session"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionV2 } from "@zaovra-ai/core/session"
-import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { ServerAuth } from "../../src/server/auth"
@@ -36,7 +35,6 @@ const apiLayer = HttpRouter.serve(
   { disableListenLog: true, disableLogger: true },
 ).pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
-  Layer.provide(Layer.mock(Auth.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(Installation.Service)({})),
   Layer.provide(

@@ -1,4 +1,5 @@
 export * from "./gen/types.gen.js"
+export type { CommandView, PermissionView, QuestionView } from "./view.js"
 export type { FileSystemEntry as LocationFileSystemEntry } from "./gen/types.gen.js"
 
 import { createClient } from "./gen/client/client.gen.js"

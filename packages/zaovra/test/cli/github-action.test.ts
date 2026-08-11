@@ -1,37 +1,35 @@
 import { test, expect, describe } from "bun:test"
-import { SessionV1 } from "@zaovra-ai/core/v1/session"
+import type { Part } from "@zaovra-ai/sdk/v2"
 import { extractResponseText, formatPromptTooLargeError } from "../../src/cli/cmd/github"
-import type { MessageV2 } from "../../src/session/message-v2"
-import { SessionID, MessageID, PartID } from "../../src/session/schema"
 
 // Helper to create minimal valid parts
-function createTextPart(text: string): SessionV1.Part {
+function createTextPart(text: string): Part {
   return {
-    id: PartID.ascending(),
-    sessionID: SessionID.make("ses_test"),
-    messageID: MessageID.make("msg_test"),
+    id: crypto.randomUUID(),
+    sessionID: "ses_test",
+    messageID: "msg_test",
     type: "text" as const,
     text,
   }
 }
 
-function createReasoningPart(text: string): SessionV1.Part {
+function createReasoningPart(text: string): Part {
   return {
-    id: PartID.ascending(),
-    sessionID: SessionID.make("ses_test"),
-    messageID: MessageID.make("msg_test"),
+    id: crypto.randomUUID(),
+    sessionID: "ses_test",
+    messageID: "msg_test",
     type: "reasoning" as const,
     text,
     time: { start: 0 },
   }
 }
 
-function createToolPart(tool: string, title: string, status: "completed" | "running" = "completed"): SessionV1.Part {
+function createToolPart(tool: string, title: string, status: "completed" | "running" = "completed"): Part {
   if (status === "completed") {
     return {
-      id: PartID.ascending(),
-      sessionID: SessionID.make("ses_test"),
-      messageID: MessageID.make("msg_test"),
+      id: crypto.randomUUID(),
+      sessionID: "ses_test",
+      messageID: "msg_test",
       type: "tool" as const,
       callID: "c1",
       tool,
@@ -46,9 +44,9 @@ function createToolPart(tool: string, title: string, status: "completed" | "runn
     }
   }
   return {
-    id: PartID.ascending(),
-    sessionID: SessionID.make("ses_test"),
-    messageID: MessageID.make("msg_test"),
+    id: crypto.randomUUID(),
+    sessionID: "ses_test",
+    messageID: "msg_test",
     type: "tool" as const,
     callID: "c1",
     tool,
@@ -60,20 +58,20 @@ function createToolPart(tool: string, title: string, status: "completed" | "runn
   }
 }
 
-function createStepStartPart(): SessionV1.Part {
+function createStepStartPart(): Part {
   return {
-    id: PartID.ascending(),
-    sessionID: SessionID.make("ses_test"),
-    messageID: MessageID.make("msg_test"),
+    id: crypto.randomUUID(),
+    sessionID: "ses_test",
+    messageID: "msg_test",
     type: "step-start" as const,
   }
 }
 
-function createStepFinishPart(): SessionV1.Part {
+function createStepFinishPart(): Part {
   return {
-    id: PartID.ascending(),
-    sessionID: SessionID.make("ses_test"),
-    messageID: MessageID.make("msg_test"),
+    id: crypto.randomUUID(),
+    sessionID: "ses_test",
+    messageID: "msg_test",
     type: "step-finish" as const,
     reason: "done",
     cost: 0,

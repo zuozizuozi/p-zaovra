@@ -5,7 +5,8 @@ import type {
   EventMessagePartUpdated,
   ZaovraClient,
   Part,
-  SessionMessageResponse,
+  SessionMessage,
+  SessionMessageAssistant,
   ToolPart,
 } from "@zaovra-ai/sdk/v2"
 import { Effect } from "effect"
@@ -77,39 +78,40 @@ export class Subscription {
     }
   }
 
-  async replayMessage(message: SessionMessageResponse) {
-    if (message.info.role !== "assistant" && message.info.role !== "user") return
-
-    const cwd = message.info.role === "assistant" ? message.info.path?.cwd : undefined
-    for (const part of message.parts) {
-      await this.recordFetchedPart(message.info.sessionID, message, part)
-      if (part.type === "tool") {
-        await this.handleToolPart(message.info.sessionID, part, cwd ?? process.cwd())
+  async replayMessage(sessionId: string, cwd: string, message: SessionMessage) {
+    if (message.type === "user") {
+      for (const chunk of partsToContentChunks([
+        { type: "text", text: message.text },
+        ...(message.files ?? []).map((file) => ({
+          type: "file" as const,
+          url: file.uri,
+          mime: file.mime,
+          filename: file.name,
+        })),
+      ])) {
+        await this.input.connection.sessionUpdate({
+          sessionId,
+          update: { sessionUpdate: "user_message_chunk", messageId: message.id, ...chunk },
+        })
+      }
+      return
+    }
+    if (message.type !== "assistant") return
+    for (const content of message.content) {
+      if (content.type === "tool") {
+        await this.handleProjectedTool(sessionId, content, cwd)
         continue
       }
-      await this.replayContentPart(message, part)
-    }
-  }
-
-  private async replayContentPart(message: SessionMessageResponse, part: Part) {
-    if (part.type !== "text" && part.type !== "file" && part.type !== "reasoning") return
-
-    const sessionUpdate =
-      part.type === "reasoning"
-        ? "agent_thought_chunk"
-        : message.info.role === "user"
-          ? "user_message_chunk"
-          : "agent_message_chunk"
-
-    for (const chunk of partsToContentChunks([part as ReplayPart])) {
-      await this.input.connection.sessionUpdate({
-        sessionId: message.info.sessionID,
-        update: {
-          sessionUpdate,
-          messageId: message.info.id,
-          ...chunk,
-        },
-      })
+      for (const chunk of partsToContentChunks([{ type: content.type, text: content.text }])) {
+        await this.input.connection.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: content.type === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk",
+            messageId: message.id,
+            ...chunk,
+          },
+        })
+      }
     }
   }
 
@@ -163,10 +165,7 @@ export class Subscription {
         partId: props.partID,
       }),
     )
-    const metadata =
-      known?.role && known.partType
-        ? known
-        : await this.fetchPartMetadata(session.id, session.cwd, props.messageID, props.partID)
+    const metadata = known?.role && known.partType ? known : undefined
     if (metadata?.role !== "assistant") return
     if (metadata.partType === "text" && props.field === "text" && metadata.ignored !== true) {
       await this.input.connection.sessionUpdate({
@@ -198,38 +197,69 @@ export class Subscription {
     }
   }
 
-  private async fetchPartMetadata(sessionId: string, cwd: string, messageId: string, partId: string) {
-    const message = await this.input.sdk.session
-      .message(
-        {
-          sessionID: sessionId,
-          messageID: messageId,
-          directory: cwd,
-        },
-        { throwOnError: true },
-      )
-      .then((response) => response.data)
-      .catch(() => undefined)
-    if (!message) return
-
-    const part = message.parts.find((item) => item.id === partId)
-    if (!part) return
-    return await this.recordFetchedPart(sessionId, message, part)
-  }
-
-  private async recordFetchedPart(sessionId: string, message: SessionMessageResponse, part: Part) {
-    return await Effect.runPromise(
-      this.input.session.recordPartMetadata({
+  private async handleProjectedTool(
+    sessionId: string,
+    part: SessionMessageAssistant["content"][number] & { type: "tool" },
+    cwd: string,
+  ) {
+    const input = part.state.status === "pending" ? {} : part.state.input
+    await this.input.connection.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        ...pendingToolCall({ toolCallId: part.id, toolName: part.name, state: { input }, cwd }),
+      },
+    })
+    this.toolStarts.add(part.id)
+    if (part.state.status === "pending") return
+    if (part.state.status === "running") {
+      await this.input.connection.sessionUpdate({
         sessionId,
-        messageId: part.messageID,
-        partId: part.id,
-        partType: part.type,
-        role: message.info.role,
-        ignored: part.type === "text" ? part.ignored : undefined,
-        toolCallId: part.type === "tool" ? part.callID : undefined,
-        metadata: "metadata" in part ? part.metadata : undefined,
-      }),
-    )
+        update: {
+          sessionUpdate: "tool_call_update",
+          ...runningToolUpdate({ toolCallId: part.id, toolName: part.name, state: { ...part.state, title: part.name }, cwd }),
+        },
+      })
+      return
+    }
+    if (part.state.status === "error") {
+      await this.input.connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          ...errorToolUpdate({
+            toolCallId: part.id,
+            toolName: part.name,
+            state: { status: "error", input, error: part.state.error.message, metadata: part.state.structured },
+            cwd,
+          }),
+        },
+      })
+      return
+    }
+    await this.input.connection.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        ...completedToolUpdate({
+          toolCallId: part.id,
+          toolName: part.name,
+          state: {
+            status: "completed",
+            input,
+            output: part.state.content
+              .map((item) => (item.type === "text" ? item.text : `[${item.name ?? item.uri}](${item.uri})`))
+              .join("\n\n"),
+            metadata: part.state.structured,
+            attachments: part.state.attachments?.map((attachment) => ({
+              ...attachment,
+              url: attachment.uri,
+            })),
+          },
+          cwd,
+        }),
+      },
+    })
   }
 
   private async handleToolPart(sessionId: string, part: ToolPart, cwd: string) {

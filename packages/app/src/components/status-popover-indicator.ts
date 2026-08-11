@@ -1,4 +1,5 @@
-import type { LspStatus, McpStatus } from "@zaovra-ai/sdk/v2/client"
+import type { LspStatus } from "@zaovra-ai/sdk/v2/client"
+import type { McpStatus } from "@/context/global-sync/mcp"
 
 export function hasNonBlockingServiceIssue(input: {
   mcp: Array<McpStatus["status"]>

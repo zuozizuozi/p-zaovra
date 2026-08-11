@@ -4,7 +4,7 @@ import type { DesktopTheme } from "@zaovra-ai/ui/theme/types"
 import oc2ThemeJson from "../../../ui/src/theme/themes/oc-2.json"
 import { randomUUID } from "node:crypto"
 import { rmSync } from "node:fs"
-import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol } from "electron"
+import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol, shell } from "electron"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { TitlebarTheme } from "../preload/types"
@@ -22,6 +22,7 @@ const rendererHost = "renderer"
 const clipboardWritePermission = "clipboard-sanitized-write"
 const notificationPermission = "notifications"
 const rendererPermissions = new Set([clipboardWritePermission, notificationPermission])
+const externalProtocols = new Set(["http:", "https:", "mailto:"])
 const oc2Theme = oc2ThemeJson as DesktopTheme
 const oc2Background = {
   light: resolveThemeVariant(oc2Theme.light, false)["background-base"],
@@ -203,19 +204,8 @@ export function createMainWindow(id: string = randomUUID()) {
   })
 
   allowRendererPermissions(win)
+  restrictRendererNavigation(win)
   wireWindowRecovery(win, id)
-
-  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
-    const { requestHeaders } = details
-    upsertKeyValue(requestHeaders, "Access-Control-Allow-Origin", ["*"])
-    callback({ requestHeaders })
-  })
-
-  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    const { responseHeaders = {} } = details
-    addRendererHeaders(details.url, responseHeaders)
-    callback({ responseHeaders })
-  })
 
   state.manage(win)
   registerWindow(win, id)
@@ -437,20 +427,47 @@ function allowRendererPermissions(win: BrowserWindow) {
   })
 }
 
-function isTrustedRendererUrl(value?: string) {
+export function isTrustedRendererUrl(value?: string) {
   return isRendererUrl(value)
 }
 
-function addRendererHeaders(value: string, headers: Record<string, any>) {
-  upsertKeyValue(headers, "Access-Control-Allow-Origin", ["*"])
-  upsertKeyValue(headers, "Access-Control-Allow-Headers", ["*"])
-  if (isRendererUrl(value, true)) upsertKeyValue(headers, documentPolicyHeader, [jsCallStacksDocumentPolicy])
-}
-
-function isRendererUrl(value?: string, html = false) {
+export function isAllowedExternalUrl(value?: string) {
   if (!value || !URL.canParse(value)) return false
   const url = new URL(value)
-  if (html && !url.pathname.endsWith(".html")) return false
+  return externalProtocols.has(url.protocol) && Boolean(url.hostname || url.protocol === "mailto:")
+}
+
+export function rendererNavigationDisposition(value?: string) {
+  if (isTrustedRendererUrl(value)) return "allow" as const
+  if (isAllowedExternalUrl(value)) return "external" as const
+  return "deny" as const
+}
+
+function restrictRendererNavigation(win: BrowserWindow) {
+  const external = (value: string) => {
+    if (!isAllowedExternalUrl(value)) return
+    void shell.openExternal(value).catch((error) =>
+      writeLog("window", "failed to open external URL", { url: value, error }, "warn"),
+    )
+  }
+  const block = (event: Electron.Event, value: string, externalize: boolean) => {
+    const disposition = rendererNavigationDisposition(value)
+    if (disposition === "allow") return
+    event.preventDefault()
+    if (disposition === "external" && externalize) external(value)
+  }
+
+  win.webContents.on("will-frame-navigate", (event) => block(event, event.url, event.isMainFrame))
+  win.webContents.on("will-redirect", (event) => block(event, event.url, event.isMainFrame))
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    external(url)
+    return { action: "deny" }
+  })
+}
+
+function isRendererUrl(value?: string) {
+  if (!value || !URL.canParse(value)) return false
+  const url = new URL(value)
   if (url.protocol === `${rendererProtocol}:` && url.host === rendererHost) return true
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (!devUrl || !URL.canParse(devUrl)) return false
@@ -479,18 +496,4 @@ function clampZoom(value: number) {
 function updateZoom(win: BrowserWindow) {
   updateTitlebar(win)
   win.webContents.send("zoom-factor-changed", win.webContents.getZoomFactor())
-}
-
-function upsertKeyValue(obj: Record<string, any>, keyToChange: string, value: any) {
-  const keyToChangeLower = keyToChange.toLowerCase()
-  for (const key of Object.keys(obj)) {
-    if (key.toLowerCase() === keyToChangeLower) {
-      // Reassign old key
-      obj[key] = value
-      // Done
-      return
-    }
-  }
-  // Insert at end instead
-  obj[keyToChange] = value
 }

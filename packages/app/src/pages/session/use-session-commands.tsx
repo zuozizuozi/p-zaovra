@@ -193,42 +193,22 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       return
     }
 
-    const url = await sdk()
-      .client.session.share({ sessionID })
-      .then((res) => res.data?.share?.url)
-      .catch(() => undefined)
-    if (!url) {
-      showToast({
-        title: language.t("toast.session.share.failed.title"),
-        description: language.t("toast.session.share.failed.description"),
-        variant: "error",
-      })
-      return
-    }
-
-    await copyShare(url, false)
+    showToast({
+      title: language.t("toast.session.share.failed.title"),
+      description: "Session sharing is not available for V2 sessions.",
+      variant: "error",
+    })
   }
 
   const unshare = async () => {
     const sessionID = params.id
     if (!sessionID) return
 
-    await sdk()
-      .client.session.unshare({ sessionID })
-      .then(() =>
-        showToast({
-          title: language.t("toast.session.unshare.success.title"),
-          description: language.t("toast.session.unshare.success.description"),
-          variant: "success",
-        }),
-      )
-      .catch(() =>
-        showToast({
-          title: language.t("toast.session.unshare.failed.title"),
-          description: language.t("toast.session.unshare.failed.description"),
-          variant: "error",
-        }),
-      )
+    showToast({
+      title: language.t("toast.session.unshare.failed.title"),
+      description: "Session sharing is not available for V2 sessions.",
+      variant: "error",
+    })
   }
 
   const openFile = () => {
@@ -316,13 +296,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     const parts = sync().data.part[message.id]
 
     if (sync().data.session_working(sessionID)) {
-      await client.session.abort({ sessionID }).catch(() => {})
+      await client.v2.session.interrupt({ sessionID }).catch(() => {})
     }
 
     await runCommand({
       owner,
       prompt: promptSession,
-      request: () => client.session.revert({ sessionID, messageID: message.id }),
+      request: () => client.v2.session.revert.stage({ sessionID, messageID: message.id }),
       updatePrompt: (promptSession) => {
         if (parts) promptSession.set(extractPromptFromParts(parts, { directory }))
       },
@@ -346,7 +326,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       await runCommand({
         owner,
         prompt: promptSession,
-        request: () => client.session.unrevert({ sessionID }),
+        request: () => client.v2.session.revert.clear({ sessionID }),
         updatePrompt: (promptSession) => promptSession.reset(),
         updateViewport: () => setActiveMessage(findLast(messages, (x) => x.id >= revertMessageID)),
       })
@@ -356,7 +336,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     await runCommand({
       owner,
       prompt: promptSession,
-      request: () => client.session.revert({ sessionID, messageID: next.id }),
+      request: () => client.v2.session.revert.stage({ sessionID, messageID: next.id }),
       updatePrompt: () => undefined,
       updateViewport: () => setActiveMessage(findLast(messages, (x) => x.id < next.id)),
     })
@@ -375,43 +355,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       return
     }
 
-    await sdk().client.session.summarize({
-      sessionID,
-      modelID: model.id,
-      providerID: model.provider.id,
-    })
+    await sdk().client.v2.session.compact({ sessionID })
   }
 
-  const fork = () => {
-    void openDialog(
-      () => import("@/components/dialog-fork"),
-      (x) => dialog.show(() => <x.DialogFork />),
-    )
-  }
-
-  const shareCmds = () => {
-    if (sync().data.config.share === "disabled") return []
-    return [
-      sessionCommand({
-        id: "session.share",
-        title: info()?.share?.url ? language.t("session.share.copy.copyLink") : language.t("command.session.share"),
-        description: info()?.share?.url
-          ? language.t("toast.session.share.success.description")
-          : language.t("command.session.share.description"),
-        slash: "share",
-        disabled: !params.id,
-        onSelect: share,
-      }),
-      sessionCommand({
-        id: "session.unshare",
-        title: language.t("command.session.unshare"),
-        description: language.t("command.session.unshare.description"),
-        slash: "unshare",
-        disabled: !params.id || !info()?.share?.url,
-        onSelect: unshare,
-      }),
-    ]
-  }
+  const shareCmds = () => []
 
   const sessionCmds = () => [
     sessionCommand({
@@ -450,14 +397,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       slash: "compact",
       disabled: !params.id || visibleUserMessages().length === 0,
       onSelect: compact,
-    }),
-    sessionCommand({
-      id: "session.fork",
-      title: language.t("command.session.fork"),
-      description: language.t("command.session.fork.description"),
-      slash: "fork",
-      disabled: !params.id || visibleUserMessages().length === 0,
-      onSelect: fork,
     }),
   ]
 

@@ -82,6 +82,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { listV2Sessions } from "@/context/v2-session-list"
 
 export default function LegacyLayout(props: ParentProps) {
   const serverSDK = useServerSDK()
@@ -874,10 +875,9 @@ export default function LegacyLayout(props: ParentProps) {
     const index = sessions.findIndex((s) => s.id === session.id)
     const nextSession = sessions[index + 1] ?? sessions[index - 1]
 
-    await serverSDK().client.session.update({
-      directory: session.directory,
+    await serverSDK().client.v2.session.update({
       sessionID: session.id,
-      time: { archived: Date.now() },
+      archived: true,
     })
     setStore(
       produce((draft) => {
@@ -1230,8 +1230,7 @@ export default function LegacyLayout(props: ParentProps) {
       await Promise.all(
         dirs.map(async (item) => ({
           path: { directory: item },
-          session: await serverSDK()
-            .client.session.list({ directory: item })
+          session: await listV2Sessions(serverSDK().client, { directory: item, roots: true, order: "desc" })
             .then((x) => x.data ?? [])
             .catch(() => []),
         })),
@@ -1444,8 +1443,10 @@ export default function LegacyLayout(props: ParentProps) {
     })
     const dismiss = () => toaster.dismiss(progress)
 
-    const sessions: Session[] = await serverSDK()
-      .client.session.list({ directory })
+    const sessions: Session[] = await listV2Sessions(serverSDK().client, {
+      directory,
+      order: "desc",
+    })
       .then((x) => x.data ?? [])
       .catch(() => [])
 
@@ -1476,16 +1477,14 @@ export default function LegacyLayout(props: ParentProps) {
       return
     }
 
-    const archivedAt = Date.now()
     await Promise.all(
       sessions
         .filter((session) => session.time.archived === undefined)
         .map((session) =>
           serverSDK()
-            .client.session.update({
+            .client.v2.session.update({
               sessionID: session.id,
-              directory: session.directory,
-              time: { archived: archivedAt },
+              archived: true,
             })
             .catch(() => undefined),
         ),
@@ -1581,8 +1580,10 @@ export default function LegacyLayout(props: ParentProps) {
     })
 
     const refresh = async () => {
-      const sessions = await serverSDK()
-        .client.session.list({ directory: props.directory })
+      const sessions = await listV2Sessions(serverSDK().client, {
+        directory: props.directory,
+        order: "desc",
+      })
         .then((x) => x.data ?? [])
         .catch(() => [])
       const active = sessions.filter((session) => session.time.archived === undefined)

@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import type {
   Message,
   Part,
-  PermissionRequest,
-  QuestionRequest,
+  PermissionView,
+  QuestionView,
   SessionStatus,
   SnapshotFileDiff,
   Todo,
@@ -37,8 +37,8 @@ describe("app session cache", () => {
       todo: Record<string, Todo[] | undefined>
       message: Record<string, Message[] | undefined>
       part: Record<string, Part[] | undefined>
-      permission: Record<string, PermissionRequest[] | undefined>
-      question: Record<string, QuestionRequest[] | undefined>
+      permission: Record<string, PermissionView[] | undefined>
+      question: Record<string, QuestionView[] | undefined>
       part_text_accum_delta: Record<string, string | undefined>
     } = {
       session_status: { ses_1: { type: "busy" } as SessionStatus },
@@ -46,8 +46,8 @@ describe("app session cache", () => {
       todo: { ses_1: [] as Todo[] },
       message: {},
       part: { msg_1: [part("prt_1", "ses_1", "msg_1")] },
-      permission: { ses_1: [] as PermissionRequest[] },
-      question: { ses_1: [] as QuestionRequest[] },
+      permission: { ses_1: [] as PermissionView[] },
+      question: { ses_1: [] as QuestionView[] },
       part_text_accum_delta: { prt_1: "streamed text" },
     }
 
@@ -71,8 +71,8 @@ describe("app session cache", () => {
       todo: Record<string, Todo[] | undefined>
       message: Record<string, Message[] | undefined>
       part: Record<string, Part[] | undefined>
-      permission: Record<string, PermissionRequest[] | undefined>
-      question: Record<string, QuestionRequest[] | undefined>
+      permission: Record<string, PermissionView[] | undefined>
+      question: Record<string, QuestionView[] | undefined>
       part_text_accum_delta: Record<string, string | undefined>
     } = {
       session_status: {},

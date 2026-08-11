@@ -6,7 +6,7 @@ import { SessionTable } from "@zaovra-ai/core/session/sql"
 import { ProjectTable } from "@zaovra-ai/core/project/sql"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { ProjectV2 } from "@zaovra-ai/core/project"
-import { SessionID } from "../../src/session/schema"
+import { Session } from "@zaovra-ai/schema/session"
 import { $ } from "bun"
 import { tmpdirScoped } from "../fixture/fixture"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -18,10 +18,10 @@ const it = testEffect(LayerNode.compile(LayerNode.group([Project.node, Database.
 
 function legacySessionID() {
   // Global-session migration covers persisted IDs from before prefixed session IDs.
-  return crypto.randomUUID() as SessionID
+  return Session.ID.make(crypto.randomUUID())
 }
 
-function seed(opts: { id: SessionID; dir: string; project: ProjectV2.ID }) {
+function seed(opts: { id: Session.ID; dir: string; project: ProjectV2.ID }) {
   const now = Date.now()
   return Database.Service.use(({ db }) =>
     db

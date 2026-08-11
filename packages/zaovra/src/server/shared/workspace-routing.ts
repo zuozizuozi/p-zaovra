@@ -1,12 +1,8 @@
-import { SessionID } from "@/session/schema"
+import { SessionV2 } from "@zaovra-ai/core/session"
 
 type Rule = { method?: string; path: string; exact?: boolean; action: "local" | "forward" }
 
-const RULES: Array<Rule> = [
-  { path: "/experimental/workspace", action: "local" },
-  { path: "/session/status", action: "forward" },
-  { method: "GET", path: "/session", action: "local" },
-]
+const RULES: Array<Rule> = [{ path: "/experimental/workspace", action: "local" }]
 
 export function isLocalWorkspaceRoute(method: string, path: string) {
   for (const rule of RULES) {
@@ -18,14 +14,10 @@ export function isLocalWorkspaceRoute(method: string, path: string) {
 }
 
 export function getWorkspaceRouteSessionID(url: URL) {
-  if (url.pathname === "/session/status") return null
-
-  const id =
-    url.pathname.match(/^\/session\/([^/]+)(?:\/|$)/)?.[1] ??
-    url.pathname.match(/^\/experimental\/session\/([^/]+)\/background$/)?.[1]
+  const id = url.pathname.match(/^\/api\/session\/([^/]+)(?:\/|$)/)?.[1]
   if (!id) return null
 
-  return SessionID.make(id)
+  return SessionV2.ID.make(id)
 }
 
 export function workspaceProxyURL(target: string | URL, requestURL: URL) {

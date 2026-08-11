@@ -1,8 +1,8 @@
 import type {
   Message,
   Part,
-  PermissionRequest,
-  QuestionRequest,
+  PermissionView,
+  QuestionView,
   SessionStatus,
   SnapshotFileDiff,
   Todo,
@@ -16,8 +16,8 @@ type SessionCache = {
   todo: Record<string, Todo[] | undefined>
   message: Record<string, Message[] | undefined>
   part: Record<string, Part[] | undefined>
-  permission: Record<string, PermissionRequest[] | undefined>
-  question: Record<string, QuestionRequest[] | undefined>
+  permission: Record<string, PermissionView[] | undefined>
+  question: Record<string, QuestionView[] | undefined>
   part_text_accum_delta: Record<string, string | undefined>
 }
 

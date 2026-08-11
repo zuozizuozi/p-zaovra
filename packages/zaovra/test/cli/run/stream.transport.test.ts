@@ -1,17 +1,32 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
-import { ZaovraClient, type GlobalEvent } from "@zaovra-ai/sdk/v2"
+import {
+  ZaovraClient,
+  type GlobalEvent,
+  type Message,
+  type Part,
+  type PermissionView,
+  type QuestionView,
+  type Session,
+  type SessionStatus,
+} from "@zaovra-ai/sdk/v2"
 import { createSessionTransport } from "@/cli/cmd/run/stream.transport"
 import type { FooterApi, FooterEvent, LocalReplayRow, RunFilePart, StreamCommit } from "@/cli/cmd/run/types"
 
 type EventStream = Awaited<ReturnType<ZaovraClient["event"]["subscribe"]>>["stream"]
 type GlobalEventStream = Awaited<ReturnType<ZaovraClient["global"]["event"]>>["stream"]
 type SdkEvent = EventStream extends AsyncGenerator<infer T, unknown, unknown> ? T : never
-type SessionMessage = NonNullable<Awaited<ReturnType<ZaovraClient["session"]["messages"]>>["data"]>[number]
-type SessionChild = NonNullable<Awaited<ReturnType<ZaovraClient["session"]["children"]>>["data"]>[number]
+type SessionMessage = { info: Message; parts: Part[] }
+type SessionChild = Session
 type SessionToolPart = Extract<SessionMessage["parts"][number], { type: "tool" }>
-type SessionStatusMap = NonNullable<Awaited<ReturnType<ZaovraClient["session"]["status"]>>["data"]>
+type SessionStatusMap = Record<string, SessionStatus>
 type TextPart = Extract<SessionMessage["parts"][number], { type: "text" }>
 type ReasoningPart = Extract<SessionMessage["parts"][number], { type: "reasoning" }>
+type ReturnTypeData<T> = {
+  data: T
+  error: undefined
+  request: Request
+  response: Response
+}
 
 afterEach(() => {
   mock.restore()
@@ -419,12 +434,12 @@ function sdk(
     globalStream?: GlobalEventStream
     subscribe?: ZaovraClient["event"]["subscribe"]
     globalEvent?: ZaovraClient["global"]["event"]
-    promptAsync?: ZaovraClient["session"]["promptAsync"]
-    status?: ZaovraClient["session"]["status"]
-    messages?: ZaovraClient["session"]["messages"]
-    children?: ZaovraClient["session"]["children"]
-    permissions?: ZaovraClient["permission"]["list"]
-    questions?: ZaovraClient["question"]["list"]
+    promptAsync?: (input: { sessionID: string; messageID?: string; parts?: Array<{ type: string; [key: string]: unknown }> }, options?: { signal?: AbortSignal | null }) => Promise<ReturnTypeData<void>>
+    status?: () => Promise<ReturnTypeData<SessionStatusMap>>
+    messages?: (input: { sessionID: string; limit?: number }) => Promise<ReturnTypeData<SessionMessage[]>>
+    children?: (input: { sessionID: string }) => Promise<ReturnTypeData<SessionChild[]>>
+    permissions?: () => Promise<ReturnTypeData<PermissionView[]>>
+    questions?: () => Promise<ReturnTypeData<QuestionView[]>>
   } = {},
 ) {
   const client = new ZaovraClient()
@@ -432,21 +447,153 @@ function sdk(
   const subscribe: ZaovraClient["event"]["subscribe"] = input.subscribe ?? (() => sse(input.stream ?? emptyStream()))
   const globalEvent: ZaovraClient["global"]["event"] =
     input.globalEvent ?? (() => globalSse(input.globalStream ?? wrapGlobalStream(input.stream ?? emptyStream())))
-  const promptAsync: ZaovraClient["session"]["promptAsync"] = input.promptAsync ?? (() => ok(undefined))
-  const status: ZaovraClient["session"]["status"] = input.status ?? (() => ok({}))
-  const messages: ZaovraClient["session"]["messages"] = input.messages ?? (() => ok([]))
-  const children: ZaovraClient["session"]["children"] = input.children ?? (() => ok([]))
-  const permissions: ZaovraClient["permission"]["list"] = input.permissions ?? (() => ok([]))
-  const questions: ZaovraClient["question"]["list"] = input.questions ?? (() => ok([]))
+  const promptAsync = input.promptAsync ?? (() => ok(undefined))
+  const status = input.status ?? (() => ok({}))
+  const messages = input.messages ?? (() => ok([]))
+  const children = input.children ?? (() => ok([]))
+  const permissions = input.permissions ?? (() => ok([]))
+  const questions = input.questions ?? (() => ok([]))
 
   spyOn(client.event, "subscribe").mockImplementation(subscribe)
   spyOn(client.global, "event").mockImplementation(globalEvent)
-  spyOn(client.session, "promptAsync").mockImplementation(promptAsync)
-  spyOn(client.session, "status").mockImplementation(status)
-  spyOn(client.session, "messages").mockImplementation(messages)
-  spyOn(client.session, "children").mockImplementation(children)
-  spyOn(client.permission, "list").mockImplementation(permissions)
-  spyOn(client.question, "list").mockImplementation(questions)
+  spyOn(client.v2.event, "subscribe").mockImplementation(async () => (await globalEvent()) as never)
+  spyOn(client.v2.session, "prompt").mockImplementation(async (next, options) => {
+    await promptAsync(
+      {
+        sessionID: next.sessionID,
+        messageID: next.id,
+        parts: [
+          ...(next.prompt?.files ?? []).map((file) => ({
+            type: "file" as const,
+            url: file.uri,
+            filename: file.name ?? "file",
+            mime: "application/octet-stream",
+          })),
+          { type: "text" as const, text: next.prompt?.text ?? "" },
+          ...(next.prompt?.agents ?? []).map((agent) => ({ type: "agent" as const, name: agent.name })),
+        ],
+      },
+      options,
+    )
+    return (await ok({
+      data: {
+        admittedSeq: 1,
+        id: next.id ?? "msg-1",
+        sessionID: next.sessionID,
+        prompt: next.prompt ?? { text: "" },
+        delivery: next.delivery ?? "steer",
+        timeCreated: 1,
+      },
+    })) as never
+  })
+  spyOn(client.v2.session, "active").mockImplementation(async () => {
+    const result = await status()
+    return (await ok({ data: result.data ?? {} })) as never
+  })
+  spyOn(client.v2.session, "switchAgent").mockImplementation(async () => (await ok(undefined)) as never)
+  spyOn(client.v2.session, "switchModel").mockImplementation(async () => (await ok(undefined)) as never)
+  spyOn(client.v2.session, "interrupt").mockImplementation(async () => (await ok(undefined)) as never)
+  spyOn(client.v2.session, "messages").mockImplementation(async (next) => {
+    const result = await messages({ sessionID: next.sessionID, limit: next.limit })
+    return (await ok({
+      data: (result.data ?? []).map((message) =>
+        message.info.role === "user"
+          ? {
+              id: message.info.id,
+              type: "user" as const,
+              text: message.parts
+                .filter((part): part is TextPart => part.type === "text")
+                .map((part) => part.text)
+                .join(""),
+              time: message.info.time,
+            }
+          : {
+              id: message.info.id,
+              type: "assistant" as const,
+              agent: message.info.agent,
+              model: { providerID: message.info.providerID, id: message.info.modelID },
+              time: message.info.time,
+              cost: message.info.cost,
+              tokens: message.info.tokens,
+              content: message.parts.map((part) => {
+                if (part.type === "text" || part.type === "reasoning") {
+                  return { type: part.type, id: part.id, text: part.text }
+                }
+                if (part.type !== "tool") return undefined
+                const state =
+                  part.state.status === "completed"
+                    ? {
+                        status: "completed" as const,
+                        input: part.state.input,
+                        content: [{ type: "text" as const, text: part.state.output }],
+                        structured: part.state.metadata,
+                      }
+                    : part.state.status === "error"
+                      ? {
+                          status: "error" as const,
+                          input: part.state.input,
+                          content: [],
+                          structured: part.state.metadata ?? {},
+                          error: { type: "unknown" as const, message: part.state.error },
+                        }
+                      : {
+                          status: "running" as const,
+                          input: part.state.input,
+                          content: [],
+                          structured: "metadata" in part.state ? (part.state.metadata ?? {}) : {},
+                        }
+                return {
+                  type: "tool" as const,
+                  id: part.callID,
+                  name: part.tool,
+                  state,
+                  time: {
+                    created: "time" in part.state ? part.state.time.start : 1,
+                    completed: "time" in part.state && "end" in part.state.time ? part.state.time.end : undefined,
+                  },
+                }
+              }).filter((part) => part !== undefined) as never,
+            },
+      ),
+      cursor: {},
+    })) as never
+  })
+  spyOn(client.v2.session, "list").mockImplementation(async () => {
+    const result = await children({ sessionID: "session-1" })
+    return (await ok({
+      data: (result.data ?? []).map((session) => ({
+        id: session.id,
+        parentID: session.parentID ?? "session-1",
+        projectID: "project-1",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: session.time,
+        title: session.title,
+        location: { directory: session.directory },
+      })),
+      cursor: {},
+    })) as never
+  })
+  spyOn(client.v2.session.permission, "list").mockImplementation(async (next) => {
+    const result = await permissions()
+    return (await ok({
+      data: (result.data ?? [])
+        .filter((request) => request.sessionID === next.sessionID)
+        .map((request) => ({
+          id: request.id,
+          sessionID: request.sessionID,
+          action: request.permission,
+          resources: request.patterns,
+          save: request.always,
+          metadata: request.metadata,
+          source: request.tool ? { type: "tool" as const, ...request.tool } : undefined,
+        })),
+    })) as never
+  })
+  spyOn(client.v2.session.question, "list").mockImplementation(async (next) => {
+    const result = await questions()
+    return (await ok({ data: (result.data ?? []).filter((request) => request.sessionID === next.sessionID) })) as never
+  })
 
   return client
 }
@@ -1319,7 +1466,9 @@ describe("run stream transport", () => {
         const item = ui.events.findLast((event) => event.type === "stream.subagent")
         const state = item?.type === "stream.subagent" ? item.state : undefined
         return state?.tabs.some((tab) => tab.sessionID === "child-1") &&
-          state.permissions.some((req) => req.id === "perm-1")
+          state.permissions.some(
+            (req) => req.id === "perm-1" && typeof req.metadata.input === "object" && req.metadata.input !== null,
+          )
           ? state
           : undefined
       })
@@ -2013,7 +2162,7 @@ describe("run stream transport", () => {
       type: "file",
       url: "file:///tmp/a.ts",
       filename: "a.ts",
-      mime: "text/plain",
+          mime: "application/octet-stream",
     }
 
     const transport = await createSessionTransport({
@@ -2101,6 +2250,100 @@ describe("run stream transport", () => {
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("turn timed out")), 1_000)),
       ])
+    } finally {
+      src.close()
+      await transport.close()
+    }
+  })
+
+  test("renders V2 session.next output and completes from active-session polling", async () => {
+    const src = eventFeed()
+    const ui = footer()
+    let busy = true
+    const transport = await createSessionTransport({
+      sdk: sdk({
+        stream: src.stream,
+        promptAsync: async () => {
+          queueMicrotask(() => {
+            src.push({
+              id: "step-start",
+              type: "session.next.step.started",
+              properties: {
+                sessionID: "session-1",
+                assistantMessageID: "msg-1",
+                timestamp: 1,
+                agent: "build",
+                model: { providerID: "openai", id: "gpt-5" },
+              },
+            })
+            src.push({
+              id: "text-start",
+              type: "session.next.text.started",
+              properties: {
+                sessionID: "session-1",
+                assistantMessageID: "msg-1",
+                textID: "text-1",
+                timestamp: 2,
+              },
+            })
+            src.push({
+              id: "text-delta",
+              type: "session.next.text.delta",
+              properties: {
+                sessionID: "session-1",
+                assistantMessageID: "msg-1",
+                textID: "text-1",
+                delta: "hello from v2",
+                timestamp: 3,
+              },
+            })
+            src.push({
+              id: "text-end",
+              type: "session.next.text.ended",
+              properties: {
+                sessionID: "session-1",
+                assistantMessageID: "msg-1",
+                textID: "text-1",
+                text: "hello from v2",
+                timestamp: 4,
+              },
+            })
+            src.push({
+              id: "step-end",
+              type: "session.next.step.ended",
+              properties: {
+                sessionID: "session-1",
+                assistantMessageID: "msg-1",
+                timestamp: 5,
+                finish: "stop",
+                cost: 0,
+                tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+              },
+            })
+            busy = false
+          })
+          return ok(undefined)
+        },
+        status: async () => ok(statusMap(busy)),
+      }),
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: ui.api,
+    })
+
+    try {
+      await transport.runPromptTurn({
+        agent: undefined,
+        model: undefined,
+        variant: undefined,
+        prompt: { text: "hello", parts: [] },
+        files: [],
+        includeFiles: false,
+      })
+      expect(ui.commits).toContainEqual(
+        expect.objectContaining({ kind: "assistant", text: "hello from v2", partID: "text-1" }),
+      )
     } finally {
       src.close()
       await transport.close()

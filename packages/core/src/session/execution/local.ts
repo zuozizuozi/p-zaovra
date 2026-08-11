@@ -32,6 +32,19 @@ const layer = Layer.effect(
       active: coordinator.active,
       interrupt: coordinator.interrupt,
       resume: coordinator.run,
+      wait: coordinator.wait,
+      compact: Effect.fn("SessionExecution.compact")(function* (sessionID) {
+        const session = yield* store.get(sessionID)
+        if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
+        let compacted = false
+        yield* coordinator.exclusive(
+          sessionID,
+          SessionRunner.Service.use((runner) =>
+            runner.compact(sessionID).pipe(Effect.tap((result) => Effect.sync(() => (compacted = result)))),
+          ).pipe(Effect.provide(locations.get(session.location))),
+        )
+        return compacted
+      }),
       wake: coordinator.wake,
     })
   }),

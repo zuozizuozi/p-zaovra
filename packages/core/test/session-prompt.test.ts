@@ -162,6 +162,30 @@ describe("SessionV2.prompt", () => {
     }),
   )
 
+  it.effect("lists pending inputs in durable admission order until promotion", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const first = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Apply this requirement" }),
+        resume: false,
+      })
+      const second = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Do this next" }),
+        delivery: "queue",
+        resume: false,
+      })
+
+      expect((yield* session.pendingInputs(sessionID)).map((input) => input.id)).toEqual([first.id, second.id])
+
+      const db = (yield* Database.Service).db
+      yield* SessionInput.promoteSteers(db, yield* EventV2.Service, sessionID, Number.MAX_SAFE_INTEGER)
+      expect((yield* session.pendingInputs(sessionID)).map((input) => input.id)).toEqual([second.id])
+    }),
+  )
+
   it.effect("resolves attachment MIME before admission", () =>
     Effect.gen(function* () {
       yield* setup

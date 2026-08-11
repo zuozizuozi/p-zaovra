@@ -16,7 +16,7 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
-import type { QuestionRequest } from "@zaovra-ai/sdk/v2"
+import type { QuestionView } from "@zaovra-ai/sdk/v2"
 import {
   createQuestionBodyState,
   questionConfirm,
@@ -45,7 +45,7 @@ import type { RunFooterTheme } from "./theme"
 import type { QuestionReject, QuestionReply } from "./types"
 
 export function RunQuestionBody(props: {
-  request: QuestionRequest
+  request: QuestionView
   theme: RunFooterTheme
   onReply: (input: QuestionReply) => void | Promise<void>
   onReject: (input: QuestionReject) => void | Promise<void>

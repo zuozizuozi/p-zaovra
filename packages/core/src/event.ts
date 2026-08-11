@@ -131,6 +131,7 @@ export interface Interface {
   ) => Effect.Effect<Payload<D>>
   readonly subscribe: <D extends Definition>(definition: D) => Stream.Stream<Payload<D>>
   readonly all: () => Stream.Stream<Payload>
+  readonly recentAfter: (id?: ID) => { readonly events: ReadonlyArray<Payload>; readonly complete: boolean }
   readonly durable: (input: { readonly aggregateID: string; readonly after?: number }) => Stream.Stream<Payload>
   /** @deprecated Use `all()` and consume the returned stream. */
   readonly listen: (listener: Subscriber) => Effect.Effect<Unsubscribe>
@@ -177,6 +178,7 @@ export const layerWith = (options?: LayerOptions) =>
         typed: new Map<string, PubSub.PubSub<Payload>>(),
       }
       const projectors = new Map<string, Subscriber[]>()
+      const recent: Payload[] = []
       // TODO: Bind durable projectors to exact type+version before supporting incompatible historical payloads.
       const listeners = new Array<Subscriber>()
       const { db } = yield* Database.Service
@@ -405,6 +407,8 @@ export const layerWith = (options?: LayerOptions) =>
 
       function notify(event: Payload, isolateListeners: boolean) {
         return Effect.gen(function* () {
+          recent.push(event)
+          if (recent.length > 2048) recent.splice(0, recent.length - 2048)
           yield* Effect.forEach(
             listeners,
             (listener) => (isolateListeners ? observe(event, listener) : listener(event)),
@@ -619,10 +623,18 @@ export const layerWith = (options?: LayerOptions) =>
           projectors.set(definition.type, list)
         })
 
+      const recentAfter = (id?: ID) => {
+        if (!id) return { events: [] as ReadonlyArray<Payload>, complete: false }
+        const index = recent.findIndex((event) => event.id === id)
+        if (index < 0) return { events: [] as ReadonlyArray<Payload>, complete: false }
+        return { events: recent.slice(index + 1), complete: true }
+      }
+
       return Service.of({
         publish,
         subscribe,
         all: streamAll,
+        recentAfter,
         durable,
         listen,
         project,

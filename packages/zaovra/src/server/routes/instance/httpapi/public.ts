@@ -56,19 +56,9 @@ type OpenApiResponse = {
 // public call shape. These keep SDK callers passing numbers/booleans while the
 // server still decodes string query params at runtime.
 const QueryParameterSchemas: Record<string, OpenApiSchema> = {
-  "GET /experimental/session start": { type: "number" },
-  "GET /experimental/session roots": QueryBooleanOpenApi,
-  "GET /experimental/session archived": QueryBooleanOpenApi,
   "GET /find/file limit": { type: "integer", minimum: 1, maximum: 200 },
-  "GET /experimental/session cursor": { type: "number" },
-  "GET /experimental/session limit": { type: "number" },
-  "GET /session start": { type: "number" },
-  "GET /session roots": QueryBooleanOpenApi,
-  "GET /session limit": { type: "number" },
-  "GET /session/{sessionID}/message limit": { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
   "GET /vcs/diff context": { type: "integer", minimum: 0 },
   "GET /api/session limit": { type: "number" },
-  "GET /api/session start": { type: "number" },
   "GET /api/session roots": QueryBooleanOpenApi,
   "GET /api/session/{sessionID}/message limit": { type: "number" },
 }
@@ -374,20 +364,6 @@ function referencesComponent(input: unknown, name: string): boolean {
 
 function normalizeLegacyOperation(operation: OpenApiOperation, path: string, method: string) {
   if (path === "/experimental/console/switch" && method === "post") delete operation.responses?.["400"]
-  if ((path !== "/session/{sessionID}/message" && path !== "/session/{sessionID}/command") || method !== "post") return
-  const response = operation.responses?.["200"]?.content?.["application/json"]
-  if (!response) return
-  response.schema = {
-    type: "object",
-    required: ["info", "parts"],
-    properties: {
-      info: { $ref: "#/components/schemas/AssistantMessage" },
-      parts: {
-        type: "array",
-        items: { $ref: "#/components/schemas/Part" },
-      },
-    },
-  }
 }
 
 function isRefResponse(response: OpenApiResponse, name: string) {

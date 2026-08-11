@@ -1,5 +1,5 @@
 import type { AgentSideConnection, Usage } from "@agentclientprotocol/sdk"
-import type { AssistantMessage as ZaovraAssistantMessage, Message } from "@zaovra-ai/sdk/v2"
+import type { AssistantMessage as ZaovraAssistantMessage, Message, SessionMessage as V2SessionMessage } from "@zaovra-ai/sdk/v2"
 import { InstanceRef } from "@/effect/instance-ref"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
@@ -26,11 +26,13 @@ export type MessagesInput = {
 }
 
 export type SDK = {
-  readonly session: {
+  readonly v2: {
+    readonly session: {
     readonly messages: (
-      parameters: { readonly sessionID: string; readonly directory: string },
+      parameters: { readonly sessionID: string; readonly order: "asc" },
       options: { readonly throwOnError: true },
-    ) => Promise<{ readonly data?: readonly SessionMessage[] | null }>
+    ) => Promise<{ readonly data: { readonly data: readonly V2SessionMessage[] } }>
+    }
   }
 }
 
@@ -74,9 +76,28 @@ export function messageLoaderFromSDK(sdk: SDK): MessageLoaderInterface {
   return MessageLoader.of({
     messages: (input) =>
       Effect.promise(() =>
-        sdk.session
-          .messages({ sessionID: input.sessionID, directory: input.directory }, { throwOnError: true })
-          .then((response) => response.data ?? []),
+        sdk.v2.session.messages({ sessionID: input.sessionID, order: "asc" }, { throwOnError: true }).then((response) =>
+          response.data.data.flatMap((message): SessionMessage[] =>
+            message.type === "assistant"
+              ? [
+                  {
+                    info: {
+                      role: "assistant",
+                      providerID: message.model.providerID,
+                      modelID: message.model.id,
+                      cost: message.cost ?? 0,
+                      tokens: message.tokens ?? {
+                        input: 0,
+                        output: 0,
+                        reasoning: 0,
+                        cache: { read: 0, write: 0 },
+                      },
+                    },
+                  },
+                ]
+              : [],
+          ),
+        ),
       ),
   })
 }

@@ -291,7 +291,7 @@ export function MessageTimeline(props: {
   const titleValue = createMemo(() => info()?.title)
   const titleLabel = createMemo(() => sessionTitle(titleValue()))
   const shareUrl = createMemo(() => info()?.share?.url)
-  const shareEnabled = createMemo(() => sync().data.config.share !== "disabled")
+  const shareEnabled = createMemo(() => false)
   const parentID = createMemo(() => info()?.parentID)
   const parent = createMemo(() => {
     const id = parentID()
@@ -650,14 +650,14 @@ export function MessageTimeline(props: {
   }
 
   const shareMutation = useMutation(() => ({
-    mutationFn: (id: string) => serverSDK().client.session.share({ sessionID: id }),
+    mutationFn: (_id: string) => Promise.reject(new Error("Session sharing is not available for V2 sessions")),
     onError: (err) => {
       console.error("Failed to share session", err)
     },
   }))
 
   const unshareMutation = useMutation(() => ({
-    mutationFn: (id: string) => serverSDK().client.session.unshare({ sessionID: id }),
+    mutationFn: (_id: string) => Promise.reject(new Error("Session sharing is not available for V2 sessions")),
     onError: (err) => {
       console.error("Failed to unshare session", err)
     },
@@ -665,7 +665,7 @@ export function MessageTimeline(props: {
 
   const titleMutation = useMutation(() => ({
     mutationFn: (input: { id: string; title: string }) =>
-      sdk().client.session.update({ sessionID: input.id, title: input.title }),
+      sdk().client.v2.session.update({ sessionID: input.id, title: input.title }),
     onSuccess: (_, input) => {
       sync().set(
         produce((draft) => {
@@ -809,7 +809,7 @@ export function MessageTimeline(props: {
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
     await sdk()
-      .client.session.update({ sessionID, time: { archived: Date.now() } })
+      .client.v2.session.update({ sessionID, archived: true })
       .then(() => {
         sync().set(
           produce((draft) => {
@@ -838,8 +838,8 @@ export function MessageTimeline(props: {
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
     const result = await sdk()
-      .client.session.delete({ sessionID })
-      .then((x) => x.data)
+      .client.v2.session.remove({ sessionID })
+      .then(() => true)
       .catch((err) => {
         showToast({
           title: language.t("session.delete.failed.title"),
@@ -952,6 +952,8 @@ export function MessageTimeline(props: {
   }
 
   const workingTurn = (userMessageID: string) => sessionStatus().type !== "idle" && activeMessageID() === userMessageID
+  const waitingToJoin = (userMessageID: string) =>
+    sessionStatus().type !== "idle" && (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0
 
   const turnDurationMs = (userMessageID: string) => {
     const message = messageByID().get(userMessageID)
@@ -1155,6 +1157,11 @@ export function MessageTimeline(props: {
                       useV2Actions={settings.general.newLayoutDesigns()}
                       comments={messageComments()}
                     />
+                    <Show when={waitingToJoin(userMessageRow().userMessageID)}>
+                      <div class="flex justify-end pt-1 pr-1 text-11-regular text-text-weak" role="status">
+                        {language.t("session.message.waitingToJoin")}
+                      </div>
+                    </Show>
                   </div>
                 </div>
               )}

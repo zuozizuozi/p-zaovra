@@ -1,6 +1,6 @@
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { httpClient } from "@zaovra-ai/core/effect/app-node-platform"
-import { Context, Effect, FiberMap, Iterable, Layer, Schema, Stream } from "effect"
+import { Context, DateTime, Effect, FiberMap, Iterable, Layer, Schema, Stream } from "effect"
 import { serviceUse } from "@zaovra-ai/core/effect/service-use"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -9,7 +9,6 @@ import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { Project } from "@/project/project"
 import { GlobalBus } from "@/bus/global"
-import { Auth } from "@/auth"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventSequenceTable, EventTable } from "@zaovra-ai/core/event/sql"
@@ -21,11 +20,17 @@ import { WorkspaceTable } from "@zaovra-ai/core/control-plane/workspace.sql"
 import { getAdapter, registeredAdapters } from "./adapters"
 import { type Target, type WorkspaceInfo, WorkspaceInfo as WorkspaceInfoSchema } from "./types"
 import { WorkspaceV2 } from "@zaovra-ai/core/workspace"
-import { Session } from "@/session/session"
-import { SessionPrompt } from "@/session/prompt"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { SessionExecutionLocal } from "@zaovra-ai/core/session/execution/local"
 import { SessionTable } from "@zaovra-ai/core/session/sql"
-import { SessionID } from "@/session/schema"
-import { NotFoundError } from "@/storage/storage"
+import { Session } from "@zaovra-ai/schema/session"
+import { SessionEvent } from "@zaovra-ai/schema/session-event"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
+import { Location } from "@zaovra-ai/core/location"
+import { PermissionV2 } from "@zaovra-ai/core/permission"
+import { QuestionV2 } from "@zaovra-ai/core/question"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { errorData } from "@/util/error"
 import { waitEvent } from "./util"
 import { WorkspaceRef } from "@/effect/instance-ref"
@@ -70,7 +75,7 @@ export type CreateInput = Schema.Schema.Type<typeof CreateInput>
 
 export const SessionWarpInput = Schema.Struct({
   workspaceID: Schema.NullOr(WorkspaceV2.ID),
-  sessionID: SessionID,
+  sessionID: Session.ID,
   copyChanges: Schema.optional(Schema.Boolean),
 })
 export type SessionWarpInput = Schema.Schema.Type<typeof SessionWarpInput>
@@ -93,7 +98,7 @@ export class SessionEventsNotFoundError extends Schema.TaggedErrorClass<SessionE
   "WorkspaceSessionEventsNotFoundError",
   {
     message: Schema.String,
-    sessionID: SessionID,
+    sessionID: Session.ID,
   },
 ) {}
 
@@ -102,7 +107,7 @@ export class SessionWarpHttpError extends Schema.TaggedErrorClass<SessionWarpHtt
   {
     message: Schema.String,
     workspaceID: WorkspaceV2.ID,
-    sessionID: SessionID,
+    sessionID: Session.ID,
     status: Schema.Number,
     body: Schema.String,
   },
@@ -118,7 +123,7 @@ export class SyncAbortedError extends Schema.TaggedErrorClass<SyncAbortedError>(
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-type CreateError = Auth.AuthError
+type CreateError = unknown
 type SessionWarpError =
   | WorkspaceNotFoundError
   | SessionEventsNotFoundError
@@ -153,9 +158,9 @@ export const use = serviceUse(Service)
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const auth = yield* Auth.Service
-    const session = yield* Session.Service
-    const prompt = yield* SessionPrompt.Service
+    const session = yield* SessionV2.Service
+    const execution = yield* SessionExecution.Service
+    const locations = yield* LocationServiceMap.Service
     const http = yield* HttpClient.HttpClient
     const events = yield* EventV2Bridge.Service
     const vcs = yield* Vcs.Service
@@ -527,7 +532,6 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
 
       const env = {
-        ZAOVRA_AUTH_CONTENT: JSON.stringify(yield* auth.all()),
         ZAOVRA_WORKSPACE_ID: config.id,
         ZAOVRA_EXPERIMENTAL_WORKSPACES: "true",
         OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
@@ -559,11 +563,32 @@ const layer = Layer.effect(
     const sessionWarp = Effect.fn("Workspace.sessionWarp")(function* (input: SessionWarpInput) {
       return yield* Effect.gen(function* () {
         const current = yield* db
-          .select({ workspaceID: SessionTable.workspace_id })
+          .select({ workspaceID: SessionTable.workspace_id, directory: SessionTable.directory })
           .from(SessionTable)
           .where(eq(SessionTable.id, input.sessionID))
           .get()
           .pipe(Effect.orDie)
+        if (!current)
+          return yield* new SessionEventsNotFoundError({
+            message: `Session not found: ${input.sessionID}`,
+            sessionID: input.sessionID,
+          })
+
+        const move = Effect.fn("Workspace.sessionWarp.move")(function* (workspaceID?: WorkspaceV2.ID) {
+          const location = Location.Ref.make({
+            directory: AbsolutePath.make(current.directory),
+            ...(workspaceID ? { workspaceID } : {}),
+          })
+          yield* events.publish(
+            SessionEvent.Moved,
+            {
+              sessionID: input.sessionID,
+              timestamp: yield* DateTime.now,
+              location,
+            },
+            { location },
+          )
+        })
 
         if (current?.workspaceID) {
           const previous = yield* get(current.workspaceID)
@@ -581,7 +606,30 @@ const layer = Layer.effect(
                 ),
               )
             } else {
-              yield* prompt.cancel(input.sessionID)
+              // A warp is unattended: reject every interactive gate before stopping execution so no deferred survives.
+              yield* Effect.gen(function* () {
+                const permissions = yield* PermissionV2.Service
+                const questions = yield* QuestionV2.Service
+                const pendingPermission = (yield* permissions.forSession(input.sessionID)).at(0)
+                if (pendingPermission) {
+                  yield* permissions.reply({ requestID: pendingPermission.id, reply: "reject" }).pipe(Effect.ignore)
+                }
+                yield* Effect.forEach(
+                  (yield* questions.list()).filter((request) => request.sessionID === input.sessionID),
+                  (request) => questions.reject(request.id).pipe(Effect.ignore),
+                  { discard: true },
+                )
+              }).pipe(
+                Effect.provide(
+                  locations.get(
+                    Location.Ref.make({
+                      directory: AbsolutePath.make(current.directory),
+                      workspaceID: current.workspaceID,
+                    }),
+                  ),
+                ),
+              )
+              yield* execution.interrupt(input.sessionID)
             }
 
             // "claim" this session so any future events coming from
@@ -621,7 +669,7 @@ const layer = Layer.effect(
         }
 
         if (input.workspaceID === null) {
-          yield* session.setWorkspace({ sessionID: input.sessionID, workspaceID: undefined })
+          yield* move()
 
           return
         }
@@ -637,79 +685,17 @@ const layer = Layer.effect(
         const target = yield* WorkspaceAdapterRuntime.target(space)
 
         if (target.type === "local") {
-          yield* session.setWorkspace({ sessionID: input.sessionID, workspaceID: input.workspaceID })
+          yield* move(input.workspaceID)
 
           return
         }
-
-        const rows = yield* db
-          .select({
-            id: EventTable.id,
-            aggregateID: EventTable.aggregate_id,
-            seq: EventTable.seq,
-            type: EventTable.type,
-            data: EventTable.data,
-          })
-          .from(EventTable)
-          .where(eq(EventTable.aggregate_id, input.sessionID))
-          .orderBy(asc(EventTable.seq))
-          .all()
-          .pipe(Effect.orDie)
-        if (rows.length === 0)
-          return yield* new SessionEventsNotFoundError({
-            message: `No events found for session: ${input.sessionID}`,
-            sessionID: input.sessionID,
-          })
-
-        const batches = Iterable.chunksOf(rows, 10)
-        const total = Iterable.size(batches)
-
-        yield* Effect.forEach(
-          batches,
-          (events, i) =>
-            Effect.gen(function* () {
-              const response = yield* http.execute(
-                HttpClientRequest.post(route(target.url, "/sync/replay"), {
-                  headers: new Headers(target.headers),
-                  body: HttpBody.jsonUnsafe({
-                    directory: space.directory ?? "",
-                    events,
-                  }),
-                }),
-              )
-
-              if (response.status < 200 || response.status >= 300) {
-                const body = yield* response.text
-                return yield* new SessionWarpHttpError({
-                  message: `Failed to warp session ${input.sessionID} into workspace ${workspaceID}: HTTP ${response.status} ${body}`,
-                  workspaceID,
-                  sessionID: input.sessionID,
-                  status: response.status,
-                  body,
-                })
-              }
-            }),
-          { discard: true },
-        )
-
-        const response = yield* http.execute(
-          HttpClientRequest.post(route(target.url, "/sync/steal"), {
-            headers: new Headers(target.headers),
-            body: HttpBody.jsonUnsafe({ sessionID: input.sessionID }),
-          }),
-        )
-        if (response.status < 200 || response.status >= 300) {
-          const body = yield* response.text
-          return yield* new SessionWarpHttpError({
-            message: `Failed to steal session ${input.sessionID} into workspace ${workspaceID}: HTTP ${response.status} ${body}`,
-            workspaceID,
-            sessionID: input.sessionID,
-            status: response.status,
-            body,
-          })
-        }
-
-        yield* session.setWorkspace({ sessionID: input.sessionID, workspaceID: input.workspaceID })
+        return yield* new SessionWarpHttpError({
+          message: `Remote workspace session warp is not supported in the V2 local runtime`,
+          workspaceID,
+          sessionID: input.sessionID,
+          status: 501,
+          body: "Remote workspace session warp is not supported",
+        })
       })
     })
 
@@ -793,7 +779,7 @@ const layer = Layer.effect(
       yield* Effect.forEach(
         sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),
         (sessionInfo) =>
-          session.remove(sessionInfo.id).pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.void)),
+          session.remove(Session.ID.make(sessionInfo.id)).pipe(Effect.catch(() => Effect.void)),
         { discard: true },
       )
 
@@ -949,9 +935,9 @@ export const node = LayerNode.make({
   service: Service,
   layer: layer,
   deps: [
-    Auth.node,
-    Session.node,
-    SessionPrompt.node,
+    SessionV2.node,
+    SessionExecutionLocal.node,
+    LocationServiceMap.node,
     httpClient,
     EventV2Bridge.node,
     Vcs.node,

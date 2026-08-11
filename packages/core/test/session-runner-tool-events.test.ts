@@ -28,6 +28,7 @@ const capture = () => {
       }),
     subscribe: () => Stream.empty,
     all: () => Stream.empty,
+    recentAfter: () => ({ events: [], complete: false }),
     durable: () => Stream.empty,
     listen: () => Effect.succeed(Effect.void),
     project: () => Effect.void,
@@ -41,6 +42,8 @@ const capture = () => {
     publisher: createLLMEventPublisher(events, {
       sessionID,
       agent: "build",
+      inputSequence: 0,
+      contextEpoch: 0,
       model: {
         id: ModelV2.ID.make("model"),
         providerID: ProviderV2.ID.make("provider"),

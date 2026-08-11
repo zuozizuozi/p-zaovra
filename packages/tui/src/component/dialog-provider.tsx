@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onMount, Show } from "solid-js"
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useSync } from "../context/sync"
 import { map, pipe, sortBy } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
@@ -8,7 +8,7 @@ import { DialogPrompt } from "../ui/dialog-prompt"
 import { Link } from "../ui/link"
 import { useTheme } from "../context/theme"
 import { TextAttributes } from "@opentui/core"
-import type { ProviderAuthAuthorization, ProviderAuthMethod } from "@zaovra-ai/sdk/v2"
+import type { IntegrationAttempt, IntegrationMethod } from "@zaovra-ai/sdk/v2"
 import { DialogModel } from "./dialog-model"
 import { useToast } from "../ui/toast"
 import { isConsoleManagedProvider } from "../util/provider-origin"
@@ -27,6 +27,8 @@ const PROVIDER_PRIORITY: Record<string, number> = {
 
 const CUSTOM_PROVIDER_OPTION_VALUE = "__zaovra_custom_provider__"
 const CUSTOM_PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
+
+type ConnectMethod = Extract<IntegrationMethod, { type: "key" | "oauth" }>
 
 type ProviderOptionBase = {
   title: string
@@ -113,6 +115,104 @@ export function createDialogProviderOptions() {
     return promptCustomProviderID()
   }
 
+  async function selectProviderMethod(providerID: string, custom = false) {
+    const location = sdk.directory ? { directory: sdk.directory } : undefined
+    const integrationID = custom
+      ? providerID
+      : await sdk.client.v2.provider
+          .get({ providerID, location }, { throwOnError: true })
+          .then((response) => response.data.data.integrationID ?? providerID)
+          .catch((error) => {
+            toast.error(error)
+            return undefined
+          })
+    if (!integrationID) return
+
+    const integration = await sdk.client.v2.integration
+      .get({ integrationID, location }, { throwOnError: true })
+      .then((response) => response.data.data)
+      .catch((error) => {
+        toast.error(error)
+        return undefined
+      })
+    if (!integration) {
+      toast.show({
+        variant: "error",
+        message: custom
+          ? `Configure ${providerID} in zaovra.json before connecting it.`
+          : `Provider ${providerID} has no registered integration.`,
+      })
+      return
+    }
+
+    const methods = integration.methods.filter(
+      (method): method is ConnectMethod => method.type === "key" || method.type === "oauth",
+    )
+    if (methods.length === 0) {
+      toast.show({ variant: "error", message: `Provider ${providerID} has no supported authentication method.` })
+      return
+    }
+
+    const index =
+      methods.length === 1
+        ? 0
+        : await new Promise<number | null>((resolve) => {
+            dialog.replace(
+              () => (
+                <DialogSelect
+                  title="Select auth method"
+                  options={methods.map((method, index) => ({
+                    title: method.type === "key" ? (method.label ?? "API key") : method.label,
+                    value: index,
+                  }))}
+                  onSelect={(option) => resolve(option.value)}
+                />
+              ),
+              () => resolve(null),
+            )
+          })
+    if (index === null) return
+    const method = methods[index]
+    const inputs = method.prompts?.length
+      ? await PromptsMethod({ dialog, prompts: method.prompts })
+      : undefined
+    if (inputs === null) return
+
+    if (method.type === "key") {
+      dialog.replace(() => (
+        <ApiMethod
+          providerID={providerID}
+          integrationID={integrationID}
+          title={method.label ?? "API key"}
+          inputs={inputs}
+        />
+      ))
+      return
+    }
+
+    const authorization = await sdk.client.v2.integration.connect
+      .oauth(
+        {
+          integrationID,
+          location,
+          methodID: method.id,
+          inputs: inputs ?? {},
+        },
+        { throwOnError: true },
+      )
+      .then((response) => response.data.data)
+      .catch((error) => {
+        toast.error(error)
+        return undefined
+      })
+    if (!authorization) return
+    if (authorization.mode === "code") {
+      dialog.replace(() => <CodeMethod providerID={providerID} title={method.label} authorization={authorization} />)
+      return
+    }
+    dialog.replace(() => <AutoMethod providerID={providerID} title={method.label} authorization={authorization} />)
+  }
+
   const options = createMemo(() => {
     return pipe(
       providerOptions(sync.data.provider_next.all),
@@ -126,7 +226,7 @@ export function createDialogProviderOptions() {
             async onSelect() {
               const providerID = await promptCustomProviderID()
               if (!providerID) return
-              return dialog.replace(() => <ApiMethod providerID={providerID} title="API key" custom />)
+              return selectProviderMethod(providerID, true)
             },
           }
         }
@@ -144,79 +244,7 @@ export function createDialogProviderOptions() {
           gutter: connected && onboarded() ? () => <text fg={theme.success}>✓</text> : undefined,
           async onSelect() {
             if (consoleManaged) return
-
-            const methods = sync.data.provider_auth[providerID] ?? [
-              {
-                type: "api",
-                label: "API key",
-              },
-            ]
-            let index: number | null = 0
-            if (methods.length > 1) {
-              index = await new Promise<number | null>((resolve) => {
-                dialog.replace(
-                  () => (
-                    <DialogSelect
-                      title="Select auth method"
-                      options={methods.map((x, index) => ({
-                        title: x.label,
-                        value: index,
-                      }))}
-                      onSelect={(option) => resolve(option.value)}
-                    />
-                  ),
-                  () => resolve(null),
-                )
-              })
-            }
-            if (index == null) return
-            const method = methods[index]
-            if (method.type === "oauth") {
-              let inputs: Record<string, string> | undefined
-              if (method.prompts?.length) {
-                const value = await PromptsMethod({
-                  dialog,
-                  prompts: method.prompts,
-                })
-                if (!value) return
-                inputs = value
-              }
-
-              const result = await sdk.client.provider.oauth.authorize({
-                providerID,
-                method: index,
-                inputs,
-              })
-              if (result.error) {
-                toast.show({
-                  variant: "error",
-                  message: JSON.stringify(result.error),
-                })
-                dialog.clear()
-                return
-              }
-              if (result.data?.method === "code") {
-                dialog.replace(() => (
-                  <CodeMethod providerID={providerID} title={method.label} index={index} authorization={result.data!} />
-                ))
-              }
-              if (result.data?.method === "auto") {
-                dialog.replace(() => (
-                  <AutoMethod providerID={providerID} title={method.label} index={index} authorization={result.data!} />
-                ))
-              }
-            }
-            if (method.type === "api") {
-              let metadata: Record<string, string> | undefined
-              if (method.prompts?.length) {
-                const value = await PromptsMethod({ dialog, prompts: method.prompts })
-                if (!value) return
-                metadata = value
-              }
-              return dialog.replace(() => (
-                <ApiMethod providerID={providerID} title={method.label} metadata={metadata} />
-              ))
-            }
+            return selectProviderMethod(providerID)
           },
         }
       }),
@@ -231,10 +259,9 @@ export function DialogProvider() {
 }
 
 interface AutoMethodProps {
-  index: number
   providerID: string
   title: string
-  authorization: ProviderAuthAuthorization
+  authorization: IntegrationAttempt
 }
 function AutoMethod(props: AutoMethodProps) {
   const { theme } = useTheme()
@@ -262,25 +289,50 @@ function AutoMethod(props: AutoMethodProps) {
     ],
   }))
 
-  onMount(async () => {
-    const result = await sdk.client.provider.oauth.callback({
-      providerID: props.providerID,
-      method: props.index,
-    })
-    if (result.error) {
-      toast.show({
-        variant: "error",
-        message:
-          "name" in result.error && result.error.name === "ProviderAuthOauthCallbackFailed"
-            ? "OAuth authorization failed. Try /connect again."
-            : JSON.stringify(result.error),
-      })
-      dialog.clear()
-      return
+  const location = sdk.directory ? { directory: sdk.directory } : undefined
+  const settled = { value: false }
+  const timer = { value: undefined as ReturnType<typeof setTimeout> | undefined }
+
+  onCleanup(() => {
+    if (timer.value !== undefined) clearTimeout(timer.value)
+    if (settled.value) return
+    void sdk.client.v2.integration.attempt
+      .cancel({ attemptID: props.authorization.attemptID, location }, { throwOnError: true })
+      .catch(() => undefined)
+  })
+
+  onMount(() => {
+    const poll = async () => {
+      const status = await sdk.client.v2.integration.attempt
+        .status({ attemptID: props.authorization.attemptID, location }, { throwOnError: true })
+        .then((response) => response.data.data)
+        .catch((error) => {
+          toast.error(error)
+          return undefined
+        })
+      if (!status) {
+        dialog.clear()
+        return
+      }
+      if (status.status === "complete") {
+        settled.value = true
+        await sdk.client.instance.dispose()
+        await sync.bootstrap()
+        dialog.replace(() => <DialogModel providerID={props.providerID} />)
+        return
+      }
+      if (status.status === "failed" || status.status === "expired") {
+        settled.value = true
+        toast.show({
+          variant: "error",
+          message: status.status === "failed" ? status.message : "OAuth authorization expired. Try /connect again.",
+        })
+        dialog.clear()
+        return
+      }
+      timer.value = setTimeout(() => void poll(), 500)
     }
-    await sdk.client.instance.dispose()
-    await sync.bootstrap()
-    dialog.replace(() => <DialogModel providerID={props.providerID} />)
+    void poll()
   })
 
   return (
@@ -306,10 +358,9 @@ function AutoMethod(props: AutoMethodProps) {
 }
 
 interface CodeMethodProps {
-  index: number
   title: string
   providerID: string
-  authorization: ProviderAuthAuthorization
+  authorization: IntegrationAttempt
 }
 function CodeMethod(props: CodeMethodProps) {
   const { theme } = useTheme()
@@ -317,18 +368,30 @@ function CodeMethod(props: CodeMethodProps) {
   const sync = useSync()
   const dialog = useDialog()
   const [error, setError] = createSignal(false)
+  const location = sdk.directory ? { directory: sdk.directory } : undefined
+  const settled = { value: false }
+
+  onCleanup(() => {
+    if (settled.value) return
+    void sdk.client.v2.integration.attempt
+      .cancel({ attemptID: props.authorization.attemptID, location }, { throwOnError: true })
+      .catch(() => undefined)
+  })
 
   return (
     <DialogPrompt
       title={props.title}
       placeholder="Authorization code"
       onConfirm={async (value) => {
-        const { error } = await sdk.client.provider.oauth.callback({
-          providerID: props.providerID,
-          method: props.index,
-          code: value,
-        })
-        if (!error) {
+        const result = await sdk.client.v2.integration.attempt
+          .complete(
+            { attemptID: props.authorization.attemptID, location, code: value },
+            { throwOnError: true },
+          )
+          .then(() => true)
+          .catch(() => false)
+        if (result) {
+          settled.value = true
           await sdk.client.instance.dispose()
           await sync.bootstrap()
           dialog.replace(() => <DialogModel providerID={props.providerID} />)
@@ -351,15 +414,14 @@ function CodeMethod(props: CodeMethodProps) {
 
 interface ApiMethodProps {
   providerID: string
+  integrationID: string
   title: string
-  metadata?: Record<string, string>
-  custom?: boolean
+  inputs?: Record<string, string>
 }
 function ApiMethod(props: ApiMethodProps) {
   const dialog = useDialog()
   const sdk = useSDK()
   const sync = useSync()
-  const toast = useToast()
   const { theme } = useTheme()
 
   return (
@@ -394,24 +456,17 @@ function ApiMethod(props: ApiMethodProps) {
       }
       onConfirm={async (value) => {
         if (!value) return
-        await sdk.client.auth.set({
-          providerID: props.providerID,
-          auth: {
-            type: "api",
+        await sdk.client.v2.integration.connect.key(
+          {
+            integrationID: props.integrationID,
+            location: sdk.directory ? { directory: sdk.directory } : undefined,
             key: value,
-            ...(props.metadata ? { metadata: props.metadata } : {}),
+            inputs: props.inputs,
           },
-        })
+          { throwOnError: true },
+        )
         await sdk.client.instance.dispose()
         await sync.bootstrap()
-        if (props.custom && !sync.data.provider_next.all.some((provider) => provider.id === props.providerID)) {
-          toast.show({
-            variant: "info",
-            message: `Saved credential for ${props.providerID}. Configure it in zaovra.json to use it.`,
-          })
-          dialog.clear()
-          return
-        }
         dialog.replace(() => <DialogModel providerID={props.providerID} />)
       }}
     />
@@ -420,7 +475,7 @@ function ApiMethod(props: ApiMethodProps) {
 
 interface PromptsMethodProps {
   dialog: ReturnType<typeof useDialog>
-  prompts: NonNullable<ProviderAuthMethod["prompts"]>[number][]
+  prompts: NonNullable<ConnectMethod["prompts"]>
 }
 async function PromptsMethod(props: PromptsMethodProps) {
   const inputs: Record<string, string> = {}

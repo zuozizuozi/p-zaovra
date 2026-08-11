@@ -24,7 +24,7 @@
 //   `data.questions`. The footer shows whichever is first. When a reply
 //   event arrives, the queue entry is removed and the footer falls back
 //   to the next pending request or to the prompt view.
-import type { Event, Part, PermissionRequest, QuestionRequest, ToolPart } from "@zaovra-ai/sdk/v2"
+import type { Event, Part, PermissionView, QuestionView, ToolPart } from "@zaovra-ai/sdk/v2"
 import * as Locale from "@/util/locale"
 import { toolView } from "./tool"
 import type { FooterOutput, FooterPatch, FooterView, StreamCommit } from "./types"
@@ -69,6 +69,13 @@ type ShellCall = {
   command?: string
 }
 
+type V2ToolCall = {
+  messageID: string
+  tool: string
+  input: Dict
+  started: number
+}
+
 export type SessionData = {
   includeUserText: boolean
   announced: boolean
@@ -76,8 +83,8 @@ export type SessionData = {
   tools: Set<string>
   call: Map<string, Dict>
   shell: Map<string, ShellCall>
-  permissions: PermissionRequest[]
-  questions: QuestionRequest[]
+  permissions: PermissionView[]
+  questions: QuestionView[]
   role: Map<string, MessageRole>
   msg: Map<string, string>
   part: Map<string, PartKind>
@@ -86,6 +93,7 @@ export type SessionData = {
   visible: Map<string, string>
   end: Set<string>
   echo: Map<string, Set<string>>
+  v2Tools: Map<string, V2ToolCall>
 }
 
 export type SessionDataInput = {
@@ -124,6 +132,7 @@ export function createSessionData(
     visible: new Map(),
     end: new Set(),
     echo: new Map(),
+    v2Tools: new Map(),
   }
 }
 
@@ -216,7 +225,7 @@ function out(data: SessionData, commits: SessionCommit[], footer?: FooterOutput)
   }
 }
 
-export function pickBlockerView(input: { permission?: PermissionRequest; question?: QuestionRequest }): FooterView {
+export function pickBlockerView(input: { permission?: PermissionView; question?: QuestionView }): FooterView {
   if (input.permission) {
     return { type: "permission", request: input.permission }
   }
@@ -285,8 +294,8 @@ export function bootstrapSessionData(input: {
   messages: Array<{
     parts: Part[]
   }>
-  permissions: PermissionRequest[]
-  questions: QuestionRequest[]
+  permissions: PermissionView[]
+  questions: QuestionView[]
 }) {
   for (const message of input.messages) {
     for (const part of message.parts) {
@@ -311,7 +320,7 @@ function key(msg: string, call: string): string {
   return `${msg}:${call}`
 }
 
-function enrichPermission(data: SessionData, request: PermissionRequest): PermissionRequest {
+function enrichPermission(data: SessionData, request: PermissionView): PermissionView {
   if (!request.tool) {
     return request
   }
@@ -774,6 +783,275 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
   const commits: SessionCommit[] = []
   const data = input.data
   const event = input.event
+
+  if (event.type === "session.next.step.started") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    data.role.set(event.properties.assistantMessageID, "assistant")
+    replay(data, commits, event.properties.assistantMessageID, "assistant", input.thinking)
+    const announced = data.announced
+    data.announced = true
+    return out(data, commits, patch(announced ? undefined : { status: "assistant responding" }))
+  }
+
+  if (event.type === "session.next.step.ended") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    const usage = formatUsage(
+      event.properties.tokens,
+      undefined,
+      typeof event.properties.cost === "number" ? event.properties.cost : undefined,
+    )
+    return out(data, commits, patch(usage ? { usage } : undefined))
+  }
+
+  if (event.type === "session.next.step.failed") {
+    if (event.properties.sessionID !== input.sessionID || data.ids.has(msgErr(event.properties.assistantMessageID))) {
+      return out(data, commits)
+    }
+
+    data.ids.add(msgErr(event.properties.assistantMessageID))
+    commits.push({
+      kind: "error",
+      text: event.properties.error.message,
+      phase: "start",
+      source: "system",
+      messageID: event.properties.assistantMessageID,
+    })
+    return out(data, commits)
+  }
+
+  if (event.type === "session.next.text.started" || event.type === "session.next.reasoning.started") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    const partID = event.type === "session.next.text.started" ? event.properties.textID : event.properties.reasoningID
+    const part = {
+      id: partID,
+      sessionID: event.properties.sessionID,
+      messageID: event.properties.assistantMessageID,
+      type: event.type === "session.next.text.started" ? ("text" as const) : ("reasoning" as const),
+      text: "",
+      time: { start: event.properties.timestamp },
+    }
+    data.role.set(event.properties.assistantMessageID, "assistant")
+    return reduceSessionData({
+      ...input,
+      event: {
+        id: event.id,
+        type: "message.part.updated",
+        properties: { sessionID: event.properties.sessionID, part, time: event.properties.timestamp },
+      },
+    })
+  }
+
+  if (event.type === "session.next.text.delta" || event.type === "session.next.reasoning.delta") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    const partID = event.type === "session.next.text.delta" ? event.properties.textID : event.properties.reasoningID
+    data.role.set(event.properties.assistantMessageID, "assistant")
+    data.part.set(partID, event.type === "session.next.text.delta" ? "assistant" : "reasoning")
+    return reduceSessionData({
+      ...input,
+      event: {
+        id: event.id,
+        type: "message.part.delta",
+        properties: {
+          sessionID: event.properties.sessionID,
+          messageID: event.properties.assistantMessageID,
+          partID,
+          field: "text",
+          delta: event.properties.delta,
+        },
+      },
+    })
+  }
+
+  if (event.type === "session.next.text.ended" || event.type === "session.next.reasoning.ended") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    const partID = event.type === "session.next.text.ended" ? event.properties.textID : event.properties.reasoningID
+    const part = {
+      id: partID,
+      sessionID: event.properties.sessionID,
+      messageID: event.properties.assistantMessageID,
+      type: event.type === "session.next.text.ended" ? ("text" as const) : ("reasoning" as const),
+      text: event.properties.text,
+      time: { start: event.properties.timestamp, end: event.properties.timestamp },
+    }
+    data.role.set(event.properties.assistantMessageID, "assistant")
+    return reduceSessionData({
+      ...input,
+      event: {
+        id: event.id,
+        type: "message.part.updated",
+        properties: { sessionID: event.properties.sessionID, part, time: event.properties.timestamp },
+      },
+    })
+  }
+
+  if (event.type === "session.next.tool.called") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    data.v2Tools.set(event.properties.callID, {
+      messageID: event.properties.assistantMessageID,
+      tool: event.properties.tool,
+      input: event.properties.input,
+      started: event.properties.timestamp,
+    })
+    return reduceSessionData({
+      ...input,
+      event: {
+        id: event.id,
+        type: "message.part.updated",
+        properties: {
+          sessionID: event.properties.sessionID,
+          time: event.properties.timestamp,
+          part: {
+            id: event.properties.callID,
+            sessionID: event.properties.sessionID,
+            messageID: event.properties.assistantMessageID,
+            type: "tool",
+            callID: event.properties.callID,
+            tool: event.properties.tool,
+            state: {
+              status: "running",
+              input: event.properties.input,
+              time: { start: event.properties.timestamp },
+            },
+          },
+        },
+      },
+    })
+  }
+
+  if (event.type === "session.next.tool.progress") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    const call = data.v2Tools.get(event.properties.callID)
+    return out(data, commits, patch(call ? { status: `running ${call.tool}` } : undefined))
+  }
+
+  if (event.type === "session.next.tool.success" || event.type === "session.next.tool.failed") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    const call = data.v2Tools.get(event.properties.callID)
+    if (!call) {
+      return out(data, commits)
+    }
+
+    data.v2Tools.delete(event.properties.callID)
+    const content =
+      event.type === "session.next.tool.success"
+        ? event.properties.content
+            .map((item) => (item.type === "text" ? item.text : item.name ? `${item.name}: ${item.uri}` : item.uri))
+            .join("\n")
+        : event.properties.error.message
+    const state =
+      event.type === "session.next.tool.success"
+        ? {
+            status: "completed" as const,
+            input: call.input,
+            output: content,
+            title: call.tool,
+            metadata: event.properties.structured,
+            time: { start: call.started, end: event.properties.timestamp },
+          }
+        : {
+            status: "error" as const,
+            input: call.input,
+            error: content,
+            time: { start: call.started, end: event.properties.timestamp },
+          }
+    return reduceSessionData({
+      ...input,
+      event: {
+        id: event.id,
+        type: "message.part.updated",
+        properties: {
+          sessionID: event.properties.sessionID,
+          time: event.properties.timestamp,
+          part: {
+            id: event.properties.callID,
+            sessionID: event.properties.sessionID,
+            messageID: call.messageID,
+            type: "tool",
+            callID: event.properties.callID,
+            tool: call.tool,
+            state,
+          },
+        },
+      },
+    })
+  }
+
+  if (event.type === "permission.v2.asked") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    upsert(
+      data.permissions,
+      enrichPermission(data, {
+        id: event.properties.id,
+        sessionID: event.properties.sessionID,
+        permission: event.properties.action,
+        patterns: event.properties.resources,
+        always: event.properties.save ?? event.properties.resources,
+        metadata: event.properties.metadata ?? {},
+        tool: event.properties.source,
+      }),
+    )
+    return queueOut(data, commits)
+  }
+
+  if (event.type === "session.next.retried") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    return out(data, commits, patch({ status: `retrying (${event.properties.attempt})` }))
+  }
+
+  if (event.type === "permission.v2.replied") {
+    if (event.properties.sessionID !== input.sessionID || !remove(data.permissions, event.properties.requestID)) {
+      return out(data, commits)
+    }
+
+    return queueOut(data, commits)
+  }
+
+  if (event.type === "question.v2.asked") {
+    if (event.properties.sessionID !== input.sessionID) {
+      return out(data, commits)
+    }
+
+    upsert(data.questions, event.properties)
+    return queueOut(data, commits)
+  }
+
+  if (event.type === "question.v2.replied" || event.type === "question.v2.rejected") {
+    if (event.properties.sessionID !== input.sessionID || !remove(data.questions, event.properties.requestID)) {
+      return out(data, commits)
+    }
+
+    return queueOut(data, commits)
+  }
 
   if (event.type === "session.next.shell.started") {
     if (event.properties.sessionID !== input.sessionID) {

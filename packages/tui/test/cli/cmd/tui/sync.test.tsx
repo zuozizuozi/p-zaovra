@@ -25,16 +25,14 @@ describe("tui sync", () => {
 
     try {
       expect(kv.get("session_directory_filter_enabled", true)).toBe(true)
-      expect(session.at(-1)?.searchParams.get("roots")).toBeNull()
-      expect(session.at(-1)?.searchParams.get("scope")).toBeNull()
-      expect(session.at(-1)?.searchParams.get("path")).toBe("packages/tui")
+      expect(session.at(-1)?.searchParams.get("roots")).toBe("false")
+      expect(session.at(-1)?.searchParams.get("subpath")).toBe("packages/tui")
 
       kv.set("session_directory_filter_enabled", false)
       await sync.session.refresh()
 
-      expect(session.at(-1)?.searchParams.get("scope")).toBe("project")
-      expect(session.at(-1)?.searchParams.get("path")).toBeNull()
-      expect(session.at(-1)?.searchParams.get("roots")).toBeNull()
+      expect(session.at(-1)?.searchParams.get("subpath")).toBeNull()
+      expect(session.at(-1)?.searchParams.get("roots")).toBe("true")
     } finally {
       app.renderer.destroy()
     }

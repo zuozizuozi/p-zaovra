@@ -93,10 +93,6 @@ export const TuiThreadCommand = cmd({
         type: "string",
         describe: "session id to continue",
       })
-      .option("fork", {
-        type: "boolean",
-        describe: "fork the session when continuing (use with --continue or --session)",
-      })
       .option("prompt", {
         type: "string",
         describe: "prompt to use",
@@ -164,7 +160,6 @@ export const TuiThreadCommand = cmd({
         directory: resolveThreadDirectory(args.project),
         continue: args.continue,
         session: args.session,
-        fork: args.fork,
         model: args.model,
         agent: args.agent,
         prompt: args.prompt,
@@ -189,12 +184,6 @@ export const TuiThreadCommand = cmd({
     const unguard = win32InstallCtrlCGuard()
     try {
       const { TuiConfig } = await import("@/config/tui")
-      if (args.fork && !args.continue && !args.session) {
-        UI.error("--fork requires --continue or --session")
-        process.exitCode = 1
-        return
-      }
-
       // Resolve relative --project paths from PWD, then use the real cwd after
       // chdir so the thread and worker share the same directory key.
       const next = resolveThreadDirectory(args.project)
@@ -290,7 +279,6 @@ export const TuiThreadCommand = cmd({
               agent: args.agent,
               model: args.model,
               prompt,
-              fork: args.fork,
               auto: args.auto || args.yolo || args["dangerously-skip-permissions"],
             },
           }),

@@ -65,7 +65,6 @@ export function DialogStatus() {
                         failed: theme.error,
                         disabled: theme.textMuted,
                         needs_auth: theme.warning,
-                        needs_client_registration: theme.error,
                       } as Record<string, typeof theme.success>
                     )[item.status],
                   }}
@@ -79,12 +78,7 @@ export function DialogStatus() {
                       <Match when={item.status === "connected"}>Connected</Match>
                       <Match when={item.status === "failed" && item}>{(val) => val().error}</Match>
                       <Match when={item.status === "disabled"}>Disabled in configuration</Match>
-                      <Match when={(item.status as string) === "needs_auth"}>
-                        Needs authentication (run: zaovra mcp auth {key})
-                      </Match>
-                      <Match when={(item.status as string) === "needs_client_registration" && item}>
-                        {(val) => (val() as { error: string }).error}
-                      </Match>
+                      <Match when={item.status === "needs_auth"}>Needs authentication (select MCP to authorize)</Match>
                     </Switch>
                   </span>
                 </text>

@@ -2,6 +2,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { defineConfig } from "electron-vite"
 import appPlugin from "@zaovra-ai/app/vite"
 import * as fs from "node:fs/promises"
+import path from "node:path"
 
 const ZAOVRA_SERVER_DIST = "../zaovra/dist/node"
 
@@ -66,6 +67,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
         enforce: "pre",
         resolveId(id) {
           if (id === "virtual:zaovra-server") return this.resolve(`${ZAOVRA_SERVER_DIST}/node.js`)
+          if (id === "zaovra-web-ui.gen.ts") return path.resolve(ZAOVRA_SERVER_DIST, id)
         },
       },
       {

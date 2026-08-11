@@ -14,6 +14,7 @@ import { Image } from "./image"
 import { Integration } from "./integration"
 import { Location } from "./location"
 import { LocationMutation } from "./location-mutation"
+import { MCP } from "./mcp"
 import { LocationServiceMap } from "./location-service-map"
 import { PermissionV2 } from "./permission"
 import { PluginV2 } from "./plugin"
@@ -36,6 +37,8 @@ import { BuiltInTools } from "./tool/builtins"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { ToolRegistry } from "./tool/registry"
 import { ToolOutputStore } from "./tool-output-store"
+import { WorkMemory } from "./work/memory"
+import { WorkOrganization } from "./work/organization"
 
 export { LocationServiceMap } from "./location-service-map"
 
@@ -60,6 +63,8 @@ export const locationServices = LayerNode.group([
   SkillV2.node,
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
+  WorkMemory.node,
+  WorkOrganization.node,
   LocationMutation.node,
   FileMutation.node,
   PermissionV2.node,
@@ -73,6 +78,7 @@ export const locationServices = LayerNode.group([
   QuestionV2.node,
   ReadToolFileSystem.node,
   BuiltInTools.node,
+  MCP.node,
   SessionRunnerModel.node,
   Snapshot.node,
   SessionRunnerLLM.node,

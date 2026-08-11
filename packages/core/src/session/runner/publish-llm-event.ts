@@ -10,6 +10,8 @@ type Input = {
   readonly sessionID: SessionSchema.ID
   readonly agent: string
   readonly model: ModelV2.Ref
+  readonly inputSequence: number
+  readonly contextEpoch: number
   readonly snapshot?: string
 }
 

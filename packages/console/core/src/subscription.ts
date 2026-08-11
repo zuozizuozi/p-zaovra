@@ -6,12 +6,6 @@ import { Resource } from "@zaovra-ai/console-resource"
 
 export namespace Subscription {
   const LimitsSchema = z.object({
-    free: z.object({
-      promoTokens: z.number().int(),
-      dailyRequests: z.number().int(),
-      dailyRequestsFallback: z.number().int(),
-      checkHeaders: z.record(z.string(), z.string()),
-    }),
     lite: z.object({
       rollingLimit: z.number().int(),
       rollingWindow: z.number().int(),
@@ -44,10 +38,6 @@ export namespace Subscription {
   export const getLimits = fn(z.void(), () => {
     const json = JSON.parse(Resource.ZEN_LIMITS.value)
     return LimitsSchema.parse(json)
-  })
-
-  export const getFreeLimits = fn(z.void(), () => {
-    return getLimits()["free"]
   })
 
   export const analyzeRollingUsage = fn(

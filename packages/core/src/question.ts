@@ -5,6 +5,7 @@ import { Context, Deferred, Effect, Layer, Schema } from "effect"
 import { Question } from "@zaovra-ai/schema/question"
 import { EventV2 } from "./event"
 import { SessionSchema } from "./session/schema"
+import { Location } from "./location"
 
 export const ID = Question.ID
 export type ID = typeof ID.Type
@@ -64,8 +65,15 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/Q
 
 interface Pending {
   readonly request: Request
+  readonly locationID: string
+  readonly owner: symbol
   readonly deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
 }
+
+// Replies may enter through a separately materialized Location consumer from
+// the tool fiber that asked the question. Keep one process-local broker while
+// retaining strict Location ownership for lookup and settlement.
+const pending = new Map<ID, Pending>()
 
 /**
  * Location-owned pending prompts. The Location layer map must materialize this
@@ -76,15 +84,19 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
-    const pending = new Map<ID, Pending>()
+    const location = yield* Location.Service
+    const owner = Symbol()
+    const locationID = `${location.directory}\0${location.workspaceID ?? ""}`
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new RejectedError()), {
-        discard: true,
-      }).pipe(
+      Effect.forEach(
+        Array.from(pending.values()).filter((item) => item.owner === owner),
+        (item) => Deferred.fail(item.deferred, new RejectedError()),
+        { discard: true },
+      ).pipe(
         Effect.ensuring(
           Effect.sync(() => {
-            pending.clear()
+            for (const [id, item] of pending) if (item.owner === owner) pending.delete(id)
           }),
         ),
       ),
@@ -96,7 +108,7 @@ const layer = Layer.effect(
           const id = ID.ascending()
           const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
           const request: Request = { id, ...input }
-          pending.set(id, { request, deferred })
+          pending.set(id, { request, deferred, locationID, owner })
           return yield* events.publish(Event.Asked, request).pipe(
             Effect.andThen(restore(Deferred.await(deferred))),
             Effect.ensuring(
@@ -113,7 +125,7 @@ const layer = Layer.effect(
       Effect.uninterruptible(
         Effect.gen(function* () {
           const existing = pending.get(input.requestID)
-          if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
+          if (existing?.locationID !== locationID) return yield* new NotFoundError({ requestID: input.requestID })
           yield* events.publish(Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
@@ -129,7 +141,7 @@ const layer = Layer.effect(
       Effect.uninterruptible(
         Effect.gen(function* () {
           const existing = pending.get(requestID)
-          if (!existing) return yield* new NotFoundError({ requestID })
+          if (existing?.locationID !== locationID) return yield* new NotFoundError({ requestID })
           yield* events.publish(Event.Rejected, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
@@ -141,7 +153,9 @@ const layer = Layer.effect(
     )
 
     const list = Effect.fn("QuestionV2.list")(function* () {
-      return Array.from(pending.values(), (item) => item.request)
+      return Array.from(pending.values())
+        .filter((item) => item.locationID === locationID)
+        .map((item) => item.request)
     })
 
     return Service.of({ ask, reply, reject, list })
@@ -150,4 +164,4 @@ const layer = Layer.effect(
 
 export const locationLayer = layer
 
-export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, Location.node] })

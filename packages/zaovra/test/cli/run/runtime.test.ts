@@ -3,8 +3,6 @@ import { ZaovraClient } from "@zaovra-ai/sdk/v2"
 import { runInteractiveMode } from "@/cli/cmd/run/runtime"
 import type { FooterApi, RunProvider } from "@/cli/cmd/run/types"
 
-type SessionMessage = NonNullable<Awaited<ReturnType<ZaovraClient["session"]["messages"]>>["data"]>[number]
-
 const provider: RunProvider = {
   id: "openai",
   name: "OpenAI",
@@ -146,39 +144,48 @@ describe("run interactive runtime", () => {
       await providers.promise
       return ok({ providers: [provider], default: {} })
     })
-    spyOn(sdk.session, "messages").mockImplementation(() =>
-      ok([
-        {
-          info: {
-            id: "msg-user-1",
-            sessionID: "ses-1",
-            role: "user",
-            time: {
-              created: 1,
-            },
-            agent: "build",
-            model: {
-              providerID: "openai",
-              modelID: "gpt-5",
-              variant: undefined,
-            },
-          },
-          parts: [
+    spyOn(sdk.v2.session, "messages").mockImplementation(
+      async () =>
+        (await ok({
+          data: [
             {
-              id: "part-user-1",
-              sessionID: "ses-1",
-              messageID: "msg-user-1",
-              type: "text",
+              id: "msg-user-1",
+              type: "user" as const,
               text: "hello",
+              time: { created: 1 },
             },
           ],
-        } satisfies SessionMessage,
-      ]),
+          cursor: {},
+        })) as never,
     )
-    spyOn(sdk.session, "get").mockRejectedValue(new Error("not needed"))
+    spyOn(sdk.v2.session, "get").mockImplementation(
+      async () =>
+        (await ok({
+          data: {
+            id: "ses-1",
+            title: "Session",
+            projectID: "project-1",
+            location: { directory: "/tmp" },
+            time: { created: 1, updated: 1 },
+            model: { providerID: "openai", id: "gpt-5" },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        })) as never,
+    )
     spyOn(sdk.app, "agents").mockImplementation(() => ok([]))
-    spyOn(sdk.experimental.resource, "list").mockImplementation(() => ok({}))
-    spyOn(sdk.command, "list").mockImplementation(() => ok([]))
+    spyOn(sdk.v2.mcp, "resources").mockImplementation(() =>
+      ok({
+        location: { directory: "/tmp", project: { id: "project", directory: "/tmp" } },
+        data: {},
+      }),
+    )
+    spyOn(sdk.v2.command, "list").mockImplementation(() =>
+      ok({
+        location: { directory: "/tmp", project: { id: "project", directory: "/tmp" } },
+        data: [],
+      }),
+    )
 
     const task = runInteractiveMode(
       {

@@ -1,8 +1,10 @@
 export * as WebFetchTool from "./webfetch"
 
 import { ToolFailure } from "@zaovra-ai/llm"
+import { lookup } from "node:dns/promises"
+import { isIP } from "node:net"
 import { Duration, Effect, Layer, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
 import TurndownService from "turndown"
 import { makeLocationNode } from "../effect/app-node"
@@ -17,6 +19,7 @@ export const name = "webfetch"
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 export const DEFAULT_TIMEOUT_SECONDS = 30
 export const MAX_TIMEOUT_SECONDS = 120
+export const MAX_REDIRECTS = 10
 
 export const description = `Fetch content from an HTTP or HTTPS URL and return it as text, markdown, or HTML. Markdown is the default.
 
@@ -86,8 +89,108 @@ const assertHttpUrl = (url: URL) => {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("URL must use http:// or https://")
 }
 
-const execute = (http: HttpClient.HttpClient, url: string, format: Format, userAgent = browserUserAgent) =>
-  http.execute(request(url, format, userAgent)).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk))
+const resolveHost = (hostname: string) => lookup(hostname, { all: true, verbatim: true })
+const metadataHosts = new Set([
+  "metadata.google.internal",
+  "metadata.google",
+  "metadata.azure.internal",
+  "metadata.aws.internal",
+])
+
+export async function validateNetworkTarget(url: URL, resolver = resolveHost) {
+  assertHttpUrl(url)
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase()
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || metadataHosts.has(hostname)) {
+    throw new Error(`Local network target is not allowed: ${hostname}`)
+  }
+  const addresses = isIP(hostname) ? [hostname] : (await resolver(hostname)).map((result) => result.address)
+  if (addresses.length === 0) throw new Error(`Host did not resolve: ${hostname}`)
+  const blocked = addresses.find(isPrivateNetworkAddress)
+  if (blocked) throw new Error(`Local network target is not allowed: ${blocked}`)
+}
+
+export function isPrivateNetworkAddress(input: string) {
+  const address = input.split("%", 1)[0]?.replace(/^\[|\]$/g, "") ?? ""
+  if (isIP(address) === 4) return isPrivateIPv4(address)
+  if (isIP(address) !== 6) return true
+  const words = ipv6Words(address)
+  if (!words) return true
+  if (words.every((word) => word === 0)) return true
+  if (words.slice(0, 7).every((word) => word === 0) && words[7] === 1) return true
+  if ((words[0]! & 0xfe00) === 0xfc00) return true
+  if ((words[0]! & 0xffc0) === 0xfe80 || (words[0]! & 0xffc0) === 0xfec0) return true
+  if ((words[0]! & 0xff00) === 0xff00) return true
+  const mapped = words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff
+  const compatible = words.slice(0, 6).every((word) => word === 0)
+  if (!mapped && !compatible) return false
+  return isPrivateIPv4(
+    [words[6]! >> 8, words[6]! & 0xff, words[7]! >> 8, words[7]! & 0xff].join("."),
+  )
+}
+
+function isPrivateIPv4(address: string) {
+  const bytes = address.split(".").map(Number)
+  const [a, b] = bytes
+  if (bytes.length !== 4 || bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return true
+  if (a === 0 || a === 10 || a === 127) return true
+  if (a === 100 && b! >= 64 && b! <= 127) return true
+  if (a === 169 && b === 254) return true
+  if (a === 172 && b! >= 16 && b! <= 31) return true
+  if (a === 192 && (b === 0 || b === 168)) return true
+  if (a === 198 && (b === 18 || b === 19)) return true
+  return a! >= 224
+}
+
+function ipv6Words(address: string) {
+  const dotted = address.slice(address.lastIndexOf(":") + 1)
+  const normalized =
+    isIP(dotted) === 4
+      ? `${address.slice(0, address.lastIndexOf(":") + 1)}${dotted
+          .split(".")
+          .map(Number)
+          .reduce((words, value, index) => {
+            const word = Math.floor(index / 2)
+            words[word] = ((words[word] ?? 0) << 8) | value
+            return words
+          }, [] as number[])
+          .map((word) => word.toString(16))
+          .join(":")}`
+      : address
+  const halves = normalized.split("::")
+  if (halves.length > 2) return
+  const left = halves[0] ? halves[0].split(":").map((word) => Number.parseInt(word, 16)) : []
+  const right = halves[1] ? halves[1].split(":").map((word) => Number.parseInt(word, 16)) : []
+  const missing = 8 - left.length - right.length
+  if ((halves.length === 1 && missing !== 0) || missing < 0) return
+  const words = [...left, ...Array.from({ length: missing }, () => 0), ...right]
+  if (words.length !== 8 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff)) return
+  return words
+}
+
+const execute = (http: HttpClient.HttpClient, url: string, format: Format, userAgent = browserUserAgent) => {
+  const loop = (current: URL, redirects: number): Effect.Effect<HttpClientResponse.HttpClientResponse, unknown> =>
+    Effect.tryPromise({
+      try: () => validateNetworkTarget(current),
+      catch: (error) => error,
+    }).pipe(
+      Effect.andThen(
+        http
+          .execute(request(current.toString(), format, userAgent))
+          .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
+      ),
+      Effect.flatMap((response) => {
+        if (response.status < 300 || response.status >= 400 || !response.headers.location) {
+          return HttpClientResponse.filterStatusOk(response)
+        }
+        if (redirects >= MAX_REDIRECTS) return Effect.fail(new Error(`Too many redirects (maximum ${MAX_REDIRECTS})`))
+        return Effect.try({
+          try: () => new URL(response.headers.location!, current),
+          catch: (error) => error,
+        }).pipe(Effect.flatMap((next) => loop(next, redirects + 1)))
+      }),
+    )
+  return loop(new URL(url), 0)
+}
 
 const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
   collectBoundedResponseBody(
@@ -130,8 +233,8 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [{ type: "text", text: output.output }],
           execute: (input, context) =>
             Effect.gen(function* () {
-              yield* Effect.try({
-                try: () => assertHttpUrl(new URL(input.url)),
+              yield* Effect.tryPromise({
+                try: () => validateNetworkTarget(new URL(input.url)),
                 catch: (error) => error,
               })
 

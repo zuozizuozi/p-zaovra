@@ -2,17 +2,18 @@ import { WorkspaceV2 } from "@zaovra-ai/core/workspace"
 import type { Target } from "@/control-plane/types"
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterRuntime } from "@/control-plane/workspace-adapter-runtime"
-import { Session } from "@/session/session"
+import { Database } from "@zaovra-ai/core/database/database"
+import { SessionTable } from "@zaovra-ai/core/session/sql"
 import { HttpApiProxy } from "./proxy"
 import * as Fence from "@/server/shared/fence"
 import { getWorkspaceRouteSessionID, isLocalWorkspaceRoute, workspaceProxyURL } from "@/server/shared/workspace-routing"
-import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@zaovra-ai/core/flag/flag"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
 import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
+import { eq } from "drizzle-orm"
 
 // Query fields this middleware reads from the URL. Spread into every
 // endpoint query schema in groups that apply WorkspaceRoutingMiddleware,
@@ -54,7 +55,7 @@ export class WorkspaceRoutingMiddleware extends HttpApiMiddleware.Service<
   WorkspaceRoutingMiddleware,
   {
     provides: WorkspaceRouteContext
-    requires: Session.Service
+    requires: Database.Service
   }
 >()("@zaovra/ExperimentalHttpApiWorkspaceRouting") {}
 
@@ -88,7 +89,11 @@ function defaultDirectory(request: HttpServerRequest.HttpServerRequest, url: URL
 }
 
 function shouldStayOnControlPlane(request: HttpServerRequest.HttpServerRequest, url: URL): boolean {
-  return isLocalWorkspaceRoute(request.method, url.pathname) || url.pathname.startsWith("/console")
+  return (
+    url.pathname.startsWith("/api/") ||
+    isLocalWorkspaceRoute(request.method, url.pathname) ||
+    url.pathname.startsWith("/console")
+  )
 }
 
 function resolveWorkspace(
@@ -159,7 +164,7 @@ function planWorkspaceRequest(
 
 function planRequest(
   request: HttpServerRequest.HttpServerRequest,
-  session?: Session.Info,
+  session?: { readonly directory: string; readonly workspaceID?: WorkspaceV2.ID },
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
     const url = requestURL(request)
@@ -215,18 +220,29 @@ function routeHttpApiWorkspace<E>(
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   E,
-  Session.Service | Workspace.Service | HttpServerRequest.HttpServerRequest | Socket.WebSocketConstructor
+  Database.Service | Workspace.Service | HttpServerRequest.HttpServerRequest | Socket.WebSocketConstructor
 > {
   return Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const sessionID = getWorkspaceRouteSessionID(requestURL(request))
     const session = sessionID
-      ? yield* Session.Service.use((svc) => svc.get(sessionID)).pipe(
-          Effect.catchIf(
-            (error): error is NotFoundError => NotFoundError.isInstance(error),
-            () => Effect.succeed(undefined),
-          ),
-          Effect.catchDefect(() => Effect.succeed(undefined)),
+      ? yield* Database.Service.use(({ db }) =>
+          db
+            .select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get()
+            .pipe(
+              Effect.orDie,
+              Effect.map((row) =>
+                row
+                  ? {
+                      directory: row.directory,
+                      ...(row.workspaceID ? { workspaceID: row.workspaceID } : {}),
+                    }
+                  : undefined,
+              ),
+            ),
         )
       : undefined
     const plan = yield* planRequest(request, session)

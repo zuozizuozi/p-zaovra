@@ -1724,8 +1724,6 @@ export default function Page() {
     })
   }
 
-  const merge = (next: NonNullable<ReturnType<typeof info>>, target = sync()) => target.session.remember(next)
-
   const roll = (sessionID: string, next: NonNullable<ReturnType<typeof info>>["revert"], target = sync()) => {
     const session = target.session.get(sessionID)
     if (!session) return
@@ -1852,7 +1850,7 @@ export default function Page() {
   const halt = (sessionID: string) =>
     busy(sessionID)
       ? sdk()
-          .client.session.abort({ sessionID })
+          .client.v2.session.interrupt({ sessionID })
           .catch(() => {})
       : Promise.resolve()
 
@@ -1868,9 +1866,19 @@ export default function Page() {
           roll(input.sessionID, { messageID: input.messageID }, target)
           prompt.set(value)
         },
-        request: () => halt(input.sessionID).then(() => client.session.revert(input)),
+        request: () => halt(input.sessionID).then(() => client.v2.session.revert.stage(input)),
         complete: (result) => {
-          if (result.data) merge(result.data, target)
+          const value = result.data?.data
+          if (value)
+            roll(
+              input.sessionID,
+              {
+                messageID: value.messageID,
+                snapshot: value.snapshot,
+                diff: value.diff,
+              },
+              target,
+            )
         },
         rollback: () => roll(input.sessionID, last, target),
         fail,
@@ -1898,13 +1906,15 @@ export default function Page() {
           }
           promptSession.reset()
         },
-        request: () =>
-          !next
-            ? halt(sessionID).then(() => client.session.unrevert({ sessionID }))
-            : halt(sessionID).then(() => client.session.revert({ sessionID, messageID: next.id })),
-        complete: (result) => {
-          if (result.data) merge(result.data, target)
+        request: async () => {
+          await halt(sessionID)
+          if (!next) {
+            await client.v2.session.revert.clear({ sessionID })
+            return
+          }
+          await client.v2.session.revert.stage({ sessionID, messageID: next.id })
         },
+        complete: () => undefined,
         rollback: () => roll(sessionID, last, target),
         fail,
       })

@@ -43,6 +43,7 @@ export const IntegrationGroup = HttpApiGroup.make("server.integration")
       query: LocationQuery,
       payload: Schema.Struct({
         key: Schema.String,
+        inputs: Schema.optional(Inputs),
         label: Schema.optional(Schema.String),
       }),
       success: HttpApiSchema.NoContent,

@@ -6,19 +6,18 @@ import type {
   Part,
   Config,
   Todo,
-  Command,
-  PermissionRequest,
-  QuestionRequest,
+  CommandView,
+  PermissionView,
+  QuestionView,
   LspStatus,
-  McpStatus,
-  McpResource,
   FormatterStatus,
   SessionStatus,
   ProviderListResponse,
-  ProviderAuthMethod,
   VcsInfo,
   SnapshotFileDiff,
   ConsoleState,
+  V2McpStatusResponse,
+  V2McpResourcesResponse,
 } from "@zaovra-ai/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "./project"
@@ -32,6 +31,12 @@ import { batch, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
+import { adaptMessages, adaptSession } from "./v2-session-adapter"
+import { useData } from "./data"
+import { adaptCommand } from "../util/control-plane"
+
+type McpStatus = V2McpStatusResponse["data"][string]
+type McpResource = V2McpResourcesResponse["data"][string]
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -70,14 +75,13 @@ export const {
       capabilities: {
         experimentalBackgroundSubagents: boolean
       }
-      provider_auth: Record<string, ProviderAuthMethod[]>
       agent: Agent[]
-      command: Command[]
+      command: CommandView[]
       permission: {
-        [sessionID: string]: PermissionRequest[]
+        [sessionID: string]: PermissionView[]
       }
       question: {
-        [sessionID: string]: QuestionRequest[]
+        [sessionID: string]: QuestionView[]
       }
       config: Config
       session: Session[]
@@ -115,7 +119,6 @@ export const {
       capabilities: {
         experimentalBackgroundSubagents: false,
       },
-      provider_auth: {},
       config: {},
       status: "loading",
       agent: [],
@@ -140,6 +143,7 @@ export const {
     const event = useEvent()
     const project = useProject()
     const sdk = useSDK()
+    const data = useData()
 
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
@@ -149,6 +153,35 @@ export const {
     }
     const touchPart = (sessionID: string, partID: string) => {
       hydratingSessions.get(sessionID)?.parts.add(partID)
+    }
+
+    const projectV2Session = async (sessionID: string) => {
+      if (!data.session.get(sessionID)) await data.session.refresh(sessionID)
+      if (!data.session.message.list(sessionID)) await data.session.message.refresh(sessionID)
+      const info = data.session.get(sessionID)
+      const messages = data.session.message.list(sessionID)
+      if (!info || !messages) return
+      const history = adaptMessages(info, messages).slice(-100)
+      history.forEach((message) => {
+        touchMessage(sessionID, message.info.id)
+        message.parts.forEach((part) => touchPart(sessionID, part.id))
+      })
+      setStore(
+        produce((draft) => {
+          const match = search(draft.session, sessionID, (item) => item.id)
+          const session = adaptSession(info)
+          if (match.found) draft.session[match.index] = session
+          if (!match.found) draft.session.splice(match.index, 0, session)
+          const visible = new Set(history.map((message) => message.info.id))
+          ;(draft.message[sessionID] ?? []).forEach((message) => {
+            if (!visible.has(message.id)) delete draft.part[message.id]
+          })
+          draft.message[sessionID] = history.map((message) => message.info)
+          history.forEach((message) => {
+            draft.part[message.info.id] = message.parts
+          })
+        }),
+      )
     }
 
     function sessionListQuery(): { scope?: "project"; path?: string } {
@@ -162,12 +195,31 @@ export const {
     }
 
     function listSessions() {
-      return sdk.client.session
-        .list({ start: Date.now() - 30 * 24 * 60 * 60 * 1000, ...sessionListQuery() })
-        .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
+      const query = sessionListQuery()
+      return sdk.client.v2.session
+        .list({ limit: 500, order: "asc", roots: query.scope === "project", subpath: query.path })
+        .then((x) => (x.data?.data ?? []).map(adaptSession).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
     event.subscribe((event, { directory, workspace }) => {
+      if (event.type.startsWith("session.next.") && "sessionID" in event.properties) {
+        const sessionID = event.properties.sessionID
+        if (typeof sessionID === "string") {
+          queueMicrotask(() => void projectV2Session(sessionID))
+          if (event.type === "session.next.step.started") setStore("session_status", sessionID, { type: "busy" })
+          if (event.type === "session.next.step.ended" || event.type === "session.next.step.failed") {
+            setTimeout(() => {
+              void sdk.client.v2.session.active().then((response) => {
+                setStore(
+                  "session_status",
+                  sessionID,
+                  sessionID in (response.data?.data ?? {}) ? { type: "busy" } : { type: "idle" },
+                )
+              })
+            }, 100)
+          }
+        }
+      }
       switch (event.type) {
         case "server.instance.disposed":
           void bootstrap()
@@ -190,11 +242,10 @@ export const {
         case "permission.asked": {
           const request = event.properties
           if (permission.mode === "auto") {
-            void sdk.client.permission.reply({
+            void sdk.client.v2.session.permission.reply({
+              sessionID: request.sessionID,
               requestID: request.id,
               reply: "once",
-              directory,
-              workspace,
             })
             break
           }
@@ -514,17 +565,47 @@ export const {
           void Promise.all([
             ...(args.continue ? [] : [sessionListPromise.then((sessions) => setStore("session", reconcile(sessions)))]),
             consoleStatePromise.then((consoleState) => setStore("console_state", reconcile(consoleState))),
-            sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
+            sdk.client.v2.command
+              .list(
+                {
+                  location: {
+                    directory: project.instance.directory() || sdk.directory || process.cwd(),
+                    workspace,
+                  },
+                },
+                { throwOnError: true },
+              )
+              .then((x) => setStore("command", reconcile(x.data.data.map(adaptCommand)))),
             sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
-            sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
-            sdk.client.experimental.resource
-              .list({ workspace })
-              .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
+            sdk.client.v2.mcp
+              .status(
+                {
+                  location: {
+                    directory: project.instance.directory() || sdk.directory || process.cwd(),
+                    workspace,
+                  },
+                },
+                { throwOnError: true },
+              )
+              .then((response) => setStore("mcp", reconcile(response.data.data))),
+            sdk.client.v2.mcp
+              .resources(
+                {
+                  location: {
+                    directory: project.instance.directory() || sdk.directory || process.cwd(),
+                    workspace,
+                  },
+                },
+                { throwOnError: true },
+              )
+              .then((response) => setStore("mcp_resource", reconcile(response.data.data))),
             sdk.client.formatter.status({ workspace }).then((x) => setStore("formatter", reconcile(x.data ?? []))),
-            sdk.client.session.status({ workspace }).then((x) => {
-              setStore("session_status", reconcile(x.data ?? {}))
+            sdk.client.v2.session.active().then((x) => {
+              const status = Object.fromEntries(
+                Object.keys(x.data?.data ?? {}).map((id) => [id, { type: "busy" as const }]),
+              )
+              setStore("session_status", reconcile(status))
             }),
-            sdk.client.provider.auth({ workspace }).then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get({ workspace }).then((x) => setStore("vcs", reconcile(x.data))),
             project.workspace.sync(),
           ]).then(() => {
@@ -592,20 +673,24 @@ export const {
           const tracker = { messages: new Set<string>(), parts: new Set<string>() }
           hydratingSessions.set(sessionID, tracker)
           const task = (async () => {
-            const [session, messages, todo, diff] = await Promise.all([
-              sdk.client.session.get({ sessionID }, { throwOnError: true }),
-              sdk.client.session.messages({ sessionID, limit: 100 }),
-              sdk.client.session.todo({ sessionID }),
-              sdk.client.session.diff({ sessionID }),
+            const [, , todo] = await Promise.all([
+              data.session.refresh(sessionID),
+              data.session.message.refresh(sessionID).catch(() => undefined),
+              sdk.client.v2.session.todos({ sessionID }),
             ])
+            const session = data.session.get(sessionID)
+            const messages = data.session.message.list(sessionID) ?? []
+            if (!session) return
+            const info = adaptSession(session)
+            const history = adaptMessages(session, messages)
             setStore(
               produce((draft) => {
                 const match = search(draft.session, sessionID, (s) => s.id)
-                if (match.found) draft.session[match.index] = session.data!
-                if (!match.found) draft.session.splice(match.index, 0, session.data!)
-                draft.todo[sessionID] = todo.data ?? []
+                if (match.found) draft.session[match.index] = info
+                if (!match.found) draft.session.splice(match.index, 0, info)
+                draft.todo[sessionID] = todo.data?.data ?? []
                 const currentMessages = draft.message[sessionID] ?? []
-                const infos = (messages.data ?? []).flatMap((message) => {
+                const infos = history.flatMap((message) => {
                   if (!tracker.messages.has(message.info.id)) return [message.info]
                   const current = currentMessages.find((item) => item.id === message.info.id)
                   return current ? [current] : []
@@ -618,7 +703,7 @@ export const {
                 const removed = infos.slice(0, -100)
                 const visible = infos.slice(-100)
                 const visibleIDs = new Set(visible.map((message) => message.id))
-                for (const message of messages.data ?? []) {
+                for (const message of history) {
                   if (!visibleIDs.has(message.info.id)) {
                     delete draft.part[message.info.id]
                     continue
@@ -647,7 +732,7 @@ export const {
                 }
                 for (const message of removed) delete draft.part[message.id]
                 draft.message[sessionID] = visible
-                draft.session_diff[sessionID] = diff.data ?? []
+                draft.session_diff[sessionID] = []
               }),
             )
             fullSyncedSessions.add(sessionID)

@@ -11,7 +11,6 @@ import { Plugin } from "../plugin"
 import { serviceUse } from "@zaovra-ai/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
 import { ModelsDev } from "@zaovra-ai/core/models-dev"
-import { Auth } from "../auth"
 import { Env } from "../env"
 import { InstallationVersion } from "@zaovra-ai/core/installation/version"
 import { iife } from "@/util/iife"
@@ -19,7 +18,6 @@ import { Global } from "@zaovra-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, Context, Schema, Types } from "effect"
-import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
@@ -31,6 +29,12 @@ import { ModelV2 } from "@zaovra-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { Catalog } from "@zaovra-ai/core/catalog"
+import { Integration } from "@zaovra-ai/core/integration"
+import { Credential } from "@zaovra-ai/core/credential"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
+import { Location } from "@zaovra-ai/core/location"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
@@ -144,11 +148,35 @@ type CustomLoader = (provider: Info) => Effect.Effect<{
   discoverModels?: CustomDiscoverModels
 }>
 
+type ProviderAuthInfo =
+  | { type: "api"; key: string; metadata?: Record<string, string> }
+  | { type: "oauth"; refresh: string; access: string; expires: number; accountId?: string; enterpriseUrl?: string }
+
 type CustomDep = {
-  auth: (id: string) => Effect.Effect<Auth.Info | undefined>
+  auth: (id: string) => Effect.Effect<ProviderAuthInfo | undefined>
   config: () => Effect.Effect<ConfigV1.Info>
   env: () => Effect.Effect<Record<string, string | undefined>>
   get: (key: string) => Effect.Effect<string | undefined>
+}
+
+function legacyAuth(value: Credential.Value | undefined): ProviderAuthInfo | undefined {
+  if (!value) return
+  if (value.type === "key") {
+    const metadata = value.metadata
+      ? Object.fromEntries(Object.entries(value.metadata).map(([key, item]) => [key, String(item)]))
+      : undefined
+    return { type: "api", key: value.key, ...(metadata ? { metadata } : {}) }
+  }
+  const accountId = value.metadata?.accountId ?? value.metadata?.accountID
+  const enterpriseUrl = value.metadata?.enterpriseUrl
+  return {
+    type: "oauth",
+    access: value.access,
+    refresh: value.refresh,
+    expires: value.expires,
+    ...(typeof accountId === "string" ? { accountId } : {}),
+    ...(typeof enterpriseUrl === "string" ? { enterpriseUrl } : {}),
+  }
 }
 
 function selectAzureLanguageModel(sdk: any, modelID: string, useChat: boolean) {
@@ -187,16 +215,9 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         Boolean(yield* dep.auth(input.id)) ||
         Boolean((yield* dep.config()).provider?.["zaovra"]?.options?.apiKey)
 
-      if (!ok) {
-        for (const [key, value] of Object.entries(input.models)) {
-          if (value.cost.input === 0) continue
-          delete input.models[key]
-        }
-      }
-
       return {
-        autoload: Object.keys(input.models).length > 0,
-        options: ok ? {} : { apiKey: "public" },
+        autoload: ok && Object.keys(input.models).length > 0,
+        options: {},
       }
     }),
     openai: () =>
@@ -1147,6 +1168,7 @@ export type Error = ModelNotFoundError | InitError | NoProvidersError | NoModels
 
 export interface Interface {
   readonly list: () => Effect.Effect<Record<ProviderV2.ID, Info>>
+  readonly auth: (providerID: ProviderV2.ID) => Effect.Effect<ProviderAuthInfo | undefined>
   readonly getProvider: (providerID: ProviderV2.ID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<Model, ModelNotFoundError>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
@@ -1159,6 +1181,7 @@ export interface Interface {
 }
 
 interface State {
+  auth: (providerID: string) => Effect.Effect<ProviderAuthInfo | undefined>
   models: Map<string, LanguageModelV3>
   providers: Record<ProviderV2.ID, Info>
   catalog: Record<ProviderV2.ID, Info>
@@ -1329,16 +1352,31 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const config = yield* Config.Service
-    const auth = yield* Auth.Service
     const env = yield* Env.Service
     const plugin = yield* Plugin.Service
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
+    const locations = yield* LocationServiceMap.Service
 
-    const state = yield* InstanceState.make<State>(() =>
+    const state = yield* InstanceState.make<State>((ctx) =>
       Effect.gen(function* () {
-        const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
+        const credentialServices = yield* Effect.gen(function* () {
+          return { catalog: yield* Catalog.Service, integrations: yield* Integration.Service }
+        }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+        const providerConnection = Effect.fn("Provider.connection")(function* (id: string) {
+          const provider = yield* credentialServices.catalog.provider.get(ProviderV2.ID.make(id))
+          const integrationID = provider?.integrationID ?? Integration.ID.make(id)
+          const connection = yield* credentialServices.integrations.connection.active(integrationID)
+          if (!connection) return
+          return {
+            connection,
+            auth: legacyAuth(yield* credentialServices.integrations.connection.resolve(connection).pipe(Effect.orDie)),
+          }
+        })
+        const providerAuth = Effect.fn("Provider.credential")(function* (id: string) {
+          return (yield* providerConnection(id))?.auth
+        })
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
@@ -1356,7 +1394,7 @@ const layer = Layer.effect(
           [providerID: string]: CustomDiscoverModels
         } = {}
         const dep = {
-          auth: (id: string) => auth.get(id).pipe(Effect.orDie),
+          auth: providerAuth,
           config: () => config.get(),
           env: () => env.all(),
           get: (key: string) => env.get(key),
@@ -1399,7 +1437,7 @@ const layer = Layer.effect(
 
           const provider = database[providerID]
           if (!provider) continue
-          const pluginAuth = yield* auth.get(providerID).pipe(Effect.orDie)
+          const pluginAuth = yield* providerAuth(providerID)
 
           provider.models = yield* Effect.promise(async () => {
             const next = await models(toPublicInfo(provider), { auth: pluginAuth })
@@ -1528,37 +1566,16 @@ const layer = Layer.effect(
         }
 
         // load apikeys
-        const auths = yield* auth.all().pipe(Effect.orDie)
-        for (const [id, provider] of Object.entries(auths)) {
+        for (const id of Object.keys(database)) {
           const providerID = ProviderV2.ID.make(id)
           if (disabled.has(providerID)) continue
-          if (provider.type === "api") {
+          const credential = yield* providerConnection(providerID)
+          if (credential?.connection.type === "credential" && credential.auth?.type === "api") {
             mergeProvider(providerID, {
               source: "api",
-              key: provider.key,
+              key: credential.auth.key,
             })
           }
-        }
-
-        // plugin auth loader - database now has entries for config providers
-        for (const plugin of plugins) {
-          if (!plugin.auth) continue
-          const providerID = ProviderV2.ID.make(plugin.auth.provider)
-          if (disabled.has(providerID)) continue
-
-          const stored = yield* auth.get(providerID).pipe(Effect.orDie)
-          if (!stored) continue
-          if (!plugin.auth.loader) continue
-
-          const options = yield* Effect.promise(() =>
-            plugin.auth!.loader!(
-              () => bridge.promise(auth.get(providerID).pipe(Effect.orDie)) as any,
-              toPublicInfo(database[plugin.auth!.provider]),
-            ),
-          )
-          const opts = options ?? {}
-          const patch: Partial<Info> = providers[providerID] ? { options: opts } : { source: "custom", options: opts }
-          mergeProvider(providerID, patch)
         }
 
         for (const [id, fn] of Object.entries(custom(dep))) {
@@ -1653,6 +1670,7 @@ const layer = Layer.effect(
         }
 
         return {
+          auth: providerAuth,
           models: languages,
           providers,
           catalog,
@@ -1664,6 +1682,9 @@ const layer = Layer.effect(
     )
 
     const list = Effect.fn("Provider.list")(() => InstanceState.use(state, (s) => s.providers))
+    const auth = Effect.fn("Provider.auth")((providerID: ProviderV2.ID) =>
+      InstanceState.useEffect(state, (s) => s.auth(providerID)),
+    )
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
@@ -1974,7 +1995,7 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    return Service.of({ list, auth, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
   }),
 )
 
@@ -2000,7 +2021,15 @@ export function parseModel(model: string) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Config.node, Auth.node, Env.node, Plugin.node, ModelsDev.node, RuntimeFlags.node],
+  deps: [
+    FSUtil.node,
+    Config.node,
+    Env.node,
+    Plugin.node,
+    ModelsDev.node,
+    RuntimeFlags.node,
+    LocationServiceMap.node,
+  ],
 })
 
 export * as Provider from "./provider"

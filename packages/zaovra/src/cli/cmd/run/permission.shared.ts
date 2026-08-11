@@ -13,7 +13,7 @@
 //
 // permissionInfo() extracts display info (icon, title, lines, diff) from
 // the request, delegating to tool.ts for tool-specific formatting.
-import type { PermissionRequest } from "@zaovra-ai/sdk/v2"
+import type { PermissionView } from "@zaovra-ai/sdk/v2"
 import type { PermissionReply } from "./types"
 import { toolPath, toolPermissionInfo } from "./tool"
 
@@ -55,7 +55,7 @@ function text(v: unknown): string {
   return typeof v === "string" ? v : ""
 }
 
-function data(request: PermissionRequest): Dict {
+function data(request: PermissionView): Dict {
   const meta = dict(request.metadata)
   return {
     ...meta,
@@ -63,7 +63,7 @@ function data(request: PermissionRequest): Dict {
   }
 }
 
-function patterns(request: PermissionRequest): string[] {
+function patterns(request: PermissionView): string[] {
   return request.patterns.filter((item): item is string => typeof item === "string")
 }
 
@@ -89,7 +89,7 @@ export function permissionOptions(stage: PermissionStage): PermissionOption[] {
   return []
 }
 
-export function permissionInfo(request: PermissionRequest): PermissionInfo {
+export function permissionInfo(request: PermissionView): PermissionInfo {
   const pats = patterns(request)
   const input = data(request)
   const info = toolPermissionInfo(request.permission, input, dict(request.metadata), pats)
@@ -123,7 +123,7 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
   }
 }
 
-export function permissionAlwaysLines(request: PermissionRequest): string[] {
+export function permissionAlwaysLines(request: PermissionView): string[] {
   if (request.always.length === 1 && request.always[0] === "*") {
     return [`This will allow ${request.permission} until Zaovra is restarted.`]
   }

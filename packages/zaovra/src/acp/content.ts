@@ -1,9 +1,10 @@
 import type { ContentBlock, ContentChunk, ResourceLink, Role } from "@agentclientprotocol/sdk"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { SessionV1 } from "@zaovra-ai/core/v1/session"
 
-export type PromptPart = SessionV1.TextPartInput | SessionV1.FilePartInput
+export type PromptPart =
+  | { type: "text"; text: string; synthetic?: boolean; ignored?: boolean }
+  | { type: "file"; url: string; filename?: string; mime: string }
 
 export type ReplayPart =
   | {
@@ -160,7 +161,7 @@ function uriToFilePart(
   uri: string,
   mime: string,
   filename?: string,
-): SessionV1.FilePartInput | SessionV1.TextPartInput {
+): PromptPart {
   try {
     if (uri.startsWith("file://")) {
       return {

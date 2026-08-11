@@ -27,6 +27,7 @@ export function DesktopPromo() {
       when={
         visible() &&
         primaryHost &&
+        strip(location.pathname) !== "/" &&
         strip(location.pathname) !== "/download" &&
         !strip(location.pathname).startsWith("/download/")
       }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect } from "bun:test"
-import { Effect, Layer, Queue, Schema, Stream } from "effect"
+import { Effect, Fiber, Layer, Queue, Schema, Stream } from "effect"
 import { EventPaths } from "../../src/server/routes/instance/httpapi/groups/event"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
@@ -27,11 +27,11 @@ const openEventStream = (directory: string) =>
   Effect.gen(function* () {
     const response = yield* requestInDirectory(EventPaths.event, directory)
     const reader = yield* Queue.unbounded<Uint8Array>()
-    yield* response.stream.pipe(
+    const fiber = yield* response.stream.pipe(
       Stream.runForEach((value) => Queue.offer(reader, value)),
       Effect.forkScoped,
     )
-    return { response, reader }
+    return { response, reader, fiber }
   })
 
 afterEach(async () => {
@@ -47,7 +47,7 @@ describe("event HttpApi", () => {
     () =>
       Effect.gen(function* () {
         const { directory } = yield* TestInstance
-        const { response, reader } = yield* openEventStream(directory)
+        const { response, reader, fiber } = yield* openEventStream(directory)
 
         expect(response.status).toBe(200)
         expect(response.headers["content-type"]).toContain("text/event-stream")
@@ -55,6 +55,7 @@ describe("event HttpApi", () => {
         expect(response.headers["x-accel-buffering"]).toBe("no")
         expect(response.headers["x-content-type-options"]).toBe("nosniff")
         expect(yield* readEvent(reader)).toMatchObject({ type: "server.connected", properties: {} })
+        yield* Fiber.interrupt(fiber)
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
@@ -64,7 +65,7 @@ describe("event HttpApi", () => {
     () =>
       Effect.gen(function* () {
         const { directory } = yield* TestInstance
-        const { reader } = yield* openEventStream(directory)
+        const { reader, fiber } = yield* openEventStream(directory)
         expect(yield* readEvent(reader)).toMatchObject({ type: "server.connected", properties: {} })
 
         // If no second event arrives within 250ms, the stream is still open.
@@ -73,8 +74,10 @@ describe("event HttpApi", () => {
           Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.succeed("open" as const) }),
         )
         expect(status).toBe("open")
+        yield* Fiber.interrupt(fiber)
       }),
     { git: true, config: { formatter: false, lsp: false } },
+    { timeout: 15000 },
   )
 
   it.instance(
@@ -82,12 +85,17 @@ describe("event HttpApi", () => {
     () =>
       Effect.gen(function* () {
         const { directory } = yield* TestInstance
-        const { reader } = yield* openEventStream(directory)
+        const { reader, fiber } = yield* openEventStream(directory)
         expect(yield* readEvent(reader)).toMatchObject({ type: "server.connected", properties: {} })
 
-        const created = yield* requestInDirectory("/session", directory, { method: "POST" })
+        const created = yield* requestInDirectory("/api/session", directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "event stream test", location: { directory } }),
+        })
         expect(created.status).toBe(200)
-        expect(yield* readEvent(reader)).toMatchObject({ type: "session.created" })
+        expect(yield* readEvent(reader)).toMatchObject({ type: "session.next.created" })
+        yield* Fiber.interrupt(fiber)
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

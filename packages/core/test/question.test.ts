@@ -6,8 +6,22 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { QuestionV2 } from "@zaovra-ai/core/question"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { testEffect } from "./lib/effect"
+import { Location } from "@zaovra-ai/core/location"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
+import { Project } from "@zaovra-ai/core/project"
 
-const questions = AppNodeBuilder.build(LayerNode.group([EventV2.node, QuestionV2.node]))
+const questions = AppNodeBuilder.build(LayerNode.group([EventV2.node, QuestionV2.node]), [
+  [
+    Location.node,
+    Layer.succeed(
+      Location.Service,
+      Location.Service.of({
+        directory: AbsolutePath.make("/project"),
+        project: { id: Project.ID.global, directory: AbsolutePath.make("/project") },
+      }),
+    ),
+  ],
+])
 const it = testEffect(questions)
 
 const sessionID = SessionV2.ID.make("ses_question_test")
@@ -89,7 +103,7 @@ describe("QuestionV2", () => {
     }),
   )
 
-  it.effect("isolates pending requests by location-layer instance and rejects them on finalization", () =>
+  it.effect("settles a pending request through another service instance for the same location", () =>
     Effect.gen(function* () {
       const firstScope = yield* Scope.make()
       const secondScope = yield* Scope.make()
@@ -99,15 +113,11 @@ describe("QuestionV2", () => {
       yield* Effect.yieldNow
       const request = (yield* first.list())[0]!
 
-      expect(yield* second.list()).toEqual([])
-      expect(yield* second.reply({ requestID: request.id, answers: [["One"]] }).pipe(Effect.flip)).toEqual(
-        new QuestionV2.NotFoundError({ requestID: request.id }),
-      )
+      expect(yield* second.list()).toEqual([request])
+      yield* second.reply({ requestID: request.id, answers: [["One"]] })
+      expect(yield* Fiber.join(fiber)).toEqual([["One"]])
 
       yield* Scope.close(firstScope, Exit.void)
-      const exit = yield* Fiber.await(fiber)
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) expect(exit.cause.toString()).toContain("QuestionV2.RejectedError")
       yield* Scope.close(secondScope, Exit.void)
     }),
   )

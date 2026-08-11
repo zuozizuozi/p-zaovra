@@ -601,7 +601,7 @@ export function NewHome() {
     await archiveHomeSession({
       server: ServerConnection.key(conn),
       session,
-      update: (value) => ctx.sdk.client.session.update(value),
+      update: (value) => ctx.sdk.client.v2.session.update(value),
       remove: () =>
         setStore(
           produce((draft) => {

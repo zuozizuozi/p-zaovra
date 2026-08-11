@@ -30,11 +30,16 @@ import { TuiEvent } from "./tui-event"
 import { VcsEvent } from "./vcs-event"
 import { WorkspaceEvent } from "./workspace-event"
 import { WorktreeEvent } from "./worktree-event"
+import { WorkEvent } from "./work-event"
 
 const sessionV1DurableDefinitions = SessionV1.Event.Definitions.filter((definition) => definition.durable !== undefined)
 const sessionV1LiveDefinitions = SessionV1.Event.Definitions.filter((definition) => definition.durable === undefined)
 
-const coreDefinitions = Event.inventory(...sessionV1DurableDefinitions, ...SessionEvent.Definitions)
+const coreDefinitions = Event.inventory(
+  ...sessionV1DurableDefinitions,
+  ...SessionEvent.Definitions,
+  ...WorkEvent.Definitions,
+)
 
 const foundationDefinitions = Event.inventory(
   ...ModelsDev.Event.Definitions,

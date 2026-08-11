@@ -212,7 +212,11 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: st
   ]
   const capabilities =
     info.tool_call !== undefined || info.modalities?.input !== undefined || info.modalities?.output !== undefined
-      ? { tools: info.tool_call ?? false, input: info.modalities?.input ?? [], output: info.modalities?.output ?? [] }
+      ? {
+          tools: info.tool_call ?? false,
+          input: info.modalities?.input ?? ["text"],
+          output: info.modalities?.output ?? ["text"],
+        }
       : undefined
   return {
     family: info.family,

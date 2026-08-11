@@ -4,7 +4,6 @@ import * as Observability from "@zaovra-ai/core/observability"
 
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Database } from "@zaovra-ai/core/database/database"
-import { Auth } from "@/auth"
 import { Account } from "@/account/account"
 import { Config } from "@/config/config"
 import { Git } from "@/git"
@@ -14,29 +13,11 @@ import { Snapshot } from "@/snapshot"
 import { Plugin } from "@/plugin"
 import { ModelsDev } from "@zaovra-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
-import { ProviderAuth } from "@/provider/auth"
 import { Agent } from "@/agent/agent"
 import { Skill } from "@/skill"
 import { Discovery } from "@/skill/discovery"
-import { Question } from "@/question"
-import { Permission } from "@/permission"
-import { Todo } from "@/session/todo"
-import { Session } from "@/session/session"
-import { SessionStatus } from "@/session/status"
-import { SessionRunState } from "@/session/run-state"
-import { SessionProcessor } from "@/session/processor"
-import { SessionCompaction } from "@/session/compaction"
-import { SessionRevert } from "@/session/revert"
-import { SessionSummary } from "@/session/summary"
-import { SessionPrompt } from "@/session/prompt"
-import { Instruction } from "@/session/instruction"
-import { LLM } from "@/session/llm"
 import { LSP } from "@/lsp/lsp"
-import { MCP } from "@/mcp"
-import { McpAuth } from "@/mcp/auth"
-import { Command } from "@/command"
 import { Truncate } from "@/tool/truncate"
-import { ToolRegistry } from "@/tool/registry"
 import { Format } from "@/format"
 import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"
@@ -44,8 +25,6 @@ import { Vcs } from "@/project/vcs"
 import { Workspace } from "@/control-plane/workspace"
 import { Worktree } from "@/worktree"
 import { Installation } from "@/installation"
-import { ShareNext } from "@/share/share-next"
-import { SessionShare } from "@/share/session"
 import { Npm } from "@zaovra-ai/core/npm"
 import { memoMap } from "@zaovra-ai/core/effect/memo-map"
 import { BackgroundJob } from "@/background/job"
@@ -54,13 +33,19 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { SessionExecutionLocal } from "@zaovra-ai/core/session/execution/local"
+import { EventV2 } from "@zaovra-ai/core/event"
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
     Npm.node,
     FSUtil.node,
     Database.node,
-    Auth.node,
+    EventV2.node,
+    LocationServiceMap.node,
     Account.node,
     Config.node,
     Git.node,
@@ -69,33 +54,16 @@ export const AppLayer = AppNodeBuilderV1.build(
     Plugin.node,
     ModelsDev.node,
     Provider.node,
-    ProviderAuth.node,
     Agent.node,
     Skill.node,
     Discovery.node,
-    Question.node,
-    Permission.node,
-    Todo.node,
-    Session.node,
+    SessionV2.node,
     SessionProjector.node,
-    SessionStatus.node,
     BackgroundJob.node,
     RuntimeFlags.node,
     EventV2Bridge.node,
-    SessionRunState.node,
-    SessionProcessor.node,
-    SessionCompaction.node,
-    SessionRevert.node,
-    SessionSummary.node,
-    SessionPrompt.node,
-    Instruction.node,
-    LLM.node,
     LSP.node,
-    MCP.node,
-    McpAuth.node,
-    Command.node,
     Truncate.node,
-    ToolRegistry.node,
     Format.node,
     InstanceStore.node,
     Project.node,
@@ -103,9 +71,11 @@ export const AppLayer = AppNodeBuilderV1.build(
     Workspace.node,
     Worktree.node,
     Installation.node,
-    ShareNext.node,
-    SessionShare.node,
   ]),
+  [
+    [LocationServiceMap.node, locationServiceMapLayer],
+    [SessionExecution.node, SessionExecutionLocal.node],
+  ],
 ).pipe(Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)), Layer.provideMerge(Observability.layer))
 
 const rt = ManagedRuntime.make(AppLayer, { memoMap })

@@ -7,4 +7,4 @@ const channel = resolveChannel()
 await $`bun ./scripts/copy-icons.ts ${channel}`
 await $`bun ./scripts/copy-metainfo.ts ${channel}`
 
-await $`cd ../zaovra && bun script/build-node.ts`
+await $`bun ../zaovra/script/build-node.ts`

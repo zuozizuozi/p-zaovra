@@ -55,6 +55,36 @@ function request(headers: Record<string, string>, variant?: string) {
 const decode = Schema.decodeUnknownSync(Config.Info)
 
 describe("ConfigProviderPlugin.Plugin", () => {
+  it.effect("registers a key integration for a configured custom provider", () =>
+    Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: decode({
+                providers: {
+                  custom: {
+                    name: "Custom",
+                    api: { type: "aisdk", package: "@ai-sdk/openai-compatible", url: "https://example.test" },
+                  },
+                },
+              }),
+            }),
+          ]),
+      })
+
+      yield* addPlugin(config)
+
+      expect(yield* integrations.get(Integration.ID.make("custom"))).toMatchObject({
+        id: "custom",
+        name: "Custom",
+        methods: [{ type: "key", label: "API key" }],
+      })
+    }),
+  )
+
   it.effect("keeps configured model variant bodies unchanged", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

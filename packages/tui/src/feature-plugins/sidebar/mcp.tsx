@@ -9,20 +9,13 @@ function View(props: { api: TuiPluginApi }) {
   const theme = () => props.api.theme.current
   const list = createMemo(() => props.api.state.mcp())
   const on = createMemo(() => list().filter((item) => item.status === "connected").length)
-  const bad = createMemo(
-    () =>
-      list().filter(
-        (item) =>
-          item.status === "failed" || item.status === "needs_auth" || item.status === "needs_client_registration",
-      ).length,
-  )
+  const bad = createMemo(() => list().filter((item) => item.status === "failed" || item.status === "needs_auth").length)
 
   const dot = (status: string) => {
     if (status === "connected") return theme().success
     if (status === "failed") return theme().error
     if (status === "disabled") return theme().textMuted
     if (status === "needs_auth") return theme().warning
-    if (status === "needs_client_registration") return theme().error
     return theme().textMuted
   }
 
@@ -65,7 +58,6 @@ function View(props: { api: TuiPluginApi }) {
                       </Match>
                       <Match when={item.status === "disabled"}>Disabled</Match>
                       <Match when={item.status === "needs_auth"}>Needs auth</Match>
-                      <Match when={item.status === "needs_client_registration"}>Needs client ID</Match>
                     </Switch>
                   </span>
                 </text>

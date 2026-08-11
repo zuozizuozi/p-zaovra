@@ -64,17 +64,19 @@ describe("bootstrapDirectory", () => {
       sdk: {
         app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
         config: { get: async () => ({ data: {} }) },
-        session: { status: async () => ({ data: {} }) },
         vcs: { get: async () => ({ data: undefined }) },
-        command: {
-          list: async () => {
-            mcpReads.push("command")
-            return { data: [] }
+        v2: {
+          command: {
+            list: async () => {
+              mcpReads.push("command")
+              return { data: { data: [] } }
+            },
           },
+          permission: { request: { list: async () => ({ data: { data: [] } }) } },
+          question: { request: { list: async () => ({ data: { data: [] } }) } },
+          reference: { list: async () => ({ data: { data: [] } }) },
+          session: { active: async () => ({ data: { data: {} } }) },
         },
-        permission: { list: async () => ({ data: [] }) },
-        question: { list: async () => ({ data: [] }) },
-        v2: { reference: { list: async () => ({ data: { data: [] } }) } },
         mcp: {
           status: async () => {
             mcpReads.push("status")
@@ -105,15 +107,17 @@ describe("bootstrapDirectory", () => {
     const client = {
       app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
       config: { get: async () => ({ data: {} }) },
-      session: {
-        status: async () => ({ data: { ses_busy: { type: "busy" } } }),
-        get: () => stalled.promise,
-      },
       vcs: { get: async () => ({ data: undefined }) },
-      command: { list: async () => ({ data: [] }) },
-      permission: { list: async () => ({ data: [] }) },
-      question: { list: async () => ({ data: [] }) },
-      v2: { reference: { list: async () => ({ data: { data: [] } }) } },
+      v2: {
+        command: { list: async () => ({ data: { data: [] } }) },
+        permission: { request: { list: async () => ({ data: { data: [] } }) } },
+        question: { request: { list: async () => ({ data: { data: [] } }) } },
+        reference: { list: async () => ({ data: { data: [] } }) },
+        session: {
+          active: async () => ({ data: { data: { ses_busy: { type: "running" } } } }),
+          get: () => stalled.promise,
+        },
+      },
       mcp: { status: async () => ({ data: {} }) },
       provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
     } as unknown as ZaovraClient
@@ -157,6 +161,75 @@ describe("bootstrapDirectory", () => {
 
     expect(session.data.session_status["ses_busy"]?.type).toBe("busy")
     expect(session.data.session_status[stale.id]).toBeUndefined()
+  })
+
+  test("bootstraps commands from the V2 location control plane", async () => {
+    const [store, setStore] = directoryState()
+    const calls: string[] = []
+    const client = {
+      app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
+      config: { get: async () => ({ data: {} }) },
+      vcs: { get: async () => ({ data: undefined }) },
+      v2: {
+        command: {
+          list: async () => {
+            calls.push("v2.command.list")
+            return {
+              data: {
+                data: [
+                  {
+                    name: "review",
+                    template: "Review the current changes",
+                    model: { providerID: "openai", id: "gpt-5" },
+                  },
+                ],
+              },
+            }
+          },
+        },
+        permission: { request: { list: async () => ({ data: { data: [] } }) } },
+        question: { request: { list: async () => ({ data: { data: [] } }) } },
+        reference: { list: async () => ({ data: { data: [] } }) },
+        session: { active: async () => ({ data: { data: {} } }) },
+        mcp: {
+          status: async () => ({ data: { data: {} } }),
+          resources: async () => ({ data: { data: {} } }),
+        },
+      },
+      provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
+    } as unknown as ZaovraClient
+
+    await bootstrapDirectory({
+      directory: "/project",
+      scope: ServerScope.local,
+      mcp: true,
+      global: {
+        config: {} satisfies Config,
+        path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
+        project: [{ id: "project", worktree: "/project" } as Project],
+        provider,
+      },
+      sdk: client,
+      store,
+      setStore,
+      vcsCache: { setStore() {} } as unknown as VcsCache,
+      loadSessions() {},
+      translate: (key) => key,
+      queryClient: new QueryClient(),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(calls).toEqual(["v2.command.list"])
+    expect(store.command).toEqual([
+      {
+        name: "review",
+        template: "Review the current changes",
+        model: "openai/gpt-5",
+        source: "command",
+        hints: [],
+      },
+    ])
   })
 })
 

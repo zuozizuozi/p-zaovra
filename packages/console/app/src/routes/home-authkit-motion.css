@@ -1,0 +1,507 @@
+/* AuthKit-inspired motion language. All effects are progressive and page-scoped. */
+
+[data-page="zaovra-home"] {
+  --home-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --home-motion-edge: rgba(152, 192, 239, 0.42);
+  --home-motion-focus: rgba(152, 192, 239, 0.72);
+}
+
+/* Page-load choreography */
+[data-page="zaovra-home"] [data-component="home-header"] {
+  animation: home-authkit-header-in 700ms var(--home-motion-ease) both;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > [data-slot="eyebrow"],
+[data-page="zaovra-home"] [data-slot="hero-copy"] > h1,
+[data-page="zaovra-home"] [data-slot="hero-copy"] > p,
+[data-page="zaovra-home"] [data-slot="hero-actions"] {
+  animation: home-authkit-reveal-up 820ms var(--home-motion-ease) both;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > [data-slot="eyebrow"] {
+  animation-delay: 80ms;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > h1 {
+  animation-delay: 165ms;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > p:not([data-slot="platform-note"]) {
+  animation-delay: 255ms;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-actions"] {
+  animation-delay: 350ms;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > [data-slot="platform-note"] {
+  animation-delay: 440ms;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-product"] {
+  animation: home-authkit-stage-in 1000ms var(--home-motion-ease) 230ms both;
+  transform-style: preserve-3d;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div {
+  animation: home-authkit-proof-in 720ms var(--home-motion-ease) both;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div:nth-child(1) {
+  animation-delay: 540ms;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div:nth-child(2) {
+  animation-delay: 620ms;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div:nth-child(3) {
+  animation-delay: 700ms;
+}
+
+/* Quiet ambient movement: surfaces move, never copy or layout. */
+[data-page="zaovra-home"] [data-component="home-hero"]::after {
+  animation: home-authkit-spotlight-drift 16s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-product"] > [data-component="desktop-workbench-stage"] {
+  animation: home-authkit-product-float 8s ease-in-out 1.2s infinite;
+  will-change: translate;
+}
+
+[data-page="zaovra-home"] [data-slot="workgraph-canvas"] {
+  animation: home-authkit-blueprint-drift 22s linear infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="graph-lines"] {
+  animation: home-authkit-path-flow 18s linear infinite;
+  will-change: background-position, opacity;
+}
+
+[data-page="zaovra-home"] [data-slot="status-dot"],
+[data-page="zaovra-home"] [data-slot="session-dot"] {
+  animation: home-authkit-status-pulse 3.8s ease-in-out infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="session-item"]:nth-child(3) [data-slot="session-dot"],
+[data-page="zaovra-home"] [data-slot="statusbar"] [data-slot="status-dot"] {
+  animation-delay: -1.9s;
+}
+
+/* Tactile controls and frosted cards */
+[data-page="zaovra-home"] :is(
+  [data-slot="header-cta"],
+  [data-slot="hero-actions"] a,
+  [data-slot="download-actions"] > a,
+  [data-slot="install-panels"] button,
+  [data-slot="provider-item"],
+  [data-slot="feature-grid"] article,
+  [data-slot="open-grid"] article,
+  [data-slot="access-grid"] article
+) {
+  transition:
+    color 200ms ease,
+    background-color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 220ms ease,
+    translate 220ms var(--home-motion-ease);
+}
+
+[data-page="zaovra-home"] :is(
+  [data-slot="header-cta"],
+  [data-slot="hero-actions"] a,
+  [data-slot="download-actions"] > a,
+  [data-slot="install-panels"] button,
+  [data-slot="provider-item"],
+  [data-slot="feature-grid"] article,
+  [data-slot="open-grid"] article,
+  [data-slot="access-grid"] article
+):hover {
+  border-color: var(--home-motion-edge);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 14px 32px rgba(0, 8, 22, 0.18),
+    0 0 0 1px rgba(93, 157, 232, 0.06);
+  translate: 0 -2px;
+}
+
+[data-page="zaovra-home"] [data-slot="install-panels"] button:hover {
+  background-color: rgba(152, 192, 239, 0.035);
+}
+
+[data-page="zaovra-home"] [data-slot="provider-item"]:hover {
+  transform: none;
+}
+
+[data-page="zaovra-home"] [data-slot="text-link"] svg,
+[data-page="zaovra-home"] [data-slot="hero-actions"] a[data-variant="secondary"] svg {
+  transition: translate 200ms var(--home-motion-ease);
+}
+
+[data-page="zaovra-home"] [data-slot="text-link"]:hover svg,
+[data-page="zaovra-home"] [data-slot="hero-actions"] a[data-variant="secondary"]:hover svg {
+  translate: 3px 0;
+}
+
+[data-page="zaovra-home"] [data-slot="goal-node"],
+[data-page="zaovra-home"] [data-slot="task-node"] {
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    translate 220ms var(--home-motion-ease);
+}
+
+[data-page="zaovra-home"] [data-slot="goal-node"]:hover,
+[data-page="zaovra-home"] [data-slot="task-node"]:hover {
+  border-color: var(--home-motion-edge);
+  box-shadow: 0 16px 34px rgba(0, 6, 18, 0.3);
+  translate: 0 -2px;
+}
+
+[data-page="zaovra-home"] :focus-visible {
+  outline: 2px solid var(--home-motion-focus);
+  outline-offset: 4px;
+}
+
+@keyframes home-authkit-header-in {
+  from {
+    opacity: 0;
+    translate: 0 -12px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes home-authkit-reveal-up {
+  from {
+    opacity: 0;
+    translate: 0 18px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes home-authkit-stage-in {
+  from {
+    opacity: 0;
+    translate: 0 24px;
+    rotate: x 4deg;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    rotate: x 0deg;
+  }
+}
+
+@keyframes home-authkit-proof-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes home-authkit-spotlight-drift {
+  0% {
+    opacity: 0.46;
+    transform: translate3d(-3%, -2%, 0) scale(0.96);
+  }
+  50% {
+    opacity: 0.66;
+    transform: translate3d(2%, 1%, 0) scale(1.03);
+  }
+  100% {
+    opacity: 0.52;
+    transform: translate3d(4%, 3%, 0) scale(1.07);
+  }
+}
+
+@keyframes home-authkit-product-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -7px;
+  }
+}
+
+@keyframes home-authkit-blueprint-drift {
+  from {
+    background-position: 0 0, 0 0;
+  }
+  to {
+    background-position: 16px 10px, 16px 10px;
+  }
+}
+
+@keyframes home-authkit-path-flow {
+  0% {
+    opacity: 0.28;
+    background-position: 0 0, 0 0, 0 0;
+  }
+  50% {
+    opacity: 0.43;
+  }
+  100% {
+    opacity: 0.28;
+    background-position: 14px 0, 10px 6px, -10px 6px;
+  }
+}
+
+@keyframes home-authkit-status-pulse {
+  0%,
+  100% {
+    opacity: 0.62;
+    box-shadow: 0 0 0 rgba(98, 216, 160, 0);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 9px rgba(98, 216, 160, 0.38);
+  }
+}
+
+@media (max-width: 719px) {
+  [data-page="zaovra-home"] [data-slot="hero-product"] {
+    transform: none !important;
+    transform-style: flat;
+    rotate: none;
+  }
+
+  [data-page="zaovra-home"] [data-slot="hero-product"] > [data-component="desktop-workbench-stage"],
+  [data-page="zaovra-home"] [data-component="home-hero"]::after,
+  [data-page="zaovra-home"] [data-slot="workgraph-canvas"],
+  [data-page="zaovra-home"] [data-slot="graph-lines"] {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-page="zaovra-home"],
+  [data-page="zaovra-home"] *,
+  [data-page="zaovra-home"] *::before,
+  [data-page="zaovra-home"] *::after {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+
+  [data-page="zaovra-home"] [data-component="home-header"],
+  [data-page="zaovra-home"] [data-slot="hero-copy"] > [data-slot="eyebrow"],
+  [data-page="zaovra-home"] [data-slot="hero-copy"] > h1,
+  [data-page="zaovra-home"] [data-slot="hero-copy"] > p,
+  [data-page="zaovra-home"] [data-slot="hero-actions"],
+  [data-page="zaovra-home"] [data-slot="hero-product"],
+  [data-page="zaovra-home"] [data-slot="hero-product"] > [data-component="desktop-workbench-stage"],
+  [data-page="zaovra-home"] [data-component="proof-rail"] > div,
+  [data-page="zaovra-home"] [data-slot="goal-node"],
+  [data-page="zaovra-home"] [data-slot="task-node"] {
+    opacity: 1 !important;
+    transform: none !important;
+    translate: none !important;
+    rotate: none !important;
+  }
+
+  [data-page="zaovra-home"] [data-component="home-hero"]::after {
+    transform: none !important;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workgraph-canvas"],
+  [data-page="zaovra-home"] [data-slot="graph-lines"] {
+    background-position: 0 0 !important;
+  }
+}
+
+[data-page="zaovra-home"] [data-component="feature-icon"],
+[data-page="zaovra-home"] [data-component="feature-icon"] [data-slot="icon-core"],
+[data-page="zaovra-home"] [data-component="feature-icon"] svg,
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li {
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 260ms ease,
+    background-color 260ms ease;
+}
+
+[data-page="zaovra-home"] [data-component="feature-icon"]::before {
+  transition: transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div:hover [data-component="feature-icon"],
+[data-page="zaovra-home"] [data-slot="feature-grid"] article:hover [data-component="feature-icon"],
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:hover [data-component="feature-icon"] {
+  transform: translateY(-7px) scale(1.045);
+  box-shadow:
+    inset 0 1px 1px rgba(216, 236, 248, 0.38),
+    inset 0 0 0 1px rgba(186, 215, 247, 0.24),
+    inset 0 -14px 28px rgba(0, 0, 0, 0.2),
+    0 22px 38px rgba(0, 0, 0, 0.42),
+    0 0 30px rgba(152, 192, 239, 0.16);
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div:hover [data-component="feature-icon"]::before,
+[data-page="zaovra-home"] [data-slot="feature-grid"] article:hover [data-component="feature-icon"]::before,
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:hover [data-component="feature-icon"]::before {
+  transform: translateX(220%) rotate(24deg);
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div:hover [data-component="feature-icon"] svg,
+[data-page="zaovra-home"] [data-slot="feature-grid"] article:hover [data-component="feature-icon"] svg,
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:hover [data-component="feature-icon"] svg {
+  transform: translateY(-1px) rotate(3deg) scale(1.07);
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:hover {
+  transform: translateY(-5px);
+  background-color: rgba(199, 211, 234, 0.055);
+  box-shadow:
+    inset 0 1px 1px rgba(216, 236, 248, 0.28),
+    inset 0 0 0 1px rgba(186, 215, 247, 0.2),
+    0 28px 50px rgba(0, 0, 0, 0.42),
+    0 0 34px rgba(152, 192, 239, 0.08);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-circuit"] [data-slot="circuit-pulse"] {
+  animation: home-authkit-circuit-flow 4.8s linear infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-circuit"] [data-slot="circuit-pulse"]:nth-of-type(6) {
+  animation-delay: -2.4s;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"] {
+  animation: home-authkit-core-breathe 6s ease-in-out infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"] img {
+  animation: home-authkit-core-float 5.4s ease-in-out infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="core-reflection"] {
+  animation: home-authkit-core-reflection 5.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span {
+  animation: home-authkit-particle 6.5s ease-in-out infinite;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(3n + 1) {
+  animation-duration: 8.5s;
+  animation-delay: -2s;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(3n + 2) {
+  width: 1px;
+  height: 1px;
+  animation-duration: 5.5s;
+  animation-delay: -4s;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(4n) {
+  width: 3px;
+  height: 3px;
+  animation-delay: -1.5s;
+}
+
+@keyframes home-authkit-circuit-flow {
+  to {
+    stroke-dashoffset: -72;
+  }
+}
+
+@keyframes home-authkit-core-breathe {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 1px rgba(216, 236, 248, 0.32),
+      inset 0 0 0 1px rgba(186, 215, 247, 0.18),
+      inset 0 28px 58px rgba(168, 216, 245, 0.07),
+      0 30px 70px rgba(0, 0, 0, 0.52),
+      0 0 42px rgba(74, 118, 211, 0.12);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 1px rgba(216, 236, 248, 0.42),
+      inset 0 0 0 1px rgba(186, 215, 247, 0.27),
+      inset 0 28px 62px rgba(168, 216, 245, 0.1),
+      0 34px 76px rgba(0, 0, 0, 0.56),
+      0 0 66px rgba(74, 118, 211, 0.22);
+  }
+}
+
+@keyframes home-authkit-core-float {
+  0%,
+  100% {
+    translate: 0 1px;
+    rotate: -0.6deg;
+  }
+  50% {
+    translate: 0 -5px;
+    rotate: 0.8deg;
+  }
+}
+
+@keyframes home-authkit-core-reflection {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateX(-40%) rotate(24deg);
+  }
+  48% {
+    opacity: 0.9;
+  }
+  72%,
+  100% {
+    opacity: 0;
+    transform: translateX(420%) rotate(24deg);
+  }
+}
+
+@keyframes home-authkit-particle {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: translate3d(0, 7px, 0) scale(0.75);
+  }
+  45% {
+    opacity: 0.72;
+  }
+  55% {
+    transform: translate3d(7px, -8px, 0) scale(1.2);
+  }
+}
+
+@media (max-width: 719px) {
+  [data-page="zaovra-home"] [data-slot="workflow-core"] {
+    animation-duration: 8s;
+  }
+
+  [data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:hover {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-page="zaovra-home"] [data-component="feature-icon"],
+  [data-page="zaovra-home"] [data-component="feature-icon"]::before,
+  [data-page="zaovra-home"] [data-component="feature-icon"] [data-slot="icon-core"],
+  [data-page="zaovra-home"] [data-component="feature-icon"] svg,
+  [data-page="zaovra-home"] [data-slot="workflow-core"],
+  [data-page="zaovra-home"] [data-slot="workflow-core"] img,
+  [data-page="zaovra-home"] [data-slot="core-reflection"],
+  [data-page="zaovra-home"] [data-slot="workflow-particles"] span,
+  [data-page="zaovra-home"] [data-slot="workflow-circuit"] [data-slot="circuit-pulse"] {
+    animation: none !important;
+    transition: none !important;
+    translate: none !important;
+    rotate: none !important;
+  }
+}

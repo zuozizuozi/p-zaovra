@@ -3,9 +3,9 @@ import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/
 import type {
   Message,
   Part,
-  PermissionRequest,
+  PermissionView,
   Project,
-  QuestionRequest,
+  QuestionView,
   Session,
   SessionStatus,
   SnapshotFileDiff,
@@ -328,7 +328,7 @@ export function applyDirectoryEvent(input: {
       break
     }
     case "permission.asked": {
-      const permission = event.properties as PermissionRequest
+      const permission = event.properties as PermissionView
       const permissions = input.store.permission[permission.sessionID]
       if (!permissions) {
         input.setStore("permission", permission.sessionID, [permission])
@@ -364,7 +364,7 @@ export function applyDirectoryEvent(input: {
       break
     }
     case "question.asked": {
-      const question = event.properties as QuestionRequest
+      const question = event.properties as QuestionView
       const questions = input.store.question[question.sessionID]
       if (!questions) {
         input.setStore("question", question.sessionID, [question])

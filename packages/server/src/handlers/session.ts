@@ -170,9 +170,75 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.pendingInputs",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.pendingInputs(ctx.params.sessionID).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.shell",
+        Effect.fn(function* (ctx) {
+          yield* session
+            .shell({
+              sessionID: ctx.params.sessionID,
+              id: ctx.payload.id,
+              command: ctx.payload.command,
+              resume: ctx.payload.resume,
+            })
+            .pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+              Effect.catchTags({
+                "Session.OperationUnavailableError": () =>
+                  Effect.fail(
+                    new ServiceUnavailableError({
+                      message: "A previous shell command has an uncertain completion state",
+                      service: "session.shell",
+                    }),
+                  ),
+              }),
+            )
+          return HttpApiSchema.NoContent.make()
+        }),
+      )
+      .handle(
+        "session.todos",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.todos(ctx.params.sessionID).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
         "session.compact",
         Effect.fn(function* (ctx) {
-          yield* session.compact({ sessionID: ctx.params.sessionID }).pipe(
+          yield* session.get(ctx.params.sessionID).pipe(
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
                 new SessionNotFoundError({
@@ -181,13 +247,48 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 }),
               ),
             ),
-            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+          )
+          const compacted = yield* session.compact({ sessionID: ctx.params.sessionID }).pipe(
+            Effect.catch(() =>
               Effect.fail(
                 new ServiceUnavailableError({
-                  message: `Session ${error.operation} is not available yet`,
-                  service: `session.${error.operation}`,
+                  message: "Session compaction could not be completed",
+                  service: "session.compact",
                 }),
               ),
+            ),
+          )
+          return { data: { compacted } }
+        }),
+      )
+      .handle(
+        "session.update",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.update({ sessionID: ctx.params.sessionID, ...ctx.payload }).pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) =>
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.remove",
+        Effect.fn(function* (ctx) {
+          yield* session.remove(ctx.params.sessionID).pipe(
+            Effect.catchTag(
+              "Session.NotFoundError",
+              (error) =>
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
             ),
           )
           return HttpApiSchema.NoContent.make()
@@ -196,7 +297,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.wait",
         Effect.fn(function* (ctx) {
-          yield* session.wait(ctx.params.sessionID).pipe(
+          yield* session.get(ctx.params.sessionID).pipe(
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
                 new SessionNotFoundError({
@@ -205,11 +306,13 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 }),
               ),
             ),
-            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+          )
+          yield* session.wait(ctx.params.sessionID).pipe(
+            Effect.catch(() =>
               Effect.fail(
                 new ServiceUnavailableError({
-                  message: `Session ${error.operation} is not available yet`,
-                  service: `session.${error.operation}`,
+                  message: "Session wait could not be completed",
+                  service: "session.wait",
                 }),
               ),
             ),

@@ -3,6 +3,7 @@ import { Effect, Exit, Scope } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { Location } from "@zaovra-ai/core/location"
+import { PermissionV2 } from "@zaovra-ai/core/permission"
 import { AgentPlugin } from "@zaovra-ai/core/plugin/agent"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { location } from "./fixture/location"
@@ -120,11 +121,53 @@ describe("AgentV2", () => {
         "explore",
         "general",
         "plan",
+        "review",
         "summary",
         "title",
+        "work-architect",
+        "work-design-architect",
+        "work-developer",
+        "work-planner",
+        "work-pm",
+        "work-qa",
+        "work-security",
       ])
       for (const item of agents) {
         expect(item.permissions.some((rule) => rule.action === "bash" && rule.effect !== "deny")).toBe(false)
+      }
+      const review = yield* agent.get(AgentV2.ID.make("review"))
+      expect(review).toBeDefined()
+      expect(PermissionV2.evaluate("edit", "src/index.ts", review?.permissions ?? []).effect).toBe("deny")
+      expect(PermissionV2.evaluate("bash", "bun test", review?.permissions ?? []).effect).toBe("deny")
+      expect(PermissionV2.evaluate("read", "src/index.ts", review?.permissions ?? []).effect).toBe("allow")
+      const architect = yield* agent.get(AgentV2.ID.make("work-architect"))
+      expect(architect).toMatchObject({ hidden: true, mode: "primary" })
+      expect(PermissionV2.evaluate("edit", "src/index.ts", architect?.permissions ?? []).effect).toBe("deny")
+      expect(PermissionV2.evaluate("read", "src/index.ts", architect?.permissions ?? []).effect).toBe("allow")
+      const developer = yield* agent.get(AgentV2.ID.make("work-developer"))
+      expect(developer).toMatchObject({ hidden: true, mode: "primary" })
+      expect(PermissionV2.evaluate("edit", "src/index.ts", developer?.permissions ?? []).effect).toBe("allow")
+      expect(PermissionV2.evaluate("task", "general", developer?.permissions ?? []).effect).toBe("deny")
+      for (const id of ["work-pm", "work-design-architect", "work-qa", "work-security"]) {
+        const role = yield* agent.get(AgentV2.ID.make(id))
+        expect(PermissionV2.evaluate("edit", "src/index.ts", role?.permissions ?? []).effect).toBe("deny")
+      }
+      for (const id of [
+        "review",
+        "work-planner",
+        "work-architect",
+        "work-pm",
+        "work-design-architect",
+        "work-developer",
+        "work-qa",
+        "work-security",
+      ]) {
+        const role = yield* agent.get(AgentV2.ID.make(id))
+        expect(role).toMatchObject({ hidden: true, mode: "primary" })
+        expect(PermissionV2.evaluate("read", "src/index.ts", role?.permissions ?? []).effect).toBe("allow")
+        expect(PermissionV2.evaluate("read", ".env", role?.permissions ?? []).effect).toBe("deny")
+        expect(PermissionV2.evaluate("external_directory", "/outside", role?.permissions ?? []).effect).toBe("deny")
+        expect(PermissionV2.evaluate("question", "*", role?.permissions ?? []).effect).toBe("deny")
       }
     }),
   )

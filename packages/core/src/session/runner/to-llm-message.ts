@@ -9,14 +9,25 @@ import {
 } from "@zaovra-ai/llm"
 import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
+import { Buffer } from "node:buffer"
 
-const media = (file: FileAttachment): ContentPart => ({
-  type: "media",
-  mediaType: file.mime,
-  data: file.uri,
-  filename: file.name,
-  metadata: file.description === undefined ? undefined : { description: file.description },
-})
+const media = (file: FileAttachment): ContentPart => {
+  const data = file.uri.match(/^data:([^;,]+)(;base64)?,(.*)$/s)
+  if (file.mime.startsWith("text/") && data) {
+    const text = data[2] ? Buffer.from(data[3], "base64").toString("utf8") : decodeURIComponent(data[3])
+    return {
+      type: "text",
+      text: `<file${file.name ? ` name="${file.name}"` : ""}>\n${text}\n</file>`,
+    }
+  }
+  return {
+    type: "media",
+    mediaType: file.mime,
+    data: file.uri,
+    filename: file.name,
+    metadata: file.description === undefined ? undefined : { description: file.description },
+  }
+}
 
 const toolInput = (tool: SessionMessage.AssistantTool) => {
   if (tool.state.status !== "pending") return tool.state.input

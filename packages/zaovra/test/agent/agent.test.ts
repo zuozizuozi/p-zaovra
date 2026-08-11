@@ -5,29 +5,31 @@ import path from "path"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Agent } from "../../src/agent/agent"
-import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { Global } from "@zaovra-ai/core/global"
-import { Permission } from "../../src/permission"
-import { PermissionV1 } from "@zaovra-ai/core/v1/permission"
+import { PermissionRules } from "../../src/permission"
 import { Plugin } from "../../src/plugin"
 import { Provider } from "../../src/provider/provider"
 import { Skill } from "../../src/skill"
 import { Truncate } from "../../src/tool/truncate"
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
 
 const agentLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
-    LayerNode.group([Agent.node, Plugin.node, Provider.node, Auth.node, Config.node, Skill.node, RuntimeFlags.node]),
-    [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
+    LayerNode.group([Agent.node, Plugin.node, Provider.node, Config.node, Skill.node, RuntimeFlags.node]),
+    [
+      [RuntimeFlags.node, RuntimeFlags.layer(flags)],
+      [LocationServiceMap.node, locationServiceMapLayer],
+    ],
   )
 
 const it = testEffect(agentLayer())
 
 // Helper to evaluate permission for a tool with wildcard pattern
-function evalPerm(agent: Agent.Info | undefined, permission: string): PermissionV1.Action | undefined {
+function evalPerm(agent: Agent.Info | undefined, permission: string): PermissionRules.Rule["effect"] | undefined {
   if (!agent) return undefined
-  return Permission.evaluate(permission, "*", agent.permission).action
+  return PermissionRules.evaluate(permission, "*", agent.permission).effect
 }
 
 function load<A>(fn: (svc: Agent.Interface) => Effect.Effect<A>) {
@@ -76,7 +78,7 @@ it.instance("plan agent denies edits except .zaovra/plans/*", () =>
     // Wildcard is denied
     expect(evalPerm(plan, "edit")).toBe("deny")
     // But specific path is allowed
-    expect(Permission.evaluate("edit", ".zaovra/plans/foo.md", plan!.permission).action).toBe("allow")
+    expect(PermissionRules.evaluate("edit", ".zaovra/plans/foo.md", plan!.permission).effect).toBe("allow")
   }),
 )
 
@@ -84,9 +86,9 @@ it.instance("plan agent denies the general subagent by default", () =>
   Effect.gen(function* () {
     const plan = yield* load((svc) => svc.get("plan"))
     expect(plan).toBeDefined()
-    expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("deny")
-    expect(Permission.evaluate("task", "explore", plan!.permission).action).toBe("allow")
-    expect(Permission.evaluate("task", "custom", plan!.permission).action).toBe("allow")
+    expect(PermissionRules.evaluate("task", "general", plan!.permission).effect).toBe("deny")
+    expect(PermissionRules.evaluate("task", "explore", plan!.permission).effect).toBe("allow")
+    expect(PermissionRules.evaluate("task", "custom", plan!.permission).effect).toBe("allow")
   }),
 )
 
@@ -96,7 +98,7 @@ it.instance(
     Effect.gen(function* () {
       const plan = yield* load((svc) => svc.get("plan"))
       expect(plan).toBeDefined()
-      expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("allow")
+      expect(PermissionRules.evaluate("task", "general", plan!.permission).effect).toBe("allow")
     }),
   {
     config: {
@@ -124,10 +126,10 @@ it.instance("explore agent asks for external directories and allows whitelisted 
   Effect.gen(function* () {
     const explore = yield* load((svc) => svc.get("explore"))
     expect(explore).toBeDefined()
-    expect(Permission.evaluate("external_directory", "/some/other/path", explore!.permission).action).toBe("ask")
-    expect(Permission.evaluate("external_directory", Truncate.GLOB, explore!.permission).action).toBe("allow")
+    expect(PermissionRules.evaluate("external_directory", "/some/other/path", explore!.permission).effect).toBe("ask")
+    expect(PermissionRules.evaluate("external_directory", Truncate.GLOB, explore!.permission).effect).toBe("allow")
     expect(
-      Permission.evaluate("external_directory", path.join(Global.Path.tmp, "agent-work"), explore!.permission).action,
+      PermissionRules.evaluate("external_directory", path.join(Global.Path.tmp, "agent-work"), explore!.permission).effect,
     ).toBe("allow")
   }),
 )
@@ -262,7 +264,7 @@ it.instance(
       const build = yield* load((svc) => svc.get("build"))
       expect(build).toBeDefined()
       // Specific pattern is denied
-      expect(Permission.evaluate("bash", "rm -rf *", build!.permission).action).toBe("deny")
+      expect(PermissionRules.evaluate("bash", "rm -rf *", build!.permission).effect).toBe("deny")
       // Edit still allowed
       expect(evalPerm(build, "edit")).toBe("allow")
     }),
@@ -528,9 +530,9 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
-      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("allow")
-      expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
-      expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
+      expect(PermissionRules.evaluate("external_directory", Truncate.GLOB, build!.permission).effect).toBe("allow")
+      expect(PermissionRules.evaluate("external_directory", Truncate.DIR, build!.permission).effect).toBe("deny")
+      expect(PermissionRules.evaluate("external_directory", "/some/other/path", build!.permission).effect).toBe("deny")
     }),
   {
     config: {
@@ -545,9 +547,9 @@ it.instance("global tmp directory children are allowed for external_directory", 
   Effect.gen(function* () {
     const build = yield* load((svc) => svc.get("build"))
     expect(
-      Permission.evaluate("external_directory", path.join(Global.Path.tmp, "scratch"), build!.permission).action,
+      PermissionRules.evaluate("external_directory", path.join(Global.Path.tmp, "scratch"), build!.permission).effect,
     ).toBe("allow")
-    expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("ask")
+    expect(PermissionRules.evaluate("external_directory", "/some/other/path", build!.permission).effect).toBe("ask")
   }),
 )
 
@@ -556,9 +558,9 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
-      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("allow")
-      expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
-      expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
+      expect(PermissionRules.evaluate("external_directory", Truncate.GLOB, build!.permission).effect).toBe("allow")
+      expect(PermissionRules.evaluate("external_directory", Truncate.DIR, build!.permission).effect).toBe("deny")
+      expect(PermissionRules.evaluate("external_directory", "/some/other/path", build!.permission).effect).toBe("deny")
     }),
   {
     config: {
@@ -578,8 +580,8 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
-      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("deny")
-      expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
+      expect(PermissionRules.evaluate("external_directory", Truncate.GLOB, build!.permission).effect).toBe("deny")
+      expect(PermissionRules.evaluate("external_directory", Truncate.DIR, build!.permission).effect).toBe("deny")
     }),
   {
     config: {
@@ -622,7 +624,7 @@ description: Permission skill.
 
       const build = yield* load((svc) => svc.get("build"))
       const target = path.join(skillDir, "reference", "notes.md")
-      expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
+      expect(PermissionRules.evaluate("external_directory", target, build!.permission).effect).toBe("allow")
     }),
   { git: true },
 )
@@ -634,7 +636,7 @@ it.instance(
       const test = yield* TestInstance
       const build = yield* load((svc) => svc.get("build"))
       const target = path.resolve(test.directory, "../docs/reference/notes.md")
-      expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
+      expect(PermissionRules.evaluate("external_directory", target, build!.permission).effect).toBe("allow")
     }),
   {
     git: true,

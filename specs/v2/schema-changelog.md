@@ -1,5 +1,113 @@
 # V2 Schema Changelog
 
+## 2026-08-07: Add Clustered Work Controllers and Managed Artifact Lifecycle
+
+Affected schema:
+
+- Add `ControllerID`, `ControllerRuntimeID`, Controller registry/status, durable Goal dispatch, and Artifact lifecycle contracts.
+- Bind `work_lease` to the concrete Controller and Controller runtime in addition to Worker, process owner, and monotonic Goal fence.
+- Add `work_controller` and `work_controller_dispatch` through migration `20260806222919_work_controller_cluster`.
+- Add `work_artifact` and `work_artifact_owner` through migration `20260806223623_work_artifact_lifecycle`.
+
+Change:
+
+- Persist every Goal wake and interrupt as a coalesced, revisioned dispatch signal. Route signals to the active Goal lease owner and allow another online, non-draining Controller to claim only after the prior Goal and dispatch leases expire.
+- Fence dispatch renewal and settlement with Controller ID, ControllerRuntimeID, revision, and monotonic dispatch fence. Settling an older revision cannot consume a newer signal recorded during execution.
+- Recover one claimed Goal before continuing it. A durable completed remote Agent result advances to verification without a second provider call; an in-flight outcome without a durable result remains unknown and requires explicit resolution.
+- Register content-addressed Work Artifacts with access timestamps and explicit owner references. Expose inventory and dry-run collection, and delete only unreferenced, retention-eligible content behind an immediate database transaction.
+- Expose Controller pool, durable dispatch, and Artifact lifecycle state through HTTP, generated clients, and the WorkGraph IDE control plane.
+
+Compatibility:
+
+- Historical Goal leases keep nullable Controller identity and remain fenced by their existing Worker/owner/fence until expiry. New claims always write both Controller identifiers.
+- Existing Artifact files remain readable through their durable references; lifecycle collection only considers Artifacts registered after this migration and therefore cannot accidentally sweep unknown legacy files.
+- Controllers must share one strongly consistent database. SQLite/WAL supports same-host multi-process controllers; cross-host production deployment requires a database backend with equivalent transactional compare-and-set semantics and is not implemented by copying a SQLite file.
+- Provider/tool work with unknown side effects is still never replayed automatically.
+
+## 2026-08-07: Add Remote Worker Backpressure, Runtime Fencing, and Result Recovery
+
+Affected schema:
+
+- Add `WorkerRuntimeID`, Worker capacity, `cancelling` Job state, runtime-bound Job assignments, cancellation notices, and poll settlement acknowledgements.
+- Bind Job heartbeat, log, Artifact, and completion payloads to the concrete Worker runtime in addition to Worker ID and monotonic fence.
+- Add the local `work_worker_job_outbox` table plus Worker/runtime/cancellation lease columns through migration `20260806211353_work_worker_runtime`.
+
+Change:
+
+- Claim at most the Worker's declared 1–32 concurrent slots after counting all active leases; keep excess Jobs queued while long Agent Fibers execute independently of polling.
+- Reject a second runtime while the current runtime heartbeat remains live, and fence all late writes from the wrong runtime even when it possesses the same Worker credential.
+- Persist cancellation requests as `cancelling`, deliver them through Worker poll, interrupt the owning Fiber, and require an explicit interrupted result before cancellation can settle.
+- Retry transient controller connectivity within the active lease instead of terminating the local Agent on the first network error.
+- Store completed Worker output and pending Artifacts in a durable local outbox before remote upload. Rebind only `result_ready` records; an `executing` record remains unsafe and is never replayed automatically.
+- Keep an unknown Job in a bounded recovery grace window so a restarted Worker can submit a durable result without racing the controller's unknown projection.
+
+Compatibility:
+
+- Existing Workers migrate with capacity 1 and no active runtime identity. A new authenticated poll establishes the runtime fence.
+- Existing queued/leased/completed Job rows remain readable; runtime identity and cancellation metadata are nullable for historical records.
+- Public Worker poll and Job mutation payloads changed and generated Promise, Effect, and legacy JavaScript clients were regenerated.
+- This change hardens one controller with many Workers. It does not implement multi-controller consensus, queue partitioning, or automatic replay of in-flight provider/tool calls.
+
+## 2026-08-07: Add Fenced Remote Job Logs and Artifacts
+
+Affected schema:
+
+- Add `WorkerGitDiffCapture`, ordered Job log, Job artifact, Job detail, and verified artifact-content contracts.
+- Extend remote command operations/results with a frozen Git revision, bounded patch capture, content-addressed Artifact references, and explicit capture failures.
+- Add durable `work_worker_job_log` and `work_worker_job_artifact` operational tables through migration `20260806193759_work_remote_artifacts`.
+- Extend `WorkDetail` with remote Job summaries and add Worker log/artifact upload plus authenticated Job/artifact inspection endpoints.
+
+Change:
+
+- Accept Job logs only under an active Worker/job fence and a strict contiguous sequence. Exact retries reconcile, while out-of-order, conflicting, stale, oversized, or over-budget entries fail.
+- Capture a remote Git patch only when the Worker has the exact controller-frozen HEAD and a clean workspace. Include untracked files through temporary intent-to-add state and restore the index before returning the patch.
+- Recompute Artifact UTF-8 size and SHA-256 on the controller, store it through the existing content-addressed Work Artifact service, and bind its metadata to the owning Job, Worker, and fence.
+- Reject completion results that forge, omit, duplicate, or reference unregistered Artifacts. Expose Job status, last log, Artifact metadata, and verified Artifact content to SDK and IDE consumers.
+- Request Git patch capture from the real remote verifier path when a command criterion requires `diff` or `artifact` evidence; ordinary command/test and file verification retain their existing behavior.
+
+Compatibility:
+
+- No durable Work event version changes. Existing Worker Jobs acquire empty log and Artifact collections, and existing command operations remain valid because capture metadata is optional.
+- Artifact upload is JSON/UTF-8 and limited to 4 MiB per patch in this slice. Streaming binary transport and remote Artifact garbage collection remain future production hardening.
+- The full provider/tool Agent Attempt still executes on the controller. This change completes the fenced output transport required before moving that loop to a remote Worker; it does not claim clustered controller ownership.
+
+## 2026-08-07: Add Fenced Remote Worker Jobs
+
+Affected schema:
+
+- Add explicit `shared` and `remote` Worker execution modes plus cross-device controller-root to Worker-root Location mappings.
+- Add `WorkerJobID`, operation/result/assignment/status contracts and the durable `work_worker_job` operational table.
+- Extend authenticated Worker polling with remote Job assignments and add fenced heartbeat/completion endpoints.
+
+Change:
+
+- Keep Goal, Attempt, Evidence, Evaluation, placement, and Goal lease truth on the controller while dispatching command/file verifiers to a remote Worker without sharing SQLite.
+- Give every remote Job an independent lease and monotonic fence. An expired leased Job becomes `unknown` and is never silently replayed; exact completion retries reconcile while conflicting or stale results fail.
+- Translate controller Locations only through enrolled mappings, reject paths outside the mapped Worker root, cap command output and completion payloads, and require HTTPS for non-loopback remote controllers.
+- Let the controller proxy Goal orchestration only for `remote` placements; an independently running `shared` Worker remains the sole eligible runtime for its placement.
+
+Compatibility:
+
+- Existing Worker rows migrate to `shared` with no Location mappings, preserving the Phase 7B shared SQLite behavior.
+- Newly enrolled Workers default to `remote`; remote enrollment requires an explicit Location mapping in the CLI and IDE.
+- This slice remotely executes deterministic command/file verification only. Provider/tool execution, Artifact/patch transfer, remote logs, and clustered controller ownership remain follow-up work.
+
+## 2026-08-06: Add Durable Worker Placement and Worker-Fenced Leases
+
+- Add `WorkerID`, public Worker capability/status/lease/placement contracts, and durable `work.goal.placement-assigned.1` and `work.goal.placement-released.1` events.
+- Add the `work_worker` heartbeat registry, persist `work_goal.worker_id`, and bind `work_lease` to Worker ID in addition to process owner and monotonic fence.
+- Reject placement on offline, draining, incapable, or workspace-incompatible Workers, and reject reassignment while an active lease exists.
+- Extend the Work HTTP API and generated Promise, Effect, and legacy JavaScript clients with Worker heartbeat/drain, Worker listing, placement assignment/release, and placement detail.
+- Preserve existing local Goals and leases through nullable Goal placement and a `worker_local` migration default. This release establishes a safe scheduling boundary; authenticated remote dispatch, Artifact transfer, and cross-device Location mapping remain a later protocol change.
+
+## 2026-08-06: Add Durable Work Handoffs and Verified Project Memory
+
+- Add `HandoffID`, structured `HandoffOutput`/`HandoffInfo`, and the durable `work.task.handoff-recorded.1` event.
+- Add the `work_handoff` projection with one immutable Handoff per completed execution Task, bound to a successful Attempt, verified Evidence IDs, and a content digest.
+- Extend `WorkDetail` in the HTTP API and generated Promise, Effect, and legacy JavaScript clients with `handoffs`.
+- Stop building dependency prompts from predecessor Session chat. Downstream Executors, Reviewers, and Architects consume durable Handoffs; legacy successful outputs are deterministically materialized at the safe scheduling boundary.
+- Register verified project Handoffs as a refreshable Location-scoped System Context source. Existing databases migrate forward without rewriting historical events; completed legacy Tasks acquire Handoffs when their Goal next drains.
+
 ## 2026-06-26: Add Finite Session History
 
 - Add `GET /api/session/:sessionID/history` and generated Promise, Effect, and legacy JavaScript client methods.
@@ -841,3 +949,91 @@ Compatibility:
 
 - Existing Context Epoch rows migrate in place by dropping the obsolete selection and pending-replacement columns.
 - Model and agent switches no longer discard earlier chronological System Context updates by forcing a new baseline.
+
+## 2026-08-06: Add WorkGraph Role Contracts, Directed Handoffs, and Governed Memory
+
+Affected schema:
+
+- Add public WorkGraph Role IDs and Role Contracts for PM, Architect, Developer, QA, Security, and compatible legacy roles.
+- Add Handoff recipients, memory scope, stable keys, optional expiration, constraints, and lessons.
+- Add durable `work.task.handoff-routed.1` and the `work_handoff.recipients` projection column.
+- Expose Role Contracts and directed Handoffs through Work HTTP APIs and generated clients.
+
+Change:
+
+- Bind organization roles to independent hidden Agents with role-specific tool permissions, workspace access, isolation, publishing, and consumption policies.
+- Route Handoffs only to direct downstream Tasks and require the durable mailbox result before a dependency becomes runnable.
+- Admit only explicitly promoted, keyed project records into Project Memory; deduplicate identical values, surface conflicting values without choosing one, and discard expired records.
+
+Compatibility:
+
+- Existing `build`, `general`, and `explore` Tasks remain valid through compatibility Role Contracts.
+- Existing Handoff rows backfill an empty recipient list; the runtime durably reconciles missing routes for direct downstream Tasks.
+- Handoff items without an explicit project scope remain Task-local and do not enter long-term Project Memory.
+
+## 2026-08-06: Add Configurable WorkGraph Organizations and Memory Resolution
+
+Affected schema:
+
+- Add optional WorkGraph Role Contract configuration and persist the resolved contract array on every new Goal.
+- Add `MemoryResolutionID`, governed Project Memory candidate/view contracts, and durable `work.project-memory.resolved.1`.
+- Add `work_goal.role_contracts` and the append-only `work_memory_resolution` projection.
+- Expose Goal organization snapshots, governed memory state, and conflict resolution through HTTP APIs and generated clients.
+
+Change:
+
+- Merge configured Role Contracts by role ID over built-in defaults, validate referenced Agents at Goal creation, and freeze the result for deterministic replay.
+- Resolve conflicts only by selecting an active exact candidate whose project, stable key, Handoff digest, item digest, and expiry all validate.
+- Preserve every accepted resolution with resolver, reason, source identity, and timestamp; the latest still-valid resolution governs the current memory view.
+
+Compatibility:
+
+- Existing Goal rows backfill an empty contract array and continue to use built-in Role Contracts.
+- Existing Handoffs remain valid governed-memory candidates; no chat transcript is promoted implicitly.
+- Configuration changes affect only newly created Goals and cannot mutate the organization contract of an existing Goal.
+
+## 2026-08-06: Add Authenticated WorkGraph Worker Pull
+
+Affected schema:
+
+- Add nullable credential digest, creation, last-used, and revocation columns to the durable Worker registry.
+- Add public Worker credential status, one-time enrollment result, assigned-Goal, and poll response contracts.
+- Add Worker enrollment, credential rotation/revocation, authenticated heartbeat, and authenticated poll HTTP endpoints.
+- No new synchronized Work event kinds are added; Goal placement and lease ownership continue to use the existing durable events and projections.
+
+Change:
+
+- Issue a high-entropy Worker token once while persisting only a Worker-bound SHA-256 digest; compare authenticated requests in constant time.
+- Keep operator-owned draining state out of Worker heartbeat payloads so a credential holder cannot silently re-enable itself.
+- Return only active Goals assigned to the authenticated Worker and refuse new lease acquisition when that Worker is absent, offline, draining, or lacks execute capability.
+- Add `zaovra worker enroll` and `zaovra worker start` for an independent process that reuses the canonical WorkGraph, SessionV2, recovery, and fenced lease runtime.
+- Detect a controller/Worker database mismatch before dispatching assigned work.
+
+Compatibility:
+
+- Existing Worker rows have null credential metadata and remain local Workers; no token can authenticate them until an operator explicitly rotates/enrolls a credential.
+- Phase 7B requires the controller and Worker process to share SQLite/WAL state and accessible workspace roots.
+- Cross-device Event replay, Artifact/patch transfer, Location mapping, remote log transport, and transport hardening remain Phase 7C work and are not implied by this change.
+
+## 2026-08-07: Add Fenced Remote Agent Attempts
+
+Affected schema:
+
+- Add `agent` variants to the public Worker Job operation and result unions, carrying durable Session identity, Agent identity, bounded final response, provider/tool counts, outcome, and content digests.
+- Extend Git diff capture with an optional prior workspace digest for exact repair continuation.
+- No new Work durable events or relational columns are added; Agent Jobs reuse the existing fenced Job, log, and Artifact projections.
+
+Change:
+
+- Dispatch execute/repair Attempts to a placement-selected remote Worker while retaining Goal, Task, Attempt, Evidence, Evaluation, and loop ownership on the controller.
+- Run each remote Attempt through the canonical durable SessionV2 provider/tool runtime in a Worker-isolated database, including the normal model, MCP, ToolRegistry, Context Epoch, and permission services.
+- Stream bounded Agent step, tool, and text progress through the ordered Job log and bind the final response plus cumulative Git patch to SHA-256 digests before completion.
+- Require a clean fixed revision for the first Attempt and the previous cumulative patch digest for repair; apply the final patch on the controller only after verification/review and only when no local drift exists.
+- Make WorkGraph-specific Agent permissions non-interactive by denying questions, external directories, and sensitive environment files.
+
+Compatibility:
+
+- Existing command/file Worker Jobs and stored Job JSON remain valid because the new operation/result variants and prior digest are additive.
+- Shared-mode and unplaced Goals continue to execute their Agent Sessions locally.
+- Remote Agent execution currently requires a Git workspace; non-Git work falls back to the existing local Session path.
+- A lost leased Agent Job remains `unknown` and is not automatically replayed. Rebinding and continuing the Worker-local Session after disconnection is a later production-distributed slice.

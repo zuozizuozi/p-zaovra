@@ -6,7 +6,7 @@ import { DockPrompt } from "@zaovra-ai/session-ui/dock-prompt"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { useSpring } from "@zaovra-ai/ui/motion-spring"
 import { showToast } from "@/utils/toast"
-import type { QuestionAnswer, QuestionRequest } from "@zaovra-ai/sdk/v2"
+import type { QuestionAnswer, QuestionView } from "@zaovra-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -61,7 +61,7 @@ function Option(props: {
   )
 }
 
-export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit: () => void }> = (props) => {
+export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: () => void }> = (props) => {
   const sdk = useSDK()
   const serverSDK = useServerSDK()
   const language = useLanguage()
@@ -223,7 +223,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const replyMutation = useMutation(() => ({
-    mutationFn: (answers: QuestionAnswer[]) => sdk().client.question.reply({ requestID: props.request.id, answers }),
+    mutationFn: (answers: QuestionAnswer[]) =>
+      sdk().client.v2.session.question.reply({
+        sessionID: props.request.sessionID,
+        requestID: props.request.id,
+        questionV2Reply: { answers },
+      }),
     onMutate: () => {
       props.onSubmit()
     },
@@ -235,7 +240,11 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }))
 
   const rejectMutation = useMutation(() => ({
-    mutationFn: () => sdk().client.question.reject({ requestID: props.request.id }),
+    mutationFn: () =>
+      sdk().client.v2.session.question.reject({
+        sessionID: props.request.sessionID,
+        requestID: props.request.id,
+      }),
     onMutate: () => {
       props.onSubmit()
     },

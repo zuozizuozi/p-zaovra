@@ -1,6 +1,24 @@
 import { describe, expect, test } from "bun:test"
-import { coalesceServerEvents, enqueueServerEvent, resumeStreamAfterPageShow } from "./server-sdk"
+import {
+  coalesceServerEvents,
+  enqueueServerEvent,
+  observeSseActivity,
+  resumeStreamAfterPageShow,
+  SSE_HEARTBEAT_TIMEOUT_MS,
+} from "./server-sdk"
 import type { Event } from "@zaovra-ai/sdk/v2/client"
+
+describe("native event stream", () => {
+  test("treats comment-only SSE frames as heartbeat activity", () => {
+    let activity = 0
+    const observe = observeSseActivity(() => activity++)
+
+    observe()
+
+    expect(activity).toBe(1)
+    expect(SSE_HEARTBEAT_TIMEOUT_MS).toBeGreaterThan(30_000)
+  })
+})
 
 describe("resumeStreamAfterPageShow", () => {
   test("restarts a stream only after a back-forward cache restore", () => {

@@ -3,11 +3,14 @@ export * as SessionCompaction from "./compaction"
 import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@zaovra-ai/llm"
 import { DateTime, Effect, Stream } from "effect"
 import type { Config } from "../config"
-import type { EventV2 } from "../event"
+import type { Database } from "../database/database"
+import { EventV2 } from "../event"
+import { EventTable } from "../event/sql"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { Token } from "../util/token"
+import { and, desc, eq } from "drizzle-orm"
 
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
@@ -57,6 +60,7 @@ type Settings = {
 }
 
 type Dependencies = {
+  readonly db: Database.Interface["db"]
   readonly events: EventV2.Interface
   readonly llm: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
@@ -69,6 +73,7 @@ type Input = {
   readonly entries: readonly Entry[]
   readonly model: Model
   readonly request: LLMRequest
+  readonly reason?: "auto" | "manual"
 }
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
@@ -169,6 +174,7 @@ export const buildPrompt = (input: { readonly previousSummary?: string; readonly
 
 export const make = (dependencies: Dependencies) => {
   const config = settings(dependencies.config)
+  const failedSources = new Map<SessionSchema.ID, number>()
   const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
     const context = input.model.route.defaults.limits?.context
     if (context === undefined || context <= 0) return false
@@ -176,6 +182,24 @@ export const make = (dependencies: Dependencies) => {
     const selected = select(input.entries, config.tokens)
     const previousSummary = input.entries.find((entry) => entry.message.type === "compaction")?.message
     if (!selected || (selected.head.length === 0 && previousSummary?.type !== "compaction")) return false
+    const sourceSequence = input.entries.findLast((entry) => entry.message.type !== "assistant")?.seq ?? 0
+    if ((input.reason ?? "auto") === "auto") {
+      const latestFailure = yield* dependencies.db
+        .select({ data: EventTable.data })
+        .from(EventTable)
+        .where(
+          and(
+            eq(EventTable.aggregate_id, input.sessionID),
+            eq(EventTable.type, EventV2.versionedType("session.next.compaction.failed", 1)),
+          ),
+        )
+        .orderBy(desc(EventTable.seq))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      if (failedSources.get(input.sessionID) === sourceSequence || latestFailure?.data.sourceSequence === sourceSequence)
+        return false
+    }
     const summaryPrompt = buildPrompt({
       previousSummary: previousSummary?.type === "compaction" ? previousSummary.summary : undefined,
       context: [previousSummary?.type === "compaction" ? previousSummary.recent : "", selected.head].filter(Boolean),
@@ -187,11 +211,12 @@ export const make = (dependencies: Dependencies) => {
       sessionID: input.sessionID,
       messageID,
       timestamp: yield* DateTime.now,
-      reason: "auto",
+      reason: input.reason ?? "auto",
+      sourceSequence,
     })
 
     const chunks: string[] = []
-    let failed = false
+    let failure: string | undefined
     const summarized = yield* dependencies.llm
       .stream(
         LLM.request({
@@ -203,23 +228,39 @@ export const make = (dependencies: Dependencies) => {
       )
       .pipe(
         Stream.runForEach((event) => {
-          if (LLMEvent.is.providerError(event)) failed = true
+          if (LLMEvent.is.providerError(event)) failure = event.message
           if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
           return Effect.void
         }),
         Effect.as(true),
-        Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
+        Effect.catchTag("LLM.Error", (error) => {
+          failure = error.reason.message
+          return Effect.succeed(false)
+        }),
       )
     const summary = chunks.join("")
-    if (!summarized || failed || !summary.trim()) return false
+    if (!summarized || failure || !summary.trim()) {
+      failedSources.set(input.sessionID, sourceSequence)
+      yield* dependencies.events.publish(SessionEvent.Compaction.Failed, {
+        sessionID: input.sessionID,
+        messageID,
+        timestamp: yield* DateTime.now,
+        reason: input.reason ?? "auto",
+        sourceSequence,
+        error: { type: "unknown", message: failure ?? "Compaction returned an empty summary" },
+      })
+      return false
+    }
     yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
       sessionID: input.sessionID,
       messageID,
       timestamp: yield* DateTime.now,
-      reason: "auto",
+      reason: input.reason ?? "auto",
+      sourceSequence,
       text: summary,
       recent: selected.recent,
     })
+    failedSources.delete(input.sessionID)
     return true
   })
   const compactIfNeeded = Effect.fn("SessionCompaction.compactIfNeeded")(function* (input: Input) {

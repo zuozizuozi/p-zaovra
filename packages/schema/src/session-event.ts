@@ -12,6 +12,8 @@ import { SessionID } from "./session-id"
 import { Location } from "./location"
 import { SessionMessage } from "./session-message"
 import { Revert } from "./revert"
+import { Agent } from "./agent"
+import { Project } from "./project"
 
 export { FileAttachment }
 
@@ -48,6 +50,24 @@ const stepSettlementOptions = {
   },
 } as const
 
+export const Created = Event.define({
+  type: "session.next.created",
+  ...options,
+  schema: {
+    ...Base,
+    projectID: Project.ID,
+    parentID: SessionID.pipe(optional),
+    agent: Agent.ID.pipe(optional),
+    model: Model.Ref.pipe(optional),
+    location: Location.Ref,
+    subpath: RelativePath.pipe(optional),
+    title: Schema.String,
+    slug: Schema.String,
+    version: Schema.String,
+  },
+})
+export type Created = typeof Created.Type
+
 export const UnknownError = SessionMessage.UnknownError
 export type UnknownError = SessionMessage.UnknownError
 
@@ -83,6 +103,24 @@ export const Moved = Event.define({
   },
 })
 export type Moved = typeof Moved.Type
+
+export const Updated = Event.define({
+  type: "session.next.updated",
+  ...options,
+  schema: {
+    ...Base,
+    title: Schema.String.pipe(optional),
+    archived: Schema.Boolean.pipe(optional),
+  },
+})
+export type Updated = typeof Updated.Type
+
+export const Deleted = Event.define({
+  type: "session.next.deleted",
+  ...options,
+  schema: Base,
+})
+export type Deleted = typeof Deleted.Type
 
 export const Prompted = Event.define({
   type: "session.next.prompted",
@@ -154,6 +192,8 @@ export namespace Step {
       assistantMessageID: SessionMessage.ID,
       agent: Schema.String,
       model: Model.Ref,
+      inputSequence: NonNegativeInt.pipe(optional),
+      contextEpoch: NonNegativeInt.pipe(optional),
       snapshot: Schema.String.pipe(optional),
     },
   })
@@ -229,6 +269,7 @@ export namespace Text {
     },
   })
   export type Ended = typeof Ended.Type
+
 }
 
 export namespace Reasoning {
@@ -403,6 +444,7 @@ export namespace Compaction {
       ...Base,
       messageID: SessionMessage.ID,
       reason: Schema.Union([Schema.Literal("auto"), Schema.Literal("manual")]),
+      sourceSequence: NonNegativeInt.pipe(optional),
     },
   })
   export type Started = typeof Started.Type
@@ -424,11 +466,25 @@ export namespace Compaction {
       ...Base,
       messageID: SessionMessage.ID,
       reason: Started.data.fields.reason,
+      sourceSequence: NonNegativeInt.pipe(optional),
       text: Schema.String,
       recent: Schema.String,
     },
   })
   export type Ended = typeof Ended.Type
+
+  export const Failed = Event.define({
+    type: "session.next.compaction.failed",
+    ...options,
+    schema: {
+      ...Base,
+      messageID: SessionMessage.ID,
+      reason: Started.data.fields.reason,
+      sourceSequence: NonNegativeInt,
+      error: UnknownError,
+    },
+  })
+  export type Failed = typeof Failed.Type
 }
 
 export namespace RevertEvent {
@@ -446,9 +502,12 @@ export namespace RevertEvent {
 }
 
 export const DurableDefinitions = Event.inventory(
+  Created,
   AgentSwitched,
   ModelSwitched,
   Moved,
+  Updated,
+  Deleted,
   Prompted,
   PromptAdmitted,
   ContextUpdated,
@@ -471,15 +530,19 @@ export const DurableDefinitions = Event.inventory(
   Retried,
   Compaction.Started,
   Compaction.Ended,
+  Compaction.Failed,
   RevertEvent.Staged,
   RevertEvent.Cleared,
   RevertEvent.Committed,
 )
 
 export const Definitions = Event.inventory(
+  Created,
   AgentSwitched,
   ModelSwitched,
   Moved,
+  Updated,
+  Deleted,
   Prompted,
   PromptAdmitted,
   ContextUpdated,
@@ -506,6 +569,7 @@ export const Definitions = Event.inventory(
   Compaction.Started,
   Compaction.Delta,
   Compaction.Ended,
+  Compaction.Failed,
   RevertEvent.Staged,
   RevertEvent.Cleared,
   RevertEvent.Committed,

@@ -17,6 +17,12 @@ import type {
   SessionsSwitchModelOutput,
   SessionsPromptInput,
   SessionsPromptOutput,
+  SessionsPendingInputsInput,
+  SessionsPendingInputsOutput,
+  SessionsShellInput,
+  SessionsShellOutput,
+  SessionsTodosInput,
+  SessionsTodosOutput,
   SessionsCompactInput,
   SessionsCompactOutput,
   SessionsWaitInput,
@@ -37,6 +43,37 @@ import type {
   SessionsInterruptOutput,
   SessionsMessageInput,
   SessionsMessageOutput,
+  SessionsUpdateInput,
+  SessionsUpdateOutput,
+  SessionsRemoveInput,
+  SessionsRemoveOutput,
+  WorkListOutput,
+  WorkCreateInput,
+  WorkCreateOutput,
+  WorkActiveOutput,
+  WorkArtifactsOutput,
+  WorkArtifactCollectInput,
+  WorkArtifactCollectOutput,
+  WorkGetInput,
+  WorkGetOutput,
+  WorkExpandInput,
+  WorkExpandOutput,
+  WorkReplanInput,
+  WorkReplanOutput,
+  WorkResumeInput,
+  WorkResumeOutput,
+  WorkPauseInput,
+  WorkPauseOutput,
+  WorkCancelInput,
+  WorkCancelOutput,
+  WorkResolveUnknownInput,
+  WorkResolveUnknownOutput,
+  WorkResolveMemoryInput,
+  WorkResolveMemoryOutput,
+  WorkUpdateMemoryInput,
+  WorkUpdateMemoryOutput,
+  WorkDeleteMemoryInput,
+  WorkDeleteMemoryOutput,
   MessagesListInput,
   MessagesListOutput,
   ModelsListInput,
@@ -63,6 +100,14 @@ import type {
   CredentialsUpdateOutput,
   CredentialsRemoveInput,
   CredentialsRemoveOutput,
+  McpStatusInput,
+  McpStatusOutput,
+  McpResourcesInput,
+  McpResourcesOutput,
+  McpConnectInput,
+  McpConnectOutput,
+  McpDisconnectInput,
+  McpDisconnectOutput,
   PermissionsListRequestsInput,
   PermissionsListRequestsOutput,
   PermissionsListSavedInput,
@@ -293,6 +338,7 @@ export function make(options: ClientOptions) {
               limit: input?.["limit"],
               order: input?.["order"],
               search: input?.["search"],
+              roots: input?.["roots"],
               directory: input?.["directory"],
               project: input?.["project"],
               subpath: input?.["subpath"],
@@ -379,17 +425,51 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
-      compact: (input: SessionsCompactInput, requestOptions?: RequestOptions) =>
-        request<SessionsCompactOutput>(
+      pendingInputs: (input: SessionsPendingInputsInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsPendingInputsOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/input/pending`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      shell: (input: SessionsShellInput, requestOptions?: RequestOptions) =>
+        request<SessionsShellOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/compact`,
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/shell`,
+            body: { id: input["id"], command: input["command"], resume: input["resume"] },
             successStatus: 204,
             declaredStatuses: [404, 503, 400, 401],
             empty: true,
           },
           requestOptions,
         ),
+      todos: (input: SessionsTodosInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsTodosOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/todo`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      compact: (input: SessionsCompactInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsCompactOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/compact`,
+            successStatus: 200,
+            declaredStatuses: [404, 503, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       wait: (input: SessionsWaitInput, requestOptions?: RequestOptions) =>
         request<SessionsWaitOutput>(
           {
@@ -492,6 +572,205 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      update: (input: SessionsUpdateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsUpdateOutput }>(
+          {
+            method: "PATCH",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            body: { title: input["title"], archived: input["archived"] },
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      remove: (input: SessionsRemoveInput, requestOptions?: RequestOptions) =>
+        request<SessionsRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    work: {
+      list: (requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkListOutput }>(
+          { method: "GET", path: `/api/work`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ).then((value) => value.data),
+      create: (input: WorkCreateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkCreateOutput }>(
+          {
+            method: "POST",
+            path: `/api/work`,
+            body: {
+              id: input["id"],
+              location: input["location"],
+              objective: input["objective"],
+              acceptanceCriteria: input["acceptanceCriteria"],
+              budget: input["budget"],
+              planning: input["planning"],
+              tasks: input["tasks"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      active: (requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkActiveOutput }>(
+          { method: "GET", path: `/api/work/active`, successStatus: 200, declaredStatuses: [401, 400], empty: false },
+          requestOptions,
+        ).then((value) => value.data),
+      artifacts: (requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkArtifactsOutput }>(
+          {
+            method: "GET",
+            path: `/api/work/artifacts`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      artifactCollect: (input: WorkArtifactCollectInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkArtifactCollectOutput }>(
+          {
+            method: "POST",
+            path: `/api/work/artifacts/collect`,
+            body: { minimumAgeMs: input["minimumAgeMs"], dryRun: input["dryRun"], limit: input["limit"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      get: (input: WorkGetInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkGetOutput }>(
+          {
+            method: "GET",
+            path: `/api/work/${encodeURIComponent(input.goalID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      expand: (input: WorkExpandInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkExpandOutput }>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/tasks`,
+            body: { tasks: input["tasks"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      replan: (input: WorkReplanInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkReplanOutput }>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/replan`,
+            body: { taskID: input["taskID"], reason: input["reason"] },
+            successStatus: 200,
+            declaredStatuses: [409, 404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      resume: (input: WorkResumeInput, requestOptions?: RequestOptions) =>
+        request<WorkResumeOutput>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/resume`,
+            successStatus: 204,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      pause: (input: WorkPauseInput, requestOptions?: RequestOptions) =>
+        request<WorkPauseOutput>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/pause`,
+            successStatus: 204,
+            declaredStatuses: [404, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      cancel: (input: WorkCancelInput, requestOptions?: RequestOptions) =>
+        request<WorkCancelOutput>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/cancel`,
+            body: { reason: input["reason"] },
+            successStatus: 204,
+            declaredStatuses: [404, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      resolveUnknown: (input: WorkResolveUnknownInput, requestOptions?: RequestOptions) =>
+        request<WorkResolveUnknownOutput>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/attempt/${encodeURIComponent(input.attemptID)}/resolve`,
+            body: { resolution: input["resolution"], reason: input["reason"] },
+            successStatus: 204,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      resolveMemory: (input: WorkResolveMemoryInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkResolveMemoryOutput }>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/memory/resolve`,
+            body: {
+              key: input["key"],
+              handoffID: input["handoffID"],
+              itemDigest: input["itemDigest"],
+              reason: input["reason"],
+            },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      updateMemory: (input: WorkUpdateMemoryInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkUpdateMemoryOutput }>(
+          {
+            method: "PATCH",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/memory/${encodeURIComponent(input.key)}`,
+            body: { kind: input["kind"], text: input["text"], reference: input["reference"], reason: input["reason"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      deleteMemory: (input: WorkDeleteMemoryInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: WorkDeleteMemoryOutput }>(
+          {
+            method: "DELETE",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/memory/${encodeURIComponent(input.key)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
     },
     messages: {
       list: (input: MessagesListInput, requestOptions?: RequestOptions) =>
@@ -578,7 +857,7 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/key`,
             query: { location: input["location"] },
-            body: { key: input["key"], label: input["label"] },
+            body: { key: input["key"], inputs: input["inputs"], label: input["label"] },
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
@@ -658,6 +937,56 @@ export function make(options: ClientOptions) {
             query: { location: input["location"] },
             successStatus: 204,
             declaredStatuses: [401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    mcp: {
+      status: (input?: McpStatusInput, requestOptions?: RequestOptions) =>
+        request<McpStatusOutput>(
+          {
+            method: "GET",
+            path: `/api/mcp`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      resources: (input?: McpResourcesInput, requestOptions?: RequestOptions) =>
+        request<McpResourcesOutput>(
+          {
+            method: "GET",
+            path: `/api/mcp/resources`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      connect: (input: McpConnectInput, requestOptions?: RequestOptions) =>
+        request<McpConnectOutput>(
+          {
+            method: "POST",
+            path: `/api/mcp/${encodeURIComponent(input.name)}/connect`,
+            query: { location: input["location"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      disconnect: (input: McpDisconnectInput, requestOptions?: RequestOptions) =>
+        request<McpDisconnectOutput>(
+          {
+            method: "POST",
+            path: `/api/mcp/${encodeURIComponent(input.name)}/disconnect`,
+            query: { location: input["location"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
             empty: true,
           },
           requestOptions,

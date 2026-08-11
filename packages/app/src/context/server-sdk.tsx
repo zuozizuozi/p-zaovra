@@ -17,6 +17,12 @@ const isAbortError = (error: unknown) =>
 const isStreamClosed = (error: unknown, signal?: AbortSignal) => isAbortError(error) || signal?.aborted === true
 type QueuedServerEvent = { directory: string; payload: Event }
 
+export const SSE_HEARTBEAT_TIMEOUT_MS = 45_000
+
+export function observeSseActivity(touch: () => void) {
+  return () => touch()
+}
+
 const coalescedKey = (event: QueuedServerEvent) => {
   if (event.payload.type === "lsp.updated") return `lsp.updated:${event.directory}`
   if (event.payload.type === "message.part.updated") {
@@ -142,15 +148,15 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   let run: Promise<void> | undefined
   let started = false
   let generation = 0
-  const HEARTBEAT_TIMEOUT_MS = 15_000
   let lastEventAt = Date.now()
+  let lastEventID: string | undefined
   let heartbeat: ReturnType<typeof setTimeout> | undefined
   const resetHeartbeat = () => {
     lastEventAt = Date.now()
     if (heartbeat) clearTimeout(heartbeat)
     heartbeat = setTimeout(() => {
       attempt?.abort()
-    }, HEARTBEAT_TIMEOUT_MS)
+    }, SSE_HEARTBEAT_TIMEOUT_MS)
   }
   const clearHeartbeat = () => {
     if (!heartbeat) return
@@ -176,6 +182,8 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         try {
           const events = await eventSdk.global.event({
             signal: attempt.signal,
+            headers: lastEventID ? { "Last-Event-ID": lastEventID } : undefined,
+            onSseEvent: observeSseActivity(resetHeartbeat),
             onSseError: (error) => {
               if (isStreamClosed(error, attempt?.signal)) return
               if (streamErrorLogged) return
@@ -195,6 +203,8 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             if (event.payload.type !== "sync") {
               const directory = event.directory ?? "global"
               const payload = event.payload as Event
+              if (payload.type !== "server.connected" && typeof payload.id === "string") lastEventID = payload.id
+              // Every transport reconnect starts with server.connected, which ServerSync treats as a snapshot resync.
               if (enqueueServerEvent(queue, { directory, payload })) schedule()
             }
 
@@ -242,7 +252,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     makeEventListener(document, "visibilitychange", () => {
       if (document.visibilityState !== "visible") return
       if (!started) return
-      if (Date.now() - lastEventAt < HEARTBEAT_TIMEOUT_MS) return
+      if (Date.now() - lastEventAt < SSE_HEARTBEAT_TIMEOUT_MS) return
       attempt?.abort()
     })
   })

@@ -212,6 +212,39 @@ const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const { db } = yield* Database.Service
+    yield* events.project(SessionEvent.Created, (event) =>
+      Effect.gen(function* () {
+        const stored = yield* db
+          .insert(SessionTable)
+          .values({
+            id: event.data.sessionID,
+            project_id: event.data.projectID,
+            workspace_id: event.data.location.workspaceID ?? null,
+            parent_id: event.data.parentID,
+            slug: event.data.slug,
+            directory: event.data.location.directory,
+            path: event.data.subpath,
+            title: event.data.title,
+            version: event.data.version,
+            agent: event.data.agent,
+            model: event.data.model,
+            time_created: DateTime.toEpochMillis(event.data.timestamp),
+            time_updated: DateTime.toEpochMillis(event.data.timestamp),
+          })
+          .onConflictDoNothing()
+          .returning({ sessionID: SessionTable.id })
+          .get()
+          .pipe(Effect.orDie)
+        if (!stored) return yield* Effect.die(new SessionAlreadyProjected())
+        if (!event.data.location.workspaceID) return
+        yield* db
+          .update(WorkspaceTable)
+          .set({ time_used: DateTime.toEpochMillis(event.data.timestamp) })
+          .where(eq(WorkspaceTable.id, event.data.location.workspaceID))
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    )
     yield* events.project(SessionV1.Event.Created, (event) =>
       Effect.gen(function* () {
         const stored = yield* db
@@ -255,6 +288,23 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         yield* SessionContextEpoch.reset(db, event.data.sessionID)
       }),
+    )
+    yield* events.project(SessionEvent.Updated, (event) =>
+      db
+        .update(SessionTable)
+        .set({
+          ...(event.data.title === undefined ? {} : { title: event.data.title }),
+          ...(event.data.archived === undefined
+            ? {}
+            : { time_archived: event.data.archived ? DateTime.toEpochMillis(event.data.timestamp) : null }),
+          time_updated: DateTime.toEpochMillis(event.data.timestamp),
+        })
+        .where(eq(SessionTable.id, event.data.sessionID))
+        .run()
+        .pipe(Effect.orDie),
+    )
+    yield* events.project(SessionEvent.Deleted, (event) =>
+      db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
     )
     yield* events.project(SessionV1.Event.Deleted, (event) =>
       db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),

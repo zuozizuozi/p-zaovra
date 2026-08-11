@@ -22,7 +22,6 @@ import { Workspace } from "../../src/control-plane/workspace"
 import { WorkspaceTable } from "@zaovra-ai/core/control-plane/workspace.sql"
 import { Database } from "@zaovra-ai/core/database/database"
 import { Project } from "../../src/project/project"
-import { Session } from "../../src/session/session"
 import { WorkspacePaths } from "../../src/server/routes/instance/httpapi/groups/workspace"
 import {
   WorkspaceRoutingMiddleware,
@@ -227,7 +226,7 @@ const ProbeApi = HttpApi.make("workspace-routing-probe").add(
     .add(
       HttpApiEndpoint.get("get", "/probe", { query: WorkspaceRoutingQuery, success: ProbeResult }),
       HttpApiEndpoint.patch("patch", "/probe", { query: WorkspaceRoutingQuery, success: Schema.Boolean }),
-      HttpApiEndpoint.get("session", "/session", { query: WorkspaceRoutingQuery, success: ProbeResult }),
+      HttpApiEndpoint.get("session", "/api/probe", { query: WorkspaceRoutingQuery, success: ProbeResult }),
       HttpApiEndpoint.get("workspace", WorkspacePaths.list, {
         query: WorkspaceRoutingQuery,
         success: ProbeResult,
@@ -252,7 +251,6 @@ const probeHandlers = HttpApiBuilder.group(ProbeApi, "probe", (handlers) =>
 const serveProbe = HttpApiBuilder.layer(ProbeApi).pipe(
   Layer.provide(probeHandlers),
   Layer.provide(workspaceRoutingTestLayer),
-  Layer.provide(Layer.mock(Session.Service)({})),
   HttpRouter.serve,
   Layer.build,
 )
@@ -376,7 +374,6 @@ describe("HttpApi workspace routing middleware", () => {
         Layer.provide(probeHandlers),
         Layer.provide(workspaceRoutingTestLayer),
         Layer.provide(Layer.succeed(Workspace.Service, workspace)),
-        Layer.provide(Layer.mock(Session.Service)({})),
         HttpRouter.serve,
         Layer.build,
       )
@@ -468,11 +465,11 @@ describe("HttpApi workspace routing middleware", () => {
         directory: workspaceDir,
       })
 
-      // GET /session is a control-plane route: it lists sessions for the main
-      // process and should not be redirected into the selected workspace target.
+      // V2 /api routes stay on the process control plane and must not be
+      // redirected into the selected workspace target.
       yield* serveProbe
 
-      const response = yield* HttpClient.get(`/session?workspace=${workspace.id}`)
+      const response = yield* HttpClient.get(`/api/probe?workspace=${workspace.id}`)
 
       expect(response.status).toBe(200)
       expect(yield* response.json).toEqual({ directory: process.cwd(), workspaceID: workspace.id })

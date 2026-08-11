@@ -273,9 +273,9 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                 return conn ? { route, sdk: global.ensureServerCtx(conn).sdk } : undefined
               },
               ({ route, sdk }) =>
-                sdk.client.session
+                sdk.client.v2.session
                   .get({ sessionID: route.sessionId })
-                  .then((x) => x.data)
+                  .then((x) => x.data?.data)
                   .catch(() => {}),
             )
 
@@ -337,7 +337,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                   sessionId: activeSession.id,
                 }
                 const model = tabs.stateValue<PromptSession>(sessionTab, "prompt")?.model.current()
-                tabs.newDraft({ server: sessionTab.server, directory: activeSession.directory }, "", model)
+                tabs.newDraft({ server: sessionTab.server, directory: activeSession.location.directory }, "", model)
                 return
               }
 

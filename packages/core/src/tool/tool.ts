@@ -44,6 +44,8 @@ type Config<
 > = {
   readonly description: string
   readonly input: Input
+  /** External producers such as MCP may override only the model-facing schema. Runtime input still crosses this Tool's canonical input codec. */
+  readonly inputJsonSchema?: ToolDefinition["inputSchema"]
   readonly output: Output
   readonly structured?: Structured
   readonly toStructuredOutput?: (input: {
@@ -82,7 +84,7 @@ export function make<
       const definition = new ToolDefinition({
         name,
         description: config.description,
-        inputSchema: toJsonSchema(config.input),
+        inputSchema: config.inputJsonSchema ?? toJsonSchema(config.input),
         outputSchema: toJsonSchema(config.structured ?? config.output),
       })
       definitions.set(name, definition)

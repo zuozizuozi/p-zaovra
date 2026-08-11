@@ -12,6 +12,7 @@ import sessionUsageMigration from "@zaovra-ai/core/database/migration/2026051003
 import normalizeStoragePathsMigration from "@zaovra-ai/core/database/migration/20260601010001_normalize_storage_paths"
 import sessionMessageProjectionOrderMigration from "@zaovra-ai/core/database/migration/20260603040000_session_message_projection_order"
 import eventSourcedSessionInputMigration from "@zaovra-ai/core/database/migration/20260604172448_event_sourced_session_input"
+import v2SessionCutoverMigration from "@zaovra-ai/core/database/migration/20260811090000_v2_session_cutover"
 import contextEpochAgentMigration from "@zaovra-ai/core/database/migration/20260605042240_add_context_epoch_agent"
 import simplifyIntegrationCredentialsMigration from "@zaovra-ai/core/database/migration/20260611192811_lush_chimera"
 import simplifySessionInputMigration from "@zaovra-ai/core/database/migration/20260622202450_simplify_session_input"
@@ -38,6 +39,34 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
 
 describe("DatabaseMigration", () => {
+  test("removes V1 sessions without migrating them into SessionV2", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* DatabaseMigration.apply(db)
+        yield* db.run(sql`PRAGMA foreign_keys = ON`)
+        yield* db.run(
+          sql`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('global', '/project', 1, 1, '[]')`,
+        )
+        yield* db.run(
+          sql`INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES ('legacy', 'global', 'legacy', '/project', 'Legacy', 'test', 1, 1), ('current', 'global', 'current', '/project', 'Current', 'test', 2, 2)`,
+        )
+        yield* db.run(sql`INSERT INTO event_sequence (aggregate_id, seq) VALUES ('legacy', 0), ('current', 0)`)
+        yield* db.run(
+          sql`INSERT INTO event (id, aggregate_id, seq, type, data) VALUES ('legacy-event', 'legacy', 0, 'session.created.1', '{}'), ('current-event', 'current', 0, 'session.next.created.1', '{}')`,
+        )
+        yield* db.run(sql`DELETE FROM migration WHERE id = ${v2SessionCutoverMigration.id}`)
+
+        yield* DatabaseMigration.applyOnly(db, [v2SessionCutoverMigration])
+
+        expect(yield* db.all(sql`SELECT id FROM session ORDER BY id`)).toEqual([{ id: "current" }])
+        expect(yield* db.all(sql`SELECT aggregate_id FROM event_sequence ORDER BY aggregate_id`)).toEqual([
+          { aggregate_id: "current" },
+        ])
+      }),
+    )
+  })
+
   test("serializes concurrent embedded initialization for one database path", async () => {
     await using tmp = await tmpdir()
     const filename = path.join(tmp.path, "embedded.sqlite")

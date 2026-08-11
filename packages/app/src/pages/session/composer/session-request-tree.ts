@@ -1,4 +1,4 @@
-import type { PermissionRequest, QuestionRequest, Session } from "@zaovra-ai/sdk/v2/client"
+import type { PermissionView, QuestionView, Session } from "@zaovra-ai/sdk/v2/client"
 
 function sessionTreeRequest<T>(
   session: Session[],
@@ -35,18 +35,18 @@ function sessionTreeRequest<T>(
 
 export function sessionPermissionRequest(
   session: Session[],
-  request: Record<string, PermissionRequest[] | undefined>,
+  request: Record<string, PermissionView[] | undefined>,
   sessionID?: string,
-  include?: (item: PermissionRequest) => boolean,
+  include?: (item: PermissionView) => boolean,
 ) {
   return sessionTreeRequest(session, request, sessionID, include)
 }
 
 export function sessionQuestionRequest(
   session: Session[],
-  request: Record<string, QuestionRequest[] | undefined>,
+  request: Record<string, QuestionView[] | undefined>,
   sessionID?: string,
-  include?: (item: QuestionRequest) => boolean,
+  include?: (item: QuestionView) => boolean,
 ) {
   return sessionTreeRequest(session, request, sessionID, include)
 }

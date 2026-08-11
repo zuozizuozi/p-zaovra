@@ -19,21 +19,23 @@ import type {
 import { UI } from "../ui"
 import { ModelsDev } from "@zaovra-ai/core/models-dev"
 import { InstanceRef } from "@/effect/instance-ref"
-import { SessionShare } from "@/share/session"
-import { Session } from "@/session/session"
-import type { SessionID } from "../../session/schema"
-import { MessageID, PartID } from "../../session/schema"
 import { Provider } from "@/provider/provider"
-import { MessageV2 } from "../../session/message-v2"
-import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@zaovra-ai/core/event"
-import { SessionPrompt } from "@/session/prompt"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { SessionMessage } from "@zaovra-ai/core/session/message"
+import { SessionEvent } from "@zaovra-ai/core/session/event"
+import { Location } from "@zaovra-ai/core/location"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
+import { PermissionV2 } from "@zaovra-ai/core/permission"
+import { QuestionV2 } from "@zaovra-ai/core/question"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
+import { ModelV2 } from "@zaovra-ai/core/model"
 import { Git } from "@/git"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Process } from "@/util/process"
 import { parseGitHubRemote } from "@/util/repository"
 import { Effect } from "effect"
-import { extractResponseText, formatPromptTooLargeError } from "./github.shared"
+import { formatPromptTooLargeError } from "./github.shared"
 
 type GitHubAuthor = {
   login: string
@@ -377,10 +379,10 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
   const ctx = yield* InstanceRef
   if (!ctx) return yield* Effect.die("InstanceRef not provided")
   const gitSvc = yield* Git.Service
-  const sessionSvc = yield* Session.Service
-  const sessionShare = yield* SessionShare.Service
-  const sessionPrompt = yield* SessionPrompt.Service
-  const events = yield* EventV2Bridge.Service
+  const sessions = yield* SessionV2.Service
+  const events = yield* EventV2.Service
+  const locations = yield* LocationServiceMap.Service
+  const location = Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) })
   const runLocalEffect = <A, E>(effect: Effect.Effect<A, E>) =>
     Effect.runPromise(effect.pipe(Effect.provideService(InstanceRef, ctx)))
   yield* Effect.promise(async () => {
@@ -426,14 +428,13 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         ? (payload as IssueCommentEvent | IssuesEvent).issue.number
         : (payload as PullRequestEvent | PullRequestReviewCommentEvent).pull_request.number
     const runUrl = `/${owner}/${repo}/actions/runs/${runId}`
-    const shareBaseUrl = isMock ? "https://dev.zaovra.com" : "https://zaovra.com"
 
     let appToken: string
     let octoRest: Octokit
     let octoGraph: typeof graphql
     let gitConfig: string
-    let session: { id: SessionID; title: string; version: string }
-    let shareId: string | undefined
+    let session: SessionV2.Info
+    let unsubscribeEvents: Effect.Effect<void> | undefined
     let exitCode = 0
     type PromptFiles = Awaited<ReturnType<typeof getUserPrompt>>["promptFiles"]
     const triggerCommentId = isCommentEvent
@@ -497,23 +498,18 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       // Setup zaovra session
       const repoData = await fetchRepo()
       session = await runLocalEffect(
-        sessionSvc.create({
-          permission: [
-            {
-              permission: "question",
-              action: "deny",
-              pattern: "*",
-            },
-          ],
+        sessions.create({
+          location,
+          model: { providerID, id: modelID, ...(variant ? { variant: ModelV2.VariantID.make(variant) } : {}) },
         }),
       )
       await subscribeSessionEvents()
-      shareId = await (async () => {
-        if (share === false) return
-        if (!share && repoData.data.private) return
-        await runLocalEffect(sessionShare.share(session.id))
-        return session.id.slice(-8)
-      })()
+      if (share === true) {
+        throw new Error("GitHub session sharing is unavailable for SessionV2; set SHARE=false")
+      }
+      if (share !== false && !repoData.data.private) {
+        console.log("Session sharing disabled: the V1 sharing pipeline cannot synchronize SessionV2 messages")
+      }
       console.log("zaovra session", session.id)
 
       // Handle event types:
@@ -572,8 +568,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             const summary = await summarize(response)
             await pushToLocalBranch(summary, uncommittedChanges)
           }
-          const hasShared = prData.comments.nodes.some((c) => c.body.includes(`${shareBaseUrl}/s/${shareId}`))
-          await createComment(`${response}${footer({ image: !hasShared })}`)
+          await createComment(`${response}${footer()}`)
           await removeReaction(commentType)
         }
         // Fork PR
@@ -590,8 +585,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
             const summary = await summarize(response)
             await pushToForkBranch(summary, prData, uncommittedChanges)
           }
-          const hasShared = prData.comments.nodes.some((c) => c.body.includes(`${shareBaseUrl}/s/${shareId}`))
-          await createComment(`${response}${footer({ image: !hasShared })}`)
+          await createComment(`${response}${footer()}`)
           await removeReaction(commentType)
         }
       }
@@ -645,6 +639,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       // Also output the clean error message for the action to capture
       //core.setOutput("prepare_error", e.message);
     } finally {
+      if (unsubscribeEvents) await runLocalEffect(unsubscribeEvents)
       if (!useGithubToken) {
         await restoreGitConfig()
         await revokeAppToken()
@@ -840,35 +835,37 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         )
       }
 
-      let text = ""
-      await runLocalEffect(
+      unsubscribeEvents = await runLocalEffect(
         events.listen((evt) => {
-          if (evt.type !== MessageV2.Event.PartUpdated.type) return Effect.void
-          const data = evt.data as EventV2.Data<typeof MessageV2.Event.PartUpdated>
-          if (data.part.sessionID !== session.id) return Effect.void
-          //if (evt.properties.part.messageID === messageID) return
-          const part = data.part
-
-          if (part.type === "tool" && part.state.status === "completed") {
-            const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
-            const title =
-              part.state.title || Object.keys(part.state.input).length > 0
-                ? JSON.stringify(part.state.input)
-                : "Unknown"
-            console.log()
-            printEvent(color, tool, title)
+          if (evt.type === PermissionV2.Event.Asked.type) {
+            const request = evt.data as PermissionV2.Request
+            if (request.sessionID !== session.id) return Effect.void
+            return Effect.gen(function* () {
+              const permissions = yield* PermissionV2.Service
+              yield* permissions.reply({ requestID: request.id, reply: "once" })
+            }).pipe(Effect.provide(locations.get(location)), Effect.orDie)
           }
-
-          if (part.type === "text") {
-            text = part.text
-
-            if (part.time?.end) {
-              UI.empty()
-              UI.println(UI.markdown(text))
-              UI.empty()
-              text = ""
-              return Effect.void
-            }
+          if (evt.type === QuestionV2.Event.Asked.type) {
+            const request = evt.data as QuestionV2.Request
+            if (request.sessionID !== session.id) return Effect.void
+            return Effect.gen(function* () {
+              const questions = yield* QuestionV2.Service
+              yield* questions.reject(request.id)
+            }).pipe(Effect.provide(locations.get(location)), Effect.orDie)
+          }
+          if (evt.type === SessionEvent.Tool.Called.type) {
+            const data = evt.data as EventV2.Data<typeof SessionEvent.Tool.Called>
+            if (data.sessionID !== session.id) return Effect.void
+            const [tool, color] = TOOL[data.tool] ?? [data.tool, UI.Style.TEXT_INFO_BOLD]
+            printEvent(color, tool, Object.keys(data.input).length > 0 ? JSON.stringify(data.input) : "")
+            return Effect.void
+          }
+          if (evt.type === SessionEvent.Text.Ended.type) {
+            const data = evt.data as EventV2.Data<typeof SessionEvent.Text.Ended>
+            if (data.sessionID !== session.id) return Effect.void
+            UI.empty()
+            UI.println(UI.markdown(data.text))
+            UI.empty()
           }
           return Effect.void
         }),
@@ -891,82 +888,54 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
 
       return runLocalEffect(
         Effect.gen(function* () {
-          const prompt = sessionPrompt
-          const result = yield* prompt.prompt({
+          yield* sessions.prompt({
             sessionID: session.id,
-            messageID: MessageID.ascending(),
-            variant,
-            model: {
-              providerID,
-              modelID,
-            },
-            // agent is omitted - server will use default_agent from config or fall back to "build"
-            parts: [
-              {
-                id: PartID.ascending(),
-                type: "text",
-                text: message,
-              },
-              ...files.flatMap((f) => [
-                {
-                  id: PartID.ascending(),
-                  type: "file" as const,
-                  mime: f.mime,
-                  url: `data:${f.mime};base64,${f.content}`,
-                  filename: f.filename,
-                  source: {
-                    type: "file" as const,
-                    text: {
-                      value: f.replacement,
-                      start: f.start,
-                      end: f.end,
-                    },
-                    path: f.filename,
-                  },
+            prompt: {
+              text: message,
+              files: files.map((file) => ({
+                uri: `data:${file.mime};base64,${file.content}`,
+                name: file.filename,
+                source: {
+                  text: file.replacement,
+                  start: file.start,
+                  end: file.end,
                 },
-              ]),
-            ],
+              })),
+            },
           })
-
-          if (result.info.role === "assistant" && result.info.error) {
-            const err = result.info.error
-            console.error("Agent error:", err)
-            if (err.name === "ContextOverflowError") throw new Error(formatPromptTooLargeError(files))
-            const message = "message" in err.data ? err.data.message : ""
-            throw new Error(`${err.name}: ${message}`)
+          yield* sessions.wait(session.id)
+          const result = (yield* sessions.messages({ sessionID: session.id, order: "desc" })).find(
+            (message): message is SessionMessage.Assistant => message.type === "assistant",
+          )
+          if (!result) throw new Error("SessionV2 completed without an assistant response")
+          if (result.error) {
+            console.error("Agent error:", result.error)
+            if (/context|too large|token limit/i.test(result.error.message)) {
+              throw new Error(formatPromptTooLargeError(files))
+            }
+            throw new Error(result.error.message)
           }
 
-          const text = extractResponseText(result.parts)
+          const text = result.content.findLast((part) => part.type === "text")?.text
           if (text) return text
 
           console.log("Requesting summary from agent...")
-          const summary = yield* prompt.prompt({
+          yield* sessions.prompt({
             sessionID: session.id,
-            messageID: MessageID.ascending(),
-            variant,
-            model: {
-              providerID,
-              modelID,
+            prompt: {
+              text: "Summarize the actions (tool calls and reasoning) you performed for the user in 1-2 sentences. Do not call tools.",
             },
-            tools: { "*": false },
-            parts: [
-              {
-                id: PartID.ascending(),
-                type: "text",
-                text: "Summarize the actions (tool calls & reasoning) you did for the user in 1-2 sentences.",
-              },
-            ],
           })
-
-          if (summary.info.role === "assistant" && summary.info.error) {
-            const err = summary.info.error
-            console.error("Summary agent error:", err)
-            if (err.name === "ContextOverflowError") throw new Error(formatPromptTooLargeError(files))
-            const message = "message" in err.data ? err.data.message : ""
-            throw new Error(`${err.name}: ${message}`)
+          yield* sessions.wait(session.id)
+          const summary = (yield* sessions.messages({ sessionID: session.id, order: "desc" })).find(
+            (message): message is SessionMessage.Assistant => message.type === "assistant",
+          )
+          if (!summary) throw new Error("SessionV2 completed without a summary response")
+          if (summary.error) {
+            console.error("Summary agent error:", summary.error)
+            throw new Error(summary.error.message)
           }
-
-          const summaryText = extractResponseText(summary.parts)
+          const summaryText = summary.content.findLast((part) => part.type === "text")?.text
           if (!summaryText) throw new Error("Failed to get summary from agent")
           return summaryText
         }),
@@ -1342,18 +1311,8 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
       }
     }
 
-    function footer(opts?: { image?: boolean }) {
-      const image = (() => {
-        if (!shareId) return ""
-        if (!opts?.image) return ""
-
-        const titleAlt = encodeURIComponent(session.title.substring(0, 50))
-        const title64 = Buffer.from(session.title.substring(0, 700), "utf8").toString("base64")
-
-        return `<a href="${shareBaseUrl}/s/${shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/zaovra-share/${title64}.png?model=${providerID}/${modelID}&version=${session.version}&id=${shareId}" /></a>\n`
-      })()
-      const shareUrl = shareId ? `[zaovra session](${shareBaseUrl}/s/${shareId})&nbsp;&nbsp;|&nbsp;&nbsp;` : ""
-      return `\n\n${image}${shareUrl}[github run](${runUrl})`
+    function footer(_opts?: { image?: boolean }) {
+      return `\n\n[github run](${runUrl})`
     }
 
     async function fetchRepo() {

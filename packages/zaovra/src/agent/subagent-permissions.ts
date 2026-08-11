@@ -1,4 +1,4 @@
-import { PermissionV1 } from "@zaovra-ai/core/v1/permission"
+import { Permission } from "@zaovra-ai/schema/permission"
 import type { Agent } from "./agent"
 
 /**
@@ -12,16 +12,16 @@ import type { Agent } from "./agent"
  *    doesn't already permit them.
  */
 export function deriveSubagentSessionPermission(input: {
-  parentSessionPermission: PermissionV1.Ruleset
+  parentSessionPermission: Permission.Ruleset
   subagent: Agent.Info
-}): PermissionV1.Ruleset {
-  const canTask = input.subagent.permission.some((rule) => rule.permission === "task")
-  const canTodo = input.subagent.permission.some((rule) => rule.permission === "todowrite")
+}): Permission.Ruleset {
+  const canTask = input.subagent.permission.some((rule) => rule.action === "task")
+  const canTodo = input.subagent.permission.some((rule) => rule.action === "todowrite")
   return [
     ...input.parentSessionPermission.filter(
-      (rule) => rule.permission === "external_directory" || rule.action === "deny",
+      (rule) => rule.action === "external_directory" || rule.effect === "deny",
     ),
-    ...(canTodo ? [] : [{ permission: "todowrite" as const, pattern: "*" as const, action: "deny" as const }]),
-    ...(canTask ? [] : [{ permission: "task" as const, pattern: "*" as const, action: "deny" as const }]),
+    ...(canTodo ? [] : [{ action: "todowrite", resource: "*", effect: "deny" as const }]),
+    ...(canTask ? [] : [{ action: "task", resource: "*", effect: "deny" as const }]),
   ]
 }

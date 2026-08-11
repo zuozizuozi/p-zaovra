@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Directory } from "@/acp/directory"
-import { Command } from "@/command"
+import type { CommandView } from "@zaovra-ai/sdk/v2"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
@@ -8,7 +8,7 @@ import { Provider } from "@/provider/provider"
 import { Effect, Layer } from "effect"
 import { it } from "../lib/effect"
 
-const command = (name: string): Command.Info => ({
+const command = (name: string): CommandView => ({
   name,
   source: "command",
   template: `run ${name}`,

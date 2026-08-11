@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@zaovra-ai/sdk/v2/client"
+import type { Message, Part, PermissionView, Project, QuestionView, Session } from "@zaovra-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
@@ -42,7 +42,7 @@ const permissionRequest = (id: string, sessionID: string, title = id) =>
     patterns: ["*"],
     metadata: {},
     always: [],
-  }) as PermissionRequest
+  }) as PermissionView
 
 const questionRequest = (id: string, sessionID: string, title = id) =>
   ({
@@ -55,7 +55,7 @@ const questionRequest = (id: string, sessionID: string, title = id) =>
         options: [{ label: title, description: title }],
       },
     ],
-  }) as QuestionRequest
+  }) as QuestionView
 
 const baseState = (input: Partial<State> = {}) =>
   ({

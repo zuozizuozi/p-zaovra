@@ -4,7 +4,7 @@ description: Interact with zaovra server over HTTP.
 ---
 
 import config from "../../../config.mjs"
-export const typesUrl = `${config.github}/blob/dev/packages/sdk/js/src/gen/types.gen.ts`
+export const typesUrl = `${config.github}/blob/dev/packages/sdk/js/src/v2/gen/types.gen.ts`
 
 The `zaovra serve` command runs a headless HTTP server that exposes an OpenAPI endpoint that an zaovra client can use.
 
@@ -132,60 +132,63 @@ The zaovra server exposes the following APIs.
 
 ---
 
-### Provider
+### Integrations and credentials
 
-| Method | Path                             | Description                          | Response                                                                            |
-| ------ | -------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
-| `GET`  | `/provider`                      | List all providers                   | `{ all: `<a href={typesUrl}>Provider[]</a>`, default: {...}, connected: string[] }` |
-| `GET`  | `/provider/auth`                 | Get provider authentication methods  | `{ [providerID: string]: `<a href={typesUrl}>ProviderAuthMethod[]</a>` }`           |
-| `POST` | `/provider/{id}/oauth/authorize` | Authorize a provider using OAuth     | <a href={typesUrl}><code>ProviderAuthAuthorization</code></a>                       |
-| `POST` | `/provider/{id}/oauth/callback`  | Handle OAuth callback for a provider | `boolean`                                                                           |
+Provider and MCP authentication use the V2 Integration and Credential Store. The removed `/provider/auth` and `/auth/:providerID` routes are not compatibility aliases.
 
----
-
-### Sessions
-
-| Method   | Path                                     | Description                           | Notes                                                                              |
-| -------- | ---------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
-| `GET`    | `/session`                               | List all sessions                     | Returns <a href={typesUrl}><code>Session[]</code></a>                              |
-| `POST`   | `/session`                               | Create a new session                  | body: `{ parentID?, title? }`, returns <a href={typesUrl}><code>Session</code></a> |
-| `GET`    | `/session/status`                        | Get session status for all sessions   | Returns `{ [sessionID: string]: `<a href={typesUrl}>SessionStatus</a>` }`          |
-| `GET`    | `/session/:id`                           | Get session details                   | Returns <a href={typesUrl}><code>Session</code></a>                                |
-| `DELETE` | `/session/:id`                           | Delete a session and all its data     | Returns `boolean`                                                                  |
-| `PATCH`  | `/session/:id`                           | Update session properties             | body: `{ title? }`, returns <a href={typesUrl}><code>Session</code></a>            |
-| `GET`    | `/session/:id/children`                  | Get a session's child sessions        | Returns <a href={typesUrl}><code>Session[]</code></a>                              |
-| `GET`    | `/session/:id/todo`                      | Get the todo list for a session       | Returns <a href={typesUrl}><code>Todo[]</code></a>                                 |
-| `POST`   | `/session/:id/init`                      | Analyze app and create `AGENTS.md`    | body: `{ messageID, providerID, modelID }`, returns `boolean`                      |
-| `POST`   | `/session/:id/fork`                      | Fork an existing session at a message | body: `{ messageID? }`, returns <a href={typesUrl}><code>Session</code></a>        |
-| `POST`   | `/session/:id/abort`                     | Abort a running session               | Returns `boolean`                                                                  |
-| `POST`   | `/session/:id/share`                     | Share a session                       | Returns <a href={typesUrl}><code>Session</code></a>                                |
-| `DELETE` | `/session/:id/share`                     | Unshare a session                     | Returns <a href={typesUrl}><code>Session</code></a>                                |
-| `GET`    | `/session/:id/diff`                      | Get the diff for this session         | query: `messageID?`, returns <a href={typesUrl}><code>FileDiff[]</code></a>        |
-| `POST`   | `/session/:id/summarize`                 | Summarize the session                 | body: `{ providerID, modelID }`, returns `boolean`                                 |
-| `POST`   | `/session/:id/revert`                    | Revert a message                      | body: `{ messageID, partID? }`, returns `boolean`                                  |
-| `POST`   | `/session/:id/unrevert`                  | Restore all reverted messages         | Returns `boolean`                                                                  |
-| `POST`   | `/session/:id/permissions/:permissionID` | Respond to a permission request       | body: `{ response, remember? }`, returns `boolean`                                 |
+| Method   | Path                                              | Description                         |
+| -------- | ------------------------------------------------- | ----------------------------------- |
+| `GET`    | `/api/integration`                                | List available integrations         |
+| `GET`    | `/api/integration/:integrationID`                 | Get integration details             |
+| `POST`   | `/api/integration/:integrationID/connect/key`     | Store a key credential              |
+| `POST`   | `/api/integration/:integrationID/connect/oauth`   | Start OAuth                         |
+| `GET`    | `/api/integration/attempt/:attemptID`             | Read OAuth attempt state            |
+| `POST`   | `/api/integration/attempt/:attemptID/complete`    | Complete an OAuth attempt           |
+| `DELETE` | `/api/integration/attempt/:attemptID`             | Cancel an OAuth attempt             |
+| `DELETE` | `/api/credential/:credentialID`                   | Remove a credential                 |
 
 ---
 
-### Messages
+### SessionV2
 
-| Method | Path                              | Description                             | Notes                                                                                                                                                                 |
-| ------ | --------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/session/:id/message`            | List messages in a session              | query: `limit?`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}[]`                                                        |
-| `POST` | `/session/:id/message`            | Send a message and wait for response    | body: `{ messageID?, model?, agent?, noReply?, system?, tools?, parts }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}` |
-| `GET`  | `/session/:id/message/:messageID` | Get message details                     | Returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`                                                                           |
-| `POST` | `/session/:id/prompt_async`       | Send a message asynchronously (no wait) | body: same as `/session/:id/message`, returns `204 No Content`                                                                                                        |
-| `POST` | `/session/:id/command`            | Execute a slash command                 | body: `{ messageID?, agent?, model?, command, arguments }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`               |
-| `POST` | `/session/:id/shell`              | Run a shell command                     | body: `{ agent, model?, command }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`                                       |
+SessionV2 is the only Agent execution API. Prompt admission is durable and separate from execution; `steer` is the default delivery mode and `queue` is explicit.
+
+| Method   | Path                                            | Description                                  |
+| -------- | ----------------------------------------------- | -------------------------------------------- |
+| `GET`    | `/api/session`                                  | List projected sessions                      |
+| `POST`   | `/api/session`                                  | Create a durable session                     |
+| `GET`    | `/api/session/active`                           | List process-local active drains             |
+| `GET`    | `/api/session/:sessionID`                       | Get a session                                |
+| `PATCH`  | `/api/session/:sessionID`                       | Update title or archive state                |
+| `DELETE` | `/api/session/:sessionID`                       | Delete a session                             |
+| `POST`   | `/api/session/:sessionID/prompt`                | Admit a durable steer or queue input         |
+| `POST`   | `/api/session/:sessionID/interrupt`             | Interrupt active process-local execution     |
+| `POST`   | `/api/session/:sessionID/wait`                  | Wait for the current local drain             |
+| `POST`   | `/api/session/:sessionID/compact`               | Run the checkpointed compaction state machine |
+| `POST`   | `/api/session/:sessionID/shell`                 | Run and persist one explicit user command    |
+| `POST`   | `/api/session/:sessionID/agent`                 | Switch the selected Agent                    |
+| `POST`   | `/api/session/:sessionID/model`                 | Switch the selected model                    |
+| `GET`    | `/api/session/:sessionID/todo`                  | Read durable todos                           |
+| `GET`    | `/api/session/:sessionID/input/pending`         | Read admitted inputs awaiting consumption    |
 
 ---
 
-### Commands
+### Session history, approvals, and recovery
 
-| Method | Path       | Description       | Response                                      |
-| ------ | ---------- | ----------------- | --------------------------------------------- |
-| `GET`  | `/command` | List all commands | <a href={typesUrl}><code>Command[]</code></a> |
+| Method | Path                                                    | Description                         |
+| ------ | ------------------------------------------------------- | ----------------------------------- |
+| `GET`  | `/api/session/:sessionID/message`                        | List projected V2 messages          |
+| `GET`  | `/api/session/:sessionID/message/:messageID`             | Get one projected message           |
+| `GET`  | `/api/session/:sessionID/history`                        | Read durable Session events         |
+| `GET`  | `/api/session/:sessionID/event`                          | Tail durable Session events         |
+| `GET`  | `/api/session/:sessionID/permission`                     | List pending permission requests    |
+| `POST` | `/api/session/:sessionID/permission/:requestID/reply`    | Reply to a permission request       |
+| `GET`  | `/api/session/:sessionID/question`                       | List pending questions              |
+| `POST` | `/api/session/:sessionID/question/:requestID/reply`      | Answer a question                   |
+| `POST` | `/api/session/:sessionID/question/:requestID/reject`     | Reject a question                   |
+| `POST` | `/api/session/:sessionID/revert/stage`                    | Stage a message/file revert         |
+| `POST` | `/api/session/:sessionID/revert/clear`                    | Clear a staged revert               |
+| `POST` | `/api/session/:sessionID/revert/commit`                   | Commit a staged revert              |
 
 ---
 
@@ -210,23 +213,14 @@ The zaovra server exposes the following APIs.
 
 ---
 
-### Tools (Experimental)
+### MCP V2
 
-| Method | Path                                        | Description                              | Response                                     |
-| ------ | ------------------------------------------- | ---------------------------------------- | -------------------------------------------- |
-| `GET`  | `/experimental/tool/ids`                    | List all tool IDs                        | <a href={typesUrl}><code>ToolIDs</code></a>  |
-| `GET`  | `/experimental/tool?provider=<p>&model=<m>` | List tools with JSON schemas for a model | <a href={typesUrl}><code>ToolList</code></a> |
-
----
-
-### LSP, Formatters & MCP
-
-| Method | Path         | Description                | Response                                                 |
-| ------ | ------------ | -------------------------- | -------------------------------------------------------- |
-| `GET`  | `/lsp`       | Get LSP server status      | <a href={typesUrl}><code>LSPStatus[]</code></a>          |
-| `GET`  | `/formatter` | Get formatter status       | <a href={typesUrl}><code>FormatterStatus[]</code></a>    |
-| `GET`  | `/mcp`       | Get MCP server status      | `{ [name: string]: `<a href={typesUrl}>MCPStatus</a>` }` |
-| `POST` | `/mcp`       | Add MCP server dynamically | body: `{ name, config }`, returns MCP status object      |
+| Method | Path                        | Description                         |
+| ------ | --------------------------- | ----------------------------------- |
+| `GET`  | `/api/mcp`                  | Read canonical Core MCP status      |
+| `GET`  | `/api/mcp/resources`        | List MCP resources                  |
+| `POST` | `/api/mcp/:name/connect`    | Connect one configured MCP server   |
+| `POST` | `/api/mcp/:name/disconnect` | Disconnect one MCP server           |
 
 ---
 

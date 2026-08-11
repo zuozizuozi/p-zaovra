@@ -1,0 +1,998 @@
+[data-page="zaovra-home"] {
+  --home-bg: #05060f;
+  --home-bg-deep: #05060f;
+  --home-layer: rgba(5, 6, 15, 0.97);
+  --home-panel: rgba(186, 214, 247, 0.03);
+  --home-panel-strong: rgba(199, 211, 234, 0.06);
+  --home-blue: #98c0ef;
+  --home-blue-hover: #b8d4f5;
+  --home-sky: #98c0ef;
+  --home-mint: #79d8bc;
+  --home-text: #d1e4fa;
+  --home-copy: #c7d3ea;
+  --home-muted: #9da7ba;
+  --home-border: rgba(186, 215, 247, 0.12);
+  --home-border-strong: rgba(186, 214, 247, 0.24);
+  --home-shadow: 0 30px 90px rgba(0, 0, 0, 0.42);
+  --home-heading-gradient: linear-gradient(180deg, #d8ecf8 0%, #98c0ef 100%);
+
+  position: relative;
+  isolation: isolate;
+  color: var(--home-text);
+  background:
+    radial-gradient(ellipse 70% 38% at 50% -6%, rgba(152, 192, 239, 0.15), transparent 70%),
+    radial-gradient(ellipse 42% 24% at 50% 8%, rgba(152, 192, 239, 0.08), transparent 72%),
+    #05060f;
+  font-family: var(--font-sans);
+}
+
+[data-page="zaovra-home"]::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 8%, rgba(186, 215, 247, 0.035) 50%, transparent 92%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 28%, transparent 92%, rgba(0, 0, 0, 0.25));
+}
+
+[data-page="zaovra-home"] h1,
+[data-page="zaovra-home"] h2,
+[data-page="zaovra-home"] h3,
+[data-page="zaovra-home"] strong {
+  text-wrap: balance;
+}
+
+[data-page="zaovra-home"] h1,
+[data-page="zaovra-home"] [data-slot="section-heading"] h2,
+[data-page="zaovra-home"] [data-slot="cta-copy"] h2 {
+  color: #d8ecf8;
+  font-family: "Space Grotesk", var(--font-sans);
+}
+
+[data-page="zaovra-home"] h1 {
+  max-width: 700px;
+  margin: 28px 0 26px;
+  font-size: clamp(54px, 6.3vw, 88px);
+  font-weight: 500;
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+}
+
+[data-page="zaovra-home"] [data-slot="section-heading"] h2,
+[data-page="zaovra-home"] [data-slot="cta-copy"] h2 {
+  margin: 20px 0;
+  font-size: clamp(38px, 4vw, 52px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+[data-page="zaovra-home"] [data-slot="eyebrow"],
+[data-page="zaovra-home"] [data-slot="section-heading"] > span,
+[data-page="zaovra-home"] [data-slot="cta-copy"] > span {
+  color: var(--home-sky);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+[data-page="zaovra-home"] [data-slot="section-heading"] > span::after,
+[data-page="zaovra-home"] [data-slot="cta-copy"] > span::after {
+  width: clamp(44px, 7vw, 92px);
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, rgba(152, 192, 239, 0.48), transparent);
+}
+
+[data-page="zaovra-home"] [data-component="home-header"] {
+  position: relative;
+  width: min(1200px, calc(100% - 48px));
+  margin: 20px auto 0;
+  border: 1px solid var(--home-border);
+  border-radius: 999px;
+  background: rgba(199, 211, 234, 0.045);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 50px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+}
+
+[data-page="zaovra-home"] [data-slot="header-inner"] {
+  width: 100%;
+  min-height: 60px;
+  padding: 0 10px 0 22px;
+  gap: 28px;
+}
+
+[data-page="zaovra-home"] [data-slot="brand"] img {
+  width: 122px;
+}
+
+[data-page="zaovra-home"] [data-slot="primary-nav"] {
+  gap: 8px;
+  color: var(--home-muted);
+  font-size: 13px;
+}
+
+[data-page="zaovra-home"] [data-slot="primary-nav"] a {
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  transition: color 200ms ease, border-color 200ms ease, background-color 200ms ease, transform 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="primary-nav"] a:hover,
+[data-page="zaovra-home"] [data-slot="primary-nav"] a:focus-visible {
+  color: var(--home-text);
+  border-color: var(--home-border);
+  background: rgba(199, 211, 234, 0.045);
+  transform: translateY(-2px);
+}
+
+[data-page="zaovra-home"] [data-slot="header-cta"] {
+  min-height: 40px;
+  padding: 0 18px;
+  color: #09101b;
+  border: 1px solid rgba(216, 236, 248, 0.68);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d8ecf8, #abcbea);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 6px 22px rgba(152, 192, 239, 0.16);
+  font-weight: 600;
+  transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease, filter 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="header-cta"]:hover {
+  background: linear-gradient(180deg, #e6f3fc, #bdd8f1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 10px 28px rgba(152, 192, 239, 0.24);
+  filter: brightness(1.04);
+  transform: translateY(-2px);
+}
+
+[data-page="zaovra-home"] [data-component="home-content"] {
+  position: relative;
+  z-index: 1;
+  width: min(1200px, calc(100% - 48px));
+}
+
+[data-page="zaovra-home"] [data-component="home-hero"] {
+  min-height: 790px;
+  padding: 112px 0 104px;
+  gap: 72px;
+}
+
+[data-page="zaovra-home"] [data-component="home-hero"]::after {
+  top: 8%;
+  right: -14%;
+  width: 62%;
+  background: radial-gradient(circle, rgba(152, 192, 239, 0.11), transparent 67%);
+  filter: blur(46px);
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > p,
+[data-page="zaovra-home"] [data-slot="section-heading"] p,
+[data-page="zaovra-home"] [data-slot="cta-copy"] p {
+  color: var(--home-copy);
+}
+
+[data-page="zaovra-home"] [data-slot="hero-copy"] > p {
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+[data-page="zaovra-home"] [data-slot="hero-actions"] a,
+[data-page="zaovra-home"] [data-slot="download-actions"] > a {
+  min-height: 50px;
+  padding: 0 22px;
+  border-color: var(--home-border);
+  border-radius: 999px;
+  transition: transform 200ms ease, border-color 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-variant="primary"] {
+  color: #09101b;
+  border-color: rgba(216, 236, 248, 0.68);
+  background: linear-gradient(180deg, #d8ecf8, #abcbea);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.74),
+    0 8px 30px rgba(152, 192, 239, 0.17);
+}
+
+[data-page="zaovra-home"] [data-variant="secondary"] {
+  color: var(--home-copy);
+  background: rgba(199, 211, 234, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+[data-page="zaovra-home"] [data-slot="hero-actions"] a:hover,
+[data-page="zaovra-home"] [data-slot="download-actions"] > a:hover {
+  border-color: var(--home-border-strong);
+  background-color: rgba(199, 211, 234, 0.07);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  transform: translateY(-2px);
+}
+
+[data-page="zaovra-home"] [data-slot="platform-note"] {
+  color: var(--home-muted) !important;
+  letter-spacing: 0.02em;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"],
+[data-page="zaovra-home"] [data-slot="feature-grid"],
+[data-page="zaovra-home"] [data-slot="open-grid"] article,
+[data-page="zaovra-home"] [data-slot="access-grid"] article,
+[data-page="zaovra-home"] [data-slot="faq-list"] details,
+[data-page="zaovra-home"] [data-component="install-options"] {
+  border: 1px solid var(--home-border);
+  background: rgba(186, 214, 247, 0.03);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 24px 70px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] {
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div {
+  padding: 30px;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] > div + div {
+  border-color: var(--home-border);
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] span,
+[data-page="zaovra-home"] [data-slot="feature-grid"] article > span,
+[data-page="zaovra-home"] [data-slot="access-grid"] article > span {
+  color: var(--home-sky);
+  letter-spacing: 0.1em;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] strong,
+[data-page="zaovra-home"] [data-slot="feature-grid"] h3,
+[data-page="zaovra-home"] [data-slot="open-grid"] h3,
+[data-page="zaovra-home"] [data-slot="access-grid"] h3 {
+  color: var(--home-text);
+  font-family: "Space Grotesk", var(--font-sans);
+  font-weight: 500;
+}
+
+[data-page="zaovra-home"] [data-layout="section"] {
+  position: relative;
+  padding: 116px 0;
+  border-bottom: 0;
+}
+
+[data-page="zaovra-home"] [data-layout="section"]::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(186, 215, 247, 0.16) 18%, rgba(186, 215, 247, 0.16) 82%, transparent);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-steps"]::before {
+  background: linear-gradient(90deg, transparent, rgba(152, 192, 239, 0.32), transparent);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-steps"] li > span {
+  border-color: var(--home-border-strong);
+  border-radius: 999px;
+  background: rgba(5, 6, 15, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 0 24px rgba(152, 192, 239, 0.08);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-steps"] strong {
+  color: var(--home-text);
+  font-family: "Space Grotesk", var(--font-sans);
+  font-weight: 500;
+}
+
+[data-page="zaovra-home"] [data-slot="feature-grid"] {
+  gap: 12px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+[data-page="zaovra-home"] [data-slot="feature-grid"] article {
+  border: 1px solid var(--home-border);
+  border-radius: 16px;
+  background: rgba(186, 214, 247, 0.03);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+[data-page="zaovra-home"] [data-slot="feature-grid"] article + article {
+  border-left: 1px solid var(--home-border);
+}
+
+[data-page="zaovra-home"] [data-slot="check-list"] li {
+  color: var(--home-copy);
+}
+
+[data-page="zaovra-home"] [data-slot="check-list"] li::before {
+  border-color: var(--home-mint);
+}
+
+[data-page="zaovra-home"] [data-slot="text-link"] {
+  color: var(--home-sky);
+  transition: color 200ms ease, transform 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="text-link"]:hover {
+  color: #d8ecf8;
+  transform: translateX(2px);
+}
+
+[data-page="zaovra-home"] [data-slot="open-grid"],
+[data-page="zaovra-home"] [data-slot="access-grid"] {
+  gap: 14px;
+}
+
+[data-page="zaovra-home"] [data-slot="open-grid"] article,
+[data-page="zaovra-home"] [data-slot="access-grid"] article {
+  border-radius: 16px;
+  transition: transform 200ms ease, border-color 200ms ease, background-color 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="open-grid"] article:hover,
+[data-page="zaovra-home"] [data-slot="access-grid"] article:hover {
+  border-color: var(--home-border-strong);
+  background: rgba(199, 211, 234, 0.055);
+  transform: translateY(-2px);
+}
+
+[data-page="zaovra-home"] [data-slot="access-grid"] article[data-variant="featured"] {
+  border-color: var(--home-border-strong);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(152, 192, 239, 0.09), transparent 42%),
+    rgba(199, 211, 234, 0.045);
+}
+
+[data-page="zaovra-home"] [data-slot="access-grid"] ul {
+  border-color: var(--home-border);
+}
+
+[data-page="zaovra-home"] [data-slot="faq-list"] {
+  display: grid;
+  border-top: 0;
+  gap: 10px;
+}
+
+[data-page="zaovra-home"] [data-slot="faq-list"] details {
+  overflow: hidden;
+  border-bottom: 1px solid var(--home-border);
+  border-radius: 16px;
+  transition: border-color 200ms ease, background-color 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="faq-list"] details:hover,
+[data-page="zaovra-home"] [data-slot="faq-list"] details[open] {
+  border-color: var(--home-border-strong);
+  background: rgba(199, 211, 234, 0.055);
+}
+
+[data-page="zaovra-home"] [data-slot="faq-list"] summary {
+  padding: 22px 56px 22px 22px;
+  color: var(--home-text);
+}
+
+[data-page="zaovra-home"] [data-slot="faq-list"] summary::after {
+  top: 18px;
+  right: 20px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--home-border);
+  border-radius: 999px;
+  font-size: 15px;
+}
+
+[data-page="zaovra-home"] [data-slot="faq-list"] p {
+  margin: -4px 0 22px;
+  padding: 0 56px 0 22px;
+}
+
+[data-page="zaovra-home"] [data-component="download-cta"] {
+  overflow: hidden;
+}
+
+[data-page="zaovra-home"] [data-component="install-options"] {
+  border-radius: 16px;
+}
+
+[data-page="zaovra-home"] [data-slot="install-tabs"] {
+  border-color: var(--home-border);
+  background: rgba(199, 211, 234, 0.025);
+}
+
+[data-page="zaovra-home"] [data-slot="install-tabs"] button {
+  transition: color 200ms ease, background-color 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="install-tabs"] button:hover {
+  color: var(--home-copy);
+  background: rgba(199, 211, 234, 0.035);
+}
+
+[data-page="zaovra-home"] [data-slot="install-tabs"] [data-kobalte-tabs-indicator] {
+  height: 1px;
+  background: var(--home-sky);
+  box-shadow: 0 0 12px rgba(152, 192, 239, 0.32);
+}
+
+[data-page="zaovra-home"] [data-slot="install-panels"] button {
+  color: var(--home-copy);
+  transition: background-color 200ms ease;
+}
+
+[data-page="zaovra-home"] [data-slot="install-panels"] button:hover {
+  background: rgba(199, 211, 234, 0.035);
+}
+
+[data-page="zaovra-home"] [data-component="footer"] {
+  color: var(--home-muted);
+  border-color: var(--home-border);
+}
+
+[data-page="zaovra-home"] [data-component="legal"] {
+  color: var(--home-muted);
+  background: rgba(5, 6, 15, 0.98);
+}
+
+[data-page="zaovra-home"] :focus-visible {
+  outline-color: var(--home-sky);
+}
+
+@media (max-width: 1099px) {
+  [data-page="zaovra-home"] [data-component="home-header"],
+  [data-page="zaovra-home"] [data-component="home-content"] {
+    width: min(100% - 40px, 1200px);
+  }
+
+  [data-page="zaovra-home"] [data-slot="primary-nav"] {
+    gap: 2px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="primary-nav"] a {
+    padding-inline: 9px;
+  }
+
+  [data-page="zaovra-home"] [data-component="home-hero"] {
+    padding: 96px 0 92px;
+    gap: 64px;
+  }
+
+  [data-page="zaovra-home"] [data-layout="section"] {
+    padding: 96px 0;
+  }
+}
+
+@media (max-width: 719px) {
+  [data-page="zaovra-home"]::before {
+    background-size: 72px 72px;
+    mask-image: linear-gradient(to bottom, #000, transparent 24%, transparent 94%, rgba(0, 0, 0, 0.25));
+  }
+
+  [data-page="zaovra-home"] [data-component="home-header"],
+  [data-page="zaovra-home"] [data-component="home-content"] {
+    width: calc(100% - 40px);
+  }
+
+  [data-page="zaovra-home"] [data-component="home-header"] {
+    margin-top: 12px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="header-inner"] {
+    min-height: 54px;
+    padding: 0 7px 0 16px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="brand"] img {
+    width: 104px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="header-cta"] {
+    min-height: 38px;
+    padding: 0 14px;
+  }
+
+  [data-page="zaovra-home"] [data-component="home-hero"] {
+    padding: 72px 0 64px;
+    gap: 48px;
+  }
+
+  [data-page="zaovra-home"] h1 {
+    margin: 22px 0;
+    font-size: clamp(46px, 14vw, 60px);
+  }
+
+  [data-page="zaovra-home"] [data-slot="hero-actions"] {
+    margin-top: 28px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="hero-actions"] a,
+  [data-page="zaovra-home"] [data-slot="download-actions"] > a {
+    width: 100%;
+  }
+
+  [data-page="zaovra-home"] [data-component="proof-rail"] {
+    border-radius: 16px;
+  }
+
+  [data-page="zaovra-home"] [data-component="proof-rail"] > div {
+    padding: 24px 22px;
+  }
+
+  [data-page="zaovra-home"] [data-layout="section"] {
+    padding: 64px 0;
+  }
+
+  [data-page="zaovra-home"] [data-slot="section-heading"] h2,
+  [data-page="zaovra-home"] [data-slot="cta-copy"] h2 {
+    font-size: clamp(34px, 10.5vw, 42px);
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-steps"] {
+    gap: 30px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="feature-grid"] {
+    gap: 10px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="feature-grid"] article + article {
+    border-top: 1px solid var(--home-border);
+    border-left: 1px solid var(--home-border);
+  }
+
+  [data-page="zaovra-home"] [data-slot="open-grid"],
+  [data-page="zaovra-home"] [data-slot="access-grid"] {
+    margin-top: 42px;
+    gap: 10px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="open-grid"] article,
+  [data-page="zaovra-home"] [data-slot="access-grid"] article {
+    padding: 26px 22px;
+  }
+
+  [data-page="zaovra-home"] [data-component="home-faq"],
+  [data-page="zaovra-home"] [data-component="download-cta"] {
+    gap: 38px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="faq-list"] summary {
+    padding-left: 18px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="faq-list"] p {
+    padding-left: 18px;
+  }
+
+  [data-page="zaovra-home"] [data-component="install-options"] {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-page="zaovra-home"] *,
+  [data-page="zaovra-home"] *::before,
+  [data-page="zaovra-home"] *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Semantic icon system and long-running workflow loop */
+[data-page="zaovra-home"] [data-component="feature-icon"] {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 62px;
+  height: 62px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  color: var(--home-text);
+  border: 0;
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 32% 18%, rgba(216, 236, 248, 0.22), transparent 36%),
+    linear-gradient(145deg, rgba(42, 57, 84, 0.82), rgba(7, 10, 22, 0.96));
+  box-shadow:
+    inset 0 1px 1px rgba(216, 236, 248, 0.28),
+    inset 0 0 0 1px rgba(186, 215, 247, 0.13),
+    inset 0 -14px 28px rgba(0, 0, 0, 0.26),
+    0 16px 32px rgba(0, 0, 0, 0.34),
+    0 0 22px rgba(152, 192, 239, 0.05);
+}
+
+[data-page="zaovra-home"] [data-component="feature-icon"]::before {
+  position: absolute;
+  z-index: 2;
+  top: -65%;
+  left: -42%;
+  width: 58%;
+  height: 210%;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(229, 242, 255, 0.28), transparent);
+  transform: rotate(24deg);
+}
+
+[data-page="zaovra-home"] [data-component="feature-icon"]::after {
+  position: absolute;
+  z-index: -1;
+  inset: 6px;
+  content: "";
+  border-radius: 11px;
+  background:
+    linear-gradient(rgba(186, 215, 247, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(186, 215, 247, 0.05) 1px, transparent 1px),
+    rgba(152, 192, 239, 0.035);
+  background-size: 7px 7px;
+  box-shadow: inset 0 0 18px rgba(152, 192, 239, 0.08);
+}
+
+[data-page="zaovra-home"] [data-component="feature-icon"] [data-slot="icon-core"] {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(199, 211, 234, 0.13), rgba(5, 6, 15, 0.2));
+  box-shadow:
+    inset 0 1px 1px rgba(216, 236, 248, 0.2),
+    0 0 22px rgba(152, 192, 239, 0.12);
+}
+
+[data-page="zaovra-home"] [data-component="feature-icon"] svg {
+  width: 27px;
+  height: 27px;
+  filter: drop-shadow(0 0 5px rgba(187, 219, 255, 0.28));
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] [data-component="feature-icon"] {
+  width: 52px;
+  height: 52px;
+  color: var(--home-text);
+  font-size: inherit;
+  letter-spacing: 0;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] [data-component="feature-icon"] [data-slot="icon-core"] {
+  width: 36px;
+  height: 36px;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] [data-component="feature-icon"] svg {
+  width: 23px;
+  height: 23px;
+}
+
+[data-page="zaovra-home"] [data-component="proof-rail"] strong {
+  margin-top: 20px;
+}
+
+[data-page="zaovra-home"] [data-slot="feature-grid"] article > [data-component="feature-icon"] {
+  display: grid;
+  width: 66px;
+  height: 66px;
+  color: var(--home-text);
+  font-size: inherit;
+  letter-spacing: 0;
+}
+
+[data-page="zaovra-home"] [data-slot="feature-grid"] h3 {
+  margin-top: 36px;
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] {
+  position: relative;
+  min-height: 640px;
+  margin-top: 68px;
+  overflow: hidden;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(85, 117, 176, 0.14), transparent 26%),
+    radial-gradient(ellipse at 50% 50%, rgba(152, 192, 239, 0.055), transparent 60%);
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"]::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  opacity: 0.55;
+  background-image:
+    linear-gradient(rgba(186, 215, 247, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(186, 215, 247, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, #000 0%, transparent 72%);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-circuit"] {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-circuit"] path {
+  fill: none;
+  stroke: rgba(152, 192, 239, 0.18);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-circuit"] [data-slot="circuit-pulse"] {
+  stroke: rgba(185, 219, 255, 0.64);
+  stroke-dasharray: 2 16;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(152, 192, 239, 0.48));
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"] {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 204px;
+  height: 204px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(70, 105, 184, 0.26), transparent 52%),
+    rgba(5, 6, 15, 0.9);
+  box-shadow:
+    inset 0 1px 1px rgba(216, 236, 248, 0.32),
+    inset 0 0 0 1px rgba(186, 215, 247, 0.18),
+    inset 0 28px 58px rgba(168, 216, 245, 0.07),
+    0 30px 70px rgba(0, 0, 0, 0.52),
+    0 0 54px rgba(74, 118, 211, 0.16);
+  transform: translate(-50%, -50%);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"]::before,
+[data-page="zaovra-home"] [data-slot="workflow-core"]::after {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"]::before {
+  inset: 12px;
+  border: 1px solid rgba(186, 215, 247, 0.12);
+  border-radius: 24px;
+  box-shadow: inset 0 0 36px rgba(152, 192, 239, 0.08);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"]::after {
+  inset: 23px;
+  border: 1px dashed rgba(186, 215, 247, 0.12);
+  border-radius: 18px;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"] img {
+  position: relative;
+  z-index: 1;
+  width: 208px;
+  height: 208px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 18px rgba(53, 112, 255, 0.28));
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-core"] > span:last-child {
+  position: absolute;
+  z-index: 4;
+  bottom: 13px;
+  padding: 5px 10px;
+  color: var(--home-copy);
+  border-radius: 6px;
+  background: rgba(199, 211, 234, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(186, 215, 247, 0.12);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+[data-page="zaovra-home"] [data-slot="core-reflection"] {
+  position: absolute;
+  z-index: 3;
+  top: -80%;
+  left: -70%;
+  width: 56%;
+  height: 260%;
+  background: linear-gradient(90deg, transparent, rgba(235, 245, 255, 0.22), transparent);
+  transform: rotate(24deg);
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 300px));
+  grid-template-rows: repeat(2, 150px);
+  align-content: space-between;
+  justify-content: space-between;
+  margin: 0;
+  padding: 38px 24px;
+  gap: 0;
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"]::before {
+  content: none;
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 150px;
+  align-items: center;
+  padding: 20px;
+  gap: 18px;
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(152, 192, 239, 0.08), transparent 44%),
+    rgba(5, 6, 15, 0.76);
+  box-shadow:
+    inset 0 1px 1px rgba(216, 236, 248, 0.18),
+    inset 0 0 0 1px rgba(186, 215, 247, 0.11),
+    0 22px 42px rgba(0, 0, 0, 0.32);
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:nth-child(3),
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:nth-child(4) {
+  align-self: end;
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="step-copy"] {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="step-copy"] strong {
+  margin: 0 0 8px;
+  color: var(--home-text);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+[data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="step-copy"] p {
+  margin: 0;
+  color: var(--home-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: rgba(184, 216, 255, 0.64);
+  box-shadow: 0 0 7px rgba(152, 192, 239, 0.55);
+}
+
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(1) { top: 9%; left: 13%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(2) { top: 18%; left: 37%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(3) { top: 8%; left: 68%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(4) { top: 22%; left: 89%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(5) { top: 42%; left: 8%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(6) { top: 36%; left: 29%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(7) { top: 45%; left: 73%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(8) { top: 39%; left: 95%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(9) { top: 66%; left: 18%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(10) { top: 73%; left: 42%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(11) { top: 69%; left: 64%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(12) { top: 78%; left: 86%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(13) { top: 92%; left: 8%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(14) { top: 88%; left: 31%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(15) { top: 93%; left: 56%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(16) { top: 86%; left: 76%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(17) { top: 58%; left: 53%; }
+[data-page="zaovra-home"] [data-slot="workflow-particles"] span:nth-child(18) { top: 28%; left: 54%; }
+
+@media (max-width: 1099px) {
+  [data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] {
+    grid-template-columns: repeat(2, minmax(0, 250px));
+    padding-inline: 10px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-core"] {
+    width: 178px;
+    height: 178px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-core"] img {
+    width: 184px;
+    height: 184px;
+  }
+}
+
+@media (max-width: 719px) {
+  [data-page="zaovra-home"] [data-component="workflow-system"] {
+    min-height: 0;
+    padding-top: 188px;
+    overflow: visible;
+    border-radius: 0;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-circuit"] {
+    display: none;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-core"] {
+    top: 0;
+    width: 154px;
+    height: 154px;
+    transform: translateX(-50%);
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-core"] img {
+    width: 164px;
+    height: 164px;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-core"] > span:last-child {
+    bottom: 9px;
+  }
+
+  [data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] {
+    position: relative;
+    inset: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    padding: 0;
+    gap: 12px;
+  }
+
+  [data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li {
+    min-height: 120px;
+    padding: 18px;
+  }
+
+  [data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:nth-child(3),
+  [data-page="zaovra-home"] [data-component="workflow-system"] [data-slot="workflow-steps"] li:nth-child(4) {
+    align-self: auto;
+  }
+
+  [data-page="zaovra-home"] [data-slot="workflow-particles"] {
+    height: 188px;
+  }
+}

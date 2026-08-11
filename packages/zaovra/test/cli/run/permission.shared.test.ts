@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { PermissionRequest } from "@zaovra-ai/sdk/v2"
+import type { PermissionView } from "@zaovra-ai/sdk/v2"
 import {
   createPermissionBodyState,
   permissionAlwaysLines,
@@ -10,7 +10,7 @@ import {
   permissionRun,
 } from "@/cli/cmd/run/permission.shared"
 
-function req(input: Partial<PermissionRequest> = {}): PermissionRequest {
+function req(input: Partial<PermissionView> = {}): PermissionView {
   return {
     id: "perm-1",
     sessionID: "session-1",

@@ -25,7 +25,6 @@ describe("hasNonBlockingServiceIssue", () => {
   test("detects MCP failures that do not block chatting", () => {
     expect(hasNonBlockingServiceIssue({ mcp: ["failed"], lsp: [] })).toBe(true)
     expect(hasNonBlockingServiceIssue({ mcp: ["needs_auth"], lsp: [] })).toBe(true)
-    expect(hasNonBlockingServiceIssue({ mcp: ["needs_client_registration"], lsp: [] })).toBe(true)
     expect(hasNonBlockingServiceIssue({ mcp: ["connected", "disabled"], lsp: [] })).toBe(false)
   })
 

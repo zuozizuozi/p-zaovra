@@ -5,12 +5,7 @@ import { useProject } from "../../context/project"
 import { useSync } from "../../context/sync"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
-import {
-  confirmWorkspaceFileChanges,
-  openWorkspaceSelect,
-  warpWorkspaceSession,
-  type WorkspaceSelection,
-} from "../dialog-workspace-create"
+import { openWorkspaceSelect, type WorkspaceSelection } from "../dialog-workspace-create"
 import type { WorkspaceStatus } from "../workspace-label"
 
 export function usePromptWorkspace(sessionID?: string) {
@@ -22,7 +17,6 @@ export function usePromptWorkspace(sessionID?: string) {
   const [selection, setSelection] = createSignal<WorkspaceSelection>()
   const [creating, setCreating] = createSignal(false)
   const [creatingDots, setCreatingDots] = createSignal(3)
-  const [notice, setNotice] = createSignal<string>()
 
   async function create(selection: Extract<WorkspaceSelection, { type: "new" }>) {
     setCreating(true)
@@ -59,47 +53,10 @@ export function usePromptWorkspace(sessionID?: string) {
   }
 
   async function warp(selection: WorkspaceSelection) {
-    if (!sessionID) {
-      setSelection(selection)
-      dialog.clear()
-      if (selection.type === "new") void create(selection)
-      return
-    }
-    const sourceWorkspaceID = project.workspace.current()
-    const copyChanges = await confirmWorkspaceFileChanges({ dialog, sdk, sourceWorkspaceID })
-    if (copyChanges === undefined) return
+    if (sessionID) return
     setSelection(selection)
     dialog.clear()
-
-    const workspace =
-      selection.type === "none"
-        ? { id: null, name: "local project" }
-        : selection.type === "existing"
-          ? { id: selection.workspaceID, name: selection.workspaceName }
-          : await create(selection)
-    if (!workspace) return
-
-    const warped = await warpWorkspaceSession({
-      dialog,
-      sdk,
-      sync,
-      project,
-      toast,
-      sourceWorkspaceID,
-      workspaceID: workspace.id,
-      sessionID,
-      copyChanges,
-    })
-    if (warped) showNotice(workspace.name)
-  }
-
-  function showNotice(name: string) {
-    setNotice(`Warped to ${name}`)
-    setTimeout(() => setNotice(undefined), 4000)
-  }
-
-  function clearNotice() {
-    setNotice(undefined)
+    if (selection.type === "new") void create(selection)
   }
 
   function open() {
@@ -133,5 +90,5 @@ export function usePromptWorkspace(sessionID?: string) {
     }
   })
 
-  return { selection, creating, creatingDots, notice, label, open, warp, clearNotice }
+  return { selection, creating, creatingDots, label, open, warp }
 }

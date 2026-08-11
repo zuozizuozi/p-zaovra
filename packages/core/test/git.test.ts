@@ -110,6 +110,51 @@ describe("Git worktrees", () => {
   )
 })
 
+describe("Git changes", () => {
+  it.live("checks, applies, and recognizes an already applied isolated change set", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(async () => {
+        await initRepo(root.path)
+        await fs.writeFile(path.join(root.path, "tracked.txt"), "one\n")
+        await $`git add .`.cwd(root.path).quiet()
+        await $`git commit -m initial`.cwd(root.path).quiet()
+      })
+      const git = yield* Git.Service
+      const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
+      const destinationRepository = yield* git.repo.discover(destination)
+      if (!destinationRepository) throw new Error("Repository not found")
+      const isolated = AbsolutePath.make(`${root.path}-git-changes`)
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const isolatedRepository = yield* git.worktree.create({
+        repository: destinationRepository,
+        directory: isolated,
+      })
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(isolated, "tracked.txt"), "two\n")
+        await fs.writeFile(path.join(isolated, "created.txt"), "created\n")
+      })
+      const changes = yield* git.change.capture({ repository: isolatedRepository, path: isolated })
+
+      expect(yield* git.change.check({ repository: destinationRepository, path: destination, changes })).toBe(true)
+      yield* git.change.apply({ repository: destinationRepository, path: destination, changes })
+      expect(yield* read(path.join(destination, "tracked.txt"))).toBe("two\n")
+      expect(yield* read(path.join(destination, "created.txt"))).toBe("created\n")
+      expect(yield* git.change.check({ repository: destinationRepository, path: destination, changes })).toBe(false)
+      expect(
+        yield* git.change.check({ repository: destinationRepository, path: destination, changes, reverse: true }),
+      ).toBe(true)
+
+      yield* git.worktree.remove({ repository: isolatedRepository, directory: isolated, force: true })
+    }),
+  )
+})
+
 describe("Git trees", () => {
   it.live("captures, compares, previews, and restores scoped trees", () =>
     Effect.gen(function* () {

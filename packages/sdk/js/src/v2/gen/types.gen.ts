@@ -16,9 +16,12 @@ export type Event =
   | EventMessageRemoved
   | EventMessagePartUpdated
   | EventMessagePartRemoved
+  | EventSessionNextCreated
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
+  | EventSessionNextUpdated
+  | EventSessionNextDeleted
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
   | EventSessionNextContextUpdated
@@ -45,9 +48,46 @@ export type Event =
   | EventSessionNextCompactionStarted
   | EventSessionNextCompactionDelta
   | EventSessionNextCompactionEnded
+  | EventSessionNextCompactionFailed
   | EventSessionNextRevertStaged
   | EventSessionNextRevertCleared
   | EventSessionNextRevertCommitted
+  | EventWorkGoalCreated
+  | EventWorkGoalActivated
+  | EventWorkGoalPauseRequested
+  | EventWorkGoalPaused
+  | EventWorkGoalCancelRequested
+  | EventWorkGoalCompleted
+  | EventWorkGoalBlocked
+  | EventWorkGoalCancelled
+  | EventWorkGoalBudgetExhausted
+  | EventWorkGoalReplanRequested
+  | EventWorkGoalPlacementAssigned
+  | EventWorkGoalPlacementReleased
+  | EventWorkTaskCreated
+  | EventWorkTaskGraphPlanned
+  | EventWorkTaskGraphExpanded
+  | EventWorkTaskGraphReplanned
+  | EventWorkTaskReadied
+  | EventWorkTaskStarted
+  | EventWorkTaskVerificationStarted
+  | EventWorkTaskReviewStarted
+  | EventWorkTaskMergeStarted
+  | EventWorkTaskMerged
+  | EventWorkTaskMergeConflicted
+  | EventWorkTaskIsolationArchived
+  | EventWorkTaskReworkRequested
+  | EventWorkTaskCompleted
+  | EventWorkTaskBlocked
+  | EventWorkTaskCancelled
+  | EventWorkAttemptAdmitted
+  | EventWorkAttemptStarted
+  | EventWorkAttemptSettled
+  | EventWorkEvidenceRecorded
+  | EventWorkEvaluationRecorded
+  | EventWorkTaskHandoffRecorded
+  | EventWorkTaskHandoffRouted
+  | EventWorkProjectMemoryResolved
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
@@ -94,42 +134,6 @@ export type Event =
   | EventServerConnected
   | EventGlobalDisposed
   | EventServerInstanceDisposed
-
-export type QuestionReplied = {
-  sessionID: string
-  requestID: string
-  answers: Array<QuestionAnswer>
-}
-
-export type QuestionRejected = {
-  sessionID: string
-  requestID: string
-}
-
-export type OAuth = {
-  type: "oauth"
-  refresh: string
-  access: string
-  expires: number
-  accountId?: string
-  enterpriseUrl?: string
-}
-
-export type ApiAuth = {
-  type: "api"
-  key: string
-  metadata?: {
-    [key: string]: string
-  }
-}
-
-export type WellKnownAuth = {
-  type: "wellknown"
-  key: string
-  token: string
-}
-
-export type Auth = OAuth | ApiAuth | WellKnownAuth
 
 export type EffectHttpApiErrorBadRequest = {
   _tag: "BadRequest"
@@ -820,6 +824,23 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.created"
+        properties: {
+          timestamp: number
+          sessionID: string
+          projectID: string
+          parentID?: string
+          agent?: string
+          model?: ModelRef
+          location: LocationRef
+          subpath?: string
+          title: string
+          slug: string
+          version: string
+        }
+      }
+    | {
+        id: string
         type: "session.next.agent.switched"
         properties: {
           timestamp: number
@@ -846,6 +867,24 @@ export type GlobalEvent = {
           sessionID: string
           location: LocationRef
           subdirectory?: string
+        }
+      }
+    | {
+        id: string
+        type: "session.next.updated"
+        properties: {
+          timestamp: number
+          sessionID: string
+          title?: string
+          archived?: boolean
+        }
+      }
+    | {
+        id: string
+        type: "session.next.deleted"
+        properties: {
+          timestamp: number
+          sessionID: string
         }
       }
     | {
@@ -920,6 +959,8 @@ export type GlobalEvent = {
           assistantMessageID: string
           agent: string
           model: ModelRef
+          inputSequence?: number
+          contextEpoch?: number
           snapshot?: string
         }
       }
@@ -1140,6 +1181,7 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           reason: "auto" | "manual"
+          sourceSequence?: number
         }
       }
     | {
@@ -1160,8 +1202,21 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           reason: "auto" | "manual"
+          sourceSequence?: number
           text: string
           recent: string
+        }
+      }
+    | {
+        id: string
+        type: "session.next.compaction.failed"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+          reason: "auto" | "manual"
+          sourceSequence: number
+          error: SessionErrorUnknown
         }
       }
     | {
@@ -1188,6 +1243,362 @@ export type GlobalEvent = {
           timestamp: number
           sessionID: string
           messageID: string
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.created"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkGoalInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.activated"
+        properties: {
+          goalID: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.pause-requested"
+        properties: {
+          goalID: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.paused"
+        properties: {
+          goalID: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.cancel-requested"
+        properties: {
+          goalID: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.completed"
+        properties: {
+          goalID: string
+          timestamp: number
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.blocked"
+        properties: {
+          goalID: string
+          timestamp: number
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.cancelled"
+        properties: {
+          goalID: string
+          timestamp: number
+          reason?: string
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.budget-exhausted"
+        properties: {
+          goalID: string
+          timestamp: number
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.replan-requested"
+        properties: {
+          goalID: string
+          timestamp: number
+          reason: string
+          info: WorkTaskInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.placement-assigned"
+        properties: {
+          goalID: string
+          timestamp: number
+          workerID: string
+          reason?: string
+        }
+      }
+    | {
+        id: string
+        type: "work.goal.placement-released"
+        properties: {
+          goalID: string
+          timestamp: number
+          workerID: string
+          reason?: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.created"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkTaskInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.task-graph.planned"
+        properties: {
+          goalID: string
+          timestamp: number
+          plannerTaskID: string
+          tasks: Array<WorkTaskInfo>
+        }
+      }
+    | {
+        id: string
+        type: "work.task-graph.expanded"
+        properties: {
+          goalID: string
+          timestamp: number
+          tasks: Array<WorkTaskInfo>
+        }
+      }
+    | {
+        id: string
+        type: "work.task-graph.replanned"
+        properties: {
+          goalID: string
+          timestamp: number
+          architectTaskID: string
+          supersededTaskIDs: Array<string>
+          tasks: Array<WorkTaskInfo>
+        }
+      }
+    | {
+        id: string
+        type: "work.task.readied"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "ready"
+        }
+      }
+    | {
+        id: string
+        type: "work.task.started"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "running"
+        }
+      }
+    | {
+        id: string
+        type: "work.task.verification-started"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "verifying"
+        }
+      }
+    | {
+        id: string
+        type: "work.task.review-started"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "reviewing"
+        }
+      }
+    | {
+        id: string
+        type: "work.task.merge-started"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "merging"
+          source: string
+          destination: string
+          changes?: string
+          artifact?: WorkArtifactReference
+          digest: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.merged"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "completed"
+          digest: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.merge-conflicted"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "blocked"
+          digest: string
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.isolation-archived"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          artifact: WorkArtifactReference
+          reason: "cancelled" | "superseded"
+        }
+      }
+    | {
+        id: string
+        type: "work.task.rework-requested"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "rework"
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.completed"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "completed"
+        }
+      }
+    | {
+        id: string
+        type: "work.task.blocked"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "blocked"
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.cancelled"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          status: "cancelled"
+          reason?: string
+        }
+      }
+    | {
+        id: string
+        type: "work.attempt.admitted"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkAttemptInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.attempt.started"
+        properties: {
+          goalID: string
+          timestamp: number
+          attemptID: string
+          ownerID: string
+          fence: number
+        }
+      }
+    | {
+        id: string
+        type: "work.attempt.settled"
+        properties: {
+          goalID: string
+          timestamp: number
+          attemptID: string
+          status: WorkAttemptStatus
+          ownerID?: string
+          fence?: number
+          failure?: WorkFailure
+        }
+      }
+    | {
+        id: string
+        type: "work.evidence.recorded"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkEvidenceInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.evaluation.recorded"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkEvaluationInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.task.handoff-recorded"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkHandoffInfo
+        }
+      }
+    | {
+        id: string
+        type: "work.task.handoff-routed"
+        properties: {
+          goalID: string
+          timestamp: number
+          handoffID: string
+          recipientTaskIDs: Array<string>
+        }
+      }
+    | {
+        id: string
+        type: "work.project-memory.resolved"
+        properties: {
+          goalID: string
+          timestamp: number
+          info: WorkMemoryResolutionInfo
         }
       }
     | {
@@ -1608,9 +2019,12 @@ export type GlobalEvent = {
     | SyncEventMessageRemoved
     | SyncEventMessagePartUpdated
     | SyncEventMessagePartRemoved
+    | SyncEventSessionNextCreated
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
+    | SyncEventSessionNextUpdated
+    | SyncEventSessionNextDeleted
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
     | SyncEventSessionNextContextUpdated
@@ -1633,9 +2047,46 @@ export type GlobalEvent = {
     | SyncEventSessionNextRetried
     | SyncEventSessionNextCompactionStarted
     | SyncEventSessionNextCompactionEnded
+    | SyncEventSessionNextCompactionFailed
     | SyncEventSessionNextRevertStaged
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
+    | SyncEventWorkGoalCreated
+    | SyncEventWorkGoalActivated
+    | SyncEventWorkGoalPauseRequested
+    | SyncEventWorkGoalPaused
+    | SyncEventWorkGoalCancelRequested
+    | SyncEventWorkGoalCompleted
+    | SyncEventWorkGoalBlocked
+    | SyncEventWorkGoalCancelled
+    | SyncEventWorkGoalBudgetExhausted
+    | SyncEventWorkGoalReplanRequested
+    | SyncEventWorkGoalPlacementAssigned
+    | SyncEventWorkGoalPlacementReleased
+    | SyncEventWorkTaskCreated
+    | SyncEventWorkTaskGraphPlanned
+    | SyncEventWorkTaskGraphExpanded
+    | SyncEventWorkTaskGraphReplanned
+    | SyncEventWorkTaskReadied
+    | SyncEventWorkTaskStarted
+    | SyncEventWorkTaskVerificationStarted
+    | SyncEventWorkTaskReviewStarted
+    | SyncEventWorkTaskMergeStarted
+    | SyncEventWorkTaskMerged
+    | SyncEventWorkTaskMergeConflicted
+    | SyncEventWorkTaskIsolationArchived
+    | SyncEventWorkTaskReworkRequested
+    | SyncEventWorkTaskCompleted
+    | SyncEventWorkTaskBlocked
+    | SyncEventWorkTaskCancelled
+    | SyncEventWorkAttemptAdmitted
+    | SyncEventWorkAttemptStarted
+    | SyncEventWorkAttemptSettled
+    | SyncEventWorkEvidenceRecorded
+    | SyncEventWorkEvaluationRecorded
+    | SyncEventWorkTaskHandoffRecorded
+    | SyncEventWorkTaskHandoffRouted
+    | SyncEventWorkProjectMemoryResolved
 }
 
 /**
@@ -2136,16 +2587,6 @@ export type EffectHttpApiErrorInternalServerError = {
   _tag: "InternalServerError"
 }
 
-export type ToolListItem = {
-  id: string
-  description: string
-  parameters: unknown
-}
-
-export type ToolList = Array<ToolListItem>
-
-export type ToolIds = Array<string>
-
 export type WorktreeError = {
   name:
     | "WorktreeNotGitError"
@@ -2180,74 +2621,6 @@ export type WorktreeRemoveInput = {
 
 export type WorktreeResetInput = {
   directory: string
-}
-
-export type ProjectSummary = {
-  id: string
-  name?: string
-  worktree: string
-}
-
-export type GlobalSession = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-  project: ProjectSummary | null
-}
-
-export type McpResource = {
-  name: string
-  uri: string
-  description?: string
-  mimeType?: string
-  client: string
 }
 
 export type Symbol = {
@@ -2332,17 +2705,6 @@ export type VcsApplyError = {
   }
 }
 
-export type Command = {
-  name: string
-  description?: string
-  agent?: string
-  model?: string
-  source?: "command" | "mcp" | "skill"
-  template: string
-  subtask?: boolean
-  hints: Array<string>
-}
-
 export type Agent = {
   name: string
   description?: string
@@ -2352,7 +2714,7 @@ export type Agent = {
   topP?: number
   temperature?: number
   color?: string
-  permission: PermissionRuleset
+  permission: PermissionV2Ruleset
   model?: {
     modelID: string
     providerID: string
@@ -2376,45 +2738,6 @@ export type FormatterStatus = {
   name: string
   extensions: Array<string>
   enabled: boolean
-}
-
-export type McpStatusConnected = {
-  status: "connected"
-}
-
-export type McpStatusDisabled = {
-  status: "disabled"
-}
-
-export type McpStatusFailed = {
-  status: "failed"
-  error: string
-}
-
-export type McpStatusNeedsAuth = {
-  status: "needs_auth"
-}
-
-export type McpStatusNeedsClientRegistration = {
-  status: "needs_client_registration"
-  error: string
-}
-
-export type McpStatus =
-  | McpStatusConnected
-  | McpStatusDisabled
-  | McpStatusFailed
-  | McpStatusNeedsAuth
-  | McpStatusNeedsClientRegistration
-
-export type McpUnsupportedOAuthError = {
-  error: string
-}
-
-export type McpServerNotFoundError = {
-  _tag: "McpServerNotFoundError"
-  name: string
-  message: string
 }
 
 export type Project = {
@@ -2442,158 +2765,6 @@ export type PtyNotFoundError = {
 
 export type PtyForbiddenError = {
   _tag: "PtyForbiddenError"
-  message: string
-}
-
-export type QuestionRequest = {
-  id: string
-  sessionID: string
-  /**
-   * Questions to ask
-   */
-  questions: Array<QuestionInfo>
-  tool?: QuestionTool
-}
-
-export type QuestionNotFoundError = {
-  _tag: "QuestionNotFoundError"
-  requestID: string
-  message: string
-}
-
-export type PermissionRequest = {
-  id: string
-  sessionID: string
-  permission: string
-  patterns: Array<string>
-  metadata: {
-    [key: string]: unknown
-  }
-  always: Array<string>
-  tool?: {
-    messageID: string
-    callID: string
-  }
-}
-
-export type PermissionNotFoundError = {
-  _tag: "PermissionNotFoundError"
-  requestID: string
-  message: string
-}
-
-export type ProviderAuthMethod = {
-  type: "oauth" | "api"
-  label: string
-  prompts?: Array<
-    | {
-        type: "text"
-        key: string
-        message: string
-        placeholder?: string
-        when?: {
-          key: string
-          op: "eq" | "neq"
-          value: string
-        }
-      }
-    | {
-        type: "select"
-        key: string
-        message: string
-        options: Array<{
-          label: string
-          value: string
-          hint?: string
-        }>
-        when?: {
-          key: string
-          op: "eq" | "neq"
-          value: string
-        }
-      }
-  >
-}
-
-export type ProviderAuthAuthorization = {
-  url: string
-  method: "auto" | "code"
-  instructions: string
-}
-
-export type ProviderAuthError1 = {
-  name:
-    | "BadRequest"
-    | "ProviderAuthOauthMissing"
-    | "ProviderAuthOauthCodeMissing"
-    | "ProviderAuthOauthCallbackFailed"
-    | "ProviderAuthValidationFailed"
-  data: {
-    providerID?: string
-    field?: string
-    message?: string
-    kind?: string
-  }
-}
-
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
-  }
-}
-
-export type TextPartInput = {
-  id?: string
-  type: "text"
-  text: string
-  synthetic?: boolean
-  ignored?: boolean
-  time?: {
-    start: number
-    end?: number
-  }
-  metadata?: {
-    [key: string]: unknown
-  }
-}
-
-export type FilePartInput = {
-  id?: string
-  type: "file"
-  mime: string
-  filename?: string
-  url: string
-  source?: FilePartSource
-}
-
-export type AgentPartInput = {
-  id?: string
-  type: "agent"
-  name: string
-  source?: {
-    value: string
-    start: number
-    end: number
-  }
-}
-
-export type SubtaskPartInput = {
-  id?: string
-  type: "subtask"
-  prompt: string
-  description: string
-  agent: string
-  model?: {
-    providerID: string
-    modelID: string
-  }
-  command?: string
-}
-
-export type SessionBusyError = {
-  _tag: "SessionBusyError"
-  sessionID: string
   message: string
 }
 
@@ -2645,6 +2816,13 @@ export type EventTuiSessionSelect = {
      * Session ID to navigate to
      */
     sessionID: string
+  }
+}
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
   }
 }
 
@@ -2733,9 +2911,12 @@ export type UnknownError1 = {
 }
 
 export type SessionDurableEvent =
+  | SessionNextCreated
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextUpdated
+  | SessionNextDeleted
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -2758,6 +2939,7 @@ export type SessionDurableEvent =
   | SessionNextRetried
   | SessionNextCompactionStarted
   | SessionNextCompactionEnded
+  | SessionNextCompactionFailed
   | SessionNextRevertStaged
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
@@ -2768,6 +2950,88 @@ export type SessionHistory = {
 }
 
 export type SessionDurableEventStream = string
+
+export type WorkCriterionInput = {
+  id?: string
+  description: string
+  required: boolean
+  evidence: WorkEvidenceKind
+  verifier?: WorkVerifier
+}
+
+export type WorkTaskInput = {
+  id?: string
+  title: string
+  instructions: string
+  dependsOn?: Array<string>
+  role?: WorkRoleId
+  location?: LocationRef
+  criteria?: Array<string>
+}
+
+export type WorkCreateInput = {
+  id?: string
+  location: LocationRef
+  objective: string
+  acceptanceCriteria: Array<WorkCriterionInput>
+  budget?: WorkBudget
+  planning?: boolean
+  tasks?: Array<WorkTaskInput>
+}
+
+export type WorkDetail = {
+  goal: WorkGoalInfo
+  tasks: Array<WorkTaskInfo>
+  attempts: Array<WorkAttemptInfo>
+  evidence: Array<WorkEvidenceInfo>
+  evaluations: Array<WorkEvaluationInfo>
+  handoffs: Array<WorkHandoffInfo>
+  roles: Array<WorkRoleContract>
+  memory: WorkProjectMemoryView
+}
+
+export type WorkNotFoundError = {
+  _tag: "WorkNotFoundError"
+  goalID: string
+  message: string
+}
+
+export type WorkActive = {
+  type: "running"
+}
+
+export type WorkExpandTaskInput = {
+  id: string
+  title: string
+  instructions: string
+  dependsOn?: Array<string>
+  role?: WorkRoleId
+  location?: LocationRef
+  criteria?: Array<string>
+}
+
+export type WorkExpandInput = {
+  tasks: Array<WorkExpandTaskInput>
+}
+
+export type WorkReplanInput = {
+  taskID: string
+  reason: string
+}
+
+export type WorkResolveMemoryInput = {
+  key: string
+  handoffID: string
+  itemDigest: string
+  reason?: string
+}
+
+export type WorkUpdateMemoryInput = {
+  kind: WorkHandoffItemKind
+  text: string
+  reference?: string
+  reason?: string
+}
 
 export type SessionMessagesResponse = {
   data: Array<SessionMessage>
@@ -2780,6 +3044,12 @@ export type SessionMessagesResponse = {
 export type ProviderNotFoundError = {
   _tag: "ProviderNotFoundError"
   providerID: string
+  message: string
+}
+
+export type PermissionNotFoundError = {
+  _tag: "PermissionNotFoundError"
+  requestID: string
   message: string
 }
 
@@ -2811,43 +3081,6 @@ export type SessionStatus2 = {
   }
 }
 
-export type QuestionReplied2 = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  type: "question.replied"
-  durable?: {
-    aggregateID: string
-    seq: number
-    version: number
-  }
-  location?: LocationRef
-  data: {
-    sessionID: string
-    requestID: string
-    answers: Array<QuestionAnswer>
-  }
-}
-
-export type QuestionRejected2 = {
-  id: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  type: "question.rejected"
-  durable?: {
-    aggregateID: string
-    seq: number
-    version: number
-  }
-  location?: LocationRef
-  data: {
-    sessionID: string
-    requestID: string
-  }
-}
-
 export type V2Event =
   | ModelsDevRefreshed
   | IntegrationUpdated
@@ -2860,9 +3093,12 @@ export type V2Event =
   | MessageRemoved
   | MessagePartUpdated
   | MessagePartRemoved
+  | SessionNextCreated
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextUpdated
+  | SessionNextDeleted
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -2889,9 +3125,46 @@ export type V2Event =
   | SessionNextCompactionStarted
   | SessionNextCompactionDelta
   | SessionNextCompactionEnded
+  | SessionNextCompactionFailed
   | SessionNextRevertStaged
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
+  | WorkGoalCreated
+  | WorkGoalActivated
+  | WorkGoalPauseRequested
+  | WorkGoalPaused
+  | WorkGoalCancelRequested
+  | WorkGoalCompleted
+  | WorkGoalBlocked
+  | WorkGoalCancelled
+  | WorkGoalBudgetExhausted
+  | WorkGoalReplanRequested
+  | WorkGoalPlacementAssigned
+  | WorkGoalPlacementReleased
+  | WorkTaskCreated
+  | WorkTaskGraphPlanned
+  | WorkTaskGraphExpanded
+  | WorkTaskGraphReplanned
+  | WorkTaskReadied
+  | WorkTaskStarted
+  | WorkTaskVerificationStarted
+  | WorkTaskReviewStarted
+  | WorkTaskMergeStarted
+  | WorkTaskMerged
+  | WorkTaskMergeConflicted
+  | WorkTaskIsolationArchived
+  | WorkTaskReworkRequested
+  | WorkTaskCompleted
+  | WorkTaskBlocked
+  | WorkTaskCancelled
+  | WorkAttemptAdmitted
+  | WorkAttemptStarted
+  | WorkAttemptSettled
+  | WorkEvidenceRecorded
+  | WorkEvaluationRecorded
+  | WorkTaskHandoffRecorded
+  | WorkTaskHandoffRouted
+  | WorkProjectMemoryResolved
   | MessagePartDelta
   | SessionDiff
   | SessionError
@@ -2926,8 +3199,8 @@ export type V2Event =
   | SessionStatus2
   | SessionIdle
   | QuestionAsked
-  | QuestionReplied2
-  | QuestionRejected2
+  | QuestionReplied
+  | QuestionRejected
   | SessionCompacted
   | VcsBranchUpdated
   | WorkspaceReady
@@ -2942,6 +3215,12 @@ export type V2EventStream = string
 
 export type ForbiddenError = {
   _tag: "ForbiddenError"
+  message: string
+}
+
+export type QuestionNotFoundError = {
+  _tag: "QuestionNotFoundError"
+  requestID: string
   message: string
 }
 
@@ -3113,6 +3392,271 @@ export type RevertState = {
   snapshot?: string
   diff?: string
   files?: Array<FileDiff>
+}
+
+export type WorkEvidenceKind = "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+
+export type WorkCommandVerifier = {
+  type: "command"
+  command: string
+  timeoutMs?: number
+  successExitCodes?: Array<number>
+}
+
+export type WorkFileVerifier = {
+  type: "file"
+  path: string
+  expected: "exists" | "file" | "directory"
+}
+
+export type WorkVerifier = WorkCommandVerifier | WorkFileVerifier
+
+export type WorkCriterion = {
+  id: string
+  description: string
+  required: boolean
+  evidence: WorkEvidenceKind
+  verifier?: WorkVerifier
+}
+
+export type WorkRoleId = string
+
+export type WorkRoleCapability = "coordinate" | "plan" | "research" | "design" | "implement" | "verify" | "audit"
+
+export type WorkWorkspaceAccess = "read_only" | "write"
+
+export type WorkPlanIsolation = "shared" | "worktree"
+
+export type WorkHandoffItemKind =
+  | "result"
+  | "fact"
+  | "decision"
+  | "constraint"
+  | "risk"
+  | "artifact"
+  | "lesson"
+  | "next_action"
+
+export type WorkRoleContract = {
+  id: WorkRoleId
+  agentID: string
+  title: string
+  purpose: string
+  capabilities: Array<WorkRoleCapability>
+  workspaceAccess: WorkWorkspaceAccess
+  allowedIsolation: Array<WorkPlanIsolation>
+  accepts: Array<WorkHandoffItemKind>
+  publishes: Array<WorkHandoffItemKind>
+}
+
+export type WorkGoalStatus =
+  | "draft"
+  | "active"
+  | "pausing"
+  | "paused"
+  | "cancelling"
+  | "completed"
+  | "blocked"
+  | "cancelled"
+  | "budget_exhausted"
+
+export type WorkBudget = {
+  maxAttemptsPerTask?: number
+  maxRepairAttempts?: number
+  maxParallelTasks?: number
+  maxReplans?: number
+  maxTurns?: number
+  maxDurationMs?: number
+  maxCost?: number
+}
+
+export type WorkUsage = {
+  attempts: number
+  repairs: number
+  turns: number
+  cost: number
+}
+
+export type WorkGoalTime = {
+  created: number
+  updated: number
+  completed?: number
+}
+
+export type WorkGoalInfo = {
+  id: string
+  location: LocationRef
+  objective: string
+  acceptanceCriteria: Array<WorkCriterion>
+  roleContracts?: Array<WorkRoleContract>
+  workerID?: string
+  status: WorkGoalStatus
+  budget?: WorkBudget
+  usage: WorkUsage
+  time: WorkGoalTime
+  revision: number
+}
+
+export type WorkTaskStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "verifying"
+  | "reviewing"
+  | "merging"
+  | "rework"
+  | "completed"
+  | "superseded"
+  | "blocked"
+  | "cancelled"
+
+export type WorkTaskTime = {
+  created: number
+  updated: number
+  completed?: number
+}
+
+export type WorkTaskInfo = {
+  id: string
+  goalID: string
+  title: string
+  instructions: string
+  dependsOn: Array<string>
+  role: string
+  location?: LocationRef
+  status: WorkTaskStatus
+  criteria: Array<string>
+  attemptCount: number
+  time: WorkTaskTime
+  revision: number
+}
+
+export type WorkArtifactDigest = string
+
+export type WorkArtifactReference = {
+  digest: WorkArtifactDigest
+  reference: string
+  size: number
+  mediaType: "text/x-diff"
+}
+
+export type WorkAttemptKind = "plan" | "replan" | "execute" | "repair" | "verify" | "review"
+
+export type WorkAttemptStatus =
+  | "admitted"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "interrupted"
+  | "unknown"
+  | "cancelled"
+
+export type WorkFailureKind = "error" | "interrupted" | "unknown" | "cancelled" | "permission" | "budget"
+
+export type WorkFailure = {
+  kind: WorkFailureKind
+  message: string
+  retryable: boolean
+  details?: unknown
+}
+
+export type WorkAttemptTime = {
+  created: number
+  started?: number
+  ended?: number
+}
+
+export type WorkAttemptInfo = {
+  id: string
+  goalID: string
+  taskID: string
+  kind: WorkAttemptKind
+  number: number
+  sessionID?: string
+  status: WorkAttemptStatus
+  ownerID?: string
+  fence?: number
+  inputRevision: number
+  failure?: WorkFailure
+  time: WorkAttemptTime
+}
+
+export type WorkEvidenceInfo = {
+  id: string
+  goalID: string
+  taskID: string
+  attemptID: string
+  criterionIDs: Array<string>
+  kind: WorkEvidenceKind
+  producer: string
+  payload: unknown
+  digest?: string
+  reference?: string
+  createdAt: number
+}
+
+export type WorkVerdict = "pass" | "fail" | "blocked"
+
+export type WorkFinding = {
+  code?: string
+  message: string
+  severity: "info" | "warning" | "error"
+  location?: string
+}
+
+export type WorkEvaluationInfo = {
+  id: string
+  goalID: string
+  taskID: string
+  attemptID: string
+  criterionID: string
+  evidenceIDs: Array<string>
+  verdict: WorkVerdict
+  evaluator: string
+  evaluatorVersion: string
+  findings: Array<WorkFinding>
+  allowsRepair: boolean
+  createdAt: number
+}
+
+export type WorkMemoryScope = "task" | "project"
+
+export type WorkHandoffItem = {
+  kind: WorkHandoffItemKind
+  text: string
+  reference?: string
+  memory?: WorkMemoryScope
+  key?: string
+  expiresAt?: number
+}
+
+export type WorkHandoffInfo = {
+  id: string
+  goalID: string
+  taskID: string
+  attemptID: string
+  producer: string
+  summary: string
+  items: Array<WorkHandoffItem>
+  evidenceIDs: Array<string>
+  recipients: Array<string>
+  digest: string
+  createdAt: number
+}
+
+export type WorkMemoryResolutionInfo = {
+  id: string
+  goalID: string
+  location: LocationRef
+  key: string
+  handoffID: string
+  handoffDigest: string
+  itemDigest: string
+  action: "select" | "replace" | "delete"
+  value?: WorkHandoffItem
+  resolver: string
+  reason?: string
+  createdAt: number
 }
 
 export type PermissionV2Source = {
@@ -3294,6 +3838,30 @@ export type SyncEventMessagePartRemoved = {
   }
 }
 
+export type SyncEventSessionNextCreated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.created.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      projectID: string
+      parentID?: string
+      agent?: string
+      model?: ModelRef
+      location: LocationRef
+      subpath?: string
+      title: string
+      slug: string
+      version: string
+    }
+  }
+}
+
 export type SyncEventSessionNextAgentSwitched = {
   type: "sync"
   id: string
@@ -3341,6 +3909,38 @@ export type SyncEventSessionNextMoved = {
       sessionID: string
       location: LocationRef
       subdirectory?: string
+    }
+  }
+}
+
+export type SyncEventSessionNextUpdated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.updated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      title?: string
+      archived?: boolean
+    }
+  }
+}
+
+export type SyncEventSessionNextDeleted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.deleted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
     }
   }
 }
@@ -3464,6 +4064,8 @@ export type SyncEventSessionNextStepStarted = {
       assistantMessageID: string
       agent: string
       model: ModelRef
+      inputSequence?: number
+      contextEpoch?: number
       snapshot?: string
     }
   }
@@ -3749,6 +4351,7 @@ export type SyncEventSessionNextCompactionStarted = {
       sessionID: string
       messageID: string
       reason: "auto" | "manual"
+      sourceSequence?: number
     }
   }
 }
@@ -3766,8 +4369,28 @@ export type SyncEventSessionNextCompactionEnded = {
       sessionID: string
       messageID: string
       reason: "auto" | "manual"
+      sourceSequence?: number
       text: string
       recent: string
+    }
+  }
+}
+
+export type SyncEventSessionNextCompactionFailed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.compaction.failed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+      reason: "auto" | "manual"
+      sourceSequence: number
+      error: SessionErrorUnknown
     }
   }
 }
@@ -3819,6 +4442,614 @@ export type SyncEventSessionNextRevertCommitted = {
   }
 }
 
+export type SyncEventWorkGoalCreated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.created.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkGoalInfo
+    }
+  }
+}
+
+export type SyncEventWorkGoalActivated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.activated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventWorkGoalPauseRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.pause-requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventWorkGoalPaused = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.paused.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventWorkGoalCancelRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.cancel-requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventWorkGoalCompleted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.completed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+    }
+  }
+}
+
+export type SyncEventWorkGoalBlocked = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.blocked.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      reason: string
+    }
+  }
+}
+
+export type SyncEventWorkGoalCancelled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.cancelled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      reason?: string
+    }
+  }
+}
+
+export type SyncEventWorkGoalBudgetExhausted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.budget-exhausted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      reason: string
+    }
+  }
+}
+
+export type SyncEventWorkGoalReplanRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.replan-requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      reason: string
+      info: WorkTaskInfo
+    }
+  }
+}
+
+export type SyncEventWorkGoalPlacementAssigned = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.placement-assigned.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      workerID: string
+      reason?: string
+    }
+  }
+}
+
+export type SyncEventWorkGoalPlacementReleased = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.goal.placement-released.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      workerID: string
+      reason?: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskCreated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.created.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkTaskInfo
+    }
+  }
+}
+
+export type SyncEventWorkTaskGraphPlanned = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task-graph.planned.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      plannerTaskID: string
+      tasks: Array<WorkTaskInfo>
+    }
+  }
+}
+
+export type SyncEventWorkTaskGraphExpanded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task-graph.expanded.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      tasks: Array<WorkTaskInfo>
+    }
+  }
+}
+
+export type SyncEventWorkTaskGraphReplanned = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task-graph.replanned.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      architectTaskID: string
+      supersededTaskIDs: Array<string>
+      tasks: Array<WorkTaskInfo>
+    }
+  }
+}
+
+export type SyncEventWorkTaskReadied = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.readied.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "ready"
+    }
+  }
+}
+
+export type SyncEventWorkTaskStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "running"
+    }
+  }
+}
+
+export type SyncEventWorkTaskVerificationStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.verification-started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "verifying"
+    }
+  }
+}
+
+export type SyncEventWorkTaskReviewStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.review-started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "reviewing"
+    }
+  }
+}
+
+export type SyncEventWorkTaskMergeStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.merge-started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "merging"
+      source: string
+      destination: string
+      changes?: string
+      artifact?: WorkArtifactReference
+      digest: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskMerged = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.merged.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "completed"
+      digest: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskMergeConflicted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.merge-conflicted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "blocked"
+      digest: string
+      reason: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskIsolationArchived = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.isolation-archived.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      artifact: WorkArtifactReference
+      reason: "cancelled" | "superseded"
+    }
+  }
+}
+
+export type SyncEventWorkTaskReworkRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.rework-requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "rework"
+      reason: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskCompleted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.completed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "completed"
+    }
+  }
+}
+
+export type SyncEventWorkTaskBlocked = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.blocked.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "blocked"
+      reason: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskCancelled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.cancelled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      status: "cancelled"
+      reason?: string
+    }
+  }
+}
+
+export type SyncEventWorkAttemptAdmitted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.attempt.admitted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkAttemptInfo
+    }
+  }
+}
+
+export type SyncEventWorkAttemptStarted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.attempt.started.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      attemptID: string
+      ownerID: string
+      fence: number
+    }
+  }
+}
+
+export type SyncEventWorkAttemptSettled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.attempt.settled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      attemptID: string
+      status: WorkAttemptStatus
+      ownerID?: string
+      fence?: number
+      failure?: WorkFailure
+    }
+  }
+}
+
+export type SyncEventWorkEvidenceRecorded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.evidence.recorded.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkEvidenceInfo
+    }
+  }
+}
+
+export type SyncEventWorkEvaluationRecorded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.evaluation.recorded.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkEvaluationInfo
+    }
+  }
+}
+
+export type SyncEventWorkTaskHandoffRecorded = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.handoff-recorded.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkHandoffInfo
+    }
+  }
+}
+
+export type SyncEventWorkTaskHandoffRouted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.handoff-routed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      handoffID: string
+      recipientTaskIDs: Array<string>
+    }
+  }
+}
+
+export type SyncEventWorkProjectMemoryResolved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.project-memory.resolved.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      info: WorkMemoryResolutionInfo
+    }
+  }
+}
+
 export type ConfigV2ReferenceGit = {
   repository: string
   branch?: string
@@ -3839,6 +5070,16 @@ export type ConfigV2ExperimentalPolicy = {
   effect: PolicyEffect
   resource: string
 }
+
+export type PermissionV2Effect = "allow" | "deny" | "ask"
+
+export type PermissionV2Rule = {
+  action: string
+  resource: string
+  effect: PermissionV2Effect
+}
+
+export type PermissionV2Ruleset = Array<PermissionV2Rule>
 
 export type ProjectDirectories = Array<{
   directory: string
@@ -3874,16 +5115,6 @@ export type ProviderRequest = {
 }
 
 export type AgentColor = string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
-
-export type PermissionV2Effect = "allow" | "deny" | "ask"
-
-export type PermissionV2Rule = {
-  action: string
-  resource: string
-  effect: PermissionV2Effect
-}
-
-export type PermissionV2Ruleset = Array<PermissionV2Rule>
 
 export type AgentV2Info = {
   id: string
@@ -4114,6 +5345,8 @@ export type SessionMessageAssistant = {
   type: "assistant"
   agent: string
   model: ModelRef
+  inputSequence?: number
+  contextEpoch?: number
   content: Array<SessionMessageAssistantText | SessionMessageAssistantReasoning | SessionMessageAssistantTool>
   snapshot?: {
     start?: string
@@ -4157,6 +5390,33 @@ export type SessionMessage =
   | SessionMessageShell
   | SessionMessageAssistant
   | SessionMessageCompaction
+
+export type SessionNextCreated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.created"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    projectID: string
+    parentID?: string
+    agent?: string
+    model?: ModelRef
+    location: LocationRef
+    subpath?: string
+    title: string
+    slug: string
+    version: string
+  }
+}
 
 export type SessionNextAgentSwitched = {
   id: string
@@ -4215,6 +5475,44 @@ export type SessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type SessionNextUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    title?: string
+    archived?: boolean
+  }
+}
+
+export type SessionNextDeleted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.deleted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
   }
 }
 
@@ -4359,6 +5657,8 @@ export type SessionNextStepStarted = {
     assistantMessageID: string
     agent: string
     model: ModelRef
+    inputSequence?: number
+    contextEpoch?: number
     snapshot?: string
   }
 }
@@ -4686,6 +5986,7 @@ export type SessionNextCompactionStarted = {
     sessionID: string
     messageID: string
     reason: "auto" | "manual"
+    sourceSequence?: number
   }
 }
 
@@ -4706,8 +6007,31 @@ export type SessionNextCompactionEnded = {
     sessionID: string
     messageID: string
     reason: "auto" | "manual"
+    sourceSequence?: number
     text: string
     recent: string
+  }
+}
+
+export type SessionNextCompactionFailed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.compaction.failed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    reason: "auto" | "manual"
+    sourceSequence: number
+    error: SessionErrorUnknown
   }
 }
 
@@ -4765,6 +6089,47 @@ export type SessionNextRevertCommitted = {
     sessionID: string
     messageID: string
   }
+}
+
+export type WorkProjectMemoryCandidate = {
+  handoffID: string
+  goalID: string
+  taskID: string
+  producer: string
+  item: WorkHandoffItem
+  itemDigest: string
+  evidenceIDs: Array<string>
+  digest: string
+  createdAt: number
+}
+
+export type WorkProjectMemoryEntry = {
+  key: string
+  status: "current" | "conflicted" | "resolved"
+  candidates: Array<WorkProjectMemoryCandidate>
+  resolution?: WorkMemoryResolutionInfo
+}
+
+export type WorkProjectMemoryView = {
+  entries: Array<WorkProjectMemoryEntry>
+  resolutions: Array<WorkMemoryResolutionInfo>
+}
+
+export type WorkArtifactLifecycleInfo = {
+  artifact: WorkArtifactReference
+  referenceCount: number
+  state: "active" | "collected"
+  createdAt: number
+  accessedAt: number
+  collectedAt?: number
+}
+
+export type WorkArtifactCollectionReport = {
+  dryRun: boolean
+  scanned: number
+  collected: number
+  reclaimedBytes: number
+  artifacts: Array<WorkArtifactReference>
 }
 
 export type ModelApi =
@@ -4907,6 +6272,7 @@ export type IntegrationOAuthMethod = {
 export type IntegrationKeyMethod = {
   type: "key"
   label?: string
+  prompts?: Array<IntegrationTextPrompt | IntegrationSelectPrompt>
 }
 
 export type IntegrationEnvMethod = {
@@ -5293,6 +6659,722 @@ export type SessionNextCompactionDelta = {
     sessionID: string
     messageID: string
     text: string
+  }
+}
+
+export type WorkGoalCreated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.created"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkGoalInfo
+  }
+}
+
+export type WorkGoalActivated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.activated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type WorkGoalPauseRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.pause-requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type WorkGoalPaused = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.paused"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type WorkGoalCancelRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.cancel-requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type WorkGoalCompleted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.completed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type WorkGoalBlocked = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.blocked"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    reason: string
+  }
+}
+
+export type WorkGoalCancelled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.cancelled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    reason?: string
+  }
+}
+
+export type WorkGoalBudgetExhausted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.budget-exhausted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    reason: string
+  }
+}
+
+export type WorkGoalReplanRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.replan-requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    reason: string
+    info: WorkTaskInfo
+  }
+}
+
+export type WorkGoalPlacementAssigned = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.placement-assigned"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    workerID: string
+    reason?: string
+  }
+}
+
+export type WorkGoalPlacementReleased = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.goal.placement-released"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    workerID: string
+    reason?: string
+  }
+}
+
+export type WorkTaskCreated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.created"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkTaskInfo
+  }
+}
+
+export type WorkTaskGraphPlanned = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task-graph.planned"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    plannerTaskID: string
+    tasks: Array<WorkTaskInfo>
+  }
+}
+
+export type WorkTaskGraphExpanded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task-graph.expanded"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    tasks: Array<WorkTaskInfo>
+  }
+}
+
+export type WorkTaskGraphReplanned = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task-graph.replanned"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    architectTaskID: string
+    supersededTaskIDs: Array<string>
+    tasks: Array<WorkTaskInfo>
+  }
+}
+
+export type WorkTaskReadied = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.readied"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "ready"
+  }
+}
+
+export type WorkTaskStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "running"
+  }
+}
+
+export type WorkTaskVerificationStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.verification-started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "verifying"
+  }
+}
+
+export type WorkTaskReviewStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.review-started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "reviewing"
+  }
+}
+
+export type WorkTaskMergeStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.merge-started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "merging"
+    source: string
+    destination: string
+    changes?: string
+    artifact?: WorkArtifactReference
+    digest: string
+  }
+}
+
+export type WorkTaskMerged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.merged"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "completed"
+    digest: string
+  }
+}
+
+export type WorkTaskMergeConflicted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.merge-conflicted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "blocked"
+    digest: string
+    reason: string
+  }
+}
+
+export type WorkTaskIsolationArchived = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.isolation-archived"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    artifact: WorkArtifactReference
+    reason: "cancelled" | "superseded"
+  }
+}
+
+export type WorkTaskReworkRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.rework-requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "rework"
+    reason: string
+  }
+}
+
+export type WorkTaskCompleted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.completed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "completed"
+  }
+}
+
+export type WorkTaskBlocked = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.blocked"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "blocked"
+    reason: string
+  }
+}
+
+export type WorkTaskCancelled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.cancelled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "cancelled"
+    reason?: string
+  }
+}
+
+export type WorkAttemptAdmitted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.attempt.admitted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkAttemptInfo
+  }
+}
+
+export type WorkAttemptStarted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.attempt.started"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    attemptID: string
+    ownerID: string
+    fence: number
+  }
+}
+
+export type WorkAttemptSettled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.attempt.settled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    attemptID: string
+    status: WorkAttemptStatus
+    ownerID?: string
+    fence?: number
+    failure?: WorkFailure
+  }
+}
+
+export type WorkEvidenceRecorded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.evidence.recorded"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkEvidenceInfo
+  }
+}
+
+export type WorkEvaluationRecorded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.evaluation.recorded"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkEvaluationInfo
+  }
+}
+
+export type WorkTaskHandoffRecorded = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.handoff-recorded"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkHandoffInfo
+  }
+}
+
+export type WorkTaskHandoffRouted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.handoff-routed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    handoffID: string
+    recipientTaskIDs: Array<string>
+  }
+}
+
+export type WorkProjectMemoryResolved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.project-memory.resolved"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    info: WorkMemoryResolutionInfo
   }
 }
 
@@ -5946,6 +8028,43 @@ export type QuestionAsked = {
   }
 }
 
+export type QuestionReplied = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "question.replied"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    answers: Array<QuestionAnswer>
+  }
+}
+
+export type QuestionRejected = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "question.rejected"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+  }
+}
+
 export type SessionCompacted = {
   id: string
   metadata?: {
@@ -6244,6 +8363,24 @@ export type EventMessagePartRemoved = {
   }
 }
 
+export type EventSessionNextCreated = {
+  id: string
+  type: "session.next.created"
+  properties: {
+    timestamp: number
+    sessionID: string
+    projectID: string
+    parentID?: string
+    agent?: string
+    model?: ModelRef
+    location: LocationRef
+    subpath?: string
+    title: string
+    slug: string
+    version: string
+  }
+}
+
 export type EventSessionNextAgentSwitched = {
   id: string
   type: "session.next.agent.switched"
@@ -6274,6 +8411,26 @@ export type EventSessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type EventSessionNextUpdated = {
+  id: string
+  type: "session.next.updated"
+  properties: {
+    timestamp: number
+    sessionID: string
+    title?: string
+    archived?: boolean
+  }
+}
+
+export type EventSessionNextDeleted = {
+  id: string
+  type: "session.next.deleted"
+  properties: {
+    timestamp: number
+    sessionID: string
   }
 }
 
@@ -6355,6 +8512,8 @@ export type EventSessionNextStepStarted = {
     assistantMessageID: string
     agent: string
     model: ModelRef
+    inputSequence?: number
+    contextEpoch?: number
     snapshot?: string
   }
 }
@@ -6592,6 +8751,7 @@ export type EventSessionNextCompactionStarted = {
     sessionID: string
     messageID: string
     reason: "auto" | "manual"
+    sourceSequence?: number
   }
 }
 
@@ -6614,8 +8774,22 @@ export type EventSessionNextCompactionEnded = {
     sessionID: string
     messageID: string
     reason: "auto" | "manual"
+    sourceSequence?: number
     text: string
     recent: string
+  }
+}
+
+export type EventSessionNextCompactionFailed = {
+  id: string
+  type: "session.next.compaction.failed"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    reason: "auto" | "manual"
+    sourceSequence: number
+    error: SessionErrorUnknown
   }
 }
 
@@ -6645,6 +8819,398 @@ export type EventSessionNextRevertCommitted = {
     timestamp: number
     sessionID: string
     messageID: string
+  }
+}
+
+export type EventWorkGoalCreated = {
+  id: string
+  type: "work.goal.created"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkGoalInfo
+  }
+}
+
+export type EventWorkGoalActivated = {
+  id: string
+  type: "work.goal.activated"
+  properties: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type EventWorkGoalPauseRequested = {
+  id: string
+  type: "work.goal.pause-requested"
+  properties: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type EventWorkGoalPaused = {
+  id: string
+  type: "work.goal.paused"
+  properties: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type EventWorkGoalCancelRequested = {
+  id: string
+  type: "work.goal.cancel-requested"
+  properties: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type EventWorkGoalCompleted = {
+  id: string
+  type: "work.goal.completed"
+  properties: {
+    goalID: string
+    timestamp: number
+  }
+}
+
+export type EventWorkGoalBlocked = {
+  id: string
+  type: "work.goal.blocked"
+  properties: {
+    goalID: string
+    timestamp: number
+    reason: string
+  }
+}
+
+export type EventWorkGoalCancelled = {
+  id: string
+  type: "work.goal.cancelled"
+  properties: {
+    goalID: string
+    timestamp: number
+    reason?: string
+  }
+}
+
+export type EventWorkGoalBudgetExhausted = {
+  id: string
+  type: "work.goal.budget-exhausted"
+  properties: {
+    goalID: string
+    timestamp: number
+    reason: string
+  }
+}
+
+export type EventWorkGoalReplanRequested = {
+  id: string
+  type: "work.goal.replan-requested"
+  properties: {
+    goalID: string
+    timestamp: number
+    reason: string
+    info: WorkTaskInfo
+  }
+}
+
+export type EventWorkGoalPlacementAssigned = {
+  id: string
+  type: "work.goal.placement-assigned"
+  properties: {
+    goalID: string
+    timestamp: number
+    workerID: string
+    reason?: string
+  }
+}
+
+export type EventWorkGoalPlacementReleased = {
+  id: string
+  type: "work.goal.placement-released"
+  properties: {
+    goalID: string
+    timestamp: number
+    workerID: string
+    reason?: string
+  }
+}
+
+export type EventWorkTaskCreated = {
+  id: string
+  type: "work.task.created"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkTaskInfo
+  }
+}
+
+export type EventWorkTaskGraphPlanned = {
+  id: string
+  type: "work.task-graph.planned"
+  properties: {
+    goalID: string
+    timestamp: number
+    plannerTaskID: string
+    tasks: Array<WorkTaskInfo>
+  }
+}
+
+export type EventWorkTaskGraphExpanded = {
+  id: string
+  type: "work.task-graph.expanded"
+  properties: {
+    goalID: string
+    timestamp: number
+    tasks: Array<WorkTaskInfo>
+  }
+}
+
+export type EventWorkTaskGraphReplanned = {
+  id: string
+  type: "work.task-graph.replanned"
+  properties: {
+    goalID: string
+    timestamp: number
+    architectTaskID: string
+    supersededTaskIDs: Array<string>
+    tasks: Array<WorkTaskInfo>
+  }
+}
+
+export type EventWorkTaskReadied = {
+  id: string
+  type: "work.task.readied"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "ready"
+  }
+}
+
+export type EventWorkTaskStarted = {
+  id: string
+  type: "work.task.started"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "running"
+  }
+}
+
+export type EventWorkTaskVerificationStarted = {
+  id: string
+  type: "work.task.verification-started"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "verifying"
+  }
+}
+
+export type EventWorkTaskReviewStarted = {
+  id: string
+  type: "work.task.review-started"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "reviewing"
+  }
+}
+
+export type EventWorkTaskMergeStarted = {
+  id: string
+  type: "work.task.merge-started"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "merging"
+    source: string
+    destination: string
+    changes?: string
+    artifact?: WorkArtifactReference
+    digest: string
+  }
+}
+
+export type EventWorkTaskMerged = {
+  id: string
+  type: "work.task.merged"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "completed"
+    digest: string
+  }
+}
+
+export type EventWorkTaskMergeConflicted = {
+  id: string
+  type: "work.task.merge-conflicted"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "blocked"
+    digest: string
+    reason: string
+  }
+}
+
+export type EventWorkTaskIsolationArchived = {
+  id: string
+  type: "work.task.isolation-archived"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    artifact: WorkArtifactReference
+    reason: "cancelled" | "superseded"
+  }
+}
+
+export type EventWorkTaskReworkRequested = {
+  id: string
+  type: "work.task.rework-requested"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "rework"
+    reason: string
+  }
+}
+
+export type EventWorkTaskCompleted = {
+  id: string
+  type: "work.task.completed"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "completed"
+  }
+}
+
+export type EventWorkTaskBlocked = {
+  id: string
+  type: "work.task.blocked"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "blocked"
+    reason: string
+  }
+}
+
+export type EventWorkTaskCancelled = {
+  id: string
+  type: "work.task.cancelled"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    status: "cancelled"
+    reason?: string
+  }
+}
+
+export type EventWorkAttemptAdmitted = {
+  id: string
+  type: "work.attempt.admitted"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkAttemptInfo
+  }
+}
+
+export type EventWorkAttemptStarted = {
+  id: string
+  type: "work.attempt.started"
+  properties: {
+    goalID: string
+    timestamp: number
+    attemptID: string
+    ownerID: string
+    fence: number
+  }
+}
+
+export type EventWorkAttemptSettled = {
+  id: string
+  type: "work.attempt.settled"
+  properties: {
+    goalID: string
+    timestamp: number
+    attemptID: string
+    status: WorkAttemptStatus
+    ownerID?: string
+    fence?: number
+    failure?: WorkFailure
+  }
+}
+
+export type EventWorkEvidenceRecorded = {
+  id: string
+  type: "work.evidence.recorded"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkEvidenceInfo
+  }
+}
+
+export type EventWorkEvaluationRecorded = {
+  id: string
+  type: "work.evaluation.recorded"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkEvaluationInfo
+  }
+}
+
+export type EventWorkTaskHandoffRecorded = {
+  id: string
+  type: "work.task.handoff-recorded"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkHandoffInfo
+  }
+}
+
+export type EventWorkTaskHandoffRouted = {
+  id: string
+  type: "work.task.handoff-routed"
+  properties: {
+    goalID: string
+    timestamp: number
+    handoffID: string
+    recipientTaskIDs: Array<string>
+  }
+}
+
+export type EventWorkProjectMemoryResolved = {
+  id: string
+  type: "work.project-memory.resolved"
+  properties: {
+    goalID: string
+    timestamp: number
+    info: WorkMemoryResolutionInfo
   }
 }
 
@@ -7089,60 +9655,6 @@ export type BadRequestError = {
     kind?: "Params" | "Headers" | "Query" | "Body" | "Payload"
   }
 }
-
-export type AuthRemoveData = {
-  body?: never
-  path: {
-    providerID: string
-  }
-  query?: never
-  url: "/auth/{providerID}"
-}
-
-export type AuthRemoveErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type AuthRemoveError = AuthRemoveErrors[keyof AuthRemoveErrors]
-
-export type AuthRemoveResponses = {
-  /**
-   * Successfully removed authentication credentials
-   */
-  200: boolean
-}
-
-export type AuthRemoveResponse = AuthRemoveResponses[keyof AuthRemoveResponses]
-
-export type AuthSetData = {
-  body?: Auth
-  path: {
-    providerID: string
-  }
-  query?: never
-  url: "/auth/{providerID}"
-}
-
-export type AuthSetErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type AuthSetError = AuthSetErrors[keyof AuthSetErrors]
-
-export type AuthSetResponses = {
-  /**
-   * Successfully set authentication credentials
-   */
-  200: boolean
-}
-
-export type AuthSetResponse = AuthSetResponses[keyof AuthSetResponses]
 
 export type AppLogData = {
   body?: {
@@ -7618,64 +10130,6 @@ export type ExperimentalConsoleSwitchOrgResponses = {
 export type ExperimentalConsoleSwitchOrgResponse =
   ExperimentalConsoleSwitchOrgResponses[keyof ExperimentalConsoleSwitchOrgResponses]
 
-export type ToolListData = {
-  body?: never
-  path?: never
-  query: {
-    directory?: string
-    workspace?: string
-    provider: string
-    model: string
-  }
-  url: "/experimental/tool"
-}
-
-export type ToolListErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type ToolListError = ToolListErrors[keyof ToolListErrors]
-
-export type ToolListResponses = {
-  /**
-   * Tools
-   */
-  200: ToolList
-}
-
-export type ToolListResponse = ToolListResponses[keyof ToolListResponses]
-
-export type ToolIdsData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/tool/ids"
-}
-
-export type ToolIdsErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type ToolIdsError = ToolIdsErrors[keyof ToolIdsErrors]
-
-export type ToolIdsResponses = {
-  /**
-   * Tool IDs
-   */
-  200: ToolIds
-}
-
-export type ToolIdsResponse = ToolIdsResponses[keyof ToolIdsResponses]
-
 export type WorktreeRemoveData = {
   body?: WorktreeRemoveInput
   path?: never
@@ -7787,103 +10241,6 @@ export type WorktreeResetResponses = {
 }
 
 export type WorktreeResetResponse = WorktreeResetResponses[keyof WorktreeResetResponses]
-
-export type ExperimentalSessionListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-    roots?: boolean | "true" | "false"
-    start?: number
-    cursor?: number
-    search?: string
-    limit?: number
-    archived?: boolean | "true" | "false"
-  }
-  url: "/experimental/session"
-}
-
-export type ExperimentalSessionListErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type ExperimentalSessionListError = ExperimentalSessionListErrors[keyof ExperimentalSessionListErrors]
-
-export type ExperimentalSessionListResponses = {
-  /**
-   * List of sessions
-   */
-  200: Array<GlobalSession>
-}
-
-export type ExperimentalSessionListResponse = ExperimentalSessionListResponses[keyof ExperimentalSessionListResponses]
-
-export type ExperimentalSessionBackgroundData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/session/{sessionID}/background"
-}
-
-export type ExperimentalSessionBackgroundErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type ExperimentalSessionBackgroundError =
-  ExperimentalSessionBackgroundErrors[keyof ExperimentalSessionBackgroundErrors]
-
-export type ExperimentalSessionBackgroundResponses = {
-  /**
-   * Backgrounded subagents
-   */
-  200: boolean
-}
-
-export type ExperimentalSessionBackgroundResponse =
-  ExperimentalSessionBackgroundResponses[keyof ExperimentalSessionBackgroundResponses]
-
-export type ExperimentalResourceListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/resource"
-}
-
-export type ExperimentalResourceListErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type ExperimentalResourceListError = ExperimentalResourceListErrors[keyof ExperimentalResourceListErrors]
-
-export type ExperimentalResourceListResponses = {
-  /**
-   * MCP resources
-   */
-  200: {
-    [key: string]: McpResource
-  }
-}
-
-export type ExperimentalResourceListResponse =
-  ExperimentalResourceListResponses[keyof ExperimentalResourceListResponses]
 
 export type FindTextData = {
   body?: never
@@ -8279,34 +10636,6 @@ export type VcsApplyResponses = {
 
 export type VcsApplyResponse = VcsApplyResponses[keyof VcsApplyResponses]
 
-export type CommandListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/command"
-}
-
-export type CommandListErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type CommandListError = CommandListErrors[keyof CommandListErrors]
-
-export type CommandListResponses = {
-  /**
-   * List of commands
-   */
-  200: Array<Command>
-}
-
-export type CommandListResponse = CommandListResponses[keyof CommandListResponses]
-
 export type AppAgentsData = {
   body?: never
   path?: never
@@ -8423,280 +10752,6 @@ export type FormatterStatusResponses = {
 }
 
 export type FormatterStatusResponse = FormatterStatusResponses[keyof FormatterStatusResponses]
-
-export type McpStatusData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp"
-}
-
-export type McpStatusErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type McpStatusError = McpStatusErrors[keyof McpStatusErrors]
-
-export type McpStatusResponses = {
-  /**
-   * MCP server status
-   */
-  200: {
-    [key: string]: McpStatus
-  }
-}
-
-export type McpStatusResponse = McpStatusResponses[keyof McpStatusResponses]
-
-export type McpAddData = {
-  body?: {
-    name: string
-    config: McpLocalConfig | McpRemoteConfig
-  }
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp"
-}
-
-export type McpAddErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type McpAddError = McpAddErrors[keyof McpAddErrors]
-
-export type McpAddResponses = {
-  /**
-   * MCP server added successfully
-   */
-  200: {
-    [key: string]: McpStatus
-  }
-}
-
-export type McpAddResponse = McpAddResponses[keyof McpAddResponses]
-
-export type McpAuthRemoveData = {
-  body?: never
-  path: {
-    name: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp/{name}/auth"
-}
-
-export type McpAuthRemoveErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * McpServerNotFoundError
-   */
-  404: McpServerNotFoundError
-}
-
-export type McpAuthRemoveError = McpAuthRemoveErrors[keyof McpAuthRemoveErrors]
-
-export type McpAuthRemoveResponses = {
-  /**
-   * OAuth credentials removed
-   */
-  200: {
-    success: true
-  }
-}
-
-export type McpAuthRemoveResponse = McpAuthRemoveResponses[keyof McpAuthRemoveResponses]
-
-export type McpAuthStartData = {
-  body?: never
-  path: {
-    name: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp/{name}/auth"
-}
-
-export type McpAuthStartErrors = {
-  /**
-   * McpUnsupportedOAuthError | InvalidRequestError
-   */
-  400: McpUnsupportedOAuthError | InvalidRequestError
-  /**
-   * McpServerNotFoundError
-   */
-  404: McpServerNotFoundError
-}
-
-export type McpAuthStartError = McpAuthStartErrors[keyof McpAuthStartErrors]
-
-export type McpAuthStartResponses = {
-  /**
-   * OAuth flow started
-   */
-  200: {
-    authorizationUrl: string
-    oauthState: string
-  }
-}
-
-export type McpAuthStartResponse = McpAuthStartResponses[keyof McpAuthStartResponses]
-
-export type McpAuthCallbackData = {
-  body?: {
-    code: string
-  }
-  path: {
-    name: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp/{name}/auth/callback"
-}
-
-export type McpAuthCallbackErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * McpServerNotFoundError
-   */
-  404: McpServerNotFoundError
-}
-
-export type McpAuthCallbackError = McpAuthCallbackErrors[keyof McpAuthCallbackErrors]
-
-export type McpAuthCallbackResponses = {
-  /**
-   * OAuth authentication completed
-   */
-  200: McpStatus
-}
-
-export type McpAuthCallbackResponse = McpAuthCallbackResponses[keyof McpAuthCallbackResponses]
-
-export type McpAuthAuthenticateData = {
-  body?: never
-  path: {
-    name: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp/{name}/auth/authenticate"
-}
-
-export type McpAuthAuthenticateErrors = {
-  /**
-   * McpUnsupportedOAuthError | InvalidRequestError
-   */
-  400: McpUnsupportedOAuthError | InvalidRequestError
-  /**
-   * McpServerNotFoundError
-   */
-  404: McpServerNotFoundError
-}
-
-export type McpAuthAuthenticateError = McpAuthAuthenticateErrors[keyof McpAuthAuthenticateErrors]
-
-export type McpAuthAuthenticateResponses = {
-  /**
-   * OAuth authentication completed
-   */
-  200: McpStatus
-}
-
-export type McpAuthAuthenticateResponse = McpAuthAuthenticateResponses[keyof McpAuthAuthenticateResponses]
-
-export type McpConnectData = {
-  body?: never
-  path: {
-    name: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp/{name}/connect"
-}
-
-export type McpConnectErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * McpServerNotFoundError
-   */
-  404: McpServerNotFoundError
-}
-
-export type McpConnectError = McpConnectErrors[keyof McpConnectErrors]
-
-export type McpConnectResponses = {
-  /**
-   * MCP server connected successfully
-   */
-  200: boolean
-}
-
-export type McpConnectResponse = McpConnectResponses[keyof McpConnectResponses]
-
-export type McpDisconnectData = {
-  body?: never
-  path: {
-    name: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/mcp/{name}/disconnect"
-}
-
-export type McpDisconnectErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * McpServerNotFoundError
-   */
-  404: McpServerNotFoundError
-}
-
-export type McpDisconnectError = McpDisconnectErrors[keyof McpDisconnectErrors]
-
-export type McpDisconnectResponses = {
-  /**
-   * MCP server disconnected successfully
-   */
-  200: boolean
-}
-
-export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
 
 export type ProjectListData = {
   body?: never
@@ -9128,172 +11183,6 @@ export type PtyConnectTokenResponses = {
 
 export type PtyConnectTokenResponse = PtyConnectTokenResponses[keyof PtyConnectTokenResponses]
 
-export type QuestionListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/question"
-}
-
-export type QuestionListErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type QuestionListError = QuestionListErrors[keyof QuestionListErrors]
-
-export type QuestionListResponses = {
-  /**
-   * List of pending questions
-   */
-  200: Array<QuestionRequest>
-}
-
-export type QuestionListResponse = QuestionListResponses[keyof QuestionListResponses]
-
-export type QuestionReplyData = {
-  body?: {
-    /**
-     * User answers in order of questions (each answer is an array of selected labels)
-     */
-    answers: Array<QuestionAnswer>
-  }
-  path: {
-    requestID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/question/{requestID}/reply"
-}
-
-export type QuestionReplyErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * QuestionNotFoundError
-   */
-  404: QuestionNotFoundError
-}
-
-export type QuestionReplyError = QuestionReplyErrors[keyof QuestionReplyErrors]
-
-export type QuestionReplyResponses = {
-  /**
-   * Question answered successfully
-   */
-  200: boolean
-}
-
-export type QuestionReplyResponse = QuestionReplyResponses[keyof QuestionReplyResponses]
-
-export type QuestionRejectData = {
-  body?: never
-  path: {
-    requestID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/question/{requestID}/reject"
-}
-
-export type QuestionRejectErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * QuestionNotFoundError
-   */
-  404: QuestionNotFoundError
-}
-
-export type QuestionRejectError = QuestionRejectErrors[keyof QuestionRejectErrors]
-
-export type QuestionRejectResponses = {
-  /**
-   * Question rejected successfully
-   */
-  200: boolean
-}
-
-export type QuestionRejectResponse = QuestionRejectResponses[keyof QuestionRejectResponses]
-
-export type PermissionListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/permission"
-}
-
-export type PermissionListErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type PermissionListError = PermissionListErrors[keyof PermissionListErrors]
-
-export type PermissionListResponses = {
-  /**
-   * List of pending permissions
-   */
-  200: Array<PermissionRequest>
-}
-
-export type PermissionListResponse = PermissionListResponses[keyof PermissionListResponses]
-
-export type PermissionReplyData = {
-  body?: {
-    reply: "once" | "always" | "reject"
-    message?: string
-  }
-  path: {
-    requestID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/permission/{requestID}/reply"
-}
-
-export type PermissionReplyErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * PermissionNotFoundError
-   */
-  404: PermissionNotFoundError
-}
-
-export type PermissionReplyError = PermissionReplyErrors[keyof PermissionReplyErrors]
-
-export type PermissionReplyResponses = {
-  /**
-   * Permission processed successfully
-   */
-  200: boolean
-}
-
-export type PermissionReplyResponse = PermissionReplyResponses[keyof PermissionReplyResponses]
-
 export type ProviderListData = {
   body?: never
   path?: never
@@ -9327,1150 +11216,6 @@ export type ProviderListResponses = {
 }
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
-
-export type ProviderAuthData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/provider/auth"
-}
-
-export type ProviderAuthErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type ProviderAuthError2 = ProviderAuthErrors[keyof ProviderAuthErrors]
-
-export type ProviderAuthResponses = {
-  /**
-   * Provider auth methods
-   */
-  200: {
-    [key: string]: Array<ProviderAuthMethod>
-  }
-}
-
-export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
-
-export type ProviderOauthAuthorizeData = {
-  body?: {
-    /**
-     * Auth method index
-     */
-    method: number
-    inputs?: {
-      [key: string]: string
-    }
-  }
-  path: {
-    providerID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/provider/{providerID}/oauth/authorize"
-}
-
-export type ProviderOauthAuthorizeErrors = {
-  /**
-   * ProviderAuthError | InvalidRequestError
-   */
-  400: ProviderAuthError1 | InvalidRequestError
-}
-
-export type ProviderOauthAuthorizeError = ProviderOauthAuthorizeErrors[keyof ProviderOauthAuthorizeErrors]
-
-export type ProviderOauthAuthorizeResponses = {
-  /**
-   * Authorization URL and method
-   */
-  200: ProviderAuthAuthorization
-}
-
-export type ProviderOauthAuthorizeResponse = ProviderOauthAuthorizeResponses[keyof ProviderOauthAuthorizeResponses]
-
-export type ProviderOauthCallbackData = {
-  body?: {
-    /**
-     * Auth method index
-     */
-    method: number
-    code?: string
-  }
-  path: {
-    providerID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/provider/{providerID}/oauth/callback"
-}
-
-export type ProviderOauthCallbackErrors = {
-  /**
-   * ProviderAuthError | InvalidRequestError
-   */
-  400: ProviderAuthError1 | InvalidRequestError
-}
-
-export type ProviderOauthCallbackError = ProviderOauthCallbackErrors[keyof ProviderOauthCallbackErrors]
-
-export type ProviderOauthCallbackResponses = {
-  /**
-   * OAuth callback processed successfully
-   */
-  200: boolean
-}
-
-export type ProviderOauthCallbackResponse = ProviderOauthCallbackResponses[keyof ProviderOauthCallbackResponses]
-
-export type SessionListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-    scope?: "project"
-    path?: string
-    roots?: boolean | "true" | "false"
-    start?: number
-    search?: string
-    limit?: number
-  }
-  url: "/session"
-}
-
-export type SessionListErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type SessionListError = SessionListErrors[keyof SessionListErrors]
-
-export type SessionListResponses = {
-  /**
-   * List of sessions
-   */
-  200: Array<Session>
-}
-
-export type SessionListResponse = SessionListResponses[keyof SessionListResponses]
-
-export type SessionCreateData = {
-  body?: {
-    parentID?: string
-    title?: string
-    agent?: string
-    model?: {
-      id: string
-      providerID: string
-      variant?: string
-    }
-    metadata?: {
-      [key: string]: unknown
-    }
-    permission?: PermissionRuleset
-    workspaceID?: string
-  }
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session"
-}
-
-export type SessionCreateErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type SessionCreateError = SessionCreateErrors[keyof SessionCreateErrors]
-
-export type SessionCreateResponses = {
-  /**
-   * Successfully created session
-   */
-  200: Session
-}
-
-export type SessionCreateResponse = SessionCreateResponses[keyof SessionCreateResponses]
-
-export type SessionStatusData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/status"
-}
-
-export type SessionStatusErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type SessionStatusError = SessionStatusErrors[keyof SessionStatusErrors]
-
-export type SessionStatusResponses = {
-  /**
-   * Get session status
-   */
-  200: {
-    [key: string]: SessionStatus
-  }
-}
-
-export type SessionStatusResponse = SessionStatusResponses[keyof SessionStatusResponses]
-
-export type SessionDeleteData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}"
-}
-
-export type SessionDeleteErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionDeleteError = SessionDeleteErrors[keyof SessionDeleteErrors]
-
-export type SessionDeleteResponses = {
-  /**
-   * Successfully deleted session
-   */
-  200: boolean
-}
-
-export type SessionDeleteResponse = SessionDeleteResponses[keyof SessionDeleteResponses]
-
-export type SessionGetData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}"
-}
-
-export type SessionGetErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionGetError = SessionGetErrors[keyof SessionGetErrors]
-
-export type SessionGetResponses = {
-  /**
-   * Get session
-   */
-  200: Session
-}
-
-export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
-
-export type SessionUpdateData = {
-  body?: {
-    title?: string
-    metadata?: {
-      [key: string]: unknown
-    }
-    permission?: PermissionRuleset
-    time?: {
-      archived?: number
-    }
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}"
-}
-
-export type SessionUpdateErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionUpdateError = SessionUpdateErrors[keyof SessionUpdateErrors]
-
-export type SessionUpdateResponses = {
-  /**
-   * Successfully updated session
-   */
-  200: Session
-}
-
-export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
-
-export type SessionChildrenData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/children"
-}
-
-export type SessionChildrenErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionChildrenError = SessionChildrenErrors[keyof SessionChildrenErrors]
-
-export type SessionChildrenResponses = {
-  /**
-   * List of children
-   */
-  200: Array<Session>
-}
-
-export type SessionChildrenResponse = SessionChildrenResponses[keyof SessionChildrenResponses]
-
-export type SessionTodoData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/todo"
-}
-
-export type SessionTodoErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionTodoError = SessionTodoErrors[keyof SessionTodoErrors]
-
-export type SessionTodoResponses = {
-  /**
-   * Todo list
-   */
-  200: Array<Todo>
-}
-
-export type SessionTodoResponse = SessionTodoResponses[keyof SessionTodoResponses]
-
-export type SessionDiffData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-    messageID?: string
-  }
-  url: "/session/{sessionID}/diff"
-}
-
-export type SessionDiffErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type SessionDiffError = SessionDiffErrors[keyof SessionDiffErrors]
-
-export type SessionDiffResponses = {
-  /**
-   * Successfully retrieved diff
-   */
-  200: Array<SnapshotFileDiff>
-}
-
-export type SessionDiffResponse = SessionDiffResponses[keyof SessionDiffResponses]
-
-export type SessionMessagesData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-    limit?: number
-    before?: string
-  }
-  url: "/session/{sessionID}/message"
-}
-
-export type SessionMessagesErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionMessagesError = SessionMessagesErrors[keyof SessionMessagesErrors]
-
-export type SessionMessagesResponses = {
-  /**
-   * List of messages
-   */
-  200: Array<{
-    info: Message
-    parts: Array<Part>
-  }>
-}
-
-export type SessionMessagesResponse2 = SessionMessagesResponses[keyof SessionMessagesResponses]
-
-export type SessionPromptData = {
-  body?: {
-    messageID?: string
-    model?: {
-      providerID: string
-      modelID: string
-    }
-    agent?: string
-    noReply?: boolean
-    tools?: {
-      [key: string]: boolean
-    }
-    format?: OutputFormat
-    system?: string
-    variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/message"
-}
-
-export type SessionPromptErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionPromptError = SessionPromptErrors[keyof SessionPromptErrors]
-
-export type SessionPromptResponses = {
-  /**
-   * Created message
-   */
-  200: {
-    info: AssistantMessage
-    parts: Array<Part>
-  }
-}
-
-export type SessionPromptResponse = SessionPromptResponses[keyof SessionPromptResponses]
-
-export type SessionDeleteMessageData = {
-  body?: never
-  path: {
-    sessionID: string
-    messageID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/message/{messageID}"
-}
-
-export type SessionDeleteMessageErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-  /**
-   * SessionBusyError
-   */
-  409: SessionBusyError
-}
-
-export type SessionDeleteMessageError = SessionDeleteMessageErrors[keyof SessionDeleteMessageErrors]
-
-export type SessionDeleteMessageResponses = {
-  /**
-   * Successfully deleted message
-   */
-  200: boolean
-}
-
-export type SessionDeleteMessageResponse = SessionDeleteMessageResponses[keyof SessionDeleteMessageResponses]
-
-export type SessionMessageData = {
-  body?: never
-  path: {
-    sessionID: string
-    messageID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/message/{messageID}"
-}
-
-export type SessionMessageErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionMessageError = SessionMessageErrors[keyof SessionMessageErrors]
-
-export type SessionMessageResponses = {
-  /**
-   * Message
-   */
-  200: {
-    info: Message
-    parts: Array<Part>
-  }
-}
-
-export type SessionMessageResponse = SessionMessageResponses[keyof SessionMessageResponses]
-
-export type SessionForkData = {
-  body?: {
-    messageID?: string
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/fork"
-}
-
-export type SessionForkErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionForkError = SessionForkErrors[keyof SessionForkErrors]
-
-export type SessionForkResponses = {
-  /**
-   * 200
-   */
-  200: Session
-}
-
-export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
-
-export type SessionAbortData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/abort"
-}
-
-export type SessionAbortErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type SessionAbortError = SessionAbortErrors[keyof SessionAbortErrors]
-
-export type SessionAbortResponses = {
-  /**
-   * Aborted session
-   */
-  200: boolean
-}
-
-export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
-
-export type SessionInitData = {
-  body?: {
-    modelID: string
-    providerID: string
-    messageID: string
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/init"
-}
-
-export type SessionInitErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionInitError = SessionInitErrors[keyof SessionInitErrors]
-
-export type SessionInitResponses = {
-  /**
-   * 200
-   */
-  200: boolean
-}
-
-export type SessionInitResponse = SessionInitResponses[keyof SessionInitResponses]
-
-export type SessionUnshareData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/share"
-}
-
-export type SessionUnshareErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-  /**
-   * InternalServerError
-   */
-  500: EffectHttpApiErrorInternalServerError
-}
-
-export type SessionUnshareError = SessionUnshareErrors[keyof SessionUnshareErrors]
-
-export type SessionUnshareResponses = {
-  /**
-   * Successfully unshared session
-   */
-  200: Session
-}
-
-export type SessionUnshareResponse = SessionUnshareResponses[keyof SessionUnshareResponses]
-
-export type SessionShareData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/share"
-}
-
-export type SessionShareErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-  /**
-   * InternalServerError
-   */
-  500: EffectHttpApiErrorInternalServerError
-}
-
-export type SessionShareError = SessionShareErrors[keyof SessionShareErrors]
-
-export type SessionShareResponses = {
-  /**
-   * Successfully shared session
-   */
-  200: Session
-}
-
-export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
-
-export type SessionSummarizeData = {
-  body?: {
-    providerID: string
-    modelID: string
-    auto?: boolean
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/summarize"
-}
-
-export type SessionSummarizeErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionSummarizeError = SessionSummarizeErrors[keyof SessionSummarizeErrors]
-
-export type SessionSummarizeResponses = {
-  /**
-   * Summarized session
-   */
-  200: boolean
-}
-
-export type SessionSummarizeResponse = SessionSummarizeResponses[keyof SessionSummarizeResponses]
-
-export type SessionPromptAsyncData = {
-  body?: {
-    messageID?: string
-    model?: {
-      providerID: string
-      modelID: string
-    }
-    agent?: string
-    noReply?: boolean
-    tools?: {
-      [key: string]: boolean
-    }
-    format?: OutputFormat
-    system?: string
-    variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/prompt_async"
-}
-
-export type SessionPromptAsyncErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionPromptAsyncError = SessionPromptAsyncErrors[keyof SessionPromptAsyncErrors]
-
-export type SessionPromptAsyncResponses = {
-  /**
-   * Prompt accepted
-   */
-  204: void
-}
-
-export type SessionPromptAsyncResponse = SessionPromptAsyncResponses[keyof SessionPromptAsyncResponses]
-
-export type SessionCommandData = {
-  body?: {
-    messageID?: string
-    agent?: string
-    model?: string
-    arguments: string
-    command: string
-    variant?: string
-    parts?: Array<{
-      id?: string
-      type: "file"
-      mime: string
-      filename?: string
-      url: string
-      source?: FilePartSource
-    }>
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/command"
-}
-
-export type SessionCommandErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type SessionCommandError = SessionCommandErrors[keyof SessionCommandErrors]
-
-export type SessionCommandResponses = {
-  /**
-   * Created message
-   */
-  200: {
-    info: AssistantMessage
-    parts: Array<Part>
-  }
-}
-
-export type SessionCommandResponse = SessionCommandResponses[keyof SessionCommandResponses]
-
-export type SessionShellData = {
-  body?: {
-    messageID?: string
-    agent: string
-    model?: {
-      providerID: string
-      modelID: string
-    }
-    command: string
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/shell"
-}
-
-export type SessionShellErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-  /**
-   * SessionBusyError
-   */
-  409: SessionBusyError
-}
-
-export type SessionShellError = SessionShellErrors[keyof SessionShellErrors]
-
-export type SessionShellResponses = {
-  /**
-   * Created message
-   */
-  200: {
-    info: Message
-    parts: Array<Part>
-  }
-}
-
-export type SessionShellResponse = SessionShellResponses[keyof SessionShellResponses]
-
-export type SessionRevertData = {
-  body?: {
-    messageID: string
-    partID?: string
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/revert"
-}
-
-export type SessionRevertErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-  /**
-   * SessionBusyError
-   */
-  409: SessionBusyError
-}
-
-export type SessionRevertError = SessionRevertErrors[keyof SessionRevertErrors]
-
-export type SessionRevertResponses = {
-  /**
-   * Updated session
-   */
-  200: Session
-}
-
-export type SessionRevertResponse = SessionRevertResponses[keyof SessionRevertResponses]
-
-export type SessionUnrevertData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/unrevert"
-}
-
-export type SessionUnrevertErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-  /**
-   * SessionBusyError
-   */
-  409: SessionBusyError
-}
-
-export type SessionUnrevertError = SessionUnrevertErrors[keyof SessionUnrevertErrors]
-
-export type SessionUnrevertResponses = {
-  /**
-   * Updated session
-   */
-  200: Session
-}
-
-export type SessionUnrevertResponse = SessionUnrevertResponses[keyof SessionUnrevertResponses]
-
-export type PermissionRespondData = {
-  body?: {
-    response: "once" | "always" | "reject"
-  }
-  path: {
-    sessionID: string
-    permissionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/permissions/{permissionID}"
-}
-
-export type PermissionRespondErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError | PermissionNotFoundError
-   */
-  404: NotFoundError | PermissionNotFoundError
-}
-
-export type PermissionRespondError = PermissionRespondErrors[keyof PermissionRespondErrors]
-
-export type PermissionRespondResponses = {
-  /**
-   * Permission processed successfully
-   */
-  200: boolean
-}
-
-export type PermissionRespondResponse = PermissionRespondResponses[keyof PermissionRespondResponses]
-
-export type PartDeleteData = {
-  body?: never
-  path: {
-    sessionID: string
-    messageID: string
-    partID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/message/{messageID}/part/{partID}"
-}
-
-export type PartDeleteErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type PartDeleteError = PartDeleteErrors[keyof PartDeleteErrors]
-
-export type PartDeleteResponses = {
-  /**
-   * Successfully deleted part
-   */
-  200: boolean
-}
-
-export type PartDeleteResponse = PartDeleteResponses[keyof PartDeleteResponses]
-
-export type PartUpdateData = {
-  body?: Part
-  path: {
-    sessionID: string
-    messageID: string
-    partID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/session/{sessionID}/message/{messageID}/part/{partID}"
-}
-
-export type PartUpdateErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-  /**
-   * NotFoundError
-   */
-  404: NotFoundError
-}
-
-export type PartUpdateError = PartUpdateErrors[keyof PartUpdateErrors]
-
-export type PartUpdateResponses = {
-  /**
-   * Successfully updated part
-   */
-  200: Part
-}
-
-export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
 
 export type SyncStartData = {
   body?: never
@@ -10540,38 +11285,6 @@ export type SyncReplayResponses = {
 }
 
 export type SyncReplayResponse = SyncReplayResponses[keyof SyncReplayResponses]
-
-export type SyncStealData = {
-  body?: {
-    sessionID: string
-  }
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/sync/steal"
-}
-
-export type SyncStealErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type SyncStealError = SyncStealErrors[keyof SyncStealErrors]
-
-export type SyncStealResponses = {
-  /**
-   * Session stolen into workspace
-   */
-  200: {
-    sessionID: string
-  }
-}
-
-export type SyncStealResponse = SyncStealResponses[keyof SyncStealResponses]
 
 export type SyncHistoryListData = {
   body?: {
@@ -11333,6 +12046,7 @@ export type V2SessionListData = {
     limit?: number
     order?: "asc" | "desc"
     search?: string
+    roots?: boolean | "true" | "false"
     directory?: string
     project?: string
     subpath?: string
@@ -11435,6 +12149,41 @@ export type V2SessionActiveResponses = {
 
 export type V2SessionActiveResponse = V2SessionActiveResponses[keyof V2SessionActiveResponses]
 
+export type V2SessionRemoveData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}"
+}
+
+export type V2SessionRemoveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionRemoveError = V2SessionRemoveErrors[keyof V2SessionRemoveErrors]
+
+export type V2SessionRemoveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionRemoveResponse = V2SessionRemoveResponses[keyof V2SessionRemoveResponses]
+
 export type V2SessionGetData = {
   body?: never
   path: {
@@ -11471,6 +12220,46 @@ export type V2SessionGetResponses = {
 }
 
 export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
+
+export type V2SessionUpdateData = {
+  body: {
+    title?: string
+    archived?: boolean
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}"
+}
+
+export type V2SessionUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionUpdateError = V2SessionUpdateErrors[keyof V2SessionUpdateErrors]
+
+export type V2SessionUpdateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionV2Info
+  }
+}
+
+export type V2SessionUpdateResponse = V2SessionUpdateResponses[keyof V2SessionUpdateResponses]
 
 export type V2SessionSwitchAgentData = {
   body: {
@@ -11592,6 +12381,123 @@ export type V2SessionPromptResponses = {
 
 export type V2SessionPromptResponse = V2SessionPromptResponses[keyof V2SessionPromptResponses]
 
+export type V2SessionPendingInputsData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/input/pending"
+}
+
+export type V2SessionPendingInputsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionPendingInputsError = V2SessionPendingInputsErrors[keyof V2SessionPendingInputsErrors]
+
+export type V2SessionPendingInputsResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<SessionInputAdmitted>
+  }
+}
+
+export type V2SessionPendingInputsResponse = V2SessionPendingInputsResponses[keyof V2SessionPendingInputsResponses]
+
+export type V2SessionShellData = {
+  body: {
+    id?: string
+    command: string
+    resume?: boolean
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/shell"
+}
+
+export type V2SessionShellErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type V2SessionShellError = V2SessionShellErrors[keyof V2SessionShellErrors]
+
+export type V2SessionShellResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2SessionShellResponse = V2SessionShellResponses[keyof V2SessionShellResponses]
+
+export type V2SessionTodosData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/todo"
+}
+
+export type V2SessionTodosErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionTodosError = V2SessionTodosErrors[keyof V2SessionTodosErrors]
+
+export type V2SessionTodosResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<Todo>
+  }
+}
+
+export type V2SessionTodosResponse = V2SessionTodosResponses[keyof V2SessionTodosResponses]
+
 export type V2SessionCompactData = {
   body?: never
   path: {
@@ -11624,9 +12530,13 @@ export type V2SessionCompactError = V2SessionCompactErrors[keyof V2SessionCompac
 
 export type V2SessionCompactResponses = {
   /**
-   * <No Content>
+   * Success
    */
-  204: void
+  200: {
+    data: {
+      compacted: boolean
+    }
+  }
 }
 
 export type V2SessionCompactResponse = V2SessionCompactResponses[keyof V2SessionCompactResponses]
@@ -11981,6 +12891,573 @@ export type V2SessionMessageResponses = {
 
 export type V2SessionMessageResponse = V2SessionMessageResponses[keyof V2SessionMessageResponses]
 
+export type V2WorkListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/work"
+}
+
+export type V2WorkListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2WorkListError = V2WorkListErrors[keyof V2WorkListErrors]
+
+export type V2WorkListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<WorkGoalInfo>
+  }
+}
+
+export type V2WorkListResponse = V2WorkListResponses[keyof V2WorkListResponses]
+
+export type V2WorkCreateData = {
+  body: WorkCreateInput
+  path?: never
+  query?: never
+  url: "/api/work"
+}
+
+export type V2WorkCreateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkCreateError = V2WorkCreateErrors[keyof V2WorkCreateErrors]
+
+export type V2WorkCreateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkCreateResponse = V2WorkCreateResponses[keyof V2WorkCreateResponses]
+
+export type V2WorkActiveData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/work/active"
+}
+
+export type V2WorkActiveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2WorkActiveError = V2WorkActiveErrors[keyof V2WorkActiveErrors]
+
+export type V2WorkActiveResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: {
+      [key: string]: unknown | WorkActive
+    }
+  }
+}
+
+export type V2WorkActiveResponse = V2WorkActiveResponses[keyof V2WorkActiveResponses]
+
+export type V2WorkArtifactsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/work/artifacts"
+}
+
+export type V2WorkArtifactsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2WorkArtifactsError = V2WorkArtifactsErrors[keyof V2WorkArtifactsErrors]
+
+export type V2WorkArtifactsResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<WorkArtifactLifecycleInfo>
+  }
+}
+
+export type V2WorkArtifactsResponse = V2WorkArtifactsResponses[keyof V2WorkArtifactsResponses]
+
+export type V2WorkArtifactCollectData = {
+  body: {
+    minimumAgeMs: number
+    dryRun: boolean
+    limit?: number
+  }
+  path?: never
+  query?: never
+  url: "/api/work/artifacts/collect"
+}
+
+export type V2WorkArtifactCollectErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2WorkArtifactCollectError = V2WorkArtifactCollectErrors[keyof V2WorkArtifactCollectErrors]
+
+export type V2WorkArtifactCollectResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkArtifactCollectionReport
+  }
+}
+
+export type V2WorkArtifactCollectResponse = V2WorkArtifactCollectResponses[keyof V2WorkArtifactCollectResponses]
+
+export type V2WorkGetData = {
+  body?: never
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}"
+}
+
+export type V2WorkGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+}
+
+export type V2WorkGetError = V2WorkGetErrors[keyof V2WorkGetErrors]
+
+export type V2WorkGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkGetResponse = V2WorkGetResponses[keyof V2WorkGetResponses]
+
+export type V2WorkExpandData = {
+  body: WorkExpandInput
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/tasks"
+}
+
+export type V2WorkExpandErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkExpandError = V2WorkExpandErrors[keyof V2WorkExpandErrors]
+
+export type V2WorkExpandResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkExpandResponse = V2WorkExpandResponses[keyof V2WorkExpandResponses]
+
+export type V2WorkReplanData = {
+  body: WorkReplanInput
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/replan"
+}
+
+export type V2WorkReplanErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkReplanError = V2WorkReplanErrors[keyof V2WorkReplanErrors]
+
+export type V2WorkReplanResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkReplanResponse = V2WorkReplanResponses[keyof V2WorkReplanResponses]
+
+export type V2WorkResumeData = {
+  body?: never
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/resume"
+}
+
+export type V2WorkResumeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkResumeError = V2WorkResumeErrors[keyof V2WorkResumeErrors]
+
+export type V2WorkResumeResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2WorkResumeResponse = V2WorkResumeResponses[keyof V2WorkResumeResponses]
+
+export type V2WorkPauseData = {
+  body?: never
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/pause"
+}
+
+export type V2WorkPauseErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+}
+
+export type V2WorkPauseError = V2WorkPauseErrors[keyof V2WorkPauseErrors]
+
+export type V2WorkPauseResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2WorkPauseResponse = V2WorkPauseResponses[keyof V2WorkPauseResponses]
+
+export type V2WorkCancelData = {
+  body: {
+    reason?: string
+  }
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/cancel"
+}
+
+export type V2WorkCancelErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+}
+
+export type V2WorkCancelError = V2WorkCancelErrors[keyof V2WorkCancelErrors]
+
+export type V2WorkCancelResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2WorkCancelResponse = V2WorkCancelResponses[keyof V2WorkCancelResponses]
+
+export type V2WorkResolveUnknownData = {
+  body: {
+    resolution: "retry"
+    reason?: string
+  }
+  path: {
+    goalID: string
+    attemptID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/attempt/{attemptID}/resolve"
+}
+
+export type V2WorkResolveUnknownErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkResolveUnknownError = V2WorkResolveUnknownErrors[keyof V2WorkResolveUnknownErrors]
+
+export type V2WorkResolveUnknownResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2WorkResolveUnknownResponse = V2WorkResolveUnknownResponses[keyof V2WorkResolveUnknownResponses]
+
+export type V2WorkResolveMemoryData = {
+  body: WorkResolveMemoryInput
+  path: {
+    goalID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/memory/resolve"
+}
+
+export type V2WorkResolveMemoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkResolveMemoryError = V2WorkResolveMemoryErrors[keyof V2WorkResolveMemoryErrors]
+
+export type V2WorkResolveMemoryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkResolveMemoryResponse = V2WorkResolveMemoryResponses[keyof V2WorkResolveMemoryResponses]
+
+export type V2WorkDeleteMemoryData = {
+  body?: never
+  path: {
+    goalID: string
+    key: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/memory/{key}"
+}
+
+export type V2WorkDeleteMemoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkDeleteMemoryError = V2WorkDeleteMemoryErrors[keyof V2WorkDeleteMemoryErrors]
+
+export type V2WorkDeleteMemoryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkDeleteMemoryResponse = V2WorkDeleteMemoryResponses[keyof V2WorkDeleteMemoryResponses]
+
+export type V2WorkUpdateMemoryData = {
+  body: WorkUpdateMemoryInput
+  path: {
+    goalID: string
+    key: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/memory/{key}"
+}
+
+export type V2WorkUpdateMemoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * WorkNotFoundError
+   */
+  404: WorkNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkUpdateMemoryError = V2WorkUpdateMemoryErrors[keyof V2WorkUpdateMemoryErrors]
+
+export type V2WorkUpdateMemoryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: WorkDetail
+  }
+}
+
+export type V2WorkUpdateMemoryResponse = V2WorkUpdateMemoryResponses[keyof V2WorkUpdateMemoryResponses]
+
 export type V2SessionMessagesData = {
   body?: never
   path: {
@@ -12235,6 +13712,9 @@ export type V2IntegrationGetResponse = V2IntegrationGetResponses[keyof V2Integra
 export type V2IntegrationConnectKeyData = {
   body: {
     key: string
+    inputs?: {
+      [key: string]: string
+    }
     label?: string
   }
   path: {
@@ -12507,6 +13987,179 @@ export type V2CredentialUpdateResponses = {
 }
 
 export type V2CredentialUpdateResponse = V2CredentialUpdateResponses[keyof V2CredentialUpdateResponses]
+
+export type V2McpStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/mcp"
+}
+
+export type V2McpStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2McpStatusError = V2McpStatusErrors[keyof V2McpStatusErrors]
+
+export type V2McpStatusResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      [key: string]:
+        | {
+            status: "connected"
+            tools: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "disabled"
+          }
+        | {
+            status: "needs_auth"
+            error: string
+            integrationID: string
+            methodID: string
+          }
+        | {
+            status: "failed"
+            error: string
+          }
+    }
+  }
+}
+
+export type V2McpStatusResponse = V2McpStatusResponses[keyof V2McpStatusResponses]
+
+export type V2McpResourcesData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/mcp/resources"
+}
+
+export type V2McpResourcesErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2McpResourcesError = V2McpResourcesErrors[keyof V2McpResourcesErrors]
+
+export type V2McpResourcesResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      [key: string]: {
+        name: string
+        uri: string
+        description?: string
+        mimeType?: string
+        client: string
+      }
+    }
+  }
+}
+
+export type V2McpResourcesResponse = V2McpResourcesResponses[keyof V2McpResourcesResponses]
+
+export type V2McpConnectData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/mcp/{name}/connect"
+}
+
+export type V2McpConnectErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2McpConnectError = V2McpConnectErrors[keyof V2McpConnectErrors]
+
+export type V2McpConnectResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2McpConnectResponse = V2McpConnectResponses[keyof V2McpConnectResponses]
+
+export type V2McpDisconnectData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/mcp/{name}/disconnect"
+}
+
+export type V2McpDisconnectErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2McpDisconnectError = V2McpDisconnectErrors[keyof V2McpDisconnectErrors]
+
+export type V2McpDisconnectResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2McpDisconnectResponse = V2McpDisconnectResponses[keyof V2McpDisconnectResponses]
 
 export type V2PermissionRequestListData = {
   body?: never

@@ -23,6 +23,8 @@ export interface Interface {
     readonly sessionID: SessionSchema.ID
     readonly force: boolean
   }) => Effect.Effect<void, RunError>
+  /** Performs one manual compaction without starting an ordinary provider turn. */
+  readonly compact: (sessionID: SessionSchema.ID) => Effect.Effect<boolean, RunError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/SessionRunner") {}

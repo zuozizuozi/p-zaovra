@@ -4,7 +4,6 @@ import { Npm } from "@zaovra-ai/core/npm"
 import { Ripgrep } from "@zaovra-ai/core/ripgrep"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Auth } from "../../src/auth"
 import { Account } from "../../src/account/account"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { Workspace } from "../../src/control-plane/workspace"
@@ -15,7 +14,6 @@ import { InstanceState } from "../../src/effect/instance-state"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { AccountTest } from "../fake/account"
-import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -23,7 +21,6 @@ import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 const noopBootstrapLayer = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Plugin.node, Workspace.node, InstanceStore.node, Ripgrep.node]), [
-    [Auth.node, AuthTest.empty],
     [Account.node, AccountTest.empty],
     [Npm.node, NpmTest.noop],
     [InstanceStore.bootstrapNode, noopBootstrapLayer],

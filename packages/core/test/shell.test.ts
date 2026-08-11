@@ -71,7 +71,10 @@ describe("shell", () => {
     })
 
     test("normalizes Git Bash shell paths from env", async () => {
-      const shell = "/cygdrive/c/Program Files/Git/bin/bash.exe"
+      const bash = Shell.gitbash()
+      if (!bash) return
+      const parsed = path.win32.parse(bash)
+      const shell = `/cygdrive/${parsed.root[0].toLowerCase()}/${bash.slice(parsed.root.length).replaceAll("\\", "/")}`
       await withShell(shell, async () => {
         expect(Shell.preferred()).toBe(FSUtil.windowsPath(shell))
       })

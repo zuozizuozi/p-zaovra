@@ -1,12 +1,12 @@
 import { For, Show } from "solid-js"
-import type { PermissionRequest } from "@zaovra-ai/sdk/v2"
+import type { PermissionView } from "@zaovra-ai/sdk/v2"
 import { Button } from "@zaovra-ai/ui/button"
 import { DockPrompt } from "@zaovra-ai/session-ui/dock-prompt"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 
 export function SessionPermissionDock(props: {
-  request: PermissionRequest
+  request: PermissionView
   responding: boolean
   onDecide: (response: "once" | "always" | "reject") => void
 }) {

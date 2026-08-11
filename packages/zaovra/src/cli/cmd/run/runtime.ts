@@ -14,7 +14,7 @@
 //   4. runs the prompt queue until the footer closes.
 import { createZaovraClient } from "@zaovra-ai/sdk/v2"
 import { Flag } from "@zaovra-ai/core/flag/flag"
-import { MessageID } from "@/session/schema"
+import { Identifier } from "@/id/id"
 import { createRunDemo } from "./demo"
 import { resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
@@ -62,7 +62,6 @@ type RunLocalInput = {
   fetch: typeof globalThis.fetch
   resolveAgent: () => Promise<string | undefined>
   session: (sdk: RunInput["sdk"]) => Promise<{ id: string; title?: string } | undefined>
-  share: (sdk: RunInput["sdk"], sessionID: string) => Promise<void>
   createSession?: CreateSession
   agent: RunInput["agent"]
   model: RunInput["model"]
@@ -164,11 +163,11 @@ async function resolveExitTitle(
     return undefined
   }
 
-  return ctx.sdk.session
+  return ctx.sdk.v2.session
     .get({
       sessionID: state.sessionID,
     })
-    .then((x) => x.data?.title)
+    .then((x) => x.data?.data.title)
     .catch(() => undefined)
 }
 
@@ -250,21 +249,33 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
       }
 
       log?.write("send.permission.reply", next)
-      await ctx.sdk.permission.reply(next)
+      await ctx.sdk.v2.session.permission.reply({
+        sessionID: state.sessionID,
+        requestID: next.requestID,
+        reply: next.reply,
+        message: next.message,
+      })
     },
     onQuestionReply: async (next) => {
       if (state.demo?.questionReply(next)) {
         return
       }
 
-      await ctx.sdk.question.reply(next)
+      await ctx.sdk.v2.session.question.reply({
+        sessionID: state.sessionID,
+        requestID: next.requestID,
+        questionV2Reply: { answers: next.answers ?? [] },
+      })
     },
     onQuestionReject: async (next) => {
       if (state.demo?.questionReject(next)) {
         return
       }
 
-      await ctx.sdk.question.reject(next)
+      await ctx.sdk.v2.session.question.reject({
+        sessionID: state.sessionID,
+        requestID: next.requestID,
+      })
     },
     onCycleVariant: () => {
       if (!state.model || state.variants.length === 0) {
@@ -343,8 +354,8 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
       }
 
       state.aborting = true
-      void ctx.sdk.session
-        .abort({
+      void ctx.sdk.v2.session
+        .interrupt({
           sessionID: state.sessionID,
         })
         .catch(() => {})
@@ -354,7 +365,10 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     },
     onBackground: () => {
       if (!hasSession(input, state)) return
-      void ctx.sdk.experimental.session.background({ sessionID: state.sessionID }).catch(() => {})
+      log?.write("background.unavailable", {
+        sessionID: state.sessionID,
+        runtime: "v2",
+      })
     },
     onSubagentSelect: (sessionID) => {
       state.selectSubagent?.(sessionID)
@@ -378,13 +392,20 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         .agents({ directory: ctx.directory })
         .then((x) => x.data ?? [])
         .catch(() => []),
-      ctx.sdk.experimental.resource
-        .list({ directory: ctx.directory })
-        .then((x) => Object.values(x.data ?? {}))
+      ctx.sdk.v2.mcp
+        .resources({ location: { directory: ctx.directory } }, { throwOnError: true })
+        .then((x) => Object.values(x.data.data))
         .catch(() => []),
-      ctx.sdk.command
-        .list({ directory: ctx.directory })
-        .then((x) => x.data ?? [])
+      ctx.sdk.v2.command
+        .list({ location: { directory: ctx.directory } }, { throwOnError: true })
+        .then((x) =>
+          x.data.data.map((command) => ({
+            ...command,
+            model: command.model ? `${command.model.providerID}/${command.model.id}` : undefined,
+            source: "command" as const,
+            hints: [],
+          })),
+        )
         .catch(() => []),
     ])
     if (footer.isClosed) {
@@ -630,7 +651,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
                 text: error instanceof Error ? error.message : String(error),
                 phase: "start",
                 source: "system",
-                messageID: MessageID.ascending(),
+                messageID: Identifier.ascending("message"),
               } as const
               rememberLocal(commit)
               footer.append(commit)
@@ -758,7 +779,6 @@ export async function runInteractiveLocalMode(input: RunLocalInput): Promise<voi
           throw new Error("Session not found")
         }
 
-        void input.share(sdk, next.id).catch(() => {})
         return {
           sessionID: next.id,
           sessionTitle: next.title,

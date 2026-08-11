@@ -8,8 +8,6 @@ import { createMemo, createSignal, onMount } from "solid-js"
 import { errorMessage } from "../util/error"
 import { useSDK } from "../context/sdk"
 import { useToast } from "../ui/toast"
-import { DialogAlert } from "../ui/dialog-alert"
-import { DialogWorkspaceFileChanges } from "./dialog-workspace-file-changes"
 
 type Adapter = ExperimentalWorkspaceAdapterListResponse[number]
 
@@ -43,10 +41,6 @@ export function recentConnectedWorkspaces<WorkspaceInfo extends { id: string; ti
   const recent = workspaces.slice(0, input.limit ?? 3)
 
   return { recent, hasMore: recent.length < workspaces.length }
-}
-
-export function warpReminderText(dir: string) {
-  return `<system-reminder>The user has changed the current working directory to "${dir}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
 }
 
 async function loadWorkspaceAdapters(input: {
@@ -83,96 +77,6 @@ export async function openWorkspaceSelect(input: {
   const adapters = await loadWorkspaceAdapters(input)
   if (!adapters) return
   input.dialog.replace(() => <DialogWorkspaceSelect adapters={adapters} onSelect={input.onSelect} />)
-}
-
-export async function warpWorkspaceSession(input: {
-  dialog: ReturnType<typeof useDialog>
-  sdk: ReturnType<typeof useSDK>
-  sync: ReturnType<typeof useSync>
-  project: ReturnType<typeof useProject>
-  toast: ReturnType<typeof useToast>
-  sourceWorkspaceID?: string
-  workspaceID: string | null
-  sessionID: string
-  copyChanges: boolean
-  done?: () => void
-}): Promise<boolean> {
-  let result
-  try {
-    result = await input.sdk.client.experimental.workspace.warp({
-      id: input.workspaceID,
-      sessionID: input.sessionID,
-      copyChanges: input.copyChanges,
-    })
-  } catch (err) {
-    input.toast.show({
-      title: "Failed to warp session",
-      message: errorMessage(err),
-      variant: "error",
-    })
-    return false
-  }
-  if (!result?.data) {
-    if (result?.error && "name" in result.error && result.error.name === "VcsApplyError") {
-      await DialogAlert.show(
-        input.dialog,
-        "Unable to Warp Session",
-        "Unable to apply file changes to this workspace. It has existing changes that conflict or is based off a different branch. Session has not been warped.",
-      )
-      return false
-    }
-
-    input.toast.show({
-      title: "Failed to warp session",
-      message: errorMessage(result?.error ?? "no response"),
-      variant: "error",
-    })
-    return false
-  }
-
-  input.project.workspace.set(input.workspaceID)
-
-  await input.sync.bootstrap({ fatal: false }).catch(() => undefined)
-
-  const dir = input.project.instance.directory() || input.sync.path.directory
-  if (dir) {
-    await input.sdk.client.session
-      .promptAsync({
-        sessionID: input.sessionID,
-        workspace: input.workspaceID ?? undefined,
-        noReply: true,
-        parts: [
-          {
-            type: "text",
-            text: warpReminderText(dir),
-            synthetic: true,
-          },
-        ],
-      })
-      .catch(() => undefined)
-  }
-
-  await Promise.all([input.project.workspace.sync(), input.sync.session.refresh()])
-
-  if (input.done) {
-    input.done()
-    return true
-  }
-  input.dialog.clear()
-  return true
-}
-
-export async function confirmWorkspaceFileChanges(input: {
-  dialog: ReturnType<typeof useDialog>
-  sdk: ReturnType<typeof useSDK>
-  sourceWorkspaceID?: string
-}) {
-  const status = await input.sdk.client.vcs.status({ workspace: input.sourceWorkspaceID }).catch(() => undefined)
-  const fileChangeChoice = status?.data?.length
-    ? await DialogWorkspaceFileChanges.show(input.dialog, status.data)
-    : "no"
-  if (!fileChangeChoice) return
-  return fileChangeChoice === "yes"
 }
 
 export function DialogWorkspaceSelect(props: {

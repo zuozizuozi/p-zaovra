@@ -8,6 +8,10 @@ export interface Coordinator<Key, E> {
   readonly active: Effect.Effect<ReadonlySet<Key>>
   /** Starts execution while idle or joins the active execution. */
   readonly run: (key: Key) => Effect.Effect<void, E>
+  /** Waits for current execution without starting new work. */
+  readonly wait: (key: Key) => Effect.Effect<void, E>
+  /** Runs one serialized operation after current execution becomes idle. */
+  readonly exclusive: (key: Key, operation: Effect.Effect<void, E>) => Effect.Effect<void, E>
   /** Registers one coalesced follow-up after newly recorded work. */
   readonly wake: (key: Key) => Effect.Effect<void>
   /** Stops active execution and waits for its cleanup. */
@@ -34,11 +38,17 @@ export const make = <Key, E>(options: {
       stopping: false,
     })
 
-    const start = (key: Key, entry: Entry<E>, force: boolean, successor = false) => {
+    const start = (
+      key: Key,
+      entry: Entry<E>,
+      force: boolean,
+      successor = false,
+      operation?: Effect.Effect<void, E>,
+    ) => {
       const ready = Deferred.makeUnsafe<void>()
       const owner = fork(
         (successor ? Effect.yieldNow : Deferred.await(ready)).pipe(
-          Effect.andThen(Effect.suspend(() => options.drain(key, force))),
+          Effect.andThen(operation ?? Effect.suspend(() => options.drain(key, force))),
           Effect.onExit((exit) => Effect.sync(() => settle(key, entry, exit))),
           Effect.exit,
           Effect.asVoid,
@@ -78,6 +88,23 @@ export const make = <Key, E>(options: {
         return restore(Deferred.await(next.done))
       })
 
+    const wait = (key: Key): Effect.Effect<void, E> =>
+      Effect.suspend(() => {
+        const entry = active.get(key)
+        return entry === undefined ? Effect.void : Deferred.await(entry.done)
+      })
+
+    const exclusive = (key: Key, operation: Effect.Effect<void, E>): Effect.Effect<void, E> =>
+      Effect.uninterruptibleMask((restore) => {
+        const entry = active.get(key)
+        if (entry !== undefined) return restore(Deferred.await(entry.done).pipe(Effect.andThen(exclusive(key, operation))))
+
+        const next = makeEntry()
+        active.set(key, next)
+        start(key, next, false, false, operation)
+        return restore(Deferred.await(next.done))
+      })
+
     const wake = (key: Key) =>
       Effect.sync(() => {
         const entry = active.get(key)
@@ -100,5 +127,5 @@ export const make = <Key, E>(options: {
         return Fiber.interrupt(entry.owner)
       })
 
-    return { active: Effect.sync(() => new Set(active.keys())), run, wake, interrupt }
+    return { active: Effect.sync(() => new Set(active.keys())), run, wait, exclusive, wake, interrupt }
   })

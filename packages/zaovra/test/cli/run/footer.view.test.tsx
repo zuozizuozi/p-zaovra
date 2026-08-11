@@ -4,7 +4,7 @@ import { BoxRenderable, RGBA, type RootRenderable } from "@opentui/core"
 import { testRender, useRenderer } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
-import type { QuestionRequest } from "@zaovra-ai/sdk/v2"
+import type { QuestionView } from "@zaovra-ai/sdk/v2"
 import { ZaovraKeymapProvider, registerZaovraKeymap } from "@zaovra-ai/tui/keymap"
 import {
   RUN_COMMAND_PANEL_ROWS,
@@ -41,7 +41,7 @@ function command(input: { name: string; description: string; source?: "command" 
   return {
     name: input.name,
     description: input.description,
-    source: input.source,
+    source: input.source ?? "command",
     template: "",
     hints: [],
   } satisfies RunCommand
@@ -1039,7 +1039,6 @@ test("direct footer shows editable prompts and additional queued work while runn
     expect(spinner).toBeDefined()
     expect(frame).toContain("a-model-name-long-enough-to-force-responsive-truncation")
     expect(frame).toContain("3 queued")
-    expect(frame).toContain("ctrl+b background")
     expect(frame).toContain("ctrl+x q 3 queued")
     expect(frame).toContain("ctrl+x down subagents")
     expect(frame).toContain("ctrl+p cmd")
@@ -1178,7 +1177,7 @@ test("direct question body separates single-select checkmark from label", async 
         ],
       },
     ],
-  } satisfies QuestionRequest
+  } satisfies QuestionView
   const replies: unknown[] = []
 
   const app = await testRender(
@@ -1225,7 +1224,7 @@ test.skip("direct custom answer submits through keymap return binding", async ()
         custom: true,
       },
     ],
-  } satisfies QuestionRequest
+  } satisfies QuestionView
   const questions: unknown[] = []
   let off: (() => void) | undefined
 

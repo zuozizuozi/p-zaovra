@@ -1,28 +1,30 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, unlink } from "fs/promises"
+import { mkdir } from "fs/promises"
 import path from "path"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
-import { Effect, Layer } from "effect"
+import { Effect } from "effect"
 import { ModelsDev } from "@zaovra-ai/core/models-dev"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { CrossSpawnSpawner } from "@zaovra-ai/core/cross-spawn-spawner"
 import { Global } from "@zaovra-ai/core/global"
 import { disposeAllInstances, provideInstanceEffect, tmpdirScoped, TestInstance } from "../fixture/fixture"
 import { markPluginDependenciesReady } from "../fixture/plugin"
-import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin/index"
 import { Provider } from "@/provider/provider"
 
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Filesystem } from "@/util/filesystem"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
+import { Integration } from "@zaovra-ai/core/integration"
+import { Location } from "@zaovra-ai/core/location"
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
 
 const originalEnv = new Map<string, string | undefined>()
 
@@ -66,12 +68,15 @@ const providerLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       FSUtil.node,
       Env.node,
       Config.node,
-      Auth.node,
       Plugin.node,
       ModelsDev.node,
       RuntimeFlags.node,
+      LocationServiceMap.node,
     ]),
-    [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
+    [
+      [RuntimeFlags.node, RuntimeFlags.layer(flags)],
+      [LocationServiceMap.node, locationServiceMapLayer],
+    ],
   )
 
 const list = Provider.use.list()
@@ -84,7 +89,7 @@ const paid = (providers: Record<string, { models: Record<string, { cost: { input
 
 const languageBaseURL = (language: unknown) => (language as { config: { baseURL: string } }).config.baseURL
 
-const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node])))
+const it = testEffect(providerLayer())
 const experimentalModels = testEffect(providerLayer({ enableExperimentalModels: true }))
 
 const alphaProviderConfig = {
@@ -1909,8 +1914,9 @@ it.instance(
 // Tests that need plugin file setup or multi-instance flows fall back to a
 // scoped tmpdir + provideInstance pattern via it.effect.
 
-const instanceStoreLayer = LayerNode.compile(InstanceStore.node, [
+const instanceStoreLayer = LayerNode.compile(LayerNode.group([InstanceStore.node, LocationServiceMap.node]), [
   [InstanceStore.bootstrapNode, InstanceBootstrap.node],
+  [LocationServiceMap.node, locationServiceMapLayer],
 ])
 const provideMultiInstance = <A, E, R>(eff: Effect.Effect<A, E, R>) =>
   eff.pipe(Effect.provide(instanceStoreLayer), Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)))
@@ -2005,7 +2011,7 @@ it.instance(
   }),
 )
 
-it.effect("zaovra loader keeps paid models when config apiKey is present", () =>
+it.effect("zaovra loader requires a configured apiKey", () =>
   Effect.gen(function* () {
     const noneDir = yield* tmpdirScoped()
     const keyedDir = yield* tmpdirScoped({
@@ -2018,15 +2024,15 @@ it.effect("zaovra loader keeps paid models when config apiKey is present", () =>
         .pipe(provideInstanceEffect(directory))
         .pipe(Effect.provide(instanceStoreLayer), Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)))
 
-    const none = paid(yield* listIn(noneDir))
+    const none = yield* listIn(noneDir)
     const keyedCount = paid(yield* listIn(keyedDir))
 
-    expect(none).toBe(0)
+    expect(none[ProviderV2.ID.zaovra]).toBeUndefined()
     expect(keyedCount).toBeGreaterThan(0)
   }).pipe(provideMultiInstance),
 )
 
-it.effect("zaovra loader keeps paid models when auth exists", () =>
+it.effect("zaovra loader accepts a V2 credential", () =>
   Effect.gen(function* () {
     const noneDir = yield* tmpdirScoped()
     const keyedDir = yield* tmpdirScoped()
@@ -2037,23 +2043,24 @@ it.effect("zaovra loader keeps paid models when auth exists", () =>
         .pipe(provideInstanceEffect(directory))
         .pipe(Effect.provide(instanceStoreLayer), Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)))
 
-    const none = paid(yield* listIn(noneDir))
-
-    const authPath = path.join(Global.Path.data, "auth.json")
-    const original = yield* Effect.promise(() => Filesystem.readText(authPath).catch(() => undefined))
-
-    yield* Effect.acquireRelease(
-      Effect.promise(() => Filesystem.write(authPath, JSON.stringify({ zaovra: { type: "api", key: "test-key" } }))),
-      () =>
-        Effect.promise(async () => {
-          if (original !== undefined) await Filesystem.write(authPath, original)
-          else await unlink(authPath).catch(() => undefined)
-        }),
+    const none = yield* listIn(noneDir)
+    yield* Effect.gen(function* () {
+      const locations = yield* LocationServiceMap.Service
+      const integrations = yield* Integration.Service.pipe(
+        Effect.provide(
+          locations.get(Location.Ref.make({ directory: AbsolutePath.make(keyedDir) })),
+        ),
+      )
+      yield* integrations.connection.key({ integrationID: Integration.ID.make("zaovra"), key: "test-key" })
+    }).pipe(
+      provideInstanceEffect(keyedDir),
+      Effect.provide(instanceStoreLayer),
+      Effect.provide(AppNodeBuilder.build(CrossSpawnSpawner.node)),
     )
 
     const keyedCount = paid(yield* listIn(keyedDir))
 
-    expect(none).toBe(0)
+    expect(none[ProviderV2.ID.zaovra]).toBeUndefined()
     expect(keyedCount).toBeGreaterThan(0)
   }).pipe(provideMultiInstance),
 )

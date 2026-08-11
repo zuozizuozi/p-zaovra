@@ -21,6 +21,8 @@ import { Model } from "@zaovra-ai/schema/model"
 import { Location } from "@zaovra-ai/schema/location"
 import { Revert } from "@zaovra-ai/schema/revert"
 import { SessionEvent } from "@zaovra-ai/schema/session-event"
+import { SessionTodo } from "@zaovra-ai/schema/session-todo"
+import { Event } from "@zaovra-ai/schema/event"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -31,6 +33,7 @@ const SessionsQueryFields = {
     description: "Session order for the first page. Use desc for newest first or asc for oldest first.",
   }),
   search: Schema.optional(Schema.String),
+  roots: Schema.optional(Schema.Boolean),
 }
 
 const SessionsDirectoryQuery = Schema.Struct({
@@ -223,9 +226,59 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.get("session.pendingInputs", "/api/session/:sessionID/input/pending", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.Array(SessionInput.Admitted) }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.pendingInputs",
+            summary: "List pending session inputs",
+            description: "Retrieve durably admitted steer and queue inputs that have not entered a provider turn yet.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.shell", "/api/session/:sessionID/shell", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({
+          id: Event.ID.pipe(Schema.optional),
+          command: Schema.String,
+          resume: Schema.Boolean.pipe(Schema.optional),
+        }),
+        success: HttpApiSchema.NoContent,
+        error: [SessionNotFoundError, ServiceUnavailableError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.shell",
+            summary: "Run a user shell command",
+            description: "Run one explicit local command, persist its output, and optionally resume the Agent loop.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.todos", "/api/session/:sessionID/todo", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.Array(SessionTodo.Info) }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.todos",
+            summary: "List session todos",
+            description: "Retrieve the durable todo projection maintained by SessionV2 tools.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.post("session.compact", "/api/session/:sessionID/compact", {
         params: { sessionID: Session.ID },
-        success: HttpApiSchema.NoContent,
+        success: Schema.Struct({ data: Schema.Struct({ compacted: Schema.Boolean }) }),
         error: [SessionNotFoundError, ServiceUnavailableError],
       })
         .middleware(sessionLocationMiddleware)
@@ -376,4 +429,22 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         title: "sessions",
         description: "Experimental session routes.",
       }),
+    )
+    .add(
+      HttpApiEndpoint.patch("session.update", "/api/session/:sessionID", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({
+          title: Schema.String.pipe(Schema.optional),
+          archived: Schema.Boolean.pipe(Schema.optional),
+        }),
+        success: Schema.Struct({ data: Session.Info }),
+        error: SessionNotFoundError,
+      }).annotateMerge(OpenApi.annotations({ identifier: "v2.session.update", summary: "Update session" })),
+    )
+    .add(
+      HttpApiEndpoint.delete("session.remove", "/api/session/:sessionID", {
+        params: { sessionID: Session.ID },
+        success: HttpApiSchema.NoContent,
+        error: SessionNotFoundError,
+      }).annotateMerge(OpenApi.annotations({ identifier: "v2.session.remove", summary: "Delete session" })),
     )

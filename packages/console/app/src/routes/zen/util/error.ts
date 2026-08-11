@@ -1,4 +1,5 @@
 export class AuthError extends Error {}
+export class SubscriptionRequiredError extends Error {}
 export class CreditsError extends Error {}
 export class MonthlyLimitError extends Error {}
 export class UserLimitError extends Error {}
@@ -13,7 +14,6 @@ class LimitError extends Error {
   }
 }
 export class RateLimitError extends LimitError {}
-export class FreeUsageLimitError extends LimitError {}
 export class BlackUsageLimitError extends LimitError {}
 
 type LimitName = "5 hour" | "weekly" | "monthly"

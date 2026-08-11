@@ -54,7 +54,7 @@ export class Handler {
     if (!session) return
 
     if (!this.input.connection.requestPermission) {
-      await this.reply(permission.id, "reject", session.cwd)
+      await this.reply(permission.sessionID, permission.id, "reject")
       return
     }
 
@@ -69,7 +69,7 @@ export class Handler {
         options: permissionOptions,
       })
       .catch(async () => {
-        await this.reply(permission.id, "reject", session.cwd)
+        await this.reply(permission.sessionID, permission.id, "reject")
         return undefined
       })
 
@@ -77,7 +77,7 @@ export class Handler {
 
     const reply = selectedReply(result)
     if (reply !== "once" && reply !== "always") {
-      await this.reply(permission.id, "reject", session.cwd)
+      await this.reply(permission.sessionID, permission.id, "reject")
       return
     }
 
@@ -85,14 +85,14 @@ export class Handler {
       await this.writeProposedEdit(session.id, permission.metadata).catch(() => {})
     }
 
-    await this.reply(permission.id, reply, session.cwd)
+    await this.reply(permission.sessionID, permission.id, reply)
   }
 
-  private async reply(requestID: string, reply: Reply, directory: string) {
-    await this.input.sdk.permission.reply({
+  private async reply(sessionID: string, requestID: string, reply: Reply) {
+    await this.input.sdk.v2.session.permission.reply({
+      sessionID,
       requestID,
       reply,
-      directory,
     })
   }
 

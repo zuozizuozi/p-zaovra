@@ -33,7 +33,7 @@ describe("v2 SDK error shape", () => {
 
     let caught: unknown
     try {
-      await sdk.session.get({ sessionID: "ses_no_such" }, { throwOnError: true })
+      await sdk.v2.session.get({ sessionID: "ses_no_such" }, { throwOnError: true })
     } catch (e) {
       caught = e
     }
@@ -44,8 +44,8 @@ describe("v2 SDK error shape", () => {
     expect(err.message).toContain("Session not found")
     expect(cause.status).toBe(404)
     expect(cause.body).toMatchObject({
-      name: "NotFoundError",
-      data: { message: expect.stringContaining("Session not found") },
+      _tag: "SessionNotFoundError",
+      message: expect.stringContaining("Session not found"),
     })
   })
 

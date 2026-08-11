@@ -14,7 +14,7 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal } from "solid-js"
-import type { PermissionRequest } from "@zaovra-ai/sdk/v2"
+import type { PermissionView } from "@zaovra-ai/sdk/v2"
 import {
   createPermissionBodyState,
   permissionAlwaysLines,
@@ -130,7 +130,7 @@ export function RejectField(props: {
 }
 
 export function RunPermissionBody(props: {
-  request: PermissionRequest
+  request: PermissionView
   theme: RunFooterTheme
   block: RunBlockTheme
   diffStyle?: RunDiffStyle

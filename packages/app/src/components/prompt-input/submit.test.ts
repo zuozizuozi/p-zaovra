@@ -63,6 +63,36 @@ const prompt = {
 const clientFor = (directory: string) => {
   createdClients.push(directory)
   return {
+    v2: {
+      session: {
+        create: async () => {
+          await createSessionGate
+          createdSessions.push(directory)
+          const id = `session-${createdSessions.length}`
+          return {
+            data: {
+              data: {
+                id,
+                projectID: "project",
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: 1, updated: 1 },
+                title: `New session ${createdSessions.length}`,
+                location: { directory },
+              },
+            },
+          }
+        },
+        switchAgent: async () => ({ data: undefined }),
+        switchModel: async () => ({ data: undefined }),
+        prompt: async () => ({ data: undefined }),
+        shell: async () => {
+          sentShell.push(directory)
+          return { data: undefined }
+        },
+        interrupt: async () => ({ data: undefined }),
+      },
+    },
     session: {
       create: async () => {
         await createSessionGate
@@ -487,7 +517,7 @@ describe("prompt submit worktree selection", () => {
 
     await submit.handleSubmit(event)
 
-    expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
+    expect(storedSessions["/repo/worktree-a"]).toMatchObject([{ id: "session-1", title: "New session 1" }])
     expect(optimisticSeeded).toEqual([true])
   })
 })

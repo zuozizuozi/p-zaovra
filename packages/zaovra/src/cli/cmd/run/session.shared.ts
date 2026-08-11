@@ -5,10 +5,11 @@
 // the current model so the footer can pre-select it.
 import { promptCopy, promptSame } from "./prompt.shared"
 import type { RunInput, RunPrompt } from "./types"
+import type { Message, Part } from "@zaovra-ai/sdk/v2"
 
 const LIMIT = 200
 
-export type SessionMessages = NonNullable<Awaited<ReturnType<RunInput["sdk"]["session"]["messages"]>>["data"]>
+export type SessionMessages = Array<{ info: Message; parts: Part[] }>
 
 type Turn = {
   prompt: RunPrompt
@@ -153,11 +154,56 @@ export function createSession(messages: SessionMessages): RunSession {
 }
 
 export async function resolveSession(sdk: RunInput["sdk"], sessionID: string, limit = LIMIT): Promise<RunSession> {
-  const response = await sdk.session.messages({
-    sessionID,
-    limit,
+  const [messages, session] = await Promise.all([
+    sdk.v2.session.messages({ sessionID, limit, order: "asc" }),
+    sdk.v2.session.get({ sessionID }),
+  ])
+  const model = session.data?.data.model
+  const adapted: SessionMessages = (messages.data?.data ?? []).flatMap((message) => {
+    if (message.type !== "user") return []
+    return [
+      {
+        info: {
+          id: message.id,
+          sessionID,
+          role: "user" as const,
+          time: message.time,
+          agent: session.data?.data.agent ?? "build",
+          model: {
+            providerID: model?.providerID ?? "unknown",
+            modelID: model?.id ?? "unknown",
+            variant: model?.variant,
+          },
+        },
+        parts: [
+          ...(message.text
+            ? [{ id: `${message.id}:text`, sessionID, messageID: message.id, type: "text" as const, text: message.text }]
+            : []),
+          ...(message.files ?? []).map((file, index) => ({
+            id: `${message.id}:file:${index}`,
+            sessionID,
+            messageID: message.id,
+            type: "file" as const,
+            mime: file.mime,
+            filename: file.name,
+            url: file.uri,
+            source: file.source
+              ? { type: "file" as const, path: file.name ?? file.uri, text: { value: file.source.text, start: file.source.start, end: file.source.end } }
+              : undefined,
+          })),
+          ...(message.agents ?? []).map((agent, index) => ({
+            id: `${message.id}:agent:${index}`,
+            sessionID,
+            messageID: message.id,
+            type: "agent" as const,
+            name: agent.name,
+            source: agent.source ? { value: agent.source.text, start: agent.source.start, end: agent.source.end } : undefined,
+          })),
+        ],
+      },
+    ]
   })
-  return createSession(response.data ?? [])
+  return createSession(adapted)
 }
 
 export function sessionHistory(session: RunSession, limit = LIMIT): RunPrompt[] {

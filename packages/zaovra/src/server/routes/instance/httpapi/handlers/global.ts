@@ -13,11 +13,11 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
 
-function eventData(data: unknown): Sse.Event {
+export function eventData(data: GlobalBusEvent): Sse.Event {
   return {
     _tag: "Event",
     event: "message",
-    id: undefined,
+    id: data.payload.id,
     data: JSON.stringify(data),
   }
 }
@@ -30,26 +30,35 @@ function parseBody(body: string) {
   }
 }
 
-function eventResponse() {
+function eventResponse(lastEventID?: string) {
   return Effect.gen(function* () {
     yield* Effect.logInfo("global event connected")
-    const events = Stream.callback<GlobalBusEvent>((queue) => {
-      const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
-      return Effect.acquireRelease(
-        Effect.sync(() => GlobalBus.on("event", handler)),
-        () => Effect.sync(() => GlobalBus.off("event", handler)),
-      )
-    })
+    const events = Stream.unwrap(
+      Effect.gen(function* () {
+        const queue = yield* Queue.unbounded<GlobalBusEvent>()
+        const replay = GlobalBus.replayAfter(lastEventID)
+        const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
+        GlobalBus.on("event", handler)
+        yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", handler)))
+        replay.events.forEach((event) => Queue.offerUnsafe(queue, event))
+        return Stream.make({
+          payload: {
+            id: EventV2.ID.create(),
+            type: "server.connected",
+            properties: { replay: replay.complete ? "applied" : lastEventID ? "reset" : "initial" },
+          },
+        }).pipe(Stream.concat(Stream.fromQueue(queue)))
+      }),
+    )
+    const output = events.pipe(Stream.map(eventData), Stream.pipeThroughChannel(Sse.encode()))
     const heartbeat = Stream.tick("10 seconds").pipe(
       Stream.drop(1),
-      Stream.map(() => ({ payload: { id: EventV2.ID.create(), type: "server.heartbeat", properties: {} } })),
+      Stream.map(() => ": heartbeat\n\n"),
     )
 
     return HttpServerResponse.stream(
-      Stream.make({ payload: { id: EventV2.ID.create(), type: "server.connected", properties: {} } }).pipe(
-        Stream.concat(events.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
-        Stream.map(eventData),
-        Stream.pipeThroughChannel(Sse.encode()),
+      output.pipe(
+        Stream.merge(heartbeat, { haltStrategy: "left" }),
         Stream.encodeText,
         Stream.ensuring(Effect.logInfo("global event disconnected")),
       ),
@@ -76,7 +85,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {
-      return yield* eventResponse()
+      const request = yield* HttpServerRequest.HttpServerRequest
+      return yield* eventResponse(request.headers["last-event-id"])
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {

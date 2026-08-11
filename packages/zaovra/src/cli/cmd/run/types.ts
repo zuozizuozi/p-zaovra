@@ -11,7 +11,16 @@
 //     → stream.ts bridges to footer API
 //       → footer.ts queues commits and patches the footer view
 //         → OpenTUI split-footer renderer writes to terminal
-import type { ZaovraClient, PermissionRequest, QuestionRequest, ToolPart } from "@zaovra-ai/sdk/v2"
+import type {
+  AgentPart,
+  FilePart,
+  PermissionV2Reply,
+  PermissionView,
+  QuestionV2Reply,
+  QuestionView,
+  ToolPart,
+  ZaovraClient,
+} from "@zaovra-ai/sdk/v2"
 import type { TuiConfig } from "@zaovra-ai/tui/config"
 
 export type RunFilePart = {
@@ -21,12 +30,21 @@ export type RunFilePart = {
   mime: string
 }
 
-type PromptModel = Parameters<ZaovraClient["session"]["prompt"]>[0]["model"]
-type PromptInput = Parameters<ZaovraClient["session"]["prompt"]>[0]
+type PromptModel = {
+  providerID: string
+  modelID: string
+}
 
-export type RunPromptPart = NonNullable<PromptInput["parts"]>[number]
+export type RunPromptPart =
+  | Omit<FilePart, "id" | "sessionID" | "messageID">
+  | Omit<AgentPart, "id" | "sessionID" | "messageID">
 
-export type RunCommand = NonNullable<Awaited<ReturnType<ZaovraClient["command"]["list"]>>["data"]>[number]
+type RunCommandV2 = NonNullable<Awaited<ReturnType<ZaovraClient["v2"]["command"]["list"]>>["data"]>["data"][number]
+export type RunCommand = Omit<RunCommandV2, "model"> & {
+  model?: string
+  source: "command" | "mcp" | "skill"
+  hints: string[]
+}
 
 export type RunProvider = NonNullable<Awaited<ReturnType<ZaovraClient["provider"]["list"]>>["data"]>["all"][number]
 
@@ -50,7 +68,7 @@ export type FooterQueuedPrompt = {
 
 export type RunAgent = NonNullable<Awaited<ReturnType<ZaovraClient["app"]["agents"]>>["data"]>[number]
 
-type RunResourceMap = NonNullable<Awaited<ReturnType<ZaovraClient["experimental"]["resource"]["list"]>>["data"]>
+type RunResourceMap = NonNullable<Awaited<ReturnType<ZaovraClient["v2"]["mcp"]["resources"]>>["data"]>["data"]
 
 export type RunResource = RunResourceMap[string]
 
@@ -172,8 +190,8 @@ export type RunEntryBody =
 // "prompt".
 export type FooterView =
   | { type: "prompt" }
-  | { type: "permission"; request: PermissionRequest }
-  | { type: "question"; request: QuestionRequest }
+  | { type: "permission"; request: PermissionView }
+  | { type: "question"; request: QuestionView }
 
 export type FooterPromptRoute =
   | { type: "composer" }
@@ -206,8 +224,8 @@ export type FooterSubagentDetail = {
 export type FooterSubagentState = {
   tabs: FooterSubagentTab[]
   details: Record<string, FooterSubagentDetail>
-  permissions: PermissionRequest[]
-  questions: QuestionRequest[]
+  permissions: PermissionView[]
+  questions: QuestionView[]
 }
 
 // The reducer emits this alongside scrollback commits so the footer can update in the same frame.
@@ -280,11 +298,20 @@ export type FooterEvent =
       state: FooterSubagentState
     }
 
-export type PermissionReply = Parameters<ZaovraClient["permission"]["reply"]>[0]
+export type PermissionReply = {
+  requestID: string
+  reply?: PermissionV2Reply
+  message?: string
+}
 
-export type QuestionReply = Parameters<ZaovraClient["question"]["reply"]>[0]
+export type QuestionReply = {
+  requestID: string
+  answers: QuestionV2Reply["answers"]
+}
 
-export type QuestionReject = Parameters<ZaovraClient["question"]["reject"]>[0]
+export type QuestionReject = {
+  requestID: string
+}
 
 export type RunTuiConfig = Pick<TuiConfig.Resolved, "keybinds" | "leader_timeout" | "diff_style">
 

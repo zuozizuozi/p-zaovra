@@ -4,7 +4,7 @@ import { Cause, Duration, Effect, Layer, Option, Schedule, Context } from "effec
 import path from "path"
 import type { Agent } from "../agent/agent"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
-import { evaluate } from "@/permission/evaluate"
+import { PermissionRules } from "@/permission"
 import { Config } from "@/config/config"
 import { Identifier } from "../id/id"
 import { ToolID } from "./schema"
@@ -27,7 +27,7 @@ export interface Options {
 
 function hasTaskTool(agent?: Agent.Info) {
   if (!agent?.permission) return false
-  return evaluate("task", "*", agent.permission).action !== "deny"
+  return PermissionRules.evaluate("task", "*", agent.permission).effect !== "deny"
 }
 
 export interface Interface {

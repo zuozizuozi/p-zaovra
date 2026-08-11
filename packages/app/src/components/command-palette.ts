@@ -1,5 +1,5 @@
 import { getFilename } from "@zaovra-ai/core/util/path"
-import type { GlobalSession, Project } from "@zaovra-ai/sdk/v2/client"
+import type { Project, Session } from "@zaovra-ai/sdk/v2/client"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { createMemo, onCleanup } from "solid-js"
 import { commandPaletteOptions, useCommand, type CommandOption } from "@/context/command"
@@ -13,6 +13,7 @@ import { useTabs } from "@/context/tabs"
 import { displayName, projectForSession } from "@/pages/layout/helpers"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { listV2Sessions } from "@/context/v2-session-list"
 
 export type CommandPaletteEntry = {
   id: string
@@ -145,7 +146,7 @@ export function createCommandPaletteModel(props: { filesOnly?: () => boolean; on
     opened: serverCtx.projects.list,
     stored: () => serverCtx.sync.data.project,
     load: (search, signal) =>
-      serverSDK.client.experimental.session.list({ roots: true, search, limit: 50 }, { signal }),
+      listV2Sessions(serverSDK.client, { roots: true, search, limit: 50, order: "desc" }, { signal }),
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
   })
@@ -219,7 +220,7 @@ export function createServerSessionEntries(props: {
   server: ServerConnection.Key
   opened: () => LocalProject[]
   stored: () => Project[]
-  load: (search: string, signal: AbortSignal) => Promise<{ data?: GlobalSession[] }>
+  load: (search: string, signal: AbortSignal) => Promise<{ data?: Session[] }>
   untitled: () => string
   category: () => string
 }) {
@@ -264,7 +265,7 @@ export function createServerSessionEntries(props: {
               id: `session:${props.server}:${session.id}`,
               type: "session" as const,
               title: session.title || props.untitled(),
-              description: project ? displayName(project) : session.project?.name || getFilename(session.directory),
+              description: project ? displayName(project) : getFilename(session.directory),
               category: props.category(),
               directory: session.directory,
               sessionID: session.id,
