@@ -42,7 +42,7 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { CommandProvider, useCommand, type CommandOption } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
-import { ServerSDKProvider } from "@/context/server-sdk"
+import { ServerSDKProvider, useServerSDK } from "@/context/server-sdk"
 import { ServerSyncProvider, useServerSync } from "@/context/server-sync"
 import { GlobalProvider, useGlobal } from "@/context/global"
 import { HighlightsProvider } from "@/context/highlights"
@@ -122,7 +122,9 @@ function TargetServerRoute(props: ParentProps) {
     // re-resolves reactively instead); both rely on this key for server changes.
     <Show when={requireServerKey(params.serverKey)} keyed>
       <ServerSDKProvider server={conn}>
-        <ServerSyncProvider server={conn}>{props.children}</ServerSyncProvider>
+        <AccountGate>
+          <ServerSyncProvider server={conn}>{props.children}</ServerSyncProvider>
+        </AccountGate>
       </ServerSDKProvider>
     </Show>
   )
@@ -169,7 +171,9 @@ function SelectedServerProviders(props: ParentProps) {
   return (
     <ServerKey>
       <ServerSDKProvider>
-        <ServerSyncProvider>{props.children}</ServerSyncProvider>
+        <AccountGate>
+          <ServerSyncProvider>{props.children}</ServerSyncProvider>
+        </AccountGate>
       </ServerSDKProvider>
     </ServerKey>
   )
@@ -216,17 +220,19 @@ function ResolvedDraftRoute(props: { draft: DraftTab }) {
   return (
     <Show when={`${props.draft.server}\0${props.draft.directory}`} keyed>
       <ServerSDKProvider server={conn}>
-        <ServerSyncProvider server={conn}>
-          <ModelsProvider directory={directory}>
-            <SDKProvider directory={directory}>
-              <DirectoryDataProvider directory={directory} server={serverKey}>
-                <DraftProviders>
-                  <NewSession />
-                </DraftProviders>
-              </DirectoryDataProvider>
-            </SDKProvider>
-          </ModelsProvider>
-        </ServerSyncProvider>
+        <AccountGate>
+          <ServerSyncProvider server={conn}>
+            <ModelsProvider directory={directory}>
+              <SDKProvider directory={directory}>
+                <DirectoryDataProvider directory={directory} server={serverKey}>
+                  <DraftProviders>
+                    <NewSession />
+                  </DraftProviders>
+                </DirectoryDataProvider>
+              </SDKProvider>
+            </ModelsProvider>
+          </ServerSyncProvider>
+        </AccountGate>
       </ServerSDKProvider>
     </Show>
   )
@@ -290,6 +296,121 @@ function SharedProviders(props: ParentProps) {
         <HighlightsProvider>{props.children}</HighlightsProvider>
       </CommandProvider>
     </>
+  )
+}
+
+function AccountGate(props: ParentProps) {
+  const serverSDK = useServerSDK()
+  const platform = usePlatform()
+  const [state, setState] = createSignal<
+    | { status: "idle" | "starting" | "error"; message?: string }
+    | {
+        status: "authorizing"
+        login: {
+          deviceCode: string
+          userCode: string
+          verificationUrl: string
+          server: string
+          expiresInMs: number
+          intervalMs: number
+        }
+      }
+  >({ status: "idle" })
+  const [account, { refetch }] = createResource(
+    () => serverSDK().scope,
+    () =>
+      serverSDK()
+        .client.experimental.console.get({}, { throwOnError: true })
+      .then((result) => result.data),
+  )
+  const authorization = createMemo(() => {
+    const current = state()
+    return current.status === "authorizing" ? current.login : undefined
+  })
+  const error = createMemo(() => {
+    const current = state()
+    return current.status === "error" ? current.message : undefined
+  })
+  let stopped = false
+  onCleanup(() => {
+    stopped = true
+  })
+
+  const begin = async () => {
+    setState({ status: "starting" })
+    const result = await serverSDK()
+      .client.experimental.consoleLogin({}, { throwOnError: true })
+      .then((response) => response.data)
+      .catch(() => undefined)
+    if (!result) {
+      setState({ status: "error", message: "Could not start Zaovra sign-in. Check your connection and try again." })
+      return
+    }
+
+    setState({ status: "authorizing", login: result })
+    platform.openLink(result.verificationUrl)
+    const poll = async () => {
+      if (stopped) return
+      const response = await serverSDK()
+        .client.experimental.consoleLoginPoll(result, { throwOnError: true })
+        .then((value) => value.data)
+        .catch(() => undefined)
+      if (!response) {
+        setState({ status: "error", message: "Sign-in status could not be checked. Please try again." })
+        return
+      }
+      if (response.status === "success") {
+        await refetch()
+        return
+      }
+      if (response.status === "expired" || response.status === "denied" || response.status === "error") {
+        setState({ status: "error", message: `Sign-in ${response.status}. Please start again.` })
+        return
+      }
+      window.setTimeout(poll, response.status === "slow" ? result.intervalMs + 5_000 : result.intervalMs)
+    }
+    window.setTimeout(poll, result.intervalMs)
+  }
+
+  return (
+    <Show
+      when={account()?.activeOrgName}
+      fallback={
+        <div class="min-h-screen w-full bg-surface-base flex items-center justify-center p-6">
+          <div class="w-full max-w-md border border-border-weak-base rounded-xl bg-surface-raised-base p-8 shadow-xl">
+            <div class="text-12-medium tracking-[0.12em] uppercase text-text-weak mb-5">Zaovra account</div>
+            <h1 class="text-24-semibold text-text-strong mb-3">Sign in before you start coding.</h1>
+            <p class="text-14-regular text-text-base leading-6 mb-6">
+              A Zaovra account is required for every desktop session. You can still use your own model keys without a paid membership.
+            </p>
+            <Show when={account.loading}>
+              <p class="text-14-regular text-text-weak">Checking account…</p>
+            </Show>
+            <Show when={!account.loading && state().status === "authorizing"}>
+              <div class="rounded-lg border border-border-weak-base bg-surface-base p-4 mb-4">
+                <p class="text-12-regular text-text-weak mb-2">Enter this code in the browser</p>
+                <p class="font-mono text-20-semibold tracking-[0.18em] text-text-strong">
+                  {authorization()?.userCode}
+                </p>
+              </div>
+              <button class="w-full rounded-md bg-text-strong text-surface-base px-4 py-3" onClick={() => authorization() && platform.openLink(authorization()!.verificationUrl)}>
+                Reopen sign-in page
+              </button>
+            </Show>
+            <Show when={!account.loading && state().status !== "authorizing"}>
+              <Show when={state().status === "error"}>
+                <p class="text-13-regular text-icon-critical-base mb-4">{error()}</p>
+              </Show>
+              <button class="w-full rounded-md bg-text-strong text-surface-base px-4 py-3 disabled:opacity-50" disabled={state().status === "starting"} onClick={begin}>
+                {state().status === "starting" ? "Starting sign-in…" : "Continue to sign in"}
+              </button>
+            </Show>
+          </div>
+        </div>
+      }
+    >
+      {props.children}
+    </Show>
   )
 }
 

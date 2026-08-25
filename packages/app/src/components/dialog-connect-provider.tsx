@@ -234,7 +234,7 @@ function ProviderPickerV2(props: {
     active: undefined as string | undefined,
     connecting: undefined as string | undefined,
   })
-  const featured = ["zaovra", "zaovra-go", "anthropic", "openai", "google", "openrouter", "vercel"]
+  const featured = ["zaovra", "anthropic", "openai", "google", "openrouter", "vercel"]
   const custom = () => ({ id: CUSTOM_ID, name: language.t("dialog.provider.custom.label") })
   const all = createMemo(() => {
     language.locale()
@@ -879,7 +879,7 @@ function ProviderConnection(props: {
               <div>
                 {language.t("provider.connect.zaovraZen.visit.prefix")}
                 <Link
-                  href="https://zaovra.com/zen"
+                  href="https://zaovra.com/pricing"
                   class="text-v2-text-text-base focus-visible:rounded-xs focus-visible:outline-2 focus-visible:outline-v2-border-border-focus"
                 >
                   {language.t("provider.connect.zaovraZen.visit.link")}
@@ -927,7 +927,7 @@ function ProviderConnection(props: {
               <div class="text-14-regular text-text-base">{language.t("provider.connect.zaovraZen.line2")}</div>
               <div class="text-14-regular text-text-base">
                 {language.t("provider.connect.zaovraZen.visit.prefix")}
-                <Link href="https://zaovra.com/zen" tabIndex={-1}>
+                <Link href="https://zaovra.com/pricing" tabIndex={-1}>
                   {language.t("provider.connect.zaovraZen.visit.link")}
                 </Link>
                 {language.t("provider.connect.zaovraZen.visit.suffix")}

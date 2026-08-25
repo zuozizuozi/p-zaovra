@@ -1,5 +1,5 @@
 import type { APIEvent } from "@solidjs/start/server"
-import { and, Database, eq, isNull, lt, or, sql } from "@zaovra-ai/console-core/drizzle/index.js"
+import { and, Database, eq, gt, isNull, lt, or, sql } from "@zaovra-ai/console-core/drizzle/index.js"
 import { KeyTable } from "@zaovra-ai/console-core/schema/key.sql.js"
 import { BillingTable, LiteTable, SubscriptionTable, UsageTable } from "@zaovra-ai/console-core/schema/billing.sql.js"
 import { centsToMicroCents } from "@zaovra-ai/console-core/util/price.js"
@@ -13,6 +13,7 @@ import { Subscription } from "@zaovra-ai/console-core/subscription.js"
 import { BlackData } from "@zaovra-ai/console-core/black.js"
 import { UserTable } from "@zaovra-ai/console-core/schema/user.sql.js"
 import { ModelTable } from "@zaovra-ai/console-core/schema/model.sql.js"
+import { AuthStorageTable } from "@zaovra-ai/console-core/schema/auth-storage.sql.js"
 import { ProviderTable } from "@zaovra-ai/console-core/schema/provider.sql.js"
 import { logger } from "./logger"
 import {
@@ -134,7 +135,7 @@ export async function handler(
       if (!allowedRegions?.includes("unavailable"))
         throw new RegionError(
           t("zen.api.error.regionNotAllowed", {
-            consoleGoUrl: `https://zaovra.com/workspace/${authInfo.workspaceID}/go`,
+            consoleGoUrl: `https://zaovra.com/workspace/${authInfo.workspaceID}/billing`,
           }),
         )
     }
@@ -550,7 +551,7 @@ export async function handler(
       throw new ModelError(
         `${t("zen.api.error.trialEnded", {
           model: modelData.name,
-          link: "https://zaovra.com/go",
+          link: "https://zaovra.com/pricing",
         })}`,
       )
 
@@ -675,10 +676,18 @@ export async function handler(
   }
 
   async function authenticate(modelInfo: ModelInfo, zenApiKey: string) {
+    const desktopSession = await Database.use((tx) =>
+      tx
+        .select({ key: AuthStorageTable.key })
+        .from(AuthStorageTable)
+        .where(and(eq(AuthStorageTable.key, `desktop-access:${zenApiKey}`), gt(AuthStorageTable.expiry, new Date())))
+        .then((rows) => rows[0]),
+    )
     const data = await Database.use((tx) =>
       tx
         .select({
           apiKey: KeyTable.id,
+          apiKeyName: KeyTable.name,
           workspace: {
             id: WorkspaceTable.id,
             region: WorkspaceTable.region,
@@ -755,6 +764,8 @@ export async function handler(
         .where(and(eq(KeyTable.key, zenApiKey), isNull(KeyTable.timeDeleted)))
         .then((rows) => rows[0]),
     )
+    if (data?.apiKeyName === "Zaovra desktop session" && !desktopSession)
+      throw new AuthError(t("zen.api.error.invalidApiKey"))
 
     if (!data) throw new AuthError(t("zen.api.error.invalidApiKey"))
     if (
@@ -858,7 +869,7 @@ export async function handler(
     // Validate lite subscription billing
     if (opts.modelList === "lite" && authInfo.billing.lite && authInfo.lite) {
       try {
-        const consoleGoUrl = `https://zaovra.com/workspace/${authInfo.workspaceID}/go`
+        const consoleGoUrl = `https://zaovra.com/workspace/${authInfo.workspaceID}/billing`
         const sub = authInfo.lite
         const liteData = LiteData.getLimits()
 
@@ -933,7 +944,7 @@ export async function handler(
     )
     if (!subscriptionAllowsBalance) {
       throw new SubscriptionRequiredError(
-        `An active ZAOVRA subscription is required. Subscribe at https://zaovra.com/workspace/${authInfo.workspaceID}/go`,
+        `An active Zaovra membership is required. Subscribe at https://zaovra.com/pricing`,
       )
     }
 

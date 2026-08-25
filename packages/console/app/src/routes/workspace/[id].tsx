@@ -17,10 +17,7 @@ export default function WorkspaceLayout(props: RouteSectionProps) {
           <nav data-component="nav-desktop">
             <div data-component="workspace-nav-items">
               <A href={`/workspace/${params.id}`} end activeClass="active" data-nav-button>
-                {i18n.t("workspace.nav.zen")}
-              </A>
-              <A href={`/workspace/${params.id}/go`} activeClass="active" data-nav-button>
-                {i18n.t("workspace.nav.go")}
+                Overview
               </A>
               <A href={`/workspace/${params.id}/usage`} activeClass="active" data-nav-button>
                 {i18n.t("workspace.nav.usage")}
@@ -45,10 +42,7 @@ export default function WorkspaceLayout(props: RouteSectionProps) {
           <nav data-component="nav-mobile">
             <div data-component="workspace-nav-items">
               <A href={`/workspace/${params.id}`} end activeClass="active" data-nav-button>
-                {i18n.t("workspace.nav.zen")}
-              </A>
-              <A href={`/workspace/${params.id}/go`} activeClass="active" data-nav-button>
-                {i18n.t("workspace.nav.go")}
+                Overview
               </A>
               <A href={`/workspace/${params.id}/usage`} activeClass="active" data-nav-button>
                 {i18n.t("workspace.nav.usage")}

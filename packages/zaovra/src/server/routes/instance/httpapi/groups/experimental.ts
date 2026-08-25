@@ -35,6 +35,29 @@ const ConsoleOrgList = Schema.Struct({
   orgs: Schema.Array(ConsoleOrgOption),
 })
 
+const ConsoleLoginResponse = Schema.Struct({
+  deviceCode: Schema.String,
+  userCode: Schema.String,
+  verificationUrl: Schema.String,
+  server: Schema.String,
+  expiresInMs: NonNegativeInt,
+  intervalMs: NonNegativeInt,
+})
+
+export const ConsoleLoginPollPayload = Schema.Struct({
+  deviceCode: Schema.String,
+  userCode: Schema.String,
+  verificationUrl: Schema.String,
+  server: Schema.String,
+  expiresInMs: NonNegativeInt,
+  intervalMs: NonNegativeInt,
+})
+
+const ConsoleLoginPollResponse = Schema.Struct({
+  status: Schema.Literals(["pending", "slow", "expired", "denied", "success", "error"]),
+  email: Schema.optionalKey(Schema.String),
+})
+
 export const ConsoleSwitchPayload = Schema.Struct({
   accountID: AccountID,
   orgID: OrgID,
@@ -62,6 +85,8 @@ export const ExperimentalPaths = {
   console: "/experimental/console",
   consoleOrgs: "/experimental/console/orgs",
   consoleSwitch: "/experimental/console/switch",
+  consoleLogin: "/experimental/console/login",
+  consoleLoginPoll: "/experimental/console/login/poll",
   worktree: "/experimental/worktree",
   worktreeReset: "/experimental/worktree/reset",
 } as const
@@ -114,6 +139,17 @@ export const ExperimentalApi = HttpApi.make("experimental")
             description: "Persist a new active Console account/org selection for the current local Zaovra state.",
           }),
         ),
+        HttpApiEndpoint.post("consoleLogin", ExperimentalPaths.consoleLogin, {
+          query: WorkspaceRoutingQuery,
+          success: described(ConsoleLoginResponse, "Zaovra account device authorization"),
+          error: HttpApiError.InternalServerError,
+        }),
+        HttpApiEndpoint.post("consoleLoginPoll", ExperimentalPaths.consoleLoginPoll, {
+          query: WorkspaceRoutingQuery,
+          payload: ConsoleLoginPollPayload,
+          success: described(ConsoleLoginPollResponse, "Zaovra account device authorization status"),
+          error: HttpApiError.InternalServerError,
+        }),
         HttpApiEndpoint.get("worktree", ExperimentalPaths.worktree, {
           query: WorkspaceRoutingQuery,
           success: described(WorktreeList, "List of worktree directories"),

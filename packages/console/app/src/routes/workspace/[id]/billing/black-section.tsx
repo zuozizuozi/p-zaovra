@@ -1,21 +1,18 @@
-import { action, useParams, useAction, useSubmission, json, query, createAsync } from "@solidjs/router"
-import { createStore } from "solid-js/store"
-import { Show } from "solid-js"
+import { A, action, createAsync, json, query, useAction, useParams } from "@solidjs/router"
+import { Show, createSignal } from "solid-js"
 import { Billing } from "@zaovra-ai/console-core/billing.js"
-import { Database, eq, and, isNull, sql } from "@zaovra-ai/console-core/drizzle/index.js"
-import { BillingTable, SubscriptionTable } from "@zaovra-ai/console-core/schema/billing.sql.js"
 import { Actor } from "@zaovra-ai/console-core/actor.js"
-import { Subscription } from "@zaovra-ai/console-core/subscription.js"
+import { and, Database, eq, isNull } from "@zaovra-ai/console-core/drizzle/index.js"
+import { BillingTable, SubscriptionTable } from "@zaovra-ai/console-core/schema/billing.sql.js"
 import { BlackData } from "@zaovra-ai/console-core/black.js"
+import { Subscription } from "@zaovra-ai/console-core/subscription.js"
 import { withActor } from "~/context/auth.withActor"
 import { queryBillingInfo } from "../../common"
 import styles from "./black-section.module.css"
-import waitlistStyles from "./black-waitlist-section.module.css"
-import { useI18n } from "~/context/i18n"
-import { formError } from "~/lib/form-error"
-import { blackResetTimeKeys, formatResetTime } from "~/lib/format-reset-time"
 
-const querySubscription = query(async (workspaceID: string) => {
+const names = { "20": "Starter", "100": "Pro", "200": "Max" } as const
+
+const queryMembership = query(async (workspaceID: string) => {
   "use server"
   return withActor(async () => {
     const row = await Database.use((tx) =>
@@ -30,248 +27,92 @@ const querySubscription = query(async (workspaceID: string) => {
         .from(BillingTable)
         .innerJoin(SubscriptionTable, eq(SubscriptionTable.workspaceID, BillingTable.workspaceID))
         .where(and(eq(SubscriptionTable.workspaceID, Actor.workspace()), isNull(SubscriptionTable.timeDeleted)))
-        .then((r) => r[0]),
+        .then((rows) => rows[0]),
     )
     if (!row?.subscription) return null
-    const blackData = BlackData.getLimits({ plan: row.subscription.plan })
-
+    const limits = BlackData.getLimits({ plan: row.subscription.plan })
     return {
       plan: row.subscription.plan,
-      useBalance: row.subscription.useBalance ?? false,
-      rollingUsage: Subscription.analyzeRollingUsage({
-        limit: blackData.rollingLimit,
-        window: blackData.rollingWindow,
+      rolling: Subscription.analyzeRollingUsage({
+        limit: limits.rollingLimit,
+        window: limits.rollingWindow,
         usage: row.rollingUsage ?? 0,
         timeUpdated: row.timeRollingUpdated ?? new Date(),
       }),
-      weeklyUsage: Subscription.analyzeWeeklyUsage({
-        limit: blackData.fixedLimit,
+      fixed: Subscription.analyzeWeeklyUsage({
+        limit: limits.fixedLimit,
         usage: row.fixedUsage ?? 0,
         timeUpdated: row.timeFixedUpdated ?? new Date(),
       }),
     }
   }, workspaceID)
-}, "subscription.get")
+}, "membership.get")
 
-const cancelWaitlist = action(async (workspaceID: string) => {
-  "use server"
-  return json(
-    await withActor(async () => {
-      await Database.use((tx) =>
-        tx
-          .update(BillingTable)
-          .set({
-            subscriptionPlan: null,
-            timeSubscriptionBooked: null,
-            timeSubscriptionSelected: null,
-          })
-          .where(eq(BillingTable.workspaceID, workspaceID)),
-      )
-      return { error: undefined }
-    }, workspaceID).catch((e) => ({ error: e.message as string })),
-    { revalidate: [queryBillingInfo.key, querySubscription.key] },
-  )
-}, "cancelWaitlist")
-
-const enroll = action(async (workspaceID: string) => {
-  "use server"
-  return json(
-    await withActor(async () => {
-      await Billing.subscribeBlack({ seats: 1 })
-      return { error: undefined }
-    }, workspaceID).catch((e) => ({ error: e.message as string })),
-    { revalidate: [queryBillingInfo.key, querySubscription.key] },
-  )
-}, "enroll")
-
-const createSessionUrl = action(async (workspaceID: string, returnUrl: string) => {
+const createPortal = action(async (workspaceID: string, returnUrl: string) => {
   "use server"
   return json(
     await withActor(
-      () =>
-        Billing.generateSessionUrl({ returnUrl })
-          .then((data) => ({ error: undefined, data }))
-          .catch((e) => ({
-            error: e.message as string,
-            data: undefined,
-          })),
+      () => Billing.generateSessionUrl({ returnUrl }).then((data) => ({ data })).catch((error) => ({ error: error.message as string })),
       workspaceID,
     ),
-    { revalidate: [queryBillingInfo.key, querySubscription.key] },
+    { revalidate: [queryBillingInfo.key, queryMembership.key] },
   )
-}, "sessionUrl")
-
-const setUseBalance = action(async (form: FormData) => {
-  "use server"
-  const workspaceID = form.get("workspaceID") as string | null
-  if (!workspaceID) return { error: formError.workspaceRequired }
-  const useBalance = (form.get("useBalance") as string | null) === "true"
-
-  return json(
-    await withActor(async () => {
-      await Database.use((tx) =>
-        tx
-          .update(BillingTable)
-          .set({
-            subscription: useBalance
-              ? sql`JSON_SET(subscription, '$.useBalance', true)`
-              : sql`JSON_REMOVE(subscription, '$.useBalance')`,
-          })
-          .where(eq(BillingTable.workspaceID, workspaceID)),
-      )
-      return { error: undefined }
-    }, workspaceID).catch((e) => ({ error: e.message as string })),
-    { revalidate: [queryBillingInfo.key, querySubscription.key] },
-  )
-}, "setUseBalance")
+}, "membership.portal")
 
 export function BlackSection() {
   const params = useParams()
-  const i18n = useI18n()
-  const billing = createAsync(() => queryBillingInfo(params.id!))
-  const subscription = createAsync(() => querySubscription(params.id!))
-  const sessionAction = useAction(createSessionUrl)
-  const sessionSubmission = useSubmission(createSessionUrl)
-  const cancelAction = useAction(cancelWaitlist)
-  const cancelSubmission = useSubmission(cancelWaitlist)
-  const enrollAction = useAction(enroll)
-  const enrollSubmission = useSubmission(enroll)
-  const useBalanceSubmission = useSubmission(setUseBalance)
-  const [store, setStore] = createStore({
-    sessionRedirecting: false,
-    cancelled: false,
-    enrolled: false,
-  })
+  const membership = createAsync(() => queryMembership(params.id!))
+  const portal = useAction(createPortal)
+  const [loading, setLoading] = createSignal(false)
 
-  async function onClickSession() {
-    const result = await sessionAction(params.id!, window.location.href)
-    if (result.data) {
-      setStore("sessionRedirecting", true)
+  const manage = async () => {
+    setLoading(true)
+    const result = await portal(params.id!, window.location.href)
+    if ("data" in result && result.data) {
       window.location.href = result.data
+      return
     }
-  }
-
-  async function onClickCancel() {
-    const result = await cancelAction(params.id!)
-    if (!result.error) {
-      setStore("cancelled", true)
-    }
-  }
-
-  async function onClickEnroll() {
-    const result = await enrollAction(params.id!)
-    if (!result.error) {
-      setStore("enrolled", true)
-    }
+    setLoading(false)
   }
 
   return (
-    <>
-      <Show when={subscription()}>
-        {(sub) => (
-          <section class={styles.root}>
+    <section class={styles.root}>
+      <Show
+        when={membership()}
+        fallback={
+          <div data-slot="section-title">
+            <h2>Zaovra membership</h2>
+            <div data-slot="title-row">
+              <p>BYOK is available without a membership. Choose a plan only when you want managed model access.</p>
+              <A href="/pricing" data-color="primary">View plans</A>
+            </div>
+          </div>
+        }
+      >
+        {(active) => (
+          <>
             <div data-slot="section-title">
-              <h2>{i18n.t("workspace.black.subscription.title")}</h2>
+              <h2>{names[active().plan]} membership</h2>
               <div data-slot="title-row">
-                <p>{i18n.t("workspace.black.subscription.message", { plan: sub().plan })}</p>
-                <button
-                  data-color="primary"
-                  disabled={sessionSubmission.pending || store.sessionRedirecting}
-                  onClick={onClickSession}
-                >
-                  {sessionSubmission.pending || store.sessionRedirecting
-                    ? i18n.t("workspace.black.loading")
-                    : i18n.t("workspace.black.subscription.manage")}
+                <p>Active managed model access · ${active().plan} per month</p>
+                <button data-color="primary" disabled={loading()} onClick={manage}>
+                  {loading() ? "Opening billing…" : "Manage membership"}
                 </button>
               </div>
             </div>
             <div data-slot="usage">
               <div data-slot="usage-item">
-                <div data-slot="usage-header">
-                  <span data-slot="usage-label">{i18n.t("workspace.black.subscription.rollingUsage")}</span>
-                  <span data-slot="usage-value">{sub().rollingUsage.usagePercent}%</span>
-                </div>
-                <div data-slot="progress">
-                  <div data-slot="progress-bar" style={{ width: `${sub().rollingUsage.usagePercent}%` }} />
-                </div>
-                <span data-slot="reset-time">
-                  {i18n.t("workspace.black.subscription.resetsIn")}{" "}
-                  {formatResetTime(sub().rollingUsage.resetInSec, i18n, blackResetTimeKeys)}
-                </span>
+                <div data-slot="usage-header"><span>Rolling usage</span><span>{active().rolling.usagePercent}%</span></div>
+                <div data-slot="progress"><div data-slot="progress-bar" style={{ width: `${active().rolling.usagePercent}%` }} /></div>
               </div>
               <div data-slot="usage-item">
-                <div data-slot="usage-header">
-                  <span data-slot="usage-label">{i18n.t("workspace.black.subscription.weeklyUsage")}</span>
-                  <span data-slot="usage-value">{sub().weeklyUsage.usagePercent}%</span>
-                </div>
-                <div data-slot="progress">
-                  <div data-slot="progress-bar" style={{ width: `${sub().weeklyUsage.usagePercent}%` }} />
-                </div>
-                <span data-slot="reset-time">
-                  {i18n.t("workspace.black.subscription.resetsIn")}{" "}
-                  {formatResetTime(sub().weeklyUsage.resetInSec, i18n, blackResetTimeKeys)}
-                </span>
+                <div data-slot="usage-header"><span>Plan-period usage</span><span>{active().fixed.usagePercent}%</span></div>
+                <div data-slot="progress"><div data-slot="progress-bar" style={{ width: `${active().fixed.usagePercent}%` }} /></div>
               </div>
             </div>
-            <form action={setUseBalance} method="post" data-slot="setting-row">
-              <p>{i18n.t("workspace.black.subscription.useBalance")}</p>
-              <input type="hidden" name="workspaceID" value={params.id} />
-              <input type="hidden" name="useBalance" value={sub().useBalance ? "false" : "true"} />
-              <label data-slot="toggle-label">
-                <input
-                  type="checkbox"
-                  checked={sub().useBalance}
-                  disabled={useBalanceSubmission.pending}
-                  onChange={(e) => e.currentTarget.form?.requestSubmit()}
-                />
-                <span></span>
-              </label>
-            </form>
-          </section>
+          </>
         )}
       </Show>
-      <Show when={billing()?.timeSubscriptionBooked}>
-        <section class={waitlistStyles.root}>
-          <div data-slot="section-title">
-            <h2>{i18n.t("workspace.black.waitlist.title")}</h2>
-            <div data-slot="title-row">
-              <p>
-                {billing()?.timeSubscriptionSelected
-                  ? i18n.t("workspace.black.waitlist.ready", { plan: billing()?.subscriptionPlan ?? "" })
-                  : i18n.t("workspace.black.waitlist.joined", { plan: billing()?.subscriptionPlan ?? "" })}
-              </p>
-              <button
-                data-color="danger"
-                disabled={cancelSubmission.pending || store.cancelled}
-                onClick={onClickCancel}
-              >
-                {cancelSubmission.pending
-                  ? i18n.t("workspace.black.waitlist.leaving")
-                  : store.cancelled
-                    ? i18n.t("workspace.black.waitlist.left")
-                    : i18n.t("workspace.black.waitlist.leave")}
-              </button>
-            </div>
-          </div>
-          <Show when={billing()?.timeSubscriptionSelected}>
-            <div data-slot="enroll-section">
-              <button
-                data-slot="enroll-button"
-                data-color="primary"
-                disabled={enrollSubmission.pending || store.enrolled}
-                onClick={onClickEnroll}
-              >
-                {enrollSubmission.pending
-                  ? i18n.t("workspace.black.waitlist.enrolling")
-                  : store.enrolled
-                    ? i18n.t("workspace.black.waitlist.enrolled")
-                    : i18n.t("workspace.black.waitlist.enroll")}
-              </button>
-              <p data-slot="enroll-note">{i18n.t("workspace.black.waitlist.enrollNote")}</p>
-            </div>
-          </Show>
-        </section>
-      </Show>
-    </>
+    </section>
   )
 }

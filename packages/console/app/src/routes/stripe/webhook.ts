@@ -1,8 +1,13 @@
 import type { Stripe } from "stripe"
 import { Billing } from "@zaovra-ai/console-core/billing.js"
 import type { APIEvent } from "@solidjs/start/server"
-import { and, Database, eq, sql } from "@zaovra-ai/console-core/drizzle/index.js"
-import { BillingTable, LiteTable, PaymentTable } from "@zaovra-ai/console-core/schema/billing.sql.js"
+import { and, Database, eq, lt, sql } from "@zaovra-ai/console-core/drizzle/index.js"
+import {
+  BillingTable,
+  LiteTable,
+  PaymentTable,
+  SubscriptionTable,
+} from "@zaovra-ai/console-core/schema/billing.sql.js"
 import { Identifier } from "@zaovra-ai/console-core/identifier.js"
 import { centsToMicroCents } from "@zaovra-ai/console-core/util/price.js"
 import { Actor } from "@zaovra-ai/console-core/actor.js"
@@ -10,6 +15,7 @@ import { Resource } from "@zaovra-ai/console-resource"
 import { LiteData } from "@zaovra-ai/console-core/lite.js"
 import { BlackData } from "@zaovra-ai/console-core/black.js"
 import { Referral } from "@zaovra-ai/console-core/referral.js"
+import { AuthStorageTable } from "@zaovra-ai/console-core/schema/auth-storage.sql.js"
 
 export async function POST(input: APIEvent) {
   const body = await Billing.stripe().webhooks.constructEventAsync(
@@ -17,7 +23,10 @@ export async function POST(input: APIEvent) {
     input.request.headers.get("stripe-signature")!,
     Resource.STRIPE_WEBHOOK_SECRET.value,
   )
-  console.log(body.type, JSON.stringify(body, null, 2))
+  console.log("Stripe webhook", body.type, body.id)
+  const event = await claimStripeEvent(body.id)
+  if (event === "done") return Response.json({ message: "duplicate" }, { status: 200 })
+  if (event === "busy") return Response.json({ message: "event is already processing" }, { status: 409 })
 
   return (async () => {
     if (body.type === "customer.updated") {
@@ -107,6 +116,7 @@ export async function POST(input: APIEvent) {
     }
     if (body.type === "customer.subscription.created") {
       const type = body.data.object.metadata?.type
+      if (type === "membership") await activateMembership(body.data.object)
       if (type === "lite") {
         const workspaceID = body.data.object.metadata?.workspaceID
         const userID = body.data.object.metadata?.userID
@@ -183,6 +193,13 @@ export async function POST(input: APIEvent) {
           })
         })
       }
+    }
+    if (
+      body.type === "customer.subscription.updated" &&
+      body.data.object.metadata?.type === "membership" &&
+      (body.data.object.status === "active" || body.data.object.status === "trialing")
+    ) {
+      await activateMembership(body.data.object)
     }
     if (body.type === "customer.subscription.updated" && body.data.object.status === "incomplete_expired") {
       const subscriptionID = body.data.object.id
@@ -301,8 +318,12 @@ export async function POST(input: APIEvent) {
         if (!workspaceID) throw new Error("Workspace ID not found")
         if (!invoiceID) throw new Error("Invoice ID not found")
 
-        const paymentIntent = await Billing.stripe().paymentIntents.retrieve(invoiceID)
-        console.log(JSON.stringify(paymentIntent))
+        const invoice = await Billing.stripe().invoices.retrieve(invoiceID, { expand: ["payments"] })
+        const paymentIntentID = invoice.payments?.data[0]?.payment.payment_intent
+        const paymentIntent =
+          typeof paymentIntentID === "string"
+            ? await Billing.stripe().paymentIntents.retrieve(paymentIntentID)
+            : undefined
         const errorMessage =
           typeof paymentIntent === "object" && paymentIntent !== null
             ? paymentIntent.last_payment_error?.message
@@ -371,10 +392,104 @@ export async function POST(input: APIEvent) {
       })
     }
   })()
-    .then((message) => {
+    .then(async (message) => {
+      await completeStripeEvent(body.id)
       return Response.json({ message: message ?? "done" }, { status: 200 })
     })
-    .catch((error: any) => {
+    .catch(async (error: any) => {
+      await releaseStripeEvent(body.id)
       return Response.json({ message: error.message }, { status: 500 })
     })
+}
+
+async function claimStripeEvent(eventID: string) {
+  const key = `stripe-event:${eventID}`
+  const now = new Date()
+  return Database.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(AuthStorageTable)
+      .values({ key, value: { status: "processing" }, expiry: new Date(now.getTime() + 2 * 60 * 1000) })
+      .onConflictDoNothing()
+      .returning({ key: AuthStorageTable.key })
+    if (inserted.length) return "claimed" as const
+
+    const existing = await tx
+      .select({ value: AuthStorageTable.value })
+      .from(AuthStorageTable)
+      .where(eq(AuthStorageTable.key, key))
+      .then((rows) => rows[0]?.value as { status?: string } | undefined)
+    if (existing?.status === "done") return "done" as const
+
+    const reclaimed = await tx
+      .update(AuthStorageTable)
+      .set({ value: { status: "processing" }, expiry: new Date(now.getTime() + 2 * 60 * 1000) })
+      .where(and(eq(AuthStorageTable.key, key), lt(AuthStorageTable.expiry, now)))
+      .returning({ key: AuthStorageTable.key })
+    return reclaimed.length ? ("claimed" as const) : ("busy" as const)
+  })
+}
+
+async function completeStripeEvent(eventID: string) {
+  await Database.use((tx) =>
+    tx
+      .update(AuthStorageTable)
+      .set({ value: { status: "done" }, expiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) })
+      .where(eq(AuthStorageTable.key, `stripe-event:${eventID}`)),
+  )
+}
+
+async function releaseStripeEvent(eventID: string) {
+  await Database.use((tx) =>
+    tx
+      .update(AuthStorageTable)
+      .set({ expiry: new Date(0) })
+      .where(eq(AuthStorageTable.key, `stripe-event:${eventID}`)),
+  )
+}
+
+async function activateMembership(subscription: Stripe.Subscription) {
+  if (subscription.status !== "active" && subscription.status !== "trialing") return
+
+  const workspaceID = subscription.metadata.workspaceID
+  const userID = subscription.metadata.userID
+  const plan = subscription.metadata.plan
+  const customerID = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id
+  const paymentMethodID =
+    typeof subscription.default_payment_method === "string" ? subscription.default_payment_method : undefined
+
+  if (!workspaceID) throw new Error("Workspace ID not found")
+  if (!userID) throw new Error("User ID not found")
+  if (plan !== "20" && plan !== "100" && plan !== "200") throw new Error("Membership plan not found")
+
+  const paymentMethod = paymentMethodID ? await Billing.stripe().paymentMethods.retrieve(paymentMethodID) : undefined
+  await Actor.provide("system", { workspaceID }, async () => {
+    const billing = await Billing.get()
+    if (!billing) throw new Error(`Workspace with ID ${workspaceID} not found`)
+    if (billing.customerID && billing.customerID !== customerID) throw new Error("Customer ID mismatch")
+
+    await Database.transaction(async (tx) => {
+      await tx
+        .update(BillingTable)
+        .set({
+          customerID,
+          subscriptionID: subscription.id,
+          subscription: { status: "subscribed", seats: 1, plan },
+          subscriptionPlan: null,
+          timeSubscriptionBooked: null,
+          timeSubscriptionSelected: null,
+          ...(paymentMethod
+            ? {
+                paymentMethodID: paymentMethod.id,
+                paymentMethodLast4: paymentMethod.card?.last4 ?? null,
+                paymentMethodType: paymentMethod.type,
+              }
+            : {}),
+        })
+        .where(eq(BillingTable.workspaceID, workspaceID))
+      await tx
+        .insert(SubscriptionTable)
+        .values({ workspaceID, id: Identifier.create("subscription"), userID })
+        .onConflictDoNothing()
+    })
+  })
 }

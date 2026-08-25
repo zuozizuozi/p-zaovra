@@ -7,7 +7,6 @@ import { selectProviderCatalog } from "./provider-catalog"
 
 export const popularProviders = [
   "zaovra",
-  "zaovra-go",
   "anthropic",
   "github-copilot",
   "openai",
@@ -24,18 +23,23 @@ export function useProviders(directory?: Accessor<string | undefined>) {
   const providers = () => {
     const value = dir()
     const projectStore = value ? serverSync().child(value)[0] : undefined
-    if (directory)
-      return selectProviderCatalog({
+    const selected = directory
+      ? selectProviderCatalog({
         explicit: true,
         directory: value,
         catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
       })
-    return selectProviderCatalog({
-      explicit: false,
-      directory: value,
-      catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
-      global: serverSync().data.provider,
-    })
+      : selectProviderCatalog({
+          explicit: false,
+          directory: value,
+          catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
+          global: serverSync().data.provider,
+        })
+    return {
+      ...selected,
+      all: new Map([...selected.all].filter(([id]) => id !== "zaovra-go")),
+      connected: selected.connected.filter((id) => id !== "zaovra-go"),
+    }
   }
   return {
     all: () => providers().all,

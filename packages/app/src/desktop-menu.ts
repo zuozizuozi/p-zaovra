@@ -207,12 +207,12 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       {
         type: "item",
         label: "Share Feedback",
-        href: "https://github.com/zuozizuozi/p-zaovra/issues/new?template=feature_request.yml",
+        href: "mailto:support@zaovra.com?subject=Zaovra%20feedback",
       },
       {
         type: "item",
         label: "Report a Bug",
-        href: "https://github.com/zuozizuozi/p-zaovra/issues/new?template=bug_report.yml",
+        href: "mailto:support@zaovra.com?subject=Zaovra%20bug%20report",
       },
     ],
   },

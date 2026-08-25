@@ -1,43 +1,11 @@
 import type { APIEvent } from "@solidjs/start"
 import type { DownloadPlatform } from "../types"
 
-const prodAssetNames: Record<string, string> = {
-  "darwin-aarch64-dmg": "zaovra-desktop-mac-arm64.dmg",
-  "darwin-x64-dmg": "zaovra-desktop-mac-x64.dmg",
-  "windows-x64-nsis": "zaovra-desktop-win-x64.exe",
-  "linux-x64-deb": "zaovra-desktop-linux-amd64.deb",
-  "linux-x64-appimage": "zaovra-desktop-linux-x86_64.AppImage",
-  "linux-x64-rpm": "zaovra-desktop-linux-x86_64.rpm",
-} satisfies Record<DownloadPlatform, string>
-
-const betaAssetNames: Record<string, string> = {
-  "darwin-aarch64-dmg": "zaovra-desktop-mac-arm64.dmg",
-  "darwin-x64-dmg": "zaovra-desktop-mac-x64.dmg",
-  "windows-x64-nsis": "zaovra-desktop-win-x64.exe",
-  "linux-x64-deb": "zaovra-desktop-linux-amd64.deb",
-  "linux-x64-appimage": "zaovra-desktop-linux-x86_64.AppImage",
-  "linux-x64-rpm": "zaovra-desktop-linux-x86_64.rpm",
-} satisfies Record<DownloadPlatform, string>
-
-// Doing this on the server lets us preserve the original name for platforms we don't care to rename for
-const downloadNames: Record<string, string> = {
-  "darwin-aarch64-dmg": "Zaovra Desktop.dmg",
-  "darwin-x64-dmg": "Zaovra Desktop.dmg",
-  "windows-x64-nsis": "Zaovra Desktop Installer.exe",
-} satisfies { [K in DownloadPlatform]?: string }
-
 export async function GET({ params: { platform, channel } }: APIEvent) {
-  const assetName = channel === "stable" ? prodAssetNames[platform] : betaAssetNames[platform]
-  if (!assetName) return new Response(null, { status: 404 })
-
-  const resp = await fetch(
-    `https://github.com/zuozizuozi/p-zaovra/releases/latest/download/${assetName}`,
+  if (channel !== "stable" || platform !== ("windows-x64-nsis" satisfies DownloadPlatform))
+    return new Response(null, { status: 404 })
+  return Response.json(
+    { error: "The Windows installer has not been published yet. Contact support@zaovra.com for release status." },
+    { status: 503 },
   )
-
-  const downloadName = downloadNames[platform]
-
-  const headers = new Headers(resp.headers)
-  if (downloadName) headers.set("content-disposition", `attachment; filename="${downloadName}"`)
-
-  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers })
 }

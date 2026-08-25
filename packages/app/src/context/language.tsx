@@ -98,10 +98,23 @@ const LABEL_KEY: Record<Locale, keyof Dictionary> = {
 }
 
 const base = i18n.flatten({ ...en, ...uiEn })
+const productTruthKeys = [
+  "dialog.provider.zaovra.note",
+  "dialog.provider.zaovra.tagline",
+  "dialog.provider.zaovraGo.tagline",
+  "provider.connect.zaovraZen.line1",
+  "provider.connect.zaovraZen.line2",
+  "provider.connect.zaovraZen.visit.prefix",
+  "provider.connect.zaovraZen.visit.link",
+  "provider.connect.zaovraZen.visit.suffix",
+] as const
+const productTruth = Object.fromEntries(productTruthKeys.map((key) => [key, base[key]])) as Partial<Dictionary>
 const dicts = new Map<Locale, Dictionary>([["en", base]])
 
 const merge = (app: Promise<Source>, ui: Promise<Source>) =>
-  Promise.all([app, ui]).then(([a, b]) => ({ ...base, ...i18n.flatten({ ...a.dict, ...b.dict }) }) as Dictionary)
+  Promise.all([app, ui]).then(
+    ([a, b]) => ({ ...base, ...i18n.flatten({ ...a.dict, ...b.dict }), ...productTruth }) as Dictionary,
+  )
 
 const loaders: Record<Exclude<Locale, "en">, () => Promise<Dictionary>> = {
   zh: () => merge(import("@/i18n/zh"), import("@zaovra-ai/ui/i18n/zh")),

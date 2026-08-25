@@ -10130,6 +10130,90 @@ export type ExperimentalConsoleSwitchOrgResponses = {
 export type ExperimentalConsoleSwitchOrgResponse =
   ExperimentalConsoleSwitchOrgResponses[keyof ExperimentalConsoleSwitchOrgResponses]
 
+export type ExperimentalConsoleLoginData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/console/login"
+}
+
+export type ExperimentalConsoleLoginErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * InternalServerError
+   */
+  500: EffectHttpApiErrorInternalServerError
+}
+
+export type ExperimentalConsoleLoginError = ExperimentalConsoleLoginErrors[keyof ExperimentalConsoleLoginErrors]
+
+export type ExperimentalConsoleLoginResponses = {
+  /**
+   * Zaovra account device authorization
+   */
+  200: {
+    deviceCode: string
+    userCode: string
+    verificationUrl: string
+    server: string
+    expiresInMs: number
+    intervalMs: number
+  }
+}
+
+export type ExperimentalConsoleLoginResponse =
+  ExperimentalConsoleLoginResponses[keyof ExperimentalConsoleLoginResponses]
+
+export type ExperimentalConsoleLoginPollData = {
+  body?: {
+    deviceCode: string
+    userCode: string
+    verificationUrl: string
+    server: string
+    expiresInMs: number
+    intervalMs: number
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/console/login/poll"
+}
+
+export type ExperimentalConsoleLoginPollErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * InternalServerError
+   */
+  500: EffectHttpApiErrorInternalServerError
+}
+
+export type ExperimentalConsoleLoginPollError =
+  ExperimentalConsoleLoginPollErrors[keyof ExperimentalConsoleLoginPollErrors]
+
+export type ExperimentalConsoleLoginPollResponses = {
+  /**
+   * Zaovra account device authorization status
+   */
+  200: {
+    status: "pending" | "slow" | "expired" | "denied" | "success" | "error"
+    email?: string
+  }
+}
+
+export type ExperimentalConsoleLoginPollResponse =
+  ExperimentalConsoleLoginPollResponses[keyof ExperimentalConsoleLoginPollResponses]
+
 export type WorktreeRemoveData = {
   body?: WorktreeRemoveInput
   path?: never

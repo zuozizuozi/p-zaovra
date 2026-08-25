@@ -87,6 +87,7 @@ export interface Interface {
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly invalidate: () => Effect.Effect<void>
+  readonly refresh: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
 }
@@ -365,6 +366,10 @@ const layer = Layer.effect(
           yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
         )
         if (activeAccount?.active_org_id) {
+          const activeOrg = Option.getOrUndefined(
+            yield* accountSvc.activeOrg().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
+          )
+          activeOrgName = activeOrg?.org.name
           const accountID = activeAccount.id
           const orgID = activeAccount.active_org_id
           const url = activeAccount.url
@@ -520,6 +525,11 @@ const layer = Layer.effect(
       yield* invalidateGlobal
     })
 
+    const refresh = Effect.fn("Config.refresh")(function* () {
+      yield* invalidateGlobal
+      yield* InstanceState.invalidate(state)
+    })
+
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
@@ -552,6 +562,7 @@ const layer = Layer.effect(
       update,
       updateGlobal,
       invalidate,
+      refresh,
       directories,
       waitForDependencies,
     })

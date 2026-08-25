@@ -27,6 +27,10 @@ import type {
   ExperimentalConsoleGetResponses,
   ExperimentalConsoleListOrgsErrors,
   ExperimentalConsoleListOrgsResponses,
+  ExperimentalConsoleLoginErrors,
+  ExperimentalConsoleLoginPollErrors,
+  ExperimentalConsoleLoginPollResponses,
+  ExperimentalConsoleLoginResponses,
   ExperimentalConsoleSwitchOrgResponses,
   ExperimentalControlPlaneMoveSessionErrors,
   ExperimentalControlPlaneMoveSessionResponses,
@@ -1002,6 +1006,81 @@ export class Workspace extends HeyApiClient {
 }
 
 export class Experimental extends HeyApiClient {
+  public consoleLogin<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalConsoleLoginResponses,
+      ExperimentalConsoleLoginErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/console/login",
+      ...options,
+      ...params,
+    })
+  }
+
+  public consoleLoginPoll<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      deviceCode?: string
+      userCode?: string
+      verificationUrl?: string
+      server?: string
+      expiresInMs?: number
+      intervalMs?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "deviceCode" },
+            { in: "body", key: "userCode" },
+            { in: "body", key: "verificationUrl" },
+            { in: "body", key: "server" },
+            { in: "body", key: "expiresInMs" },
+            { in: "body", key: "intervalMs" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalConsoleLoginPollResponses,
+      ExperimentalConsoleLoginPollErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/console/login/poll",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   private _controlPlane?: ControlPlane
   get controlPlane(): ControlPlane {
     return (this._controlPlane ??= new ControlPlane({ client: this.client }))

@@ -1,0 +1,11 @@
+.git
+.codex_tmp
+.sst
+.turbo
+node_modules
+**/node_modules
+**/.output
+**/.vercel
+**/dist
+**/coverage
+*.log

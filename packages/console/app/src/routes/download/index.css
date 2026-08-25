@@ -73,7 +73,8 @@
 [data-page="download"] h1 { max-width: 690px; margin: 26px 0 0; color: #edf4ff; font-size: clamp(48px, 6.6vw, 82px); line-height: 0.99; letter-spacing: -0.047em; font-weight: 590; }
 [data-page="download"] [data-slot="download-copy"] > p { max-width: 62ch; margin: 28px 0 0; color: #9ba9bc; font-size: 16px; line-height: 1.72; }
 [data-page="download"] [data-slot="hero-actions"] { margin-top: 34px; display: flex; gap: 10px; }
-[data-page="download"] [data-slot="hero-actions"] a {
+[data-page="download"] [data-slot="hero-actions"] a,
+[data-page="download"] [data-slot="hero-actions"] button {
   min-height: 47px;
   padding: 0 18px;
   display: inline-flex;
@@ -85,7 +86,9 @@
   box-shadow: inset 0 0 0 1px rgba(192, 214, 245, 0.15);
 }
 
-[data-page="download"] [data-slot="hero-actions"] a[data-variant="primary"] { color: #101722; background: #b9cbe3; box-shadow: 0 12px 30px -19px rgba(140, 186, 244, 0.82); }
+[data-page="download"] [data-slot="hero-actions"] a[data-variant="primary"],
+[data-page="download"] [data-slot="hero-actions"] button[data-variant="primary"] { color: #101722; background: #b9cbe3; box-shadow: 0 12px 30px -19px rgba(140, 186, 244, 0.82); }
+[data-page="download"] [data-slot="hero-actions"] button:disabled { cursor: not-allowed; opacity: 0.58; }
 [data-page="download"] [data-slot="hero-actions"] svg { width: 18px; height: 18px; }
 
 [data-page="download"] [data-slot="download-mark"] {

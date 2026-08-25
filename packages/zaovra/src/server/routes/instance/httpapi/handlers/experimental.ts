@@ -1,13 +1,14 @@
 import { Account } from "@/account/account"
+import { DeviceCode, Login, UserCode } from "@/account/schema"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Project } from "@/project/project"
 import { Worktree } from "@/worktree"
-import { Effect, Option } from "effect"
+import { Duration, Effect, Option, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { ConsoleSwitchPayload, WorktreeApiError } from "../groups/experimental"
+import { ConsoleLoginPollPayload, ConsoleSwitchPayload, WorktreeApiError } from "../groups/experimental"
 
 function mapWorktreeError<A, R>(self: Effect.Effect<A, Worktree.Error, R>) {
   return self.pipe(
@@ -78,6 +79,47 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       return true
     })
 
+    const loginConsole = Effect.fn("ExperimentalHttpApi.consoleLogin")(function* () {
+      const login = yield* account
+        .login("https://zaovra.com")
+        .pipe(Effect.catch(() => Effect.fail(new HttpApiError.InternalServerError({}))))
+      return {
+        deviceCode: login.code,
+        userCode: login.user,
+        verificationUrl: login.url,
+        server: login.server,
+        expiresInMs: Duration.toMillis(login.expiry),
+        intervalMs: Duration.toMillis(login.interval),
+      }
+    })
+
+    const pollConsoleLogin = Effect.fn("ExperimentalHttpApi.consoleLoginPoll")(function* (ctx: {
+      payload: typeof ConsoleLoginPollPayload.Type
+    }) {
+      const result = yield* account
+        .poll(
+          new Login({
+            code: Schema.decodeSync(DeviceCode)(ctx.payload.deviceCode),
+            user: Schema.decodeSync(UserCode)(ctx.payload.userCode),
+            url: ctx.payload.verificationUrl,
+            server: ctx.payload.server,
+            expiry: Duration.millis(ctx.payload.expiresInMs),
+            interval: Duration.millis(ctx.payload.intervalMs),
+          }),
+        )
+        .pipe(Effect.catch(() => Effect.fail(new HttpApiError.InternalServerError({}))))
+
+      if (result._tag === "PollSuccess") {
+        yield* config.refresh()
+        return { status: "success" as const, email: result.email }
+      }
+      if (result._tag === "PollPending") return { status: "pending" as const }
+      if (result._tag === "PollSlow") return { status: "slow" as const }
+      if (result._tag === "PollExpired") return { status: "expired" as const }
+      if (result._tag === "PollDenied") return { status: "denied" as const }
+      return { status: "error" as const }
+    })
+
     const worktree = Effect.fn("ExperimentalHttpApi.worktree")(function* () {
       const ctx = yield* InstanceState.context
       return yield* project.sandboxes(ctx.project.id)
@@ -110,6 +152,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("console", getConsole)
       .handle("consoleOrgs", listConsoleOrgs)
       .handle("consoleSwitch", switchConsole)
+      .handle("consoleLogin", loginConsole)
+      .handle("consoleLoginPoll", pollConsoleLogin)
       .handle("worktree", worktree)
       .handle("worktreeCreate", worktreeCreate)
       .handle("worktreeRemove", worktreeRemove)

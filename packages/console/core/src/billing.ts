@@ -471,6 +471,42 @@ export namespace Billing {
     },
   )
 
+  export const generateMembershipCheckoutUrl = fn(
+    z.object({
+      plan: z.enum(["20", "100", "200"]),
+      successUrl: z.string(),
+      cancelUrl: z.string(),
+    }),
+    async (input) => {
+      const user = Actor.assert("user")
+      const email = (await User.getAuthEmail(user.properties.userID))!
+      const billing = await Billing.get()
+
+      if (billing.subscriptionID) throw new Error("This workspace already has an active membership")
+      if (billing.liteSubscriptionID) throw new Error("Cancel the legacy subscription before choosing a membership")
+
+      const session = await Billing.stripe().checkout.sessions.create({
+        mode: "subscription",
+        ...(billing.customerID ? { customer: billing.customerID } : { customer_email: email }),
+        line_items: [{ price: BlackData.planToPriceID({ plan: input.plan }), quantity: 1 }],
+        billing_address_collection: "required",
+        tax_id_collection: { enabled: true },
+        subscription_data: {
+          metadata: {
+            type: "membership",
+            plan: input.plan,
+            workspaceID: Actor.workspace(),
+            userID: user.properties.userID,
+          },
+        },
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+      })
+
+      return session.url
+    },
+  )
+
   export const subscribeBlack = fn(
     z.object({
       seats: z.number(),

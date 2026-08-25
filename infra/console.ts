@@ -162,7 +162,7 @@ const ZEN_LITE_PRICE = new sst.Linkable("ZEN_LITE_PRICE", {
 })
 
 const zenBlackProduct = new stripe.Product("ZenBlack", {
-  name: "Zaovra Black",
+  name: "Zaovra Membership",
 })
 const zenBlackPriceProps = {
   product: zenBlackProduct.id,

@@ -8,17 +8,15 @@ export function Legal() {
   const language = useLanguage()
   return (
     <div data-component="legal">
-      <span>
-        ©{new Date().getFullYear()} <a href="https://anoma.ly">Anomaly</a>
-      </span>
-      <span>
-        <A href={language.route("/brand")}>{i18n.t("legal.brand")}</A>
-      </span>
+      <span>©{new Date().getFullYear()} Zaovra</span>
       <span>
         <A href={language.route("/legal/privacy-policy")}>{i18n.t("legal.privacy")}</A>
       </span>
       <span>
         <A href={language.route("/legal/terms-of-service")}>{i18n.t("legal.terms")}</A>
+      </span>
+      <span>
+        <a href="mailto:support@zaovra.com">support@zaovra.com</a>
       </span>
       <span>
         <LanguagePicker align="right" />

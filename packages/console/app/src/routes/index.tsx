@@ -6,19 +6,16 @@ import "./home-impeccable-polish.css"
 import "./home-navigation.css"
 import { Meta, Title } from "@solidjs/meta"
 import { A } from "@solidjs/router"
-import { Tabs } from "@kobalte/core/tabs"
 import { useSpring } from "@zaovra-ai/ui/motion-spring"
 import { createSignal, onCleanup } from "solid-js"
 import logo from "../asset/logo-ornate-dark.svg"
 import logoSquare from "../asset/brand/zaovra-logo-light-square.png"
 import appScreenshot from "../asset/lander/zaovra-app-session.png"
 import appScreenshotMobile from "../asset/lander/zaovra-app-session-mobile.png"
-import { IconCheck, IconCopy } from "../component/icon"
 import { ProviderStage, WorkGraphPreviewStage } from "~/component/home-product-stages"
 import { Footer } from "~/component/footer"
 import { Legal } from "~/component/legal"
 import { LocaleLinks } from "~/component/locale-links"
-import { config } from "~/config"
 import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
 
@@ -95,7 +92,7 @@ function HomeNavigation(props: { route: (path: string) => string }) {
   return (
     <>
       <nav data-slot="primary-nav" aria-label="Homepage navigation">
-        <A href={props.route("/go")}>Pricing</A>
+        <A href={props.route("/pricing")}>Pricing</A>
         <div
           data-component="nav-flyout"
           data-open={byokOpen() ? "" : undefined}
@@ -138,7 +135,7 @@ function HomeNavigation(props: { route: (path: string) => string }) {
       <details data-component="mobile-nav">
         <summary>Menu <ChevronIcon /></summary>
         <nav aria-label="Mobile homepage navigation">
-          <A href={props.route("/go")}>Pricing</A>
+          <A href={props.route("/pricing")}>Pricing</A>
           <a href="#byok">BYOK</a>
           <A href={props.route("/docs/providers/")}>Provider docs</A>
           <A href={props.route("/download")}>Download</A>
@@ -242,26 +239,9 @@ function FeatureIcon(props: { name: keyof typeof featureIconGlyphs }) {
   )
 }
 
-function CopyStatus() {
-  return (
-    <span data-component="copy-status" aria-hidden="true">
-      <IconCopy data-slot="copy" />
-      <IconCheck data-slot="check" />
-    </span>
-  )
-}
-
 export default function Home() {
   const i18n = useI18n()
   const language = useLanguage()
-  const handleCopyClick = (event: Event) => {
-    const button = event.currentTarget as HTMLButtonElement
-    const command = button.dataset.command
-    if (!command) return
-    void navigator.clipboard.writeText(command)
-    button.setAttribute("data-copied", "")
-    setTimeout(() => button.removeAttribute("data-copied"), 1500)
-  }
 
   return (
     <main data-page="zaovra-home">
@@ -297,10 +277,10 @@ export default function Home() {
                 <DownloadIcon />
                 {i18n.t("home.next.action.downloadBeta")}
               </A>
-              <a href={config.github.repoUrl} target="_blank" rel="noreferrer" data-variant="secondary">
-                {i18n.t("home.next.action.github")}
+              <A href={language.route("/pricing")} data-variant="secondary">
+                Pricing
                 <ArrowIcon />
-              </a>
+              </A>
             </div>
             <p data-slot="platform-note">{i18n.t("home.next.hero.platforms")}</p>
           </div>
@@ -524,12 +504,12 @@ export default function Home() {
               <p>{i18n.t("home.next.open.workspace.body")}</p>
             </article>
             <article>
-              <h3>{i18n.t("home.next.open.source.title")}</h3>
-              <p>{i18n.t("home.next.open.source.body")}</p>
-              <a href={config.github.repoUrl} target="_blank" rel="noreferrer" data-slot="text-link">
-                {i18n.t("home.next.action.source")}
+              <h3>Desktop-first workflow</h3>
+              <p>Work in real projects with explicit permissions, terminal context, and reviewable changes.</p>
+              <A href={language.route("/download")} data-slot="text-link">
+                Download Zaovra
                 <ArrowIcon />
-              </a>
+              </A>
             </article>
           </div>
         </section>
@@ -584,10 +564,6 @@ export default function Home() {
               <summary>{i18n.t("home.next.faq.desktop.q")}</summary>
               <p>{i18n.t("home.next.faq.desktop.a")}</p>
             </details>
-            <details>
-              <summary>{i18n.t("home.next.faq.open.q")}</summary>
-              <p>{i18n.t("home.next.faq.open.a")}</p>
-            </details>
           </div>
         </section>
 
@@ -602,48 +578,7 @@ export default function Home() {
               <DownloadIcon />
               {i18n.t("home.next.action.downloadBeta")}
             </A>
-            <Tabs as="div" data-component="install-options" defaultValue="curl">
-              <Tabs.List data-slot="install-tabs" aria-label={i18n.t("home.next.install.ariaLabel")}>
-                <Tabs.Trigger value="curl">curl</Tabs.Trigger>
-                <Tabs.Trigger value="npm">npm</Tabs.Trigger>
-                <Tabs.Trigger value="bun">bun</Tabs.Trigger>
-                <Tabs.Trigger value="brew">brew</Tabs.Trigger>
-                <Tabs.Trigger value="paru">paru</Tabs.Trigger>
-                <Tabs.Indicator />
-              </Tabs.List>
-              <div data-slot="install-panels">
-                <Tabs.Content value="curl">
-                  <button data-command="curl -fsSL https://zaovra.com/install | bash" onClick={handleCopyClick}>
-                    <code>curl -fsSL <strong>https://zaovra.com/install</strong> | bash</code>
-                    <CopyStatus />
-                  </button>
-                </Tabs.Content>
-                <Tabs.Content value="npm">
-                  <button data-command="npm i -g zaovra-ai" onClick={handleCopyClick}>
-                    <code>npm i -g <strong>zaovra-ai</strong></code>
-                    <CopyStatus />
-                  </button>
-                </Tabs.Content>
-                <Tabs.Content value="bun">
-                  <button data-command="bun add -g zaovra-ai" onClick={handleCopyClick}>
-                    <code>bun add -g <strong>zaovra-ai</strong></code>
-                    <CopyStatus />
-                  </button>
-                </Tabs.Content>
-                <Tabs.Content value="brew">
-                  <button data-command="brew install zuozizuozi/tap/zaovra" onClick={handleCopyClick}>
-                    <code>brew install <strong>zuozizuozi/tap/zaovra</strong></code>
-                    <CopyStatus />
-                  </button>
-                </Tabs.Content>
-                <Tabs.Content value="paru">
-                  <button data-command="paru -S zaovra" onClick={handleCopyClick}>
-                    <code>paru -S <strong>zaovra</strong></code>
-                    <CopyStatus />
-                  </button>
-                </Tabs.Content>
-              </div>
-            </Tabs>
+            <p data-slot="platform-note">Windows available first · macOS coming soon</p>
           </div>
         </section>
 

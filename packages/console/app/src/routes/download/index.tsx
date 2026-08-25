@@ -27,7 +27,7 @@ export default function Download() {
   return (
     <main data-page="download">
       <Title>Download Zaovra for Windows</Title>
-      <Meta name="description" content="Choose Zaovra access and get the Windows desktop app when the release is available." />
+      <Meta name="description" content="Download Zaovra for Windows. macOS is coming soon." />
       <LocaleLinks path="/download" />
 
       <header data-component="download-header">
@@ -35,7 +35,7 @@ export default function Download() {
           <img src={logo} alt="Zaovra" width="140" height="32" />
         </A>
         <nav aria-label="Download page navigation">
-          <A href={language.route("/go")}>Pricing</A>
+          <A href={language.route("/pricing")}>Pricing</A>
           <A href={language.route("/#byok")}>BYOK</A>
           <A href={language.route("/about")}>About us</A>
           <A href={language.route("/login?continue=/download")} data-slot="login-link">Log in</A>
@@ -48,12 +48,12 @@ export default function Download() {
             <span data-slot="platform-label"><WindowsIcon /> Windows desktop</span>
             <h1 id="download-title">Bring Zaovra to the code you are working on.</h1>
             <p>
-              Choose your access, then return here for the Windows desktop release. Purchases and downloads stay on this site;
-              provider credentials are configured only inside the desktop app.
+              Download the Windows desktop app, then sign in with your Zaovra account. BYOK credentials are configured
+              only inside the desktop app and do not require a membership.
             </p>
             <div data-slot="hero-actions">
-              <A href={language.route("/go")} data-variant="primary">View pricing <ArrowIcon /></A>
-              <A href={language.route("/login?continue=/download")}>Log in</A>
+              <button type="button" data-variant="primary" disabled>Windows release pending</button>
+              <A href={language.route("/pricing")}>View pricing</A>
             </div>
           </div>
 
@@ -63,25 +63,25 @@ export default function Download() {
           </div>
         </section>
 
-        <section data-component="access-panel" aria-label="Purchase and download status">
+        <section data-component="access-panel" aria-label="Desktop availability">
           <article>
             <span data-slot="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7.5h14v9H5v-9Zm2-3v3m10-3v3M8.5 12h7" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></span>
             <div>
-              <span data-slot="step-label">Choose access</span>
-              <h2>Purchase Zaovra Go</h2>
-              <p>Review the current plan and continue through the existing secure checkout flow.</p>
+              <span data-slot="step-label">Account access</span>
+              <h2>Sign in to use Zaovra</h2>
+              <p>Every desktop session requires a Zaovra account. A membership is optional when you use BYOK.</p>
             </div>
-            <A href={language.route("/go")}>Pricing <ArrowIcon /></A>
+            <A href={language.route("/login?continue=/download")}>Log in <ArrowIcon /></A>
           </article>
 
           <article>
             <span data-slot="step-icon"><WindowsIcon /></span>
             <div>
               <span data-slot="step-label">Windows x64</span>
-              <h2>Desktop release</h2>
-              <p>The download action will be enabled after the Windows release asset is available.</p>
+              <h2>Windows release</h2>
+              <p>The Windows installer is not published yet. macOS is coming soon; no other platforms are promised.</p>
             </div>
-            <button type="button" disabled>Release pending</button>
+            <button type="button" disabled>Not yet available</button>
           </article>
         </section>
 

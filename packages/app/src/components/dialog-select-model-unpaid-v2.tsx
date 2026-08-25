@@ -9,7 +9,7 @@ import { decode64 } from "@/utils/base64"
 import { useLanguage } from "@/context/language"
 
 type ModelState = ReturnType<typeof useLocal>["model"]
-const featuredProviders = ["zaovra", "zaovra-go", "openai", "anthropic", "google", "github-copilot"]
+const featuredProviders = ["zaovra", "openai", "anthropic", "google", "github-copilot"]
 
 export const DialogSelectModelUnpaidV2: Component<{ model?: ModelState }> = () => {
   const local = useLocal()
