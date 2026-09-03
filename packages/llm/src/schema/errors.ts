@@ -127,7 +127,9 @@ export class TransportReason extends Schema.Class<TransportReason>("LLM.Error.Tr
   http: Schema.optional(HttpContext),
 }) {
   get retryable() {
-    return false
+    // Transport failures happen before a provider response is accepted, so replaying the
+    // request is safe. The executor still applies a small hard retry limit.
+    return this.kind === "Timeout" || this.kind === "TransportError"
   }
 }
 

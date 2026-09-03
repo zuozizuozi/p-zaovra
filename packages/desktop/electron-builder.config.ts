@@ -12,7 +12,7 @@ const signScript = path.join(rootDir, "script", "sign-windows.ps1")
 // Keep the short desktop entry as an installation compatibility alias so existing
 // GNOME/KDE pins continue to resolve alongside the canonical Zaovra app id.
 const legacyDesktopEntry = path.join(packageDir, "resources", "linux", "zaovra-desktop.desktop")
-const legacyDesktopEntryFpm = `${legacyDesktopEntry}=/usr/share/applications/zaovra-desktop.desktop`
+const legacyDesktopEntryFpm = `${legacyDesktopEntry.replaceAll("\\", "/")}=/usr/share/applications/zaovra-desktop.desktop`
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return

@@ -16,6 +16,7 @@ import { LocationServiceMap } from "../location-service-map"
 import { ProjectCopy } from "../project/copy"
 import { ProjectDirectories } from "../project/directories"
 import { AbsolutePath } from "../schema"
+import { Hash } from "../util/hash"
 import { SessionV2 } from "../session"
 import { SessionMessage } from "../session/message"
 import { WorkArtifact } from "./artifact"
@@ -1913,7 +1914,7 @@ function errorText(error: unknown) {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 function failureSignature(evaluation: Work.EvaluationInfo) {

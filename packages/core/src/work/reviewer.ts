@@ -6,6 +6,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionV2 } from "../session"
 import { SessionMessage } from "../session/message"
 import { SessionRunner } from "../session/runner"
+import { Hash } from "../util/hash"
 
 export type Input = {
   readonly goal: Work.GoalInfo
@@ -126,7 +127,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 export const node = makeGlobalNode({ service: Service, layer, deps: [SessionV2.node] })

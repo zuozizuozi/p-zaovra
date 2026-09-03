@@ -7,6 +7,7 @@ import { Clock, Context, DateTime, Effect, Exit, Layer, Schedule, Schema } from 
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import { NonNegativeInt } from "../schema"
+import { Hash } from "../util/hash"
 import { WorkControllerDispatchTable, WorkControllerTable, WorkLeaseTable } from "./sql"
 
 const DEFAULT_DURATION_MS = 15_000
@@ -59,7 +60,7 @@ const configuredControllerID = process.env.ZAOVRA_CONTROLLER_ID?.trim()
 export const defaultControllerID = Work.ControllerID.make(
   configuredControllerID?.startsWith("controller_")
     ? configuredControllerID
-    : `controller_${new Bun.CryptoHasher("sha256").update(`${hostname()}:${process.pid}`).digest("hex").slice(0, 20)}`,
+    : `controller_${Hash.sha256(`${hostname()}:${process.pid}`).slice(0, 20)}`,
 )
 export const defaultRuntimeID = Work.ControllerRuntimeID.create()
 

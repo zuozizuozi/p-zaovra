@@ -2287,6 +2287,7 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Recover interrupted tool" },
         {
           type: "assistant",
+          finish: "interrupted",
           content: [
             {
               type: "tool",
@@ -3039,6 +3040,45 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Finish at the limit" },
         { type: "assistant", content: [{ type: "tool", id: "call-terminal", state: { status: "completed" } }] },
         { type: "assistant", content: [{ type: "tool", id: "call-forbidden", state: { status: "error" } }] },
+      ])
+    }),
+  )
+
+  it.effect("blocks repeated identical tool side effects after three attempts", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Do not loop forever" }), resume: false })
+
+      requests.length = 0
+      executions.length = 0
+      responses = Array.from({ length: 4 }, (_, index) => [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: `call-repeat-${index}`, name: "echo", input: { text: "same" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ])
+
+      yield* session.resume(sessionID)
+
+      expect(executions).toEqual(["same", "same", "same"])
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Do not loop forever" },
+        { type: "assistant", content: [{ type: "tool", state: { status: "completed" } }] },
+        { type: "assistant", content: [{ type: "tool", state: { status: "completed" } }] },
+        { type: "assistant", content: [{ type: "tool", state: { status: "completed" } }] },
+        {
+          type: "assistant",
+          content: [
+            {
+              type: "tool",
+              state: {
+                status: "error",
+                error: { message: "Identical tool call blocked after 3 attempts" },
+              },
+            },
+          ],
+        },
       ])
     }),
   )

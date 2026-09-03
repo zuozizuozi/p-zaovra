@@ -22,6 +22,7 @@ import { WorkLease } from "@zaovra-ai/core/work/lease"
 import { WorkRemoteJob } from "@zaovra-ai/core/work/remote-job"
 import { WorkRecovery } from "@zaovra-ai/core/work/recovery"
 import { WorkWorker } from "@zaovra-ai/core/work/worker"
+import { Hash } from "@zaovra-ai/core/util/hash"
 import { WorkWorkerJobOutboxTable } from "@zaovra-ai/core/work/sql"
 import { asc, eq } from "drizzle-orm"
 import { Cause, Clock, DateTime, Duration, Effect, Exit, Fiber, Ref, Schema, Stream } from "effect"
@@ -1023,7 +1024,7 @@ function boundedLog(value: string) {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 function size(value: string) {

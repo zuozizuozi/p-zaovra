@@ -22,6 +22,7 @@ import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
 import path from "path"
+import { spawn } from "node:child_process"
 import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
@@ -457,16 +458,24 @@ const layer = Layer.effect(
               process.platform === "win32"
                 ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", input.command]
                 : ["/bin/sh", "-lc", input.command]
-            const child = Bun.spawn(command, {
+            const child = spawn(command[0]!, command.slice(1), {
               cwd: session.location.directory,
-              stdout: "pipe",
-              stderr: "pipe",
               signal,
             })
+            const read = (stream: NodeJS.ReadableStream) =>
+              new Promise<string>((resolve, reject) => {
+                const chunks: Buffer[] = []
+                stream.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)))
+                stream.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
+                stream.once("error", reject)
+              })
             const [stdout, stderr, exit] = await Promise.all([
-              new Response(child.stdout).text(),
-              new Response(child.stderr).text(),
-              child.exited,
+              read(child.stdout),
+              read(child.stderr),
+              new Promise<number>((resolve, reject) => {
+                child.once("error", reject)
+                child.once("close", (code) => resolve(code ?? -1))
+              }),
             ])
             return `${stdout}${stderr}${exit === 0 ? "" : `\nProcess exited with code ${exit}.`}`
           },

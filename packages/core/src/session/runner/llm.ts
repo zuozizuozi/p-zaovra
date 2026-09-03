@@ -5,6 +5,7 @@ import {
   LLMEvent,
   Message,
   SystemPart,
+  TransportReason,
   isContextOverflowFailure,
   type ProviderErrorEvent,
 } from "@zaovra-ai/llm"
@@ -51,10 +52,10 @@ import { llmClient } from "../../effect/app-node-platform"
  * - Session ownership and controls
  *   - [x] Coordinate one local active drain per Session; explicit resumes join and prompt wakeups coalesce.
  *   - [ ] Replace local ownership with durable multi-node ownership when clustered.
- *   - [ ] Mark busy, retrying, idle, interrupted, or terminal-failure status durably.
+ *   - [x] Settle interrupted provider turns durably before explicit continuation.
  *   - [ ] Honor interruption and reject stale work after runtime attachment replacement.
  *   - [x] Honor optional agent step limits.
- *   - [ ] Bound provider retries and repeated identical tool calls.
+ *   - [x] Bound provider retries, provider turns, and repeated identical tool calls.
  *
  * - Runtime context assembly
  *   - Track V1 runtime-context parity canonically in `specs/v2/session.md`.
@@ -92,6 +93,11 @@ import { llmClient } from "../../effect/app-node-platform"
  * explicit loop starts the next provider turn after local settlement. Configured agent step limits bound the loop.
  */
 
+const PROVIDER_IDLE_TIMEOUT = "180 seconds"
+const DEFAULT_MAX_PROVIDER_TURNS = 64
+const HARD_MAX_PROVIDER_TURNS = 128
+const MAX_IDENTICAL_TOOL_CALLS = 3
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -119,7 +125,7 @@ const layer = Layer.effect(
     const getContext = Effect.fn("SessionRunner.getContext")(function* (sessionID: SessionSchema.ID) {
       return yield* store.context(sessionID)
     })
-    const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
+    const settleInterruptedTurn = Effect.fn("SessionRunner.settleInterruptedTurn")(function* (
       sessionID: SessionSchema.ID,
     ) {
       for (const message of yield* getContext(sessionID)) {
@@ -138,6 +144,15 @@ const layer = Layer.effect(
             },
           })
         }
+        if (message.time.completed) continue
+        yield* events.publish(SessionEvent.Step.Ended, {
+          sessionID,
+          timestamp: yield* DateTime.now,
+          assistantMessageID: message.id,
+          finish: "interrupted",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
       }
     })
 
@@ -177,6 +192,7 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
+      toolCallAttempts: Map<string, number>,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
     ) {
       yield* plugins.wait(PluginInternal.readyID)
@@ -196,14 +212,18 @@ const layer = Layer.effect(
           promoted += Number(yield* SessionInput.promoteNextQueued(db, events, session.id))
           promoted += yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
         }
-        if (promoted > 0) currentStep = 1
+        if (promoted > 0) {
+          currentStep = 1
+          toolCallAttempts.clear()
+        }
       }
       const system =
         initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
       const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
-      const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
+      const isLastStep =
+        currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS)
       const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
@@ -236,6 +256,20 @@ const layer = Layer.effect(
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
       const providerStream = llm.stream(request).pipe(
+        Stream.timeoutOrElse({
+          duration: PROVIDER_IDLE_TIMEOUT,
+          orElse: () =>
+            Stream.fail(
+              new LLMError({
+                module: "SessionRunner",
+                method: "stream",
+                reason: new TransportReason({
+                  message: `Provider stream produced no event for ${PROVIDER_IDLE_TIMEOUT}`,
+                  kind: "Timeout",
+                }),
+              }),
+            ),
+        }),
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             if (overflowFailure || publisher.hasProviderError()) return
@@ -247,6 +281,23 @@ const layer = Layer.effect(
             }
             yield* publish(event)
             if (event.type !== "tool-call" || event.providerExecuted) return
+            const fingerprint = `${event.name}:${JSON.stringify(event.input)}`
+            const attempts = (toolCallAttempts.get(fingerprint) ?? 0) + 1
+            toolCallAttempts.set(fingerprint, attempts)
+            if (attempts > MAX_IDENTICAL_TOOL_CALLS) {
+              needsContinuation = true
+              yield* publish(
+                LLMEvent.toolResult({
+                  id: event.id,
+                  name: event.name,
+                  result: {
+                    type: "error",
+                    value: `Identical tool call blocked after ${MAX_IDENTICAL_TOOL_CALLS} attempts`,
+                  },
+                }),
+              )
+              return
+            }
             if (!toolMaterialization) {
               yield* withPublication(publisher.failUnsettledTools("Tools are disabled after the maximum agent steps"))
               return
@@ -356,31 +407,34 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
+      toolCallAttempts: Map<string, number>,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step) {
-      return yield* runTurnAttempt(sessionID, promotion, step).pipe(
-        Effect.catchDefect(
-          Effect.fnUntraced(function* (defect) {
-            if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
-            if (defect.transition._tag === "ContinueAfterOverflowCompaction")
-              return yield* Effect.die("Post-compaction provider attempt cannot recover another overflow")
-            yield* Effect.yieldNow
-            return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step)
-          }),
-        ),
-      )
-    })
+    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(
+      function* (sessionID, promotion, step, toolCallAttempts) {
+        return yield* runTurnAttempt(sessionID, promotion, step, toolCallAttempts).pipe(
+          Effect.catchDefect(
+            Effect.fnUntraced(function* (defect) {
+              if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
+              if (defect.transition._tag === "ContinueAfterOverflowCompaction")
+                return yield* Effect.die("Post-compaction provider attempt cannot recover another overflow")
+              yield* Effect.yieldNow
+              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, toolCallAttempts)
+            }),
+          ),
+        )
+      },
+    )
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step) {
-      return yield* runTurnAttempt(sessionID, promotion, step, compaction.compactAfterOverflow).pipe(
+    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
+      return yield* runTurnAttempt(sessionID, promotion, step, toolCallAttempts, compaction.compactAfterOverflow).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
             yield* Effect.yieldNow
             if (defect.transition._tag === "ContinueAfterOverflowCompaction")
-              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step)
-            return yield* runTurn(sessionID, undefined, defect.transition.step)
+              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, toolCallAttempts)
+            return yield* runTurn(sessionID, undefined, defect.transition.step, toolCallAttempts)
           }),
         ),
       )
@@ -393,14 +447,15 @@ const layer = Layer.effect(
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
-      yield* failInterruptedTools(input.sessionID)
+      yield* settleInterruptedTurn(input.sessionID)
+      const toolCallAttempts = new Map<string, number>()
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
       while (shouldRun) {
         let needsContinuation = true
         let step = 1
         while (needsContinuation) {
-          const result = yield* runTurn(input.sessionID, promotion, step)
+          const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts)
           needsContinuation = result.needsContinuation
           step = result.step + 1
           promotion = "steer"

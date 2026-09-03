@@ -34,6 +34,7 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/LLM/
 
 const BODY_LIMIT = 16_384
 const MAX_RETRIES = 2
+const REQUEST_TIMEOUT = "120 seconds"
 const BASE_DELAY_MS = 500
 const MAX_DELAY_MS = 10_000
 const REDACTED = "<redacted>"
@@ -372,7 +373,11 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
         const redactedNames = yield* Headers.CurrentRedactedNames
         return yield* http
           .execute(request)
-          .pipe(Effect.mapError(toHttpError(redactedNames)), Effect.flatMap(statusError(request, redactedNames)))
+          .pipe(
+            Effect.timeout(REQUEST_TIMEOUT),
+            Effect.mapError(toHttpError(redactedNames)),
+            Effect.flatMap(statusError(request, redactedNames)),
+          )
       })
     return Service.of({
       execute: (request) => retryStatusFailures(executeOnce(request)),

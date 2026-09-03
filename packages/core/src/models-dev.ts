@@ -213,15 +213,10 @@ const layer = Layer.effect(
       if (fromDisk) return fromDisk
       const snapshot = yield* loadSnapshot
       if (snapshot) return snapshot
-      if (Flag.ZAOVRA_DISABLE_MODELS_FETCH) return {}
-      // Flock is cross-process: concurrent zaovra CLIs can race on this cache file.
-      const text = yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* Flock.effect(lockKey)
-          return yield* fetchAndWrite()
-        }),
-      )
-      return JSON.parse(text) as Record<string, Provider>
+      // Catalog hydration must never block application startup. Packaged builds carry a
+      // snapshot; source builds start with an empty catalog and the background refresh
+      // below publishes an event that reloads Catalog and Integration when ready.
+      return {}
     }).pipe(Effect.withSpan("ModelsDev.populate"), Effect.orDie)
 
     const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)

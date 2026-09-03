@@ -7,6 +7,7 @@ import { timingSafeEqual } from "node:crypto"
 import path from "path"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
+import { Hash } from "../util/hash"
 import { WorkInfo } from "./info"
 import { WorkGoalTable, WorkWorkerTable } from "./sql"
 
@@ -330,7 +331,7 @@ function issueToken() {
 }
 
 function tokenHash(workerID: Work.WorkerID, token: string) {
-  return new Bun.CryptoHasher("sha256").update(`${workerID}:${token}`).digest("hex")
+  return Hash.sha256(`${workerID}:${token}`)
 }
 
 function matches(expected: string, actual: string) {

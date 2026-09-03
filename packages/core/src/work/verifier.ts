@@ -8,6 +8,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { Git } from "../git"
 import { AppProcess } from "../process"
+import { Hash } from "../util/hash"
 import { WorkRemoteJob } from "./remote-job"
 
 const MAX_OUTPUT_BYTES = 128 * 1024
@@ -447,7 +448,7 @@ const captureSpec = Effect.fn("WorkVerifier.captureSpec")(function* (
 })
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 function errorText(error: unknown) {

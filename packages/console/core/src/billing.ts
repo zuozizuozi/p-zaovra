@@ -322,14 +322,14 @@ export namespace Billing {
 
       const coupon = (() => {
         if (coupons.some((coupon) => coupon.type === "GO12MONTHS100" && !coupon.timeRedeemed))
-          return LiteData.twelveMonths100Coupon
+          return LiteData.twelveMonths100Coupon()
         if (coupons.some((coupon) => coupon.type === "GO6MONTHS100" && !coupon.timeRedeemed))
-          return LiteData.sixMonths100Coupon
+          return LiteData.sixMonths100Coupon()
         if (coupons.some((coupon) => coupon.type === "GO3MONTHS100" && !coupon.timeRedeemed))
-          return LiteData.threeMonths100Coupon
+          return LiteData.threeMonths100Coupon()
         if (coupons.some((coupon) => coupon.type === "GOFREEMONTH" && !coupon.timeRedeemed))
-          return LiteData.firstMonth100Coupon
-        if (!coupons.some((coupon) => coupon.type === "GO1MONTH50")) return LiteData.firstMonth50Coupon
+          return LiteData.firstMonth100Coupon()
+        if (!coupons.some((coupon) => coupon.type === "GO1MONTH50")) return LiteData.firstMonth50Coupon()
         return undefined
       })()
       const createSession = () =>

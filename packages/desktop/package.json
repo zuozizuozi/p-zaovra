@@ -1,5 +1,6 @@
 {
   "name": "@zaovra-ai/desktop",
+  "description": "AI-native desktop agent IDE",
   "private": true,
   "version": "1.18.3",
   "type": "module",

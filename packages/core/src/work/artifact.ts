@@ -8,6 +8,7 @@ import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
+import { Hash } from "../util/hash"
 import { WorkArtifactOwnerTable, WorkArtifactTable } from "./sql"
 
 const prefix = "zaovra-work-artifact://sha256/"
@@ -302,7 +303,7 @@ function file(root: string, digest: string) {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 function size(value: string) {

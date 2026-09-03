@@ -7,6 +7,7 @@ import { DateTime, Effect, Layer } from "effect"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { makeGlobalNode } from "../effect/app-node"
+import { Hash } from "../util/hash"
 import { SessionMessageTable, SessionTable } from "../session/sql"
 import {
   WorkAttemptTable,
@@ -1046,7 +1047,7 @@ function handoffDigest(
   items: ReadonlyArray<Work.HandoffItem>,
   evidenceIDs: ReadonlyArray<Work.EvidenceID>,
 ) {
-  return new Bun.CryptoHasher("sha256").update(JSON.stringify({ summary, items, evidenceIDs })).digest("hex")
+  return Hash.sha256(JSON.stringify({ summary, items, evidenceIDs }))
 }
 
 function acyclic(tasks: ReadonlyArray<{ readonly id: Work.TaskID; readonly dependsOn: ReadonlyArray<Work.TaskID> }>) {

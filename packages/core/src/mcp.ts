@@ -22,6 +22,7 @@ import { makeLocationNode } from "./effect/app-node"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { Location } from "./location"
 import { Integration } from "./integration"
+import { Hash } from "./util/hash"
 import { implementation, integrationID, methodID, oauthProvider } from "./mcp/oauth"
 import { PermissionV2 } from "./permission"
 import { SystemContext } from "./system-context"
@@ -653,7 +654,7 @@ function sanitize(value: string) {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 function modelContent(value: unknown): ReadonlyArray<Tool.Content> {

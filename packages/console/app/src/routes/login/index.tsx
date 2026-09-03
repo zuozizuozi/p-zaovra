@@ -1,7 +1,7 @@
 import "./index.css"
 import { Meta, Title } from "@solidjs/meta"
-import { A, useSearchParams } from "@solidjs/router"
-import { createMemo, type JSX } from "solid-js"
+import { A } from "@solidjs/router"
+import type { JSX } from "solid-js"
 import logo from "../../asset/logo-ornate-dark.svg"
 import logoSquare from "../../asset/brand/zaovra-logo-light-square.png"
 import { LocaleLinks } from "~/component/locale-links"
@@ -29,27 +29,8 @@ function GoogleIcon(props: JSX.SvgSVGAttributes<SVGSVGElement>) {
   )
 }
 
-function ArrowIcon() {
-  return (
-    <svg viewBox="0 0 18 18" aria-hidden="true">
-      <path d="M3.75 9h9.5m-3.5-3.5L13.25 9l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4" />
-    </svg>
-  )
-}
-
 export default function Login() {
   const language = useLanguage()
-  const [search] = useSearchParams()
-  const continuePath = createMemo(() => {
-    const value = search.continue
-    if (typeof value !== "string" || !value.startsWith("/")) return undefined
-    return value
-  })
-  const authorizeHref = (provider: "github" | "google") => {
-    const params = new URLSearchParams({ provider })
-    if (continuePath()) params.set("continue", continuePath()!)
-    return `/auth/authorize?${params}`
-  }
 
   return (
     <main data-page="login">
@@ -98,24 +79,24 @@ export default function Login() {
             </span>
           </div>
           <h1 id="login-title">Sign in to Zaovra</h1>
-          <p data-slot="login-intro">Choose the account provider you already use.</p>
+          <p data-slot="login-intro">Account sign-in is being prepared for the public release.</p>
 
           <div data-slot="provider-list">
-            <a href={authorizeHref("github")} data-provider="github">
+            <button type="button" data-provider="github" disabled>
               <GitHubIcon />
-              <span>Continue with GitHub</span>
-              <ArrowIcon />
-            </a>
-            <a href={authorizeHref("google")} data-provider="google">
+              <span>GitHub sign-in</span>
+              <small>Coming soon</small>
+            </button>
+            <button type="button" data-provider="google" disabled>
               <GoogleIcon />
-              <span>Continue with Google</span>
-              <ArrowIcon />
-            </a>
+              <span>Google sign-in</span>
+              <small>Coming soon</small>
+            </button>
           </div>
 
           <div data-slot="login-note">
             <span data-slot="status-dot" aria-hidden="true" />
-            First sign-in creates your Zaovra account.
+            No account will be created until sign-in is enabled.
           </div>
           <p data-slot="legal-copy">
             By continuing, you agree to the <A href={language.route("/legal/terms-of-service")}>Terms</A> and <A href={language.route("/legal/privacy-policy")}>Privacy Policy</A>.

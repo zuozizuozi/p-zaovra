@@ -2,6 +2,7 @@ export * as WorkHandoff from "./handoff"
 
 import { Work } from "@zaovra-ai/schema/work"
 import { Option, Schema } from "effect"
+import { Hash } from "../util/hash"
 
 const HandoffJson = Schema.UnknownFromJsonString.pipe(Schema.decodeTo(Work.HandoffOutput))
 const decode = Schema.decodeUnknownOption(HandoffJson)
@@ -44,5 +45,5 @@ export function itemDigest(item: Work.HandoffItem) {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }

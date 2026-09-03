@@ -7,6 +7,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js"
 import { Cause, Deferred, Effect, Exit } from "effect"
+import { createServer } from "node:http"
 import { Credential } from "../credential"
 import { Integration } from "../integration"
 import { OauthCallbackPage } from "../oauth/page"
@@ -143,34 +144,55 @@ function authorize(name: string, server: Remote) {
     const redirect = yield* Effect.try({ try: () => requireLoopback(oauth.redirectUrl), catch: normalizeError })
     const callback = yield* Deferred.make<string, Error>()
     yield* Effect.acquireRelease(
-      Effect.try({
+      Effect.tryPromise({
         try: () =>
-          Bun.serve({
-            hostname: redirect.hostname,
-            port: Number(redirect.port),
-            fetch(request) {
-              const url = new URL(request.url)
-              if (url.pathname !== redirect.pathname) return new Response("Not found", { status: 404 })
+          new Promise<ReturnType<typeof createServer>>((resolve, reject) => {
+            const running = createServer((request, response) => {
+              const url = new URL(request.url ?? "/", redirect.origin)
+              if (url.pathname !== redirect.pathname) {
+                response.writeHead(404, { "content-type": "text/plain; charset=utf-8" })
+                response.end("Not found")
+                return
+              }
               if (url.searchParams.get("state") !== oauth.expectedState()) {
                 const message = "Invalid or expired OAuth state"
                 Effect.runFork(Deferred.fail(callback, new Error(message)))
-                return html(OauthCallbackPage.error(message, { provider: `MCP ${name}` }), 400)
+                sendHtml(response, OauthCallbackPage.error(message, { provider: `MCP ${name}` }), 400)
+                return
               }
               const error = url.searchParams.get("error_description") ?? url.searchParams.get("error")
               if (error) {
                 Effect.runFork(Deferred.fail(callback, new Error(error)))
-                return html(OauthCallbackPage.error(error, { provider: `MCP ${name}` }))
+                sendHtml(response, OauthCallbackPage.error(error, { provider: `MCP ${name}` }))
+                return
               }
               const code = url.searchParams.get("code")
-              if (!code)
-                return html(OauthCallbackPage.error("No authorization code provided", { provider: `MCP ${name}` }), 400)
+              if (!code) {
+                sendHtml(
+                  response,
+                  OauthCallbackPage.error("No authorization code provided", { provider: `MCP ${name}` }),
+                  400,
+                )
+                return
+              }
               Effect.runFork(Deferred.succeed(callback, code))
-              return html(OauthCallbackPage.success({ provider: `MCP ${name}` }))
-            },
+              sendHtml(response, OauthCallbackPage.success({ provider: `MCP ${name}` }))
+            })
+            running.once("error", reject)
+            running.listen(Number(redirect.port), redirect.hostname, () => {
+              running.removeListener("error", reject)
+              resolve(running)
+            })
           }),
         catch: (cause) => new Error(`Unable to start MCP OAuth callback server: ${String(cause)}`),
       }),
-      (running) => Effect.sync(() => running.stop(true)),
+      (running) =>
+        Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              running.close(() => resolve())
+            }),
+        ),
     )
     const transport = new StreamableHTTPClientTransport(new URL(server.url), {
       authProvider: oauth,
@@ -259,8 +281,9 @@ function requireLoopback(value: string) {
   return url
 }
 
-function html(body: string, status = 200) {
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } })
+function sendHtml(response: import("node:http").ServerResponse, body: string, status = 200) {
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8" })
+  response.end(body)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -171,15 +171,15 @@ export async function POST(input: APIEvent) {
             })
 
             if (userEmail) {
-              if (coupon === LiteData.firstMonth50Coupon) {
+              if (coupon === LiteData.firstMonth50Coupon()) {
                 await Billing.redeemCoupon(userEmail, "GO1MONTH50")
-              } else if (coupon === LiteData.firstMonth100Coupon) {
+              } else if (coupon === LiteData.firstMonth100Coupon()) {
                 await Billing.redeemCoupon(userEmail, "GOFREEMONTH")
-              } else if (coupon === LiteData.threeMonths100Coupon) {
+              } else if (coupon === LiteData.threeMonths100Coupon()) {
                 await Billing.redeemCoupon(userEmail, "GO3MONTHS100")
-              } else if (coupon === LiteData.sixMonths100Coupon) {
+              } else if (coupon === LiteData.sixMonths100Coupon()) {
                 await Billing.redeemCoupon(userEmail, "GO6MONTHS100")
-              } else if (coupon === LiteData.twelveMonths100Coupon) {
+              } else if (coupon === LiteData.twelveMonths100Coupon()) {
                 await Billing.redeemCoupon(userEmail, "GO12MONTHS100")
               }
             }

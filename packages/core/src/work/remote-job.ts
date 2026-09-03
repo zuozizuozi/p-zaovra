@@ -6,6 +6,7 @@ import { Clock, Context, DateTime, Effect, Layer } from "effect"
 import { isDeepStrictEqual } from "node:util"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
+import { Hash } from "../util/hash"
 import { WorkArtifact } from "./artifact"
 import { WorkWorkerJobArtifactTable, WorkWorkerJobLogTable, WorkWorkerJobTable, WorkWorkerTable } from "./sql"
 
@@ -820,10 +821,7 @@ export function makeLayer(options?: { readonly leaseMs?: number; readonly recove
 
 function jobID(input: DispatchInput) {
   return Work.WorkerJobID.make(
-    `worker_job_${new Bun.CryptoHasher("sha256")
-      .update(`${input.attemptID}:${input.criterionID}`)
-      .digest("hex")
-      .slice(0, 32)}`,
+    `worker_job_${Hash.sha256(`${input.attemptID}:${input.criterionID}`).slice(0, 32)}`,
   )
 }
 
@@ -898,7 +896,7 @@ export function agentCriterionID(attemptID: Work.AttemptID) {
 }
 
 function hash(value: string) {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex")
+  return Hash.sha256(value)
 }
 
 function sameJson(left: unknown, right: unknown) {
