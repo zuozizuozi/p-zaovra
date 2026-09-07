@@ -1,0 +1,204 @@
+- generic [active] [ref=f8e1]:
+  - link "Skip to content" [ref=f8e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=f8e3]:
+    - link "Zaovra home" [ref=f8e4] [cursor=pointer]:
+      - /url: "#top"
+      - img "Zaovra" [ref=f8e5]
+    - group [ref=f8e6]:
+      - generic "Open navigation" [ref=f8e7] [cursor=pointer]: Menu
+  - main [ref=f8e8]:
+    - generic [ref=f8e9]:
+      - generic [aria-hidden] [ref=f8e11]: ZAOVRA
+      - generic [ref=f8e13]:
+        - link "Download desktop" [ref=f8e14] [cursor=pointer]:
+          - /url: https://zaovra.com/download
+        - link "Read the docs" [ref=f8e15] [cursor=pointer]:
+          - /url: https://zaovra.com/docs
+          - text: Read the docs
+          - generic [aria-hidden] [ref=f8e16]: ↗
+    - region "Product facts" [ref=f8e17]:
+      - generic [ref=f8e18]:
+        - generic [ref=f8e19]: Runtime
+        - strong [ref=f8e20]: Local-first
+      - generic [ref=f8e21]:
+        - generic [ref=f8e22]: Model access
+        - strong [ref=f8e23]: BYOK + managed
+      - generic [ref=f8e24]:
+        - generic [ref=f8e25]: Surfaces
+        - strong [ref=f8e26]: Desktop + TUI
+      - generic [ref=f8e27]:
+        - generic [ref=f8e28]: License
+        - strong [ref=f8e29]: MIT
+    - generic [ref=f8e30]:
+      - generic [ref=f8e31]:
+        - paragraph [ref=f8e32]: One grounded loop
+        - heading "From a question to reviewed code." [level=2] [ref=f8e33]: From a questionto reviewed code.
+        - paragraph [ref=f8e34]: Zaovra keeps context, execution, and evidence in the same session so the work stays legible from first read to final diff.
+      - generic [ref=f8e35]:
+        - figure "Actual Zaovra interface Local workspace session" [ref=f8e36]:
+          - img "Real Zaovra terminal experience showing workspace context loaded" [ref=f8e37]
+          - generic [ref=f8e38]:
+            - generic [ref=f8e39]: Actual Zaovra interface
+            - generic [ref=f8e40]: Local workspace session
+        - list [ref=f8e41]:
+          - listitem [ref=f8e42]:
+            - generic [ref=f8e43]: Explore
+            - paragraph [ref=f8e44]: Read the repository before changing it.
+            - generic [aria-hidden] [ref=f8e45]: ✓
+          - listitem [ref=f8e46]:
+            - generic [ref=f8e47]: Plan
+            - paragraph [ref=f8e48]: Turn intent into a bounded implementation.
+            - generic [aria-hidden] [ref=f8e49]: ✓
+          - listitem [ref=f8e50]:
+            - generic [ref=f8e51]: Execute
+            - paragraph [ref=f8e52]: Edit files and run the real toolchain.
+            - generic [aria-hidden] [ref=f8e53]: ●
+          - listitem [ref=f8e54]:
+            - generic [ref=f8e55]: Verify
+            - paragraph [ref=f8e56]: Inspect checks, evidence, and the final diff.
+            - generic [aria-hidden] [ref=f8e57]: ○
+    - generic [ref=f8e58]:
+      - generic [ref=f8e59]:
+        - heading "Your workspace is the source of truth." [level=2] [ref=f8e60]: Your workspace isthe source of truth.
+        - paragraph [ref=f8e61]: Not a detached chat tab. Zaovra works against the project, permissions, tools, and history you actually use.
+      - generic [ref=f8e62]:
+        - article [ref=f8e63]:
+          - generic [ref=f8e64]:
+            - generic [ref=f8e65]: WORKSPACE / 01
+            - heading "Code context that stays attached." [level=3] [ref=f8e66]
+            - paragraph [ref=f8e67]: Files, project instructions, terminal output, and language services remain part of the session.
+          - generic [aria-hidden] [ref=f8e68]:
+            - generic [ref=f8e69]:
+              - generic [ref=f8e70]: AGENTS.md
+              - generic [ref=f8e71]: Loaded
+            - generic [ref=f8e72]:
+              - generic [ref=f8e73]: src/session/execution.ts
+              - generic [ref=f8e74]: Tracked
+            - generic [ref=f8e75]:
+              - generic [ref=f8e76]: TypeScript language server
+              - generic [ref=f8e77]: Ready
+            - generic [ref=f8e78]:
+              - generic [ref=f8e79]: powershell
+              - generic [ref=f8e80]: Connected
+        - article [ref=f8e81]:
+          - generic [ref=f8e82]: MODELS / 02
+          - heading "Bring the model access you trust." [level=3] [ref=f8e83]
+          - paragraph [ref=f8e84]: Connect provider keys, OpenAI-compatible endpoints, local endpoints, or use Zaovra managed access.
+          - list "Provider examples" [ref=f8e85]:
+            - listitem [ref=f8e86]:
+              - generic [ref=f8e87]: A
+              - text: Anthropic
+            - listitem [ref=f8e88]:
+              - generic [ref=f8e89]: O
+              - text: OpenAI
+            - listitem [ref=f8e90]:
+              - generic [ref=f8e91]: G
+              - text: Google
+            - listitem [ref=f8e92]:
+              - generic [ref=f8e93]: API
+              - text: Custom
+        - article [ref=f8e94]:
+          - generic [ref=f8e95]: SESSION / 03
+          - heading "Durable by design." [level=3] [ref=f8e96]
+          - paragraph [ref=f8e97]: Sessions preserve the work trail, admit new prompts safely, and let you return without rebuilding context from scratch.
+          - generic [ref=f8e98]:
+            - generic [ref=f8e100]: Homepage redesign
+            - emphasis [ref=f8e101]: retained
+        - article [ref=f8e102]:
+          - generic [ref=f8e103]: CONTROL / 04
+          - heading "Permission stays explicit." [level=3] [ref=f8e104]
+          - paragraph [ref=f8e105]: Use read-only planning or full build mode. Commands and file changes follow the rules you set.
+          - generic [aria-hidden] [ref=f8e106]:
+            - generic [ref=f8e107]: PLAN / READ ONLY
+            - generic [ref=f8e108]: BUILD / ASK
+    - region [ref=f8e109]:
+      - generic [ref=f8e110]:
+        - generic [ref=f8e111]: EVIDENCE, NOT PROMISES
+        - heading "See the change. Then decide." [level=2] [ref=f8e112]: See the change.Then decide.
+        - paragraph [ref=f8e113]: "Every implementation ends where professional software work should: in checks you can inspect and a diff you can review."
+        - list [ref=f8e114]:
+          - listitem [ref=f8e115]:
+            - generic [ref=f8e116]: Terminal
+            - generic [ref=f8e117]: Run the project’s own commands
+          - listitem [ref=f8e118]:
+            - generic [ref=f8e119]: LSP
+            - generic [ref=f8e120]: Use language-aware context
+          - listitem [ref=f8e121]:
+            - generic [ref=f8e122]: Diff
+            - generic [ref=f8e123]: Review every changed line
+      - generic "Reviewable code changes example" [ref=f8e124]:
+        - generic [ref=f8e125]:
+          - generic [ref=f8e126]: packages / website-redesign / styles.css
+          - generic [ref=f8e127]: Review
+        - generic [ref=f8e128]:
+          - generic [ref=f8e129]: "126"
+          - code [ref=f8e130]: ".hero { min-height: 100dvh; }"
+        - generic [ref=f8e131]:
+          - generic [ref=f8e132]: "127"
+          - code [ref=f8e133]: "- background: linear-gradient(...);"
+        - generic [ref=f8e134]:
+          - generic [ref=f8e135]: "127"
+          - code [ref=f8e136]: "+ background: var(--void);"
+        - generic [ref=f8e137]:
+          - generic [ref=f8e138]: "128"
+          - code [ref=f8e139]: "+ perspective: 1400px;"
+        - generic [ref=f8e140]:
+          - generic [ref=f8e141]: "129"
+          - code [ref=f8e142]: "}"
+        - generic [ref=f8e143]:
+          - generic [ref=f8e144]: +2 additions
+          - generic [ref=f8e145]: −1 deletion
+          - generic [ref=f8e146]: Ready to inspect
+    - generic [ref=f8e147]:
+      - generic [ref=f8e148]:
+        - heading "One engine. Three places to work." [level=2] [ref=f8e149]: One engine.Three places to work.
+        - paragraph [ref=f8e150]: Use the focused desktop app, stay inside VS Code, or move at terminal speed in the TUI.
+      - generic [ref=f8e151]:
+        - figure "VS Code Work beside the editor" [ref=f8e152]:
+          - img "Zaovra running with VS Code" [ref=f8e153]
+          - generic [ref=f8e154]:
+            - generic [ref=f8e155]: VS Code
+            - generic [ref=f8e156]: Work beside the editor
+        - figure "GitHub Carry reviewed work forward" [ref=f8e157]:
+          - img "Zaovra project workflow connected to GitHub" [ref=f8e158]
+          - generic [ref=f8e159]:
+            - generic [ref=f8e160]: GitHub
+            - generic [ref=f8e161]: Carry reviewed work forward
+        - generic [ref=f8e162]:
+          - generic [ref=f8e163]: TUI
+          - button "Copy the Zaovra installation command" [ref=f8e164]:
+            - code [ref=f8e165]:
+              - emphasis [ref=f8e166]: $
+              - text: npm i -g zaovra-ai@latest
+              - emphasis [ref=f8e167]: $
+              - text: zaovra [ready] Workspace context loaded
+            - text: click to copy
+          - link "Open CLI documentation" [ref=f8e168] [cursor=pointer]:
+            - /url: https://zaovra.com/docs
+            - text: Open CLI documentation
+            - generic [aria-hidden] [ref=f8e169]: ↗
+    - generic [ref=f8e170]:
+      - generic [aria-hidden] [ref=f8e171]: Z
+      - generic [ref=f8e172]:
+        - paragraph [ref=f8e173]: Ground the model. Keep control.
+        - heading "Make the next change with Zaovra." [level=2] [ref=f8e174]: Make the nextchange with Zaovra.
+        - generic [ref=f8e175]:
+          - link "Download Zaovra" [ref=f8e176] [cursor=pointer]:
+            - /url: https://zaovra.com/download
+          - link "View on GitHub" [ref=f8e177] [cursor=pointer]:
+            - /url: https://github.com/zuozizuozi/p-zaovra
+            - text: View on GitHub
+            - generic [aria-hidden] [ref=f8e178]: ↗
+  - contentinfo [ref=f8e179]:
+    - img "Zaovra" [ref=f8e180]
+    - navigation "Footer navigation" [ref=f8e181]:
+      - link "Docs" [ref=f8e182] [cursor=pointer]:
+        - /url: https://zaovra.com/docs
+      - link "Privacy" [ref=f8e183] [cursor=pointer]:
+        - /url: https://zaovra.com/legal/privacy-policy
+      - link "Terms" [ref=f8e184] [cursor=pointer]:
+        - /url: https://zaovra.com/legal/terms-of-service
+      - link "GitHub" [ref=f8e185] [cursor=pointer]:
+        - /url: https://github.com/zuozizuozi/p-zaovra
+    - generic [ref=f8e186]: © 2026 Zaovra

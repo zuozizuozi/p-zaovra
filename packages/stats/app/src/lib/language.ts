@@ -1,5 +1,5 @@
-import { route as localeRoute, strip as localeStrip } from "../../../../console/app/src/lib/language"
-import type { Locale } from "../../../../console/app/src/lib/language"
+import { route as localeRoute, strip as localeStrip } from "../../../../website/app/src/lib/language"
+import type { Locale } from "../../../../website/app/src/lib/language"
 
 export {
   LOCALES,
@@ -16,9 +16,9 @@ export {
   localeFromRequest,
   parseLocale,
   tag,
-} from "../../../../console/app/src/lib/language"
+} from "../../../../website/app/src/lib/language"
 
-export type { Locale } from "../../../../console/app/src/lib/language"
+export type { Locale } from "../../../../website/app/src/lib/language"
 
 export const basePath = "/data"
 export const baseUrl = "https://zaovra.com"

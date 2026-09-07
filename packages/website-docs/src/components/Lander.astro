@@ -1,0 +1,708 @@
+---
+import { Image } from 'astro:assets'
+import { getRelativeLocaleUrl } from 'astro:i18n'
+import config from "virtual:starlight/user-config"
+
+import CopyIcon from "../assets/lander/copy.svg"
+import CheckIcon from "../assets/lander/check.svg"
+import TuiScreenshot from "../assets/lander/screenshot-splash.png"
+import VscodeScreenshot from "../assets/lander/screenshot-vscode.png"
+import GithubScreenshot from "../assets/lander/screenshot-github.png"
+
+const { data } = Astro.locals.starlightRoute.entry
+const { image } = data.hero || {}
+const t = Astro.locals.t as (key: string) => string
+const locale = Astro.currentLocale || 'root'
+
+const github = (config.social || []).filter(s => s.icon === 'github')[0]
+const discord = (config.social || []).filter(s => s.icon === 'discord')[0]
+
+const docsHref = getRelativeLocaleUrl(locale, "")
+const docsCliHref = getRelativeLocaleUrl(locale, "cli")
+const docsIdeHref = getRelativeLocaleUrl(locale, "ide")
+const docsGithubHref = getRelativeLocaleUrl(locale, "github")
+
+const command = "curl -fsSL"
+const protocol = "https://"
+const installerUrl = "zaovra.com/install"
+const bash = "| bash"
+const installCommand = `${command} ${protocol}${installerUrl} ${bash}`
+
+let darkImage: ImageMetadata | undefined
+let lightImage: ImageMetadata | undefined
+if (image) {
+  if ('file' in image) {
+    darkImage = image.file
+  } else if ('dark' in image) {
+    darkImage = image.dark
+    lightImage = image.light
+  }
+}
+
+const featureCards = [
+  {
+    title: t('app.lander.features.native_tui.title'),
+    description: t('app.lander.features.native_tui.description'),
+  },
+  {
+    title: t('app.lander.features.lsp_enabled.title'),
+    description: t('app.lander.features.lsp_enabled.description'),
+  },
+  {
+    title: t('app.lander.features.multi_session.title'),
+    description: t('app.lander.features.multi_session.description'),
+  },
+  {
+    title: t('app.lander.features.shareable_links.title'),
+    description: t('app.lander.features.shareable_links.description'),
+  },
+  {
+    title: "GitHub Copilot",
+    description: t('app.lander.features.github_copilot.description'),
+  },
+  {
+    title: "ChatGPT Plus/Pro",
+    description: t('app.lander.features.chatgpt_plus_pro.description'),
+  },
+  {
+    title: t('app.lander.features.use_any_model.title'),
+    description: `${t('app.lander.features.use_any_model.prefix')} ${t('app.lander.features.use_any_model.suffix')}`,
+  },
+]
+
+const installCards = [
+  { label: 'npm', command: 'npm install -g zaovra-ai' },
+  { label: 'Bun', command: 'bun install -g zaovra-ai' },
+  { label: 'Homebrew', command: 'brew install zaovra' },
+  { label: 'Paru', command: 'paru -S zaovra-bin' },
+  { label: 'Mise', command: 'mise use -g github:zuozizuozi/p-zaovra' },
+]
+---
+
+<div class="hero-shell" id="lander">
+  <canvas id="particle-canvas" class="particle-canvas" aria-hidden="true"></canvas>
+  <div class="hero-glow"></div>
+
+  <div class="hero-panel">
+    <section class="top">
+      <div class="logo">
+        {darkImage && (
+          <Image
+            src={darkImage}
+            width={300}
+            height={56}
+            alt="Zaovra logo"
+            decoding="async"
+            loading="eager"
+            class:list={{ 'light:sl-hidden': Boolean(lightImage) }}
+          />
+        )}
+        {lightImage && <Image src={lightImage} width={300} height={56} alt="Zaovra logo" decoding="async" loading="eager" class="dark:sl-hidden" />}
+      </div>
+      <h1>{t('app.lander.hero.title')}</h1>
+      <p class="hero-subtitle">{t('app.lander.hero.subtitle')}</p>
+      <p class="hero-pulse">{t('app.lander.hero.description')}</p>
+    </section>
+
+    <section class="cta">
+      <a class="cta-link" href={docsHref}>{t('app.lander.cta.getStarted')}</a>
+      <button class="command" data-command={installCommand}>
+        <code>
+          <span>{command}</span>
+          <span class="protocol">{protocol}</span>
+          <span class="highlight">{installerUrl}</span>
+          <span class="bash">{bash}</span>
+        </code>
+        <span class="copy">
+          <CopyIcon />
+          <CheckIcon />
+        </span>
+      </button>
+    </section>
+
+    <section class="features">
+      <h2>{t('app.lander.sections.core')}</h2>
+      <div class="feature-grid">
+        {featureCards.map((feature) => (
+          <article class="feature-card">
+            <h3>{feature.title}</h3>
+            <p>{feature.description}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section class="alternatives">
+      <h2>{t('app.lander.sections.installers')}</h2>
+      <div class="command-grid">
+        {installCards.map((item) => (
+          <button class="command command-compact" data-command={item.command}>
+            <h3>{item.label}</h3>
+            <code>{item.command}</code>
+            <span class="copy">
+              <CopyIcon />
+              <CheckIcon />
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+
+    <section class="images">
+      <h2>{t('app.lander.sections.showcase')}</h2>
+      <div class="layout">
+        <figure>
+          <figcaption>{t('app.lander.images.tui.caption')}</figcaption>
+          <a href={docsCliHref}><Image src={TuiScreenshot} alt={t('app.lander.images.tui.alt')} /></a>
+        </figure>
+        <div class="stack">
+          <figure>
+            <figcaption>{t('app.lander.images.vscode.caption')}</figcaption>
+            <a href={docsIdeHref}><Image src={VscodeScreenshot} alt={t('app.lander.images.vscode.alt')} /></a>
+          </figure>
+          <figure>
+            <figcaption>{t('app.lander.images.github.caption')}</figcaption>
+            <a href={docsGithubHref}><Image src={GithubScreenshot} alt={t('app.lander.images.github.alt')} /></a>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="footer">
+      <a href={github?.href} target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href={discord?.href} target="_blank" rel="noopener noreferrer">Discord</a>
+      <span>&copy;2026 <a href="https://anoma.ly" target="_blank" rel="noopener noreferrer">Anomaly Innovations</a></span>
+    </section>
+  </div>
+</div>
+
+<style>
+.hero-shell {
+  --panel-radius: 22px;
+  --surface: linear-gradient(140deg, rgb(2 12 28 / 0.95), rgb(9 22 43 / 0.95));
+  --stroke: color-mix(in oklab, var(--sl-color-border) 45%, transparent);
+  --text-soft: color-mix(in oklab, var(--sl-color-text) 72%, transparent);
+  --pulse: 0 0 24px 0 color-mix(in oklab, #4ad6ff 35%, transparent);
+
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--panel-radius);
+  border: 1px solid var(--stroke);
+  margin: 1rem;
+  box-shadow: 0 18px 54px 0 color-mix(in oklab, #0a1c3a 40%, transparent);
+  background: var(--surface);
+  color: #ecf5ff;
+}
+
+.particle-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.hero-glow {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in oklab, #4fd3ff 28%, transparent), transparent 42%),
+    radial-gradient(circle at 80% 80%, color-mix(in oklab, #8b6dff 22%, transparent), transparent 42%);
+  opacity: 0.9;
+  z-index: 1;
+}
+
+.hero-panel {
+  position: relative;
+  z-index: 2;
+  padding: clamp(1rem, 2vw, 2rem) clamp(1rem, 3vw, 2.8rem) clamp(1.4rem, 2vw, 2.2rem);
+  display: grid;
+  gap: 1rem;
+  backdrop-filter: blur(4px);
+}
+
+.top {
+  border-bottom: 1px solid var(--stroke);
+  padding-bottom: 1.25rem;
+}
+
+.logo :global(img) {
+  display: block;
+  width: clamp(190px, 26vw, 280px);
+  height: auto;
+}
+
+.top h1 {
+  margin-top: 0.9rem;
+  margin-bottom: 0.55rem;
+  max-width: 16ch;
+  font-size: clamp(1.7rem, 4vw, 2.65rem);
+  letter-spacing: -0.025em;
+  color: #eff6ff;
+}
+
+.hero-subtitle,
+.hero-pulse {
+  margin: 0;
+  color: var(--text-soft);
+  max-width: 72ch;
+  line-height: 1.55;
+}
+
+.hero-pulse {
+  margin-top: 0.5rem;
+}
+
+.cta {
+  margin-top: 0.7rem;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.7rem;
+}
+
+.cta-link,
+.command,
+.command-compact {
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, #4fd3ff 35%, var(--sl-color-border) 45%);
+  background: color-mix(in oklab, #030f23 70%, #0000 30%);
+  padding: 0.78rem 0.95rem;
+  color: inherit;
+}
+
+.cta-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+}
+
+.command,
+.command-compact {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.command code,
+.command-compact code {
+  font-size: 0.92rem;
+  color: #c8d9f3;
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+
+.protocol {
+  color: #9fe0ff;
+  margin-inline: 0 0.2rem;
+}
+
+.bash {
+  color: #79ffb6;
+}
+
+.highlight {
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.copy {
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.copy svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.copy svg:first-child { color: #9aabcb; }
+.copy svg:last-child { color: #8bffd6; display: none; }
+
+.command.success .copy svg:first-child,
+.command-compact.success .copy svg:first-child {
+  display: none;
+}
+
+.command.success .copy svg:last-child,
+.command-compact.success .copy svg:last-child {
+  display: inline;
+}
+
+.features,
+.alternatives {
+  padding-top: 1rem;
+  border-top: 1px solid var(--stroke);
+}
+
+h2 {
+  margin: 0 0 0.7rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.88rem;
+  color: #86d8ff;
+}
+
+.feature-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.feature-card {
+  padding: 0.75rem;
+  border: 1px solid color-mix(in oklab, #6ec4ff 28%, transparent);
+  border-radius: 12px;
+  background: linear-gradient(160deg, color-mix(in oklab, #112a4c 55%, #071226 45%), color-mix(in oklab, #071226 84%, transparent));
+  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.feature-card:hover {
+  border-color: color-mix(in oklab, #8ce3ff 48%, #fff 2%);
+  box-shadow: var(--pulse);
+  transform: translateY(-2px);
+}
+
+.feature-card h3 {
+  font-size: 0.98rem;
+  margin: 0 0 0.4rem;
+  color: #d8ecff;
+}
+
+.feature-card p {
+  margin: 0;
+  color: #a8bfdc;
+  line-height: 1.45;
+}
+
+.command-grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.command-compact {
+  align-items: center;
+  border-radius: 10px;
+  padding-top: 0.68rem;
+  padding-bottom: 0.68rem;
+}
+
+.command-compact h3 {
+  margin: 0;
+  min-width: 5.8rem;
+  font-size: 0.9rem;
+  color: #98d4ff;
+  text-transform: uppercase;
+}
+
+.command-compact code {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.images {
+  border-top: 1px solid var(--stroke);
+  padding-top: 1rem;
+}
+
+.images .layout {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 0.7rem;
+}
+
+.layout figure,
+.layout img {
+  margin: 0;
+  width: 100%;
+  display: block;
+}
+
+.layout figure {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  overflow: hidden;
+  background: color-mix(in oklab, #0b1d36 82%, #0000);
+  padding: 0.4rem;
+}
+
+.layout figcaption {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  color: #86d8ff;
+  letter-spacing: 0.08em;
+}
+
+.layout a {
+  display: block;
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.layout img {
+  height: auto;
+  width: 100%;
+  object-fit: cover;
+  border: 1px solid color-mix(in oklab, #5fd8ff 18%, transparent);
+}
+
+.stack {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.footer {
+  margin-top: 1rem;
+  border-top: 1px solid var(--stroke);
+  padding-top: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.footer a {
+  color: #9ec8ec !important;
+  text-underline-offset: 3px;
+}
+
+.footer span,
+.footer a {
+  font-size: 0.84rem;
+}
+
+@media (max-width: 60rem) {
+  .hero-shell {
+    margin: 0.6rem;
+  }
+
+  .cta {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .command-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .images .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 40rem) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .top h1 {
+    max-width: 100%;
+  }
+}
+</style>
+
+<style is:global>
+:root[data-has-hero] {
+  .sl-markdown-content {
+    margin-top: 0;
+  }
+  header.header {
+    display: none;
+  }
+  .main-frame {
+    padding-top: 0;
+  }
+  .main-pane > main {
+    padding: 0;
+  }
+}
+</style>
+
+<script>
+  const buttons = document.querySelectorAll('button.command, button.command-compact') as NodeListOf<HTMLButtonElement>
+  buttons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const commandText = button.dataset.command
+      if (!commandText) return
+
+      navigator.clipboard.writeText(commandText)
+      button.classList.toggle('success')
+      setTimeout(() => {
+        button.classList.toggle('success')
+      }, 1300)
+    })
+  })
+
+  const prefersReduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (prefersReduceMotion) {
+    const canvas = document.getElementById('particle-canvas') as HTMLCanvasElement | null
+    if (canvas) {
+      canvas.style.opacity = '0.18'
+    }
+  } else {
+    const canvas = document.getElementById('particle-canvas') as HTMLCanvasElement | null
+    const wrapper = document.getElementById('lander')
+    if (!canvas || !wrapper) return
+
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    const particles: Array<{
+      x: number
+      y: number
+      vx: number
+      vy: number
+      r: number
+      life: number
+      hue: number
+    }> = []
+
+    let width = 0
+    let height = 0
+    const dpr = window.devicePixelRatio || 1
+    let pointer = { x: -1000, y: -1000 }
+
+    const setSize = () => {
+      const rect = wrapper.getBoundingClientRect()
+      width = rect.width
+      height = rect.height
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr))
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr))
+      canvas.style.width = `${rect.width}px`
+      canvas.style.height = `${rect.height}px`
+      context.setTransform(dpr, 0, 0, dpr, 0, 0)
+    }
+
+    const createParticle = () => ({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: (Math.random() - 0.5) * 0.35,
+      vy: (Math.random() - 0.5) * 0.35,
+      r: Math.random() * 1.5 + 0.5,
+      life: Math.random() * 2 + 4,
+      hue: Math.floor(Math.random() * 120) + 150,
+    })
+
+    const refillParticles = () => {
+      const count = Math.min(160, Math.max(50, Math.floor((width * height) / 8000)))
+      particles.length = 0
+      for (let i = 0; i < count; i += 1) {
+        particles.push(createParticle())
+      }
+    }
+
+    const spawnBurst = (x: number, y: number) => {
+      const burstCount = 8
+      for (let i = 0; i < burstCount; i += 1) {
+        const angle = (Math.PI * 2 * i) / burstCount
+        const speed = 2 + Math.random() * 1.5
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          r: Math.random() * 2.2 + 1,
+          life: 0.9,
+          hue: Math.floor(Math.random() * 60) + 150,
+        })
+      }
+    }
+
+    const render = () => {
+      context.clearRect(0, 0, width, height)
+      context.globalCompositeOperation = 'lighter'
+
+      for (let i = 0; i < particles.length; i += 1) {
+        const p = particles[i]
+        p.x += p.vx
+        p.y += p.vy
+        p.life -= 0.01
+
+        if (p.x < 0) p.x = width
+        if (p.x > width) p.x = 0
+        if (p.y < 0) p.y = height
+        if (p.y > height) p.y = 0
+
+        context.beginPath()
+        context.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+        context.fillStyle = `hsla(${p.hue}, 88%, 76%, ${p.life > 1.5 ? 0.58 : Math.max(0.08, p.life / 1.5)})`
+        context.fill()
+
+        for (let j = i + 1; j < particles.length; j += 1) {
+          const q = particles[j]
+          const dx = p.x - q.x
+          const dy = p.y - q.y
+          const d2 = dx * dx + dy * dy
+          if (d2 > 2500) continue
+
+          const distance = Math.sqrt(d2)
+          const alpha = Math.max(0.02, (50 - distance) / 55)
+          context.strokeStyle = `hsla(${Math.min(p.hue, q.hue)}, 90%, 72%, ${alpha * 0.18})`
+          context.lineWidth = 1
+          context.beginPath()
+          context.moveTo(p.x, p.y)
+          context.lineTo(q.x, q.y)
+          context.stroke()
+        }
+
+        const dx = p.x - pointer.x
+        const dy = p.y - pointer.y
+        const dist2 = dx * dx + dy * dy
+        if (dist2 < 2500) {
+          const glow = 1 - Math.sqrt(dist2) / 50
+          context.beginPath()
+          context.arc(p.x, p.y, p.r * (6 + glow * 8), 0, Math.PI * 2)
+          context.strokeStyle = `rgba(136, 220, 255, ${Math.min(glow, 0.35)})`
+          context.stroke()
+        }
+
+        if (p.life <= 0) {
+          particles[i] = createParticle()
+        }
+      }
+
+      requestAnimationFrame(render)
+    }
+
+    setSize()
+    refillParticles()
+    render()
+
+    window.addEventListener('resize', () => {
+      setSize()
+      refillParticles()
+    })
+
+    wrapper.addEventListener('pointermove', (event) => {
+      const rect = wrapper.getBoundingClientRect()
+      pointer = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      }
+    })
+
+    wrapper.addEventListener('pointerleave', () => {
+      pointer = { x: -1000, y: -1000 }
+    })
+
+    wrapper.addEventListener('click', (event) => {
+      const rect = wrapper.getBoundingClientRect()
+      spawnBurst(event.clientX - rect.left, event.clientY - rect.top)
+    })
+  }
+</script>

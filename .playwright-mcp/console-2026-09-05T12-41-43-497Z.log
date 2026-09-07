@@ -1,0 +1,5 @@
+[     178ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:4180/favicon.ico:0
+[  228326ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at HTMLButtonElement.<anonymous> (http://127.0.0.1:4180/src/main.js:243:35)
+[  249590ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at HTMLButtonElement.<anonymous> (http://127.0.0.1:4180/src/main.js:243:35)

@@ -7,7 +7,7 @@ import { playgroundCss } from "./playground-css-plugin"
 const here = path.dirname(fileURLToPath(import.meta.url))
 const ui = path.resolve(here, "../../ui")
 const sessionUi = path.resolve(here, "../../session-ui")
-const app = path.resolve(here, "../../app/src")
+const app = path.resolve(here, "../../app-ui/src")
 const mocks = path.resolve(here, "./mocks")
 
 export default defineMain({
@@ -25,7 +25,7 @@ export default defineMain({
   stories: [
     "../../ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
     "../../session-ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
-    "../../app/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../app-ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
   ],
   async viteFinal(config) {
     const { mergeConfig, searchForWorkspaceRoot } = await import("vite")

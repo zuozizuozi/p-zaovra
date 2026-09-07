@@ -1,0 +1,168 @@
+- generic [ref=f6e2]:
+  - link "Skip to content" [ref=f6e3] [cursor=pointer]:
+    - /url: "#top"
+  - banner [ref=f6e4]:
+    - link "Zaovra home" [ref=f6e5] [cursor=pointer]:
+      - /url: "#top"
+      - generic [ref=f6e7]:
+        - text: zaovra
+        - generic [ref=f6e8]: CODING WORKSPACE
+    - navigation "Primary navigation" [ref=f6e9]:
+      - link "Product" [ref=f6e10] [cursor=pointer]:
+        - /url: "#product"
+  - main [ref=f6e11]:
+    - region "Engineering context. Kept in motion." [ref=f6e12]:
+      - generic [ref=f6e14]:
+        - link "Download Zaovra ↗" [ref=f6e15] [cursor=pointer]:
+          - /url: "#install"
+          - text: Download Zaovra
+          - generic [ref=f6e16]: ↗
+        - link "See how it works ↓" [ref=f6e17] [cursor=pointer]:
+          - /url: "#product"
+          - text: See how it works
+          - generic [ref=f6e18]: ↓
+    - generic [ref=f6e20]:
+      - generic [ref=f6e21]: 01 / CONTEXT DRIFT
+      - generic "Context drift diagnostic illustration" [ref=f6e24]:
+        - generic [ref=f6e25]:
+          - text: CONTEXT SCANNER
+          - generic [ref=f6e26]: LIVE DEMO
+    - generic [ref=f6e29]:
+      - generic [ref=f6e30]:
+        - generic [ref=f6e31]: 02 / LOCAL SYSTEM
+        - heading "Everything connected. Own the workflow." [level=2] [ref=f6e32]: Everything connected.Own the workflow.
+        - paragraph [ref=f6e33]: Your files, terminal, tools, permissions, model choice, and output remain part of one understandable system.
+      - generic "Zaovra local workflow diagram" [ref=f6e34]:
+        - generic [ref=f6e35]: FROM REPOSITORY TO REVIEW
+        - generic [ref=f6e36]:
+          - generic [ref=f6e37]:
+            - text: WORKSPACE
+            - generic [ref=f6e38]: files · git · rules
+          - generic [ref=f6e40]:
+            - text: ZAOVRA RUNTIME
+            - generic [ref=f6e42]: context · session · tools
+          - generic [ref=f6e44]:
+            - text: REVIEWABLE OUTPUT
+            - generic [ref=f6e45]: diffs · tests · your approval
+        - paragraph [ref=f6e46]: Hover or focus a node to inspect its role.
+    - generic [ref=f6e48]:
+      - generic [ref=f6e49]:
+        - generic "Durable session flow" [ref=f6e50]:
+          - generic [ref=f6e51]:
+            - generic [ref=f6e52]: "01"
+            - generic [ref=f6e53]: SESSION
+            - generic [ref=f6e54]: Project history loaded
+          - generic [ref=f6e56]:
+            - generic [ref=f6e57]: "02"
+            - generic [ref=f6e58]: INPUT ADMITTED
+            - generic [ref=f6e59]: Request saved to session
+          - generic [ref=f6e61]:
+            - generic [ref=f6e62]: "03"
+            - generic [ref=f6e63]: TOOLS RUN
+            - generic [ref=f6e64]: Tools run with permission
+          - generic [ref=f6e66]:
+            - generic [ref=f6e67]: "04"
+            - generic [ref=f6e68]: DIFF READY
+            - generic [ref=f6e69]: Changes ready for review
+          - generic [ref=f6e71]:
+            - generic [ref=f6e72]: SESSION PREVIEW
+            - generic [ref=f6e73]: Request saved to session
+        - generic [ref=f6e74]:
+          - heading "Resume the work, not the setup." [level=2] [ref=f6e75]: Resume the work,not the setup.
+          - paragraph [ref=f6e76]: Durable sessions keep admitted work, relevant history, and execution boundaries available when a task spans providers, tools, or time.
+      - generic [ref=f6e77]:
+        - article [ref=f6e78]:
+          - heading "Durable sessions" [level=3] [ref=f6e79]
+          - paragraph [ref=f6e80]: Work is admitted before execution and can continue from a known state.
+        - article [ref=f6e81]:
+          - heading "Your providers" [level=3] [ref=f6e82]
+          - paragraph [ref=f6e83]: Route work to the model you choose with your own credentials.
+        - article [ref=f6e84]:
+          - heading "Review before merge" [level=3] [ref=f6e85]
+          - paragraph [ref=f6e86]: Keep permissions, tool activity, and final diffs visible to people.
+    - generic [ref=f6e88]:
+      - generic [ref=f6e89]:
+        - generic [ref=f6e90]: 04 / THE APPROACH
+        - heading "Purpose sets the sequence." [level=2] [ref=f6e91]
+        - paragraph [ref=f6e92]: Zaovra separates understanding, durable admission, and controlled execution so agents can move quickly without losing the human checkpoint.
+      - generic [ref=f6e93]:
+        - tablist "Zaovra approach" [ref=f6e94]:
+          - tab "01 Ground the workspace + Map project files, conventions, current state, and the exact scope before code changes begin. Context is selected from the repository, not reconstructed from a generic chat." [selected] [ref=f6e95] [cursor=pointer]:
+            - generic [ref=f6e96]: "01"
+            - strong [ref=f6e97]: Ground the workspace
+            - generic [ref=f6e98]: +
+            - generic [ref=f6e99]:
+              - paragraph [ref=f6e100]: Map project files, conventions, current state, and the exact scope before code changes begin.
+              - paragraph [ref=f6e101]: Context is selected from the repository, not reconstructed from a generic chat.
+          - tab "02 Admit work durably + Record the user input and delivery mode before scheduling execution. Session continuity stays separate from any single model response or process lifetime." [ref=f6e102] [cursor=pointer]:
+            - generic [ref=f6e103]: "02"
+            - strong [ref=f6e104]: Admit work durably
+            - generic [ref=f6e105]: +
+            - generic [ref=f6e106]:
+              - paragraph: Record the user input and delivery mode before scheduling execution.
+              - paragraph [ref=f6e107]: Session continuity stays separate from any single model response or process lifetime.
+          - tab "03 Execute with control + Run agents and tools against explicit permissions, then return a reviewable diff. People remain in charge of risky actions and the final merge." [ref=f6e108] [cursor=pointer]:
+            - generic [ref=f6e109]: "03"
+            - strong [ref=f6e110]: Execute with control
+            - generic [ref=f6e111]: +
+            - generic [ref=f6e112]:
+              - paragraph: Run agents and tools against explicit permissions, then return a reviewable diff.
+              - paragraph [ref=f6e113]: People remain in charge of risky actions and the final merge.
+        - generic [ref=f6e114]:
+          - generic [ref=f6e115]:
+            - generic [ref=f6e116]: ZAOVRA / CONTEXT GRAPH
+            - generic [ref=f6e118]: READY
+          - generic [ref=f6e119]:
+            - generic [ref=f6e120]:
+              - strong [ref=f6e125]: Zaovra
+              - generic [ref=f6e126]: Project rules
+              - generic [ref=f6e127]: Files
+              - generic [ref=f6e128]: Tools
+              - generic [ref=f6e129]: Session history
+            - text: READY READY READY READY READY READY READY
+          - paragraph [ref=f6e130]: PROJECT CONTEXT / LINKED AND CURRENT
+    - figure [ref=f6e138]:
+      - img "Zaovra running inside a code editor" [ref=f6e139]
+    - generic [ref=f6e147]:
+      - heading "Keep the whole build in context." [level=2] [ref=f6e150]: Keep the whole buildin context.
+      - link "Download Zaovra ↗" [ref=f6e151] [cursor=pointer]:
+        - /url: "#install"
+        - text: Download Zaovra
+        - generic [ref=f6e152]: ↗
+      - paragraph [ref=f6e153]: Open source · local-first · built for review
+  - contentinfo [ref=f6e154]:
+    - generic [ref=f6e155]:
+      - generic [ref=f6e156]:
+        - link "Zaovra home" [ref=f6e157] [cursor=pointer]:
+          - /url: "#top"
+          - generic [ref=f6e159]:
+            - text: zaovra
+            - generic [ref=f6e160]: CODING WORKSPACE
+        - paragraph [ref=f6e161]: A local-first AI coding workspace for durable, reviewable engineering work.
+      - generic [ref=f6e162]:
+        - strong [ref=f6e163]: Product
+        - link "Overview" [ref=f6e164] [cursor=pointer]:
+          - /url: "#product"
+        - link "Workflows" [ref=f6e165] [cursor=pointer]:
+          - /url: "#workflow"
+        - link "Download" [ref=f6e166] [cursor=pointer]:
+          - /url: "#install"
+      - generic [ref=f6e167]:
+        - strong [ref=f6e168]: Resources
+        - link "Documentation" [ref=f6e169] [cursor=pointer]:
+          - /url: "#faq"
+        - link "FAQ" [ref=f6e170] [cursor=pointer]:
+          - /url: "#faq"
+        - link "GitHub" [ref=f6e171] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra
+      - generic [ref=f6e172]:
+        - strong [ref=f6e173]: Community
+        - link "Contribute" [ref=f6e174] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra
+        - link "Issues" [ref=f6e175] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra/issues
+        - link "Releases" [ref=f6e176] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra/releases
+    - generic [ref=f6e177]:
+      - generic [ref=f6e178]: © 2026 ZAOVRA. OPEN SOURCE.
+      - generic [ref=f6e179]: LOCAL RUNTIME / ONLINE

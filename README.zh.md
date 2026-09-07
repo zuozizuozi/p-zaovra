@@ -1,9 +1,11 @@
+> 本地开发请先看 [目录说明](./目录说明.md)：官网在 `packages/website`，文档站在 `packages/website-docs`，桌面端在 `packages/desktop-app`，工作台界面在 `packages/app-ui`。
+
 <p align="center">
   <a href="https://zaovra.com">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Zaovra logo">
+      <source srcset="packages/website/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/website/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/website/app/src/asset/logo-ornate-light.svg" alt="Zaovra logo">
     </picture>
   </a>
 </p>
@@ -39,7 +41,7 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Zaovra Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://zaovra.com)
+[![Zaovra Terminal UI](packages/website-docs/src/assets/lander/screenshot.png)](https://zaovra.com)
 
 ---
 

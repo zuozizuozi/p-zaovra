@@ -67,7 +67,7 @@ stdenv.mkDerivation (finalAttrs: {
     # https://github.com/electron/electron/issues/31121
     # mac builds use a .app bundle which doesnt have this issue
     + lib.optionalString stdenv.isLinux ''
-      BASE_PATH=packages/desktop
+      BASE_PATH=packages/desktop-app
       FILES=(src/main/windows.ts)
       for file in "''${FILES[@]}"; do
         substituteInPlace $BASE_PATH/$file \
@@ -87,7 +87,7 @@ stdenv.mkDerivation (finalAttrs: {
   buildPhase = ''
     runHook preBuild
 
-    cd packages/desktop
+    cd packages/desktop-app
 
     bun run build
     npx electron-builder --dir \

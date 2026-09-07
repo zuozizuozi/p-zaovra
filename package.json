@@ -8,9 +8,15 @@
   "scripts": {
     "check:symlinks": "bun run script/check-symlinks.ts",
     "dev": "bun run --cwd packages/zaovra --conditions=browser src/index.ts",
-    "dev:desktop": "bun --cwd packages/desktop dev",
-    "dev:web": "bun --cwd packages/app dev",
-    "dev:console": "ulimit -n 10240 2>/dev/null; bun run --cwd packages/console/app dev",
+    "dev:desktop": "bun --cwd packages/desktop-app dev",
+    "dev:website": "bun --cwd packages/website/app dev",
+    "dev:docs": "bun --cwd packages/website-docs dev",
+    "dev:app": "bun --cwd packages/app-ui dev",
+    "dev:web": "bun --cwd packages/app-ui dev",
+    "dev:console": "bun run dev:website",
+    "build:website": "bun --cwd packages/website/app run build",
+    "build:docs": "bun --cwd packages/website-docs run build",
+    "build:desktop": "bun --cwd packages/desktop-app run build",
     "dev:stats": "bun sst shell --stage=production -- bun run --cwd packages/stats/app dev",
     "dev:storybook": "bun --cwd packages/storybook storybook",
     "lint": "oxlint",
@@ -26,7 +32,7 @@
   "workspaces": {
     "packages": [
       "packages/*",
-      "packages/console/*",
+      "packages/website/*",
       "packages/stats/*",
       "packages/sdk/js",
       "packages/slack"

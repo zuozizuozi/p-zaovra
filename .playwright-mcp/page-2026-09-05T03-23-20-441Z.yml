@@ -1,0 +1,421 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - region "Notifications alt+T"
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - link "跳至内容" [ref=e5] [cursor=pointer]:
+        - /url: "#main"
+      - link "Homepage" [ref=e7] [cursor=pointer]:
+        - /url: /cn/home
+        - generic [ref=e8]:
+          - generic:
+            - generic "Cursor 徽标动画"
+        - generic [ref=e18]: Cursor
+      - navigation [ref=e19]:
+        - list [ref=e20]:
+          - listitem [ref=e21]:
+            - link "模型" [ref=e22] [cursor=pointer]:
+              - /url: /grok
+            - button "展开菜单" [ref=e23]:
+              - generic [aria-hidden] [ref=e24]: ↓
+          - listitem [ref=e25]:
+            - link "产品" [ref=e26] [cursor=pointer]:
+              - /url: /product
+            - button "展开菜单" [ref=e27]:
+              - generic [aria-hidden] [ref=e28]: ↓
+          - listitem [ref=e29]:
+            - link "企业" [ref=e30] [cursor=pointer]:
+              - /url: /cn/enterprise
+          - listitem [ref=e31]:
+            - link "定价" [ref=e32] [cursor=pointer]:
+              - /url: /cn/pricing
+          - listitem [ref=e33]:
+            - link "资源" [ref=e34] [cursor=pointer]:
+              - /url: /changelog
+            - button "展开菜单" [ref=e35]:
+              - generic [aria-hidden] [ref=e36]: ↓
+      - generic [ref=e37]:
+        - link "登录" [ref=e38] [cursor=pointer]:
+          - /url: /dashboard
+        - link "联系销售" [ref=e39] [cursor=pointer]:
+          - /url: /contact-sales?source=navbar
+        - link "下载" [ref=e41] [cursor=pointer]:
+          - /url: /cn/download
+  - main [ref=e42]:
+    - generic [ref=e43]:
+      - article [ref=e44]:
+        - generic [ref=e47]:
+          - link "Blog" [ref=e48] [cursor=pointer]:
+            - /url: /cn/blog
+          - text: /
+          - link "产品" [ref=e49] [cursor=pointer]:
+            - /url: /cn/blog/topic/产品
+        - generic [ref=e52]:
+          - time [ref=e54]: Apr 2, 2026
+          - heading "认识全新的 Cursor" [level=1] [ref=e55]
+          - generic [ref=e64]:
+            - text: Michael Truell & Sualeh Asif
+            - generic [ref=e65]: · 8 分钟阅读
+        - generic [ref=e68]:
+          - navigation [ref=e69]:
+            - button [expanded] [ref=e70]:
+              - heading "目录" [level=3] [ref=e71]
+              - generic [ref=e72]: ↑
+            - list [ref=e74]:
+              - listitem [ref=e75]:
+                - link "Cursor 3 的新变化" [ref=e76] [cursor=pointer]:
+                  - /url: "#cursor-3"
+              - listitem [ref=e77]:
+                - link "你的所有智能体，尽在一处" [ref=e78] [cursor=pointer]:
+                  - /url: "#"
+              - listitem [ref=e79]:
+                - link "并行运行多个智能体" [ref=e80] [cursor=pointer]:
+                  - /url: "#"
+              - listitem [ref=e81]:
+                - link "本地与云端之间交接的全新 UX" [ref=e82] [cursor=pointer]:
+                  - /url: "#ux"
+              - listitem [ref=e83]:
+                - link "从提交到合并 PR" [ref=e84] [cursor=pointer]:
+                  - /url: "#pr"
+              - listitem [ref=e85]:
+                - link "在 Cursor 最佳功能的基础上构建" [ref=e86] [cursor=pointer]:
+                  - /url: "#cursor"
+              - listitem [ref=e87]:
+                - link "帮助理解代码的文件" [ref=e88] [cursor=pointer]:
+                  - /url: "#"
+              - listitem [ref=e89]:
+                - link "集成浏览器" [ref=e90] [cursor=pointer]:
+                  - /url: "#"
+              - listitem [ref=e91]:
+                - link "Cursor 应用市场上的插件" [ref=e92] [cursor=pointer]:
+                  - /url: "#cursor"
+              - listitem [ref=e93]:
+                - link "借助 AI 编程的最佳方式" [ref=e94] [cursor=pointer]:
+                  - /url: "#ai"
+          - generic [ref=e95]:
+            - figure [ref=e96]:
+              - region "video player" [ref=e98]:
+                - generic [ref=e100]:
+                  - generic:
+                    - button "playback time" [ref=e101]: 0:00
+                    - generic [ref=e103] [cursor=pointer]:
+                      - slider "seek" [ref=e109]: "0.00425026100064039"
+                      - generic: en 0:00
+                    - button "pause" [ref=e110] [cursor=pointer]
+                    - button "unmute" [ref=e115] [cursor=pointer]
+                    - button "enter fullscreen mode" [ref=e121] [cursor=pointer]
+            - paragraph [ref=e128]: 软件开发正在改变，Cursor 也在随之演进。
+            - paragraph [ref=e129]:
+              - text: 在过去一年里，我们已经从手动编辑文件，转向与那些编写了我们大部分代码的智能体协同工作。随着我们进入
+              - link "软件开发的第三个时代" [ref=e130] [cursor=pointer]:
+                - /url: https://cursor.com/blog/third-era
+              - text: ，软件的创建方式还将继续演进；在这个时代，成群的智能体将自主工作，持续交付改进。
+            - paragraph [ref=e131]: 我们正朝着这个未来迈进，但要真正实现它，仍有许多工作要做。工程师们仍在对单个智能体进行事无巨细的管理，努力跟踪不同的对话，并在多个终端、工具和窗口之间来回切换。
+            - paragraph [ref=e132]:
+              - strong [ref=e133]: 我们推出 Cursor 3：一个借助智能体构建软件的统一工作区。
+              - text: 全新的 Cursor 界面让智能体产出的成果一目了然，帮助您站在更高的抽象层级上工作，同时在需要时也能随时深入查看细节。它更快、更简洁、也更强大，具备多代码仓库布局、本地与云端智能体之间的无缝交接，并可随时切换回 Cursor IDE。
+            - heading [level=2] [ref=e134]:
+              - link "Link to this section" [ref=e135] [cursor=pointer]:
+                - /url: "#cursor-3"
+                - text: "#"
+              - text: Cursor 3 的新变化
+            - paragraph [ref=e136]: 在开始构建 Cursor 时，我们选择基于 VS Code 分叉开发，而不是做成一个扩展，以便打造属于我们自己的使用環境。到了 Cursor 3，我们又向前迈进了一步：围绕智能体，从零开始构建了这一全新界面。
+            - heading [level=3] [ref=e137]:
+              - link "Link to this section" [ref=e138] [cursor=pointer]:
+                - /url: "#"
+                - text: "#"
+              - text: 你的所有智能体，尽在一处
+            - paragraph [ref=e139]: 新界面原生支持多工作区，用户和智能体可跨不同代码仓库协同工作。
+            - figure [ref=e140]
+            - heading [level=3] [ref=e143]:
+              - link "Link to this section" [ref=e144] [cursor=pointer]:
+                - /url: "#-1"
+                - text: "#"
+              - text: 并行运行多个智能体
+            - paragraph [ref=e145]: 现在，与智能体协作变得更加轻松。所有本地和云端智能体都会显示在侧边栏中，包括您从移动端、Web、桌面端、Slack、GitHub 和 Linear 启动的那些智能体。
+            - paragraph [ref=e146]:
+              - text: 云端智能体会生成其工作成果的演示和截图，供您确认。这就是您在
+              - link "cursor.com/agents" [ref=e147] [cursor=pointer]:
+                - /url: https://cursor.com/agents
+              - text: 上获得的同样体验，现在已集成到桌面应用中。
+            - figure [ref=e148]
+            - heading [level=3] [ref=e151]:
+              - link "Link to this section" [ref=e152] [cursor=pointer]:
+                - /url: "#ux"
+                - text: "#"
+              - text: 本地与云端之间交接的全新 UX
+            - paragraph [ref=e153]: 我们大幅加快了智能体在不同环境之间切换的速度。
+            - paragraph [ref=e154]:
+              - text: 当您想进行编辑并在自己的电脑上测试时，可以将智能体会话从云端移到本地。
+              - link "Composer 2" [ref=e155] [cursor=pointer]:
+                - /url: https://cursor.com/blog/composer-2
+              - text: 是我们自研的前沿编程模型，拥有较高的用量上限，非常适合快速迭代。
+            - figure [ref=e156]
+            - paragraph [ref=e159]: 反过来，您也可以将智能体会话从本地移到云端，这样即使您离线，它也能继续运行，或者让您着手处理下一个任务。这对运行时间较长的任务尤其有用，否则当您合上笔记本电脑时，这些任务就会中断。
+            - figure [ref=e160]
+            - heading [level=3] [ref=e163]:
+              - link "Link to this section" [ref=e164] [cursor=pointer]:
+                - /url: "#pr"
+                - text: "#"
+              - text: 从提交到合并 PR
+            - paragraph [ref=e165]: 全新的差异视图采用更简洁的 UI，让您能更快地编辑和审查变更。准备就绪后，您可以暂存、提交并管理 PR。
+            - figure [ref=e166]
+            - heading [level=2] [ref=e169]:
+              - link "Link to this section" [ref=e170] [cursor=pointer]:
+                - /url: "#cursor"
+                - text: "#"
+              - text: 在 Cursor 最佳功能的基础上构建
+            - paragraph [ref=e171]: Alpha 用户告诉我们，他们喜欢 Cursor 3 的一个重要原因，是它将 IDE 中最出色的部分，与我们在以智能体为先的界面中推出的新功能结合了起来。
+            - heading [level=3] [ref=e172]:
+              - link "Link to this section" [ref=e173] [cursor=pointer]:
+                - /url: "#-2"
+                - text: "#"
+              - text: 帮助理解代码的文件
+            - paragraph [ref=e174]: 你可以随时查看文件，深入了解代码，并在编辑器中借助完整的 LSP 跳转到定义。
+            - figure [ref=e175]
+            - heading [level=3] [ref=e178]:
+              - link "Link to this section" [ref=e179] [cursor=pointer]:
+                - /url: "#-3"
+                - text: "#"
+              - text: 集成浏览器
+            - paragraph [ref=e180]:
+              - text: Cursor 可以使用内置
+              - link "浏览器" [ref=e181] [cursor=pointer]:
+                - /url: https://cursor.com/docs/agent/tools/browser
+              - text: 打开本地网站、进行浏览，并向其发送提示。
+            - figure [ref=e182]
+            - heading [level=3] [ref=e185]:
+              - link "Link to this section" [ref=e186] [cursor=pointer]:
+                - /url: "#cursor-1"
+                - text: "#"
+              - text: Cursor 应用市场上的插件
+            - paragraph [ref=e187]:
+              - text: 浏览数百款可通过 MCP、技能、子智能体等扩展智能体能力的
+              - link "插件" [ref=e188] [cursor=pointer]:
+                - /url: https://cursor.com/docs/plugins
+              - text: 。支持一键安装，或搭建你自己的
+              - link "团队私有插件应用市场" [ref=e189] [cursor=pointer]:
+                - /url: https://cursor.com/docs/plugins#team-marketplaces
+              - text: 。
+            - figure [ref=e190]
+            - heading [level=2] [ref=e193]:
+              - link "Link to this section" [ref=e194] [cursor=pointer]:
+                - /url: "#ai"
+                - text: "#"
+              - text: 借助 AI 编程的最佳方式
+            - paragraph [ref=e195]: 在 Cursor 3 中，我们已经具备了模型、产品和运行时这些基础能力，可以构建出更自主的智能体，并提升团队间的协作。我们也会继续投入 IDE，直到代码库能够实现自我驱动。
+            - paragraph [ref=e196]: 这不会是软件开发界面最后一次发生变化。更强大的编程模型将解锁新的交互模式。我们很高兴继续构建、简化并不断革新 Cursor，让它成为借助 AI 编程的最佳方式。
+            - paragraph [ref=e197]:
+              - text: 升级 Cursor，然后输入
+              - code [ref=e198]: Cmd+Shift+P -> Agents Window
+              - text: 来试用新界面。或者前往我们的
+              - link "文档" [ref=e199] [cursor=pointer]:
+                - /url: https://cursor.com/docs/agent/agents-window
+              - text: 了解更多。 ■
+          - generic [ref=e200]:
+            - paragraph [ref=e201]:
+              - generic [ref=e202]: 分类：
+              - link "产品" [ref=e203] [cursor=pointer]:
+                - /url: /cn/blog/topic/产品
+            - paragraph [ref=e204]: "作者s: Michael Truell & Sualeh Asif"
+      - generic [ref=e208]:
+        - heading "相关文章" [level=2] [ref=e210]
+        - generic [ref=e212]:
+          - article [ref=e214]:
+            - link "Feb 26, 2026 创意 AI 软件开发的第三个时代 Michael Truell1 分钟阅读" [ref=e215] [cursor=pointer]:
+              - /url: /cn/blog/third-era
+              - generic [ref=e216]:
+                - generic [ref=e217]:
+                  - time [ref=e218]: Feb 26, 2026
+                  - generic [aria-hidden] [ref=e219]: ·
+                  - generic [ref=e220]: 创意
+                - paragraph [ref=e222]: AI 软件开发的第三个时代
+                - generic [ref=e228]:
+                  - text: Michael Truell
+                  - generic [ref=e229]: · 1 分钟阅读
+          - article [ref=e231]:
+            - link "Mar 19, 2026 研究 推出 Composer 2 Cursor Team2 分钟阅读" [ref=e232] [cursor=pointer]:
+              - /url: /cn/blog/composer-2
+              - generic [ref=e233]:
+                - generic [ref=e234]:
+                  - time [ref=e235]: Mar 19, 2026
+                  - generic [aria-hidden] [ref=e236]: ·
+                  - generic [ref=e237]: 研究
+                - paragraph [ref=e239]: 推出 Composer 2
+                - generic [ref=e245]:
+                  - text: Cursor Team
+                  - generic [ref=e246]: · 2 分钟阅读
+          - article [ref=e248]:
+            - link "Feb 24, 2026 产品 Cursor 智能体现在可以控制自己的计算机了 Jonas & Alexi6 分钟阅读" [ref=e249] [cursor=pointer]:
+              - /url: /cn/blog/agent-computer-use
+              - generic [ref=e250]:
+                - generic [ref=e251]:
+                  - time [ref=e252]: Feb 24, 2026
+                  - generic [aria-hidden] [ref=e253]: ·
+                  - generic [ref=e254]: 产品
+                - paragraph [ref=e256]: Cursor 智能体现在可以控制自己的计算机了
+                - generic [ref=e265]:
+                  - text: Jonas & Alexi
+                  - generic [ref=e266]: · 6 分钟阅读
+          - link "查看更多文章 →" [ref=e267] [cursor=pointer]:
+            - /url: /cn/blog
+  - contentinfo [ref=e268]:
+    - navigation [ref=e270]:
+      - generic [ref=e271]:
+        - generic [ref=e272]:
+          - heading "产品" [level=3] [ref=e273]
+          - list [ref=e274]:
+            - listitem [ref=e275]:
+              - link "智能体" [ref=e276] [cursor=pointer]:
+                - /url: /cn/product
+            - listitem [ref=e277]:
+              - link "团队版" [ref=e278] [cursor=pointer]:
+                - /url: /cn/business/teams
+            - listitem [ref=e279]:
+              - link "企业" [ref=e280] [cursor=pointer]:
+                - /url: /cn/enterprise
+            - listitem [ref=e281]:
+              - link "定价" [ref=e282] [cursor=pointer]:
+                - /url: /cn/pricing
+            - listitem [ref=e283]:
+              - link "代码审查" [ref=e284] [cursor=pointer]:
+                - /url: /cn/bugbot
+            - listitem [ref=e285]:
+              - link "CLI" [ref=e286] [cursor=pointer]:
+                - /url: /cn/cli
+            - listitem [ref=e287]:
+              - link "云端智能体" [ref=e288] [cursor=pointer]:
+                - /url: /agents
+            - listitem [ref=e289]:
+              - link "Composer" [ref=e290] [cursor=pointer]:
+                - /url: /cn/composer
+            - listitem [ref=e291]:
+              - link "应用市场 ↗" [ref=e292] [cursor=pointer]:
+                - /url: https://cursor.com/marketplace
+                - text: 应用市场
+                - generic [ref=e293]: ↗
+        - generic [ref=e294]:
+          - heading "资源" [level=3] [ref=e295]
+          - list [ref=e296]:
+            - listitem [ref=e297]:
+              - link "下载" [ref=e298] [cursor=pointer]:
+                - /url: /cn/download
+            - listitem [ref=e299]:
+              - link "更新日志" [ref=e300] [cursor=pointer]:
+                - /url: /cn/changelog
+            - listitem [ref=e301]:
+              - link "文档" [ref=e302] [cursor=pointer]:
+                - /url: /docs
+            - listitem [ref=e303]:
+              - link "了解更多 ↗" [ref=e304] [cursor=pointer]:
+                - /url: https://cursor.com/learn
+                - text: 了解更多
+                - generic [ref=e305]: ↗
+            - listitem [ref=e306]:
+              - link "价值计算器" [ref=e307] [cursor=pointer]:
+                - /url: /cn/cost-savings
+            - listitem [ref=e308]:
+              - link "论坛 ↗" [ref=e309] [cursor=pointer]:
+                - /url: https://forum.cursor.com/
+                - text: 论坛
+                - generic [ref=e310]: ↗
+            - listitem [ref=e311]:
+              - link "帮助 ↗" [ref=e312] [cursor=pointer]:
+                - /url: https://cursor.com/help
+                - text: 帮助
+                - generic [ref=e313]: ↗
+            - listitem [ref=e314]:
+              - link "研讨会" [ref=e315] [cursor=pointer]:
+                - /url: /cn/workshops
+            - listitem [ref=e316]:
+              - link "状态 ↗" [ref=e317] [cursor=pointer]:
+                - /url: https://status.cursor.com/
+                - text: 状态
+                - generic [ref=e318]: ↗
+        - generic [ref=e319]:
+          - heading "公司" [level=3] [ref=e320]
+          - list [ref=e321]:
+            - listitem [ref=e322]:
+              - link "招聘" [ref=e323] [cursor=pointer]:
+                - /url: /cn/careers
+            - listitem [ref=e324]:
+              - link "Blog" [ref=e325] [cursor=pointer]:
+                - /url: /cn/blog
+            - listitem [ref=e326]:
+              - link "社区" [ref=e327] [cursor=pointer]:
+                - /url: /cn/community
+            - listitem [ref=e328]:
+              - link "学生" [ref=e329] [cursor=pointer]:
+                - /url: /cn/students
+            - listitem [ref=e330]:
+              - link "品牌" [ref=e331] [cursor=pointer]:
+                - /url: /cn/brand
+            - listitem [ref=e332]:
+              - link "未来" [ref=e333] [cursor=pointer]:
+                - /url: /cn/future
+            - listitem [ref=e334]:
+              - link "Anysphere ↗" [ref=e335] [cursor=pointer]:
+                - /url: https://anysphere.inc/
+                - text: Anysphere
+                - generic [ref=e336]: ↗
+        - generic [ref=e337]:
+          - heading "法律" [level=3] [ref=e338]
+          - list [ref=e339]:
+            - listitem [ref=e340]:
+              - link "服务条款" [ref=e341] [cursor=pointer]:
+                - /url: /cn/terms-of-service
+            - listitem [ref=e342]:
+              - link "可接受使用政策" [ref=e343] [cursor=pointer]:
+                - /url: /cn/acceptable-use-policy
+            - listitem [ref=e344]:
+              - link "Grok Bot 条款" [ref=e345] [cursor=pointer]:
+                - /url: /cn/terms/grok-bot
+            - listitem [ref=e346]:
+              - link "隐私政策" [ref=e347] [cursor=pointer]:
+                - /url: /cn/privacy
+            - listitem [ref=e348]:
+              - link "数据使用" [ref=e349] [cursor=pointer]:
+                - /url: /cn/data-use
+            - listitem [ref=e350]:
+              - link "安全" [ref=e351] [cursor=pointer]:
+                - /url: /cn/security
+        - generic [ref=e352]:
+          - heading "连接" [level=3] [ref=e353]
+          - list [ref=e354]:
+            - listitem [ref=e355]:
+              - link "X ↗" [ref=e356] [cursor=pointer]:
+                - /url: https://x.com/cursor_ai
+                - text: X
+                - generic [ref=e357]: ↗
+            - listitem [ref=e358]:
+              - link "LinkedIn ↗" [ref=e359] [cursor=pointer]:
+                - /url: https://www.linkedin.com/company/cursorai
+                - text: LinkedIn
+                - generic [ref=e360]: ↗
+            - listitem [ref=e361]:
+              - link "YouTube ↗" [ref=e362] [cursor=pointer]:
+                - /url: https://www.youtube.com/@cursor_ai
+                - text: YouTube
+                - generic [ref=e363]: ↗
+    - generic [ref=e364]:
+      - generic [ref=e365]:
+        - generic [ref=e366]:
+          - text: © 2026
+          - link "Anysphere, Inc." [ref=e367] [cursor=pointer]:
+            - /url: https://anysphere.inc
+        - generic [ref=e368]:
+          - text: 🛡
+          - link "SOC 2 | ISO27001 | ISO42001 | 已获 AIUC-1 认证" [ref=e369] [cursor=pointer]:
+            - /url: /cn/security
+      - generic [ref=e370]:
+        - generic [ref=e371]:
+          - button "系统主题" [ref=e373] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e374]: 🖥
+          - button "浅色主题" [ref=e375] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e376]: ☉
+          - button "深色主题" [ref=e377] [cursor=pointer]:
+            - generic [aria-hidden] [ref=e378]: ☾
+        - button "🌐 简体中文 ↓" [ref=e381] [cursor=pointer]:
+          - generic [ref=e382]: 🌐
+          - text: 简体中文
+          - generic [ref=e383]: ↓

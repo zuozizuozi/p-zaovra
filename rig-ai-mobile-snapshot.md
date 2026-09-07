@@ -1,0 +1,253 @@
+- generic [active] [ref=e1] [box=0,0,375,11640]:
+  - generic [ref=e2] [box=0,0,375,670]:
+    - banner [ref=e3] [box=0,0,375,64]:
+      - navigation "Main navigation" [ref=e4] [box=0,0,375,64]:
+        - link "Rig — Home" [ref=e5] [cursor=pointer] [box=20,19,60,26]:
+          - /url: /
+        - button "Toggle navigation" [ref=e538] [cursor=pointer] [box=315,16,40,32]
+    - generic [ref=e11] [box=19,64,338,564]:
+      - heading "On-device AI coding. No cloud. No limits." [level=1] [ref=e12] [box=39,96,298,197]: On-device AI coding.No cloud. No limits.
+      - paragraph [ref=e13] [box=39,325,298,77]: A complete coding agent that executes entirely on your machine. No API calls. No usage caps.
+      - generic [ref=e14] [box=39,442,298,138]:
+        - link "Join Waitlist" [ref=e15] [cursor=pointer] [box=39,442,298,59]:
+          - /url: "#early-access"
+        - link "Our Approach" [ref=e16] [cursor=pointer] [box=39,517,298,63]:
+          - /url: "#our-approach"
+    - generic [ref=e18] [box=-32,641,375,17]:
+      - generic [ref=e19] [box=-32,641,127,17]: Zero telemetry
+      - generic [ref=e20] [box=127,641,5,17]: •
+      - generic [ref=e21] [box=164,641,134,17]: Native inference
+      - generic [ref=e22] [box=330,641,5,17]: •
+      - generic [ref=e23] [box=367,641,100,17]: 100% offline
+      - generic [ref=e24] [box=500,641,5,17]: •
+      - generic [ref=e25] [box=537,641,223,17]: Your hardware, your rules
+      - generic [ref=e26] [box=792,641,5,17]: •
+      - generic [ref=e27] [box=829,641,164,17]: No tokens, no limits
+      - generic [ref=e28] [box=1025,641,5,17]: •
+      - generic [ref=e29] [box=1062,641,128,17]: Specialized SLM
+      - generic [ref=e30] [box=1223,641,5,17]: •
+      - generic [ref=e31] [box=1260,641,160,17]: Unbounded context
+      - generic [ref=e32] [box=1452,641,5,17]: •
+      - generic [ref=e33] [box=1489,641,127,17]: Zero telemetry
+      - generic [ref=e34] [box=1648,641,5,17]: •
+      - generic [ref=e35] [box=1685,641,134,17]: Native inference
+      - generic [ref=e36] [box=1851,641,5,17]: •
+      - generic [ref=e37] [box=1888,641,100,17]: 100% offline
+      - generic [ref=e38] [box=2021,641,5,17]: •
+      - generic [ref=e39] [box=2058,641,223,17]: Your hardware, your rules
+      - generic [ref=e40] [box=2313,641,5,17]: •
+      - generic [ref=e41] [box=2350,641,164,17]: No tokens, no limits
+      - generic [ref=e42] [box=2547,641,5,17]: •
+      - generic [ref=e43] [box=2584,641,128,17]: Specialized SLM
+      - generic [ref=e44] [box=2744,641,5,17]: •
+      - generic [ref=e45] [box=2781,641,160,17]: Unbounded context
+  - main [ref=e46] [box=0,670,375,9761]:
+    - generic [ref=e51] [box=19,735,338,1245]:
+      - generic [ref=e52] [box=19,735,338,335]:
+        - generic [ref=e53] [box=110,759,155,34]: The problem
+        - heading "You don't own your AI. And you're being watched." [level=2] [ref=e56] [box=39,825,298,221]: You don't own your AI.And you're being watched.
+      - generic [ref=e58] [box=19,1071,338,908]:
+        - img [ref=e61] [box=48,1071,280,280]:
+          - generic [ref=e62] [box=48,1071,280,280]
+        - generic [ref=e109] [box=19,1352,338,162]:
+          - generic [ref=e110] [box=39,1372,298,13]
+          - heading "They train on your code." [level=3] [ref=e113] [box=39,1397,298,23]
+          - paragraph [ref=e114] [box=39,1431,298,61]: Every prompt. Every file. Every fix.It flows through infrastructure you don't control — improving systems they want to use to replace you.
+        - generic [ref=e115] [box=19,1514,338,162]:
+          - generic [ref=e116] [box=39,1534,298,13]
+          - heading "They meter your ambition." [level=3] [ref=e119] [box=39,1559,298,23]
+          - paragraph [ref=e120] [box=39,1593,298,61]: Slowdowns, overages, caps.Right when you're deep in a sprint, the meter decides you've had enough.
+        - generic [ref=e121] [box=19,1676,338,142]:
+          - generic [ref=e122] [box=39,1696,298,13]
+          - heading "They change the model." [level=3] [ref=e125] [box=39,1721,298,23]
+          - paragraph [ref=e126] [box=39,1755,298,41]: They silently downgrade to cheaper models during peak load. Full price, degraded experience.
+        - generic [ref=e127] [box=19,1817,338,161]:
+          - generic [ref=e128] [box=39,1837,298,13]
+          - heading "They control your flow." [level=3] [ref=e131] [box=39,1862,298,23]
+          - paragraph [ref=e132] [box=39,1897,298,61]: Every completion makes a round trip across the internet.Thousands of tiny interruptions, every single day.
+    - generic [ref=e136] [box=39,2044,298,528]:
+      - generic [ref=e137] [box=39,2044,298,299]:
+        - generic [ref=e138] [box=93,2044,189,34]: Introducing Rig
+        - heading "Everything local. Own your AI." [level=2] [ref=e141] [box=39,2110,298,132]: Everything local.Own your AI.
+        - paragraph [ref=e142] [box=39,2267,298,77]: A complete AI coding agent running entirely on your own hardware. No usage limits. No cloud dependency.
+      - img [ref=e144] [box=39,2424,298,149]:
+        - generic [ref=e147] [box=48,2458,37,4]: YOUR MACHINE
+        - generic [ref=e148] [box=49,2477,58,27]:
+          - generic [ref=e150] [box=64,2486,28,4]: YOUR CODE
+          - generic [ref=e151] [box=57,2492,42,4]: KEYSTROKES · FILES
+        - generic [ref=e152] [box=141,2465,85,50]:
+          - generic [ref=e154] [box=176,2477,16,8]: RIG
+          - generic [ref=e155] [box=161,2488,45,4]: ✓ LOCAL INFERENCE
+          - generic [ref=e156] [box=161,2507,7,3]: GPU
+          - generic [ref=e157] [box=178,2507,11,3]: INDEX
+          - generic [ref=e158] [box=196,2507,12,3]: MODEL
+        - generic [ref=e159] [box=263,2477,64,27]:
+          - generic [ref=e161] [box=283,2486,24,4]: RESPONSE
+          - generic [ref=e162] [box=274,2492,42,4]: <300ms · ON DEVICE
+        - generic [ref=e163] [box=152,2426,64,17]: CLOUD
+        - generic [ref=e169] [box=152,2538,64,17]: TELEMETRY
+    - generic [ref=e178] [box=19,2637,338,804]:
+      - generic [ref=e180] [box=103,2754,169,326]:
+        - generic [ref=e181] [box=108,2754,159,40]: Cloud servers
+        - generic [ref=e182] [box=167,2794,42,74]: Severed
+        - generic [ref=e189] [box=103,2868,169,98]:
+          - generic [ref=e190] [box=136,2889,103,30]: Your machine
+          - generic [ref=e191] [box=136,2925,103,20]
+        - generic [ref=e193] [box=167,2966,42,74]: Severed
+        - generic [ref=e200] [box=104,3040,168,40]: Nothing leaves
+      - generic [ref=e235] [box=19,3229,338,212]:
+        - generic [ref=e236] [box=19,3229,120,34]: Offline
+        - heading "Work offline" [level=2] [ref=e239] [box=19,3287,338,36]
+        - paragraph [ref=e240] [box=19,3347,338,54]: Flights. Spotty Wi-Fi. Network outages. Nothing stops your flow.
+    - generic [ref=e244] [box=19,3443,338,644]:
+      - generic [ref=e246] [box=51,3443,274,214]:
+        - generic [ref=e247] [box=119,3475,137,34]: Unlimited
+        - heading "Remove the meter" [level=3] [ref=e250] [box=51,3525,274,23]
+        - paragraph [ref=e251] [box=51,3560,274,65]: Refactor the whole codebase. Riff on an idea all day. Run agent loops without thinking about cost.
+      - generic [ref=e254] [box=51,3658,274,214]:
+        - generic [ref=e255] [box=127,3690,120,34]: Privacy
+        - heading "Sever the connection" [level=3] [ref=e258] [box=51,3740,274,23]
+        - paragraph [ref=e259] [box=51,3775,274,65]: Your code, keystrokes, and files never leave your machine. Not anonymized. Not aggregated. Not sent.
+      - generic [ref=e262] [box=51,3873,274,214]:
+        - generic [ref=e263] [box=127,3905,120,34]: Latency
+        - heading "Stop waiting" [level=3] [ref=e266] [box=51,3955,274,23]
+        - paragraph [ref=e267] [box=51,3990,274,65]: No round-trip to a data center. Inference happens on your machine, in single-digit milliseconds.
+    - generic [ref=e271] [box=19,4153,338,1411]:
+      - generic [ref=e272] [box=39,4153,298,320]:
+        - generic [ref=e273] [box=106,4153,163,34]: Our Approach
+        - heading "Purpose beats scale." [level=2] [ref=e276] [box=87,4211,202,110]
+        - paragraph [ref=e277] [box=87,4345,202,128]: "Rig is a closed system — model, context, tools, and inference — engineered together for one job: real coding work."
+      - generic [ref=e278] [box=39,4521,298,1043]:
+        - generic [ref=e279] [box=39,4521,298,593]:
+          - 'button "Step 1: A focused model, trained specifically for coding" [ref=e280] [cursor=pointer] [box=39,4521,298,321]'
+          - 'button "Step 2: Full intelligence, compressed to fit your machine" [ref=e289] [cursor=pointer] [box=39,4843,298,136]'
+          - 'button "Step 3: A custom runtime, engineered for Apple Silicon" [ref=e296] [cursor=pointer] [box=39,4978,298,137]'
+        - generic [ref=e305] [box=55,5116,266,448]:
+          - generic [ref=e306] [box=88,5145,200,32]: Training Focus
+          - generic [ref=e307] [box=88,5193,200,343]: Parameters dedicated to code Rig ████████████████████ 100% Most AI models ████░░░░░░░░░░░░░░░░ ~15–20% General-purpose models spread capacity across chat, translation, creative writing, and more. Rig dedicates every parameter to engineering.
+    - generic [ref=e310] [box=19,5629,338,1507]:
+      - generic [ref=e311] [box=106,5629,163,34]: Capabilities
+      - heading "Your machine, unleashed." [level=2] [ref=e314] [box=43,5687,290,74]
+      - generic [ref=e315] [box=43,5793,290,1344]:
+        - generic [ref=e316] [box=43,5793,290,219]:
+          - generic [ref=e317] [box=64,5818,248,14]: "[ 01 ]"
+          - heading "Understands your architecture." [level=3] [ref=e318] [box=64,5844,248,48]
+          - paragraph [ref=e319] [box=64,5903,248,87]: Builds a connected model of modules, dependencies, and relationships so reasoning happens across files and aligns with your architecture.
+        - generic [ref=e320] [box=43,6027,290,219]:
+          - generic [ref=e321] [box=64,6052,248,14]: "[ 02 ]"
+          - heading "Tracks relationships, prevents breakage." [level=3] [ref=e322] [box=64,6078,248,48]
+          - paragraph [ref=e323] [box=64,6138,248,87]: Edits that respect function contracts, type boundaries, and dependency graphs — reducing bugs and regressions.
+        - generic [ref=e324] [box=43,6262,290,173]:
+          - generic [ref=e325] [box=64,6287,248,14]: "[ 03 ]"
+          - heading "Strategizes before acting." [level=3] [ref=e326] [box=64,6313,248,24]
+          - paragraph [ref=e327] [box=64,6349,248,65]: Explore → Plan → Execute workflows ensure multiple steps are reasoned out before changes occur.
+        - generic [ref=e328] [box=43,6451,290,219]:
+          - generic [ref=e329] [box=64,6476,248,14]: "[ 04 ]"
+          - heading "Executes complex coding workflows." [level=3] [ref=e330] [box=64,6502,248,48]
+          - paragraph [ref=e331] [box=64,6561,248,87]: From refactors to test generation to feature builds — coordinate tools, code edits, web search, and commands as needed.
+        - generic [ref=e332] [box=43,6685,290,240]:
+          - generic [ref=e333] [box=64,6710,248,14]: "[ 05 ]"
+          - heading "Isolates agent sandboxes." [level=3] [ref=e334] [box=64,6736,248,48]
+          - paragraph [ref=e335] [box=64,6796,248,109]: Each agent runs in its own workspace so experiments are safe, parallel workflows don't clash, and code changes stay isolated until you merge them.
+        - generic [ref=e336] [box=43,6942,290,195]:
+          - generic [ref=e337] [box=64,6967,248,14]: "[ 06 ]"
+          - heading "Runs at full speed." [level=3] [ref=e338] [box=64,6993,248,24]
+          - paragraph [ref=e339] [box=64,7028,248,87]: Custom Rust inference engine optimized for CUDA and Metal — delivering up to 144 tokens per second on consumer hardware.
+    - generic [ref=e341] [box=19,7201,338,533]:
+      - generic [ref=e342] [box=19,7202,338,133]:
+        - generic [ref=e343] [box=39,7226,298,14]: Latency
+        - generic [ref=e344] [box=39,7252,298,32]: 0ms
+        - generic [ref=e345] [box=39,7296,298,14]: No round-trip required
+      - generic [ref=e346] [box=19,7335,338,133]:
+        - generic [ref=e347] [box=39,7359,298,14]: Privacy
+        - generic [ref=e348] [box=39,7385,298,32]: 100%
+        - generic [ref=e349] [box=39,7429,298,14]: Air-gapped by design
+      - generic [ref=e350] [box=19,7468,338,133]:
+        - generic [ref=e351] [box=39,7492,298,14]: Cost / Token
+        - generic [ref=e352] [box=39,7518,298,32]: $0
+        - generic [ref=e353] [box=39,7562,298,14]: Your GPU, your tokens
+      - generic [ref=e354] [box=19,7601,338,132]:
+        - generic [ref=e355] [box=39,7625,298,14]: Uptime
+        - generic [ref=e356] [box=39,7651,298,32]: Local
+        - generic [ref=e357] [box=39,7695,298,14]: No dependency on cloud
+    - generic [ref=e360] [box=19,7799,338,990]:
+      - generic [ref=e361] [box=39,7799,298,132]:
+        - generic [ref=e362] [box=58,7799,258,34]: Engineered intelligence
+        - heading "Built for control freaks" [level=2] [ref=e365] [box=39,7857,298,74]
+      - generic [ref=e367] [box=39,7979,298,511]:
+        - generic [ref=e375] [box=62,8017,252,394]:
+          - generic [ref=e376] [box=62,8017,252,53]: rig://localhost · offline
+          - generic [ref=e383] [box=62,8070,252,341]
+        - generic [ref=e395] [box=60,8433,256,36]:
+          - generic [ref=e396] [box=60,8450,100,11]: Neural Engine
+          - generic [ref=e398] [box=188,8450,46,11]: RG-800
+          - generic [ref=e399] [box=246,8450,69,11]: Local Ops
+      - generic [ref=e542] [box=39,8514,298,276]:
+        - generic [ref=e543] [box=40,8515,148,101]:
+          - generic [ref=e544] [box=52,8535,123,13]: Custom Model
+          - generic [ref=e545] [box=52,8552,123,43]: Optimized for consumer hardware
+        - generic [ref=e546] [box=188,8515,148,101]:
+          - generic [ref=e547] [box=200,8535,124,13]: Terminal UI
+          - generic [ref=e548] [box=200,8552,124,29]: Built in Rust and blazing fast
+        - generic [ref=e549] [box=40,8616,148,87]:
+          - generic [ref=e550] [box=52,8636,123,13]: Inference
+          - generic [ref=e551] [box=52,8653,123,29]: Cross-OS using Rust
+        - generic [ref=e552] [box=188,8616,148,87]:
+          - generic [ref=e553] [box=200,8636,124,13]: Heavily Tuned
+          - generic [ref=e554] [box=200,8653,124,29]: Consistent tool calls and plan use
+        - generic [ref=e555] [box=40,8703,148,86]:
+          - generic [ref=e556] [box=52,8723,123,13]: Context Graph
+          - generic [ref=e557] [box=52,8740,123,29]: Repo-wide code understanding
+        - generic [ref=e558] [box=188,8703,148,86]:
+          - generic [ref=e559] [box=200,8723,124,13]: Opinionated
+          - generic [ref=e560] [box=200,8740,124,29]: Focused on code correctness
+    - generic [ref=e405] [box=39,8919,298,462]:
+      - generic [ref=e406] [box=39,8919,298,248]:
+        - generic [ref=e407] [box=106,8919,163,34]: Early access
+        - heading "Rig is almost ready." [level=2] [ref=e410] [box=39,8977,298,74]
+        - paragraph [ref=e411] [box=39,9074,298,92]: We're inviting engineers to run it on real code and help shape what ships.
+      - generic [ref=e413] [box=39,9199,298,182]:
+        - textbox [aria-hidden] [ref=e414] [box=-9980,-1080,4,4]
+        - generic [ref=e415] [box=39,9199,298,97]:
+          - textbox "you@company.com" [ref=e416] [box=39,9199,298,44]
+          - button "Join Waitlist" [ref=e417] [cursor=pointer] [box=39,9255,298,41]
+    - generic [ref=e421] [box=19,9510,338,790]:
+      - generic [ref=e422] [box=145,9510,86,34]: FAQ
+      - heading "Frequently asked questions." [level=2] [ref=e425] [box=39,9576,298,74]
+      - generic [ref=e426] [box=39,9681,298,619]:
+        - group [ref=e427] [box=39,9681,298,65]:
+          - generic "01 What is Rig?" [ref=e428] [cursor=pointer] [box=63,9682,250,64]
+        - group [ref=e434] [box=39,9746,298,81]:
+          - generic "02 What Model does Rig use?" [ref=e435] [cursor=pointer] [box=63,9747,250,80]
+        - group [ref=e441] [box=39,9828,298,81]:
+          - generic "03 What are the Hardware Requirements?" [ref=e442] [cursor=pointer] [box=63,9829,250,80]
+        - group [ref=e448] [box=39,9909,298,81]:
+          - generic "04 How Does Rig Compare to Large Cloud Models?" [ref=e449] [cursor=pointer] [box=63,9910,250,80]
+        - group [ref=e455] [box=39,9990,298,81]:
+          - generic "05 Can Rig Search the Web?" [ref=e456] [cursor=pointer] [box=63,9991,250,80]
+        - group [ref=e462] [box=39,10072,298,65]:
+          - generic "06 How will Rig be Priced?" [ref=e463] [cursor=pointer] [box=63,10073,250,64]
+        - group [ref=e469] [box=39,10137,298,81]:
+          - generic "07 Will Rig Collect my Data?" [ref=e470] [cursor=pointer] [box=63,10138,250,80]
+        - group [ref=e476] [box=39,10218,298,82]:
+          - generic "08 When Will Rig be Available?" [ref=e477] [cursor=pointer] [box=63,10219,250,80]
+  - generic [ref=e487] [box=19,10527,338,319]:
+    - heading "Break free from big AI Break free from big AI Break free from big AI" [level=2] [ref=e502] [box=39,10639,298,72]
+    - button "Request Early Access" [ref=e504] [cursor=pointer] [box=39,10759,298,59]
+    - paragraph [ref=e508] [box=39,10830,298,16]: No credit card. No usage meter.
+  - contentinfo [ref=e509] [box=0,11022,375,618]:
+    - generic [ref=e510] [box=19,11071,338,473]:
+      - generic [ref=e511] [box=19,11071,338,332]:
+        - generic [ref=e512] [box=19,11071,338,82]:
+          - link "Rig" [ref=e513] [cursor=pointer] [box=19,11073,47,20]:
+            - /url: /
+          - paragraph [ref=e515] [box=19,11109,280,44]: Local-first AI for developers who refuse to be dependent on the cloud.
+        - generic [ref=e516] [box=19,11185,338,93]:
+          - heading "Connect" [level=3] [ref=e517] [box=19,11185,338,14]
+          - list [ref=e518] [box=19,11219,338,50]
+        - generic [ref=e523] [box=19,11310,338,93]:
+          - heading "Legal" [level=3] [ref=e524] [box=19,11310,338,14]
+          - list [ref=e525] [box=19,11344,338,50]
+      - generic [ref=e530] [box=19,11467,338,77]:
+        - generic [ref=e531] [box=19,11500,328,14]: © 2026 Rig AI Inc. All rights reserved.
+        - generic [ref=e532] [box=19,11530,158,14]: All systems local

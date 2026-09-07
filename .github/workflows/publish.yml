@@ -312,7 +312,7 @@ jobs:
 
       - name: Prepare
         run: bun ./scripts/prepare.ts
-        working-directory: packages/desktop
+        working-directory: packages/desktop-app
         env:
           ZAOVRA_VERSION: ${{ needs.version.outputs.version }}
           ZAOVRA_CHANNEL: ${{ (github.ref_name == 'beta' && 'beta') || 'prod' }}
@@ -323,7 +323,7 @@ jobs:
 
       - name: Build
         run: bun run build
-        working-directory: packages/desktop
+        working-directory: packages/desktop-app
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           ZAOVRA_CHANNEL: ${{ (github.ref_name == 'beta' && 'beta') || 'prod' }}
@@ -338,7 +338,7 @@ jobs:
       - name: Package
         if: needs.version.outputs.release
         run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish never --config electron-builder.config.ts
-        working-directory: packages/desktop
+        working-directory: packages/desktop-app
         timeout-minutes: 60
         env:
           ZAOVRA_CHANNEL: ${{ (github.ref_name == 'beta' && 'beta') || 'prod' }}
@@ -352,14 +352,14 @@ jobs:
       - name: Package (no publish)
         if: ${{ !needs.version.outputs.release }}
         run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish never --config electron-builder.config.ts
-        working-directory: packages/desktop
+        working-directory: packages/desktop-app
         timeout-minutes: 60
         env:
           ZAOVRA_CHANNEL: ${{ (github.ref_name == 'beta' && 'beta') || 'prod' }}
 
       - name: Create macOS .app.tar.gz
         if: runner.os == 'macOS' && needs.version.outputs.release
-        working-directory: packages/desktop/dist
+        working-directory: packages/desktop-app/dist
         run: |
           if [[ "${{ matrix.settings.target }}" == "x86_64-apple-darwin" ]]; then
             APP_DIR="mac"
@@ -383,9 +383,9 @@ jobs:
         shell: pwsh
         run: |
           $files = @()
-          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*.exe" | Select-Object -ExpandProperty FullName
-          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\*.exe" | Select-Object -ExpandProperty FullName
-          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\resources\zaovra-cli.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop-app\dist\*.exe" | Select-Object -ExpandProperty FullName
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop-app\dist\*unpacked\*.exe" | Select-Object -ExpandProperty FullName
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop-app\dist\*unpacked\resources\zaovra-cli.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
 
           foreach ($file in $files | Select-Object -Unique) {
             $sig = Get-AuthenticodeSignature $file
@@ -397,13 +397,13 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: zaovra-desktop-${{ matrix.settings.target }}
-          path: packages/desktop/dist/*
+          path: packages/desktop-app/dist/*
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: needs.version.outputs.release
         with:
           name: latest-yml-${{ matrix.settings.target }}
-          path: packages/desktop/dist/latest*.yml
+          path: packages/desktop-app/dist/latest*.yml
 
   publish:
     needs:

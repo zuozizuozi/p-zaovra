@@ -51,7 +51,7 @@ export const api = new sst.cloudflare.Worker("Api", {
 
 new sst.cloudflare.x.Astro("Web", {
   domain: "docs." + domain,
-  path: "packages/web",
+  path: "packages/website-docs",
   environment: {
     // For astro config
     SST_STAGE: $app.stage,
@@ -61,7 +61,7 @@ new sst.cloudflare.x.Astro("Web", {
 
 new sst.cloudflare.StaticSite("WebApp", {
   domain: "app." + domain,
-  path: "packages/app",
+  path: "packages/app-ui",
   build: {
     command: "bun turbo build",
     output: "./dist",

@@ -2,7 +2,7 @@
 
 ## Scope lock
 
-- Target: `packages/console/app/src/routes/home-authkit-motion.css`
+- Target: `packages/website/app/src/routes/home-authkit-motion.css`
 - CSS-only enhancement over the existing homepage. No content or DOM changes.
 - All motion must be disabled by `prefers-reduced-motion: reduce`.
 

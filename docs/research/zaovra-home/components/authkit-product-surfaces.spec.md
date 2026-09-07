@@ -2,7 +2,7 @@
 
 ## Scope lock
 
-- Target: `packages/console/app/src/routes/home-authkit-stages.css`
+- Target: `packages/website/app/src/routes/home-authkit-stages.css`
 - Style only current product-stage DOM: desktop workbench, provider stage, and WorkGraph preview.
 - Do not change `home-product-stages.tsx`, labels, provider list, nodes, statuses, or product claims.
 

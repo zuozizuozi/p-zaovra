@@ -96,10 +96,10 @@ function init() {
             }}
           >
             <Kobalte.Portal>
+              {/* Dismiss explicitly so switching away to copy credentials cannot discard a form. */}
               <Kobalte.Overlay
                 data-component="dialog-overlay"
                 style={{ "z-index": String(zIndex) }}
-                onClick={() => close(id)}
               />
               <div
                 data-dialog-layer={layer}

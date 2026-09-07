@@ -1,0 +1,378 @@
+/* Presence of the desktop rail scopes portals as well as the workspace. The
+ * existing color-scheme and font preferences remain the source of truth. */
+html[data-theme="oc-2"] body[data-new-layout]:has([data-component="desktop-sidebar-v2"]) {
+  --zaovra-canvas: light-dark(#f8f9fb, #171a20);
+  --zaovra-rail: light-dark(#edf0f4, #12151a);
+  --zaovra-surface: light-dark(#fdfdfe, #1c2027);
+  --zaovra-hover: light-dark(#e4e8ee, #282e38);
+  --zaovra-ink: light-dark(#242c38, #e4e8ef);
+  --zaovra-secondary: light-dark(#596475, #a8b1bf);
+  --zaovra-muted: light-dark(#626e7f, #97a3b5);
+  --zaovra-accent: light-dark(#245bc4, #8aafff);
+  --zaovra-selection: light-dark(#dde7f8, #233452);
+  --zaovra-line: light-dark(#dce1e8, #303743);
+  --zaovra-focus: light-dark(#356bd0, #8aafff);
+  --zaovra-radius-control: 5px;
+  --zaovra-radius-panel: 8px;
+  --zaovra-shadow: 0 2px 5px light-dark(#2535520a, #070b122b);
+  --zaovra-shadow-float: 0 16px 48px light-dark(#25355229, #070b1266);
+
+  --v2-background-bg-base: var(--zaovra-surface);
+  --v2-background-bg-deep: var(--zaovra-canvas);
+  --v2-background-bg-layer-01: var(--zaovra-canvas);
+  --v2-background-bg-layer-02: var(--zaovra-hover);
+  --v2-background-bg-layer-03: light-dark(#d4dbe5, #3d4859);
+  --v2-background-bg-layer-04: light-dark(#bdc6d3, #515f72);
+  --v2-background-bg-inverse: var(--zaovra-ink);
+  --v2-background-bg-button-neutral: var(--zaovra-surface);
+  --v2-background-bg-accent: light-dark(#245bc4, #457ade);
+  --v2-text-text-base: var(--zaovra-ink);
+  --v2-text-text-muted: var(--zaovra-secondary);
+  --v2-text-text-faint: var(--zaovra-muted);
+  --v2-text-text-accent: var(--zaovra-accent);
+  --v2-text-text-accent-hover: light-dark(#174ba9, #b1c8ff);
+  --v2-icon-icon-base: var(--zaovra-secondary);
+  --v2-icon-icon-muted: var(--zaovra-muted);
+  --v2-icon-icon-accent: var(--zaovra-accent);
+  --v2-border-border-muted: var(--zaovra-line);
+  --v2-border-border-base: var(--zaovra-line);
+  --v2-border-border-strong: light-dark(#b4becd, #546278);
+  --v2-border-border-focus: var(--zaovra-focus);
+  --v2-overlay-simple-overlay-hover: light-dark(#25355209, #b4c9ef0d);
+  --v2-overlay-simple-overlay-pressed: light-dark(#25355215, #b4c9ef18);
+  --v2-elevation-raised: inset 0 0 0 1px var(--zaovra-line), var(--zaovra-shadow);
+  --v2-elevation-elements: 0 1px 2px light-dark(#25355212, #070b1240);
+  --v2-elevation-floating: inset 0 0 0 1px var(--zaovra-line), var(--zaovra-shadow-float);
+
+  color: var(--zaovra-ink);
+  background: var(--zaovra-canvas);
+
+  /* A navigation surface, not a second welcome screen. */
+  [data-component="desktop-sidebar-v2"] {
+    width: 248px;
+    background: var(--zaovra-rail);
+    border-color: var(--zaovra-line);
+  }
+
+  [data-component="desktop-sidebar-v2"] > div:first-child {
+    height: 44px;
+    padding-inline: 10px;
+    border-bottom: 1px solid var(--zaovra-line);
+  }
+
+  [data-component="desktop-sidebar-v2"] > div:first-child > button {
+    font-size: 13px;
+    letter-spacing: 0.01em;
+  }
+
+  [data-component="desktop-sidebar-v2"] > div:nth-child(2) {
+    padding: 14px 12px 16px;
+  }
+
+  [data-component="desktop-sidebar-v2"] > div:nth-child(2) [data-component="button-v2"] {
+    justify-content: flex-start;
+    height: 32px;
+    background: var(--zaovra-surface);
+    box-shadow:
+      inset 0 0 0 1px var(--zaovra-line),
+      var(--zaovra-shadow);
+    color: var(--zaovra-ink);
+    border-radius: var(--zaovra-radius-control);
+  }
+
+  [data-component="desktop-sidebar-v2"] > div:nth-child(2) [data-component="button-v2"]:hover {
+    background: var(--zaovra-hover);
+  }
+
+  [data-component="desktop-sidebar-v2"] nav section {
+    gap: 5px;
+  }
+
+  [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"] {
+    border-radius: var(--zaovra-radius-control);
+    --tab-bg: transparent;
+  }
+
+  [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"][data-active="true"] {
+    --tab-bg: var(--zaovra-selection);
+    box-shadow: inset 2px 0 var(--zaovra-accent);
+  }
+
+  [data-component="desktop-sidebar-v2"] [data-active="true"] [data-slot="tab-title"] {
+    color: var(--zaovra-accent);
+    font-weight: 550;
+  }
+
+  [data-component="desktop-sidebar-v2"] > div:last-child {
+    padding: 10px 12px;
+    gap: 2px;
+  }
+
+  [data-slot="titlebar-v2"] {
+    background: var(--zaovra-canvas);
+    box-shadow: inset 0 -1px var(--zaovra-line);
+  }
+
+  /* Brand stays recognizable, while the existing composer takes precedence. */
+  [data-component="session-new-design"] {
+    background: var(--zaovra-canvas);
+    overflow-y: auto;
+  }
+
+  [data-slot="new-session-position"] {
+    position: relative;
+    top: auto;
+    min-height: 100%;
+    align-items: center;
+    padding: 32px 40px clamp(72px, 12vh, 120px);
+  }
+
+  [data-slot="new-session-content"] {
+    width: 100%;
+    max-width: 680px;
+  }
+
+  [data-slot="new-session-heading"] {
+    margin-bottom: 20px;
+  }
+
+  [data-slot="new-session-heading"] > h1 {
+    margin: 0;
+    color: var(--zaovra-ink);
+    font-size: 24px;
+    font-weight: 560;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+  }
+
+  [data-slot="new-session-body"],
+  [data-slot="new-session-task"] {
+    width: 100%;
+    max-width: none;
+  }
+
+  [data-slot="new-session-task"] > div {
+    gap: 10px;
+  }
+
+  [data-slot="new-session-task"] [data-action="prompt-project"] {
+    height: 30px;
+    max-width: 260px;
+    padding-inline: 8px;
+    border-radius: var(--zaovra-radius-control);
+    color: var(--zaovra-secondary);
+  }
+
+  [data-component="project-glyph"] {
+    color: var(--zaovra-muted);
+  }
+
+  [data-component="project-glyph"][data-variant="blue"] {
+    color: var(--zaovra-accent);
+  }
+
+  [data-component="project-glyph"][data-variant="purple"] {
+    color: light-dark(#7654b4, #bda5f2);
+  }
+
+  [data-component="project-glyph"][data-variant="cyan"] {
+    color: light-dark(#137582, #72c9d2);
+  }
+
+  [data-component="project-glyph"][data-variant="green"] {
+    color: light-dark(#32734a, #79bd8e);
+  }
+
+  [data-component="project-glyph"][data-variant="orange"],
+  [data-component="project-glyph"][data-variant="yellow"] {
+    color: light-dark(#9a6327, #deb479);
+  }
+
+  [data-component="project-glyph"][data-variant="red"],
+  [data-component="project-glyph"][data-variant="pink"] {
+    color: light-dark(#9c4c61, #dc93a5);
+  }
+
+  [data-component="prompt-input-v2"] {
+    border-radius: var(--zaovra-radius-panel);
+    background: var(--zaovra-surface);
+    box-shadow:
+      inset 0 0 0 1px var(--zaovra-line),
+      var(--zaovra-shadow);
+  }
+
+  [data-component="prompt-input-v2"]:focus-within {
+    box-shadow:
+      inset 0 0 0 1px var(--zaovra-focus),
+      0 0 0 3px light-dark(#245bc410, #8aafff12);
+  }
+
+  [data-component="prompt-input-v2"] > div:last-child {
+    border-top: 1px solid var(--zaovra-line);
+    border-radius: 0 0 var(--zaovra-radius-panel) var(--zaovra-radius-panel);
+    background: var(--zaovra-canvas);
+  }
+
+  [data-component="button-v2"],
+  [data-component="icon-button-v2"],
+  [data-slot="tabs-v2-trigger"] {
+    border-radius: var(--zaovra-radius-control);
+  }
+
+  :is(button, a, input, textarea, [role="tab"], [role="menuitem"]):focus-visible {
+    outline: 2px solid var(--zaovra-focus);
+    outline-offset: 2px;
+  }
+
+  [data-component="dialog-v2"] [data-slot="dialog-container"] {
+    border-radius: 10px;
+    box-shadow:
+      inset 0 0 0 1px var(--zaovra-line),
+      var(--zaovra-shadow-float);
+  }
+
+  [data-component="menu-v2-content"] {
+    padding: 4px;
+    border-radius: var(--zaovra-radius-panel);
+    background: var(--zaovra-surface);
+  }
+
+  [data-component="menu-v2-item"] {
+    --menu-v2-hover: var(--zaovra-selection);
+    border-radius: var(--zaovra-radius-control);
+  }
+
+  [data-component="tabs-v2"][data-variant="settings"] [data-slot="tabs-v2-list"] {
+    background: var(--zaovra-rail);
+  }
+
+  [data-component="tabs-v2"][data-variant="settings"] [data-slot="tabs-v2-trigger"][data-selected] {
+    background: var(--zaovra-selection);
+    color: var(--zaovra-accent);
+    box-shadow: inset 2px 0 var(--zaovra-accent);
+  }
+
+  .settings-v2-tab-header {
+    padding: 30px 32px 24px;
+  }
+
+  .settings-v2-tab-title {
+    font-size: 17px;
+    line-height: 24px;
+    font-weight: 600;
+  }
+
+  .settings-v2-tab-body {
+    gap: 28px;
+    padding: 0 32px 32px;
+  }
+
+  .settings-v2-section {
+    gap: 12px;
+  }
+
+  .settings-v2-section-title {
+    font-size: 13px;
+    line-height: 20px;
+    padding-bottom: 0;
+    color: var(--zaovra-secondary);
+  }
+
+  [data-component="settings-v2-list"] {
+    background: transparent;
+    border-radius: 0;
+    padding-inline: 0;
+    box-shadow: none;
+    border-top: 1px solid var(--zaovra-line);
+  }
+
+  [data-component="settings-v2-row"] {
+    padding-block: 17px;
+  }
+
+  [data-slot="settings-v2-row-copy"] {
+    gap: 4px;
+  }
+
+  [data-slot="settings-v2-row-title"],
+  [data-slot="settings-v2-row-description"] {
+    line-height: 1.55;
+  }
+
+  [data-component="switch"] [data-slot="switch-control"] {
+    width: 30px;
+    height: 18px;
+    border-radius: 9px;
+    background: light-dark(#bac4d2, #536178);
+    box-shadow: none;
+  }
+
+  [data-component="switch"] [data-slot="switch-thumb"] {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: none;
+    background: #f8f9fb;
+    box-shadow: 0 1px 2px #19253824;
+  }
+
+  [data-component="switch"][data-checked] [data-slot="switch-control"] {
+    background: var(--v2-background-bg-accent);
+  }
+
+  [data-component="switch"][data-checked] [data-slot="switch-thumb"] {
+    transform: translateX(12px);
+  }
+
+  [data-component="switch"]:hover:not([data-disabled], [data-readonly]) [data-slot="switch-thumb"] {
+    width: 14px;
+    border-radius: 50%;
+  }
+
+  /* Tool and file tab typography inherits the same tokens without changing
+   * streamed row heights, virtualization, terminal sizing or diff semantics. */
+  [data-slot="basic-tool-tool-title"] {
+    color: var(--zaovra-ink);
+  }
+
+  [data-slot="basic-tool-tool-subtitle"] {
+    color: var(--zaovra-secondary);
+  }
+
+  [data-component="tabs-v2"][data-variant="normal"] [data-slot="tabs-v2-trigger-wrapper"]:has([data-selected]) {
+    border-bottom-color: var(--zaovra-accent);
+    color: var(--zaovra-ink);
+  }
+
+  /* Keep control feedback immediate when reduced motion is requested. Scope
+   * this to controls so task progress and timeline behavior stay intact. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-component="button-v2"],
+    [data-component="icon-button-v2"],
+    [data-slot="tabs-v2-trigger"],
+    [data-component="switch"] [data-slot="switch-control"],
+    [data-component="switch"] [data-slot="switch-thumb"] {
+      transition: none;
+    }
+  }
+
+  @media (max-width: 1000px) {
+    [data-component="desktop-sidebar-v2"] {
+      width: 220px;
+    }
+
+    [data-slot="new-session-position"] {
+      padding-inline: 24px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    [data-slot="new-session-heading"] {
+      margin-bottom: 16px;
+    }
+
+    [data-slot="new-session-heading"] > h1 {
+      font-size: 20px;
+    }
+  }
+}

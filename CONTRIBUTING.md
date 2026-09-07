@@ -72,8 +72,8 @@ Replace `<platform>` with your platform (e.g., `darwin-arm64`, `linux-x64`).
 - Core pieces:
   - `packages/zaovra`: Zaovra core business logic & server.
   - `packages/zaovra/src/cli/cmd/tui/`: The TUI code, written in SolidJS with [opentui](https://github.com/sst/opentui)
-  - `packages/app`: The shared web UI components, written in SolidJS
-  - `packages/desktop`: The native desktop app, built with Electron (wraps `packages/app`)
+  - `packages/app-ui`: The shared web UI components, written in SolidJS
+  - `packages/desktop-app`: The native desktop app, built with Electron (wraps `packages/app-ui`)
   - `packages/plugin`: Source for `@zaovra-ai/plugin`
 
 ### Understanding bun dev vs zaovra
@@ -116,7 +116,7 @@ To test UI changes during development:
 2. **Then run the web app:**
 
 ```bash
-bun run --cwd packages/app dev
+bun run --cwd packages/app-ui dev
 ```
 
 This starts a local dev server at http://localhost:5173 (or similar port shown in output). Most UI changes can be tested here, but the server must be running for full functionality.
@@ -128,14 +128,14 @@ The desktop app is an Electron application that wraps the web UI.
 To run the desktop app in development:
 
 ```bash
-bun run --cwd packages/desktop dev
+bun run --cwd packages/desktop-app dev
 ```
 
 To create a production build and package the app:
 
 ```bash
-bun run --cwd packages/desktop build
-bun run --cwd packages/desktop package
+bun run --cwd packages/desktop-app build
+bun run --cwd packages/desktop-app package
 ```
 
 > [!NOTE]

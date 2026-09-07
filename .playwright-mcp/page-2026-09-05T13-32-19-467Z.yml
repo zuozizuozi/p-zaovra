@@ -1,0 +1,347 @@
+- generic [ref=f3e2]:
+  - link "Skip to content" [ref=f3e3] [cursor=pointer]:
+    - /url: "#top"
+  - banner [ref=f3e4]:
+    - link "Zaovra home" [ref=f3e5] [cursor=pointer]:
+      - /url: "#top"
+      - generic [ref=f3e7]:
+        - text: zaovra
+        - generic [ref=f3e8]: CODING WORKSPACE
+    - generic [ref=f3e9]:
+      - button "EN" [ref=f3e11] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f3e13]: ⌄
+      - button "Open navigation" [ref=f3e14] [cursor=pointer]
+  - main [ref=f3e17]:
+    - region [ref=f3e18]:
+      - generic [ref=f3e22]: Z
+      - generic [ref=f3e23]:
+        - heading "Engineering context. Kept in motion." [level=1] [ref=f3e24]: Engineering context.Kept in motion.
+        - paragraph [ref=f3e25]: An open-source, local-first coding workspace that keeps sessions durable, execution visible, and every change ready to review.
+        - generic [ref=f3e26]:
+          - link "Download Zaovra ↗" [ref=f3e27] [cursor=pointer]:
+            - /url: "#install"
+            - text: Download Zaovra
+            - generic [ref=f3e28]: ↗
+          - link "See how it works ↓" [ref=f3e29] [cursor=pointer]:
+            - /url: "#product"
+            - text: See how it works
+            - generic [ref=f3e30]: ↓
+      - generic "Zaovra features" [ref=f3e31]:
+        - generic [ref=f3e32]:
+          - generic [ref=f3e33]: LOCAL WORKSPACE•
+          - generic [ref=f3e34]: DURABLE SESSIONS•
+          - generic [ref=f3e35]: MULTI-MODEL•
+          - generic [ref=f3e36]: REVIEWABLE DIFFS•
+          - generic [ref=f3e37]: TERMINAL•
+          - generic [ref=f3e38]: DESKTOP•
+          - generic [ref=f3e39]: IDE•
+          - generic [ref=f3e40]: LOCAL WORKSPACE•
+          - generic [ref=f3e41]: DURABLE SESSIONS•
+          - generic [ref=f3e42]: MULTI-MODEL•
+          - generic [ref=f3e43]: REVIEWABLE DIFFS•
+          - generic [ref=f3e44]: TERMINAL•
+          - generic [ref=f3e45]: DESKTOP•
+          - generic [ref=f3e46]: IDE•
+    - generic [ref=f3e48]:
+      - generic [ref=f3e49]:
+        - generic [ref=f3e50]: 01 / CONTEXT DRIFT
+        - heading "Code keeps moving. Most AI loses the thread." [level=2] [ref=f3e51]: Code keeps moving.Most AI loses the thread.
+      - generic [ref=f3e52]:
+        - generic "Context drift diagnostic illustration" [ref=f3e53]:
+          - generic [ref=f3e54]:
+            - text: CONTEXT SCANNER
+            - generic [ref=f3e55]: LIVE DEMO
+          - generic [ref=f3e56]:
+            - generic [ref=f3e59]: src/session.ts
+            - generic [ref=f3e61]: tools/bash.ts
+            - generic [ref=f3e63]: git diff
+            - generic [ref=f3e65]: project rules
+          - generic [ref=f3e69]: SESSION / 04CONTEXT / FRAGMENTEDSTATE / UNRESOLVED
+        - generic [ref=f3e70]:
+          - article [ref=f3e71]:
+            - text: CHAT MEMORY
+            - heading "The chat knows the prompt" [level=3] [ref=f3e72]
+            - paragraph [ref=f3e73]: Long-running work needs the repository, current branch, tool results, and why each decision was made.
+          - article [ref=f3e74]:
+            - text: SESSION BREAKS
+            - heading "The context was written" [level=3] [ref=f3e75]
+            - paragraph [ref=f3e76]: A transcript is not execution state. When the provider turn ends, important working context can disappear.
+          - article [ref=f3e77]:
+            - text: MODEL LOCK-IN
+            - heading "They choose the model" [level=3] [ref=f3e78]
+            - paragraph [ref=f3e79]: One hosted assistant turns provider choice and project access into platform policy.
+          - article [ref=f3e80]:
+            - text: REVIEW GAP
+            - heading "They control your flow" [level=3] [ref=f3e81]
+            - paragraph [ref=f3e82]: Opaque automation makes it hard to see what ran, what changed, and what should be trusted.
+    - generic [ref=f3e84]:
+      - generic [ref=f3e85]:
+        - generic [ref=f3e86]: 02 / LOCAL SYSTEM
+        - heading "Everything connected. Own the workflow." [level=2] [ref=f3e87]: Everything connected.Own the workflow.
+        - paragraph [ref=f3e88]: Your files, terminal, tools, permissions, model choice, and output remain part of one understandable system.
+      - generic "Zaovra local workflow diagram" [ref=f3e89]:
+        - generic [ref=f3e90]: FROM REPOSITORY TO REVIEW
+        - generic [ref=f3e91]:
+          - generic [ref=f3e92]:
+            - text: WORKSPACE
+            - generic [ref=f3e93]: files · git · rules
+          - generic [ref=f3e95]:
+            - text: ZAOVRA RUNTIME
+            - generic [ref=f3e97]: context · session · tools
+          - generic [ref=f3e99]:
+            - text: REVIEWABLE OUTPUT
+            - generic [ref=f3e100]: diffs · tests · your approval
+        - paragraph [ref=f3e101]: Hover or focus a node to inspect its role.
+    - generic [ref=f3e103]:
+      - generic [ref=f3e104]:
+        - generic "Durable session flow" [ref=f3e105]:
+          - generic [ref=f3e106]:
+            - generic [ref=f3e107]: "01"
+            - generic [ref=f3e108]: SESSION
+            - generic [ref=f3e109]: Project history loaded
+          - generic [ref=f3e111]:
+            - generic [ref=f3e112]: "02"
+            - generic [ref=f3e113]: INPUT ADMITTED
+            - generic [ref=f3e114]: Request saved to session
+          - generic [ref=f3e116]:
+            - generic [ref=f3e117]: "03"
+            - generic [ref=f3e118]: TOOLS RUN
+            - generic [ref=f3e119]: Tools run with permission
+          - generic [ref=f3e121]:
+            - generic [ref=f3e122]: "04"
+            - generic [ref=f3e123]: DIFF READY
+            - generic [ref=f3e124]: Changes ready for review
+          - generic [ref=f3e126]:
+            - generic [ref=f3e127]: SESSION PREVIEW
+            - generic [ref=f3e128]: Request saved to session
+        - generic [ref=f3e129]:
+          - heading "Resume the work, not the setup." [level=2] [ref=f3e130]: Resume the work,not the setup.
+          - paragraph [ref=f3e131]: Durable sessions keep admitted work, relevant history, and execution boundaries available when a task spans providers, tools, or time.
+      - generic [ref=f3e132]:
+        - article [ref=f3e133]:
+          - heading "Durable sessions" [level=3] [ref=f3e134]
+          - paragraph [ref=f3e135]: Work is admitted before execution and can continue from a known state.
+        - article [ref=f3e136]:
+          - heading "Your providers" [level=3] [ref=f3e137]
+          - paragraph [ref=f3e138]: Route work to the model you choose with your own credentials.
+        - article [ref=f3e139]:
+          - heading "Review before merge" [level=3] [ref=f3e140]
+          - paragraph [ref=f3e141]: Keep permissions, tool activity, and final diffs visible to people.
+    - generic [ref=f3e143]:
+      - generic [ref=f3e144]:
+        - generic [ref=f3e145]: 04 / THE APPROACH
+        - heading "Purpose sets the sequence." [level=2] [ref=f3e146]
+        - paragraph [ref=f3e147]: Zaovra separates understanding, durable admission, and controlled execution so agents can move quickly without losing the human checkpoint.
+      - generic [ref=f3e148]:
+        - tablist "Zaovra approach" [ref=f3e149]:
+          - tab "01 Ground the workspace + Map project files, conventions, current state, and the exact scope before code changes begin. Context is selected from the repository, not reconstructed from a generic chat." [selected] [ref=f3e150] [cursor=pointer]:
+            - generic [ref=f3e151]: "01"
+            - strong [ref=f3e152]: Ground the workspace
+            - generic [ref=f3e153]: +
+            - generic [ref=f3e154]:
+              - paragraph [ref=f3e155]: Map project files, conventions, current state, and the exact scope before code changes begin.
+              - paragraph [ref=f3e156]: Context is selected from the repository, not reconstructed from a generic chat.
+          - tab "02 Admit work durably + Record the user input and delivery mode before scheduling execution. Session continuity stays separate from any single model response or process lifetime." [ref=f3e157] [cursor=pointer]:
+            - generic [ref=f3e158]: "02"
+            - strong [ref=f3e159]: Admit work durably
+            - generic [ref=f3e160]: +
+            - generic [ref=f3e161]:
+              - paragraph: Record the user input and delivery mode before scheduling execution.
+              - paragraph [ref=f3e162]: Session continuity stays separate from any single model response or process lifetime.
+          - tab "03 Execute with control + Run agents and tools against explicit permissions, then return a reviewable diff. People remain in charge of risky actions and the final merge." [ref=f3e163] [cursor=pointer]:
+            - generic [ref=f3e164]: "03"
+            - strong [ref=f3e165]: Execute with control
+            - generic [ref=f3e166]: +
+            - generic [ref=f3e167]:
+              - paragraph: Run agents and tools against explicit permissions, then return a reviewable diff.
+              - paragraph [ref=f3e168]: People remain in charge of risky actions and the final merge.
+        - generic [ref=f3e169]:
+          - generic [ref=f3e170]:
+            - generic [ref=f3e171]: ZAOVRA / CONTEXT GRAPH
+            - generic [ref=f3e173]: READY
+          - generic [ref=f3e174]:
+            - generic [ref=f3e175]:
+              - strong [ref=f3e180]: Zaovra
+              - generic [ref=f3e181]: Project rules
+              - generic [ref=f3e182]: Files
+              - generic [ref=f3e183]: Tools
+              - generic [ref=f3e184]: Session history
+            - text: READY READY READY READY READY READY READY
+          - paragraph [ref=f3e185]: PROJECT CONTEXT / LINKED AND CURRENT
+    - generic [ref=f3e187]:
+      - heading "Your machine, coordinated." [level=2] [ref=f3e189]
+      - generic [ref=f3e190]:
+        - article [ref=f3e191]:
+          - generic [ref=f3e194]: "01"
+          - heading "Understands the architecture" [level=3] [ref=f3e195]
+          - paragraph [ref=f3e196]: Build a working map of the repository, its conventions, and the files that matter before changing code.
+        - article [ref=f3e197]:
+          - generic [ref=f3e205]: "02"
+          - heading "Coordinates agents" [level=3] [ref=f3e206]
+          - paragraph [ref=f3e207]: Give focused work to parallel agents, keep the shared objective visible, and bring results back into one reviewable change.
+        - article [ref=f3e208]:
+          - generic [ref=f3e212]: "03"
+          - heading "Uses terminal + tools" [level=3] [ref=f3e213]
+          - paragraph [ref=f3e214]: Search, edit, run commands, inspect results, and keep the actual workspace at the center of every decision.
+        - article [ref=f3e215]:
+          - generic [ref=f3e218]: "04"
+          - heading "Keeps sessions durable" [level=3] [ref=f3e219]
+          - paragraph [ref=f3e220]: Admit work before execution, resume long tasks safely, and keep context available beyond one provider turn.
+        - article [ref=f3e221]:
+          - generic [ref=f3e224]: "05"
+          - heading "Connects any model" [level=3] [ref=f3e225]
+          - paragraph [ref=f3e226]: Bring your own provider and select the model that fits the task, without moving the repository into a hosted black box.
+        - article [ref=f3e227]:
+          - generic [ref=f3e230]: "06"
+          - heading "Produces reviewable diffs" [level=3] [ref=f3e231]
+          - paragraph [ref=f3e232]: Changes stay visible as code. Permissions, tool calls, and final diffs remain available for human review.
+      - generic [ref=f3e233]:
+        - generic [ref=f3e234]:
+          - strong [ref=f3e235]: OPEN
+          - generic [ref=f3e236]: Open source
+        - generic [ref=f3e237]:
+          - strong [ref=f3e238]: LOCAL
+          - generic [ref=f3e239]: Workspace context
+        - generic [ref=f3e240]:
+          - strong [ref=f3e241]: ANY
+          - generic [ref=f3e242]: Multi-model
+        - generic [ref=f3e243]:
+          - strong [ref=f3e244]: "3"
+          - generic [ref=f3e245]: Terminal · Desktop · IDE
+    - generic [ref=f3e247]:
+      - generic [ref=f3e248]:
+        - generic [ref=f3e249]: 06 / PRODUCT SURFACE
+        - heading "Built for the whole build." [level=2] [ref=f3e250]
+        - paragraph [ref=f3e251]: One workspace for conversation, execution, project state, and the change you will actually ship.
+      - generic [ref=f3e252]:
+        - figure [ref=f3e254]:
+          - img "Zaovra running inside a code editor" [ref=f3e255]
+        - generic [ref=f3e256]:
+          - text: agent mode
+          - strong [ref=f3e257]: Orchestrated work
+        - generic [ref=f3e258]:
+          - text: provider routing
+          - strong [ref=f3e259]: Model choice
+        - generic [ref=f3e260]:
+          - text: permission gate
+          - strong [ref=f3e261]: Human control
+        - generic [ref=f3e262]:
+          - text: live tools
+          - strong [ref=f3e263]: Visible execution
+        - generic [ref=f3e264]:
+          - text: session state
+          - strong [ref=f3e265]: Durable context
+        - generic [ref=f3e266]:
+          - text: diff review
+          - strong [ref=f3e267]: Reviewable output
+    - generic [ref=f3e270]:
+      - heading "Start where your code lives." [level=2] [ref=f3e271]
+      - generic [ref=f3e272]:
+        - code [ref=f3e273]: curl -fsSL https://zaovra.com/install | bash
+        - button "Copy" [ref=f3e274] [cursor=pointer]
+        - link "Download desktop ↗" [ref=f3e275] [cursor=pointer]:
+          - /url: https://zaovra.com/download
+          - text: Download desktop
+          - generic [ref=f3e276]: ↗
+    - generic [ref=f3e278]:
+      - heading "Frequently asked questions." [level=2] [ref=f3e280]
+      - generic [ref=f3e281]:
+        - generic [ref=f3e282]:
+          - button "01 What is Zaovra? +" [ref=f3e283] [cursor=pointer]:
+            - generic [ref=f3e284]: "01"
+            - strong [ref=f3e285]: What is Zaovra?
+            - generic [ref=f3e286]: +
+          - generic:
+            - paragraph: Zaovra is an open-source, local-first AI coding workspace for running agents against real repositories with durable context and reviewable output.
+        - generic [ref=f3e287]:
+          - button "02 What does local-first mean? +" [ref=f3e288] [cursor=pointer]:
+            - generic [ref=f3e289]: "02"
+            - strong [ref=f3e290]: What does local-first mean?
+            - generic [ref=f3e291]: +
+          - generic:
+            - paragraph: Your workspace and execution environment remain local. Zaovra grounds agents in the files, tools, and project state already on your machine.
+        - generic [ref=f3e292]:
+          - button "03 Can I choose my model provider? +" [ref=f3e293] [cursor=pointer]:
+            - generic [ref=f3e294]: "03"
+            - strong [ref=f3e295]: Can I choose my model provider?
+            - generic [ref=f3e296]: +
+          - generic:
+            - paragraph: Yes. Zaovra is designed for bring-your-own-key workflows and multi-model routing, so the provider stays your choice.
+        - generic [ref=f3e297]:
+          - button "04 How does Zaovra handle project data? +" [ref=f3e298] [cursor=pointer]:
+            - generic [ref=f3e299]: "04"
+            - strong [ref=f3e300]: How does Zaovra handle project data?
+            - generic [ref=f3e301]: +
+          - generic:
+            - paragraph: Project context is read from the local workspace. Every external model request still follows the provider and permissions you configure.
+        - generic [ref=f3e302]:
+          - button "05 Can I use it from the terminal only? +" [ref=f3e303] [cursor=pointer]:
+            - generic [ref=f3e304]: "05"
+            - strong [ref=f3e305]: Can I use it from the terminal only?
+            - generic [ref=f3e306]: +
+          - generic:
+            - paragraph: Yes. The terminal workflow is first-class, and the same project can also be used through desktop and IDE surfaces.
+        - generic [ref=f3e307]:
+          - button "06 Is there a desktop app? +" [ref=f3e308] [cursor=pointer]:
+            - generic [ref=f3e309]: "06"
+            - strong [ref=f3e310]: Is there a desktop app?
+            - generic [ref=f3e311]: +
+          - generic:
+            - paragraph: Yes. Zaovra supports desktop, terminal, and IDE workflows so you can choose the surface that fits the task.
+        - generic [ref=f3e312]:
+          - button "07 How does it keep project context? +" [ref=f3e313] [cursor=pointer]:
+            - generic [ref=f3e314]: "07"
+            - strong [ref=f3e315]: How does it keep project context?
+            - generic [ref=f3e316]: +
+          - generic:
+            - paragraph: Zaovra combines workspace grounding with durable sessions, then reloads the relevant history and tool state at safe execution boundaries.
+        - generic [ref=f3e317]:
+          - button "08 Is Zaovra open source? +" [ref=f3e318] [cursor=pointer]:
+            - generic [ref=f3e319]: "08"
+            - strong [ref=f3e320]: Is Zaovra open source?
+            - generic [ref=f3e321]: +
+          - generic:
+            - paragraph: Yes. The codebase is open source, so teams can inspect the runtime, extend tools, and keep their workflow portable.
+    - generic [ref=f3e324]:
+      - heading "Keep the whole build in context." [level=2] [ref=f3e327]: Keep the whole buildin context.
+      - link "Download Zaovra ↗" [ref=f3e328] [cursor=pointer]:
+        - /url: "#install"
+        - text: Download Zaovra
+        - generic [ref=f3e329]: ↗
+      - paragraph [ref=f3e330]: Open source · local-first · built for review
+  - contentinfo [ref=f3e331]:
+    - generic [ref=f3e332]:
+      - generic [ref=f3e333]:
+        - link "Zaovra home" [ref=f3e334] [cursor=pointer]:
+          - /url: "#top"
+          - generic [ref=f3e336]:
+            - text: zaovra
+            - generic [ref=f3e337]: CODING WORKSPACE
+        - paragraph [ref=f3e338]: A local-first AI coding workspace for durable, reviewable engineering work.
+      - generic [ref=f3e339]:
+        - strong [ref=f3e340]: Product
+        - link "Overview" [ref=f3e341] [cursor=pointer]:
+          - /url: "#product"
+        - link "Workflows" [ref=f3e342] [cursor=pointer]:
+          - /url: "#workflow"
+        - link "Download" [ref=f3e343] [cursor=pointer]:
+          - /url: "#install"
+      - generic [ref=f3e344]:
+        - strong [ref=f3e345]: Resources
+        - link "Documentation" [ref=f3e346] [cursor=pointer]:
+          - /url: "#faq"
+        - link "FAQ" [ref=f3e347] [cursor=pointer]:
+          - /url: "#faq"
+        - link "GitHub" [ref=f3e348] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra
+      - generic [ref=f3e349]:
+        - strong [ref=f3e350]: Community
+        - link "Contribute" [ref=f3e351] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra
+        - link "Issues" [ref=f3e352] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra/issues
+        - link "Releases" [ref=f3e353] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra/releases
+    - generic [ref=f3e354]:
+      - generic [ref=f3e355]: © 2026 ZAOVRA. OPEN SOURCE.
+      - generic [ref=f3e356]: LOCAL RUNTIME / ONLINE

@@ -125,16 +125,16 @@ jobs:
 
       - name: Install Playwright system dependencies
         if: runner.os == 'Linux'
-        working-directory: packages/app
+        working-directory: packages/app-ui
         run: bunx playwright install-deps chromium
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        working-directory: packages/app
+        working-directory: packages/app-ui
         run: bunx playwright install chromium
 
       - name: Run app e2e tests
-        run: bun --cwd packages/app test:e2e:local
+        run: bun --cwd packages/app-ui test:e2e:local
         env:
           CI: true
         timeout-minutes: 30
@@ -147,5 +147,5 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
           path: |
-            packages/app/e2e/test-results
-            packages/app/e2e/playwright-report
+            packages/app-ui/e2e/test-results
+            packages/app-ui/e2e/playwright-report

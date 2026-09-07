@@ -2,7 +2,7 @@
 
 ## Scope lock
 
-- Target: `packages/console/app/src/routes/home-authkit-foundation.css`
+- Target: `packages/website/app/src/routes/home-authkit-foundation.css`
 - Import after `index.css`; overrides only descendants of `[data-page="zaovra-home"]`.
 - Keep every existing section, DOM node, link, string, product claim, and responsive content unchanged.
 - Do not use AuthKit logos, illustrations, copy, or downloaded assets.

@@ -61,11 +61,11 @@ describe("translate app", () => {
 
   test("limits each locale to its app surfaces", () => {
     expect(targetFiles("fr")).toEqual([
-      "packages/app/src/i18n/fr.ts",
+      "packages/app-ui/src/i18n/fr.ts",
       "packages/ui/src/i18n/fr.ts",
-      "packages/desktop/src/renderer/i18n/fr.ts",
+      "packages/desktop-app/src/renderer/i18n/fr.ts",
     ])
-    expect(targetFiles("tr")).toEqual(["packages/app/src/i18n/tr.ts", "packages/ui/src/i18n/tr.ts"])
+    expect(targetFiles("tr")).toEqual(["packages/app-ui/src/i18n/tr.ts", "packages/ui/src/i18n/tr.ts"])
   })
 
   test("maps product locale codes to their glossaries", () => {
@@ -139,13 +139,13 @@ zaovra/next
   })
 
   test("disables side effects and scopes edits for the translation agent", () => {
-    const config = translationConfig("translate-app-fr", "zaovra/gpt-5.5", ["packages/app/src/i18n/fr.ts"])
+    const config = translationConfig("translate-app-fr", "zaovra/gpt-5.5", ["packages/app-ui/src/i18n/fr.ts"])
     expect(config.share).toBe("disabled")
     expect(config.formatter).toBe(false)
     expect(config.lsp).toBe(false)
     expect(config.agent["translate-app-fr"].permission.edit).toEqual({
       "*": "deny",
-      "packages/app/src/i18n/fr.ts": "allow",
+      "packages/app-ui/src/i18n/fr.ts": "allow",
     })
   })
 
@@ -155,12 +155,12 @@ zaovra/next
         { "script/translate-app.ts": "before" },
         {
           "script/translate-app.ts": "before",
-          "packages/app/src/i18n/fr.ts": "translated",
-          "packages/app/src/app.tsx": "unexpected",
+          "packages/app-ui/src/i18n/fr.ts": "translated",
+          "packages/app-ui/src/app.tsx": "unexpected",
         },
-        ["packages/app/src/i18n/fr.ts"],
+        ["packages/app-ui/src/i18n/fr.ts"],
       ),
-    ).toEqual(["packages/app/src/app.tsx"])
+    ).toEqual(["packages/app-ui/src/app.tsx"])
     expect(unexpectedChanges({ "already-dirty.ts": "before" }, { "already-dirty.ts": "after" }, [])).toEqual([
       "already-dirty.ts",
     ])

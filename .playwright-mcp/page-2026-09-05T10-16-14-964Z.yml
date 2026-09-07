@@ -1,0 +1,156 @@
+- generic [active] [ref=e1]:
+  - link "跳至公司介绍" [ref=e2] [cursor=pointer]:
+    - /url: "#about"
+  - banner:
+    - link "光栈智能，返回首页" [ref=e5] [cursor=pointer]:
+      - /url: "#home"
+      - generic [ref=e8]:
+        - text: 光栈智能
+        - generic [ref=e9]: GUANGZHAN AI
+    - navigation "主导航":
+      - generic:
+        - generic:
+          - generic:
+            - generic [ref=e10]:
+              - generic [aria-hidden] [ref=e11]: GUANGZHAN / ABOUT
+              - link "关于光栈" [ref=e12] [cursor=pointer]:
+                - /url: "#about"
+            - generic [ref=e15]:
+              - generic [aria-hidden] [ref=e16]: EXPLORE / AI
+              - link "探索方向" [ref=e17] [cursor=pointer]:
+                - /url: "#explore"
+            - generic [ref=e20]:
+              - generic [aria-hidden] [ref=e21]: THE WORKSHOP
+              - link "我们的方式" [ref=e22] [cursor=pointer]:
+                - /url: "#approach"
+            - generic [ref=e25]:
+              - generic [aria-hidden] [ref=e26]: FUTURE / TOGETHER
+              - link "向未来，出发" [ref=e27] [cursor=pointer]:
+                - /url: "#future"
+  - main [ref=e30]:
+    - region [ref=e31]:
+      - generic [ref=e32]:
+        - heading "让智能， 成为日常。" [level=1] [ref=e33]: 让智能，成为日常。
+        - paragraph [ref=e34]: 我们构建 AI 产品，让每一个想法，更接近现实。
+        - link "走进光栈" [ref=e35] [cursor=pointer]:
+          - /url: "#about"
+      - generic [ref=e38]: 在此刻，构建下一种可能
+      - generic [aria-hidden]: GUANGZHAN
+      - generic [ref=e39]:
+        - link "向下探索" [ref=e40] [cursor=pointer]:
+          - /url: "#about"
+        - generic [ref=e42]: AI PRODUCTS. HUMAN POSSIBILITIES.
+        - generic [ref=e43]: 中国 · 广州
+    - region [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]: 关于光栈
+        - generic [ref=e48]: A LITTLE ABOUT US
+      - generic [ref=e49]:
+        - heading "技术的意义， 在于它让什么 变得可能。" [level=2] [ref=e50]: 技术的意义，在于它让什么变得可能。
+        - generic [ref=e51]:
+          - paragraph [ref=e52]: 光栈智能，是一家生长于广州的 AI 创业公司。我们从真实的需求出发，探索人工智能在创作、工具与工作场景中的更多可能。
+          - paragraph [ref=e53]: 从灵感到产品，从重复的任务到更自然的协作，我们关心的始终是：技术如何真正被人使用。
+          - generic [ref=e54]: 把复杂留给技术，把可能交给每个人。
+      - generic [ref=e55]:
+        - text: 一个想法，点亮一座新的城市。
+        - generic [ref=e57]: 光栈 · 数字城市概念场景
+    - region [ref=e58]:
+      - generic [ref=e59]:
+        - generic [ref=e60]:
+          - heading "不止一种可能。" [level=2] [ref=e61]
+          - paragraph [ref=e62]: 以 AI 为起点，向真实的场景延伸。
+        - generic [ref=e63]: WHAT WE EXPLORE
+      - generic [aria-hidden] [ref=e64]:
+        - generic [ref=e65]: 灵感，流动成日常。
+        - generic [ref=e66]: 创作街区 · 城市意象
+      - generic [ref=e67]:
+        - article [ref=e68]:
+          - generic [ref=e69]:
+            - img "层叠光线形成的生成式创作概念图" [ref=e70]
+            - generic [ref=e71]: CREATIVE INTELLIGENCE
+          - generic [ref=e72]:
+            - heading "让灵感，有形" [level=3] [ref=e73]
+            - generic [ref=e74]: 智能创作
+          - paragraph [ref=e75]: 探索图像、视频与内容创作，让想象拥有更直接的表达方式。
+        - article [ref=e76]:
+          - generic [ref=e77]:
+            - img "围绕核心生长的智能工具概念图" [ref=e78]
+            - generic [ref=e79]: EVERYDAY INTELLIGENCE
+          - generic [ref=e80]:
+            - heading "让日常，更轻" [level=3] [ref=e81]
+            - generic [ref=e82]: 实用工具
+          - paragraph [ref=e83]: 把 AI 能力融入具体任务，构建简单、顺手、值得反复使用的产品。
+        - article [ref=e84]:
+          - generic [ref=e85]:
+            - img "有序光线连接多个任务节点的工作流概念图" [ref=e86]
+            - generic [ref=e87]: CONNECTED INTELLIGENCE
+          - generic [ref=e88]:
+            - heading "让工作，向前" [level=3] [ref=e89]
+            - generic [ref=e90]: 智能工作流
+          - paragraph [ref=e91]: 连接信息、任务与系统，探索人与 AI 更自然的协作方式。
+      - generic [ref=e92]:
+        - generic [ref=e93]: 保持好奇，持续构建。
+        - generic [ref=e94]: 产品会不断生长，探索始终继续。
+    - region [ref=e95]:
+      - generic [ref=e96]:
+        - text: 我们的方式
+        - heading "仰望可能， 着手当下。" [level=2] [ref=e97]: 仰望可能，着手当下。
+        - paragraph [ref=e98]: 我们相信，好产品来自对真实问题的理解，也来自一次次认真而具体的打磨。
+      - generic [ref=e99]:
+        - article [ref=e100]:
+          - generic [ref=e103]:
+            - heading "从问题开始" [level=3] [ref=e104]
+            - paragraph [ref=e105]: 先理解人们想完成什么，再思考 AI 可以做什么。
+        - article [ref=e106]:
+          - generic [ref=e109]:
+            - heading "在使用中生长" [level=3] [ref=e110]
+            - paragraph [ref=e111]: 让想法走进真实场景，在反馈与迭代中逐渐清晰。
+        - article [ref=e112]:
+          - generic [ref=e115]:
+            - heading "为长期而构建" [level=3] [ref=e116]
+            - paragraph [ref=e117]: 保持对技术的好奇，也保持对体验与细节的耐心。
+    - region [ref=e118]:
+      - generic [ref=e119]:
+        - heading "下一种可能， 正在发生。" [level=2] [ref=e120]: 下一种可能，正在发生。
+        - paragraph [ref=e121]: 让 AI 走进日常，让想法走向更远。光栈智能，持续构建中。
+        - link "继续探索" [ref=e122] [cursor=pointer]:
+          - /url: "#explore"
+      - generic [ref=e125]:
+        - generic [ref=e126]: BUILT WITH CURIOSITY.
+        - generic [ref=e127]: 向光而行，步履不停。
+  - complementary "城市章节导航" [ref=e128]:
+    - link "光栈天际：首页" [ref=e129] [cursor=pointer]:
+      - /url: "#home"
+      - generic: 光栈天际
+    - link "月映广场：关于光栈" [ref=e130] [cursor=pointer]:
+      - /url: "#about"
+      - generic: 月映广场
+    - link "创作街区：探索方向" [ref=e131] [cursor=pointer]:
+      - /url: "#explore"
+      - generic: 创作街区
+    - link "协作工坊：我们的方式" [ref=e132] [cursor=pointer]:
+      - /url: "#approach"
+      - generic: 协作工坊
+    - link "远航港湾：共创未来" [ref=e133] [cursor=pointer]:
+      - /url: "#future"
+      - generic: 远航港湾
+  - generic [aria-hidden]:
+    - generic:
+      - strong: 光栈天际
+      - generic: 从一个想法，望向整座城市
+    - generic: 城市意象
+  - contentinfo [ref=e134]:
+    - generic [ref=e135]:
+      - link "光栈智能 GUANGZHAN AI" [ref=e136] [cursor=pointer]:
+        - /url: "#home"
+        - generic [ref=e139]:
+          - text: 光栈智能
+          - generic [ref=e140]: GUANGZHAN AI
+      - paragraph [ref=e141]: 广州光栈智能科技有限公司
+      - link "回到顶部" [ref=e142] [cursor=pointer]:
+        - /url: "#home"
+    - generic [ref=e145]:
+      - generic [ref=e146]: © 2026 GUANGZHAN AI. 保留所有权利。
+      - generic [ref=e147]: 立足广州 · 探索无限
+  - button "暂停场景动画" [ref=e149] [cursor=pointer]:
+    - generic [ref=e152]: 动态场景

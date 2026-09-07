@@ -1,0 +1,287 @@
+- generic [active] [ref=f1e1]:
+  - link "Skip to content" [ref=f1e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=f1e3]:
+    - link "Zaovra home" [ref=f1e4] [cursor=pointer]:
+      - /url: "#top"
+      - img "Zaovra" [ref=f1e5]
+    - navigation "Primary navigation" [ref=f1e6]:
+      - link "Workflow" [ref=f1e7] [cursor=pointer]:
+        - /url: "#workflow"
+      - link "Capabilities" [ref=f1e8] [cursor=pointer]:
+        - /url: "#capabilities"
+      - link "Surfaces" [ref=f1e9] [cursor=pointer]:
+        - /url: "#surfaces"
+      - link "Docs" [ref=f1e10] [cursor=pointer]:
+        - /url: https://zaovra.com/docs
+    - link "Download" [ref=f1e11] [cursor=pointer]:
+      - /url: https://zaovra.com/download
+      - text: Download
+      - generic [aria-hidden] [ref=f1e12]: ↗
+  - main [ref=f1e13]:
+    - generic [ref=f1e14]:
+      - generic [aria-hidden] [ref=f1e16]: ZAOVRA
+      - generic [ref=f1e17]:
+        - paragraph [ref=f1e196]: Local-first AI coding workspace
+        - heading "Build where your code lives." [level=1] [ref=f1e198]: Build whereyour code lives.
+        - paragraph [ref=f1e199]: Explore unfamiliar systems, plan the change, edit real files, run the terminal, and review every diff from one grounded workspace.
+        - generic [ref=f1e18]:
+          - link "Download desktop" [ref=f1e19] [cursor=pointer]:
+            - /url: https://zaovra.com/download
+          - link "Read the docs" [ref=f1e20] [cursor=pointer]:
+            - /url: https://zaovra.com/docs
+            - text: Read the docs
+            - generic [aria-hidden] [ref=f1e21]: ↗
+        - paragraph [ref=f1e200]: Windows available first • macOS coming soon
+      - generic "Zaovra running in a developer workstation" [ref=f1e201]:
+        - generic [ref=f1e203]:
+          - img "Zaovra new session interface with model selection and local workspace controls" [ref=f1e205]
+          - generic [ref=f1e206]: LOCAL / SESSION READY
+        - generic [aria-hidden] [ref=f1e209]:
+          - generic [ref=f1e210]:
+            - generic [ref=f1e211]: esc
+            - generic [ref=f1e212]: "1"
+            - generic [ref=f1e213]: "2"
+            - generic [ref=f1e214]: "3"
+            - generic [ref=f1e215]: "4"
+            - generic [ref=f1e216]: "5"
+            - generic [ref=f1e217]: "6"
+            - generic [ref=f1e218]: "7"
+            - generic [ref=f1e219]: "8"
+            - generic [ref=f1e220]: "9"
+            - generic [ref=f1e221]: "0"
+            - generic [ref=f1e222]: ⌫
+          - generic [ref=f1e223]:
+            - generic [ref=f1e224]: tab
+            - generic [ref=f1e225]: Q
+            - generic [ref=f1e226]: W
+            - generic [ref=f1e227]: E
+            - generic [ref=f1e228]: R
+            - generic [ref=f1e229]: T
+            - generic [ref=f1e230]: "Y"
+            - generic [ref=f1e231]: U
+            - generic [ref=f1e232]: I
+            - generic [ref=f1e233]: O
+            - generic [ref=f1e234]: P
+          - generic [ref=f1e235]:
+            - generic [ref=f1e236]: caps
+            - generic [ref=f1e237]: A
+            - generic [ref=f1e238]: S
+            - generic [ref=f1e239]: D
+            - generic [ref=f1e240]: F
+            - generic [ref=f1e241]: Z
+            - generic [ref=f1e242]: H
+            - generic [ref=f1e243]: J
+            - generic [ref=f1e244]: K
+            - generic [ref=f1e245]: L
+          - generic [ref=f1e246]:
+            - generic [ref=f1e247]: shift
+            - generic [ref=f1e248]: Z
+            - generic [ref=f1e249]: X
+            - generic [ref=f1e250]: C
+            - generic [ref=f1e251]: V
+            - generic [ref=f1e252]: B
+            - generic [ref=f1e253]: "N"
+            - generic [ref=f1e254]: M
+            - generic [ref=f1e255]: ↑
+          - generic [ref=f1e256]:
+            - generic [ref=f1e257]: ctrl
+            - generic [ref=f1e258]: alt
+            - generic [ref=f1e260]: ←
+            - generic [ref=f1e261]: ↓
+            - generic [ref=f1e262]: →
+        - generic [aria-hidden] [ref=f1e263]:
+          - generic [ref=f1e264]: "01"
+          - generic [ref=f1e265]: Workspace context loaded
+        - generic [aria-hidden] [ref=f1e266]:
+          - generic [ref=f1e267]: "02"
+          - generic [ref=f1e268]: "Review mode permission: ask"
+      - generic [aria-hidden] [ref=f1e22]:
+        - generic [ref=f1e23]: ZA / 01
+        - generic [ref=f1e24]: AI CODING / LOCAL RUNTIME
+    - region "Product facts" [ref=f1e25]:
+      - generic [ref=f1e26]:
+        - generic [ref=f1e27]: Runtime
+        - strong [ref=f1e28]: Local-first
+      - generic [ref=f1e29]:
+        - generic [ref=f1e30]: Model access
+        - strong [ref=f1e31]: BYOK + managed
+      - generic [ref=f1e32]:
+        - generic [ref=f1e33]: Surfaces
+        - strong [ref=f1e34]: Desktop + TUI
+      - generic [ref=f1e35]:
+        - generic [ref=f1e36]: License
+        - strong [ref=f1e37]: MIT
+    - generic [ref=f1e38]:
+      - generic [ref=f1e39]:
+        - paragraph [ref=f1e40]: One grounded loop
+        - heading "From a question to reviewed code." [level=2] [ref=f1e41]: From a questionto reviewed code.
+        - paragraph [ref=f1e42]: Zaovra keeps context, execution, and evidence in the same session so the work stays legible from first read to final diff.
+      - generic [ref=f1e43]:
+        - figure "Actual Zaovra interface Local workspace session" [ref=f1e44]:
+          - img "Real Zaovra terminal experience showing workspace context loaded" [ref=f1e45]
+          - generic [ref=f1e46]:
+            - generic [ref=f1e47]: Actual Zaovra interface
+            - generic [ref=f1e48]: Local workspace session
+        - list [ref=f1e49]:
+          - listitem [ref=f1e50]:
+            - generic [ref=f1e51]: Explore
+            - paragraph [ref=f1e52]: Read the repository before changing it.
+            - generic [aria-hidden] [ref=f1e53]: ✓
+          - listitem [ref=f1e54]:
+            - generic [ref=f1e55]: Plan
+            - paragraph [ref=f1e56]: Turn intent into a bounded implementation.
+            - generic [aria-hidden] [ref=f1e57]: ✓
+          - listitem [ref=f1e58]:
+            - generic [ref=f1e59]: Execute
+            - paragraph [ref=f1e60]: Edit files and run the real toolchain.
+            - generic [aria-hidden] [ref=f1e61]: ●
+          - listitem [ref=f1e62]:
+            - generic [ref=f1e63]: Verify
+            - paragraph [ref=f1e64]: Inspect checks, evidence, and the final diff.
+            - generic [aria-hidden] [ref=f1e65]: ○
+    - generic [ref=f1e66]:
+      - generic [ref=f1e67]:
+        - heading "Your workspace is the source of truth." [level=2] [ref=f1e68]: Your workspace isthe source of truth.
+        - paragraph [ref=f1e69]: Not a detached chat tab. Zaovra works against the project, permissions, tools, and history you actually use.
+      - generic [ref=f1e70]:
+        - article [ref=f1e71]:
+          - generic [ref=f1e72]:
+            - generic [ref=f1e73]: WORKSPACE / 01
+            - heading "Code context that stays attached." [level=3] [ref=f1e74]
+            - paragraph [ref=f1e75]: Files, project instructions, terminal output, and language services remain part of the session.
+          - generic [aria-hidden] [ref=f1e76]:
+            - generic [ref=f1e77]:
+              - generic [ref=f1e78]: AGENTS.md
+              - generic [ref=f1e79]: Loaded
+            - generic [ref=f1e80]:
+              - generic [ref=f1e81]: src/session/execution.ts
+              - generic [ref=f1e82]: Tracked
+            - generic [ref=f1e83]:
+              - generic [ref=f1e84]: TypeScript language server
+              - generic [ref=f1e85]: Ready
+            - generic [ref=f1e86]:
+              - generic [ref=f1e87]: powershell
+              - generic [ref=f1e88]: Connected
+        - article [ref=f1e89]:
+          - generic [ref=f1e90]: MODELS / 02
+          - heading "Bring the model access you trust." [level=3] [ref=f1e91]
+          - paragraph [ref=f1e92]: Connect provider keys, OpenAI-compatible endpoints, local endpoints, or use Zaovra managed access.
+          - list "Provider examples" [ref=f1e93]:
+            - listitem [ref=f1e94]:
+              - generic [ref=f1e95]: A
+              - text: Anthropic
+            - listitem [ref=f1e96]:
+              - generic [ref=f1e97]: O
+              - text: OpenAI
+            - listitem [ref=f1e98]:
+              - generic [ref=f1e99]: G
+              - text: Google
+            - listitem [ref=f1e100]:
+              - generic [ref=f1e101]: API
+              - text: Custom
+        - article [ref=f1e102]:
+          - generic [ref=f1e103]: SESSION / 03
+          - heading "Durable by design." [level=3] [ref=f1e104]
+          - paragraph [ref=f1e105]: Sessions preserve the work trail, admit new prompts safely, and let you return without rebuilding context from scratch.
+          - generic [ref=f1e106]:
+            - generic [ref=f1e108]: Homepage redesign
+            - emphasis [ref=f1e109]: retained
+        - article [ref=f1e110]:
+          - generic [ref=f1e111]: CONTROL / 04
+          - heading "Permission stays explicit." [level=3] [ref=f1e112]
+          - paragraph [ref=f1e113]: Use read-only planning or full build mode. Commands and file changes follow the rules you set.
+          - generic [aria-hidden] [ref=f1e114]:
+            - generic [ref=f1e115]: PLAN / READ ONLY
+            - generic [ref=f1e116]: BUILD / ASK
+    - region [ref=f1e117]:
+      - generic [ref=f1e118]:
+        - generic [ref=f1e119]: EVIDENCE, NOT PROMISES
+        - heading "See the change. Then decide." [level=2] [ref=f1e120]: See the change.Then decide.
+        - paragraph [ref=f1e121]: "Every implementation ends where professional software work should: in checks you can inspect and a diff you can review."
+        - list [ref=f1e122]:
+          - listitem [ref=f1e123]:
+            - generic [ref=f1e124]: Terminal
+            - generic [ref=f1e125]: Run the project’s own commands
+          - listitem [ref=f1e126]:
+            - generic [ref=f1e127]: LSP
+            - generic [ref=f1e128]: Use language-aware context
+          - listitem [ref=f1e129]:
+            - generic [ref=f1e130]: Diff
+            - generic [ref=f1e131]: Review every changed line
+      - generic "Reviewable code changes example" [ref=f1e132]:
+        - generic [ref=f1e133]:
+          - generic [ref=f1e134]: packages / website-redesign / styles.css
+          - generic [ref=f1e135]: Review
+        - generic [ref=f1e136]:
+          - generic [ref=f1e137]: "126"
+          - code [ref=f1e138]: ".hero { min-height: 100dvh; }"
+        - generic [ref=f1e139]:
+          - generic [ref=f1e140]: "127"
+          - code [ref=f1e141]: "- background: linear-gradient(...);"
+        - generic [ref=f1e142]:
+          - generic [ref=f1e143]: "127"
+          - code [ref=f1e144]: "+ background: var(--void);"
+        - generic [ref=f1e145]:
+          - generic [ref=f1e146]: "128"
+          - code [ref=f1e147]: "+ perspective: 1400px;"
+        - generic [ref=f1e148]:
+          - generic [ref=f1e149]: "129"
+          - code [ref=f1e150]: "}"
+        - generic [ref=f1e151]:
+          - generic [ref=f1e152]: +2 additions
+          - generic [ref=f1e153]: −1 deletion
+          - generic [ref=f1e154]: Ready to inspect
+    - generic [ref=f1e155]:
+      - generic [ref=f1e156]:
+        - heading "One engine. Three places to work." [level=2] [ref=f1e157]: One engine.Three places to work.
+        - paragraph [ref=f1e158]: Use the focused desktop app, stay inside VS Code, or move at terminal speed in the TUI.
+      - generic [ref=f1e159]:
+        - figure "VS Code Work beside the editor" [ref=f1e160]:
+          - img "Zaovra running with VS Code" [ref=f1e161]
+          - generic [ref=f1e162]:
+            - generic [ref=f1e163]: VS Code
+            - generic [ref=f1e164]: Work beside the editor
+        - figure "GitHub Carry reviewed work forward" [ref=f1e165]:
+          - img "Zaovra project workflow connected to GitHub" [ref=f1e166]
+          - generic [ref=f1e167]:
+            - generic [ref=f1e168]: GitHub
+            - generic [ref=f1e169]: Carry reviewed work forward
+        - generic [ref=f1e170]:
+          - generic [ref=f1e171]: TUI
+          - button "Copy the Zaovra installation command" [ref=f1e172]:
+            - code [ref=f1e173]:
+              - emphasis [ref=f1e174]: $
+              - text: npm i -g zaovra-ai@latest
+              - emphasis [ref=f1e175]: $
+              - text: zaovra [ready] Workspace context loaded
+            - text: click to copy
+          - link "Open CLI documentation" [ref=f1e176] [cursor=pointer]:
+            - /url: https://zaovra.com/docs
+            - text: Open CLI documentation
+            - generic [aria-hidden] [ref=f1e177]: ↗
+    - generic [ref=f1e178]:
+      - generic [aria-hidden] [ref=f1e179]: Z
+      - generic [ref=f1e180]:
+        - paragraph [ref=f1e181]: Ground the model. Keep control.
+        - heading "Make the next change with Zaovra." [level=2] [ref=f1e182]: Make the nextchange with Zaovra.
+        - generic [ref=f1e183]:
+          - link "Download Zaovra" [ref=f1e184] [cursor=pointer]:
+            - /url: https://zaovra.com/download
+          - link "View on GitHub" [ref=f1e185] [cursor=pointer]:
+            - /url: https://github.com/zuozizuozi/p-zaovra
+            - text: View on GitHub
+            - generic [aria-hidden] [ref=f1e186]: ↗
+  - contentinfo [ref=f1e187]:
+    - img "Zaovra" [ref=f1e188]
+    - paragraph [ref=f1e189]: Local-first AI coding workspace.
+    - navigation "Footer navigation" [ref=f1e190]:
+      - link "Docs" [ref=f1e191] [cursor=pointer]:
+        - /url: https://zaovra.com/docs
+      - link "Privacy" [ref=f1e192] [cursor=pointer]:
+        - /url: https://zaovra.com/legal/privacy-policy
+      - link "Terms" [ref=f1e193] [cursor=pointer]:
+        - /url: https://zaovra.com/legal/terms-of-service
+      - link "GitHub" [ref=f1e194] [cursor=pointer]:
+        - /url: https://github.com/zuozizuozi/p-zaovra
+    - generic [ref=f1e195]: © 2026 Zaovra

@@ -85,9 +85,9 @@ export function parseTranslationArgs(args: string[]) {
 
 export function targetFiles(locale: Locale) {
   return [
-    `packages/app/src/i18n/${locale}.ts`,
+    `packages/app-ui/src/i18n/${locale}.ts`,
     `packages/ui/src/i18n/${locale}.ts`,
-    ...(desktopLocales.has(locale) ? [`packages/desktop/src/renderer/i18n/${locale}.ts`] : []),
+    ...(desktopLocales.has(locale) ? [`packages/desktop-app/src/renderer/i18n/${locale}.ts`] : []),
   ]
 }
 
@@ -312,7 +312,7 @@ async function inspect(locale: Locale) {
       const source = target.replace(`/${locale}.ts`, "/en.ts")
       const dictionaries = await Promise.all([dictionary(source), dictionary(target)])
       return {
-        name: target.includes("packages/app/") ? "app" : target.includes("packages/ui/") ? "ui" : "desktop",
+        name: target.includes("packages/app-ui/") ? "app" : target.includes("packages/ui/") ? "ui" : "desktop",
         source,
         target,
         drift: findDrift(dictionaries[0], dictionaries[1]),

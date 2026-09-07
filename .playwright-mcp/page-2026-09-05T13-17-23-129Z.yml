@@ -1,0 +1,90 @@
+- generic [ref=e2]:
+  - link "Skip to content" [ref=e3] [cursor=pointer]:
+    - /url: "#top"
+  - banner [ref=e4]:
+    - link "Zaovra home" [ref=e5] [cursor=pointer]:
+      - /url: "#top"
+      - generic [ref=e7]:
+        - text: zaovra
+        - generic [ref=e8]: CODING WORKSPACE
+    - navigation "Primary navigation" [ref=e9]:
+      - link "Product" [ref=e10] [cursor=pointer]:
+        - /url: "#product"
+      - link "Workflows" [ref=e11] [cursor=pointer]:
+        - /url: "#workflow"
+  - main [ref=e12]:
+    - region [ref=e13]:
+      - generic [ref=e17]: Z
+      - generic [ref=e18]:
+        - heading "Engineering context. Kept in motion." [level=1] [ref=e19]: Engineering context.Kept in motion.
+        - generic [ref=e20]:
+          - link "Download Zaovra ↗" [ref=e21] [cursor=pointer]:
+            - /url: "#install"
+            - text: Download Zaovra
+            - generic [ref=e22]: ↗
+          - link "See how it works ↓" [ref=e23] [cursor=pointer]:
+            - /url: "#product"
+            - text: See how it works
+            - generic [ref=e24]: ↓
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - generic [ref=e28]: 01 / CONTEXT DRIFT
+        - heading "Code keeps moving. Most AI loses the thread." [level=2] [ref=e29]: Code keeps moving.Most AI loses the thread.
+      - generic "Context drift diagnostic illustration" [ref=e31]:
+        - generic [ref=e32]:
+          - text: CONTEXT SCANNER
+          - generic [ref=e33]: LIVE DEMO
+    - generic "Zaovra local workflow diagram" [ref=e38]:
+      - paragraph [ref=e40]:
+        - generic [ref=e41]: EXPLORE THE SYSTEM
+        - text: Hover or focus a node to inspect its role.
+    - generic "Durable session flow" [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]: SESSION PREVIEW
+        - generic [ref=e48]: Request saved to session
+    - tablist "Zaovra approach" [ref=e55]
+    - figure [ref=e64]:
+      - img "Zaovra running inside a code editor" [ref=e65]
+    - generic [ref=e73]:
+      - heading "Keep the whole build in context." [level=2] [ref=e76]: Keep the whole buildin context.
+      - link "Download Zaovra ↗" [ref=e77] [cursor=pointer]:
+        - /url: "#install"
+        - text: Download Zaovra
+        - generic [ref=e78]: ↗
+      - paragraph [ref=e79]: Open source · local-first · built for review
+  - contentinfo [ref=e80]:
+    - generic [ref=e81]:
+      - generic [ref=e82]:
+        - link "Zaovra home" [ref=e83] [cursor=pointer]:
+          - /url: "#top"
+          - generic [ref=e85]:
+            - text: zaovra
+            - generic [ref=e86]: CODING WORKSPACE
+        - paragraph [ref=e87]: A local-first AI coding workspace for durable, reviewable engineering work.
+      - generic [ref=e88]:
+        - strong [ref=e89]: Product
+        - link "Overview" [ref=e90] [cursor=pointer]:
+          - /url: "#product"
+        - link "Workflows" [ref=e91] [cursor=pointer]:
+          - /url: "#workflow"
+        - link "Download" [ref=e92] [cursor=pointer]:
+          - /url: "#install"
+      - generic [ref=e93]:
+        - strong [ref=e94]: Resources
+        - link "Documentation" [ref=e95] [cursor=pointer]:
+          - /url: "#faq"
+        - link "FAQ" [ref=e96] [cursor=pointer]:
+          - /url: "#faq"
+        - link "GitHub" [ref=e97] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra
+      - generic [ref=e98]:
+        - strong [ref=e99]: Community
+        - link "Contribute" [ref=e100] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra
+        - link "Issues" [ref=e101] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra/issues
+        - link "Releases" [ref=e102] [cursor=pointer]:
+          - /url: https://github.com/zuozizuozi/p-zaovra/releases
+    - generic [ref=e103]:
+      - generic [ref=e104]: © 2026 ZAOVRA. OPEN SOURCE.
+      - generic [ref=e105]: LOCAL RUNTIME / ONLINE

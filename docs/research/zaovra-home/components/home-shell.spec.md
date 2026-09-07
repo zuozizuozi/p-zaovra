@@ -2,8 +2,8 @@
 
 ## Overview
 
-- Target: `packages/console/app/src/routes/index.tsx`
-- Styles: `packages/console/app/src/routes/index.css`
+- Target: `packages/website/app/src/routes/index.tsx`
+- Styles: `packages/website/app/src/routes/index.css`
 - Interaction: static page with anchor navigation and native details FAQ.
 
 ## Structure

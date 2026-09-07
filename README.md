@@ -1,9 +1,11 @@
+> Local source layout: `packages/website` (website), `packages/website-docs` (docs), `packages/desktop-app` (Electron), and `packages/app-ui` (shared workbench). See [目录说明](./目录说明.md) for commands and migration notes.
+
 <p align="center">
   <a href="https://zaovra.com">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Zaovra logo">
+      <source srcset="packages/website/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/website/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/website/app/src/asset/logo-ornate-light.svg" alt="Zaovra logo">
     </picture>
   </a>
 </p>

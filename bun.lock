@@ -27,7 +27,7 @@
         "turbo": "2.10.2",
       },
     },
-    "packages/app": {
+    "packages/app-ui": {
       "name": "@zaovra-ai/app",
       "version": "1.18.3",
       "dependencies": {
@@ -155,135 +155,6 @@
         "@typescript/native-preview": "catalog:",
       },
     },
-    "packages/console/app": {
-      "name": "@zaovra-ai/console-app",
-      "version": "1.18.3",
-      "dependencies": {
-        "@cloudflare/vite-plugin": "1.15.2",
-        "@ibm/plex": "6.4.1",
-        "@jsx-email/render": "1.1.1",
-        "@kobalte/core": "catalog:",
-        "@openauthjs/openauth": "catalog:",
-        "@smithy/eventstream-codec": "4.2.7",
-        "@smithy/util-utf8": "4.2.0",
-        "@solidjs/meta": "catalog:",
-        "@solidjs/router": "catalog:",
-        "@solidjs/start": "catalog:",
-        "@stripe/stripe-js": "8.6.1",
-        "@upstash/redis": "1.38.0",
-        "@zaovra-ai/console-core": "workspace:*",
-        "@zaovra-ai/console-function": "workspace:*",
-        "@zaovra-ai/console-mail": "workspace:*",
-        "@zaovra-ai/console-resource": "workspace:*",
-        "@zaovra-ai/ui": "workspace:*",
-        "chart.js": "4.5.1",
-        "hono": "catalog:",
-        "nitro": "3.0.1-alpha.2",
-        "solid-js": "catalog:",
-        "solid-list": "0.3.0",
-        "solid-stripe": "0.8.1",
-        "vite": "catalog:",
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@types/bun": "catalog:",
-        "@typescript/native-preview": "catalog:",
-        "@webgpu/types": "0.1.54",
-        "typescript": "catalog:",
-        "wrangler": "4.50.0",
-      },
-    },
-    "packages/console/core": {
-      "name": "@zaovra-ai/console-core",
-      "version": "1.18.3",
-      "dependencies": {
-        "@aws-sdk/client-sts": "3.782.0",
-        "@jsx-email/render": "1.1.1",
-        "@zaovra-ai/console-mail": "workspace:*",
-        "@zaovra-ai/console-resource": "workspace:*",
-        "aws4fetch": "1.0.20",
-        "drizzle-orm": "catalog:",
-        "postgres": "3.4.7",
-        "stripe": "18.0.0",
-        "ulid": "catalog:",
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "@tsconfig/node22": "22.0.2",
-        "@types/bun": "catalog:",
-        "@types/node": "catalog:",
-        "@typescript/native-preview": "catalog:",
-        "drizzle-kit": "catalog:",
-        "typescript": "catalog:",
-      },
-    },
-    "packages/console/function": {
-      "name": "@zaovra-ai/console-function",
-      "version": "1.18.3",
-      "dependencies": {
-        "@ai-sdk/anthropic": "3.0.82",
-        "@ai-sdk/openai": "3.0.48",
-        "@ai-sdk/openai-compatible": "2.0.37",
-        "@openauthjs/openauth": "0.0.0-20250322224806",
-        "@zaovra-ai/console-core": "workspace:*",
-        "@zaovra-ai/console-resource": "workspace:*",
-        "ai": "catalog:",
-        "zod": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "@tsconfig/node22": "22.0.2",
-        "@types/node": "catalog:",
-        "@typescript/native-preview": "catalog:",
-        "openai": "5.11.0",
-        "typescript": "catalog:",
-      },
-    },
-    "packages/console/mail": {
-      "name": "@zaovra-ai/console-mail",
-      "version": "1.18.3",
-      "dependencies": {
-        "@jsx-email/all": "2.2.3",
-        "@jsx-email/cli": "1.4.3",
-        "@tsconfig/bun": "1.0.9",
-        "@types/react": "18.0.25",
-        "react": "18.2.0",
-        "solid-js": "catalog:",
-      },
-    },
-    "packages/console/resource": {
-      "name": "@zaovra-ai/console-resource",
-      "dependencies": {
-        "@cloudflare/workers-types": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "@tsconfig/node22": "22.0.2",
-        "@types/node": "catalog:",
-        "cloudflare": "5.2.0",
-      },
-    },
-    "packages/console/support": {
-      "name": "@zaovra-ai/console-support",
-      "version": "1.18.3",
-      "dependencies": {
-        "@cloudflare/vite-plugin": "1.15.2",
-        "@solidjs/meta": "catalog:",
-        "@solidjs/router": "catalog:",
-        "@solidjs/start": "catalog:",
-        "@zaovra-ai/console-core": "workspace:*",
-        "nitro": "3.0.1-alpha.1",
-        "solid-js": "catalog:",
-        "vite": "catalog:",
-      },
-      "devDependencies": {
-        "@types/bun": "catalog:",
-        "@typescript/native-preview": "catalog:",
-        "typescript": "catalog:",
-        "wrangler": "4.50.0",
-      },
-    },
     "packages/core": {
       "name": "@zaovra-ai/core",
       "version": "1.18.3",
@@ -379,7 +250,7 @@
         "drizzle-kit": "catalog:",
       },
     },
-    "packages/desktop": {
+    "packages/desktop-app": {
       "name": "@zaovra-ai/desktop",
       "version": "1.18.3",
       "dependencies": {
@@ -893,7 +764,7 @@
         "solid-js": "^1.9.0",
       },
     },
-    "packages/web": {
+    "packages/website-docs": {
       "name": "@zaovra-ai/web",
       "version": "1.18.3",
       "dependencies": {
@@ -925,6 +796,145 @@
         "@types/node": "catalog:",
         "typescript": "catalog:",
         "zaovra": "workspace:*",
+      },
+    },
+    "packages/website-redesign": {
+      "name": "zaovra-website-redesign",
+      "version": "0.0.0",
+      "dependencies": {
+        "gsap": "^3.13.0",
+      },
+      "devDependencies": {
+        "vite": "^7.1.4",
+      },
+    },
+    "packages/website/app": {
+      "name": "@zaovra-ai/console-app",
+      "version": "1.18.3",
+      "dependencies": {
+        "@cloudflare/vite-plugin": "1.15.2",
+        "@ibm/plex": "6.4.1",
+        "@jsx-email/render": "1.1.1",
+        "@kobalte/core": "catalog:",
+        "@openauthjs/openauth": "catalog:",
+        "@smithy/eventstream-codec": "4.2.7",
+        "@smithy/util-utf8": "4.2.0",
+        "@solidjs/meta": "catalog:",
+        "@solidjs/router": "catalog:",
+        "@solidjs/start": "catalog:",
+        "@stripe/stripe-js": "8.6.1",
+        "@upstash/redis": "1.38.0",
+        "@zaovra-ai/console-core": "workspace:*",
+        "@zaovra-ai/console-function": "workspace:*",
+        "@zaovra-ai/console-mail": "workspace:*",
+        "@zaovra-ai/console-resource": "workspace:*",
+        "@zaovra-ai/ui": "workspace:*",
+        "chart.js": "4.5.1",
+        "hono": "catalog:",
+        "nitro": "3.0.1-alpha.2",
+        "solid-js": "catalog:",
+        "solid-list": "0.3.0",
+        "solid-stripe": "0.8.1",
+        "vite": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "@webgpu/types": "0.1.54",
+        "typescript": "catalog:",
+        "wrangler": "4.50.0",
+      },
+    },
+    "packages/website/core": {
+      "name": "@zaovra-ai/console-core",
+      "version": "1.18.3",
+      "dependencies": {
+        "@aws-sdk/client-sts": "3.782.0",
+        "@jsx-email/render": "1.1.1",
+        "@zaovra-ai/console-mail": "workspace:*",
+        "@zaovra-ai/console-resource": "workspace:*",
+        "aws4fetch": "1.0.20",
+        "drizzle-orm": "catalog:",
+        "postgres": "3.4.7",
+        "stripe": "18.0.0",
+        "ulid": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "@tsconfig/node22": "22.0.2",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "drizzle-kit": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/website/function": {
+      "name": "@zaovra-ai/console-function",
+      "version": "1.18.3",
+      "dependencies": {
+        "@ai-sdk/anthropic": "3.0.82",
+        "@ai-sdk/openai": "3.0.48",
+        "@ai-sdk/openai-compatible": "2.0.37",
+        "@openauthjs/openauth": "0.0.0-20250322224806",
+        "@zaovra-ai/console-core": "workspace:*",
+        "@zaovra-ai/console-resource": "workspace:*",
+        "ai": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "@tsconfig/node22": "22.0.2",
+        "@types/node": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "openai": "5.11.0",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/website/mail": {
+      "name": "@zaovra-ai/console-mail",
+      "version": "1.18.3",
+      "dependencies": {
+        "@jsx-email/all": "2.2.3",
+        "@jsx-email/cli": "1.4.3",
+        "@tsconfig/bun": "1.0.9",
+        "@types/react": "18.0.25",
+        "react": "18.2.0",
+        "solid-js": "catalog:",
+      },
+    },
+    "packages/website/resource": {
+      "name": "@zaovra-ai/console-resource",
+      "dependencies": {
+        "@cloudflare/workers-types": "catalog:",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "@tsconfig/node22": "22.0.2",
+        "@types/node": "catalog:",
+        "cloudflare": "5.2.0",
+      },
+    },
+    "packages/website/support": {
+      "name": "@zaovra-ai/console-support",
+      "version": "1.18.3",
+      "dependencies": {
+        "@cloudflare/vite-plugin": "1.15.2",
+        "@solidjs/meta": "catalog:",
+        "@solidjs/router": "catalog:",
+        "@solidjs/start": "catalog:",
+        "@zaovra-ai/console-core": "workspace:*",
+        "nitro": "3.0.1-alpha.1",
+        "solid-js": "catalog:",
+        "vite": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "typescript": "catalog:",
+        "wrangler": "4.50.0",
       },
     },
     "packages/zaovra": {
@@ -2990,7 +3000,7 @@
 
     "@xmldom/xmldom": ["@xmldom/xmldom@0.8.13", "", {}, "sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw=="],
 
-    "@zaovra-ai/app": ["@zaovra-ai/app@workspace:packages/app"],
+    "@zaovra-ai/app": ["@zaovra-ai/app@workspace:packages/app-ui"],
 
     "@zaovra-ai/cli": ["@zaovra-ai/cli@workspace:packages/cli"],
 
@@ -2998,21 +3008,21 @@
 
     "@zaovra-ai/codemode": ["@zaovra-ai/codemode@workspace:packages/codemode"],
 
-    "@zaovra-ai/console-app": ["@zaovra-ai/console-app@workspace:packages/console/app"],
+    "@zaovra-ai/console-app": ["@zaovra-ai/console-app@workspace:packages/website/app"],
 
-    "@zaovra-ai/console-core": ["@zaovra-ai/console-core@workspace:packages/console/core"],
+    "@zaovra-ai/console-core": ["@zaovra-ai/console-core@workspace:packages/website/core"],
 
-    "@zaovra-ai/console-function": ["@zaovra-ai/console-function@workspace:packages/console/function"],
+    "@zaovra-ai/console-function": ["@zaovra-ai/console-function@workspace:packages/website/function"],
 
-    "@zaovra-ai/console-mail": ["@zaovra-ai/console-mail@workspace:packages/console/mail"],
+    "@zaovra-ai/console-mail": ["@zaovra-ai/console-mail@workspace:packages/website/mail"],
 
-    "@zaovra-ai/console-resource": ["@zaovra-ai/console-resource@workspace:packages/console/resource"],
+    "@zaovra-ai/console-resource": ["@zaovra-ai/console-resource@workspace:packages/website/resource"],
 
-    "@zaovra-ai/console-support": ["@zaovra-ai/console-support@workspace:packages/console/support"],
+    "@zaovra-ai/console-support": ["@zaovra-ai/console-support@workspace:packages/website/support"],
 
     "@zaovra-ai/core": ["@zaovra-ai/core@workspace:packages/core"],
 
-    "@zaovra-ai/desktop": ["@zaovra-ai/desktop@workspace:packages/desktop"],
+    "@zaovra-ai/desktop": ["@zaovra-ai/desktop@workspace:packages/desktop-app"],
 
     "@zaovra-ai/effect-drizzle-sqlite": ["@zaovra-ai/effect-drizzle-sqlite@workspace:packages/effect-drizzle-sqlite"],
 
@@ -3058,7 +3068,7 @@
 
     "@zaovra-ai/ui": ["@zaovra-ai/ui@workspace:packages/ui"],
 
-    "@zaovra-ai/web": ["@zaovra-ai/web@workspace:packages/web"],
+    "@zaovra-ai/web": ["@zaovra-ai/web@workspace:packages/website-docs"],
 
     "@zip.js/zip.js": ["@zip.js/zip.js@2.7.62", "", {}, "sha512-OaLvZ8j4gCkLn048ypkZu29KX30r8/OfFF2w4Jo5WXFr+J04J+lzJ5TKZBVgFXhlvSkqNFQdfnY1Q8TMTCyBVA=="],
 
@@ -3901,6 +3911,8 @@
     "graphql-request": ["graphql-request@6.1.0", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.2.0", "cross-fetch": "^3.1.5" }, "peerDependencies": { "graphql": "14 - 16" } }, "sha512-p+XPfS4q7aIpKVcgmnZKhMNqhltk20hfXtkaIkTfjjmiKMJ5xrt5c743cL03y/K7y1rg3WrIC49xGiEQ4mxdNw=="],
 
     "gray-matter": ["gray-matter@4.0.3", "", { "dependencies": { "js-yaml": "^3.13.1", "kind-of": "^6.0.2", "section-matter": "^1.0.0", "strip-bom-string": "^1.0.0" } }, "sha512-5v6yZd4JK3eMI3FqqCouswVqwugaA9r4dNZB1wwcmrD02QkV5H0y7XBQW8QwQqEaZY1pM9aqORSORhJRdNK44Q=="],
+
+    "gsap": ["gsap@3.15.0", "", {}, "sha512-dMW4CWBTUK1AEEDeZc1g4xpPGIrSf9fJF960qbTZmN/QwZIWY5wgliS6JWl9/25fpTGJrMRtSjGtOmPnfjZB+A=="],
 
     "gtoken": ["gtoken@8.0.0", "", { "dependencies": { "gaxios": "^7.0.0", "jws": "^4.0.0" } }, "sha512-+CqsMbHPiSTdtSO14O51eMNlrp9N79gmeqmXeouJOhfucAedHw9noVe/n5uJk3tbKE6a+6ZCQg3RPhVhHByAIw=="],
 
@@ -5632,6 +5644,8 @@
 
     "zaovra-poe-auth": ["opencode-poe-auth@0.0.1", "", { "dependencies": { "open": "^10.0.0", "poe-oauth": "*" }, "peerDependencies": { "@zaovra-ai/plugin": "*" } }, "sha512-cXqTlS6AXHzo1oBdosnxbT47ZJEZ9WXn050X8Re6wZ1vaNnTpB/l2fMQt90evT7RBK0fB8UjXQUDMKyd7bbiqg=="],
 
+    "zaovra-website-redesign": ["zaovra-website-redesign@workspace:packages/website-redesign"],
+
     "zip-stream": ["zip-stream@6.0.1", "", { "dependencies": { "archiver-utils": "^5.0.0", "compress-commons": "^6.0.2", "readable-stream": "^4.0.0" } }, "sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA=="],
 
     "zod": ["zod@4.1.8", "", {}, "sha512-5R1P+WwQqmmMIEACyzSvo4JXHY5WiAFHRMg+zBZKgKS+Q1viRa0C1hmUKtHltoIFKtIdki3pRxkmpP74jnNYHQ=="],
@@ -6573,6 +6587,8 @@
     "zaovra/semver": ["semver@7.8.5", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA=="],
 
     "zaovra-gitlab-auth/open": ["open@10.2.0", "", { "dependencies": { "default-browser": "^5.2.1", "define-lazy-prop": "^3.0.0", "is-inside-container": "^1.0.0", "wsl-utils": "^0.1.0" } }, "sha512-YgBpdJHPyQ2UE5x+hlSXcnejzAvD0b22U2OuAP+8OnlJT+PjWPxtgmGqKKc+RgTM63U9gN0YzrYc71R2WT/hTA=="],
+
+    "zaovra-website-redesign/vite": ["vite@7.1.10", "", { "dependencies": { "esbuild": "^0.25.0", "fdir": "^6.5.0", "picomatch": "^4.0.3", "postcss": "^8.5.6", "rollup": "^4.43.0", "tinyglobby": "^0.2.15" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "jiti": ">=1.21.0", "less": "^4.0.0", "lightningcss": "^1.21.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "jiti", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-CmuvUBzVJ/e3HGxhg6cYk88NGgTnBoOo7ogtfJJ0fefUWAxN/WDSUa50o+oVBxuIhO8FoEZW0j2eW7sfjs5EtA=="],
 
     "zod-to-ts/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 

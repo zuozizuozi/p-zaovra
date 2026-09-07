@@ -2,7 +2,7 @@
 
 ## Overview
 
-- Target: `packages/console/app/src/component/home-product-stages.tsx`
+- Target: `packages/website/app/src/component/home-product-stages.tsx`
 - Interaction: static, with minor non-essential ambient animation.
 
 ## DesktopWorkbenchStage

@@ -25,6 +25,7 @@ export function Dialog(props: DialogProps) {
     >
       <div data-slot="dialog-container">
         <Kobalte.Content
+          onInteractOutside={(event) => event.preventDefault()}
           data-slot="dialog-content"
           data-no-header={!props.title && !props.action ? "" : undefined}
           classList={{
