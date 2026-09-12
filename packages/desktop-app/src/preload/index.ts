@@ -70,6 +70,11 @@ const api: ElectronAPI = {
   resolveAppPath: (appName) => ipcRenderer.invoke("resolve-app-path", appName),
   storeGet: (name, key) => ipcRenderer.invoke("store-get", name, key),
   storeSet: (name, key, value) => ipcRenderer.invoke("store-set", name, key, value),
+  onStoreWrite: (callback) => {
+    const listener = (_: unknown, event: { name: string; key: string; value: string }) => callback(event)
+    ipcRenderer.on("store-write", listener)
+    return () => ipcRenderer.removeListener("store-write", listener)
+  },
   storeDelete: (name, key) => ipcRenderer.invoke("store-delete", name, key),
   storeClear: (name) => ipcRenderer.invoke("store-clear", name),
   storeKeys: (name) => ipcRenderer.invoke("store-keys", name),
@@ -91,6 +96,15 @@ const api: ElectronAPI = {
   openDirectoryPicker: (opts) => ipcRenderer.invoke("open-directory-picker", opts),
   openFilePicker: (opts) => ipcRenderer.invoke("open-file-picker", opts),
   readPickedFile: (token, path) => ipcRenderer.invoke("read-picked-file", token, path),
+  cancelAttachment: (id) => ipcRenderer.invoke("cancel-attachment", id),
+  artifactPreview: {
+    readPDF: (input) => ipcRenderer.invoke("artifact-read-pdf", input),
+    open: (input) => ipcRenderer.invoke("artifact-open", input),
+    bounds: (input) => ipcRenderer.invoke("artifact-bounds", input),
+    action: (input) => ipcRenderer.invoke("artifact-action", input),
+    state: (id) => ipcRenderer.invoke("artifact-state", id),
+  },
+  convertAttachment: (input) => ipcRenderer.invoke("convert-attachment", input),
   releasePickedFiles: (token) => ipcRenderer.invoke("release-picked-files", token),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   saveFilePicker: (opts) => ipcRenderer.invoke("save-file-picker", opts),

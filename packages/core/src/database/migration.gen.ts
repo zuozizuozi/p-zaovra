@@ -54,5 +54,6 @@ export const migrations = (
     import("./migration/20260806223623_work_artifact_lifecycle"),
     import("./migration/20260811062621_work-memory-control"),
     import("./migration/20260811090000_v2_session_cutover"),
+    import("./migration/20260909074241_session-input-cancellation"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

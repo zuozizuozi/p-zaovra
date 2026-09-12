@@ -19,7 +19,8 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { createStore, produce } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
-import { Logo } from "@zaovra-ai/ui/logo"
+import { Logo, Mark } from "@zaovra-ai/ui/logo"
+import "./home-welcome.css"
 import { Spinner } from "@zaovra-ai/ui/spinner"
 import { ScrollView } from "@zaovra-ai/ui/scroll-view"
 import { ProjectAvatar } from "@zaovra-ai/ui/v2/project-avatar-v2"
@@ -29,7 +30,7 @@ import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@zaovra-ai/ui/v2/tooltip-v2"
 import { getProjectAvatarVariant, useLayout, type HomeProjectSelection, type LocalProject } from "@/context/layout"
-import { useNavigate } from "@solidjs/router"
+import { useNavigate, useSearchParams } from "@solidjs/router"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { usePlatform } from "@/context/platform"
@@ -309,8 +310,11 @@ export function NewHome() {
   const [state, setState] = createStore({
     search: "",
     searchFocused: false,
+    welcomePrompt: "",
+    starting: false,
   })
   const selection = layout.home.selection
+  const [searchParams] = useSearchParams<{ view?: string }>()
 
   const focusedServer = createMemo(
     () => global.servers.list().find((conn) => ServerConnection.key(conn) === selection().server) ?? server.current,
@@ -633,7 +637,10 @@ export function NewHome() {
   }
 
   return (
-    <div class="rounded-[10px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
+    <div
+      data-component="home-workbench"
+      class="rounded-[10px] border border-v2-border-border-muted m-2 min-h-0 overflow-hidden bg-v2-background-bg-base self-stretch flex-1"
+    >
       <ScrollView
         class="h-full [container-type:size]"
         thumbContainer={sessionThumbTrack}
@@ -649,141 +656,225 @@ export function NewHome() {
           containHomeWheel(event, sessionViewport)
         }}
       >
-        <div class="mx-auto grid min-h-full w-full max-w-[1080px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6">
-          <HomeProjectColumn
-            projects={projects()}
-            recentlyClosed={recentlyClosed()}
-            homedir={homedir()}
-            selected={selection()}
-            focusServer={focusServer}
-            selectProject={selectProject}
-            openNewSession={openProjectNewSession}
-            openRecentProject={(conn, directory) => addProjects(conn, [directory])}
-            chooseProject={(conn) => void chooseProject(conn)}
-            editProject={editProject}
-            closeProject={(conn, directory) => {
-              const next = closeHomeProject(
-                selection(),
-                ServerConnection.key(conn),
-                global.ensureServerCtx(conn).projects,
-                directory,
-              )
-              if (next) setSelection(next)
-            }}
-            clearNotifications={clearNotifications}
-            unseenCount={unseenCount}
-            openSettings={openSettings}
-            openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
-            language={language}
-            onWheel={(event) => {
-              if (sessionViewport) containHomeWheel(event, sessionViewport)
-            }}
-          />
-
-          <section
-            ref={setSessionHoverTarget}
-            class="min-h-0 min-w-0 flex-1 flex flex-col"
-            aria-label={language.t("sidebar.project.recentSessions")}
-          >
-            <div
-              class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6 lg:pt-12"
+        <Show when={searchParams.view !== "projects"}>
+          <section class="home-welcome" aria-labelledby="home-welcome-title">
+            <div class="home-welcome-brand" role="img" aria-label="Zaovra">
+              <Mark class="home-welcome-logo" />
+              <span>Zaovra</span>
+            </div>
+            <h1 id="home-welcome-title">{language.t("home.welcome.title")}</h1>
+            <p>{language.t("home.welcome.description")}</p>
+            <form
+              class="home-welcome-composer"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const conn = focusedServer()
+                const project = newSessionProject()
+                if (!conn || !project || state.starting) return
+                setState("starting", true)
+                void tabs
+                  .newDraft({ server: ServerConnection.key(conn), directory: project.worktree }, state.welcomePrompt)
+                  .finally(() => setState("starting", false))
+              }}
+            >
+              <textarea
+                aria-label={language.t("prompt.placeholder.simple")}
+                placeholder={language.t("prompt.placeholder.simple")}
+                value={state.welcomePrompt}
+                onInput={(event) => setState("welcomePrompt", event.currentTarget.value)}
+                rows={3}
+              />
+              <div class="home-welcome-actions">
+                <Show
+                  when={newSessionProject()}
+                  fallback={
+                    <ButtonV2
+                      type="button"
+                      variant="ghost-muted"
+                      onClick={() => {
+                        const conn = focusedServer()
+                        if (conn) chooseProject(conn)
+                      }}
+                    >
+                      {language.t("command.project.open")}
+                    </ButtonV2>
+                  }
+                >
+                  <label class="home-welcome-project">
+                    <IconV2 name="folder" />
+                    <select
+                      aria-label={language.t("home.projects")}
+                      value={newSessionProject()?.worktree}
+                      onChange={(event) => {
+                        const conn = focusedServer()
+                        if (conn)
+                          setSelection({ server: ServerConnection.key(conn), directory: event.currentTarget.value })
+                      }}
+                    >
+                      <For each={projects()}>
+                        {(project) => <option value={project.worktree}>{displayName(project)}</option>}
+                      </For>
+                    </select>
+                  </label>
+                </Show>
+                <ButtonV2 type="submit" variant="neutral" disabled={!newSessionProject() || state.starting}>
+                  {language.t("home.welcome.continue")}
+                </ButtonV2>
+              </div>
+            </form>
+            <div class="mt-6 flex items-center gap-4">
+              <ButtonV2 variant="ghost-muted" onClick={() => navigate("/?view=projects")}>
+                {language.t("home.projects")}
+              </ButtonV2>
+              <HomeUtilityNav
+                class="flex"
+                openSettings={openSettings}
+                openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+                language={language}
+              />
+            </div>
+          </section>
+        </Show>
+        <Show when={searchParams.view === "projects"}>
+          <header class="mx-auto w-full max-w-[1080px] px-6 pt-8">
+            <h1 class="text-20-medium text-v2-text-text-base">{language.t("home.projects")}</h1>
+          </header>
+          <div class="home-library mx-auto grid min-h-full w-full max-w-[1080px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6">
+            <HomeProjectColumn
+              projects={projects()}
+              recentlyClosed={recentlyClosed()}
+              homedir={homedir()}
+              selected={selection()}
+              focusServer={focusServer}
+              selectProject={selectProject}
+              openNewSession={openProjectNewSession}
+              openRecentProject={(conn, directory) => addProjects(conn, [directory])}
+              chooseProject={(conn) => void chooseProject(conn)}
+              editProject={editProject}
+              closeProject={(conn, directory) => {
+                const next = closeHomeProject(
+                  selection(),
+                  ServerConnection.key(conn),
+                  global.ensureServerCtx(conn).projects,
+                  directory,
+                )
+                if (next) setSelection(next)
+              }}
+              clearNotifications={clearNotifications}
+              unseenCount={unseenCount}
+              openSettings={openSettings}
+              openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+              language={language}
               onWheel={(event) => {
                 if (sessionViewport) containHomeWheel(event, sessionViewport)
               }}
+            />
+
+            <section
+              ref={setSessionHoverTarget}
+              class="min-h-0 min-w-0 flex-1 flex flex-col"
+              aria-label={language.t("sidebar.project.recentSessions")}
             >
-              <HomeSessionSearch
-                value={state.search}
-                placeholder={searchPlaceholder()}
-                open={searchOpen()}
-                loading={sessionLoad.isLoading}
-                results={searchResults()}
-                showProjectName={!selectedProject()}
-                server={selection().server}
-                noResultsLabel={language.t("home.sessions.search.noResults", { query: search() })}
-                bindFocus={(focus) => {
-                  focusSessionSearch = focus
-                }}
-                onInput={(value) => setState("search", value)}
-                onFocus={() => setState("searchFocused", true)}
-                onClose={closeSearch}
-                onSelect={selectSearchSession}
-              />
-              <Show when={groups().length > 0 && newSessionProject()}>
-                <div class="pointer-events-none absolute right-0 top-[84px] z-20 flex lg:top-[108px]">
-                  <ButtonV2
-                    data-action="home-new-session"
-                    variant="ghost-muted"
-                    size="normal"
-                    icon="edit"
-                    class="pointer-events-auto h-7 px-2 [font-weight:530]"
-                    onClick={openNewSession}
-                  >
-                    {language.t("command.session.new")}
-                  </ButtonV2>
-                </div>
-              </Show>
-            </div>
-            {/* Sticky chrome for the portaled session scrollbar — matches old sessions ScrollView bounds */}
-            <div class="pointer-events-none sticky top-[84px] z-40 h-0 -mr-3 lg:top-[108px]">
               <div
-                ref={setSessionThumbTrack}
-                data-component="home-session-scroll-track"
-                class="relative ml-auto h-[calc(100cqh-84px)] w-3 lg:h-[calc(100cqh-108px)]"
-              />
-            </div>
-            <div class="-mr-3 min-h-[calc(100cqh-72px)] lg:min-h-[calc(100cqh-96px)]">
-              <Show
-                when={!sessionLoad.isLoading}
-                fallback={
-                  <div class="pt-3">
-                    <HomeSessionSkeleton label={language.t("common.loading")} />
-                  </div>
-                }
+                class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6 lg:pt-12"
+                onWheel={(event) => {
+                  if (sessionViewport) containHomeWheel(event, sessionViewport)
+                }}
               >
-                <Show
-                  when={groups().length > 0}
-                  fallback={<HomeSessionsEmpty onNewSession={newSessionProject() ? openNewSession : undefined} />}
-                >
-                  <div ref={sessionHeaderOpacity.setContentRef} class="flex flex-col pt-3 pr-3 pb-16">
-                    <For each={groups()}>
-                      {(group, index) => (
-                        <>
-                          <HomeSessionGroupHeader
-                            title={group.title}
-                            titleOpacity={sessionHeaderOpacity.titleOpacity(group.id)}
-                            ref={(el) => sessionHeaderOpacity.setHeaderRef(group.id, el)}
-                            elevated={index() === 0}
-                          />
-                          <div
-                            class={`flex min-w-0 flex-col gap-px pt-4 ${index() === groups().length - 1 ? "" : "mb-6"}`}
-                          >
-                            <For each={group.sessions}>
-                              {(record) => (
-                                <HomeSessionRow
-                                  record={record}
-                                  showProjectName={!selectedProject()}
-                                  server={selection().server}
-                                  openSession={openSession}
-                                  archiveSession={archiveSession}
-                                />
-                              )}
-                            </For>
-                          </div>
-                        </>
-                      )}
-                    </For>
+                <HomeSessionSearch
+                  value={state.search}
+                  placeholder={searchPlaceholder()}
+                  open={searchOpen()}
+                  loading={sessionLoad.isLoading}
+                  results={searchResults()}
+                  showProjectName={!selectedProject()}
+                  server={selection().server}
+                  noResultsLabel={language.t("home.sessions.search.noResults", { query: search() })}
+                  bindFocus={(focus) => {
+                    focusSessionSearch = focus
+                  }}
+                  onInput={(value) => setState("search", value)}
+                  onFocus={() => setState("searchFocused", true)}
+                  onClose={closeSearch}
+                  onSelect={selectSearchSession}
+                />
+                <Show when={groups().length > 0 && newSessionProject()}>
+                  <div class="pointer-events-none absolute right-0 top-[84px] z-20 flex lg:top-[108px]">
+                    <ButtonV2
+                      data-action="home-new-session"
+                      variant="ghost-muted"
+                      size="normal"
+                      icon="edit"
+                      class="pointer-events-auto h-7 px-2 [font-weight:530]"
+                      onClick={openNewSession}
+                    >
+                      {language.t("command.session.new")}
+                    </ButtonV2>
                   </div>
                 </Show>
-              </Show>
-            </div>
-          </section>
-          <HomeUtilityNav
-            class="flex lg:hidden"
-            openSettings={openSettings}
-            openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
-            language={language}
-          />
-        </div>
+              </div>
+              {/* Sticky chrome for the portaled session scrollbar — matches old sessions ScrollView bounds */}
+              <div class="pointer-events-none sticky top-[84px] z-40 h-0 -mr-3 lg:top-[108px]">
+                <div
+                  ref={setSessionThumbTrack}
+                  data-component="home-session-scroll-track"
+                  class="relative ml-auto h-[calc(100cqh-84px)] w-3 lg:h-[calc(100cqh-108px)]"
+                />
+              </div>
+              <div class="-mr-3 min-h-[calc(100cqh-72px)] lg:min-h-[calc(100cqh-96px)]">
+                <Show
+                  when={!sessionLoad.isLoading}
+                  fallback={
+                    <div class="pt-3">
+                      <HomeSessionSkeleton label={language.t("common.loading")} />
+                    </div>
+                  }
+                >
+                  <Show
+                    when={groups().length > 0}
+                    fallback={<HomeSessionsEmpty onNewSession={newSessionProject() ? openNewSession : undefined} />}
+                  >
+                    <div ref={sessionHeaderOpacity.setContentRef} class="flex flex-col pt-3 pr-3 pb-16">
+                      <For each={groups()}>
+                        {(group, index) => (
+                          <>
+                            <HomeSessionGroupHeader
+                              title={group.title}
+                              titleOpacity={sessionHeaderOpacity.titleOpacity(group.id)}
+                              ref={(el) => sessionHeaderOpacity.setHeaderRef(group.id, el)}
+                              elevated={index() === 0}
+                            />
+                            <div
+                              class={`flex min-w-0 flex-col gap-px pt-4 ${index() === groups().length - 1 ? "" : "mb-6"}`}
+                            >
+                              <For each={group.sessions}>
+                                {(record) => (
+                                  <HomeSessionRow
+                                    record={record}
+                                    showProjectName={!selectedProject()}
+                                    server={selection().server}
+                                    openSession={openSession}
+                                    archiveSession={archiveSession}
+                                  />
+                                )}
+                              </For>
+                            </div>
+                          </>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+            </section>
+            <HomeUtilityNav
+              class="flex lg:hidden"
+              openSettings={openSettings}
+              openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+              language={language}
+            />
+          </div>
+        </Show>
       </ScrollView>
     </div>
   )
@@ -922,25 +1013,29 @@ function HomeUtilityNav(props: {
   openHelp: () => void
   language: ReturnType<typeof useLanguage>
 }) {
+  const platform = usePlatform()
+  const layout = useLayout()
   return (
-    <div class={`${props.class ?? ""} min-w-0 flex-col gap-1 pr-3`}>
-      <button
-        type="button"
-        class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-        onClick={props.openSettings}
-      >
-        <IconV2 name="settings-gear" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.settings")}</span>
-      </button>
-      <button
-        type="button"
-        class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-        onClick={props.openHelp}
-      >
-        <IconV2 name="help" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.help")}</span>
-      </button>
-    </div>
+    <Show when={platform.platform !== "desktop"}>
+      <div class={`${props.class ?? ""} min-w-0 flex-col gap-1 pr-3`}>
+        <button
+          type="button"
+          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
+          onClick={props.openSettings}
+        >
+          <IconV2 name="settings-gear" size="small" />
+          <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.settings")}</span>
+        </button>
+        <button
+          type="button"
+          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
+          onClick={props.openHelp}
+        >
+          <IconV2 name="help" size="small" />
+          <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("sidebar.help")}</span>
+        </button>
+      </div>
+    </Show>
   )
 }
 

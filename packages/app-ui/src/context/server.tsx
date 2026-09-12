@@ -252,6 +252,17 @@ export function nextServerAfterRemoval(
   return next ? ServerConnection.key(next) : fallback
 }
 
+export function resolveServerConnection(servers: ServerConnection.Any[], key: ServerConnection.Key) {
+  return servers.find((server) => ServerConnection.key(server) === key)
+}
+
+export function resolveServerTarget(
+  target: Accessor<ServerConnection.Any | undefined> | undefined,
+  current: Accessor<ServerConnection.Any | undefined>,
+) {
+  return target ? target() : current()
+}
+
 export const { use: useServer, provider: ServerProvider } = createSimpleContext({
   name: "Server",
   gate: true,
@@ -263,6 +274,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [store, setStore, _, ready] = persisted(
       {
         ...Persist.global("server", ["server.v3"]),
+        sync: true,
         migrate: (value) => migrateCanonicalLocalServerState(value, props.canonicalLocalServer),
       },
       createStore({
@@ -327,8 +339,8 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       projectStores.set(key, next)
       return next
     }
-    const current: Accessor<ServerConnection.Any | undefined> = createMemo(
-      () => allServers().find((s) => ServerConnection.key(s) === state.active) ?? allServers()[0],
+    const current: Accessor<ServerConnection.Any | undefined> = createMemo(() =>
+      resolveServerConnection(allServers(), state.active),
     )
     const isLocal = createMemo(() => ServerConnection.local(current()))
 

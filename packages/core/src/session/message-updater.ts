@@ -133,13 +133,17 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             type: "user",
             metadata: event.metadata,
             text: event.data.prompt.text,
+            invocation: event.data.prompt.invocation,
             files: event.data.prompt.files,
             agents: event.data.prompt.agents,
+            selection: event.data.prompt.selection,
+            subtask: event.data.prompt.subtask,
             time: { created: event.data.timestamp },
           }),
         )
       },
       "session.next.prompt.admitted": () => Effect.void,
+      "session.next.prompt.cancelled": () => Effect.void,
       "session.next.context.updated": (event) =>
         adapter.appendMessage(
           SessionMessage.System.make({

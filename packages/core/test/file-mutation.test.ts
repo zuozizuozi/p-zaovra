@@ -366,3 +366,54 @@ function instrumentWrites(run: <E>(write: Effect.Effect<void, E>, target: string
     }),
   ).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))
 }
+
+it.live("holds the file lock through a real formatter and captures its content before the next write", () =>
+  withTmp((directory) =>
+    Effect.gen(function* () {
+      const started = path.join(directory, "formatter-started")
+      const release = path.join(directory, "formatter-release")
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(directory, "zaovra.json"),
+          JSON.stringify({
+            formatter: {
+              custom: {
+                extensions: [".audit"],
+                command: [
+                  process.execPath,
+                  "-e",
+                  "const fs=require('fs');fs.writeFileSync(process.argv[2],'started');const timer=setInterval(()=>{if(fs.existsSync(process.argv[3])){clearInterval(timer);fs.writeFileSync(process.argv[1],'formatted')}},10);setTimeout(()=>{clearInterval(timer);process.exit(1)},5000).unref()",
+                  "$FILE",
+                  started,
+                  release,
+                ],
+              },
+            },
+          }),
+        ),
+      )
+      yield* Effect.gen(function* () {
+        const mutation = yield* LocationMutation.Service
+        const files = yield* FileMutation.Service
+        const target = yield* mutation.resolve({ path: "shared.audit" })
+        const first = yield* files.write({ target, content: "draft", format: true }).pipe(Effect.forkChild)
+        yield* Effect.promise(async () => {
+          const deadline = Date.now() + 4000
+          while (!(await Bun.file(started).exists())) {
+            if (Date.now() > deadline) throw new Error("Formatter did not start")
+            await Bun.sleep(10)
+          }
+        })
+        const second = yield* files.write({ target, content: "second" }).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* Effect.promise(() => Bun.write(release, "release"))
+        expect(yield* Fiber.join(first)).toMatchObject({
+          content: "formatted",
+          formatting: { ran: ["custom"], failed: [] },
+        })
+        yield* Fiber.join(second)
+        expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("second")
+      }).pipe(provide(directory))
+    }),
+  ),
+)

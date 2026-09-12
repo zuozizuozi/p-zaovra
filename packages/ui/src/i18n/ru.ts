@@ -1,4 +1,7 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "Изменения файла сохранены. Не удалось завершить диагностику языка: {{servers}}.",
+  "ui.messagePart.formattingFailed": "Изменения сохранены. Ошибка автоматического форматирования: {{formatters}}.",
+
   "ui.sessionReview.title": "Изменения сессии",
   "ui.sessionReview.title.git": "Изменения Git",
   "ui.sessionReview.title.branch": "Изменения ветки",

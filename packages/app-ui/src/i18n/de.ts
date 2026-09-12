@@ -3,6 +3,68 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "home.welcome.title": "Was erschaffen wir heute?",
+  "home.welcome.description": "Beschreibe deine Idee, wähle ein Projekt und starte mit Zaovra.",
+  "home.welcome.continue": "Weiter zur Sitzung",
+  "desktop.menu.exportLogs": "Protokolle exportieren",
+  "desktop.menu.file": "Datei",
+  "desktop.menu.edit": "Bearbeiten",
+  "desktop.menu.view": "Ansicht",
+  "desktop.menu.go": "Navigation",
+  "desktop.menu.window": "Fenster",
+  "desktop.menu.help": "Hilfe",
+  "desktop.menu.undo": "Rückgängig",
+  "desktop.menu.redo": "Wiederholen",
+  "desktop.menu.cut": "Ausschneiden",
+  "desktop.menu.copy": "Kopieren",
+  "desktop.menu.paste": "Einfügen",
+  "desktop.menu.delete": "Löschen",
+  "desktop.menu.selectAll": "Alles auswählen",
+  "desktop.menu.newWindow": "Neues Fenster",
+  "desktop.menu.closeWindow": "Fenster schließen",
+  "desktop.menu.minimize": "Minimieren",
+  "desktop.menu.maximize": "Maximieren / Wiederherstellen",
+  "desktop.menu.reload": "Neu laden",
+  "desktop.menu.devTools": "Entwicklerwerkzeuge",
+  "desktop.menu.actualSize": "Originalgröße",
+  "desktop.menu.zoomIn": "Vergrößern",
+  "desktop.menu.zoomOut": "Verkleinern",
+  "desktop.menu.fullScreen": "Vollbild umschalten",
+  "desktop.menu.documentation": "Zaovra-Dokumentation",
+  "desktop.menu.support": "Support-Community",
+  "provider.custom.discovery.restart":
+    "Die Verbindungskomponente der Desktop-App wurde aktualisiert. Schließen und öffnen Sie Zaovra erneut, um Modelle abzurufen. Ihre Eingaben bleiben erhalten.",
+  "provider.custom.discovery.environment":
+    "Schlüssel aus Umgebungsvariablen können hier nicht ausgelesen werden. Geben Sie Modell-IDs manuell ein oder fügen Sie einen Schlüssel zum Abrufen der Liste ein.",
+  "provider.custom.discovery.timeout":
+    "Der Dienst hat innerhalb von 15 Sekunden nicht geantwortet. Versuchen Sie es erneut oder geben Sie Modelle manuell ein.",
+  "provider.custom.discovery.unsupported":
+    "Dieser Dienst unterstützt an dieser Adresse keine Modellliste. Prüfen Sie die URL oder geben Sie eine Modell-ID manuell ein.",
+  "provider.custom.discovery.saved": "Konfiguration für {provider} gespeichert",
+  "provider.custom.discovery.savedDescription":
+    "Wählen Sie ein Modell, um eine Aufgabe zu starten. Generierung und Werkzeugaufrufe wurden nicht überprüft.",
+  "provider.custom.discovery.intro":
+    "Geben Sie die Dienst-URL und den API-Schlüssel ein und rufen Sie dann die Modellliste ab.",
+  "provider.custom.discovery.fetch": "Modelle abrufen",
+  "provider.custom.discovery.loading": "Modelle werden abgerufen…",
+  "provider.custom.discovery.manual": "Modelle manuell eingeben",
+  "provider.custom.discovery.advanced": "Erweiterte Einstellungen",
+  "provider.custom.discovery.auto": "Automatisch",
+  "provider.custom.discovery.save": "Konfiguration speichern",
+  "provider.custom.discovery.search": "Modelle suchen",
+  "provider.custom.discovery.success":
+    "Modellliste empfangen. Das erste Modell ist ausgewählt; ändern Sie die Auswahl bei Bedarf. Dies prüft nicht die Unterstützung für Generierung oder Werkzeuge.",
+  "provider.custom.discovery.auth":
+    "Authentifizierung fehlgeschlagen. Prüfen Sie den API-Schlüssel und die Dienstadresse.",
+  "provider.custom.discovery.rate":
+    "Anfragelimit erreicht. Versuchen Sie es später erneut oder geben Sie eine Modell-ID manuell ein.",
+  "provider.custom.discovery.url":
+    "Geben Sie eine gültige HTTP(S)-Dienst-URL ohne Zugangsdaten, Abfrageparameter oder Fragmente ein.",
+  "provider.custom.discovery.empty":
+    "Der Dienst hat keine Modelle zurückgegeben. Sie können eine Modell-ID manuell eingeben.",
+  "provider.custom.discovery.failed":
+    "Modelle konnten nicht abgerufen werden. Prüfen Sie Adresse und Netzwerk, versuchen Sie es erneut oder geben Sie Modelle manuell ein. Es wurde keine Konfiguration gespeichert.",
+  "provider.custom.discovery.choose": "Wählen Sie mindestens ein Modell oder geben Sie eine Modell-ID manuell ein.",
   "command.category.suggested": "Vorgeschlagen",
   "command.category.view": "Ansicht",
   "command.category.project": "Projekt",
@@ -719,8 +781,7 @@ export const dict = {
   "settings.general.row.appearance.title": "Erscheinungsbild",
   "settings.general.row.appearance.description": "Anpassen, wie Zaovra auf Ihrem Gerät aussieht",
   "settings.general.row.colorScheme.title": "Farbschema",
-  "settings.general.row.colorScheme.description":
-    "Wählen Sie, ob Zaovra dem System-, hellen oder dunklen Thema folgt",
+  "settings.general.row.colorScheme.description": "Wählen Sie, ob Zaovra dem System-, hellen oder dunklen Thema folgt",
   "settings.general.row.theme.title": "Thema",
   "settings.general.row.theme.description": "Das Thema von Zaovra anpassen.",
   "settings.general.row.font.title": "Code-Schriftart",
@@ -1035,7 +1096,8 @@ export const dict = {
   "terminal.connectionLost.abnormalClose": "WebSocket abnormal geschlossen: {{code}}",
   "dialog.provider.custom.label": "Custom OpenAI-compatible provider",
   "dialog.model.unpaid.viewMoreProviders": "See 70+ more providers",
-  "prompt.toast.shellUnavailable.description": "Direct shell mode is unavailable in SessionV2. Use the agent\u0027s bash tool instead.",
+  "prompt.toast.shellUnavailable.description":
+    "Direct shell mode is unavailable in SessionV2. Use the agent\u0027s bash tool instead.",
   "session.message.waitingToJoin": "Waiting to join the current task…",
   "session.header.reveal.finder": "Reveal in Finder",
   "session.header.reveal.fileExplorer": "Reveal in File Explorer",

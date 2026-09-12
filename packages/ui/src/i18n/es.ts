@@ -1,4 +1,8 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed":
+    "Cambios guardados. No se pudieron completar los diagnósticos de lenguaje: {{servers}}.",
+  "ui.messagePart.formattingFailed": "Cambios guardados. Error de formato automático: {{formatters}}.",
+
   "ui.sessionReview.title": "Cambios de la sesión",
   "ui.sessionReview.title.git": "Cambios de Git",
   "ui.sessionReview.title.branch": "Cambios de la rama",

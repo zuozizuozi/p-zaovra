@@ -434,3 +434,83 @@ describe("ApplyPatchTool", () => {
     ),
   )
 })
+
+it.live("patch add and update diffs include actual formatter output", () =>
+  Effect.acquireUseRelease(
+    Effect.promise(() => tmpdir()),
+    (tmp) =>
+      Effect.gen(function* () {
+        reset()
+        yield* Effect.promise(() => Bun.write(path.join(tmp.path, "old.audit"), "before\n"))
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(tmp.path, "zaovra.json"),
+            JSON.stringify({
+              formatter: {
+                custom: {
+                  extensions: [".audit"],
+                  command: [
+                    process.execPath,
+                    "-e",
+                    "require('fs').writeFileSync(process.argv[1], 'FORMATTED bad\\n')",
+                    "$FILE",
+                  ],
+                },
+              },
+              lsp: {
+                test: {
+                  extensions: [".audit"],
+                  command: [
+                    process.execPath,
+                    path.join(import.meta.dirname, "fixture/lsp-diagnostics.cjs"),
+                    path.join(tmp.path, "lsp.log"),
+                  ],
+                },
+              },
+            }),
+          ),
+        )
+        yield* withTool(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const settled = yield* settleTool(
+              registry,
+              call(
+                "*** Begin Patch\n*** Add File: new.audit\n+new\n*** Update File: old.audit\n@@\n-before\n+after\n*** End Patch",
+              ),
+            )
+            expect(settled.output?.structured).toMatchObject({
+              files: [
+                { file: "new.audit", patch: expect.stringContaining("+FORMATTED") },
+                { file: "old.audit", patch: expect.stringContaining("-before\n+FORMATTED") },
+              ],
+            })
+            expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "new.audit")).text())).toBe(
+              "FORMATTED bad\n",
+            )
+            expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "old.audit")).text())).toBe(
+              "FORMATTED bad\n",
+            )
+            expect(settled.output?.structured).toMatchObject({
+              applied: [
+                { lsp: { diagnostics: { [path.join(tmp.path, "new.audit")]: [{ message: "Bad text" }] }, failed: [] } },
+                { lsp: { diagnostics: { [path.join(tmp.path, "old.audit")]: [{ message: "Bad text" }] }, failed: [] } },
+              ],
+            })
+            expect(settled.result.value).toContain("ERROR: Bad text")
+            const removed = yield* settleTool(
+              registry,
+              call("*** Begin Patch\n*** Delete File: new.audit\n*** End Patch", "call-delete-diagnosed"),
+            )
+            expect(removed.output?.structured).toMatchObject({
+              applied: [
+                { type: "delete", lsp: { diagnostics: { [path.join(tmp.path, "new.audit")]: [] }, failed: [] } },
+              ],
+            })
+            expect(yield* exists(path.join(tmp.path, "new.audit"))).toBe(false)
+            expect(removed.result.value).not.toContain("Bad text")
+          }),
+        )
+      }),
+    (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+  ),
+)

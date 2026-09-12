@@ -6,6 +6,7 @@ import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
 import * as LSPServer from "./server"
 import { Config } from "@/config/config"
+import { ConfigTooling } from "@/config/tooling"
 import { Process } from "@/util/process"
 import { spawn as lspspawn } from "./launch"
 import { Effect, Layer, Context, Schema } from "effect"
@@ -144,7 +145,7 @@ const layer = Layer.effect(
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("LSP.state")(function* (ctx) {
-        const cfg = yield* config.get()
+        const cfg = yield* ConfigTooling.read(config.get(), ctx)
 
         const servers: Record<string, LSPServer.Info> = {}
 
@@ -169,7 +170,7 @@ const layer = Layer.effect(
                 ...existing,
                 id: name,
                 root: existing?.root ?? (async (_file, ctx) => ctx.directory),
-                extensions: item.extensions ?? existing?.extensions ?? [],
+                extensions: [...(item.extensions ?? existing?.extensions ?? [])],
                 spawn: async (root) => ({
                   process: lspspawn(item.command[0], item.command.slice(1), {
                     cwd: root,

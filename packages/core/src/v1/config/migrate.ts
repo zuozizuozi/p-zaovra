@@ -68,6 +68,10 @@ export function migrate(info: typeof ConfigV1.Info.Type) {
     ),
     experimental: info.experimental?.policies && { policies: info.experimental.policies },
     providers: providers(info.provider),
+    provider_filter:
+      info.enabled_providers !== undefined || info.disabled_providers !== undefined
+        ? { allow: info.enabled_providers, deny: info.disabled_providers }
+        : undefined,
   }
 }
 
@@ -173,6 +177,10 @@ function migrateProvider(info: ConfigProviderV1.Info) {
   const url = info.api ?? options.url
   return {
     name: info.name,
+    filter:
+      info.whitelist !== undefined || info.blacklist !== undefined
+        ? { allow: info.whitelist, deny: info.blacklist }
+        : undefined,
     env: info.env,
     api: info.npm
       ? {

@@ -199,7 +199,7 @@ export function SelectV2<T>(props: SelectV2Props<T>) {
         </span>
       </Kobalte.Trigger>
       <Kobalte.Portal>
-        <Kobalte.Content data-component="menu-v2-content" data-slot="select-v2-content">
+        <Kobalte.Content data-kb-top-layer="" data-component="menu-v2-content" data-slot="select-v2-content">
           <Kobalte.Listbox data-slot="select-v2-listbox" />
         </Kobalte.Content>
       </Kobalte.Portal>

@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test"
+import type { Message, Part, ProviderListResponse, SessionMessage } from "@zaovra-ai/sdk/v2/client"
 
 const emptyList = new Set(["/skill", "/command", "/lsp", "/formatter", "/vcs/status", "/vcs/diff"])
 const emptyObject = new Set(["/global/config", "/config", "/provider/auth", "/mcp", "/experimental/resource"])
@@ -29,8 +30,59 @@ export interface MockServerConfig {
 export async function mockZaovraServer(page: Page, config: MockServerConfig) {
   const cursors = new Map<string, string>()
   let nextCursor = 0
+  const catalog = config.provider as Partial<ProviderListResponse>
+  const available = (catalog.all ?? []).filter((provider) => catalog.connected?.includes(provider.id))
   const staticRoutes: Record<string, unknown> = {
+    "/experimental/console": { consoleManagedProviders: [], activeOrgName: "Benchmark fixture", switchableOrgCount: 1 },
+    "/api/command": { data: [] },
+    "/api/mcp": { data: {} },
+    "/api/mcp/resources": { data: {} },
+    "/api/permission/request": { data: [] },
+    "/api/question/request": { data: [] },
     "/provider": config.provider,
+    "/api/provider": {
+      data: available.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        api: { type: "native", settings: {} },
+        request: { headers: {}, body: {} },
+      })),
+    },
+    "/api/integration": {
+      data: (catalog.all ?? []).map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        methods: [{ type: "key" }],
+        connections: [],
+      })),
+    },
+    "/api/model": {
+      data: available.flatMap((provider) =>
+        Object.values(provider.models).map((model) => ({
+          id: model.id,
+          providerID: provider.id,
+          name: model.name,
+          family: model.family,
+          api: { type: "native", id: model.id, settings: {} },
+          capabilities: {
+            tools: model.capabilities?.toolcall ?? false,
+            input: Object.entries(model.capabilities?.input ?? { text: true })
+              .filter(([, enabled]) => enabled)
+              .map(([type]) => type),
+            output: Object.entries(model.capabilities?.output ?? { text: true })
+              .filter(([, enabled]) => enabled)
+              .map(([type]) => type),
+          },
+          request: { headers: model.headers ?? {}, body: model.options ?? {} },
+          variants: Object.entries(model.variants ?? {}).map(([id, body]) => ({ id, body, headers: {} })),
+          time: { released: Date.parse(model.release_date) || 0 },
+          cost: model.cost ? [model.cost] : [],
+          status: model.status ?? "active",
+          enabled: true,
+          limit: model.limit ?? { context: 0, output: 0 },
+        })),
+      ),
+    },
     "/path": {
       state: config.directory,
       config: config.directory,
@@ -40,7 +92,9 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
     },
     "/project": [config.project],
     "/project/current": config.project,
-    "/agent": [{ name: "build", mode: "primary" }],
+    "/api/agent": {
+      data: [{ id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } }],
+    },
     "/vcs": { branch: "main", default_branch: "main" },
     "/session": config.sessions,
   }
@@ -56,6 +110,7 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
     const path = url.pathname
     if (path === "/global/event" || path === "/event") return sse(route, config.events?.(), config.eventRetry)
     if (path === "/global/health") return json(route, { healthy: true })
+    if (path === "/api/session/active") return json(route, { data: config.sessionStatus ?? {} })
     if (path === "/api/session")
       return json(route, {
         data: config.sessions.map((session) => v2Session(session, config.directory)),
@@ -93,31 +148,40 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
     if (emptyList.has(path)) return json(route, [])
     if (path in staticRoutes) return json(route, staticRoutes[path])
 
-    const sessionMatch = path.match(/^\/session\/([^/]+)$/)
+    const v2 = path.startsWith("/api/session/")
+    const sessionPath = v2 ? path.slice(4) : path
+    const sessionMatch = sessionPath.match(/^\/session\/([^/]+)$/)
     if (sessionMatch) {
       const session = config.sessions.find((s) => s.id === sessionMatch[1])
-      return json(route, session ?? {})
+      return json(route, v2 && session ? { data: v2Session(session, config.directory) } : (session ?? {}))
     }
 
     const projectMatch = path.match(/^\/project\/([^/]+)$/)
     if (projectMatch) return json(route, config.project)
 
-    const messageMatch = path.match(/^\/session\/([^/]+)\/message\/([^/]+)$/)
+    const messageMatch = sessionPath.match(/^\/session\/([^/]+)\/message\/([^/]+)$/)
     if (messageMatch) {
       config.onMessage?.({ sessionID: messageMatch[1]!, messageID: messageMatch[2]! })
       if (config.messageDelay !== undefined) await new Promise((resolve) => setTimeout(resolve, config.messageDelay))
       const message = config.message?.(messageMatch[1]!, messageMatch[2]!)
       if (message === undefined) return json(route, { error: "Message not found" }, undefined, 404)
-      return json(route, message)
+      return json(route, v2 ? { data: v2Message(message) } : message)
     }
 
-    const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/)
-    if (todoMatch) return json(route, config.todos?.(todoMatch[1]!) ?? [])
+    const todoMatch = sessionPath.match(/^\/session\/([^/]+)\/todo$/)
+    if (todoMatch) {
+      const todos = config.todos?.(todoMatch[1]!) ?? []
+      return json(route, v2 ? { data: todos } : todos)
+    }
+    if (v2 && /^\/session\/[^/]+\/(input\/pending|permission|question)$/.test(sessionPath))
+      return json(route, { data: [] })
+    if (v2 && /^\/session\/[^/]+\/message\/[^/]+\/diff$/.test(sessionPath)) return json(route, { data: [] })
+    if (v2 && /^\/session\/[^/]+\/wait$/.test(sessionPath)) return json(route, {})
     if (/^\/session\/[^/]+\/(children|diff)$/.test(path)) return json(route, [])
 
-    const messagesMatch = path.match(/^\/session\/([^/]+)\/message$/)
+    const messagesMatch = sessionPath.match(/^\/session\/([^/]+)\/message$/)
     if (messagesMatch) {
-      const token = url.searchParams.get("before") ?? undefined
+      const token = url.searchParams.get(v2 ? "cursor" : "before") ?? undefined
       const before = token ? cursors.get(token) : undefined
       if (token && !before) return json(route, { error: "Invalid cursor" }, undefined, 400)
       config.onMessages?.({ sessionID: messagesMatch[1], before, phase: "start" })
@@ -126,12 +190,15 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
       const limit = Number(url.searchParams.get("limit") ?? 80)
       const pageData = config.pageMessages(messagesMatch[1], limit, before)
       config.onMessages?.({ sessionID: messagesMatch[1], before, phase: "end" })
-      if (!pageData.cursor) return json(route, pageData.items)
+      if (!pageData.cursor)
+        return json(route, v2 ? { data: pageData.items.map(v2Message), cursor: {} } : pageData.items)
       const cursor = `cursor_${++nextCursor}`
       cursors.set(cursor, pageData.cursor)
+      if (v2) return json(route, { data: pageData.items.map(v2Message), cursor: { next: cursor } })
       return json(route, pageData.items, { "x-next-cursor": cursor })
     }
 
+    if (path.startsWith("/api/")) throw new Error(`Unhandled mock API route: ${path}`)
     if (url.port === targetPort && targetPort !== appPort) return json(route, {})
     return route.fallback()
   })
@@ -142,6 +209,9 @@ function v2Session(session: { id: string } & Record<string, unknown>, fallbackDi
   return {
     id: session.id,
     parentID: session.parentID,
+    agent: session.agent ?? "build",
+    model: session.model,
+    revert: session.revert,
     projectID: session.projectID ?? "project",
     cost: session.cost ?? 0,
     tokens: session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -158,6 +228,71 @@ function v2Session(session: { id: string } & Record<string, unknown>, fallbackDi
       ...(typeof session.workspaceID === "string" ? { workspaceID: session.workspaceID } : {}),
     },
     ...(typeof session.path === "string" ? { subpath: session.path } : {}),
+  }
+}
+
+// Existing scenarios describe the desktop's legacy presentation shape. Serve
+// the V2 wire shape so production builds exercise the real session adapter.
+function v2Message(value: unknown): SessionMessage {
+  const item = value as { info: Message; parts: Part[] }
+  if (item.info.role === "user")
+    return {
+      id: item.info.id,
+      type: "user",
+      time: item.info.time,
+      text: item.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n\n"),
+      files: item.parts.flatMap((part) =>
+        part.type === "file" ? [{ uri: part.url, mime: part.mime, name: part.filename }] : [],
+      ),
+      agents: item.parts.flatMap((part) => (part.type === "agent" ? [{ name: part.name }] : [])),
+    }
+  return {
+    id: item.info.id,
+    type: "assistant",
+    time: item.info.time,
+    agent: item.info.agent,
+    model: { id: item.info.modelID, providerID: item.info.providerID, variant: item.info.variant },
+    cost: item.info.cost,
+    tokens: item.info.tokens,
+    finish: item.info.finish,
+    content: item.parts.flatMap((part): Extract<SessionMessage, { type: "assistant" }>["content"] => {
+      if (part.type === "text" || part.type === "reasoning") return [{ id: part.id, type: part.type, text: part.text }]
+      if (part.type !== "tool") return []
+      const state = part.state
+      const structured: Record<string, unknown> = state.status === "pending" ? {} : { ...state.metadata }
+      if (part.tool === "task" && typeof structured.sessionId === "string") {
+        structured.task_id = structured.sessionId
+        delete structured.sessionId
+      }
+      return [
+        {
+          type: "tool",
+          id: part.id,
+          name: part.tool,
+          time: {
+            created: state.status === "pending" ? item.info.time.created : state.time.start,
+            completed: state.status === "completed" || state.status === "error" ? state.time.end : undefined,
+          },
+          state:
+            state.status === "pending"
+              ? { status: "pending", input: state.raw }
+              : state.status === "error"
+                ? {
+                    status: "error",
+                    input: state.input,
+                    structured,
+                    content: [],
+                    error: { type: "unknown", message: state.error },
+                  }
+                : {
+                    status: state.status,
+                    input: state.input,
+                    structured,
+                    content: state.status === "completed" ? [{ type: "text", text: state.output }] : [],
+                  },
+        },
+      ]
+    }),
   }
 }
 

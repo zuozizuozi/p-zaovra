@@ -4,6 +4,26 @@ import { type ParseError as JsoncParseError, parse as parseJsoncImpl, printParse
 import { Cause, Exit, Schema as EffectSchema, SchemaIssue } from "effect"
 import type { DeepMutable } from "@zaovra-ai/core/schema"
 import { InvalidError, JsonError } from "@zaovra-ai/core/v1/config/error"
+import { Config } from "@zaovra-ai/core/config"
+import { ConfigV1 } from "@zaovra-ai/core/v1/config/config"
+import { Option } from "effect"
+
+export function configuration(data: unknown, source: string) {
+  const extra =
+    typeof data === "object" && data !== null && !Array.isArray(data)
+      ? Object.keys(data).filter(
+          (key) => !Object.hasOwn(Config.Info.fields, key) && !Object.hasOwn(ConfigV1.Info.fields, key),
+        )
+      : []
+  if (extra.length)
+    throw new InvalidError({
+      path: source,
+      issues: [{ code: "unrecognized_keys", keys: extra, path: [], message: `Unrecognized keys: ${extra.join(", ")}` }],
+    })
+  const decoded = Config.decode(data)
+  if (Option.isSome(decoded)) return decoded.value
+  throw new InvalidError({ path: source, issues: [{ path: [], message: "Invalid configuration values" }] })
+}
 
 export function jsonc(text: string, filepath: string): unknown {
   const errors: JsoncParseError[] = []

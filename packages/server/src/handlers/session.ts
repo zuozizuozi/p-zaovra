@@ -21,6 +21,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
     const session = yield* SessionV2.Service
 
     return handlers
+      .handle("session.usage", Effect.fn(function* (ctx) {
+        return { data: yield* session.usage(ctx.query.sessionID) }
+      }))
       .handle(
         "session.list",
         Effect.fn(function* (ctx) {
@@ -166,6 +169,65 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   ),
                 ),
               ),
+          }
+        }),
+      )
+      .handle(
+        "session.turnDiff",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.turnDiff(ctx.params).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+              Effect.catchTag("Session.MessageNotFoundError", (error) =>
+                Effect.fail(
+                  new MessageNotFoundError({
+                    sessionID: error.sessionID,
+                    messageID: error.messageID,
+                    message: "User turn not found",
+                  }),
+                ),
+              ),
+              Effect.catchTag("Snapshot.Error", () =>
+                Effect.fail(
+                  new ServiceUnavailableError({
+                    service: "session.turnDiff",
+                    message: "Recorded changes could not be loaded",
+                  }),
+                ),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
+        "session.cancelInput",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.cancelInput(ctx.params).pipe(
+              Effect.catchTag("Session.NotFoundError", (error) =>
+                Effect.fail(
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+                ),
+              ),
+              Effect.catchTag("Session.PromptConflictError", (error) =>
+                Effect.fail(
+                  new ConflictError({
+                    resource: error.messageID,
+                    message: "Input is missing or has already entered execution",
+                  }),
+                ),
+              ),
+            ),
           }
         }),
       )

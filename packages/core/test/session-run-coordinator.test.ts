@@ -6,6 +6,50 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(Layer.empty)
 
 describe("SessionRunCoordinator", () => {
+  it.effect("completes observers when execution interrupts without interrupting the observer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        const coordinator = yield* SessionRunCoordinator.make({
+          drain: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(gate)),
+              Effect.andThen(Effect.interrupt),
+            ),
+        })
+        yield* coordinator.wake("session")
+        yield* Deferred.await(started)
+        const observer = yield* coordinator.wait("session").pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(gate, undefined)
+        expect(Exit.isSuccess(yield* Fiber.await(observer))).toBe(true)
+        expect((yield* coordinator.active).size).toBe(0)
+      }),
+    ),
+  )
+
+  it.effect("cancelling an observer preserves execution and the observer interruption", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        const coordinator = yield* SessionRunCoordinator.make({
+          drain: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(gate))),
+        })
+        yield* coordinator.wake("session")
+        yield* Deferred.await(started)
+        const observer = yield* coordinator.wait("session").pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* Fiber.interrupt(observer)
+        const exit = yield* Fiber.await(observer)
+        expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+        expect((yield* coordinator.active).has("session")).toBe(true)
+        yield* Deferred.succeed(gate, undefined)
+        yield* coordinator.wait("session")
+      }),
+    ),
+  )
   it.effect("joins concurrent resumes for one key", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -101,7 +145,8 @@ describe("SessionRunCoordinator", () => {
         const drained = yield* Deferred.make<void>()
         const order: string[] = []
         const coordinator = yield* SessionRunCoordinator.make({
-          drain: () => Effect.sync(() => order.push("drain")).pipe(Effect.andThen(Deferred.succeed(drained, undefined))),
+          drain: () =>
+            Effect.sync(() => order.push("drain")).pipe(Effect.andThen(Deferred.succeed(drained, undefined))),
         })
         const operation = Effect.sync(() => order.push("exclusive")).pipe(
           Effect.andThen(Deferred.succeed(operationStarted, undefined)),

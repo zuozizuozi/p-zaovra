@@ -73,6 +73,7 @@ import {
   type PromptInputSubmission,
 } from "./prompt-input/contracts"
 import { createPromptSubmit } from "./prompt-input/submit"
+import { useLocal } from "@/context/local"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -115,6 +116,7 @@ const EXAMPLES = [
 ] as const
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
+  const local = useLocal()
   const sdk = useSDK()
 
   const sync = useSync()
@@ -1111,6 +1113,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       (id) => {
         const edit = props.edit
         if (!id || !edit) return
+        if (edit.agent) local.agent.set(edit.agent)
+        if (edit.model) {
+          local.model.set(edit.model)
+          local.model.variant.set(edit.variant)
+        }
 
         for (const item of prompt.context.items()) {
           prompt.context.remove(item.key)

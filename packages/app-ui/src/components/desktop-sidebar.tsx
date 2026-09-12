@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createResource, For, Show } from "solid-js"
+import { useNavigate } from "@solidjs/router"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useCommand } from "@/context/command"
@@ -13,6 +14,7 @@ import { WindowsAppMenu } from "@/components/windows-app-menu"
 import { useSettingsDialog } from "@/components/settings-dialog"
 import { displayName } from "@/pages/layout/helpers"
 import { ProjectGlyph } from "@/components/project-glyph"
+import { Mark } from "@zaovra-ai/ui/logo"
 
 type ProjectGroup = {
   server: ServerConnection.Key
@@ -69,6 +71,7 @@ function DesktopSessionTab(props: {
 }
 
 export function DesktopSidebar() {
+  const navigate = useNavigate()
   const command = useCommand()
   const global = useGlobal()
   const language = useLanguage()
@@ -116,7 +119,7 @@ export function DesktopSidebar() {
   }
   const selectProject = (group: ProjectGroup) => {
     layout.home.setSelection({ server: group.server, directory: group.project.worktree })
-    if (layout.route().type !== "home") tabs.toggleHome({ home: false, current: currentTab() })
+    navigate("/?view=projects")
   }
 
   return (
@@ -134,14 +137,10 @@ export function DesktopSidebar() {
         <Show when={platform.os === "windows" || platform.os === "linux"}>
           <WindowsAppMenu command={command} platform={platform} variant="v2" />
         </Show>
-        <button
-          type="button"
-          class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold text-v2-text-text-base hover:bg-v2-background-bg-layer-02"
-          onClick={() => command.trigger("home.toggle")}
-        >
-          <IconV2 name="grid-plus" size="small" />
-          <span class="truncate">Zaovra</span>
-        </button>
+        <div class="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm font-semibold text-v2-text-text-base">
+          <Mark class="size-5 shrink-0" />
+          <span>Zaovra</span>
+        </div>
       </div>
 
       <div class="shrink-0 px-3 pb-3 pt-2">

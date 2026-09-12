@@ -9,7 +9,12 @@ import { showToast } from "@/utils/toast"
 import { batch, For, Show, onCleanup } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
-import { discoverProviderModels, providerBaseURL } from "@/provider-discovery"
+import {
+  discoverProviderModels,
+  providerBaseURL,
+  providerProtocols,
+  changeProviderProtocolURL,
+} from "@/provider-discovery"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
@@ -50,6 +55,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
   const language = useLanguage()
 
   const [form, setForm] = createStore<FormState>({
+    protocol: "openai",
     providerID: "",
     name: "",
     baseURL: "",
@@ -72,7 +78,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     alive.value = false
   })
   const automatic = () => {
-    const baseURL = providerBaseURL(form.baseURL)
+    const baseURL = providerBaseURL(form.baseURL, form.protocol)
     const host = new URL(baseURL).hostname
     const stem =
       host
@@ -90,14 +96,15 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     setDiscovery({ pending: true, error: "" })
     try {
       const input = {
-        baseURL: providerBaseURL(form.baseURL),
+        baseURL: providerBaseURL(form.baseURL, form.protocol),
         apiKey: form.apiKey,
+        kind: form.protocol,
         headers: Object.fromEntries(
           form.headers.filter((h) => h.key.trim()).map((h) => [h.key.trim(), h.value.trim()]),
         ),
       }
       const models = await (platform.discoverProviderModels ?? discoverProviderModels)(input)
-      if (!alive.value) return
+      if (!alive.value || input.kind !== form.protocol || input.apiKey !== form.apiKey) return
       batch(() => {
         setDiscovery({ models, manual: false, query: "" })
         setForm("baseURL", input.baseURL)
@@ -292,10 +299,34 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         <p class="text-14-regular text-text-base">{language.t("provider.custom.discovery.intro")}</p>
         <fieldset disabled={discovery.pending || saveMutation.isPending} class="flex min-w-0 flex-col gap-6">
           <div class="flex flex-col gap-4">
+            <label class="flex flex-col gap-2 text-14-regular">
+              <span>{language.t("provider.custom.protocol.label")}</span>
+              <select
+                aria-label={language.t("provider.custom.protocol.label")}
+                value={form.protocol}
+                class="h-10 w-full rounded-md border border-border-base bg-surface-base px-3 text-text-base focus-visible:outline focus-visible:outline-2"
+                onChange={(event) => {
+                  const protocol = event.currentTarget.value as NonNullable<FormState["protocol"]>
+                  if (protocol === form.protocol) return
+                  const baseURL = changeProviderProtocolURL(form.baseURL, form.protocol ?? "openai", protocol)
+                  batch(() => {
+                    setForm("protocol", protocol)
+                    setForm("baseURL", baseURL)
+                    setForm("models", [modelRow()])
+                    setDiscovery({ models: [], error: "", query: "", manual: false })
+                  })
+                }}
+              >
+                <For each={Object.entries(providerProtocols)}>
+                  {([value, protocol]) => <option value={value}>{protocol.label}</option>}
+                </For>
+              </select>
+              <span class="text-12-regular text-text-weak">{language.t("provider.custom.protocol.hint")}</span>
+            </label>
             <TextField
               autofocus={props.autofocus ?? true}
               label={language.t("provider.custom.field.baseURL.label")}
-              placeholder={language.t("provider.custom.field.baseURL.placeholder")}
+              placeholder={providerProtocols[form.protocol ?? "openai"].baseURL}
               value={form.baseURL}
               onChange={(v) => setField("baseURL", v)}
               validationState={form.err.baseURL ? "invalid" : undefined}

@@ -89,47 +89,48 @@ export function FileMedia(props: { media?: FileMediaOptions; fallback: () => JSX
     }
   })
 
-  createEffect(() => {
-    const input = request()
-    if (!input) {
-      setRemote({ key: undefined, loading: false, error: false, src: undefined, mime: undefined })
-      return
-    }
+  createEffect(
+    on(request, (input) => {
+      if (!input) {
+        setRemote({ key: undefined, loading: false, error: false, src: undefined, mime: undefined })
+        return
+      }
 
-    let active = true
-    // Keep the previous media visible while re-reading the same file (e.g. a vcs
-    // diff refresh); only a key change resets to the loading placeholder.
-    if (untrack(() => remote.key) === input.key) setRemote({ loading: true, error: false })
-    else setRemote({ key: input.key, loading: true, error: false, src: undefined, mime: undefined })
-    void input.readFile(input.path).then(
-      (result) => {
-        if (!active) return
-        const src = dataUrlFromMediaValue(result as any, input.kind)
-        if (!src) {
+      let active = true
+      // Keep the previous media visible while re-reading the same file (e.g. a vcs
+      // diff refresh); only a key change resets to the loading placeholder.
+      if (untrack(() => remote.key) === input.key) setRemote({ loading: true, error: false })
+      else setRemote({ key: input.key, loading: true, error: false, src: undefined, mime: undefined })
+      void input.readFile(input.path).then(
+        (result) => {
+          if (!active) return
+          const src = dataUrlFromMediaValue(result as any, input.kind)
+          if (!src) {
+            input.onError?.({ kind: input.kind })
+            setRemote({ key: input.key, loading: false, error: true, src: undefined, mime: undefined })
+            return
+          }
+
+          setRemote({
+            key: input.key,
+            loading: false,
+            error: false,
+            src,
+            mime: input.kind === "audio" ? normalizeMimeType(result?.mimeType) : undefined,
+          })
+        },
+        () => {
+          if (!active) return
           input.onError?.({ kind: input.kind })
           setRemote({ key: input.key, loading: false, error: true, src: undefined, mime: undefined })
-          return
-        }
+        },
+      )
 
-        setRemote({
-          key: input.key,
-          loading: false,
-          error: false,
-          src,
-          mime: input.kind === "audio" ? normalizeMimeType(result?.mimeType) : undefined,
-        })
-      },
-      () => {
-        if (!active) return
-        input.onError?.({ kind: input.kind })
-        setRemote({ key: input.key, loading: false, error: true, src: undefined, mime: undefined })
-      },
-    )
-
-    onCleanup(() => {
-      active = false
-    })
-  })
+      onCleanup(() => {
+        active = false
+      })
+    }),
+  )
 
   const src = createMemo(() => {
     const input = request()

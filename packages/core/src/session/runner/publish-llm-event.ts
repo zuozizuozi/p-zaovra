@@ -1,10 +1,11 @@
-import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue, type Usage } from "@zaovra-ai/llm"
+import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue } from "@zaovra-ai/llm"
 import { DateTime, Effect } from "effect"
 import { EventV2 } from "../../event"
 import { ModelV2 } from "../../model"
 import { SessionEvent } from "../event"
 import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
+import { usageTokens, usageReported } from "../usage-tokens"
 
 type Input = {
   readonly sessionID: SessionSchema.ID
@@ -13,20 +14,6 @@ type Input = {
   readonly inputSequence: number
   readonly contextEpoch: number
   readonly snapshot?: string
-}
-
-const safe = (value: number | undefined) => Math.max(0, Number.isFinite(value) ? (value ?? 0) : 0)
-
-const tokens = (usage: Usage | undefined) => {
-  const reasoning = safe(usage?.reasoningTokens)
-  const read = safe(usage?.cacheReadInputTokens)
-  const write = safe(usage?.cacheWriteInputTokens)
-  return {
-    input: safe(usage?.nonCachedInputTokens),
-    output: safe(usage?.visibleOutputTokens),
-    reasoning,
-    cache: { read, write },
-  }
 }
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -71,7 +58,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
   let assistantActive = false
   let assistantFailed = false
   let providerFailed = false
-  let stepSettlement: { readonly finish: string; readonly tokens: ReturnType<typeof tokens> } | undefined
+  let stepSettlement: { readonly finish: string; readonly tokens: ReturnType<typeof usageTokens>; readonly usageReported: boolean } | undefined
 
   const startAssistant = Effect.fnUntraced(function* () {
     if (assistantMessageID !== undefined) return assistantMessageID
@@ -94,24 +81,26 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     name: string,
     ended: (id: string, value: string, providerMetadata?: ProviderMetadata) => Effect.Effect<void>,
   ) => {
-    const chunks = new Map<string, string[]>()
+    const chunks = new Map<string, { values: string[]; length: number }>()
     const start = (id: string) =>
       Effect.suspend(() => {
         if (chunks.has(id)) return Effect.die(`Duplicate ${name} start: ${id}`)
-        chunks.set(id, [])
+        chunks.set(id, { values: [], length: 0 })
         return Effect.void
       })
     const append = (id: string, value: string) =>
       Effect.suspend(() => {
         const current = chunks.get(id)
         if (!current) return Effect.die(`${name} delta before start: ${id}`)
-        current.push(value)
-        return Effect.void
+        const offset = current.length
+        current.values.push(value)
+        current.length += value.length
+        return Effect.succeed(offset)
       })
     const end = Effect.fnUntraced(function* (id: string, providerMetadata?: ProviderMetadata) {
       const current = chunks.get(id)
       if (!current) return yield* Effect.die(`${name} end before start: ${id}`)
-      yield* ended(id, current.join(""), providerMetadata)
+      yield* ended(id, current.values.join(""), providerMetadata)
       chunks.delete(id)
     })
     const flush = Effect.fnUntraced(function* () {
@@ -255,13 +244,13 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         })
         return
       case "text-delta":
-        yield* text.append(event.id, event.text)
         yield* events.publish(SessionEvent.Text.Delta, {
           sessionID: input.sessionID,
           assistantMessageID: yield* currentAssistantMessageID(),
           timestamp: yield* timestamp,
           textID: event.id,
           delta: event.text,
+          offset: yield* text.append(event.id, event.text),
         })
         return
       case "text-end":
@@ -278,13 +267,13 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         })
         return
       case "reasoning-delta":
-        yield* reasoning.append(event.id, event.text)
         yield* events.publish(SessionEvent.Reasoning.Delta, {
           sessionID: input.sessionID,
           assistantMessageID: yield* currentAssistantMessageID(),
           timestamp: yield* timestamp,
           reasoningID: event.id,
           delta: event.text,
+          offset: yield* reasoning.append(event.id, event.text),
         })
         return
       case "reasoning-end":
@@ -399,7 +388,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         yield* flush()
         assistantActive = false
         if (stepSettlement) return yield* Effect.die("Duplicate step finish")
-        stepSettlement = { finish: event.reason, tokens: tokens(event.usage) }
+        stepSettlement = { finish: event.reason, tokens: usageTokens(event.usage), usageReported: usageReported(event.usage) }
         return
       case "finish":
         return

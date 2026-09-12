@@ -2,6 +2,65 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "home.welcome.title": "Hva skal vi skape i dag?",
+  "home.welcome.description": "Beskriv ideen din, velg et prosjekt og kom i gang med Zaovra.",
+  "home.welcome.continue": "Fortsett til økten",
+  "desktop.menu.exportLogs": "Eksporter logger",
+  "desktop.menu.file": "Fil",
+  "desktop.menu.edit": "Rediger",
+  "desktop.menu.view": "Vis",
+  "desktop.menu.go": "Gå til",
+  "desktop.menu.window": "Vindu",
+  "desktop.menu.help": "Hjelp",
+  "desktop.menu.undo": "Angre",
+  "desktop.menu.redo": "Gjør om",
+  "desktop.menu.cut": "Klipp ut",
+  "desktop.menu.copy": "Kopier",
+  "desktop.menu.paste": "Lim inn",
+  "desktop.menu.delete": "Slett",
+  "desktop.menu.selectAll": "Velg alt",
+  "desktop.menu.newWindow": "Nytt vindu",
+  "desktop.menu.closeWindow": "Lukk vindu",
+  "desktop.menu.minimize": "Minimer",
+  "desktop.menu.maximize": "Maksimer / Gjenopprett",
+  "desktop.menu.reload": "Last inn på nytt",
+  "desktop.menu.devTools": "Utviklerverktøy",
+  "desktop.menu.actualSize": "Faktisk størrelse",
+  "desktop.menu.zoomIn": "Zoom inn",
+  "desktop.menu.zoomOut": "Zoom ut",
+  "desktop.menu.fullScreen": "Veksle fullskjerm",
+  "desktop.menu.documentation": "Zaovra-dokumentasjon",
+  "desktop.menu.support": "Brukerstøtte",
+  "provider.custom.discovery.restart":
+    "Tilkoblingskomponenten i skrivebordsappen er oppdatert. Lukk og åpne Zaovra igjen for å hente modeller. Det du har skrevet inn, beholdes.",
+  "provider.custom.discovery.environment":
+    "Nøkler fra miljøvariabler kan ikke leses her. Skriv inn modell-ID-er manuelt, eller lim inn en nøkkel for å hente listen.",
+  "provider.custom.discovery.timeout":
+    "Tjenesten svarte ikke innen 15 sekunder. Prøv igjen, eller skriv inn modeller manuelt.",
+  "provider.custom.discovery.unsupported":
+    "Tjenesten støtter ikke henting av modellister på denne adressen. Kontroller URL-en, eller skriv inn en modell-ID manuelt.",
+  "provider.custom.discovery.saved": "Konfigurasjonen for {provider} er lagret",
+  "provider.custom.discovery.savedDescription":
+    "Velg en modell for å starte en oppgave. Generering og verktøykall er ikke verifisert.",
+  "provider.custom.discovery.intro": "Skriv inn tjenestens URL og API-nøkkel, og hent deretter modellisten.",
+  "provider.custom.discovery.fetch": "Hent modeller",
+  "provider.custom.discovery.loading": "Henter modeller…",
+  "provider.custom.discovery.manual": "Skriv inn modeller manuelt",
+  "provider.custom.discovery.advanced": "Avanserte innstillinger",
+  "provider.custom.discovery.auto": "Automatisk",
+  "provider.custom.discovery.save": "Lagre konfigurasjon",
+  "provider.custom.discovery.search": "Søk etter modeller",
+  "provider.custom.discovery.success":
+    "Modellisten er mottatt. Den første modellen er valgt; endre valget ved behov. Dette verifiserer ikke støtte for generering eller verktøy.",
+  "provider.custom.discovery.auth": "Autentisering mislyktes. Kontroller API-nøkkelen og tjenestens adresse.",
+  "provider.custom.discovery.rate":
+    "Forespørselsgrensen er nådd. Prøv igjen senere, eller skriv inn en modell-ID manuelt.",
+  "provider.custom.discovery.url":
+    "Skriv inn en gyldig HTTP(S)-URL til tjenesten uten påloggingsinformasjon, spørringsparametere eller fragmenter.",
+  "provider.custom.discovery.empty": "Tjenesten returnerte ingen modeller. Du kan skrive inn en modell-ID manuelt.",
+  "provider.custom.discovery.failed":
+    "Kunne ikke hente modeller. Kontroller adressen og nettverket, prøv igjen, eller skriv inn modeller manuelt. Ingen konfigurasjon er lagret.",
+  "provider.custom.discovery.choose": "Velg minst én modell, eller skriv inn en modell-ID manuelt.",
   "command.category.suggested": "Foreslått",
   "command.category.view": "Visning",
   "command.category.project": "Prosjekt",
@@ -1109,7 +1168,8 @@ export const dict = {
   "settings.updates.action.installing": "Installerer...",
   "dialog.provider.custom.label": "Custom OpenAI-compatible provider",
   "dialog.model.unpaid.viewMoreProviders": "See 70+ more providers",
-  "prompt.toast.shellUnavailable.description": "Direct shell mode is unavailable in SessionV2. Use the agent\u0027s bash tool instead.",
+  "prompt.toast.shellUnavailable.description":
+    "Direct shell mode is unavailable in SessionV2. Use the agent\u0027s bash tool instead.",
   "session.message.waitingToJoin": "Waiting to join the current task…",
   "session.header.reveal.finder": "Reveal in Finder",
   "session.header.reveal.fileExplorer": "Reveal in File Explorer",

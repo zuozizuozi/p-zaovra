@@ -143,6 +143,7 @@ function MenuV2SubContent(props: ComponentProps<typeof DropdownMenu.SubContent>)
   return (
     <DropdownMenu.SubContent
       {...r}
+      data-kb-top-layer=""
       data-component="menu-v2-content"
       classList={{ ...s.classList, [s.class ?? ""]: !!s.class }}
     />
@@ -176,6 +177,7 @@ function MenuV2Content(props: ComponentProps<typeof DropdownMenu.Content>) {
   return (
     <DropdownMenu.Content
       {...r}
+      data-kb-top-layer=""
       data-component="menu-v2-content"
       classList={{ ...s.classList, [s.class ?? ""]: !!s.class }}
     />
@@ -195,6 +197,7 @@ function MenuV2ContextContent(props: ComponentProps<typeof ContextMenu.Content>)
   return (
     <ContextMenu.Content
       {...r}
+      data-kb-top-layer=""
       data-component="menu-v2-content"
       classList={{ ...s.classList, [s.class ?? ""]: !!s.class }}
     />

@@ -1,12 +1,15 @@
 import { Binary } from "@zaovra-ai/core/util/binary"
 import { retry } from "@zaovra-ai/core/util/retry"
 import type {
+  Event,
   Message,
   ZaovraClient,
   Part,
   PermissionView,
   QuestionView,
   Session,
+  SessionInputAdmitted,
+  SessionMessage,
   SessionStatus,
   SnapshotFileDiff,
   Todo,
@@ -17,7 +20,23 @@ import { diffs as cleanDiffs, message as cleanMessage } from "@/utils/diffs"
 import { sessionNotFoundError } from "@/utils/server-errors"
 import { rootSession } from "@/utils/session-route"
 import { dropSessionCaches, pickSessionCacheEvictions, SESSION_CACHE_LIMIT } from "./global-sync/session-cache"
-import { adaptSession, adaptSessionInput, adaptSessionMessages } from "./v2-session-adapter"
+import {
+  adaptPartID,
+  adaptSession,
+  adaptSessionInput,
+  adaptSessionMessages,
+  type SessionView,
+} from "./v2-session-adapter"
+import { adaptServerEvent } from "./server-event"
+
+function appendOffsetText(text: string, chunks: ReadonlyMap<number, string>) {
+  return [...chunks]
+    .sort(([left], [right]) => left - right)
+    .reduce(
+      (text, [offset, delta]) => (offset <= text.length ? text + delta.slice(Math.max(0, text.length - offset)) : text),
+      text,
+    )
+}
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const cmpMessage = (a: Message, b: Message) => a.time.created - b.time.created || cmp(a.id, b.id)
@@ -39,6 +58,7 @@ type MessagePage = {
   part: { id: string; part: Part[] }[]
   cursor?: string
   complete: boolean
+  unresolved?: SessionMessage[]
 }
 
 // Most markers describe the current HTTP attempt; deltaParts persists non-durable stream state across retries.
@@ -133,12 +153,13 @@ function reconcileFetched<T extends { id: string }>(
 
 export function createServerSession(client: ZaovraClient, options?: { retry?: typeof retry }) {
   const [data, setData] = createStore({
-    info: {} as Record<string, Session | undefined>,
+    info: {} as Record<string, SessionView | undefined>,
     session_status: {} as Record<string, SessionStatus>,
     session_diff: {} as Record<string, SnapshotFileDiff[]>,
     todo: {} as Record<string, Todo[]>,
     permission: {} as Record<string, PermissionView[]>,
     question: {} as Record<string, QuestionView[]>,
+    pending_input: {} as Record<string, SessionInputAdmitted[]>,
     message: {} as Record<string, Message[]>,
     part: {} as Record<string, Part[]>,
     part_text_accum_delta: {} as Record<string, string>,
@@ -146,8 +167,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       return (this.session_status[id]?.type ?? "idle") !== "idle"
     },
   })
-  const requests = new Map<string, Promise<Session>>()
+  const requests = new Map<string, Promise<SessionView>>()
   const v2Info = new Map<string, Parameters<typeof adaptSession>[0]>()
+  const unresolvedHistory = new Map<string, { cursor: string; messages: SessionMessage[] }>()
   const inflight = new Map<string, Promise<void>>()
   const inflightDiff = new Map<string, Promise<void>>()
   const inflightTodo = new Map<string, Promise<void>>()
@@ -157,7 +179,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const orphanParts = new Map<string, Set<string>>()
   const removedMessages = new Map<string, Set<string>>()
   const v2Refreshes = new Map<string, ReturnType<typeof setTimeout>>()
+  const executionWaits = new Map<string, Promise<void>>()
   const deltaBases = new Map<string, { base: string; sessionID: string }>()
+  const offsetChunks = new Map<string, { sessionID: string; chunks: Map<number, string> }>()
   const deleteMessageParts = (
     cache: { part: Record<string, Part[] | undefined>; part_text_accum_delta: Record<string, string | undefined> },
     messageID: string,
@@ -165,6 +189,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     for (const part of cache.part[messageID] ?? []) {
       delete cache.part_text_accum_delta[part.id]
       deltaBases.delete(part.id)
+      offsetChunks.delete(part.id)
     }
     delete cache.part[messageID]
   }
@@ -179,6 +204,25 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     generations.set(sessionID, created)
     return created
   }
+  const watchExecution = (sessionID: string) =>
+    runInflight(executionWaits, sessionID, async () => {
+      const active = generation(sessionID)
+      // A provider step may finish while tools, another turn, or queued inputs
+      // still belong to the same drain. Only process ownership establishes idle.
+      while (generations.get(sessionID) === active) {
+        const failure = await client.v2.session.wait({ sessionID }, { throwOnError: true }).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        const result = await client.v2.session.active({ throwOnError: true })
+        if (generations.get(sessionID) !== active) return
+        if (!result.data.data[sessionID]) {
+          setData("session_status", sessionID, { type: "idle" })
+          return
+        }
+        if (failure) throw failure
+      }
+    })
   const [meta, setMeta] = createStore({
     limit: {} as Record<string, number | undefined>,
     cursor: {} as Record<string, string | undefined>,
@@ -187,7 +231,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     at: {} as Record<string, number | undefined>,
   })
 
-  const remember = (session: Session) => {
+  const remember = (session: SessionView) => {
     setData("info", session.id, reconcile(session))
     infoSeen.delete(session.id)
     infoSeen.add(session.id)
@@ -393,11 +437,15 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     for (const [partID, item] of deltaBases) {
       if (evicted.has(item.sessionID)) deltaBases.delete(partID)
     }
+    for (const [partID, item] of offsetChunks) {
+      if (evicted.has(item.sessionID)) offsetChunks.delete(partID)
+    }
     sessionIDs.forEach((sessionID) => {
       generations.delete(sessionID)
       clearOptimistic(sessionID)
       requests.delete(sessionID)
       v2Info.delete(sessionID)
+      unresolvedHistory.delete(sessionID)
       inflight.delete(sessionID)
       inflightDiff.delete(sessionID)
       inflightTodo.delete(sessionID)
@@ -412,6 +460,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     setData(
       produce((draft) => {
         dropSessionCaches(draft, sessionIDs)
+        sessionIDs.forEach((sessionID) => delete draft.pending_input[sessionID])
       }),
     )
     setMeta(
@@ -457,8 +506,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       v2Info.get(sessionID) ?? (await (options?.retry ?? retry)(() => client.v2.session.get({ sessionID }))).data?.data
     if (!session) throw sessionNotFoundError(sessionID)
     v2Info.set(sessionID, session)
+    const active = generation(sessionID)
     const pending = (options?.retry ?? retry)(() => client.v2.session.pendingInputs({ sessionID })).then((response) => {
       if (!response.data) throw new Error(`Unable to load pending inputs: ${sessionID}`)
+      if (generations.get(sessionID) === active) setData("pending_input", sessionID, response.data.data)
       return response.data.data
     })
 
@@ -466,25 +517,62 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     const loadPage = async (cursor?: string) => {
       const response = await (options?.retry ?? retry)(() => {
         onAttempt?.()
-        return client.v2.session.messages({ sessionID, limit, cursor, order: cursor ? undefined : "desc" })
+        return client.v2.session.messages({
+          sessionID,
+          limit: Math.min(100, Math.max(initialMessagePageSize, limit)),
+          cursor,
+          order: cursor ? undefined : "desc",
+        })
       })
       if (!response.data) throw new Error(`Unable to load messages: ${sessionID}`)
       pages.push(response.data)
       return response.data
     }
     const first = await loadPage(before)
-    const cachedParent = (data.message[sessionID] ?? []).findLast((message) => message.role === "user")?.id
+    const oldest = first.data.reduce<SessionMessage | undefined>(
+      (result, item) =>
+        !result ||
+        item.time.created < result.time.created ||
+        (item.time.created === result.time.created && item.id < result.id)
+          ? item
+          : result,
+      undefined,
+    )
+    // A cached user from a newer page cannot own output in an older page.
+    const cachedParent =
+      oldest &&
+      (data.message[sessionID] ?? [])
+        .filter(
+          (message) =>
+            message.role === "user" &&
+            (message.time.created < oldest.time.created ||
+              (message.time.created === oldest.time.created && message.id <= oldest.id)),
+        )
+        .sort(cmpMessage)
+        .at(-1)?.id
     let cursor = first.cursor.next
-    for (let page = first; !cachedParent && !page.data.some((item) => item.type === "user") && cursor; ) {
+    for (
+      let page = first;
+      !cachedParent &&
+      !page.data.some((item) => item.type === "user" || item.type === "shell" || item.type === "synthetic") &&
+      cursor;
+
+    ) {
       page = await loadPage(cursor)
       cursor = page.cursor.next
-      if (pages.length >= 4) break
     }
-    const items = pages.flatMap((page) => page.data)
+    const carried = unresolvedHistory.get(sessionID)
+    const items = [
+      ...pages.flatMap((page) => page.data),
+      ...(before && carried?.cursor === before ? carried.messages : []),
+    ]
     const adapted = [
       ...adaptSessionMessages(session, items, cachedParent),
-      ...(await pending).map((input) => adaptSessionInput(session, input)),
+      ...(await pending)
+        .filter((input) => input.delivery !== "queue")
+        .map((input) => adaptSessionInput(session, input)),
     ].sort((a, b) => cmpMessage(a.message, b.message))
+    const adaptedIDs = new Set(adapted.map((item) => item.message.id))
     return {
       session: adapted.map((item) => cleanMessage(item.message)).sort((a, b) => cmp(a.id, b.id)),
       part: adapted.map((item) => ({
@@ -493,6 +581,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       })),
       cursor,
       complete: !cursor,
+      // Keep the leading partial turn until pagination brings its user. The
+      // server cursor already passed these messages, so dropping them loses output.
+      unresolved: items.filter((item) => item.type === "assistant" && !adaptedIDs.has(item.id)),
     }
   }
 
@@ -523,6 +614,15 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       const pending = pendingParts.get(sessionID)?.get(item.id)
       const touched = new Set([...(load?.touchedParts.get(item.id) ?? []), ...(pending ?? [])])
       for (const part of fetched) {
+        const buffered = offsetChunks.get(part.id)
+        if (buffered && (part.type === "text" || part.type === "reasoning")) {
+          part.text = appendOffsetText(part.text, buffered.chunks)
+          for (const [offset, delta] of buffered.chunks) {
+            if (offset + delta.length <= part.text.length) buffered.chunks.delete(offset)
+          }
+          if (!buffered.chunks.size) offsetChunks.delete(part.id)
+          touched.delete(part.id)
+        }
         const accumulated = data.part_text_accum_delta[part.id]
         const base = deltaBases.get(part.id)?.base
         const preserveDelta =
@@ -569,6 +669,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     preserveUnfetched: boolean | ((message: Message) => boolean),
     cleanupOrphans: boolean,
   ) => {
+    if (page.cursor && page.unresolved?.length)
+      unresolvedHistory.set(sessionID, { cursor: page.cursor, messages: page.unresolved })
+    if (!page.cursor || !page.unresolved?.length) unresolvedHistory.delete(sessionID)
     const merged = mergeOptimisticPage(page, [...(optimistic.get(sessionID)?.values() ?? [])])
     merged.observed.forEach((item) => {
       if (!load?.clearedMessageParts.has(item.messageID)) confirmOptimistic(sessionID, item.messageID, item.parts)
@@ -695,6 +798,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   }
 
   const apply = (event: { type: string; properties?: unknown }): void => {
+    const normalized = adaptServerEvent(event as Event)
+    if (normalized !== event) return apply(normalized)
     const eventID = eventSessionID(event)
     if (eventID) {
       touch(eventID)
@@ -707,25 +812,51 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         void resolve(eventID).catch(() => {})
     }
     const refreshV2 = (sessionID: string) => {
+      const active = generation(sessionID)
       const pending = v2Refreshes.get(sessionID)
       if (pending) clearTimeout(pending)
       v2Refreshes.set(
         sessionID,
         setTimeout(() => {
           v2Refreshes.delete(sessionID)
-          void sync(sessionID, { force: true }).catch(() => {})
+          void (async () => {
+            await inflight.get(sessionID)?.catch(() => {})
+            if (generations.get(sessionID) !== active) return
+            await sync(sessionID, { force: true })
+          })().catch(() => {})
         }, 50),
       )
     }
+    if (event.type === "session.next.prompt.cancelled") {
+      const props = event.properties as { sessionID: string; messageID: string }
+      apply({ type: "message.removed", properties: props })
+      setData("pending_input", props.sessionID, (items = []) => items.filter((item) => item.id !== props.messageID))
+      refreshV2(props.sessionID)
+      return
+    }
     if (event.type === "session.next.prompted" || event.type === "session.next.prompt.admitted") {
       const props = event.properties as {
+        delivery?: "steer" | "queue"
         timestamp: number
         sessionID: string
         messageID: string
         prompt: {
+          selection?: SessionInputAdmitted["prompt"]["selection"]
           text: string
+          invocation?: string
           files?: { uri: string; mime: string; name?: string }[]
           agents?: { name: string; source?: { text: string; start: number; end: number } }[]
+        }
+      }
+      if (event.type === "session.next.prompt.admitted" && props.delivery === "queue") {
+        refreshV2(props.sessionID)
+        return
+      }
+      if (event.type === "session.next.prompted") {
+        setData("pending_input", props.sessionID, (items = []) => items.filter((item) => item.id !== props.messageID))
+        if (props.prompt.selection) {
+          v2Info.delete(props.sessionID)
+          void resolve(props.sessionID, { force: true }).catch(() => {})
         }
       }
       const session = data.info[props.sessionID]
@@ -738,11 +869,11 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
             sessionID: props.sessionID,
             role: "user",
             time: { created: props.timestamp },
-            agent: session.agent ?? "build",
+            agent: props.prompt.selection?.agent ?? session.agent ?? "build",
             model: {
-              providerID: session.model?.providerID ?? "unknown",
-              modelID: session.model?.id ?? "unknown",
-              variant: session.model?.variant,
+              providerID: props.prompt.selection?.model.providerID ?? session.model?.providerID ?? "unknown",
+              modelID: props.prompt.selection?.model.id ?? session.model?.id ?? "unknown",
+              variant: props.prompt.selection ? props.prompt.selection.model.variant : session.model?.variant,
             },
           },
         },
@@ -756,7 +887,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
               sessionID: props.sessionID,
               messageID: props.messageID,
               type: "text",
-              text: props.prompt.text,
+              text: props.prompt.invocation ?? props.prompt.text,
             },
           },
         })
@@ -804,6 +935,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         agent: string
         model: { id: string; providerID: string; variant?: string }
       }
+      setData("session_status", props.sessionID, { type: "busy" })
+      void watchExecution(props.sessionID).catch(() => {})
       const session = data.info[props.sessionID]
       const parentID = data.message[props.sessionID]?.findLast((message) => message.role === "user")?.id
       if (!session || !parentID) return refreshV2(props.sessionID)
@@ -838,8 +971,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         textID?: string
         reasoningID?: string
       }
-      const partID = props.textID ?? props.reasoningID
-      if (!partID) return
+      const id = props.textID ?? props.reasoningID
+      if (!id) return
+      const partID = adaptPartID(props.assistantMessageID, id)
+      if (data.part[props.assistantMessageID]?.some((part) => part.id === partID)) return
       apply({
         type: "message.part.updated",
         properties: {
@@ -862,9 +997,41 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         textID?: string
         reasoningID?: string
         delta: string
+        offset?: number
       }
-      const partID = props.textID ?? props.reasoningID
-      if (!partID) return
+      const id = props.textID ?? props.reasoningID
+      if (!id) return
+      const partID = adaptPartID(props.assistantMessageID, id)
+      if (props.offset !== undefined) {
+        const buffered = offsetChunks.get(partID) ?? { sessionID: props.sessionID, chunks: new Map<number, string>() }
+        buffered.chunks.set(props.offset, props.delta)
+        offsetChunks.set(partID, buffered)
+        const part = data.part[props.assistantMessageID]?.find((part) => part.id === partID)
+        if (!part || (part.type !== "text" && part.type !== "reasoning")) {
+          refreshV2(props.sessionID)
+          return
+        }
+        const text = appendOffsetText(part.text, buffered.chunks)
+        if (!messageLoads.has(props.sessionID)) {
+          for (const [offset, delta] of buffered.chunks) {
+            if (offset + delta.length <= text.length) buffered.chunks.delete(offset)
+          }
+          if (!buffered.chunks.size) offsetChunks.delete(partID)
+        }
+        if (props.offset > part.text.length) refreshV2(props.sessionID)
+        if (text === part.text) return
+        apply({
+          type: "message.part.delta",
+          properties: {
+            sessionID: props.sessionID,
+            messageID: props.assistantMessageID,
+            partID,
+            field: "text",
+            delta: text.slice(part.text.length),
+          },
+        })
+        return
+      }
       apply({
         type: "message.part.delta",
         properties: {
@@ -886,8 +1053,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         reasoningID?: string
         text: string
       }
-      const partID = props.textID ?? props.reasoningID
+      const id = props.textID ?? props.reasoningID
+      const partID = id ? adaptPartID(props.assistantMessageID, id) : undefined
       const current = partID ? data.part[props.assistantMessageID]?.find((part) => part.id === partID) : undefined
+      if (partID) offsetChunks.delete(partID)
       if (current && "text" in current)
         apply({
           type: "message.part.updated",
@@ -932,12 +1101,13 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
             },
           },
         })
-      setData("session_status", props.sessionID, { type: "idle" })
+      void watchExecution(props.sessionID).catch(() => {})
       refreshV2(props.sessionID)
       return
     }
     if (
       event.type === "session.next.tool.called" ||
+      event.type === "session.next.tool.progress" ||
       event.type === "session.next.tool.success" ||
       event.type === "session.next.tool.failed" ||
       event.type === "session.next.shell.ended" ||
@@ -946,7 +1116,13 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       if (eventID) refreshV2(eventID)
       return
     }
-    if (event.type === "session.next.updated" && eventID) {
+    if (
+      (event.type === "session.next.updated" ||
+        event.type === "session.next.revert.staged" ||
+        event.type === "session.next.revert.cleared" ||
+        event.type === "session.next.revert.committed") &&
+      eventID
+    ) {
       v2Info.delete(eventID)
       void resolve(eventID, { force: true }).catch(() => {})
       return
@@ -1138,6 +1314,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           produce((draft) => {
             delete draft.part_text_accum_delta[props.partID]
             deltaBases.delete(props.partID)
+            offsetChunks.delete(props.partID)
             const parts = draft.part[props.messageID]
             if (!parts) return
             const result = Binary.search(parts, props.partID, (part) => part.id)
@@ -1258,6 +1435,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     set: setData,
     get: (sessionID: string) => data.info[sessionID],
     peek: (sessionID: string) => data.info[sessionID],
+    messageConfirmed: (sessionID: string, messageID: string) =>
+      !!data.message[sessionID]?.some((message) => message.id === messageID) &&
+      (!optimistic.get(sessionID)?.has(messageID) || !!optimistic.get(sessionID)?.get(messageID)?.confirmedMessage),
     remember,
     resolve,
     lineage: {
@@ -1268,6 +1448,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       },
     },
     sync,
+    watchExecution,
     prefetch,
     shouldPrefetch(sessionID: string, limit: number) {
       if (data.message[sessionID] === undefined) return true
@@ -1340,9 +1521,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     diff(sessionID: string, options?: { force?: boolean }) {
       touch(sessionID)
       if (data.session_diff[sessionID] !== undefined && !options?.force) return Promise.resolve()
-      return runInflight(inflightDiff, sessionID, () => {
+      return runInflight(inflightDiff, sessionID, async () => {
         const active = generation(sessionID)
-        return client.vcs.diff({ mode: "git" }).then((result) => {
+        const session = await resolve(sessionID)
+        return client.vcs.diff({ mode: "git", directory: session.directory }).then((result) => {
           if (generations.get(sessionID) !== active) return
           setData("session_diff", sessionID, reconcile(cleanDiffs(result.data ?? []), { key: "file" }))
         })

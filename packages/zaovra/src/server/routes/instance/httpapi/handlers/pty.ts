@@ -6,7 +6,7 @@ import { Pty } from "@zaovra-ai/core/pty"
 import { PtyProtocol } from "@zaovra-ai/core/pty/protocol"
 import { PtyID } from "@zaovra-ai/core/pty/schema"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
-import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { Location } from "@zaovra-ai/core/location"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { Shell } from "@zaovra-ai/core/shell"
@@ -16,7 +16,7 @@ import {
   PTY_CONNECT_TOKEN_HEADER,
   PTY_CONNECT_TOKEN_HEADER_VALUE,
 } from "@/server/shared/pty-ticket"
-import { Effect, Layer, Option, Queue, Schema } from "effect"
+import { Effect, Option, Queue, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -158,7 +158,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
       .handle("remove", remove)
       .handle("connectToken", connectToken)
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+)
 
 export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-connect", (handlers) =>
   Effect.gen(function* () {
@@ -270,4 +270,4 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
       }),
     )
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+)

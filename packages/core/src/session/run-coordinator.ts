@@ -1,6 +1,6 @@
 export * as SessionRunCoordinator from "./run-coordinator"
 
-import { Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
 
 /** Serializes execution for each key while allowing different keys to run concurrently. */
 export interface Coordinator<Key, E> {
@@ -20,6 +20,7 @@ export interface Coordinator<Key, E> {
 
 type Entry<E> = {
   readonly done: Deferred.Deferred<void, E>
+  readonly observed: Deferred.Deferred<Exit.Exit<void, E>>
   owner?: Fiber.Fiber<void, never>
   pendingWake: boolean
   stopping: boolean
@@ -34,6 +35,7 @@ export const make = <Key, E>(options: {
 
     const makeEntry = (): Entry<E> => ({
       done: Deferred.makeUnsafe<void, E>(),
+      observed: Deferred.makeUnsafe<Exit.Exit<void, E>>(),
       pendingWake: false,
       stopping: false,
     })
@@ -72,6 +74,7 @@ export const make = <Key, E>(options: {
         start(key, successor, false, true)
       }
       Deferred.doneUnsafe(entry.done, exit)
+      Deferred.doneUnsafe(entry.observed, Effect.succeed(exit))
     }
 
     const run = (key: Key): Effect.Effect<void, E> =>
@@ -91,13 +94,22 @@ export const make = <Key, E>(options: {
     const wait = (key: Key): Effect.Effect<void, E> =>
       Effect.suspend(() => {
         const entry = active.get(key)
-        return entry === undefined ? Effect.void : Deferred.await(entry.done)
+        // Observers receive interruption as a completed result, while cancellation
+        // of the observer itself still interrupts its own Deferred.await.
+        return entry === undefined
+          ? Effect.void
+          : Deferred.await(entry.observed).pipe(
+              Effect.flatMap((exit) =>
+                Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? Effect.void : exit,
+              ),
+            )
       })
 
     const exclusive = (key: Key, operation: Effect.Effect<void, E>): Effect.Effect<void, E> =>
       Effect.uninterruptibleMask((restore) => {
         const entry = active.get(key)
-        if (entry !== undefined) return restore(Deferred.await(entry.done).pipe(Effect.andThen(exclusive(key, operation))))
+        if (entry !== undefined)
+          return restore(Deferred.await(entry.done).pipe(Effect.andThen(exclusive(key, operation))))
 
         const next = makeEntry()
         active.set(key, next)

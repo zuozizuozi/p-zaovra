@@ -24,6 +24,7 @@ export type Event =
   | EventSessionNextDeleted
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
+  | EventSessionNextPromptCancelled
   | EventSessionNextContextUpdated
   | EventSessionNextSynthetic
   | EventSessionNextShellStarted
@@ -644,8 +645,11 @@ export type Part =
 
 export type Prompt = {
   text: string
+  invocation?: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  selection?: PromptSelection
+  subtask?: PromptSubtask
 }
 
 export type Pty = {
@@ -911,6 +915,15 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.prompt.cancelled"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+        }
+      }
+    | {
+        id: string
         type: "session.next.context.updated"
         properties: {
           timestamp: number
@@ -973,6 +986,8 @@ export type GlobalEvent = {
           assistantMessageID: string
           finish: string
           cost: number
+          usageReported?: boolean
+          requestPerformed?: boolean
           tokens: {
             input: number
             output: number
@@ -1015,6 +1030,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           textID: string
           delta: string
+          offset?: number
         }
       }
     | {
@@ -1048,6 +1064,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           reasoningID: string
           delta: string
+          offset?: number
         }
       }
     | {
@@ -1205,6 +1222,19 @@ export type GlobalEvent = {
           sourceSequence?: number
           text: string
           recent: string
+          usage?: {
+            providerID: string
+            tokens: {
+              input: number
+              output: number
+              reasoning: number
+              cache: {
+                read: number
+                write: number
+              }
+            }
+            reported: boolean
+          }
         }
       }
     | {
@@ -1217,6 +1247,19 @@ export type GlobalEvent = {
           reason: "auto" | "manual"
           sourceSequence: number
           error: SessionErrorUnknown
+          usage?: {
+            providerID: string
+            tokens: {
+              input: number
+              output: number
+              reasoning: number
+              cache: {
+                read: number
+                write: number
+              }
+            }
+            reported: boolean
+          }
         }
       }
     | {
@@ -2027,6 +2070,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextDeleted
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
+    | SyncEventSessionNextPromptCancelled
     | SyncEventSessionNextContextUpdated
     | SyncEventSessionNextSynthetic
     | SyncEventSessionNextShellStarted
@@ -2881,8 +2925,11 @@ export type SessionNotFoundError = {
 
 export type PromptInput = {
   text: string
+  invocation?: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  selection?: PromptSelection
+  subtask?: PromptSubtask
 }
 
 export type ConflictError = {
@@ -2891,17 +2938,17 @@ export type ConflictError = {
   resource?: string
 }
 
-export type ServiceUnavailableError = {
-  _tag: "ServiceUnavailableError"
-  message: string
-  service?: string
-}
-
 export type MessageNotFoundError = {
   _tag: "MessageNotFoundError"
   sessionID: string
   messageID: string
   message: string
+}
+
+export type ServiceUnavailableError = {
+  _tag: "ServiceUnavailableError"
+  message: string
+  service?: string
 }
 
 export type UnknownError1 = {
@@ -2919,6 +2966,7 @@ export type SessionDurableEvent =
   | SessionNextDeleted
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextPromptCancelled
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -3101,6 +3149,7 @@ export type V2Event =
   | SessionNextDeleted
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextPromptCancelled
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -3338,6 +3387,17 @@ export type PromptFileAttachment = {
 export type PromptAgentAttachment = {
   name: string
   source?: PromptSource
+}
+
+export type PromptSelection = {
+  agent: string
+  model: ModelRef
+}
+
+export type PromptSubtask = {
+  command: string
+  agent: string
+  model: ModelRef
 }
 
 export type SessionErrorUnknown = {
@@ -3981,6 +4041,22 @@ export type SyncEventSessionNextPromptAdmitted = {
   }
 }
 
+export type SyncEventSessionNextPromptCancelled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.prompt.cancelled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+    }
+  }
+}
+
 export type SyncEventSessionNextContextUpdated = {
   type: "sync"
   id: string
@@ -4085,6 +4161,8 @@ export type SyncEventSessionNextStepEnded = {
       assistantMessageID: string
       finish: string
       cost: number
+      usageReported?: boolean
+      requestPerformed?: boolean
       tokens: {
         input: number
         output: number
@@ -4372,6 +4450,19 @@ export type SyncEventSessionNextCompactionEnded = {
       sourceSequence?: number
       text: string
       recent: string
+      usage?: {
+        providerID: string
+        tokens: {
+          input: number
+          output: number
+          reasoning: number
+          cache: {
+            read: number
+            write: number
+          }
+        }
+        reported: boolean
+      }
     }
   }
 }
@@ -4391,6 +4482,19 @@ export type SyncEventSessionNextCompactionFailed = {
       reason: "auto" | "manual"
       sourceSequence: number
       error: SessionErrorUnknown
+      usage?: {
+        providerID: string
+        tokens: {
+          input: number
+          output: number
+          reasoning: number
+          cache: {
+            read: number
+            write: number
+          }
+        }
+        reported: boolean
+      }
     }
   }
 }
@@ -5171,6 +5275,7 @@ export type SessionInputAdmitted = {
   delivery: "steer" | "queue"
   timeCreated: number
   promotedSeq?: number
+  cancelledSeq?: number
 }
 
 export type SessionMessageAgentSwitched = {
@@ -5206,8 +5311,11 @@ export type SessionMessageUser = {
     created: number
   }
   text: string
+  invocation?: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  selection?: PromptSelection
+  subtask?: PromptSubtask
   type: "user"
 }
 
@@ -5558,6 +5666,25 @@ export type SessionNextPromptAdmitted = {
   }
 }
 
+export type SessionNextPromptCancelled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.prompt.cancelled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+  }
+}
+
 export type SessionNextContextUpdated = {
   id: string
   metadata?: {
@@ -5681,6 +5808,8 @@ export type SessionNextStepEnded = {
     assistantMessageID: string
     finish: string
     cost: number
+    usageReported?: boolean
+    requestPerformed?: boolean
     tokens: {
       input: number
       output: number
@@ -6010,6 +6139,19 @@ export type SessionNextCompactionEnded = {
     sourceSequence?: number
     text: string
     recent: string
+    usage?: {
+      providerID: string
+      tokens: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
+      reported: boolean
+    }
   }
 }
 
@@ -6032,6 +6174,19 @@ export type SessionNextCompactionFailed = {
     reason: "auto" | "manual"
     sourceSequence: number
     error: SessionErrorUnknown
+    usage?: {
+      providerID: string
+      tokens: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
+      reported: boolean
+    }
   }
 }
 
@@ -6597,6 +6752,7 @@ export type SessionNextTextDelta = {
     assistantMessageID: string
     textID: string
     delta: string
+    offset?: number
   }
 }
 
@@ -6618,6 +6774,7 @@ export type SessionNextReasoningDelta = {
     assistantMessageID: string
     reasoningID: string
     delta: string
+    offset?: number
   }
 }
 
@@ -8458,6 +8615,16 @@ export type EventSessionNextPromptAdmitted = {
   }
 }
 
+export type EventSessionNextPromptCancelled = {
+  id: string
+  type: "session.next.prompt.cancelled"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+  }
+}
+
 export type EventSessionNextContextUpdated = {
   id: string
   type: "session.next.context.updated"
@@ -8527,6 +8694,8 @@ export type EventSessionNextStepEnded = {
     assistantMessageID: string
     finish: string
     cost: number
+    usageReported?: boolean
+    requestPerformed?: boolean
     tokens: {
       input: number
       output: number
@@ -8572,6 +8741,7 @@ export type EventSessionNextTextDelta = {
     assistantMessageID: string
     textID: string
     delta: string
+    offset?: number
   }
 }
 
@@ -8608,6 +8778,7 @@ export type EventSessionNextReasoningDelta = {
     assistantMessageID: string
     reasoningID: string
     delta: string
+    offset?: number
   }
 }
 
@@ -8777,6 +8948,19 @@ export type EventSessionNextCompactionEnded = {
     sourceSequence?: number
     text: string
     recent: string
+    usage?: {
+      providerID: string
+      tokens: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
+      reported: boolean
+    }
   }
 }
 
@@ -8790,6 +8974,19 @@ export type EventSessionNextCompactionFailed = {
     reason: "auto" | "manual"
     sourceSequence: number
     error: SessionErrorUnknown
+    usage?: {
+      providerID: string
+      tokens: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
+      reported: boolean
+    }
   }
 }
 
@@ -12200,6 +12397,92 @@ export type V2SessionCreateResponses = {
 
 export type V2SessionCreateResponse = V2SessionCreateResponses[keyof V2SessionCreateResponses]
 
+export type V2SessionUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    sessionID?: string
+  }
+  url: "/api/usage"
+}
+
+export type V2SessionUsageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2SessionUsageError = V2SessionUsageErrors[keyof V2SessionUsageErrors]
+
+export type V2SessionUsageResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: {
+      total: {
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+        calls: number
+        unreported: number
+      }
+      own: {
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+        calls: number
+        unreported: number
+      }
+      official: {
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+        calls: number
+        unreported: number
+      }
+      unknown: {
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+        calls: number
+        unreported: number
+      }
+      lastTurn: {
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+        calls: number
+        unreported: number
+      }
+      updatedAt: number
+      billing: "unavailable"
+    }
+  }
+}
+
+export type V2SessionUsageResponse = V2SessionUsageResponses[keyof V2SessionUsageResponses]
+
 export type V2SessionActiveData = {
   body?: never
   path?: never
@@ -12501,6 +12784,90 @@ export type V2SessionPendingInputsResponses = {
 }
 
 export type V2SessionPendingInputsResponse = V2SessionPendingInputsResponses[keyof V2SessionPendingInputsResponses]
+
+export type V2SessionTurnDiffData = {
+  body?: never
+  path: {
+    sessionID: string
+    messageID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/message/{messageID}/diff"
+}
+
+export type V2SessionTurnDiffErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError | MessageNotFoundError
+   */
+  404: MessageNotFoundError | SessionNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type V2SessionTurnDiffError = V2SessionTurnDiffErrors[keyof V2SessionTurnDiffErrors]
+
+export type V2SessionTurnDiffResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<FileDiff>
+  }
+}
+
+export type V2SessionTurnDiffResponse = V2SessionTurnDiffResponses[keyof V2SessionTurnDiffResponses]
+
+export type V2SessionCancelInputData = {
+  body?: never
+  path: {
+    sessionID: string
+    messageID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/input/{messageID}/cancel"
+}
+
+export type V2SessionCancelInputErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2SessionCancelInputError = V2SessionCancelInputErrors[keyof V2SessionCancelInputErrors]
+
+export type V2SessionCancelInputResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionInputAdmitted
+  }
+}
+
+export type V2SessionCancelInputResponse = V2SessionCancelInputResponses[keyof V2SessionCancelInputResponses]
 
 export type V2SessionShellData = {
   body: {

@@ -78,6 +78,30 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("reads and cancels durable task inputs whose IDs exceed the router default", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const id = `ses_task_${"parent_assistant_call_".repeat(7)}`
+    const messageID = `msg_task_${"parent_assistant_call_".repeat(7)}`
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, location: { directory: tmp.path } }),
+    })
+    expect(created.status).toBe(200)
+    const read = await request(`/api/session/${id}`, tmp.path)
+    expect(read.status).toBe(200)
+    expect(await read.json()).toMatchObject({ data: { id } })
+    const admitted = await request(`/api/session/${id}/prompt`, tmp.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: messageID, prompt: { text: "admit only" }, delivery: "queue", resume: false }),
+    })
+    expect(admitted.status).toBe(200)
+    const cancelled = await request(`/api/session/${id}/input/${messageID}/cancel`, tmp.path, { method: "POST" })
+    expect(cancelled.status).toBe(200)
+    expect((await request(`/api/session/${id}/input/pending`, tmp.path)).status).toBe(200)
+  })
+
   test("decodes EventV2 location refs without resolved project metadata", () => {
     expect(
       Schema.decodeUnknownSync(Event)({
@@ -114,10 +138,14 @@ describe("v2 location HttpApi", () => {
     expect(connected.type).toBe("server.connected")
     expect(connected.location).toBeUndefined()
 
-    const created = await request("/session", publisher.path, { method: "POST" })
+    const created = await request("/api/session", publisher.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: { directory: publisher.path } }),
+    })
     expect(created.status).toBe(200)
-    expect(await readEventType(reader, "session.created")).toMatchObject({
-      type: "session.created",
+    expect(await readEventType(reader, "session.next.created")).toMatchObject({
+      type: "session.next.created",
       location: { directory: publisher.path },
       data: { sessionID: expect.any(String) },
     })

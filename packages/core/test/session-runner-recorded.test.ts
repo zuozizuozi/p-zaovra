@@ -9,6 +9,8 @@ import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { EventTable } from "@zaovra-ai/core/event/sql"
 import { PermissionV2 } from "@zaovra-ai/core/permission"
+import { PluginV2 } from "@zaovra-ai/core/plugin"
+import { PluginInternal } from "@zaovra-ai/core/plugin/internal"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Config } from "@zaovra-ai/core/config"
 import { Project } from "@zaovra-ai/core/project"
@@ -104,6 +106,7 @@ const it = testEffect(
     LayerNode.group([
       Database.node,
       EventV2.node,
+      PluginV2.node,
       SessionProjector.node,
       SessionStore.node,
       AgentV2.node,
@@ -137,6 +140,9 @@ const sessionID = SessionV2.ID.make("ses_runner_recorded")
 describe("SessionRunnerLLM recorded", () => {
   it.effect("executes one recorded V2 prompt through the recorded HTTP transport", () =>
     Effect.gen(function* () {
+      // This transport fixture has no plugin tools, but the runner still waits for initialization.
+      const plugins = yield* PluginV2.Service
+      yield* plugins.add(PluginInternal.readyID, () => Effect.void)
       const { db } = yield* Database.Service
       yield* db
         .insert(ProjectTable)

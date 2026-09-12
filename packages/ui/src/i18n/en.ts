@@ -1,4 +1,7 @@
 export const dict: Record<string, string> = {
+  "ui.messagePart.diagnosticsFailed": "File changes saved. Language diagnostics could not complete: {{servers}}.",
+  "ui.messagePart.formattingFailed": "File changes saved. Automatic formatting failed: {{formatters}}.",
+
   "ui.sessionReview.title": "Session changes",
   "ui.sessionReview.title.git": "Git changes",
   "ui.sessionReview.title.branch": "Branch changes",

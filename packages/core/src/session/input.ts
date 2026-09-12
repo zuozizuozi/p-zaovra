@@ -27,6 +27,7 @@ const fromRow = (row: typeof SessionInputTable.$inferSelect): Admitted =>
     delivery: row.delivery,
     timeCreated: DateTime.makeUnsafe(row.time_created),
     ...(row.promoted_seq === null ? {} : { promotedSeq: row.promoted_seq }),
+    ...(row.cancelled_seq === null ? {} : { cancelledSeq: row.cancelled_seq }),
   })
 
 export const find = Effect.fn("SessionInput.find")(function* (db: DatabaseService, id: SessionMessage.ID) {
@@ -134,6 +135,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
         eq(SessionInputTable.id, input.id),
         eq(SessionInputTable.session_id, input.sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_seq),
       ),
     )
     .returning()
@@ -167,6 +169,30 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     .pipe(Effect.orDie)
 })
 
+export const projectCancelled = Effect.fn("SessionInput.projectCancelled")(function* (
+  db: DatabaseService,
+  input: { readonly id: SessionMessage.ID; readonly sessionID: SessionSchema.ID; readonly cancelledSeq: number },
+) {
+  const updated = yield* db
+    .update(SessionInputTable)
+    .set({ cancelled_seq: input.cancelledSeq })
+    .where(
+      and(
+        eq(SessionInputTable.id, input.id),
+        eq(SessionInputTable.session_id, input.sessionID),
+        isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_seq),
+      ),
+    )
+    .returning()
+    .get()
+    .pipe(Effect.orDie)
+  if (updated) return
+  const stored = yield* find(db, input.id)
+  if (stored?.sessionID === input.sessionID && stored.cancelledSeq === input.cancelledSeq) return
+  return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+})
+
 export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,
@@ -179,6 +205,7 @@ export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
       and(
         eq(SessionInputTable.session_id, sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_seq),
         eq(SessionInputTable.delivery, delivery),
       ),
     )
@@ -188,17 +215,23 @@ export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
   return row !== undefined
 })
 
-export const pending = Effect.fn("SessionInput.pending")(function* (
-  db: DatabaseService,
-  sessionID: SessionSchema.ID,
-) {
+export const pending = Effect.fn("SessionInput.pending")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
   return yield* db
     .select()
     .from(SessionInputTable)
-    .where(and(eq(SessionInputTable.session_id, sessionID), isNull(SessionInputTable.promoted_seq)))
+    .where(
+      and(
+        eq(SessionInputTable.session_id, sessionID),
+        isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_seq),
+      ),
+    )
     .orderBy(asc(SessionInputTable.admitted_seq))
     .all()
-    .pipe(Effect.orDie, Effect.map((rows) => rows.map(fromRow)))
+    .pipe(
+      Effect.orDie,
+      Effect.map((rows) => rows.map(fromRow)),
+    )
 })
 
 export const equivalent = (
@@ -232,9 +265,10 @@ const publish = Effect.fn("SessionInput.publish")(function* (
   sessionID: SessionSchema.ID,
   rows: ReadonlyArray<typeof SessionInputTable.$inferSelect>,
 ) {
+  let promoted = 0
   for (const row of rows) {
     const id = SessionMessage.ID.make(row.id)
-    yield* events
+    const completed = yield* events
       .publish(SessionEvent.Prompted, {
         sessionID,
         timestamp: DateTime.makeUnsafe(row.time_created),
@@ -243,16 +277,22 @@ const publish = Effect.fn("SessionInput.publish")(function* (
         delivery: row.delivery,
       })
       .pipe(
+        Effect.as(true),
         Effect.catchDefect((defect) =>
           defect instanceof LifecycleConflict
             ? find(db, id).pipe(
-                Effect.flatMap((stored) => (stored?.promotedSeq === undefined ? Effect.die(defect) : Effect.void)),
+                Effect.flatMap((stored) => {
+                  if (stored?.cancelledSeq !== undefined) return Effect.succeed(false)
+                  if (stored?.promotedSeq !== undefined) return Effect.succeed(false)
+                  return Effect.die(defect)
+                }),
               )
             : Effect.die(defect),
         ),
       )
+    if (completed) promoted++
   }
-  return rows.length
+  return promoted
 })
 
 export const promoteSteers = Effect.fn("SessionInput.promoteSteers")(function* (
@@ -268,6 +308,7 @@ export const promoteSteers = Effect.fn("SessionInput.promoteSteers")(function* (
       and(
         eq(SessionInputTable.session_id, sessionID),
         isNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.cancelled_seq),
         eq(SessionInputTable.delivery, "steer"),
         lte(SessionInputTable.admitted_seq, cutoff),
       ),
@@ -283,19 +324,23 @@ export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(fun
   events: EventV2.Interface,
   sessionID: SessionSchema.ID,
 ) {
-  const row = yield* db
-    .select()
-    .from(SessionInputTable)
-    .where(
-      and(
-        eq(SessionInputTable.session_id, sessionID),
-        isNull(SessionInputTable.promoted_seq),
-        eq(SessionInputTable.delivery, "queue"),
-      ),
-    )
-    .orderBy(asc(SessionInputTable.admitted_seq))
-    .limit(1)
-    .get()
-    .pipe(Effect.orDie)
-  return row === undefined ? false : yield* publish(db, events, sessionID, [row]).pipe(Effect.as(true))
+  while (true) {
+    const row = yield* db
+      .select()
+      .from(SessionInputTable)
+      .where(
+        and(
+          eq(SessionInputTable.session_id, sessionID),
+          isNull(SessionInputTable.promoted_seq),
+          isNull(SessionInputTable.cancelled_seq),
+          eq(SessionInputTable.delivery, "queue"),
+        ),
+      )
+      .orderBy(asc(SessionInputTable.admitted_seq))
+      .limit(1)
+      .get()
+      .pipe(Effect.orDie)
+    if (row === undefined) return false
+    if ((yield* publish(db, events, sessionID, [row])) > 0) return true
+  }
 })

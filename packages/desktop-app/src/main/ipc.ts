@@ -1,7 +1,10 @@
+import { createArtifactPreview } from "./artifact-preview"
+import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/app/provider-discovery"
 import { stat } from "node:fs/promises"
-import { basename } from "node:path"
+import { basename, join } from "node:path"
+import { convertAttachment } from "./attachment-convert"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@zaovra-ai/app/desktop-menu"
@@ -11,6 +14,7 @@ import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
+import { writeStore } from "./store-write"
 import {
   getPinchZoomEnabled,
   getWindowID,
@@ -79,6 +83,7 @@ type Deps = {
 }
 
 export function registerIpcHandlers(deps: Deps) {
+  const conversions = new Map<number, { id: string; controller: AbortController }>()
   const updaterSubscriptions = createUpdaterSubscriptions()
   const resolvedApps = new Map<number, Set<string>>()
   const handle = <Args extends unknown[], Result>(
@@ -94,6 +99,22 @@ export function registerIpcHandlers(deps: Deps) {
       if (!isTrustedIpcSender(event)) return
       listener(event, ...(args as Args))
     })
+  const previews = new Map<number, ArtifactPreviewAPI>()
+  const preview = (event: IpcMainInvokeEvent) => {
+    const existing = previews.get(event.sender.id)
+    if (existing) return existing
+    const value = createArtifactPreview(event.sender)
+    previews.set(event.sender.id, value)
+    event.sender.once("destroyed", () => previews.delete(event.sender.id))
+    return value
+  }
+  handle("artifact-read-pdf", (event, input: Parameters<ArtifactPreviewAPI["readPDF"]>[0]) =>
+    preview(event).readPDF(input),
+  )
+  handle("artifact-open", (event, input: Parameters<ArtifactPreviewAPI["open"]>[0]) => preview(event).open(input))
+  handle("artifact-bounds", (event, input: Parameters<ArtifactPreviewAPI["bounds"]>[0]) => preview(event).bounds(input))
+  handle("artifact-action", (event, input: Parameters<ArtifactPreviewAPI["action"]>[0]) => preview(event).action(input))
+  handle("artifact-state", (event, id: string) => preview(event).state(id))
   const rememberResolvedApp = (event: IpcMainInvokeEvent, value: string) => {
     const current = resolvedApps.get(event.sender.id)
     if (current) {
@@ -103,6 +124,39 @@ export function registerIpcHandlers(deps: Deps) {
     resolvedApps.set(event.sender.id, new Set([value.toLowerCase()]))
     event.sender.once("destroyed", () => resolvedApps.delete(event.sender.id))
   }
+  handle("cancel-attachment", (event, id: string) => {
+    const task = conversions.get(event.sender.id)
+    if (task?.id !== id) return
+    task.controller.abort()
+    conversions.delete(event.sender.id)
+  })
+  handle("convert-attachment", async (event, input: { id: string; name: string; bytes: ArrayBuffer }) => {
+    if (conversions.has(event.sender.id)) throw new Error("正在解析附件，请等待当前文件完成后重试")
+    const controller = new AbortController()
+    conversions.set(event.sender.id, { id: input.id, controller })
+    const destroyed = () => controller.abort()
+    event.sender.once("destroyed", destroyed)
+    const runtime = app.isPackaged
+      ? join(process.resourcesPath, "attachments")
+      : join(app.getAppPath(), "../../.cache/attachment-python")
+    try {
+      return await convertAttachment(
+        input,
+        {
+          python: join(runtime, process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
+          script: join(
+            app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"),
+            "attachments/convert.py",
+          ),
+          models: join(runtime, "models"),
+        },
+        controller.signal,
+      )
+    } finally {
+      event.sender.removeListener("destroyed", destroyed)
+      if (conversions.get(event.sender.id)?.id === input.id) conversions.delete(event.sender.id)
+    }
+  })
   app.once("will-quit", updaterSubscriptions.clear)
 
   handle("kill-sidecar", () => deps.killSidecar())
@@ -163,8 +217,16 @@ export function registerIpcHandlers(deps: Deps) {
       return null
     }
   })
-  handle("store-set", (_event: IpcMainInvokeEvent, name: string, key: string, value: string) => {
-    getStore(name).set(key, value)
+  handle("store-set", (event: IpcMainInvokeEvent, name: string, key: string, value: string) => {
+    writeStore(
+      name,
+      key,
+      value,
+      event.sender.id,
+      BrowserWindow.getAllWindows()
+        .map((win) => win.webContents)
+        .filter((contents) => !contents.isDestroyed() && isTrustedRendererUrl(contents.getURL())),
+    )
   })
   handle("store-delete", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     getStore(name).delete(key)

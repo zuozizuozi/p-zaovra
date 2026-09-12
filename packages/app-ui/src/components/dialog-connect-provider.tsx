@@ -1,3 +1,4 @@
+import { modelSource } from "@/utils/model-source"
 import type { IntegrationAttempt, IntegrationMethod } from "@zaovra-ai/sdk/v2/types"
 import { Button } from "@zaovra-ai/ui/button"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -37,7 +38,7 @@ import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { resolveProviderIntegration } from "@/utils/provider-integration"
 import { CustomProviderForm } from "./dialog-custom-provider"
 import { usePlatform } from "@/context/platform"
-import { discoverProviderModels, providerDiscoveryPresets } from "@/provider-discovery"
+import { discoverProviderModels, providerDiscoveryPresets, providerProtocols } from "@/provider-discovery"
 
 const CUSTOM_ID = "_custom"
 
@@ -53,6 +54,7 @@ export function useProviderConnectController(options: { onBack?: () => void } = 
 }
 
 export const DialogConnectProvider: Component<{
+  ownOnly?: boolean
   directory?: Accessor<string | undefined>
   controller?: ReturnType<typeof useProviderConnectController>
 }> = (props) => {
@@ -88,6 +90,7 @@ export const DialogConnectProvider: Component<{
         </Match>
         <Match when={true}>
           <ProviderPicker
+            ownOnly={props.ownOnly}
             directory={props.directory}
             onSelect={select}
             onPrepare={newLayout() ? holdFocus : undefined}
@@ -150,13 +153,21 @@ export const DialogConnectProvider: Component<{
 }
 
 function ProviderPicker(props: {
+  ownOnly?: boolean
   directory?: Accessor<string | undefined>
   onSelect: (provider: string) => void
   onPrepare?: () => void
 }) {
   const settings = useSettings()
   if (settings.general.newLayoutDesigns())
-    return <ProviderPickerV2 directory={props.directory} onSelect={props.onSelect} onPrepare={props.onPrepare} />
+    return (
+      <ProviderPickerV2
+        ownOnly={props.ownOnly}
+        directory={props.directory}
+        onSelect={props.onSelect}
+        onPrepare={props.onPrepare}
+      />
+    )
   const providers = useProviders(props.directory)
   const language = useLanguage()
   const popularGroup = () => language.t("dialog.provider.group.popular")
@@ -179,7 +190,12 @@ function ProviderPicker(props: {
       key={(x) => x?.id}
       items={() => {
         language.locale()
-        return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()]
+        return [
+          { id: CUSTOM_ID, name: customLabel() },
+          ...Array.from(providers.all().values()).filter(
+            (provider) => !props.ownOnly || modelSource(provider) === "own",
+          ),
+        ]
       }}
       filterKeys={["id", "name"]}
       groupBy={(x) => (popularProviders.includes(x.id) ? popularGroup() : otherGroup())}
@@ -225,6 +241,7 @@ function ProviderPicker(props: {
 }
 
 function ProviderPickerV2(props: {
+  ownOnly?: boolean
   directory?: Accessor<string | undefined>
   onSelect: (provider: string) => void
   onPrepare?: () => void
@@ -241,7 +258,10 @@ function ProviderPickerV2(props: {
   const all = createMemo(() => {
     language.locale()
     const query = store.filter.trim().toLowerCase()
-    const values = [custom(), ...providers.all().values()]
+    const values = [
+      custom(),
+      ...Array.from(providers.all().values()).filter((provider) => !props.ownOnly || modelSource(provider) === "own"),
+    ]
     if (!query) return values
     return values.filter((provider) => `${provider.id} ${provider.name}`.toLowerCase().includes(query))
   })
@@ -860,8 +880,20 @@ function ProviderConnection(props: {
       try {
         const preset = providerDiscoveryPresets[props.provider]
         const configured = serverSync().data.config.provider?.[props.provider]?.options
-        if (preset && !configured?.baseURL && !Object.keys(store.promptInputs ?? {}).length)
-          await (platform.discoverProviderModels ?? discoverProviderModels)({ ...preset, apiKey: key })
+        if (preset && !configured?.baseURL && !Object.keys(store.promptInputs ?? {}).length) {
+          const discovered = await (platform.discoverProviderModels ?? discoverProviderModels)({
+            ...preset,
+            apiKey: key,
+          })
+          await serverSync().updateConfig({
+            provider: {
+              [props.provider]: {
+                whitelist: discovered.map((model) => model.id),
+                models: Object.fromEntries(discovered.map((model) => [model.id, { name: model.name }])),
+              },
+            },
+          })
+        }
         await serverSDK().client.v2.integration.connect.key(
           {
             integrationID: auth.latest!.integrationID,
@@ -913,6 +945,14 @@ function ProviderConnection(props: {
             </div>
           </Show>
           <form onSubmit={handleSubmit} class="flex flex-col items-start gap-5 self-stretch">
+            <Show when={providerDiscoveryPresets[props.provider]}>
+              {(preset) => (
+                <p>
+                  {language.t("provider.custom.protocol.label")}:{" "}
+                  {preset().kind ? providerProtocols[preset().kind!].label : "OpenAI"}
+                </p>
+              )}
+            </Show>
             <label class="flex w-full flex-col gap-1 font-[530] leading-4 text-v2-text-text-base">
               {language.t("provider.connect.apiKey.label", { provider: provider().name })}
               <TextInputV2

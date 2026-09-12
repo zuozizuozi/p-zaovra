@@ -25,7 +25,13 @@ const layer = Layer.effect(
         .selectDistinct({ id: SessionTable.id })
         .from(SessionTable)
         .innerJoin(SessionInputTable, eq(SessionInputTable.session_id, SessionTable.id))
-        .where(and(isNotNull(SessionTable.parent_id), isNull(SessionInputTable.promoted_seq)))
+        .where(
+          and(
+            isNotNull(SessionTable.parent_id),
+            isNull(SessionInputTable.promoted_seq),
+            isNull(SessionInputTable.cancelled_seq),
+          ),
+        )
         .all()
         .pipe(Effect.orDie)
       const sessionIDs = rows.map((row) => SessionSchema.ID.make(row.id))

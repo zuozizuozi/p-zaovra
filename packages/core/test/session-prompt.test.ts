@@ -9,8 +9,13 @@ import { EventTable } from "@zaovra-ai/core/event/sql"
 import { SessionEvent } from "@zaovra-ai/core/session/event"
 import { Project } from "@zaovra-ai/core/project"
 import { ProjectTable } from "@zaovra-ai/core/project/sql"
-import { AbsolutePath } from "@zaovra-ai/core/schema"
+import { AbsolutePath, RelativePath } from "@zaovra-ai/core/schema"
+import { SessionTurnDiff } from "@zaovra-ai/core/session/turn-diff"
+import { Model } from "@zaovra-ai/schema/model"
+import { Provider } from "@zaovra-ai/schema/provider"
+import { Snapshot } from "@zaovra-ai/core/snapshot"
 import { SessionV2 } from "@zaovra-ai/core/session"
+import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
@@ -99,6 +104,212 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  it.effect("applies a queued input's model and agent only when it is promoted", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const before = yield* session.get(sessionID)
+      const selection = {
+        agent: "plan",
+        model: { id: Model.ID.make("queued-model"), providerID: Provider.ID.make("queued-provider") },
+      }
+      const input = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Later", selection }),
+        delivery: "queue",
+        resume: false,
+      })
+      expect((yield* session.get(sessionID)).model).toEqual(before.model)
+      expect((yield* session.get(sessionID)).agent).toEqual(before.agent)
+      expect((yield* session.pendingInputs(sessionID))[0].prompt.selection).toEqual(selection)
+      const conflict = yield* session
+        .prompt({
+          id: input.id,
+          sessionID,
+          prompt: Prompt.make({ text: "Later", selection: { ...selection, agent: "build" } }),
+          delivery: "queue",
+          resume: false,
+        })
+        .pipe(Effect.flip)
+      expect(conflict._tag).toBe("Session.PromptConflictError")
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(true)
+      expect((yield* session.get(sessionID)).model).toMatchObject(selection.model)
+      expect((yield* session.get(sessionID)).agent).toBe(AgentV2.ID.make("plan"))
+      const messages = yield* session.messages({ sessionID })
+      expect(messages[0].type === "user" && messages[0].selection).toEqual(selection)
+    }),
+  )
+
+  it.effect("plans changes from persisted snapshots within exactly one user turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const events = yield* EventV2.Service
+      const timestamp = yield* DateTime.now
+      const first = SessionMessage.ID.create()
+      const next = SessionMessage.ID.create()
+      for (const turn of [
+        { id: first, snapshots: ["before", "middle", "after"] },
+        { id: next, snapshots: ["later-before", "later-after"] },
+      ]) {
+        yield* events.publish(SessionEvent.Prompted, {
+          sessionID,
+          timestamp,
+          messageID: turn.id,
+          prompt: Prompt.make({ text: "Edit" }),
+          delivery: "steer",
+        })
+        for (let index = 1; index < turn.snapshots.length; index++) {
+          const assistantMessageID = SessionMessage.ID.create()
+          yield* events.publish(SessionEvent.Step.Started, {
+            sessionID,
+            timestamp,
+            assistantMessageID,
+            agent: "build",
+            model: { id: Model.ID.make("test"), providerID: Provider.ID.make("test") },
+            snapshot: turn.snapshots[index - 1],
+          })
+          yield* events.publish(SessionEvent.Step.Ended, {
+            sessionID,
+            timestamp,
+            assistantMessageID,
+            finish: "stop",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            snapshot: turn.snapshots[index],
+            files: [RelativePath.make(turn.id === first ? "first.txt" : "next.txt")],
+          })
+        }
+      }
+      expect(yield* SessionTurnDiff.plan({ sessionID, messageID: first })).toEqual({
+        from: Snapshot.ID.make("before"),
+        to: Snapshot.ID.make("after"),
+        paths: [RelativePath.make("first.txt")],
+      })
+      expect(yield* SessionTurnDiff.plan({ sessionID, messageID: next })).toEqual({
+        from: Snapshot.ID.make("later-before"),
+        to: Snapshot.ID.make("later-after"),
+        paths: [RelativePath.make("next.txt")],
+      })
+      const error = yield* SessionTurnDiff.plan({ sessionID, messageID: SessionMessage.ID.create() }).pipe(Effect.flip)
+      expect(error._tag).toBe("Session.MessageNotFoundError")
+    }),
+  )
+
+  it.effect("cancels pending input durably without allowing an old retry to wake it", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const input = {
+        sessionID,
+        id: SessionMessage.ID.create(),
+        prompt: Prompt.make({ text: "Queued work" }),
+        delivery: "queue" as const,
+        resume: false,
+      }
+      yield* session.prompt(input)
+      const cancelled = yield* session.cancelInput({ sessionID, messageID: input.id })
+      expect(cancelled.cancelledSeq).toBeDefined()
+      expect(yield* session.pendingInputs(sessionID)).toEqual([])
+      expect(yield* session.cancelInput({ sessionID, messageID: input.id })).toEqual(cancelled)
+      wakeCalls.length = 0
+      expect(yield* session.prompt({ ...input, resume: true })).toEqual(cancelled)
+      expect(wakeCalls).toEqual([])
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(false)
+      expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.PromptCancelled.type, 1))).toBe(1)
+    }),
+  )
+
+  it.effect("rejects cancelling an input that already entered the transcript", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const input = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Run work" }),
+        delivery: "queue",
+        resume: false,
+      })
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(true)
+      const error = yield* session.cancelInput({ sessionID, messageID: input.id }).pipe(Effect.flip)
+      expect(error._tag).toBe("Session.PromptConflictError")
+      expect((yield* admitted(input.id))?.cancelledSeq).toBeUndefined()
+    }),
+  )
+
+  it.effect("keeps cancellation exclusive with concurrent promotion", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const input = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Race" }),
+        delivery: "queue",
+        resume: false,
+      })
+      yield* Effect.all(
+        [
+          session
+            .cancelInput({ sessionID, messageID: input.id })
+            .pipe(Effect.catchTag("Session.PromptConflictError", () => Effect.void)),
+          SessionInput.promoteNextQueued(database.db, events, sessionID),
+        ],
+        { concurrency: "unbounded" },
+      )
+      const stored = yield* admitted(input.id)
+      expect(stored).toBeDefined()
+      expect(stored!.cancelledSeq !== undefined).toBe(stored!.promotedSeq === undefined)
+      expect((yield* session.messages({ sessionID })).length).toBe(stored!.promotedSeq === undefined ? 0 : 1)
+    }),
+  )
+
+  it.effect("replays cancellation without resurrecting pending work", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const input = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Cancel then replay" }),
+        delivery: "queue",
+        resume: false,
+      })
+      const cancelled = yield* session.cancelInput({ sessionID, messageID: input.id })
+      const recorded = yield* database.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      yield* events.remove(sessionID)
+      yield* database.db
+        .delete(SessionInputTable)
+        .where(eq(SessionInputTable.session_id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* events.replayAll(
+        recorded.map((event) => ({
+          id: event.id,
+          aggregateID: event.aggregate_id,
+          seq: event.seq,
+          type: event.type,
+          data: event.data,
+        })),
+      )
+      expect(yield* admitted(input.id)).toEqual(cancelled)
+      expect(yield* session.pendingInputs(sessionID)).toEqual([])
+    }),
+  )
+
   it.effect("exposes the execution registry", () =>
     Effect.gen(function* () {
       activeSessions.add(sessionID)

@@ -45,8 +45,11 @@ export interface User extends Schema.Schema.Type<typeof User> {}
 export const User = Schema.Struct({
   ...Base,
   text: Prompt.fields.text,
+  invocation: Prompt.fields.invocation,
   files: Prompt.fields.files,
   agents: Prompt.fields.agents,
+  selection: Prompt.fields.selection,
+  subtask: Prompt.fields.subtask,
   type: Schema.Literal("user"),
 }).annotate({ identifier: "Session.Message.User" })
 

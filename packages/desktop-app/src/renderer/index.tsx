@@ -17,7 +17,8 @@ import {
 import type { UpdaterState } from "@zaovra-ai/app/updater"
 import * as Sentry from "@sentry/solid"
 import type { AsyncStorage } from "@solid-primitives/storage"
-import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidjs/router"
+import type { BaseRouterProps } from "@solidjs/router"
+import { DesktopMemoryRouter, getLastActiveUrl } from "./window-router"
 import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
@@ -25,7 +26,7 @@ import { initI18n, t } from "./i18n"
 import { initializationData, initializationReady } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
-import { availableStartupServer, readyWslConnections } from "./wsl/connections"
+import { createStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { Splash } from "@zaovra-ai/ui/logo"
 import { useTheme } from "@zaovra-ai/ui/theme/context"
@@ -82,36 +83,9 @@ const listenForDeepLinks = () => {
   return window.api.onDeepLink((urls) => emitDeepLinks(urls))
 }
 
-function windowLastActiveUrlKey(windowID: string) {
-  return `zaovra.desktop.window.${windowID}.last-active-url`
-}
-
-function getLastActiveUrl(windowID: string) {
-  if (typeof localStorage !== "object") return "/"
-  try {
-    const value = localStorage.getItem(windowLastActiveUrlKey(windowID))
-    if (value?.startsWith("/") && !value.startsWith("//")) return value
-  } catch {}
-  return "/"
-}
-
-function setLastActiveUrl(windowID: string, value: string) {
-  if (typeof localStorage !== "object") return
-  try {
-    localStorage.setItem(windowLastActiveUrlKey(windowID), value)
-  } catch {}
-}
-
-function DesktopMemoryRouter(props: BaseRouterProps & { windowID: string }) {
-  const history = createMemoryHistory()
-  const initialUrl = getLastActiveUrl(props.windowID)
-  if (initialUrl !== "/") history.set({ value: initialUrl, replace: true, scroll: false })
-  onCleanup(history.listen((value) => setLastActiveUrl(props.windowID, value)))
-  return <MemoryRouter {...props} history={history} />
-}
-
 const createPlatform = (windowState: DesktopWindowState): Platform => {
   const attachmentPaths = new WeakMap<File, string>()
+  let attachmentQueue = Promise.resolve()
   const os = (() => {
     const ua = navigator.userAgent
     if (ua.includes("Mac")) return "macos"
@@ -197,8 +171,45 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       }
     },
 
+    artifactPreview: window.api.artifactPreview,
     getPathForFile(file) {
       return attachmentPaths.get(file) ?? window.api.getPathForFile(file)
+    },
+    async prepareAttachment(file, signal) {
+      if (!/\.(docx|xlsx|pptx|pdf|zip|wav|mp3|m4a|ogg|flac|aac|mp4|webm|mov|mkv)$/i.test(file.name)) return [file]
+      if (!window.api.convertAttachment) throw new Error("附件组件已更新，请下次启动造物后使用文档解析")
+      const task = attachmentQueue.then(async () => {
+        signal?.throwIfAborted()
+        const bytes = await file.arrayBuffer()
+        signal?.throwIfAborted()
+        const id = crypto.randomUUID()
+        const abort = () => void window.api.cancelAttachment(id).catch(() => undefined)
+        signal?.addEventListener("abort", abort, { once: true })
+        const result = await window.api
+          .convertAttachment({ id, name: file.name, bytes })
+          .finally(() => signal?.removeEventListener("abort", abort))
+        signal?.throwIfAborted()
+        return [
+          new File(
+            [`# ${file.name}\n\n${result.warnings.map((warning) => `> ${warning}`).join("\n")}\n\n${result.text}`],
+            `${file.name}.md`,
+            { type: "text/plain" },
+          ),
+          ...result.images.map(
+            (image) =>
+              new File(
+                [Uint8Array.from(atob(image.data), (character) => character.charCodeAt(0))],
+                `${file.name}-${image.name}`,
+                { type: image.mime },
+              ),
+          ),
+        ]
+      })
+      attachmentQueue = task.then(
+        () => undefined,
+        () => undefined,
+      )
+      return task
     },
 
     async saveFilePickerDialog(opts) {
@@ -231,6 +242,12 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     },
 
     storage,
+    subscribeStorageWrites: window.api.onStoreWrite
+      ? (name, key, callback) =>
+          window.api.onStoreWrite((event) => {
+            if (event.name === name && event.key === key) callback(event.value)
+          })
+      : undefined,
 
     updater: {
       state: updaterState,
@@ -409,15 +426,17 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
       list.push(...readyWslConnections(wslServers.data))
       return list
     })
-    const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(defaultServer.latest, wslServers.data)),
-    )
+    const effectiveDefaultServer = createStartupServer({
+      ready,
+      defaultServer: () => defaultServer.latest,
+      wsl: () => wslServers.data,
+    })
     return (
       <Show when={ready()} fallback={<LoadingSplash />}>
         <Show when={effectiveDefaultServer()} keyed>
           {(key) => (
             <AppInterface
-              defaultServer={key}
+              defaultServer={ServerConnection.Key.make(key)}
               servers={servers()}
               router={router}
               startup={onboarding.promise}

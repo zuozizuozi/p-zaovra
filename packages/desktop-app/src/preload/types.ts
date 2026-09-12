@@ -1,3 +1,4 @@
+import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import type { DesktopMenuAction } from "@zaovra-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@zaovra-ai/app/wsl/types"
 import type { UpdaterState } from "@zaovra-ai/app/updater"
@@ -60,6 +61,7 @@ export type ElectronAPI = {
   resolveAppPath: (appName: string) => Promise<string | null>
   storeGet: (name: string, key: string) => Promise<string | null>
   storeSet: (name: string, key: string, value: string) => Promise<void>
+  onStoreWrite: (callback: (event: { name: string; key: string; value: string }) => void) => () => void
   storeDelete: (name: string, key: string) => Promise<void>
   storeClear: (name: string) => Promise<void>
   storeKeys: (name: string) => Promise<string[]>
@@ -82,6 +84,13 @@ export type ElectronAPI = {
     extensions?: string[]
   }) => Promise<{ token: string; files: { path: string; name: string; size: number }[] } | null>
   readPickedFile: (token: string, path: string) => Promise<ArrayBuffer>
+  cancelAttachment: (id: string) => Promise<void>
+  artifactPreview: ArtifactPreviewAPI
+  convertAttachment: (input: {
+    id: string
+    name: string
+    bytes: ArrayBuffer
+  }) => Promise<{ text: string; warnings: string[]; images: { name: string; mime: string; data: string }[] }>
   releasePickedFiles: (token: string) => Promise<void>
   getPathForFile: (file: File) => string
   saveFilePicker: (opts?: { title?: string; defaultPath?: string }) => Promise<string | null>

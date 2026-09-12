@@ -17,7 +17,6 @@ import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { WindowsAppMenu } from "./windows-app-menu"
-import { applyPath, backPath, forwardPath } from "./titlebar-history"
 import { TitlebarTabStrip } from "@/components/titlebar-tab-strip"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -98,13 +97,6 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
   }
   const windowsControlsWidth = () => `${windowsControlsBaseWidth / Math.max(titlebarZoom(), 1)}px`
 
-  const [history, setHistory] = createStore({
-    stack: [] as string[],
-    index: 0,
-    action: undefined as "back" | "forward" | undefined,
-  })
-
-  const path = () => `${location.pathname}${location.search}${location.hash}`
   const creating = createMemo(() => {
     const route = layout.route()
     if (route.type === "draft" || route.type === "dir-new-sesssion") return true
@@ -114,20 +106,6 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
     return parts.at(-1) === "session"
   })
 
-  createEffect(() => {
-    const current = path()
-
-    untrack(() => {
-      const next = applyPath(history, current)
-      if (next === history) return
-      setHistory(next)
-    })
-  })
-
-  const canBack = createMemo(() => history.index > 0)
-  const canForward = createMemo(() => history.index < history.stack.length - 1)
-  const hasProjects = createMemo(() => layout.projects.list().length > 0)
-  const nav = createMemo(() => (useV2Titlebar() ? settings.general.showNavigation() : true))
   const updateState = createMemo<TitlebarUpdatePillState>(() => {
     const installing = props.update?.installing() ?? false
     const version = props.update?.version()
@@ -143,37 +121,6 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
   const v2RightState = createMemo<TitlebarV2RightState>(() => ({
     update: updateState(),
   }))
-
-  const back = () => {
-    const next = backPath(history)
-    if (!next) return
-    setHistory(next.state)
-    navigate(next.to)
-  }
-
-  const forward = () => {
-    const next = forwardPath(history)
-    if (!next) return
-    setHistory(next.state)
-    navigate(next.to)
-  }
-
-  command.register(() => [
-    {
-      id: "common.goBack",
-      title: language.t("common.goBack"),
-      category: language.t("command.category.view"),
-      keybind: "mod+[",
-      onSelect: back,
-    },
-    {
-      id: "common.goForward",
-      title: language.t("common.goForward"),
-      category: language.t("command.category.view"),
-      keybind: "mod+]",
-      onSelect: forward,
-    },
-  ])
 
   const getWin = () => {
     if (platform.platform !== "desktop") return
@@ -379,7 +326,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
             }
             const toggleHome = () => tabs.toggleHome({ home: layout.route().type === "home", current: currentTab() })
 
-            command.register("titlebar-home", () => [
+            command.register("titlebar-home", () => props.minimal ? [] : [
               {
                 id: "home.toggle",
                 title: language.t("home.title"),
@@ -643,30 +590,6 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                       "duration-180 ease-in": layout.sidebar.opened(),
                     }}
                   >
-                    <Show when={hasProjects() && nav()}>
-                      <div class="flex items-center gap-0 transition-transform">
-                        <Tooltip placement="bottom" value={language.t("common.goBack")} openDelay={800}>
-                          <Button
-                            variant="ghost"
-                            icon="chevron-left"
-                            class="titlebar-icon w-6 h-6 p-0 box-border"
-                            disabled={!canBack()}
-                            onClick={back}
-                            aria-label={language.t("common.goBack")}
-                          />
-                        </Tooltip>
-                        <Tooltip placement="bottom" value={language.t("common.goForward")} openDelay={800}>
-                          <Button
-                            variant="ghost"
-                            icon="chevron-right"
-                            class="titlebar-icon w-6 h-6 p-0 box-border"
-                            disabled={!canForward()}
-                            onClick={forward}
-                            aria-label={language.t("common.goForward")}
-                          />
-                        </Tooltip>
-                      </div>
-                    </Show>
                     <div id="zaovra-titlebar-left" class="flex items-center gap-3 min-w-0 px-2" />
                     <ChannelIndicator />
                   </div>

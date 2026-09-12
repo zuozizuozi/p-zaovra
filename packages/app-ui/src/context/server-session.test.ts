@@ -19,6 +19,9 @@ function setup(input: {
   sessions?: Record<string, SessionV2Info>
   pages?: { data: SessionMessage[]; cursor?: string }[]
   pending?: SessionInputAdmitted[]
+  wait?: () => Promise<void>
+  active?: () => Partial<Record<string, { type: "running" }>>
+  pageWait?: () => Promise<void>
 }) {
   const sessions = input.sessions ?? { ses_child: info("ses_child") }
   const pages = input.pages ?? [{ data: [] }]
@@ -26,17 +29,23 @@ function setup(input: {
     get: [] as string[],
     messages: [] as { sessionID: string; cursor?: string }[],
     pending: [] as string[],
+    limits: [] as number[],
   }
   const client = {
     v2: {
       session: {
+        wait: input.wait ?? (() => Promise.resolve()),
+        active: async () => ({ data: { data: input.active?.() ?? {} } }),
         get: async ({ sessionID }: { sessionID: string }) => {
           requests.get.push(sessionID)
           return { data: { data: sessions[sessionID] } }
         },
-        messages: async ({ sessionID, cursor }: { sessionID: string; cursor?: string }) => {
+        messages: async ({ sessionID, cursor, limit }: { sessionID: string; cursor?: string; limit: number }) => {
           requests.messages.push({ sessionID, cursor })
+          requests.limits.push(limit)
+          if (limit < 1 || limit > 100) throw new Error("History limit must be between 1 and 100")
           const page = pages.shift() ?? { data: [] }
+          await input.pageWait?.()
           return { data: { data: page.data, cursor: { next: page.cursor } } }
         },
         pendingInputs: async ({ sessionID }: { sessionID: string }) => {
@@ -60,7 +69,7 @@ const user = (id: string, text: string, created: number): SessionMessage => ({
   time: { created },
 })
 
-const assistant = (id: string, text: string, created: number): SessionMessage => ({
+const assistant = (id: string, text: string, created: number): Extract<SessionMessage, { type: "assistant" }> => ({
   id,
   type: "assistant",
   agent: "build",
@@ -70,12 +79,303 @@ const assistant = (id: string, text: string, created: number): SessionMessage =>
 })
 
 describe("V2 server session store", () => {
+  test("distinguishes backend-confirmed history from an unacknowledged optimistic message", async () => {
+    const ctx = setup({ pages: [{ data: [user("msg_persisted", "Already sent", 1)] }] })
+    await ctx.store.sync("ses_child")
+    expect(ctx.store.messageConfirmed("ses_child", "msg_persisted")).toBe(true)
+    expect(ctx.store.messageConfirmed("ses_other", "msg_persisted")).toBe(false)
+    const message = {
+      id: "msg_pending",
+      sessionID: "ses_child",
+      role: "user" as const,
+      time: { created: 2 },
+      agent: "build",
+      model: { modelID: "model", providerID: "provider" },
+    }
+    ctx.store.optimistic.add({ sessionID: "ses_child", message, parts: [] })
+    expect(ctx.store.messageConfirmed("ses_child", "msg_pending")).toBe(false)
+    ctx.store.apply({ type: "message.updated", properties: { info: message } })
+    expect(ctx.store.messageConfirmed("ses_child", "msg_pending")).toBe(true)
+  })
+  test("merges offset deltas arriving during an older snapshot read", async () => {
+    const entered = Promise.withResolvers<void>()
+    const returned = Promise.withResolvers<void>()
+    const ctx = setup({
+      pages: [
+        { data: [assistant("msg_first", "hello", 1), user("msg_user", "question", 0)] },
+        { data: [assistant("msg_first", "hello wo", 1), user("msg_user", "question", 0)] },
+      ],
+      pageWait: () => {
+        if (ctx.requests.messages.length < 2) return Promise.resolve()
+        entered.resolve()
+        return returned.promise
+      },
+    })
+    await ctx.store.sync("ses_child")
+    const reading = ctx.store.sync("ses_child", { force: true })
+    await entered.promise
+    ctx.store.apply({
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "ses_child",
+        assistantMessageID: "msg_first",
+        textID: "msg_first:text",
+        offset: 5,
+        delta: " world",
+      },
+    })
+    returned.resolve()
+    await reading
+    expect(ctx.store.data.part["msg_first"]?.[0]).toMatchObject({ text: "hello world" })
+  })
+
+  test("retains a delta received before the snapshot supplies its missing prefix", async () => {
+    const entered = Promise.withResolvers<void>()
+    const returned = Promise.withResolvers<void>()
+    const ctx = setup({
+      pages: [{ data: [assistant("msg_first", "hello", 1), user("msg_user", "question", 0)] }],
+      pageWait: () => {
+        entered.resolve()
+        return returned.promise
+      },
+    })
+    const reading = ctx.store.sync("ses_child")
+    await entered.promise
+    ctx.store.apply({
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "ses_child",
+        assistantMessageID: "msg_first",
+        textID: "msg_first:text",
+        offset: 5,
+        delta: " world",
+      },
+    })
+    returned.resolve()
+    await reading
+    expect(ctx.store.data.part["msg_first"]?.[0]).toMatchObject({ text: "hello world" })
+  })
+  test("does not append an in-flight delta already included in the active snapshot", async () => {
+    const ctx = setup({
+      pages: [{ data: [assistant("msg_first", "hello world", 1), user("msg_user", "question", 0)] }],
+    })
+    await ctx.store.sync("ses_child")
+    ctx.store.apply({
+      type: "session.next.text.started",
+      properties: { sessionID: "ses_child", assistantMessageID: "msg_first", textID: "msg_first:text", timestamp: 1 },
+    })
+    ctx.store.apply({
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "ses_child",
+        assistantMessageID: "msg_first",
+        textID: "msg_first:text",
+        offset: 5,
+        delta: " world",
+      },
+    })
+    expect(ctx.store.data.part["msg_first"]?.[0]).toMatchObject({ text: "hello world" })
+  })
+  test("isolates repeated provider text IDs across historical and streaming messages", async () => {
+    const first: SessionMessage = {
+      ...assistant("msg_first", "History stays unchanged", 1),
+      content: [{ id: "text-0", type: "text", text: "History stays unchanged" }],
+    }
+    const second: SessionMessage = {
+      ...assistant("msg_second", "", 3),
+      content: [{ id: "text-0", type: "text", text: "" }],
+    }
+    const ctx = setup({ pages: [{ data: [second, first, user("msg_user", "question", 0)] }] })
+    await ctx.store.sync("ses_child")
+    const oldPart = ctx.store.data.part.msg_first[0]
+    const newPart = ctx.store.data.part.msg_second[0]
+    expect(oldPart.id).not.toBe(newPart.id)
+    ctx.store.apply({
+      type: "session.next.text.delta",
+      properties: { sessionID: "ses_child", assistantMessageID: "msg_second", textID: "text-0", delta: "New response" },
+    })
+    expect(ctx.store.data.part_text_accum_delta[oldPart.id]).toBeUndefined()
+    expect(ctx.store.data.part_text_accum_delta[newPart.id]).toBe("New response")
+    expect(ctx.store.data.part.msg_first).toMatchObject([{ text: "History stays unchanged" }])
+  })
+  test("refreshes a new empty session with an admissible history page size", async () => {
+    const ctx = setup({
+      pages: [{ data: [] }, { data: [assistant("msg_002", "answer", 2), user("msg_001", "question", 1)] }],
+    })
+    await ctx.store.sync("ses_child")
+    await ctx.store.sync("ses_child", { force: true })
+    expect(ctx.store.data.part.msg_002).toMatchObject([{ type: "text", text: "answer" }])
+    expect(ctx.requests.limits).toEqual([20, 20])
+  })
+
+  test("caps history requests after more than one hundred messages are cached", async () => {
+    const ctx = setup({
+      pages: [
+        {
+          data: Array.from({ length: 100 }, (_, index) => user(`msg_${100 + index}`, "new", 100 + index)),
+          cursor: "older",
+        },
+        { data: Array.from({ length: 20 }, (_, index) => user(`msg_${index}`, "old", index)) },
+        { data: [user("msg_200", "newest", 200)], cursor: "older" },
+      ],
+    })
+    await ctx.store.sync("ses_child", { messageLimit: 100 })
+    await ctx.store.history.loadMore("ses_child")
+    expect(ctx.store.data.message.ses_child).toHaveLength(120)
+    await ctx.store.sync("ses_child", { force: true })
+    expect(ctx.requests.limits.at(-1)).toBe(100)
+    expect(ctx.store.data.message.ses_child.some((message) => message.id === "msg_200")).toBe(true)
+  })
+
+  test("keeps a split turn until older pagination supplies its user", async () => {
+    const ctx = setup({
+      pages: [
+        {
+          data: [
+            assistant("msg_004", "new answer", 4),
+            user("msg_003", "new", 3),
+            assistant("msg_002", "old answer", 2),
+          ],
+          cursor: "older",
+        },
+        { data: [user("msg_001", "old", 1)] },
+      ],
+    })
+    await ctx.store.sync("ses_child")
+    await ctx.store.history.loadMore("ses_child")
+    expect(ctx.store.data.message.ses_child.map((message) => message.id)).toEqual([
+      "msg_001",
+      "msg_002",
+      "msg_003",
+      "msg_004",
+    ])
+    expect(ctx.store.data.message.ses_child.find((message) => message.id === "msg_002")).toMatchObject({
+      parentID: "msg_001",
+    })
+  })
+
+  test("never assigns older output to a newer cached user while paginating", async () => {
+    const ctx = setup({
+      pages: [
+        { data: [assistant("msg_004", "new answer", 4), user("msg_003", "new", 3)], cursor: "older" },
+        { data: [assistant("msg_002", "old answer", 2)], cursor: "oldest" },
+        { data: [user("msg_001", "old", 1)] },
+      ],
+    })
+    await ctx.store.sync("ses_child")
+    await ctx.store.history.loadMore("ses_child")
+    expect(ctx.requests.messages.length).toBe(3)
+    expect(ctx.store.data.message.ses_child.find((message) => message.id === "msg_002")).toMatchObject({
+      parentID: "msg_001",
+    })
+  })
+
+  test("restores queued inputs separately without inventing a visible user turn", async () => {
+    const ctx = setup({
+      pending: [
+        {
+          admittedSeq: 1,
+          id: "msg_queue",
+          sessionID: "ses_child",
+          prompt: { text: "Later" },
+          delivery: "queue",
+          timeCreated: 2,
+        },
+      ],
+    })
+    await ctx.store.sync("ses_child")
+    expect(ctx.store.data.pending_input.ses_child[0].id).toBe("msg_queue")
+    expect(ctx.store.data.message.ses_child.length).toBe(0)
+    ctx.store.apply({
+      type: "session.next.prompted",
+      properties: {
+        sessionID: "ses_child",
+        messageID: "msg_queue",
+        timestamp: 2,
+        prompt: { text: "Later" },
+        delivery: "queue",
+      },
+    })
+    expect(ctx.store.data.pending_input.ses_child.length).toBe(0)
+    expect(ctx.store.data.message.ses_child[0].id).toBe("msg_queue")
+  })
+
+  test("a provider step ending does not mark a continuing drain idle", async () => {
+    const first = Promise.withResolvers<void>()
+    const second = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<void>()
+    const waits = [first, second]
+    const ctx = setup({
+      wait: () => {
+        if (waits.length === 1) started.resolve()
+        return waits.shift()!.promise
+      },
+      active: () => (waits.length === 0 ? {} : { ses_child: { type: "running" } }),
+    })
+    await ctx.store.resolve("ses_child")
+    ctx.store.set("session_status", "ses_child", { type: "busy" })
+    ctx.store.apply({
+      type: "session.next.step.ended",
+      properties: { sessionID: "ses_child", assistantMessageID: "msg_2", timestamp: 2, finish: "tool-calls" },
+    })
+    const settled = ctx.store.watchExecution("ses_child")
+    expect(ctx.store.data.session_working("ses_child")).toBe(true)
+    first.resolve()
+    await started.promise
+    expect(ctx.store.data.session_working("ses_child")).toBe(true)
+    second.resolve()
+    await settled
+    expect(ctx.store.data.session_working("ses_child")).toBe(false)
+  })
+
+  test("a failed wait cannot claim idle while the server still owns execution", async () => {
+    const ctx = setup({
+      wait: () => Promise.reject(new Error("disconnected")),
+      active: () => ({ ses_child: { type: "running" } }),
+    })
+    await ctx.store.resolve("ses_child")
+    ctx.store.set("session_status", "ses_child", { type: "busy" })
+    await expect(ctx.store.watchExecution("ses_child")).rejects.toThrow("disconnected")
+    expect(ctx.store.data.session_working("ses_child")).toBe(true)
+  })
+
+  test("retains the latest output when finding its user requires more than four pages", async () => {
+    const ctx = setup({
+      pages: [
+        ...Array.from({ length: 5 }, (_, page) => ({
+          data: [assistant(`msg_${6 - page}`, `output ${page}`, 6 - page)],
+          cursor: `cursor_${page}`,
+        })),
+        { data: [user("msg_1", "long task", 1)] },
+      ],
+    })
+    await ctx.store.sync("ses_child")
+    expect(ctx.store.data.message.ses_child.map((message) => message.id)).toEqual([
+      "msg_1",
+      "msg_2",
+      "msg_3",
+      "msg_4",
+      "msg_5",
+      "msg_6",
+    ])
+    expect(ctx.store.data.message.ses_child[5]).toMatchObject({ parentID: "msg_1" })
+  })
+
+  test("retains the durable revert boundary on cold resolution", async () => {
+    const ctx = setup({
+      sessions: { ses_child: { ...info("ses_child"), revert: { messageID: "msg_2", snapshot: "snapshot" } } },
+    })
+    await ctx.store.resolve("ses_child")
+    expect(ctx.store.get("ses_child")?.revert).toEqual({ messageID: "msg_2", snapshot: "snapshot" })
+  })
+
   test("resolves parent lineage only through V2 Session", async () => {
     const ctx = setup({ sessions: { ses_child: info("ses_child", "ses_root"), ses_root: info("ses_root") } })
 
     const result = await ctx.store.lineage.resolve("ses_child")
 
     expect(result.root.id).toBe("ses_root")
+    expect(ctx.store.get("ses_child")?.model).toEqual({ id: "model", providerID: "provider" })
     expect(ctx.requests.get).toEqual(["ses_child", "ses_root"])
   })
 
@@ -244,6 +544,6 @@ describe("V2 server session store", () => {
     })
 
     expect(ctx.store.data.message.ses_child[1]).toMatchObject({ id: "msg_002", parentID: "msg_001" })
-    expect(ctx.store.data.part.msg_002).toMatchObject([{ id: "text_1", text: "hello" }])
+    expect(ctx.store.data.part.msg_002).toMatchObject([{ id: "msg_002:text_1", text: "hello" }])
   })
 })

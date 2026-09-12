@@ -53,10 +53,18 @@ describe("TaskRecovery", () => {
         location,
         parentID: parent.id,
       })
-      yield* sessions.prompt({ sessionID: child.id, prompt: { text: "Continue after restart" }, resume: false })
+      const input = yield* sessions.prompt({
+        sessionID: child.id,
+        prompt: { text: "Continue after restart" },
+        resume: false,
+      })
 
       expect(yield* recovery.recover()).toEqual([child.id])
       expect(woken).toEqual([child.id])
+      yield* sessions.cancelInput({ sessionID: child.id, messageID: input.id })
+      woken.length = 0
+      expect(yield* recovery.recover()).toEqual([])
+      expect(woken).toEqual([])
     }),
   )
 })

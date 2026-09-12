@@ -41,6 +41,8 @@ import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Config } from "@zaovra-ai/core/config"
 import { ConfigCompaction } from "@zaovra-ai/core/config/compaction"
 import { Tool } from "@zaovra-ai/core/tool/tool"
+import { TaskTool } from "@zaovra-ai/core/tool/task"
+import { CommandV2 } from "@zaovra-ai/core/command"
 import {
   SessionContextEpochTable,
   SessionInputTable,
@@ -502,7 +504,16 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
       .where(eq(EventTable.type, EventV2.versionedType(fixture.delta.type, 1)))
       .all()
       .pipe(Effect.orDie)
-    expect(Array.from(yield* Fiber.join(live))).toHaveLength(32)
+    const streamed = Array.from(yield* Fiber.join(live))
+    expect(streamed).toHaveLength(32)
+    if (kind === "text" || kind === "reasoning")
+      expect(
+        streamed.map((event) =>
+          typeof event.data === "object" && event.data !== null && "offset" in event.data
+            ? event.data.offset
+            : undefined,
+        ),
+      ).toEqual(chunks.map((_, index) => chunks.slice(0, index).join("").length))
     expect(deltas).toHaveLength(0)
     expect(yield* session.context(sessionID)).toMatchObject(expectedContext)
 
@@ -566,6 +577,124 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("runs a command through a real child Session and returns its findings to the parent", () =>
+    Effect.gen(function* () {
+      yield* setup
+      requests.length = 0
+      const applications = yield* ApplicationTools.Service
+      const sessions = yield* SessionV2.Service
+      const agents = yield* AgentV2.Service
+      const commands = yield* CommandV2.Service
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("build"), (agent) => {
+          agent.mode = "primary"
+        }),
+      )
+      yield* commands.transform((draft) =>
+        draft.update("review", (command) => {
+          command.subtask = true
+        }),
+      )
+      yield* applications.register({
+        task: Tool.make({
+          description: TaskTool.description,
+          input: TaskTool.Input,
+          output: TaskTool.Output,
+          execute: (input, context) =>
+            Effect.gen(function* () {
+              const parent = yield* sessions.get(context.sessionID).pipe(Effect.orDie)
+              return yield* TaskTool.run(sessions, parent, input, context)
+            }).pipe(
+              Effect.provideService(AgentV2.Service, agents),
+              Effect.provideService(CommandV2.Service, commands),
+              Effect.provide(Layer.mock(PermissionV2.Service, { assert: () => Effect.void })),
+            ),
+        }),
+      })
+      responses = [
+        fragmentFixture("text", "child-text", ["Child review findings"]).completeEvents,
+        fragmentFixture("text", "parent-text", ["Parent review summary"]).completeEvents,
+      ]
+      yield* sessions.prompt({
+        sessionID,
+        resume: false,
+        prompt: Prompt.make({
+          text: "Review the changes",
+          subtask: {
+            command: "review",
+            agent: "build",
+            model: { id: ModelV2.ID.make("replacement"), providerID: ProviderV2.ID.make("fake") },
+          },
+        }),
+      })
+      yield* sessions.resume(sessionID)
+      const children = (yield* sessions.list()).filter((session) => session.parentID === sessionID)
+      expect(children).toHaveLength(1)
+      expect(requests.map((request) => request.model.id)).toEqual([replacementModel.id, model.id])
+      expect(JSON.stringify(requests[1].messages)).toContain("Child review findings")
+      expect(
+        (yield* sessions.messages({ sessionID: children[0].id })).some(
+          (message) =>
+            message.type === "assistant" &&
+            message.content.some((part) => part.type === "text" && part.text === "Child review findings"),
+        ),
+      ).toBe(true)
+      yield* sessions.resume(sessionID)
+      expect((yield* sessions.list()).filter((session) => session.parentID === sessionID)).toHaveLength(1)
+      requests.length = 0
+    }).pipe(Effect.provide(CommandV2.locationLayer)),
+  )
+
+  it.effect("delegates a durable subtask once before asking the parent provider to continue", () =>
+    Effect.gen(function* () {
+      yield* setup
+      requests.length = 0
+      const applications = yield* ApplicationTools.Service
+      const session = yield* SessionV2.Service
+      const calls: (typeof TaskTool.Input.Type)[] = []
+      yield* applications.register({
+        task: Tool.make({
+          description: "Command child",
+          input: TaskTool.Input,
+          output: TaskTool.Output,
+          execute: (input) =>
+            Effect.sync(() => {
+              expect(requests.length).toBe(0)
+              calls.push(input)
+              return { task_id: SessionV2.ID.make("ses_command_child"), content: "Child findings" }
+            }),
+        }),
+      })
+      yield* session.prompt({
+        sessionID,
+        resume: false,
+        prompt: Prompt.make({
+          text: "Review changes",
+          subtask: {
+            command: "review",
+            agent: "build",
+            model: { id: ModelV2.ID.make("replacement"), providerID: ProviderV2.ID.make("fake") },
+          },
+        }),
+      })
+      yield* session.resume(sessionID)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ command: "review", prompt: "Review changes", model: { id: "replacement" } })
+      expect(requests).toHaveLength(1)
+      const history = yield* session.messages({ sessionID })
+      expect(
+        history.some(
+          (message) =>
+            message.type === "assistant" &&
+            message.content.some((part) => part.type === "tool" && part.state.status === "completed"),
+        ),
+      ).toBe(true)
+      yield* session.resume(sessionID)
+      expect(calls).toHaveLength(1)
+      requests.length = 0
+    }),
+  )
+
   it.effect("advertises and executes a globally attached application tool", () =>
     Effect.gen(function* () {
       yield* setup
@@ -638,6 +767,31 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
+    }),
+  )
+
+  it.effect("resolves each queued input's own model after its safe promotion boundary", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      requests.length = 0
+      response = []
+      for (const id of ["fake-model", "replacement"]) {
+        yield* session.prompt({
+          sessionID,
+          delivery: "queue",
+          resume: false,
+          prompt: Prompt.make({
+            text: id,
+            selection: { agent: "build", model: { id: ModelV2.ID.make(id), providerID: ProviderV2.ID.make("fake") } },
+          }),
+        })
+      }
+      expect(requests).toHaveLength(0)
+      yield* session.resume(sessionID)
+      expect(requests.map((request) => request.model.id)).toEqual([model.id, replacementModel.id])
+      expect(userTexts(requests[0])).toEqual(["fake-model"])
+      expect(userTexts(requests[1])).toEqual(["fake-model", "replacement"])
     }),
   )
 
@@ -2735,6 +2889,8 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Call declined" },
         {
           type: "assistant",
+          finish: "interrupted",
+          time: { completed: expect.anything() },
           content: [
             {
               type: "tool",

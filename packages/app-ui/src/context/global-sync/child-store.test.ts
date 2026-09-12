@@ -73,6 +73,37 @@ beforeAll(async () => {
 })
 
 describe("createChildStoreManager", () => {
+  test("preserves an empty directory provider catalog when global providers exist", () => {
+    const dispose = createOwner((owner) => {
+      const manager = createChildStoreManager({
+        owner,
+        scope: ServerScope.local,
+        persist,
+        isBooting: () => false,
+        isLoadingSessions: () => false,
+        onBootstrap() {},
+        onMcp() {},
+        onDispose() {},
+        translate: (key) => key,
+        queryOptions: queryOptionsApi,
+        global: {
+          provider: {
+            all: new Map([
+              ["custom", { id: "custom", name: "Custom", source: "config", env: [], options: {}, models: {} }],
+            ]),
+            connected: ["custom"],
+            default: {},
+          },
+        },
+      })
+      const [store] = manager.child("/project")
+      expect(store.provider_ready).toBe(true)
+      expect(store.provider.all.size).toBe(0)
+      expect(store.provider.connected).toEqual([])
+    })
+    dispose()
+  })
+
   test("does not evict the active directory during mark", () => {
     const owner = createRoot((dispose) => {
       const current = getOwner()

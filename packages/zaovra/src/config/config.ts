@@ -97,9 +97,7 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/Conf
 export const use = serviceUse(Service)
 
 function globalConfigFile() {
-  const candidates = ["zaovra.jsonc", "zaovra.json", "config.json"].map((file) =>
-    path.join(Global.Path.config, file),
-  )
+  const candidates = ["zaovra.jsonc", "zaovra.json", "config.json"].map((file) => path.join(Global.Path.config, file))
   for (const file of candidates) {
     if (existsSync(file)) return file
   }
@@ -123,6 +121,18 @@ function patchJsonc(input: string, patch: unknown, path: string[] = []): string 
 function writable(info: Info) {
   const { plugin_origins: _plugin_origins, ...next } = info
   return next
+}
+
+function patchPreferences(input: string, config: Info, source: string) {
+  const original = ConfigParse.jsonc(input, source)
+  return Object.entries({ disabled_providers: "deny", enabled_providers: "allow" }).reduce(
+    (result, [key, field]) => {
+      const value = config[key as "disabled_providers" | "enabled_providers"]
+      if (value === undefined || !isRecord(original) || !isRecord(original.provider_filter)) return result
+      return patchJsonc(result, value, ["provider_filter", field])
+    },
+    patchJsonc(input, config),
+  )
 }
 
 function writableGlobal(info: Info) {
@@ -514,11 +524,13 @@ const layer = Layer.effect(
 
     const update = Effect.fn("Config.update")(function* (config: Info) {
       const dir = yield* InstanceState.directory
-      const file = path.join(dir, "config.json")
-      const existing = yield* loadFile(file)
-      yield* fs
-        .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
-        .pipe(Effect.orDie)
+      const file = path.join(
+        dir,
+        (yield* fs.existsSafe(path.join(dir, "zaovra.jsonc"))) ? "zaovra.jsonc" : "zaovra.json",
+      )
+      const updated = patchPreferences((yield* readConfigFile(file)) ?? "{}", writable(config), file)
+      ConfigParse.configuration(normalizeLoadedConfig(ConfigParse.jsonc(updated, file)), file)
+      yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
     })
 
     const invalidate = Effect.fn("Config.invalidate")(function* () {
@@ -534,25 +546,19 @@ const layer = Layer.effect(
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
       const patch = writableGlobal(config)
-
-      let next: Info
-      let changed: boolean
-      if (!file.endsWith(".jsonc")) {
-        const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeDeep(writable(existing), patch)
-        const serialized = JSON.stringify(merged, null, 2)
-        changed = serialized !== before
-        if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
-        next = merged
-      } else {
-        const updated = patchJsonc(before, patch)
-        next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
-        changed = updated !== before
-        if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
-      }
+      const updated = patchPreferences(before, patch, file)
+      const data = ConfigParse.jsonc(updated, file)
+      ConfigParse.configuration(normalizeLoadedConfig(data), file)
+      const changed = updated !== before
+      if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
 
       if (changed) yield* invalidate()
-      return { info: next, changed }
+      // The legacy response schema cannot represent every native configuration.
+      // Acknowledge the accepted patch in that case; the authored file stays intact.
+      const info = Schema.decodeUnknownOption(ConfigV1.Info)(data).pipe(
+        Option.match({ onNone: () => config, onSome: (value) => ConfigParse.schema(ConfigV1.Info, value, file) }),
+      )
+      return { info, changed }
     })
 
     return Service.of({

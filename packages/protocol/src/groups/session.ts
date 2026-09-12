@@ -23,6 +23,7 @@ import { Revert } from "@zaovra-ai/schema/revert"
 import { SessionEvent } from "@zaovra-ai/schema/session-event"
 import { SessionTodo } from "@zaovra-ai/schema/session-todo"
 import { Event } from "@zaovra-ai/schema/event"
+import { SessionUsage } from "@zaovra-ai/schema/session-usage"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -146,6 +147,16 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
       ),
     )
     .add(
+      HttpApiEndpoint.get("session.usage", "/api/usage", {
+        query: Schema.Struct({ sessionID: Session.ID.pipe(Schema.optional) }),
+        success: Schema.Struct({ data: SessionUsage.Summary }),
+      }).annotateMerge(OpenApi.annotations({
+        identifier: "v2.session.usage",
+        summary: "Recorded token usage",
+        description: "Usage recorded by this server, optionally limited to one conversation. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.",
+      })),
+    )
+    .add(
       HttpApiEndpoint.get("session.active", "/api/session/active", {
         success: Schema.Struct({ data: Schema.Record(Session.ID, SessionActive) }),
       }).annotateMerge(
@@ -237,6 +248,38 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.pendingInputs",
             summary: "List pending session inputs",
             description: "Retrieve durably admitted steer and queue inputs that have not entered a provider turn yet.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.turnDiff", "/api/session/:sessionID/message/:messageID/diff", {
+        params: { sessionID: Session.ID, messageID: SessionMessage.ID },
+        success: Schema.Struct({ data: Schema.Array(Revert.FileDiff) }),
+        error: [SessionNotFoundError, MessageNotFoundError, ServiceUnavailableError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.turnDiff",
+            summary: "Get changes from one user turn",
+            description:
+              "Compare recorded snapshots after this user message and before the next user message, restricted to files changed by the turn.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.cancelInput", "/api/session/:sessionID/input/:messageID/cancel", {
+        params: { sessionID: Session.ID, messageID: SessionMessage.ID },
+        success: Schema.Struct({ data: SessionInput.Admitted }),
+        error: [SessionNotFoundError, ConflictError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.cancelInput",
+            summary: "Cancel a pending session input",
+            description:
+              "Cancel an admitted input before promotion. Repeated cancellation is idempotent; promoted inputs conflict.",
           }),
         ),
     )

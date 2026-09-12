@@ -22,6 +22,8 @@ const rendererHost = "renderer"
 const clipboardWritePermission = "clipboard-sanitized-write"
 const notificationPermission = "notifications"
 const rendererPermissions = new Set([clipboardWritePermission, notificationPermission])
+const rendererContents = new WeakSet<BrowserWindow["webContents"]>()
+const permissionSessions = new WeakSet<BrowserWindow["webContents"]["session"]>()
 const externalProtocols = new Set(["http:", "https:", "mailto:"])
 const oc2Theme = oc2ThemeJson as DesktopTheme
 const oc2Background = {
@@ -410,19 +412,22 @@ function addDocumentPolicy(response: Response, file: string) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
 
-function allowRendererPermissions(win: BrowserWindow) {
-  const webContentsId = win.webContents.id
+export function allowRendererPermissions(win: Pick<BrowserWindow, "webContents">) {
+  rendererContents.add(win.webContents)
+  if (permissionSessions.has(win.webContents.session)) return
+  permissionSessions.add(win.webContents.session)
 
   win.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
     callback(
       rendererPermissions.has(permission) &&
         isTrustedRendererUrl(details.requestingUrl) &&
-        webContents.id === webContentsId,
+        rendererContents.has(webContents) &&
+        !webContents.isDestroyed(),
     )
   })
   win.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
     if (!rendererPermissions.has(permission)) return false
-    if (webContents && webContents.id !== webContentsId) return false
+    if (!webContents || !rendererContents.has(webContents) || webContents.isDestroyed()) return false
     return isTrustedRendererUrl(details.requestingUrl) || isTrustedRendererUrl(requestingOrigin)
   })
 }

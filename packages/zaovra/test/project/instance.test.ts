@@ -6,6 +6,8 @@ import { InstanceRef } from "../../src/effect/instance-ref"
 import { registerDisposer } from "../../src/effect/instance-registry"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
+import { InstanceState } from "../../src/effect/instance-state"
+import { Project } from "../../src/project/project"
 import { tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -16,7 +18,7 @@ const noopBootstrap = Layer.succeed(
 )
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([InstanceStore.node, CrossSpawnSpawner.node]), [
+  LayerNode.compile(LayerNode.group([InstanceStore.node, CrossSpawnSpawner.node, Project.node]), [
     [InstanceStore.bootstrapNode, noopBootstrap],
   ]),
 )
@@ -39,6 +41,37 @@ const registerDisposerScoped = (disposer: (directory: string) => Promise<void>) 
   )
 
 describe("InstanceStore", () => {
+  for (const method of ["disposeDirectory", "disposeAll"] as const) {
+    it.live(`releases directly materialized state through ${method}`, () =>
+      Effect.gen(function* () {
+        const directory = yield* tmpdirScoped({ git: true })
+        const project = yield* Project.Service
+        const result = yield* project.fromDirectory(directory)
+        const store = yield* InstanceStore.Service
+        const closed: string[] = []
+        const state = yield* InstanceState.make((ctx) =>
+          Effect.gen(function* () {
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                closed.push(ctx.directory)
+              }),
+            )
+            return ctx.directory
+          }),
+        )
+        yield* InstanceState.get(state).pipe(
+          Effect.provideService(InstanceRef, {
+            directory,
+            worktree: result.sandbox,
+            project: result.project,
+          }),
+        )
+        yield* method === "disposeAll" ? store.disposeAll() : store.disposeDirectory(directory)
+        expect(closed).toEqual([directory])
+      }),
+    )
+  }
+
   it.live("loads instance context", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })

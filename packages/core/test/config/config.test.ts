@@ -1,7 +1,7 @@
 import path from "path"
 import fs from "fs/promises"
 import { describe, expect } from "bun:test"
-import { Effect, Layer, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Config } from "@zaovra-ai/core/config"
 import { ConfigProvider } from "@zaovra-ai/core/config/provider"
@@ -52,6 +52,48 @@ const provider = {
 }
 
 describe("Config", () => {
+  it.live("preserves native providers and ordered permissions beside legacy settings", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const permissions = [
+            { action: "edit", resource: "*", effect: "deny" },
+            { action: "edit", resource: "src/*", effect: "allow" },
+          ] as const
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(tmp.path, "zaovra.json"),
+              JSON.stringify({
+                disabled_providers: ["legacy"],
+                provider: { legacy: { name: "Legacy" } },
+                providers: { native: { ...provider, name: "Native" } },
+                permissions,
+                commands: { review: { template: "Review this project" } },
+                mcp: { servers: { local: { type: "local", command: ["audit-mcp"], disabled: true } } },
+                skills: ["./skills"],
+              }),
+            ),
+          )
+          yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const documents = (yield* config.entries()).filter((entry) => entry.type === "document")
+            expect(documents).toHaveLength(1)
+            expect(documents[0]?.info.providers?.native?.api?.type).toBe("native")
+            expect(documents[0]?.info.providers?.legacy?.name).toBe("Legacy")
+            expect(documents[0]?.info.provider_filter?.deny).toEqual(["legacy"])
+            expect(documents[0]?.info.permissions).toEqual(permissions)
+            expect(documents[0]?.info.commands?.review?.template).toBe("Review this project")
+            expect(documents[0]?.info.mcp?.servers?.local?.disabled).toBe(true)
+            expect(documents[0]?.info.skills).toEqual(["./skills"])
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
   it.effect("returns the latest defined scalar from priority-ordered documents", () =>
     Effect.sync(() => {
       const entries = [
@@ -666,7 +708,7 @@ describe("Config", () => {
     ),
   )
 
-  it.live("ignores an invalid file while loading valid config values", () =>
+  it.live("rejects invalid JSON instead of silently dropping a configuration file", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
@@ -679,11 +721,39 @@ describe("Config", () => {
               fs.writeFile(path.join(tmp.path, "zaovra.jsonc"), "{ invalid"),
             ]),
           )
-          return yield* Effect.gen(function* () {
+          const result = yield* Effect.gen(function* () {
             const config = yield* Config.Service
-            const documents = (yield* config.entries()).filter((entry) => entry.type === "document")
+            return yield* config.entries()
+          }).pipe(Effect.provide(testLayer(tmp.path)), Effect.exit)
+          expect(Exit.isFailure(result)).toBe(true)
+          if (Exit.isFailure(result)) expect(Cause.squash(result.cause)).toMatchObject({ name: "ConfigJsonError" })
+        }),
+      ),
+    ),
+  )
 
-            expect(documents.map((document) => document.info.$schema)).toEqual(["base"])
+  it.live("rejects invalid settings alongside permission rules and loads a corrected file", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const permissions = [{ action: "edit", resource: "*", effect: "deny" }] as const
+          const file = path.join(tmp.path, "zaovra.json")
+          yield* Effect.promise(() => Bun.write(file, JSON.stringify({ username: 42, permissions })))
+          const invalid = yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            return yield* config.entries()
+          }).pipe(Effect.provide(testLayer(tmp.path)), Effect.exit)
+          expect(Exit.isFailure(invalid)).toBe(true)
+          if (Exit.isFailure(invalid)) expect(Cause.squash(invalid.cause)).toMatchObject({ name: "ConfigInvalidError" })
+          yield* Effect.promise(() => Bun.write(file, JSON.stringify({ username: "corrected", permissions })))
+          yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const entries = yield* config.entries()
+            expect(Config.latest(entries, "permissions")).toEqual(permissions)
+            expect(Config.latest(entries, "username")).toBe("corrected")
           }).pipe(Effect.provide(testLayer(tmp.path)))
         }),
       ),

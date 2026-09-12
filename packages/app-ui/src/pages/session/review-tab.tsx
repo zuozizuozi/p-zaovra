@@ -24,6 +24,7 @@ export interface SessionReviewTabProps {
   diffStyle: DiffStyle
   onDiffStyleChange?: (style: DiffStyle) => void
   onViewFile?: (file: string) => void
+  filePath?: (path: string) => string
   onLineComment?: (comment: { file: string; selection: SelectedLineRange; comment: string; preview?: string }) => void
   onLineCommentUpdate?: (comment: SessionReviewCommentUpdate) => void
   onLineCommentDelete?: (comment: SessionReviewCommentDelete) => void
@@ -54,7 +55,7 @@ export function SessionReviewTab(props: SessionReviewTabProps) {
 
   const readFile = async (path: string) => {
     return sdk()
-      .client.file.read({ path })
+      .client.file.read({ path: props.filePath?.(path) ?? path })
       .then((x) => x.data)
       .catch((error) => {
         console.debug("[session-review] failed to read file", { path, error })

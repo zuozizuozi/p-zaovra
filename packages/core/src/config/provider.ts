@@ -9,6 +9,15 @@ export class Request extends Schema.Class<Request>("ConfigV2.Provider.Request")(
   body: Schema.Record(Schema.String, Schema.Unknown).pipe(Schema.optional),
 }) {}
 
+export class Filter extends Schema.Class<Filter>("ConfigV2.Provider.Filter")({
+  allow: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
+    description: "Exact IDs to allow. Omit for all; an empty list allows none.",
+  }),
+  deny: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
+    description: "Exact IDs to exclude, including IDs present in allow.",
+  }),
+}) {}
+
 class Cache extends Schema.Class<Cache>("ConfigV2.Model.Cost.Cache")({
   read: Schema.Finite.pipe(Schema.optional),
   write: Schema.Finite.pipe(Schema.optional),
@@ -64,6 +73,8 @@ class Model extends Schema.Class<Model>("ConfigV2.Model")({
 
 export class Info extends Schema.Class<Info>("ConfigV2.Provider")({
   name: Schema.String.pipe(Schema.optional),
+  disabled: Schema.Boolean.pipe(Schema.optional),
+  filter: Filter.pipe(Schema.optional),
   env: Schema.String.pipe(Schema.Array, Schema.optional),
   api: ProviderV2.Api.pipe(Schema.optional),
   request: Request.pipe(Schema.optional),

@@ -9,22 +9,29 @@ import type {
 } from "@zaovra-ai/sdk/v2/client"
 import { toLegacySessionSummary } from "./global-sync/home-session-index"
 
-export function adaptSession(session: SessionV2Info): Session {
-  return toLegacySessionSummary(session)
+export type SessionView = Session & Pick<SessionV2Info, "agent" | "model">
+
+export function adaptPartID(messageID: string, partID: string) {
+  // Provider part IDs such as text-0 are only unique within one message.
+  return `${messageID}:${partID}`
 }
 
-export function adaptSessionInput(session: SessionV2Info, input: SessionInputAdmitted) {
+export function adaptSession(session: SessionV2Info): SessionView {
+  return { ...toLegacySessionSummary(session), agent: session.agent, model: session.model }
+}
+
+export function adaptSessionInput(session: Pick<SessionV2Info, "id" | "agent" | "model">, input: SessionInputAdmitted) {
   return {
     message: {
       id: input.id,
       sessionID: session.id,
       role: "user" as const,
       time: { created: input.timeCreated },
-      agent: session.agent ?? "build",
+      agent: input.prompt.selection?.agent ?? session.agent ?? "build",
       model: {
-        providerID: session.model?.providerID ?? "unknown",
-        modelID: session.model?.id ?? "unknown",
-        variant: session.model?.variant,
+        providerID: input.prompt.selection?.model.providerID ?? session.model?.providerID ?? "unknown",
+        modelID: input.prompt.selection?.model.id ?? session.model?.id ?? "unknown",
+        variant: input.prompt.selection ? input.prompt.selection.model.variant : session.model?.variant,
       },
     },
     parts: [
@@ -35,7 +42,7 @@ export function adaptSessionInput(session: SessionV2Info, input: SessionInputAdm
               sessionID: session.id,
               messageID: input.id,
               type: "text" as const,
-              text: input.prompt.text,
+              text: input.prompt.invocation ?? input.prompt.text,
             },
           ]
         : []),
@@ -75,11 +82,11 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
           sessionID: session.id,
           role: "user",
           time: item.time,
-          agent: session.agent ?? "build",
+          agent: item.selection?.agent ?? session.agent ?? "build",
           model: {
-            providerID: session.model?.providerID ?? "unknown",
-            modelID: session.model?.id ?? "unknown",
-            variant: session.model?.variant,
+            providerID: item.selection?.model.providerID ?? session.model?.providerID ?? "unknown",
+            modelID: item.selection?.model.id ?? session.model?.id ?? "unknown",
+            variant: item.selection ? item.selection.model.variant : session.model?.variant,
           },
         },
         parts: [
@@ -90,7 +97,7 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
                   sessionID: session.id,
                   messageID: item.id,
                   type: "text" as const,
-                  text: item.text,
+                  text: item.invocation ?? item.text,
                 },
               ]
             : []),
@@ -146,7 +153,7 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
           if (content.type === "text")
             return [
               {
-                id: content.id,
+                id: adaptPartID(item.id, content.id),
                 sessionID: session.id,
                 messageID: item.id,
                 type: "text",
@@ -156,7 +163,7 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
           if (content.type === "reasoning")
             return [
               {
-                id: content.id,
+                id: adaptPartID(item.id, content.id),
                 sessionID: session.id,
                 messageID: item.id,
                 type: "reasoning",
@@ -211,7 +218,80 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
   const output = content
     .map((item) => (item.type === "text" ? item.text : `[${item.name ?? item.uri}](${item.uri})`))
     .join("\n\n")
-  const input = tool.state.status === "pending" ? {} : tool.state.input
+  const rawInput = tool.state.status === "pending" ? {} : tool.state.input
+  const rawStructured = tool.state.status === "pending" ? {} : tool.state.structured
+  const lsp = rawStructured.lsp
+  const diagnostics = lsp && typeof lsp === "object" && "diagnostics" in lsp ? lsp.diagnostics : undefined
+  const filePath = rawInput.filePath ?? rawInput.path
+  const structured =
+    ["write", "edit"].includes(tool.name) &&
+    diagnostics &&
+    typeof diagnostics === "object" &&
+    !Array.isArray(diagnostics)
+      ? {
+          ...rawStructured,
+          diagnostics: {
+            ...diagnostics,
+            ...(typeof filePath === "string" &&
+            typeof rawStructured.target === "string" &&
+            rawStructured.target in diagnostics
+              ? { [filePath]: diagnostics[rawStructured.target as keyof typeof diagnostics] }
+              : {}),
+          },
+        }
+      : rawStructured
+  const input = ["read", "write", "edit"].includes(tool.name)
+    ? {
+        ...rawInput,
+        filePath: rawInput.filePath ?? rawInput.path,
+        ...(tool.name === "write" && typeof structured.content === "string" ? { content: structured.content } : {}),
+      }
+    : rawInput
+  const metadata =
+    tool.name === "task" && typeof structured.task_id === "string"
+      ? { ...structured, sessionId: structured.task_id }
+      : tool.name === "edit" && Array.isArray(structured.files) && structured.files[0]
+        ? { ...structured, filediff: structured.files[0] }
+        : tool.name === "apply_patch" && Array.isArray(structured.files)
+          ? {
+              ...structured,
+              ...(Array.isArray(structured.applied)
+                ? {
+                    diagnostics: Object.fromEntries(
+                      structured.applied.flatMap((item: unknown) => {
+                        if (
+                          !item ||
+                          typeof item !== "object" ||
+                          !("resource" in item) ||
+                          typeof item.resource !== "string" ||
+                          !("target" in item) ||
+                          typeof item.target !== "string" ||
+                          !("lsp" in item) ||
+                          !item.lsp ||
+                          typeof item.lsp !== "object" ||
+                          !("diagnostics" in item.lsp)
+                        )
+                          return []
+                        const diagnostics = item.lsp.diagnostics
+                        if (!diagnostics || typeof diagnostics !== "object" || !(item.target in diagnostics)) return []
+                        const issues = diagnostics[item.target as keyof typeof diagnostics]
+                        return Array.isArray(issues) ? [[item.resource, issues]] : []
+                      }),
+                    ),
+                  }
+                : {}),
+              files: structured.files.map((file: unknown) => {
+                if (!file || typeof file !== "object" || !("file" in file) || typeof file.file !== "string") return file
+                const status = "status" in file ? file.status : undefined
+                return {
+                  ...file,
+                  filePath: file.file,
+                  relativePath: file.file,
+                  type: status === "added" ? "add" : status === "deleted" ? "delete" : "update",
+                }
+              }),
+            }
+          : structured
   const state = (() => {
     if (tool.state.status === "pending") return { status: "pending" as const, input, raw: tool.state.input }
     if (tool.state.status === "running")
@@ -219,7 +299,7 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
         status: "running" as const,
         input,
         title: tool.name,
-        metadata: tool.state.structured,
+        metadata,
         time: { start: tool.time.ran ?? tool.time.created },
       }
     if (tool.state.status === "error")
@@ -227,7 +307,7 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
         status: "error" as const,
         input,
         error: tool.state.error.message,
-        metadata: tool.state.structured,
+        metadata,
         time: { start: tool.time.ran ?? tool.time.created, end: tool.time.completed ?? tool.time.created },
       }
     return {
@@ -235,7 +315,7 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
       input,
       output,
       title: tool.name,
-      metadata: tool.state.structured,
+      metadata,
       time: { start: tool.time.ran ?? tool.time.created, end: tool.time.completed ?? tool.time.created },
       attachments: tool.state.attachments?.map((file, index) => ({
         id: `${tool.id}:attachment:${index}`,
@@ -250,7 +330,7 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
   })()
 
   return {
-    id: tool.id,
+    id: adaptPartID(messageID, tool.id),
     sessionID,
     messageID,
     type: "tool",

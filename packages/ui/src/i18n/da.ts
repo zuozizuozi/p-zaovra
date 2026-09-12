@@ -1,4 +1,7 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "Filændringer gemt. Sprogdiagnostik kunne ikke fuldføres: {{servers}}.",
+  "ui.messagePart.formattingFailed": "Filændringer gemt. Automatisk formatering mislykkedes: {{formatters}}.",
+
   "ui.sessionReview.title": "Sessionsændringer",
   "ui.sessionReview.title.git": "Git-ændringer",
   "ui.sessionReview.title.branch": "Grenændringer",

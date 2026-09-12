@@ -58,6 +58,34 @@ afterEach(async () => {
 })
 
 describe("pty HttpApi bridge", () => {
+  testPty("shares terminal identity across V2 and legacy routes", async () => {
+    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    const headers = { "x-zaovra-directory": tmp.path, "content-type": "application/json" }
+    const created = await app().request("/api/pty", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "sleep 30"], title: "shared" }),
+    })
+    expect(created.status).toBe(200)
+    const info = Schema.decodeUnknownSync(Schema.Struct({ data: Pty.Info }))(await created.json()).data
+    try {
+      const read = await app().request(`/pty/${info.id}`, { headers })
+      expect(read.status).toBe(200)
+      expect(await read.json()).toMatchObject({ id: info.id, title: "shared" })
+      const updated = await app().request(`/pty/${info.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ title: "shared renamed" }),
+      })
+      expect(updated.status).toBe(200)
+      const current = await app().request(`/api/pty/${info.id}`, { headers })
+      expect(await current.json()).toMatchObject({ data: { id: info.id, title: "shared renamed" } })
+    } finally {
+      await app().request(`/api/pty/${info.id}`, { method: "DELETE", headers })
+    }
+    expect((await app().request(`/pty/${info.id}`, { headers })).status).toBe(404)
+  })
+
   test("serves available shell list through experimental Effect routes", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     const response = await app().request(PtyPaths.shells, { headers: { "x-zaovra-directory": tmp.path } })

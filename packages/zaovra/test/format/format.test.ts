@@ -232,4 +232,20 @@ describe("Format", () => {
       },
     },
   )
+
+  for (const command of [["node", "-e", "process.exit(1)"], ["zaovra-missing-formatter-test"]]) {
+    it.instance(
+      `file() returns false when formatter fails: ${command[0]}`,
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          const file = `${test.directory}/test.failedformat`
+          yield* Effect.promise(() => Bun.write(file, "unchanged"))
+
+          expect(yield* Format.use.file(file)).toBe(false)
+          expect(yield* Effect.promise(() => Bun.file(file).text())).toBe("unchanged")
+        }),
+      { config: { formatter: { failing: { command, extensions: [".failedformat"] } } } },
+    )
+  }
 })

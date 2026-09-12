@@ -37,20 +37,30 @@ export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext(
 
     const serverCtxs = new Map<
       ServerConnection.Key,
-      { dispose: () => void; serverCtx: ReturnType<typeof createServerCtx> }
+      { dispose: () => void; serverCtx: ReturnType<typeof createServerCtx>; http: ServerConnection.HttpBase }
     >()
 
     const owner = getOwner()
 
-    const ensureServerCtx = (conn: ServerConnection.Any) => {
-      const key = ServerConnection.key(conn)
+    const ensureServerCtx = (input: ServerConnection.Any) => {
+      const key = ServerConnection.key(input)
+      // A dialog may retain the previous connection object after credentials are edited.
+      const conn = server.list.find((item) => ServerConnection.key(item) === key) ?? input
       const existing = serverCtxs.get(key)
-      if (existing) return existing.serverCtx
+      if (
+        existing &&
+        existing.http.url === conn.http.url &&
+        existing.http.username === conn.http.username &&
+        existing.http.password === conn.http.password
+      )
+        return existing.serverCtx
       const root = createRoot((dispose) => {
         const serverCtx = createServerCtx(conn, server.scope(key), server.projects.forServer(key))
-        return { dispose, serverCtx }
+        // Keep a snapshot: persisted connection objects may be updated in place.
+        return { dispose, serverCtx, http: { ...conn.http } }
       }, owner as any)
       serverCtxs.set(key, root)
+      existing?.dispose()
       return root.serverCtx
     }
 

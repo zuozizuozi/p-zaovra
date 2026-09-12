@@ -6,6 +6,8 @@ import { createTwoFilesPatch, diffLines } from "diff"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileMutation } from "../file-mutation"
+import { Formatter } from "../formatter"
+import { LSP } from "../lsp"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { Patch } from "../patch"
@@ -26,6 +28,8 @@ export const Applied = Schema.Struct({
   type: Schema.Literals(["add", "update", "delete"]),
   resource: Schema.String,
   target: Schema.String,
+  formatting: Formatter.Result.pipe(Schema.optional),
+  lsp: LSP.Report.pipe(Schema.optional),
 })
 
 export const Output = Schema.Struct({
@@ -40,7 +44,17 @@ export const toModelOutput = (output: Output) =>
     ...output.applied.map(
       (item) => `${item.type === "add" ? "A" : item.type === "delete" ? "D" : "M"} ${item.resource}`,
     ),
-  ].join("\n")
+    ...output.applied.flatMap((item) =>
+      item.formatting?.failed.length
+        ? [
+            `Automatic formatting failed for ${item.resource}: ${item.formatting.failed.join(", ")}. Read the file before making further edits.`,
+          ]
+        : [],
+    ),
+    ...output.applied.map((item) => LSP.describe(item.lsp)),
+  ]
+    .filter(Boolean)
+    .join("\n")
 
 type Prepared =
   | (Extract<Patch.Hunk, { readonly type: "add" | "delete" }> & {
@@ -61,6 +75,7 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const mutation = yield* LocationMutation.Service
     const files = yield* FileMutation.Service
+    const lsp = yield* LSP.Service
     const fs = yield* FSUtil.Service
     const permission = yield* PermissionV2.Service
 
@@ -155,7 +170,7 @@ const layer = Layer.effectDiscard(
                   }).pipe(Effect.mapError(() => fail(hunk.path)))
                 }
 
-                const patchFiles = prepared.map(patchFile)
+                const patchFiles: FileDiff.Info[] = []
                 yield* Effect.forEach(
                   prepared,
                   (change) =>
@@ -163,25 +178,56 @@ const layer = Layer.effectDiscard(
                       if (change.type === "add") {
                         const result = yield* files.create({
                           target: change.target,
+                          format: true,
                           content:
                             change.contents.endsWith("\n") || change.contents === ""
                               ? change.contents
                               : `${change.contents}\n`,
                         })
-                        applied.push({ type: change.type, resource: result.resource, target: result.target })
+                        const diagnostics = yield* lsp.changed(result.target)
+                        applied.push({
+                          ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                            ? { lsp: diagnostics }
+                            : {}),
+                          type: change.type,
+                          resource: result.resource,
+                          target: result.target,
+                          ...(result.formatting ? { formatting: result.formatting } : {}),
+                        })
+                        patchFiles.push(patchFile({ ...change, after: result.content ?? change.after }))
                         return
                       }
                       if (change.type === "delete") {
                         const result = yield* files.remove({ target: change.target })
-                        applied.push({ type: change.type, resource: result.resource, target: result.target })
+                        const diagnostics = yield* lsp.removed(result.target)
+                        applied.push({
+                          type: change.type,
+                          resource: result.resource,
+                          target: result.target,
+                          ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                            ? { lsp: diagnostics }
+                            : {}),
+                        })
+                        patchFiles.push(patchFile(change))
                         return
                       }
                       const result = yield* files.writeIfUnchanged({
                         target: change.target,
                         expected: change.source,
                         content: change.content,
+                        format: true,
                       })
-                      applied.push({ type: change.type, resource: result.resource, target: result.target })
+                      const diagnostics = yield* lsp.changed(result.target)
+                      applied.push({
+                        ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                          ? { lsp: diagnostics }
+                          : {}),
+                        type: change.type,
+                        resource: result.resource,
+                        target: result.target,
+                        ...(result.formatting ? { formatting: result.formatting } : {}),
+                      })
+                      patchFiles.push(patchFile({ ...change, after: result.content ?? change.after }))
                     }).pipe(Effect.mapError(() => fail(change.path))),
                   { discard: true },
                 )
@@ -199,7 +245,7 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/apply-patch",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, FSUtil.node, PermissionV2.node],
+  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, LSP.node, FSUtil.node, PermissionV2.node],
 })
 
 function patchFile(change: Prepared): typeof FileDiff.Info.Type {

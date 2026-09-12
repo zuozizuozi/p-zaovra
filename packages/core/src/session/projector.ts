@@ -408,6 +408,16 @@ const layer = Layer.effectDiscard(
           timeCreated: event.data.timestamp,
           promotedSeq: event.durable.seq,
         })
+        if (event.data.prompt.selection)
+          yield* db
+            .update(SessionTable)
+            .set({
+              agent: event.data.prompt.selection.agent,
+              model: event.data.prompt.selection.model,
+            })
+            .where(eq(SessionTable.id, event.data.sessionID))
+            .run()
+            .pipe(Effect.orDie)
         yield* run(db, event)
       }),
     )
@@ -424,6 +434,14 @@ const layer = Layer.effectDiscard(
         })
       }),
     )
+    yield* events.project(SessionEvent.PromptCancelled, (event) => {
+      if (event.durable === undefined) return Effect.die("Durable Session event is missing aggregate sequence")
+      return SessionInput.projectCancelled(db, {
+        id: event.data.messageID,
+        sessionID: event.data.sessionID,
+        cancelledSeq: event.durable.seq,
+      })
+    })
     yield* events.project(SessionEvent.ContextUpdated, (event) => run(db, event))
     yield* events.project(SessionEvent.Synthetic, (event) => run(db, event))
     yield* events.project(SessionEvent.Shell.Started, (event) => run(db, event))

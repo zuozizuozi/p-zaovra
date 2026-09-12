@@ -10,6 +10,8 @@ import { ToolFailure } from "@zaovra-ai/llm"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileMutation } from "../file-mutation"
+import { Formatter } from "../formatter"
+import { LSP } from "../lsp"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
@@ -32,23 +34,25 @@ export const Output = Schema.Struct({
   target: Schema.String,
   resource: Schema.String,
   existed: Schema.Boolean,
+  formatting: Formatter.Result.pipe(Schema.optional),
+  lsp: LSP.Report.pipe(Schema.optional),
+  content: Schema.String.pipe(Schema.optional),
 })
 export type Output = typeof Output.Type
 
 export const toModelOutput = (output: Output) =>
-  `${output.existed ? "Wrote" : "Created"} file successfully: ${output.resource}`
+  `${output.existed ? "Wrote" : "Created"} file successfully: ${output.resource}${output.formatting?.failed.length ? `\nAutomatic formatting failed: ${output.formatting.failed.join(", ")}. Read the file before making further edits.` : ""}${LSP.describe(output.lsp) ? `\n${LSP.describe(output.lsp)}` : ""}`
 
 /** Deferred V2 write UX integrations remain visible at the model-facing seam. */
-// TODO: Add formatter integration after V2 formatter runtime exists.
 // TODO: Publish watcher/file-edit events after V2 watcher integration exists.
 // TODO: Add snapshots / undo after design exists.
-// TODO: Add LSP notification and diagnostics after V2 LSP runtime exists.
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
     const mutation = yield* LocationMutation.Service
     const files = yield* FileMutation.Service
+    const lsp = yield* LSP.Service
     const permission = yield* PermissionV2.Service
 
     yield* tools
@@ -84,7 +88,19 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
-                return yield* files.writeTextPreservingBom({ target, content: input.content })
+                const result = yield* files.writeTextPreservingBom({ target, content: input.content, format: true })
+                const diagnostics = yield* lsp.changed(result.target)
+                return {
+                  ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                    ? { lsp: diagnostics }
+                    : {}),
+                  operation: result.operation,
+                  target: result.target,
+                  resource: result.resource,
+                  existed: result.existed,
+                  ...(result.formatting ? { formatting: result.formatting } : {}),
+                  ...(result.formatting ? { content: result.content } : {}),
+                }
               }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to write ${input.path}` }))),
           }),
           "edit",
@@ -97,5 +113,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/write",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, PermissionV2.node],
+  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, LSP.node, PermissionV2.node],
 })

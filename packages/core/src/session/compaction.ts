@@ -1,6 +1,7 @@
 export * as SessionCompaction from "./compaction"
 
-import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@zaovra-ai/llm"
+import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model, type Usage } from "@zaovra-ai/llm"
+import { usageTokens, usageReported } from "./usage-tokens"
 import { DateTime, Effect, Stream } from "effect"
 import type { Config } from "../config"
 import type { Database } from "../database/database"
@@ -216,6 +217,7 @@ export const make = (dependencies: Dependencies) => {
     })
 
     const chunks: string[] = []
+    let usage: Usage | undefined
     let failure: string | undefined
     const summarized = yield* dependencies.llm
       .stream(
@@ -230,6 +232,7 @@ export const make = (dependencies: Dependencies) => {
         Stream.runForEach((event) => {
           if (LLMEvent.is.providerError(event)) failure = event.message
           if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+          if (LLMEvent.is.stepFinish(event)) usage = event.usage
           return Effect.void
         }),
         Effect.as(true),
@@ -248,6 +251,7 @@ export const make = (dependencies: Dependencies) => {
         reason: input.reason ?? "auto",
         sourceSequence,
         error: { type: "unknown", message: failure ?? "Compaction returned an empty summary" },
+        usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
       })
       return false
     }
@@ -259,6 +263,7 @@ export const make = (dependencies: Dependencies) => {
       sourceSequence,
       text: summary,
       recent: selected.recent,
+      usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
     })
     failedSources.delete(input.sessionID)
     return true

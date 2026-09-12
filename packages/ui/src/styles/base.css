@@ -82,8 +82,17 @@ a {
   cursor: default;
 }
 
-#root:not([aria-hidden]) *[data-tauri-drag-region] {
+*[data-tauri-drag-region] {
   app-region: drag;
+}
+
+[data-component="dialog-window-drag-region"] {
+  pointer-events: auto;
+  position: fixed;
+  top: 0;
+  left: 84px;
+  right: 138px;
+  height: 36px;
 }
 
 *[data-tauri-drag-region] button,

@@ -231,6 +231,8 @@ import type {
   V2ReferenceListResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
+  V2SessionCancelInputErrors,
+  V2SessionCancelInputResponses,
   V2SessionCompactErrors,
   V2SessionCompactResponses,
   V2SessionContextErrors,
@@ -285,8 +287,12 @@ import type {
   V2SessionSwitchModelResponses,
   V2SessionTodosErrors,
   V2SessionTodosResponses,
+  V2SessionTurnDiffErrors,
+  V2SessionTurnDiffResponses,
   V2SessionUpdateErrors,
   V2SessionUpdateResponses,
+  V2SessionUsageErrors,
+  V2SessionUsageResponses,
   V2SessionWaitErrors,
   V2SessionWaitResponses,
   V2SkillListErrors,
@@ -3535,6 +3541,25 @@ export class Session extends HeyApiClient {
   }
 
   /**
+   * Recorded token usage
+   *
+   * Usage recorded by this server, optionally limited to one conversation. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionUsageResponses, V2SessionUsageErrors, ThrowOnError>({
+      url: "/api/usage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * List active sessions
    *
    * Retrieve foreground Session drains currently owned by this Zaovra process. Sessions absent from the result are inactive.
@@ -3754,6 +3779,70 @@ export class Session extends HeyApiClient {
       ThrowOnError
     >({
       url: "/api/session/{sessionID}/input/pending",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get changes from one user turn
+   *
+   * Compare recorded snapshots after this user message and before the next user message, restricted to files changed by the turn.
+   */
+  public turnDiff<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "messageID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2SessionTurnDiffResponses, V2SessionTurnDiffErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/message/{messageID}/diff",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Cancel a pending session input
+   *
+   * Cancel an admitted input before promotion. Repeated cancellation is idempotent; promoted inputs conflict.
+   */
+  public cancelInput<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "messageID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionCancelInputResponses,
+      V2SessionCancelInputErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/input/{messageID}/cancel",
       ...options,
       ...params,
     })

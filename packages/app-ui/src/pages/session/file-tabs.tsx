@@ -1,3 +1,6 @@
+import { ArtifactView } from "@/components/artifact-view"
+import { usePlatform } from "@/context/platform"
+import { useSDK } from "@/context/sdk"
 import { createEffect, createMemo, createSignal, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
@@ -207,12 +210,41 @@ export function FileTabContent(props: { tab: string }) {
   )
 }
 
-export function SessionFileView(props: { tab: string }) {
+export function SessionFileView(props: { tab: string; active?: boolean }) {
   const settings = useSettings()
+  const platform = usePlatform()
+  const file = useFile()
+  const sdk = useSDK()
+  const [mode, setMode] = createStore({ source: false })
+  const preview = () => !!platform.artifactPreview && /\.(html?|pdf)$/i.test(file.pathFromTab(props.tab) ?? "")
+
   return (
-    <Show when={settings.general.newLayoutDesigns()} fallback={<SessionFileViewV1 tab={props.tab} />}>
-      <SessionFileViewV2 tab={props.tab} />
-    </Show>
+    <div class="flex h-full min-h-0 flex-col">
+      <Show when={preview()}>
+        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border-weak-base px-3">
+          <button class="h-10 px-2 text-xs" aria-pressed={!mode.source} onClick={() => setMode("source", false)}>
+            成果预览
+          </button>
+          <button class="h-10 px-2 text-xs" aria-pressed={mode.source} onClick={() => setMode("source", true)}>
+            源文件
+          </button>
+        </div>
+      </Show>
+      <div class="min-h-0 flex-1">
+        <Show
+          when={preview() && !mode.source}
+          fallback={
+            <Show when={settings.general.newLayoutDesigns()} fallback={<SessionFileViewV1 tab={props.tab} />}>
+              <SessionFileViewV2 tab={props.tab} />
+            </Show>
+          }
+        >
+          <Show when={props.active !== false}>
+            <ArtifactView target={file.pathFromTab(props.tab)!} directory={sdk().directory} />
+          </Show>
+        </Show>
+      </div>
+    </div>
   )
 }
 

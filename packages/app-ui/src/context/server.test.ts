@@ -6,9 +6,38 @@ import {
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
   resolveServerList,
+  resolveServerConnection,
+  resolveServerTarget,
   ServerConnection,
 } from "./server"
 import { ServerScope } from "@/utils/server-scope"
+
+test("an explicit unavailable route target does not use the active server", () => {
+  const local: ServerConnection.Sidecar = { type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:4096" } }
+  let fallbackReads = 0
+  const current = () => {
+    fallbackReads++
+    return local
+  }
+  expect(resolveServerTarget(() => undefined, current)).toBeUndefined()
+  expect(fallbackReads).toBe(0)
+  expect(resolveServerTarget(undefined, current)).toBe(local)
+  expect(fallbackReads).toBe(1)
+})
+
+test("a missing selected WSL server must not resolve to the Windows sidecar", () => {
+  const local: ServerConnection.Sidecar = { type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:4096" } }
+  const wsl: ServerConnection.Sidecar = {
+    type: "sidecar",
+    variant: "wsl",
+    distro: "Debian",
+    http: { url: "http://127.0.0.1:5000" },
+  }
+  const key = ServerConnection.Key.make("wsl:Debian")
+  expect(resolveServerConnection([local, wsl], key)).toBe(wsl)
+  expect(resolveServerConnection([local], key)).toBeUndefined()
+  expect(resolveServerConnection([local, wsl], key)).toBe(wsl)
+})
 
 describe("resolveServerList", () => {
   test("lets startup auth_token credentials override a persisted same-url server", () => {

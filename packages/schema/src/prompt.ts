@@ -1,6 +1,14 @@
 import { Schema } from "effect"
 import { optional } from "./schema"
 import { statics } from "./schema"
+import { Model } from "./model"
+
+export const Selection = Schema.Struct({ agent: Schema.String, model: Model.Ref }).annotate({
+  identifier: "Prompt.Selection",
+})
+export const Subtask = Schema.Struct({ command: Schema.String, agent: Schema.String, model: Model.Ref }).annotate({
+  identifier: "Prompt.Subtask",
+})
 
 export interface Source extends Schema.Schema.Type<typeof Source> {}
 export const Source = Schema.Struct({
@@ -40,18 +48,25 @@ export const AgentAttachment = Schema.Struct({
 export interface Prompt extends Schema.Schema.Type<typeof Prompt> {}
 export const Prompt = Schema.Struct({
   text: Schema.String,
+  // Preserve the editable invocation while text contains the expanded model input.
+  invocation: Schema.String.pipe(optional),
   files: Schema.Array(FileAttachment).pipe(optional),
   agents: Schema.Array(AgentAttachment).pipe(optional),
+  selection: Selection.pipe(optional),
+  subtask: Subtask.pipe(optional),
 })
   .annotate({ identifier: "Prompt" })
   .pipe(
     statics((schema) => ({
       equivalence: Schema.toEquivalence(schema),
-      fromUserMessage: (input: Pick<Prompt, "text" | "files" | "agents">) =>
+      fromUserMessage: (input: Pick<Prompt, "text" | "invocation" | "files" | "agents" | "selection" | "subtask">) =>
         schema.make({
           text: input.text,
+          ...(input.invocation === undefined ? {} : { invocation: input.invocation }),
           ...(input.files === undefined ? {} : { files: input.files }),
           ...(input.agents === undefined ? {} : { agents: input.agents }),
+          ...(input.selection === undefined ? {} : { selection: input.selection }),
+          ...(input.subtask === undefined ? {} : { subtask: input.subtask }),
         }),
     })),
   )

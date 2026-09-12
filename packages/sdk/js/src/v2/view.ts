@@ -2,6 +2,7 @@ import type { CommandV2Info, PermissionV2Request, QuestionV2Request } from "./ge
 
 export type CommandView = Omit<CommandV2Info, "model"> & {
   model?: string
+  variant?: string
   source: "command" | "mcp" | "skill"
   hints: Array<string>
 }

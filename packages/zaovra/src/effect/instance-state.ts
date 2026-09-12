@@ -1,7 +1,7 @@
 import { Effect, ScopedCache, Scope } from "effect"
 import type { InstanceContext } from "@/project/instance-context"
 import { InstanceRef, WorkspaceRef } from "./instance-ref"
-import { registerDisposer } from "./instance-registry"
+import { registerDisposer, trackInstance } from "./instance-registry"
 import { WorkspaceContext } from "@/control-plane/workspace-context"
 
 const TypeId = "~zaovra/InstanceState"
@@ -31,7 +31,9 @@ export const make = <A, E = never, R = never>(
       capacity: Number.POSITIVE_INFINITY,
       lookup: () =>
         Effect.gen(function* () {
-          return yield* init(yield* context)
+          const ctx = yield* context
+          trackInstance(ctx.directory)
+          return yield* init(ctx)
         }),
     })
 

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && bun run scripts/export-preview.js",
+    "export:preview": "bun run scripts/export-preview.js",
     "preview": "vite preview"
   },
   "dependencies": {

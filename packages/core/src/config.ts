@@ -26,6 +26,7 @@ import { ConfigWatcher } from "./config/watcher"
 import { ConfigWork } from "./config/work"
 import { ConfigV1 } from "./v1/config/config"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
+import { ConfigErrorV1 } from "./v1/config/error"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: Schema.optional(Schema.String).annotate({
@@ -108,6 +109,7 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   experimental: ConfigExperimental.Experimental.pipe(Schema.optional),
   providers: Schema.Record(Schema.String, ConfigProvider.Info).pipe(Schema.optional),
+  provider_filter: ConfigProvider.Filter.pipe(Schema.optional),
 }) {}
 
 export class Document extends Schema.Class<Document>("Config.Document")({
@@ -129,6 +131,48 @@ export function latest<K extends keyof Info>(entries: readonly Entry[], key: K):
     .findLast((entry) => entry.info[key] !== undefined)?.info[key]
 }
 
+const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder: "original" } as const
+const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
+const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
+
+export function decode(input: unknown): Option.Option<Info> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return Option.none<Info>()
+
+  // Classify shared fields by their shape: MCP, skills and compaction changed
+  // shape between versions. One legacy setting must not discard native fields.
+  const nativeKeys = new Set(
+    Object.entries(input)
+      .filter(
+        ([key, value]) =>
+          Object.hasOwn(Info.fields, key) &&
+          (!Object.hasOwn(ConfigV1.Info.fields, key) ||
+            Option.isSome(
+              Schema.decodeUnknownOption(Info.fields[key as keyof typeof Info.fields], {
+                onExcessProperty: "error",
+              })(value),
+            )),
+      )
+      .map(([key]) => key),
+  )
+
+  return decodeV1Info(Object.fromEntries(Object.entries(input).filter(([key]) => !nativeKeys.has(key)))).pipe(
+    Option.flatMap((legacy) => {
+      const migrated = ConfigMigrateV1.migrate(legacy)
+      return decodeInfo(Object.fromEntries(Object.entries(input).filter(([key]) => nativeKeys.has(key)))).pipe(
+        Option.flatMap((native) =>
+          decodeInfo({
+            ...migrated,
+            ...native,
+            providers: native.providers ? { ...migrated.providers, ...native.providers } : migrated.providers,
+            agents: native.agents ? { ...migrated.agents, ...native.agents } : migrated.agents,
+            commands: native.commands ? { ...migrated.commands, ...native.commands } : migrated.commands,
+          }),
+        ),
+      )
+    }),
+  )
+}
+
 export interface Interface {
   /** Returns location config documents and supplemental directories from lowest to highest priority. */
   readonly entries: () => Effect.Effect<Entry[]>
@@ -144,21 +188,20 @@ const layer = Layer.effect(
     const location = yield* Location.Service
     const policy = yield* Policy.Service
     const names = ["zaovra.json", "zaovra.jsonc"]
-    const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder: "original" } as const
-    const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
-    const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
-
     const loadText = (text: string, filepath?: string) => {
       const errors: ParseError[] = []
       const input: unknown = parse(text, errors, { allowTrailingComma: true })
-      if (errors.length) return
-
-      const info = Option.getOrUndefined(
-        ConfigMigrateV1.isV1(input)
-          ? decodeV1Info(input).pipe(Option.map(ConfigMigrateV1.migrate), Option.flatMap(decodeInfo))
-          : decodeInfo(input),
-      )
-      if (!info) return
+      if (errors.length)
+        throw new ConfigErrorV1.JsonError({
+          path: filepath ?? "ZAOVRA_CONFIG_CONTENT",
+          message: "Invalid configuration JSON",
+        })
+      const info = Option.getOrUndefined(decode(input))
+      if (!info)
+        throw new ConfigErrorV1.InvalidError({
+          path: filepath ?? "ZAOVRA_CONFIG_CONTENT",
+          message: "Invalid configuration values",
+        })
       return new Document({ type: "document", path: filepath, info })
     }
 

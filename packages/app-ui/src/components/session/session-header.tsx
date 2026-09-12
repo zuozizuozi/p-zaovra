@@ -146,7 +146,7 @@ export function SessionHeader() {
   const settings = useSettings()
   const sync = useSync()
   const terminal = useTerminal()
-  const { params, view } = useSessionLayout()
+  const { params, view, tabs } = useSessionLayout()
 
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
   const project = createMemo(() => {
@@ -242,6 +242,11 @@ export function SessionHeader() {
     reviewVisible: isDesktop(),
     reviewOpened: view().reviewPanel.opened(),
     onReviewToggle: () => view().reviewPanel.toggle(),
+    onArtifacts: () => {
+      tabs().open("artifacts")
+      tabs().setActive("artifacts")
+      view().reviewPanel.open()
+    },
   }))
 
   const selectApp = (app: OpenApp) => {
@@ -523,6 +528,7 @@ type SessionHeaderV2ActionsState = {
   reviewKeybind: string[]
   reviewVisible: boolean
   reviewOpened: boolean
+  onArtifacts: () => void
   onReviewToggle: () => void
 }
 
@@ -537,6 +543,14 @@ function SessionHeaderV2Actions(props: { state: SessionHeaderV2ActionsState }) {
         </Tooltip>
       </Show>
       <Show when={props.state.reviewVisible}>
+        <button
+          type="button"
+          class="h-9 rounded-md px-3 text-xs text-text-weak hover:bg-background-stronger hover:text-text-strong"
+          onClick={props.state.onArtifacts}
+          aria-label="查看成果"
+        >
+          成果
+        </button>
         <TooltipV2
           class="shrink-0"
           placement="bottom"

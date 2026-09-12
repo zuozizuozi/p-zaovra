@@ -119,7 +119,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   }
 
   const disconnect = async (providerID: string, name: string) => {
-    if (isConfigCustom(providerID)) {
+    if (isConfigCustom(providerID) || connected().some((item) => item.id === providerID && source(item) === "config")) {
       await disconnectProviderCredentials(serverSDK().client, providerID).catch(() => undefined)
       await disableProvider(providerID, name)
       return

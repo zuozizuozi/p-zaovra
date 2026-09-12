@@ -236,6 +236,33 @@ describe("Vcs diff", () => {
     { git: true },
   )
 
+  worktreeIt.live("nested project diffs resolve repository-relative paths from the worktree", () =>
+    Effect.gen(function* () {
+      const root = yield* tmpdirScoped({ git: true })
+      const directory = path.join(root, "nested project")
+      yield* write(path.join(directory, "tracked.txt"), "before\n")
+      yield* git(root, ["add", "."])
+      yield* git(root, ["commit", "--no-gpg-sign", "-m", "seed nested project"])
+      yield* write(path.join(directory, "tracked.txt"), "after\n")
+      yield* write(path.join(directory, "added.txt"), "new text\n")
+      yield* write(path.join(root, "outside.txt"), "outside project\n")
+
+      const result = yield* Effect.gen(function* () {
+        const vcs = yield* init()
+        return { diffs: yield* vcs.diff("git"), raw: yield* vcs.diffRaw() }
+      }).pipe(provideInstance(directory))
+
+      expect(result.diffs.map((diff) => diff.file)).toEqual(["nested project/added.txt", "nested project/tracked.txt"])
+      expect(result.diffs[0]).toMatchObject({ additions: 1, deletions: 0, status: "added" })
+      expect(result.diffs[0].patch).toContain("+new text")
+      expect(result.diffs[1]).toMatchObject({ additions: 1, deletions: 1, status: "modified" })
+      expect(result.diffs[1].patch).toContain("-before")
+      expect(result.diffs[1].patch).toContain("+after")
+      expect(result.raw).toContain("+new text")
+      expect(result.raw).not.toContain("outside project")
+    }),
+  )
+
   it.instance(
     "diff('git') handles special filenames",
     () =>

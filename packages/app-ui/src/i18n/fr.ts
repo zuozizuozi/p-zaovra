@@ -1,4 +1,65 @@
 export const dict = {
+  "home.welcome.title": "Que va-t-on créer aujourd’hui ?",
+  "home.welcome.description": "Décrivez votre idée, choisissez un projet et commencez avec Zaovra.",
+  "home.welcome.continue": "Continuer vers la session",
+  "desktop.menu.exportLogs": "Exporter les journaux",
+  "desktop.menu.file": "Fichier",
+  "desktop.menu.edit": "Édition",
+  "desktop.menu.view": "Affichage",
+  "desktop.menu.go": "Navigation",
+  "desktop.menu.window": "Fenêtre",
+  "desktop.menu.help": "Aide",
+  "desktop.menu.undo": "Annuler",
+  "desktop.menu.redo": "Rétablir",
+  "desktop.menu.cut": "Couper",
+  "desktop.menu.copy": "Copier",
+  "desktop.menu.paste": "Coller",
+  "desktop.menu.delete": "Supprimer",
+  "desktop.menu.selectAll": "Tout sélectionner",
+  "desktop.menu.newWindow": "Nouvelle fenêtre",
+  "desktop.menu.closeWindow": "Fermer la fenêtre",
+  "desktop.menu.minimize": "Réduire",
+  "desktop.menu.maximize": "Agrandir / Restaurer",
+  "desktop.menu.reload": "Recharger",
+  "desktop.menu.devTools": "Outils de développement",
+  "desktop.menu.actualSize": "Taille réelle",
+  "desktop.menu.zoomIn": "Zoom avant",
+  "desktop.menu.zoomOut": "Zoom arrière",
+  "desktop.menu.fullScreen": "Basculer en plein écran",
+  "desktop.menu.documentation": "Documentation Zaovra",
+  "desktop.menu.support": "Communauté d’assistance",
+  "provider.custom.discovery.restart":
+    "Le composant de connexion de l’application de bureau a été mis à jour. Fermez puis rouvrez Zaovra pour récupérer les modèles. Votre saisie est conservée.",
+  "provider.custom.discovery.environment":
+    "Les clés provenant de variables d’environnement ne peuvent pas être lues ici. Saisissez les identifiants de modèles manuellement ou collez une clé pour récupérer la liste.",
+  "provider.custom.discovery.timeout":
+    "Le service n’a pas répondu en 15 secondes. Réessayez ou saisissez les modèles manuellement.",
+  "provider.custom.discovery.unsupported":
+    "Ce service ne permet pas de lister les modèles à cette adresse. Vérifiez l’URL ou saisissez un identifiant de modèle manuellement.",
+  "provider.custom.discovery.saved": "Configuration de {provider} enregistrée",
+  "provider.custom.discovery.savedDescription":
+    "Sélectionnez un modèle pour démarrer une tâche. La génération et les appels d’outils n’ont pas été vérifiés.",
+  "provider.custom.discovery.intro": "Saisissez l’URL du service et la clé API, puis récupérez la liste des modèles.",
+  "provider.custom.discovery.fetch": "Récupérer les modèles",
+  "provider.custom.discovery.loading": "Récupération des modèles…",
+  "provider.custom.discovery.manual": "Saisir les modèles manuellement",
+  "provider.custom.discovery.advanced": "Paramètres avancés",
+  "provider.custom.discovery.auto": "Automatique",
+  "provider.custom.discovery.save": "Enregistrer la configuration",
+  "provider.custom.discovery.search": "Rechercher des modèles",
+  "provider.custom.discovery.success":
+    "Liste des modèles reçue. Le premier modèle est sélectionné ; modifiez la sélection si nécessaire. Cela ne vérifie pas la prise en charge de la génération ni des outils.",
+  "provider.custom.discovery.auth": "Échec de l’authentification. Vérifiez la clé API et l’adresse du service.",
+  "provider.custom.discovery.rate":
+    "Limite de requêtes atteinte. Réessayez plus tard ou saisissez un identifiant de modèle manuellement.",
+  "provider.custom.discovery.url":
+    "Saisissez une URL de service HTTP(S) valide sans identifiants de connexion, paramètres de requête ni fragments.",
+  "provider.custom.discovery.empty":
+    "Le service n’a renvoyé aucun modèle. Vous pouvez saisir un identifiant de modèle manuellement.",
+  "provider.custom.discovery.failed":
+    "Impossible de récupérer les modèles. Vérifiez l’adresse et le réseau, réessayez ou saisissez les modèles manuellement. Aucune configuration n’a été enregistrée.",
+  "provider.custom.discovery.choose":
+    "Sélectionnez au moins un modèle ou saisissez un identifiant de modèle manuellement.",
   "command.category.suggested": "Suggéré",
   "command.category.view": "Affichage",
   "command.category.project": "Projet",
@@ -682,8 +743,7 @@ export const dict = {
   "sidebar.workspaces.enable": "Activer les espaces de travail",
   "sidebar.workspaces.disable": "Désactiver les espaces de travail",
   "sidebar.gettingStarted.title": "Commencer",
-  "sidebar.gettingStarted.line1":
-    "Zaovra inclut des modèles gratuits pour que vous puissiez commencer immédiatement.",
+  "sidebar.gettingStarted.line1": "Zaovra inclut des modèles gratuits pour que vous puissiez commencer immédiatement.",
   "sidebar.gettingStarted.line2":
     "Connectez n'importe quel fournisseur pour utiliser des modèles, y compris Claude, GPT, Gemini etc.",
   "sidebar.project.recentSessions": "Sessions récentes",
@@ -1035,7 +1095,8 @@ export const dict = {
   "terminal.connectionLost.abnormalClose": "WebSocket fermé anormalement : {{code}}",
   "dialog.provider.custom.label": "Custom OpenAI-compatible provider",
   "dialog.model.unpaid.viewMoreProviders": "See 70+ more providers",
-  "prompt.toast.shellUnavailable.description": "Direct shell mode is unavailable in SessionV2. Use the agent\u0027s bash tool instead.",
+  "prompt.toast.shellUnavailable.description":
+    "Direct shell mode is unavailable in SessionV2. Use the agent\u0027s bash tool instead.",
   "session.message.waitingToJoin": "Waiting to join the current task…",
   "session.header.reveal.finder": "Reveal in Finder",
   "session.header.reveal.fileExplorer": "Reveal in File Explorer",

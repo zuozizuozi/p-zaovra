@@ -175,5 +175,6 @@ export function toLegacySessionSummary(session: SessionV2Info): Session {
     model: session.model,
     version: "",
     time: session.time,
+    revert: session.revert,
   }
 }

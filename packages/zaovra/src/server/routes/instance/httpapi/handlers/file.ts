@@ -1,11 +1,11 @@
 import * as InstanceState from "@/effect/instance-state"
 import { FileSystem } from "@zaovra-ai/core/filesystem"
-import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { Ripgrep } from "@zaovra-ai/core/ripgrep"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Location } from "@zaovra-ai/core/location"
 import { AbsolutePath, RelativePath } from "@zaovra-ai/core/schema"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Option } from "effect"
 import ignore from "ignore"
 import path from "path"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -113,7 +113,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
         ),
         Effect.map(({ item, text }) =>
           Option.isSome(text)
-            ? { type: "text" as const, content: text.value.trim() }
+            ? { type: "text" as const, content: text.value }
             : {
                 type: "binary" as const,
                 content: Buffer.from(item.content).toString("base64"),
@@ -136,4 +136,4 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("content", content)
       .handle("status", status)
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+)

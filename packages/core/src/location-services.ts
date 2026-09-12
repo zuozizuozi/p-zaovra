@@ -1,4 +1,6 @@
 import { Effect, Layer, LayerMap } from "effect"
+import path from "node:path"
+import { AbsolutePath } from "./schema"
 import { AgentV2 } from "./agent"
 import { AISDK } from "./aisdk"
 import { Catalog } from "./catalog"
@@ -13,6 +15,7 @@ import { Watcher } from "./filesystem/watcher"
 import { Image } from "./image"
 import { Integration } from "./integration"
 import { Location } from "./location"
+import { LSP } from "./lsp"
 import { LocationMutation } from "./location-mutation"
 import { MCP } from "./mcp"
 import { LocationServiceMap } from "./location-service-map"
@@ -44,6 +47,7 @@ export { LocationServiceMap } from "./location-service-map"
 
 export const locationServices = LayerNode.group([
   Location.node,
+  LSP.node,
   Policy.node,
   Config.node,
   AgentV2.node,
@@ -113,8 +117,20 @@ export function buildLocationServiceMap(
         )
       },
       { idleTimeToLive: "60 minutes" },
+    ).pipe(
+      Effect.map((locations) => ({
+        ...locations,
+        get: (ref: Location.Ref) => locations.get(canonicalRef(ref)),
+        contextEffect: (ref: Location.Ref) => locations.contextEffect(canonicalRef(ref)),
+        invalidate: (ref: Location.Ref) => locations.invalidate(canonicalRef(ref)),
+      })),
     ),
   )
+}
+
+function canonicalRef(ref: Location.Ref): Location.Ref {
+  // Omitted and explicitly undefined workspace identities must share the same cache key.
+  return Location.Ref.make({ directory: AbsolutePath.make(path.resolve(ref.directory)), workspaceID: ref.workspaceID })
 }
 
 // This is temporary for backwards compatibility

@@ -1,7 +1,7 @@
 import { Platform, usePlatform } from "@/context/platform"
 import { makePersisted, type AsyncStorage, type SyncStorage } from "@solid-primitives/storage"
 import { checksum } from "@zaovra-ai/core/util/encode"
-import { createResource, type Accessor } from "solid-js"
+import { createResource, onCleanup, type Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
 import { pathKey } from "@/utils/path-key"
 import { ScopedKey, ServerScope, type ServerScope as ServerScopeValue } from "@/utils/server-scope"
@@ -15,6 +15,7 @@ type PersistedWithReady<T> = [
 ]
 
 type PersistTarget = {
+  sync?: boolean
   storage?: string
   scope?: "window"
   legacyStorageNames?: string[]
@@ -562,6 +563,24 @@ export function persisted<T>(
 
   const isDesktop = platform.platform === "desktop" && !!platform.storage
 
+  const channel =
+    config.sync &&
+    !platform.subscribeStorageWrites &&
+    typeof window !== "undefined" &&
+    typeof BroadcastChannel !== "undefined"
+      ? new BroadcastChannel(
+          JSON.stringify(["zaovra.persist", isDesktop, config.storage ?? LEGACY_STORAGE, config.key]),
+        )
+      : undefined
+  const lifecycle = { closed: false, writes: 0 }
+  onCleanup(() => {
+    lifecycle.closed = true
+    if (lifecycle.writes === 0) channel?.close()
+  })
+  const publish = (key: string, newValue: string | null) => {
+    if (!lifecycle.closed || lifecycle.writes > 0) channel?.postMessage({ key, newValue, timeStamp: Date.now() })
+  }
+
   const currentStorage = (() => {
     if (isDesktop) return platform.storage?.(config.storage)
     if (!config.storage) return localStorageDirect()
@@ -598,6 +617,7 @@ export function persisted<T>(
         },
         setItem: (key, value) => {
           current.setItem(key, value)
+          publish(key, value)
         },
         removeItem: (key) => {
           current.removeItem(key)
@@ -628,7 +648,15 @@ export function persisted<T>(
         })
       },
       setItem: async (key, value) => {
-        await current.setItem(key, value)
+        if (!channel || lifecycle.closed) return current.setItem(key, value)
+        lifecycle.writes++
+        try {
+          await current.setItem(key, value)
+          publish(key, value)
+        } finally {
+          lifecycle.writes--
+          if (lifecycle.closed && lifecycle.writes === 0) channel.close()
+        }
       },
       removeItem: async (key) => {
         await current.removeItem(key)
@@ -638,7 +666,42 @@ export function persisted<T>(
     return api
   })()
 
-  const [state, setState, init] = makePersisted(store, { name: config.key, storage })
+  const [state, setState, init] = makePersisted(store, {
+    name: config.key,
+    storage,
+    sync:
+      config.sync && (channel || platform.subscribeStorageWrites)
+        ? [
+            (subscriber) => {
+              const receive = (key: string, newValue: string) => {
+                const update = { key, newValue, timeStamp: Date.now() }
+                // An asynchronous initial read must not overwrite a newer update from another window.
+                void Promise.resolve(init).then(
+                  () => {
+                    if (!lifecycle.closed) subscriber(update)
+                  },
+                  () => {},
+                )
+              }
+              if (platform.subscribeStorageWrites) {
+                onCleanup(
+                  platform.subscribeStorageWrites(config.storage ?? LEGACY_STORAGE, config.key, (value) =>
+                    receive(config.key, value),
+                  ),
+                )
+                return
+              }
+              channel?.addEventListener("message", (event: MessageEvent<unknown>) => {
+                const data = event.data
+                if (!data || typeof data !== "object" || !("key" in data) || typeof data.key !== "string") return
+                if (!("newValue" in data) || typeof data.newValue !== "string") return
+                receive(data.key, data.newValue)
+              })
+            },
+            () => {}, // Storage publishes only after its write succeeds.
+          ]
+        : undefined,
+  })
 
   const isAsync = init instanceof Promise
   const [ready] = createResource(

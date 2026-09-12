@@ -29,14 +29,44 @@ function setup(input?: { currentVersion?: string; ready?: UpdaterReadyRecord }) 
         ready = undefined
       },
     },
-    stop: async () => {
-      calls.push("stop")
-    },
   })
   return { controller, calls, getReady: () => ready }
 }
 
 describe("updater controller", () => {
+  test("does not check or download again while installation is waiting for acceptance", async () => {
+    const stopped = Promise.withResolvers<void>()
+    const calls: string[] = []
+    const controller = createUpdaterController({
+      enabled: true,
+      currentVersion: "1.0.0",
+      backend: {
+        async checkForUpdates() {
+          calls.push("check")
+          return { isUpdateAvailable: true, updateInfo: { version: "2.0.0" } }
+        },
+        async downloadUpdate() {
+          calls.push("download")
+        },
+        quitAndInstall() {
+          calls.push("install")
+          return stopped.promise
+        },
+      },
+      persistence: { get: () => undefined, set() {}, clear() {} },
+    })
+    await controller.check()
+    const installing = controller.install()
+    try {
+      expect(await controller.check()).toEqual({ status: "installing", version: "2.0.0" })
+      expect(calls).toEqual(["check", "download", "install"])
+    } finally {
+      stopped.resolve()
+      await installing
+    }
+    expect(calls).toEqual(["check", "download", "install"])
+  })
+
   test("checks, downloads, persists, and publishes one authoritative ready state", async () => {
     const app = setup()
     const states: ReturnType<typeof app.controller.getState>[] = []
@@ -76,14 +106,14 @@ describe("updater controller", () => {
     expect(app.calls).toEqual(["check", "download"])
   })
 
-  test("returns to ready when quitAndInstall returns without exiting", async () => {
+  test("stays installing after the installer accepts the update", async () => {
     const app = setup()
     await app.controller.start()
 
     await app.controller.install()
 
-    expect(app.calls).toEqual(["check", "download", "stop", "install"])
-    expect(app.controller.getState()).toEqual({ status: "ready", version: "2.0.0" })
+    expect(app.calls).toEqual(["check", "download", "install"])
+    expect(app.controller.getState()).toEqual({ status: "installing", version: "2.0.0" })
   })
 
   test("returns to ready when installation cannot start", async () => {
@@ -96,16 +126,15 @@ describe("updater controller", () => {
       backend: {
         checkForUpdates: async () => ({ isUpdateAvailable: true, updateInfo: { version: "2.0.0" } }),
         downloadUpdate: async () => {},
-        quitAndInstall() {},
+        quitAndInstall() {
+          throw new Error("installer failed")
+        },
       },
       persistence: { get: () => undefined, set() {}, clear() {} },
-      stop: async () => {
-        throw new Error("stop failed")
-      },
     })
     await failed.start()
 
-    await expect(failed.install()).rejects.toThrow("stop failed")
+    await expect(failed.install()).rejects.toThrow("installer failed")
     expect(failed.getState()).toEqual({ status: "ready", version: "2.0.0" })
   })
 })

@@ -3,6 +3,9 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "Dosya değişiklikleri kaydedildi. Dil tanılaması tamamlanamadı: {{servers}}.",
+  "ui.messagePart.formattingFailed":
+    "Dosya değişiklikleri kaydedildi. Otomatik biçimlendirme başarısız: {{formatters}}.",
   "ui.sessionReview.title": "Oturum değişiklikleri",
   "ui.sessionReview.title.git": "Git değişiklikleri",
   "ui.sessionReview.title.branch": "Dal değişiklikleri",

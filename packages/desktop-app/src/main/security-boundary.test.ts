@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
+import type { Session, WebContents } from "electron"
 
 const originalRendererUrl = process.env.ELECTRON_RENDERER_URL
 const invokeHandlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
@@ -61,6 +62,37 @@ afterAll(() => {
 })
 
 describe("desktop renderer trust boundary", () => {
+  test("shared permission handlers retain all live trusted windows", () => {
+    const handlers: {
+      request?: Parameters<Session["setPermissionRequestHandler"]>[0]
+      check?: Parameters<Session["setPermissionCheckHandler"]>[0]
+    } = {}
+    const session = {
+      setPermissionRequestHandler: (handler: typeof handlers.request) => { handlers.request = handler },
+      setPermissionCheckHandler: (handler: typeof handlers.check) => { handlers.check = handler },
+    }
+    const closed = new Set<number>()
+    const first = { id: 1, session, isDestroyed: () => closed.has(1) } as unknown as WebContents
+    const second = { id: 2, session, isDestroyed: () => closed.has(2) } as unknown as WebContents
+    const foreign = { id: 3, session, isDestroyed: () => false } as unknown as WebContents
+    windows.allowRendererPermissions({ webContents: first })
+    const initial = handlers.check
+    windows.allowRendererPermissions({ webContents: second })
+    expect(handlers.check).toBe(initial)
+    const details = { requestingUrl: "oc://renderer/index.html", isMainFrame: true }
+    expect(handlers.check!(first, "notifications", "oc://renderer", details)).toBe(true)
+    expect(handlers.check!(second, "clipboard-sanitized-write", "oc://renderer", details)).toBe(true)
+    closed.add(2)
+    expect(handlers.check!(first, "notifications", "oc://renderer", details)).toBe(true)
+    expect(handlers.check!(second, "notifications", "oc://renderer", details)).toBe(false)
+    expect(handlers.check!(foreign, "notifications", "oc://renderer", details)).toBe(false)
+    expect(handlers.check!(null, "notifications", "oc://renderer", details)).toBe(false)
+    const replies: boolean[] = []
+    handlers.request!(first, "notifications", (allowed) => replies.push(allowed), details)
+    handlers.request!(first, "notifications", (allowed) => replies.push(allowed), { ...details, requestingUrl: "https://example.com" })
+    expect(replies).toEqual([true, false])
+  })
+
   test("allows only the packaged renderer origin", () => {
     expect(windows.isTrustedRendererUrl("oc://renderer/index.html")).toBe(true)
     expect(windows.isTrustedRendererUrl("oc://renderer/assets/index.js")).toBe(true)

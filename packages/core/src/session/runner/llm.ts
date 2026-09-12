@@ -196,34 +196,58 @@ const layer = Layer.effect(
       recoverOverflow?: typeof compaction.compactAfterOverflow,
     ) {
       yield* plugins.wait(PluginInternal.readyID)
-      const session = yield* getSession(sessionID)
-      if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
+      const placement = yield* getSession(sessionID)
+      if (
+        placement.location.directory !== location.directory ||
+        placement.location.workspaceID !== location.workspaceID
+      )
         return yield* Effect.interrupt
-      const agent = yield* agents.select(session.agent)
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
+      const cutoff = yield* EventV2.latestSequence(db, sessionID)
+      const pending = promotion ? yield* SessionInput.pending(db, sessionID) : []
+      const selected = [
+        ...(promotion === "queue" ? pending.filter((input) => input.delivery === "queue").slice(0, 1) : []),
+        ...pending.filter((input) => input.delivery === "steer" && input.admittedSeq <= cutoff),
+      ]
+        .flatMap((input) => (input.prompt.selection ? [input.prompt.selection] : []))
+        .at(-1)
+      const selectedAgent = yield* agents.select(selected?.agent ?? placement.agent)
+      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(selectedAgent), sessionID)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
       if (promotion) {
-        const cutoff = yield* EventV2.latestSequence(db, session.id)
         let promoted = 0
-        if (promotion === "steer") promoted = yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
+        if (promotion === "steer") promoted = yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         if (promotion === "queue") {
-          promoted += Number(yield* SessionInput.promoteNextQueued(db, events, session.id))
-          promoted += yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
+          promoted += Number(yield* SessionInput.promoteNextQueued(db, events, sessionID))
+          promoted += yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         }
         if (promoted > 0) {
           currentStep = 1
           toolCallAttempts.clear()
         }
       }
+      const session = promotion ? yield* getSession(sessionID) : placement
+      const sameAgent = session.agent === (selected?.agent ?? placement.agent)
+      const agent = sameAgent ? selectedAgent : yield* agents.select(session.agent)
       const system =
-        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
+        (sameAgent ? initialized : undefined) ??
+        (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
       const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
+      const subtask = context.find(
+        (message) =>
+          message.type === "user" &&
+          message.subtask &&
+          !context.some(
+            (item) =>
+              item.type === "assistant" &&
+              item.content.some((part) => part.type === "tool" && part.id === `command_${message.id}`),
+          ),
+      )
       const isLastStep =
-        currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS)
+        !subtask && currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS)
       const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const request = LLM.request({
@@ -255,7 +279,30 @@ const layer = Layer.effect(
       const publish = (event: LLMEvent, outputPaths: ReadonlyArray<string> = []) =>
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
-      const providerStream = llm.stream(request).pipe(
+      // Explicit command delegation uses the same durable tool settlement path,
+      // without asking a provider to decide whether to create the child.
+      const providerStream = (
+        subtask?.type === "user" && subtask.subtask
+          ? Stream.fromIterable([
+              LLMEvent.stepStart({ index: 0 }),
+              LLMEvent.toolCall({
+                id: `command_${subtask.id}`,
+                name: "task",
+                input: {
+                  command: subtask.subtask.command,
+                  description: `/${subtask.subtask.command}`,
+                  subagent_type: subtask.subtask.agent,
+                  model: subtask.subtask.model,
+                  prompt: subtask.text,
+                  files: subtask.files,
+                  agents: subtask.agents,
+                },
+              }),
+              LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+              LLMEvent.finish({ reason: "tool-calls" }),
+            ])
+          : llm.stream(request)
+      ).pipe(
         Stream.timeoutOrElse({
           duration: PROVIDER_IDLE_TIMEOUT,
           orElse: () =>
@@ -354,6 +401,7 @@ const layer = Layer.effect(
           if (settled._tag === "Failure" && isUserDeclined(settled.cause)) {
             yield* FiberSet.clear(toolFibers)
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* withPublication(settleInterruptedTurn(session.id))
             return yield* Effect.interrupt
           }
           if (
@@ -387,6 +435,8 @@ const layer = Layer.effect(
                 finish: stepSettlement.finish,
                 cost: 0,
                 tokens: stepSettlement.tokens,
+                usageReported: stepSettlement.usageReported,
+                requestPerformed: !(subtask?.type === "user" && subtask.subtask),
                 snapshot: endSnapshot,
                 files,
               }),
@@ -399,7 +449,10 @@ const layer = Layer.effect(
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
-          return { needsContinuation: !publisher.hasProviderError() && needsContinuation, step: currentStep }
+          return {
+            needsContinuation: !publisher.hasProviderError() && needsContinuation,
+            step: subtask ? currentStep - 1 : currentStep,
+          }
         }),
       )
     }, Effect.scoped)

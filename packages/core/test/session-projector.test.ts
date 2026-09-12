@@ -16,6 +16,7 @@ import { SessionEvent } from "@zaovra-ai/core/session/event"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionMessageUpdater } from "@zaovra-ai/core/session/message-updater"
+import { SessionLive } from "@zaovra-ai/core/session/live"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { SessionInput } from "@zaovra-ai/core/session/input"
@@ -23,7 +24,9 @@ import { SessionInputTable, SessionMessageTable, SessionTable } from "@zaovra-ai
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@zaovra-ai/core/snapshot"
 
-const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionProjector.node])))
+const it = testEffect(
+  AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SessionLive.node])),
+)
 const sessionsLayer = AppNodeBuilder.build(SessionV2.node, [[SessionExecution.node, SessionExecution.noopLayer]])
 const sessionID = SessionV2.ID.make("ses_projector_test")
 const created = DateTime.makeUnsafe(0)
@@ -44,6 +47,106 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("keeps an in-flight snapshot stable while clearing completed live state", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const live = yield* SessionLive.Service
+      yield* database.db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* database.db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const assistantMessageID = SessionMessage.ID.create()
+      const base = { sessionID, assistantMessageID, timestamp: created }
+      yield* events.publish(SessionEvent.Step.Started, { ...base, agent: "build", model })
+      yield* events.publish(SessionEvent.Text.Started, { ...base, textID: "text-0" })
+      yield* events.publish(SessionEvent.Text.Delta, { ...base, textID: "text-0", delta: "prefix" })
+      const snapshot = live.capture()
+      const empty = SessionMessage.Assistant.make({
+        id: assistantMessageID,
+        type: "assistant",
+        agent: "build",
+        model,
+        time: { created },
+        content: [{ type: "text", id: "text-0", text: "" }],
+      })
+      yield* events.publish(SessionEvent.Text.Delta, { ...base, textID: "text-0", delta: " suffix" })
+      expect(snapshot([empty])[0]).toMatchObject({ content: [{ text: "prefix suffix" }] })
+      yield* events.publish(SessionEvent.Text.Ended, { ...base, textID: "text-0", text: "prefix suffix" })
+      yield* events.publish(SessionEvent.Step.Failed, { ...base, error: { type: "unknown", message: "interrupted" } })
+      expect(snapshot([empty])[0]).toMatchObject({ content: [{ text: "prefix" }] })
+      expect(live.capture()([empty])[0]).toMatchObject({ content: [{ text: "" }] })
+      expect(
+        snapshot([{ ...empty, content: [{ type: "text", id: "text-0", text: "prefix suffix" }] }])[0],
+      ).toMatchObject({ content: [{ text: "prefix suffix" }] })
+      expect(snapshot([{ ...empty, id: SessionMessage.ID.create() }])[0]).toMatchObject({ content: [{ text: "" }] })
+    }),
+  )
+  it.effect("returns active text and reasoning in fresh session reads without persisting live deltas", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      yield* database.db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* database.db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const assistantMessageID = SessionMessage.ID.create()
+      const base = { sessionID, assistantMessageID, timestamp: created }
+      yield* events.publish(SessionEvent.Step.Started, { ...base, agent: "build", model })
+      yield* events.publish(SessionEvent.Text.Started, { ...base, textID: "text-0" })
+      yield* events.publish(SessionEvent.Reasoning.Started, { ...base, reasoningID: "reasoning-0" })
+      yield* events.publish(SessionEvent.Text.Delta, { ...base, textID: "text-0", delta: "Already visible" })
+      yield* events.publish(SessionEvent.Reasoning.Delta, {
+        ...base,
+        reasoningID: "reasoning-0",
+        delta: "Thinking so far",
+      })
+      const expected = [
+        { type: "text", id: "text-0", text: "Already visible" },
+        { type: "reasoning", id: "reasoning-0", text: "Thinking so far" },
+      ]
+      expect((yield* sessions.messages({ sessionID })).at(-1)).toMatchObject({ content: expected })
+      expect((yield* sessions.context(sessionID)).at(-1)).toMatchObject({ content: expected })
+      expect(yield* sessions.message({ sessionID, messageID: assistantMessageID })).toMatchObject({ content: expected })
+      expect(
+        (yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)).some((event) =>
+          event.type.includes(".delta"),
+        ),
+      ).toBe(false)
+      yield* events.publish(SessionEvent.Text.Ended, { ...base, textID: "text-0", text: "Already visible, finished" })
+      expect((yield* sessions.messages({ sessionID })).at(-1)).toMatchObject({
+        content: [{ ...expected[0], text: "Already visible, finished" }, expected[1]],
+      })
+    }).pipe(Effect.provide(sessionsLayer)),
+  )
+
   it.effect("projects staged, cleared, and committed reverts", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

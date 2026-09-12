@@ -113,3 +113,16 @@ it.live("InstanceStore.reload runs InstanceBootstrap", () =>
     expect(existsSync(tmp.marker)).toBe(true)
   }),
 )
+
+it.live("InstanceStore retries bootstrap after a malformed project config is repaired", () =>
+  Effect.gen(function* () {
+    const directory = yield* tmpdirScoped({ git: true })
+    const store = yield* InstanceStore.Service
+    yield* Effect.promise(() => Bun.write(path.join(directory, "zaovra.json"), '{ "provider":'))
+    expect(Exit.isFailure(yield* store.load({ directory }).pipe(Effect.exit))).toBe(true)
+
+    yield* Effect.promise(() => Bun.write(path.join(directory, "zaovra.json"), "{}"))
+    const recovered = yield* store.load({ directory })
+    expect(recovered.directory).toBe(directory)
+  }),
+)

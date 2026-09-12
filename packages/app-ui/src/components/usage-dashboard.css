@@ -1,0 +1,103 @@
+.session-usage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 14px;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--v2-text-text-muted);
+  cursor: pointer;
+  text-align: start;
+  border-radius: 5px;
+}
+.session-usage-bar:hover {
+  color: var(--v2-text-text-base);
+}
+.session-usage-bar:focus-visible {
+  outline: 2px solid var(--v2-border-border-base);
+  outline-offset: 2px;
+}
+.session-usage-bar b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.usage-dashboard {
+  padding: 28px 32px;
+  color: var(--v2-text-text-base);
+}
+.usage-dashboard-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.usage-dashboard h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.usage-dashboard p {
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 12px 0 20px;
+}
+.usage-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 16px;
+}
+.usage-card {
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+}
+.usage-card h3 {
+  font-size: 14px;
+  font-weight: 500;
+}
+.usage-total {
+  margin: 14px 0 18px;
+  font-size: 27px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.usage-total span {
+  font-size: 12px;
+  color: var(--v2-text-text-muted);
+}
+.usage-card dl > div,
+.usage-billing > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 4px 0;
+}
+.usage-card dt,
+.usage-billing span {
+  color: var(--v2-text-text-muted);
+}
+.usage-card dd {
+  font-variant-numeric: tabular-nums;
+}
+.usage-billing {
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--v2-border-border-base);
+}
+.usage-billing strong {
+  font-weight: 400;
+  text-align: end;
+}
+.usage-updated {
+  font-size: 11px !important;
+}
+@media (max-width: 600px) {
+  .usage-dashboard {
+    padding: 20px 16px;
+  }
+}

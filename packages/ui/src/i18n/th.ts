@@ -1,4 +1,8 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed":
+    "บันทึกการเปลี่ยนแปลงไฟล์แล้ว แต่ไม่สามารถตรวจวิเคราะห์ภาษาให้เสร็จสมบูรณ์ได้: {{servers}}.",
+  "ui.messagePart.formattingFailed": "บันทึกการเปลี่ยนแปลงไฟล์แล้ว แต่จัดรูปแบบอัตโนมัติไม่สำเร็จ: {{formatters}}",
+
   "ui.sessionReview.title": "การเปลี่ยนแปลงเซสชัน",
   "ui.sessionReview.title.git": "การเปลี่ยนแปลงใน Git",
   "ui.sessionReview.title.branch": "การเปลี่ยนแปลงในสาขา",

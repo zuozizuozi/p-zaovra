@@ -49,6 +49,7 @@ export const Plugin = define({
             const providerID = id
             catalog.provider.update(providerID, (provider) => {
               if (item.name !== undefined) provider.name = item.name
+              if (item.disabled !== undefined) provider.disabled = item.disabled
               if (item.api !== undefined) provider.api = { ...item.api }
               if (item.request !== undefined) {
                 Object.assign(provider.request.headers, item.request.headers)
@@ -100,6 +101,28 @@ export const Plugin = define({
                 }
                 if (config.disabled !== undefined) model.enabled = !config.disabled
                 if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
+              })
+            }
+          }
+        }
+        // Apply filters after all documents so a later empty list can clear an earlier restriction.
+        const allow = files.findLast((file) => file.info.provider_filter?.allow !== undefined)?.info.provider_filter
+          ?.allow
+        const deny = files.findLast((file) => file.info.provider_filter?.deny !== undefined)?.info.provider_filter?.deny
+        for (const record of catalog.provider.list()) {
+          const id = record.provider.id
+          if ((allow !== undefined && !allow.includes(id)) || deny?.includes(id)) {
+            catalog.provider.update(id, (provider) => {
+              provider.disabled = true
+            })
+          }
+          const configs = files.flatMap((file) => (file.info.providers?.[id] ? [file.info.providers[id]] : []))
+          const modelsAllowed = configs.findLast((config) => config.filter?.allow !== undefined)?.filter?.allow
+          const modelsDenied = configs.findLast((config) => config.filter?.deny !== undefined)?.filter?.deny
+          for (const modelID of record.models.keys()) {
+            if ((modelsAllowed !== undefined && !modelsAllowed.includes(modelID)) || modelsDenied?.includes(modelID)) {
+              catalog.model.update(id, modelID, (model) => {
+                model.enabled = false
               })
             }
           }

@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { AgentV2 } from "@zaovra-ai/core/agent"
+import { CommandV2 } from "@zaovra-ai/core/command"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { PermissionV2 } from "@zaovra-ai/core/permission"
 import { ProjectV2 } from "@zaovra-ai/core/project"
@@ -17,12 +18,67 @@ const assertions: PermissionV2.AssertInput[] = []
 const permission = Layer.mock(PermissionV2.Service, {
   assert: (input) => Effect.sync(() => assertions.push(input)),
 })
-const it = testEffect(Layer.mergeAll(AgentV2.locationLayer, permission))
+const it = testEffect(Layer.mergeAll(AgentV2.locationLayer, CommandV2.locationLayer, permission))
 const parentID = SessionV2.ID.make("ses_task_parent")
 const childID = SessionV2.ID.make("ses_task_child")
 const location = { directory: AbsolutePath.make("/project") }
 
 describe("TaskTool", () => {
+  it.effect("allows a configured subtask command to run a primary agent in a child", () =>
+    Effect.gen(function* () {
+      yield* registerExplore()
+      const commands = yield* CommandV2.Service
+      const agents = yield* AgentV2.Service
+      yield* commands.transform((draft) =>
+        draft.update("review", (command) => {
+          command.subtask = true
+        }),
+      )
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("explore"), (agent) => {
+          agent.mode = "primary"
+        }),
+      )
+      const input = { description: "Review", prompt: "Review changes", subagent_type: "explore", command: "review" }
+      const result = yield* TaskTool.run(sessionOps(), info(parentID), input, {
+        sessionID: parentID,
+        ...toolIdentity,
+        toolCallID: "call-review",
+      })
+      expect(result.task_id).toBe(childID)
+      const invalid = yield* TaskTool.run(
+        sessionOps(),
+        info(parentID),
+        { ...input, command: "missing" },
+        { sessionID: parentID, ...toolIdentity, toolCallID: "call-invalid" },
+      ).pipe(Effect.exit)
+      expect(invalid._tag).toBe("Failure")
+    }),
+  )
+
+  it.effect("persists a command model override on the child input", () =>
+    Effect.gen(function* () {
+      yield* registerExplore()
+      const prompts: Parameters<SessionV2.Interface["prompt"]>[0][] = []
+      const model = ModelV2.Ref.make({
+        id: ModelV2.ID.make("command-model"),
+        providerID: ProviderV2.ID.make("command-provider"),
+        variant: ModelV2.VariantID.make("high"),
+      })
+      yield* TaskTool.run(
+        sessionOps({
+          prompt: (input) =>
+            Effect.sync(() => prompts.push(input)).pipe(Effect.as(admitted(input.sessionID, input.prompt.text))),
+        }),
+        info(parentID),
+        { description: "Command", prompt: "Inspect this", subagent_type: "explore", model },
+        { sessionID: parentID, ...toolIdentity, toolCallID: "call-command" },
+      )
+      expect(prompts[0].sessionID).toBe(childID)
+      expect(prompts[0].prompt.selection).toEqual({ agent: "explore", model })
+    }),
+  )
+
   it.effect("runs a permitted subagent in an independent child Session", () =>
     Effect.gen(function* () {
       assertions.length = 0

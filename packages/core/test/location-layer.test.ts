@@ -55,6 +55,9 @@ describe("LocationServiceMap", () => {
             expect(Equal.equals(constructed, decoded)).toBe(true)
             expect(Hash.hash(constructed)).toBe(Hash.hash(decoded))
             expect(yield* locations.contextEffect(constructed)).toBe(yield* locations.contextEffect(decoded))
+            expect(yield* locations.contextEffect({ directory })).toBe(
+              yield* locations.contextEffect({ directory, workspaceID: undefined }),
+            )
           }),
         ),
       ),

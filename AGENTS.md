@@ -4,6 +4,14 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## Desktop interactions
+- For desktop interaction changes, use Codex as the primary UX reference. Keep controls aligned with implemented capabilities and avoid duplicate navigation or unsupported placeholder actions.
+
+## Website preview synchronization
+
+- After every change to `packages/website-redesign` website content, assets, styling, or interactions, run `bun run build` from that package before handing off. It regenerates `website-preview/Zaovra-preview.html` in the repository root.
+- Keep the standalone HTML preview synchronized with the website. Do not hand-edit the generated HTML; update source and regenerate. Verify it opens directly with `file://` and retains its embedded assets and key interactions.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.

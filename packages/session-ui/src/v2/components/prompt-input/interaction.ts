@@ -89,6 +89,7 @@ export function createPromptInputV2Controller(input: {
   const attachments = input.attachments
     ? createPromptInputV2Attachments({
         ...input.attachments,
+        identity: input.identity,
         capture: () => ({
           current: () => draft.state.prompt,
           cursor: () => draft.state.cursor,
@@ -309,6 +310,8 @@ export function createPromptInputV2Controller(input: {
     attachments(): PromptInputV2Attachment[] {
       return draft.state.prompt.filter((part): part is PromptInputV2Attachment => part.type === "image")
     },
+    attachmentJobs: () => attachments?.jobs() ?? [],
+    dismissAttachmentJob: (id: number) => attachments?.dismiss(id),
     toggleContext(id: string) {
       dispatch({ type: "context.active", id })
       input.openContext?.(id)
@@ -326,6 +329,7 @@ export function createPromptInputV2Controller(input: {
       draft.removeAttachment(id)
     },
     canSubmit() {
+      if (attachments?.busy()) return false
       const persisted = draft.state
       if (persisted.prompt.some((part) => part.type === "image")) return true
       if (persisted.context.items.some((item) => !!item.comment?.trim())) return true
@@ -356,6 +360,7 @@ export function createPromptInputV2Controller(input: {
       dispatch({ type: "mode.normal" })
     },
     submit() {
+      if (attachments?.busy()) return
       input.view.submit.onSubmit()
       dispatch({ type: "popover.close" })
     },

@@ -5,6 +5,9 @@ import { Effect, Layer, Schema } from "effect"
 import { AgentV2 } from "../agent"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocationServiceMap } from "../location-service-map"
+import { ModelV2 } from "../model"
+import { CommandV2 } from "../command"
+import { AgentAttachment, FileAttachment } from "@zaovra-ai/schema/prompt"
 import { PermissionV2 } from "../permission"
 import { SessionV2 } from "../session"
 import { SessionMessage } from "../session/message"
@@ -22,9 +25,15 @@ export const description = `Delegate one focused task to an independent subagent
 Fresh calls receive only the supplied prompt, not the parent conversation. Reuse task_id to continue the same child Session. Subagents cannot create nested subagents.`
 
 export const Input = Schema.Struct({
+  command: Schema.String.pipe(Schema.optional).annotate({ description: "Configured subtask command to execute" }),
+  files: Schema.Array(FileAttachment).pipe(Schema.optional),
+  agents: Schema.Array(AgentAttachment).pipe(Schema.optional),
   description: Schema.String.annotate({ description: "Short description of the delegated task" }),
   prompt: Schema.String.annotate({ description: "Complete instructions and context for the subagent" }),
   subagent_type: Schema.String.annotate({ description: "Configured subagent role, such as explore or general" }),
+  model: ModelV2.Ref.pipe(Schema.optional).annotate({
+    description: "Optional model override for this child input",
+  }),
   task_id: SessionV2.ID.pipe(Schema.optional).annotate({
     description: "Existing child Session ID to continue instead of creating a fresh subagent",
   }),
@@ -154,7 +163,16 @@ export const run = Effect.fn("TaskTool.execute")(function* (
     return yield* failure("Subagents cannot delegate nested tasks; return the finding to the parent Agent")
   const targetID = AgentV2.ID.make(input.subagent_type)
   const target = yield* agents.get(targetID)
-  if (!target || target.mode !== "subagent")
+  const command =
+    input.command === undefined
+      ? undefined
+      : yield* Effect.gen(function* () {
+          const commands = yield* CommandV2.Service
+          return yield* commands.get(input.command!)
+        })
+  if (input.command !== undefined && (!command?.subtask || (command.agent && command.agent !== input.subagent_type)))
+    return yield* failure(`Unknown or incompatible subtask command: ${input.command}`)
+  if (!target || (target.mode !== "subagent" && !command))
     return yield* failure(`Unknown or unavailable subagent type: ${input.subagent_type}`)
 
   yield* permission
@@ -186,7 +204,12 @@ export const run = Effect.fn("TaskTool.execute")(function* (
     .prompt({
       id: SessionMessage.ID.make(`msg_task_${parent.id}_${context.assistantMessageID}_${context.toolCallID}`),
       sessionID: child.id,
-      prompt: { text: input.prompt },
+      prompt: {
+        text: input.prompt,
+        files: input.files,
+        agents: input.agents,
+        ...(input.model ? { selection: { agent: targetID, model: input.model } } : {}),
+      },
       resume: input.run_in_background === true,
     })
     .pipe(Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error))))

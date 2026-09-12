@@ -34,3 +34,15 @@ logs/
 tsconfig.tsbuildinfo
 .vercel
 .env*
+
+# Local attachment runtime and downloaded models
+/.cache/
+/packages/desktop-app/resources/attachments/__pycache__/
+
+# Local QA runs contain packaged Electron apps, downloads, profiles and logs.
+# Keep written acceptance reports; executable test sources live in packages/.
+/quality/*
+!/quality/*.md
+!/quality/desktop-audit-*/
+/quality/desktop-audit-*/*
+!/quality/desktop-audit-*/*.md

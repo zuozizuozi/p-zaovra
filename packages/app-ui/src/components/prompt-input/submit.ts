@@ -1,4 +1,4 @@
-import type { Message, Session } from "@zaovra-ai/sdk/v2/client"
+import type { Message, Session, SessionInputAdmitted } from "@zaovra-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 import { Binary } from "@zaovra-ai/core/util/binary"
@@ -28,7 +28,15 @@ type PendingPrompt = {
 
 const pending = new Map<string, PendingPrompt>()
 
+class CancelledFollowupInput extends Error {
+  constructor() {
+    super("This queued input has already been cancelled.")
+  }
+}
+
 export type FollowupDraft = {
+  admission?: SessionInputAdmitted["prompt"]
+  subtask?: SessionInputAdmitted["prompt"]["subtask"]
   sessionID: string
   sessionDirectory: string
   prompt: Prompt
@@ -44,6 +52,8 @@ type FollowupSendInput = {
   sync: DirectorySync
   draft: FollowupDraft
   messageID?: string
+  delivery?: "steer" | "queue"
+  resume?: boolean
   optimisticBusy?: boolean
   before?: () => Promise<boolean> | boolean
 }
@@ -71,10 +81,7 @@ export function expandCommandTemplate(template: string, argumentsText: string) {
 
 const commandPrompt = (prompt: Prompt, template: string, argumentsText: string): Prompt => {
   const content = expandCommandTemplate(template, argumentsText)
-  return [
-    { type: "text", content, start: 0, end: content.length },
-    ...prompt.filter((part) => part.type !== "text"),
-  ]
+  return [{ type: "text", content, start: 0, end: content.length }, ...prompt.filter((part) => part.type !== "text")]
 }
 
 const toV2Prompt = (parts: ReturnType<typeof buildRequestParts>["requestParts"]) => ({
@@ -85,6 +92,7 @@ const toV2Prompt = (parts: ReturnType<typeof buildRequestParts>["requestParts"])
     return [
       {
         uri: part.url,
+        mime: part.mime,
         name: part.filename,
         source: text ? { text: text.value, start: text.start, end: text.end } : undefined,
       },
@@ -104,21 +112,62 @@ const toV2Prompt = (parts: ReturnType<typeof buildRequestParts>["requestParts"])
   ),
 })
 
-export async function sendFollowupDraft(input: FollowupSendInput) {
+export function prepareFollowupDraft(input: Pick<FollowupSendInput, "draft" | "sync">): FollowupDraft {
+  if (input.draft.admission) return input.draft
   const originalText = draftText(input.draft.prompt)
-  const [head, ...tail] = originalText.split(" ")
-  const command = head?.startsWith("/")
-    ? input.sync.data.command.find((item) => item.name === head.slice(1))
-    : undefined
-  const prompt = command ? commandPrompt(input.draft.prompt, command.template, tail.join(" ")) : input.draft.prompt
+  const invocation = originalText.match(/^\/(\S+)(?:\s+([\s\S]*))?$/)
+  const command = invocation ? input.sync.data.command.find((item) => item.name === invocation[1]) : undefined
+  const prompt = command
+    ? commandPrompt(input.draft.prompt, command.template, invocation?.[2] ?? "")
+    : input.draft.prompt
+  const agent = command?.agent ?? input.draft.agent
+  const separator = command?.model?.indexOf("/") ?? -1
+  if (command?.model && (separator < 1 || separator === command.model.length - 1))
+    throw new Error(`Invalid model configured for /${command.name}`)
+  const model = command?.model
+    ? { providerID: command.model.slice(0, separator), modelID: command.model.slice(separator + 1) }
+    : input.draft.model
+  const variant = command?.model ? command.variant : input.draft.variant
+  const subtask = command?.subtask
+    ? { command: command.name, agent, model: { id: model.modelID, providerID: model.providerID, variant } }
+    : input.draft.subtask
+  const selection = subtask
+    ? {
+        agent: input.draft.agent,
+        model: {
+          id: input.draft.model.modelID,
+          providerID: input.draft.model.providerID,
+          variant: input.draft.variant,
+        },
+      }
+    : { agent, model: { id: model.modelID, providerID: model.providerID, variant } }
   const text = draftText(prompt)
   const images = draftImages(prompt)
+  const { requestParts } = buildRequestParts({
+    prompt,
+    context: input.draft.context,
+    images,
+    text,
+    sessionID: input.draft.sessionID,
+    messageID: "",
+    sessionDirectory: input.draft.sessionDirectory,
+  })
+  return {
+    ...input.draft,
+    admission: { ...toV2Prompt(requestParts), invocation: command ? originalText : undefined, selection, subtask },
+  }
+}
+
+export async function sendFollowupDraft(input: FollowupSendInput) {
+  const admission = prepareFollowupDraft(input).admission!
   const setBusy = () => {
+    if (input.delivery === "queue" || input.resume === false) return
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
   }
 
   const setIdle = () => {
+    if (input.delivery === "queue" || input.resume === false) return
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "idle" })
   }
@@ -130,11 +179,11 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
-  const { requestParts, optimisticParts } = buildRequestParts({
-    prompt,
+  const { optimisticParts } = buildRequestParts({
+    prompt: input.draft.prompt,
     context: input.draft.context,
-    images,
-    text,
+    images: draftImages(input.draft.prompt),
+    text: draftText(input.draft.prompt),
     sessionID: input.draft.sessionID,
     messageID,
     sessionDirectory: input.draft.sessionDirectory,
@@ -145,8 +194,14 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     sessionID: input.draft.sessionID,
     role: "user",
     time: { created: Date.now() },
-    agent: input.draft.agent,
-    model: { ...input.draft.model, variant: input.draft.variant },
+    agent: admission.selection?.agent ?? input.draft.agent,
+    model: admission.selection
+      ? {
+          modelID: admission.selection.model.id,
+          providerID: admission.selection.model.providerID,
+          variant: admission.selection.model.variant,
+        }
+      : input.draft.model,
   }
 
   const add = () =>
@@ -166,7 +221,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
 
   batch(() => {
     setBusy()
-    add()
+    if (input.delivery !== "queue" && input.resume !== false) add()
   })
 
   try {
@@ -178,26 +233,14 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    await Promise.all([
-      input.client.v2.session.switchAgent({
-        sessionID: input.draft.sessionID,
-        agent: input.draft.agent,
-      }),
-      input.client.v2.session.switchModel({
-        sessionID: input.draft.sessionID,
-        model: {
-          id: input.draft.model.modelID,
-          providerID: input.draft.model.providerID,
-          variant: input.draft.variant,
-        },
-      }),
-    ])
-    await input.client.v2.session.prompt({
+    const admitted = await input.client.v2.session.prompt({
       sessionID: input.draft.sessionID,
       id: messageID,
-      prompt: toV2Prompt(requestParts),
-      delivery: "steer",
+      prompt: admission,
+      delivery: input.delivery ?? "steer",
+      resume: input.resume,
     })
+    if (admitted.data?.data.cancelledSeq !== undefined) throw new CancelledFollowupInput()
     return true
   } catch (err) {
     batch(() => {
@@ -206,6 +249,29 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     })
     throw err
   }
+}
+
+export async function cancelFollowupDraft(
+  input: FollowupSendInput & { messageID: string; admitted?: boolean; cancelID?: string },
+) {
+  // A failed queue-to-steer conversion may still have its original input.
+  if (input.cancelID)
+    await input.client.v2.session.cancelInput(
+      { sessionID: input.draft.sessionID, messageID: input.cancelID },
+      { throwOnError: true },
+    )
+  // Reconcile a lost admission response without waking model execution.
+  if (!input.admitted)
+    await sendFollowupDraft({ ...input, delivery: input.cancelID ? "steer" : "queue", resume: false }).catch(
+      (error) => {
+        if (error instanceof CancelledFollowupInput) return
+        throw error
+      },
+    )
+  await input.client.v2.session.cancelInput(
+    { sessionID: input.draft.sessionID, messageID: input.messageID },
+    { throwOnError: true },
+  )
 }
 
 type PromptSubmitInput = {
@@ -498,15 +564,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (mode === "shell") {
       clearContext(submission.target())
       clearInput()
-      await client.v2.session
-        .shell({ sessionID: session.id, command: text.trim() })
-        .catch((err) => {
-          restoreInput()
-          showToast({
-            title: language.t("prompt.toast.shellSendFailed.title"),
-            description: errorMessage(err),
-          })
+      await client.v2.session.shell({ sessionID: session.id, command: text.trim() }).catch((err) => {
+        restoreInput()
+        showToast({
+          title: language.t("prompt.toast.shellSendFailed.title"),
+          description: errorMessage(err),
         })
+      })
       return
     }
 

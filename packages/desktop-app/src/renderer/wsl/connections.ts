@@ -1,4 +1,17 @@
 import type { WslServersState } from "@zaovra-ai/app/wsl/types"
+import { createMemo } from "solid-js"
+
+export function createStartupServer(input: {
+  ready: () => boolean
+  defaultServer: () => string | null | undefined
+  wsl: () => WslServersState | undefined
+}) {
+  return createMemo<string | undefined>((previous) => {
+    if (previous) return previous
+    if (!input.ready()) return
+    return availableStartupServer(input.defaultServer(), input.wsl())
+  })
+}
 
 export function readyWslConnections(state?: WslServersState) {
   return (state?.servers ?? []).flatMap((item) => {

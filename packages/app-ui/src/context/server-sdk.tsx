@@ -6,10 +6,11 @@ import { type Accessor, batch, createMemo, onCleanup, onMount } from "solid-js"
 import { createSdkForServer } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
-import { ServerConnection, useServer } from "./server"
+import { ServerConnection, resolveServerTarget, useServer } from "./server"
 import { createRefCountMap } from "@/utils/refcount"
 import { useGlobal } from "./global"
 import { ServerScope } from "@/utils/server-scope"
+import { adaptServerEvent } from "./server-event"
 
 const isAbortError = (error: unknown) =>
   error !== null && typeof error === "object" && "name" in error && error.name === "AbortError"
@@ -202,7 +203,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             streamErrorLogged = false
             if (event.payload.type !== "sync") {
               const directory = event.directory ?? "global"
-              const payload = event.payload as Event
+              const payload = adaptServerEvent(event.payload as Event)
               if (payload.type !== "server.connected" && typeof payload.id === "string") lastEventID = payload.id
               // Every transport reconnect starts with server.connected, which ServerSync treats as a snapshot resync.
               if (enqueueServerEvent(queue, { directory, payload })) schedule()
@@ -311,7 +312,7 @@ export const { use: useServerSDK, provider: ServerSDKProvider } = createSimpleCo
     const server = useServer()
 
     return createMemo<ServerSDK>(() => {
-      const conn = props.server?.() ?? server.current
+      const conn = resolveServerTarget(props.server, () => server.current)
       if (!conn) throw new Error(language.t("error.serverSDK.noServerAvailable"))
       return global.ensureServerCtx(conn).sdk
     })

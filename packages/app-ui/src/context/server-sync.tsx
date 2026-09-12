@@ -33,7 +33,7 @@ import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
 import { createRefCountMap } from "@/utils/refcount"
 import { useGlobal } from "./global"
-import { ServerConnection, useServer } from "./server"
+import { ServerConnection, resolveServerTarget, useServer } from "./server"
 import { retry } from "@zaovra-ai/core/util/retry"
 import type { ServerScope } from "@/utils/server-scope"
 import { createHomeSessionIndexCache } from "./global-sync/home-session-index"
@@ -55,7 +55,7 @@ type GlobalStore = {
 
 export const loadMcpQuery = (scope: ServerScope, directory: string, sdk: ZaovraClient) =>
   queryOptions({
-    queryKey: [scope, directory, "mcp"] as const,
+    queryKey: [scope, directoryKey(directory), "mcp"] as const,
     queryFn: () =>
       sdk.v2.mcp
         .status({ location: { directory } }, { throwOnError: true })
@@ -64,7 +64,7 @@ export const loadMcpQuery = (scope: ServerScope, directory: string, sdk: ZaovraC
 
 export const loadMcpResourcesQuery = (scope: ServerScope, directory: string, sdk: ZaovraClient) =>
   queryOptions<Record<string, McpResource>>({
-    queryKey: [scope, directory, "mcpResources"] as const,
+    queryKey: [scope, directoryKey(directory), "mcpResources"] as const,
     queryFn: () =>
       sdk.v2.mcp.resources({ location: { directory } }, { throwOnError: true }).then((response) => response.data.data),
     placeholderData: {},
@@ -72,7 +72,7 @@ export const loadMcpResourcesQuery = (scope: ServerScope, directory: string, sdk
 
 export const loadLspQuery = (scope: ServerScope, directory: string, sdk: ZaovraClient) =>
   queryOptions({
-    queryKey: [scope, directory, "lsp"] as const,
+    queryKey: [scope, directoryKey(directory), "lsp"] as const,
     queryFn: () => sdk.lsp.status().then((r) => r.data ?? []),
   })
 
@@ -571,7 +571,7 @@ export const { use: useServerSync, provider: ServerSyncProvider } = createSimple
     const server = useServer()
 
     return createMemo<ServerSync>(() => {
-      const conn = props.server?.() ?? server.current
+      const conn = resolveServerTarget(props.server, () => server.current)
       if (!conn) throw new Error(language.t("error.serverSDK.noServerAvailable"))
       return global.ensureServerCtx(conn).sync
     })

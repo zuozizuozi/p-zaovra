@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(packageDir, "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
+const publisherName = process.env.WINDOWS_SIGNING_PUBLISHER_NAME?.trim()
 // Keep the short desktop entry as an installation compatibility alias so existing
 // GNOME/KDE pins continue to resolve alongside the canonical Zaovra app id.
 const legacyDesktopEntry = path.join(packageDir, "resources", "linux", "zaovra-desktop.desktop")
@@ -17,6 +18,7 @@ const legacyDesktopEntryFpm = `${legacyDesktopEntry.replaceAll("\\", "/")}=/usr/
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
   if (process.env.GITHUB_ACTIONS !== "true") return
+  if (!publisherName) throw new Error("WINDOWS_SIGNING_PUBLISHER_NAME is required for signed Windows releases")
 
   await execFileAsync(
     "pwsh",
@@ -73,9 +75,10 @@ const getBase = (appId: string): Configuration => ({
     icon: `resources/icons/icon.ico`,
     signtoolOptions: {
       sign: signWindows,
+      ...(publisherName ? { publisherName } : {}),
     },
     target: ["nsis"],
-    verifyUpdateCodeSignature: false,
+    verifyUpdateCodeSignature: true,
   },
   nsis: {
     oneClick: true,

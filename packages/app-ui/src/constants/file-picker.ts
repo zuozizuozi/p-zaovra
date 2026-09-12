@@ -1,6 +1,7 @@
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
 export const ACCEPTED_FILE_TYPES = [
+  ".docx", ".xlsx", ".pptx", ".zip", ".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".mp4", ".webm", ".mov", ".mkv",
   ...ACCEPTED_IMAGE_TYPES,
   "application/pdf",
   "text/*",

@@ -61,6 +61,7 @@ import { TextShimmer } from "@zaovra-ai/ui/text-shimmer"
 import { AnimatedCountList } from "./tool-count-summary"
 import { ToolStatusTitle } from "./tool-status-title"
 import { patchFiles } from "./apply-patch-file"
+import { diagnosticFailures, formattingFailures } from "./formatting-failures"
 import { animate } from "motion"
 import { useLocation } from "@solidjs/router"
 import { attached, inline, kind, typeLabel } from "./message-file"
@@ -1566,6 +1567,16 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const input = () => part().state?.input ?? emptyInput
   // @ts-expect-error
   const partMetadata = () => part().state?.metadata ?? emptyMetadata
+  const formattingWarnings = createMemo(() =>
+    part().state.status === "completed" && ["write", "edit", "apply_patch"].includes(part().tool)
+      ? formattingFailures(partMetadata())
+      : [],
+  )
+  const diagnosticWarnings = createMemo(() =>
+    part().state.status === "completed" && ["write", "edit", "apply_patch"].includes(part().tool)
+      ? diagnosticFailures(partMetadata())
+      : [],
+  )
   const taskId = createMemo(() => {
     if (part().tool !== "task") return
     const value = partMetadata().sessionId
@@ -1636,6 +1647,16 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
             />
           </Match>
         </Switch>
+        <Show when={formattingWarnings().length > 0}>
+          <div data-component="formatting-warning" role="status" class="text-12-regular">
+            {i18n.t("ui.messagePart.formattingFailed", { formatters: formattingWarnings().join(", ") })}
+          </div>
+        </Show>
+        <Show when={diagnosticWarnings().length > 0}>
+          <div data-component="diagnostic-warning" role="status" class="text-12-regular">
+            {i18n.t("ui.messagePart.diagnosticsFailed", { servers: diagnosticWarnings().join(", ") })}
+          </div>
+        </Show>
       </div>
     </Show>
   )
@@ -2456,6 +2477,9 @@ ToolRegistry.register({
                                 />
                               </div>
                             </Show>
+                            <DiagnosticsDisplay
+                              diagnostics={getDiagnostics(props.metadata.diagnostics, file.filePath)}
+                            />
                           </Accordion.Content>
                         </Accordion.Item>
                       )
@@ -2532,6 +2556,7 @@ ToolRegistry.register({
                 />
               </div>
             </ToolFileAccordion>
+            <DiagnosticsDisplay diagnostics={getDiagnostics(props.metadata.diagnostics, single()!.filePath)} />
           </BasicTool>
         </div>
       </Show>

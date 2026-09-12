@@ -323,6 +323,22 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
+          title={language.t("settings.general.row.followup.title")}
+          description={language.t("settings.general.row.followup.description")}
+        >
+          <Select
+            data-action="settings-followup"
+            options={["steer", "queue"] as const}
+            current={settings.general.followup()}
+            label={(value) => language.t(`settings.general.row.followup.option.${value}`)}
+            onSelect={(value) => value && settings.general.setFollowup(value)}
+            variant="secondary"
+            size="small"
+            triggerVariant="settings"
+          />
+        </SettingsRow>
+
+        <SettingsRow
           title={language.t("settings.general.row.shell.title")}
           description={language.t("settings.general.row.shell.description")}
         >

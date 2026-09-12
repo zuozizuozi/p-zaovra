@@ -136,6 +136,13 @@ export const PromptAdmitted = Event.define({
 })
 export type PromptAdmitted = typeof PromptAdmitted.Type
 
+export const PromptCancelled = Event.define({
+  type: "session.next.prompt.cancelled",
+  ...options,
+  schema: { ...Base, messageID: SessionMessage.ID },
+})
+export type PromptCancelled = typeof PromptCancelled.Type
+
 export const ContextUpdated = Event.define({
   type: "session.next.context.updated",
   ...options,
@@ -207,6 +214,8 @@ export namespace Step {
       assistantMessageID: SessionMessage.ID,
       finish: Schema.String,
       cost: Schema.Finite,
+      usageReported: Schema.Boolean.pipe(optional),
+      requestPerformed: Schema.Boolean.pipe(optional),
       tokens: Schema.Struct({
         input: Schema.Finite,
         output: Schema.Finite,
@@ -254,6 +263,8 @@ export namespace Text {
       assistantMessageID: SessionMessage.ID,
       textID: Schema.String,
       delta: Schema.String,
+      // UTF-16 prefix length lets reconnecting readers deduplicate snapshot overlap.
+      offset: NonNegativeInt.pipe(optional),
     },
   })
   export type Delta = typeof Delta.Type
@@ -269,7 +280,6 @@ export namespace Text {
     },
   })
   export type Ended = typeof Ended.Type
-
 }
 
 export namespace Reasoning {
@@ -293,6 +303,7 @@ export namespace Reasoning {
       assistantMessageID: SessionMessage.ID,
       reasoningID: Schema.String,
       delta: Schema.String,
+      offset: NonNegativeInt.pipe(optional),
     },
   })
   export type Delta = typeof Delta.Type
@@ -437,6 +448,11 @@ export const Retried = Event.define({
 export type Retried = typeof Retried.Type
 
 export namespace Compaction {
+  const Usage = Schema.Struct({
+    providerID: Schema.String,
+    tokens: Step.Ended.data.fields.tokens,
+    reported: Schema.Boolean,
+  })
   export const Started = Event.define({
     type: "session.next.compaction.started",
     ...options,
@@ -469,6 +485,7 @@ export namespace Compaction {
       sourceSequence: NonNegativeInt.pipe(optional),
       text: Schema.String,
       recent: Schema.String,
+      usage: Usage.pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type
@@ -482,6 +499,7 @@ export namespace Compaction {
       reason: Started.data.fields.reason,
       sourceSequence: NonNegativeInt,
       error: UnknownError,
+      usage: Usage.pipe(optional),
     },
   })
   export type Failed = typeof Failed.Type
@@ -510,6 +528,7 @@ export const DurableDefinitions = Event.inventory(
   Deleted,
   Prompted,
   PromptAdmitted,
+  PromptCancelled,
   ContextUpdated,
   Synthetic,
   Shell.Started,
@@ -545,6 +564,7 @@ export const Definitions = Event.inventory(
   Deleted,
   Prompted,
   PromptAdmitted,
+  PromptCancelled,
   ContextUpdated,
   Synthetic,
   Shell.Started,

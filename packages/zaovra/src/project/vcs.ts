@@ -202,6 +202,7 @@ const files = Effect.fnUntraced(function* (
 const diffAgainstRef = Effect.fnUntraced(function* (
   git: Git.Interface,
   cwd: string,
+  worktree: string,
   ref: string,
   options?: DiffOptions,
 ) {
@@ -210,7 +211,7 @@ const diffAgainstRef = Effect.fnUntraced(function* (
   })
   return yield* files(
     git,
-    cwd,
+    worktree,
     ref,
     merge(
       list,
@@ -225,11 +226,13 @@ const diffAgainstRef = Effect.fnUntraced(function* (
 const track = Effect.fnUntraced(function* (
   git: Git.Interface,
   cwd: string,
+  worktree: string,
   ref: string | undefined,
   options?: DiffOptions,
 ) {
-  if (!ref) return yield* files(git, cwd, ref, yield* git.status(cwd), new Map(), emptyBatch(), options)
-  return yield* diffAgainstRef(git, cwd, ref, options)
+  // Git lists repository-relative paths even when cwd scopes the query to a subdirectory.
+  if (!ref) return yield* files(git, worktree, ref, yield* git.status(cwd), new Map(), emptyBatch(), options)
+  return yield* diffAgainstRef(git, cwd, worktree, ref, options)
 })
 
 export const Mode = Schema.Literals(["git", "branch"])
@@ -375,14 +378,20 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const ctx = yield* InstanceState.context
         if (ctx.project.vcs !== "git") return []
         if (mode === "git") {
-          return yield* track(git, ctx.directory, (yield* git.hasHead(ctx.directory)) ? "HEAD" : undefined, options)
+          return yield* track(
+            git,
+            ctx.directory,
+            ctx.worktree,
+            (yield* git.hasHead(ctx.directory)) ? "HEAD" : undefined,
+            options,
+          )
         }
 
         if (!value.root) return []
         if (value.current && value.current === value.root.name) return []
         const ref = yield* git.mergeBase(ctx.directory, value.root.ref)
         if (!ref) return []
-        return yield* diffAgainstRef(git, ctx.directory, ref, options)
+        return yield* diffAgainstRef(git, ctx.directory, ctx.worktree, ref, options)
       }),
       diffRaw: Effect.fn("Vcs.diffRaw")(function* () {
         const ctx = yield* InstanceState.context
@@ -393,7 +402,7 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const tracked = hasHead ? (yield* git.patchAll(ctx.directory, "HEAD")).text : ""
         const untracked = yield* Effect.forEach(
           status.filter((item) => item.code === "??"),
-          (item) => git.patchUntracked(ctx.directory, item.file).pipe(Effect.map((patch) => patch.text)),
+          (item) => git.patchUntracked(ctx.worktree, item.file).pipe(Effect.map((patch) => patch.text)),
         )
         return [tracked, ...untracked].filter(Boolean).join("\n")
       }),

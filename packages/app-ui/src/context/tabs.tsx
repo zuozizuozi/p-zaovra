@@ -122,30 +122,13 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
 
     createEffect(() => {
       if (!ready() || !recentReady()) return
-      const servers = new Set(server.list.map(ServerConnection.key))
-      const next = store.filter((tab) => servers.has(tab.server))
-      if (next.length !== store.length) {
-        for (const tab of store) {
-          if (!servers.has(tab.server)) {
-            const key = tabKey(tab)
-            memory.remove(key)
-            removeInfo(key)
-          }
-        }
-        setStore(() => next)
-      }
-      if (recent.key && !next.some((tab) => tabKey(tab) === recent.key)) setRecentKey(undefined)
-      const keys = new Set(next.map(tabKey))
+      // Availability is transient (for example WSL startup). Explicit service
+      // removal owns tab cleanup; a connection outage must not discard drafts.
+      if (recent.key && !store.some((tab) => tabKey(tab) === recent.key)) setRecentKey(undefined)
+      const keys = new Set(store.map(tabKey))
       for (const key of Object.keys(info)) {
         if (!keys.has(key)) removeInfo(key)
       }
-    })
-
-    createEffect(() => {
-      if (!closedReady()) return
-      const servers = new Set(server.list.map(ServerConnection.key))
-      const next = closed.filter((entry) => servers.has(entry.tab.server))
-      if (next.length !== closed.length) setClosed(() => next)
     })
 
     const navigateTab = (tab: Tab) => {

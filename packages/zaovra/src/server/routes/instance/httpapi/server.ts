@@ -300,6 +300,8 @@ export const routes = createRoutes()
 
 export const webHandler = lazy(() =>
   HttpRouter.toWebHandler(routes, {
+    // Match the listener's support for durable task and input IDs.
+    routerConfig: { maxParamLength: 1024 },
     disableLogger: true,
     memoMap,
     middleware: disposeMiddleware,

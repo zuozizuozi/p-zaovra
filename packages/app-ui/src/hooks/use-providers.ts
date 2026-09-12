@@ -2,45 +2,58 @@ import { useServerSync } from "@/context/server-sync"
 import { decode64 } from "@/utils/base64"
 import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
-import type { Accessor } from "solid-js"
+import { createMemo, type Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
+import { configuredModelIDs, modelSource } from "@/utils/model-source"
+import { parseModelKey } from "@/utils/model-key"
 
-export const popularProviders = [
-  "zaovra",
-  "anthropic",
-  "github-copilot",
-  "openai",
-  "google",
-  "openrouter",
-  "vercel",
-]
+export const popularProviders = ["zaovra", "anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
 const popularProviderSet = new Set(popularProviders)
 
 export function useProviders(directory?: Accessor<string | undefined>) {
   const serverSync = useServerSync()
   const params = useParams()
   const dir = () => (directory ? directory() : decode64(params.dir))
-  const providers = () => {
+  const providers = createMemo(() => {
     const value = dir()
     const projectStore = value ? serverSync().child(value)[0] : undefined
     const selected = directory
       ? selectProviderCatalog({
-        explicit: true,
-        directory: value,
-        catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
-      })
+          explicit: true,
+          directory: value,
+          catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
+        })
       : selectProviderCatalog({
           explicit: false,
           directory: value,
           catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
           global: serverSync().data.provider,
         })
+    const config = projectStore?.config ?? serverSync().data.config
+    const defaultModel = config.model ? parseModelKey(config.model) : undefined
     return {
       ...selected,
-      all: new Map([...selected.all].filter(([id]) => id !== "zaovra-go")),
+      all: new Map(
+        [...selected.all]
+          .filter(([id]) => id !== "zaovra-go")
+          .map(([id, provider]) => {
+            if (modelSource(provider) === "official") return [id, provider]
+            const configured = configuredModelIDs(
+              config.provider?.[id],
+              defaultModel?.providerID === id ? defaultModel.modelID : undefined,
+            )
+            return [
+              id,
+              {
+                ...provider,
+                models: Object.fromEntries(Object.entries(provider.models).filter(([id]) => configured.has(id))),
+              },
+            ]
+          }),
+      ),
       connected: selected.connected.filter((id) => id !== "zaovra-go"),
     }
-  }
+  })
   return {
     all: () => providers().all,
     default: () => providers().default,

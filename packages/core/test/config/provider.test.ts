@@ -8,6 +8,7 @@ import { ModelV2 } from "@zaovra-ai/core/model"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { PluginHost } from "@zaovra-ai/core/plugin/host"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
+import { ConfigMigrateV1 } from "@zaovra-ai/core/v1/config/migrate"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "../plugin/fixture"
 
@@ -55,6 +56,99 @@ function request(headers: Record<string, string>, variant?: string) {
 const decode = Schema.decodeUnknownSync(Config.Info)
 
 describe("ConfigProviderPlugin.Plugin", () => {
+  ;[
+    {
+      name: "provider allowlist",
+      configs: [{ enabled_providers: ["custom"] }],
+      expected: ["custom/one", "custom/two", "custom/three"],
+    },
+    { name: "empty provider allowlist", configs: [{ enabled_providers: [] }], expected: [] },
+    {
+      name: "model allowlist and deny precedence",
+      configs: [{ provider: { custom: { whitelist: ["one", "two"], blacklist: ["two"] } } }],
+      expected: ["builtin/one", "custom/one"],
+    },
+    {
+      name: "cleared provider and model deny lists",
+      configs: [
+        { disabled_providers: ["builtin"], provider: { custom: { blacklist: ["one"] } } },
+        { disabled_providers: [], provider: { custom: { blacklist: [] } } },
+      ],
+      expected: ["builtin/one", "custom/one", "custom/two", "custom/three"],
+    },
+  ].forEach((test) =>
+    it.effect(`preserves legacy ${test.name} in the executor catalog`, () =>
+      Effect.gen(function* () {
+        const catalog = yield* Catalog.Service
+        yield* catalog.transform((editor) => {
+          editor.model.update(ProviderV2.ID.make("builtin"), ModelV2.ID.make("one"), () => {})
+          for (const id of ["one", "two", "three"])
+            editor.model.update(ProviderV2.ID.make("custom"), ModelV2.ID.make(id), () => {})
+        })
+        yield* addPlugin(
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed(
+                test.configs.map(
+                  (config) => new Config.Document({ type: "document", info: decode(ConfigMigrateV1.migrate(config)) }),
+                ),
+              ),
+          }),
+        )
+        expect((yield* catalog.model.available()).map((model) => `${model.providerID}/${model.id}`)).toEqual(
+          test.expected,
+        )
+      }),
+    ),
+  )
+
+  it.effect("honors desktop provider disabling after V1 migration, including built-in providers", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      yield* catalog.transform((editor) => {
+        for (const id of ["disabled-built-in", "disabled-custom", "available"]) {
+          editor.provider.update(ProviderV2.ID.make(id), () => {})
+          editor.model.update(ProviderV2.ID.make(id), ModelV2.ID.make("chat"), () => {})
+        }
+      })
+      yield* addPlugin(
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({
+                type: "document",
+                info: decode(
+                  ConfigMigrateV1.migrate({
+                    disabled_providers: ["disabled-built-in", "disabled-custom"],
+                    provider: { "disabled-custom": { name: "Custom" } },
+                  }),
+                ),
+              }),
+            ]),
+        }),
+      )
+      expect((yield* catalog.provider.available()).map((provider) => String(provider.id))).toEqual(["available"])
+      expect((yield* catalog.model.available()).map((model) => String(model.providerID))).toEqual(["available"])
+      expect(required(yield* catalog.provider.get(ProviderV2.ID.make("disabled-custom"))).name).toBe("Custom")
+    }),
+  )
+
+  it.effect("allows a later V2 provider configuration to re-enable a disabled provider", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      yield* addPlugin(
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({ type: "document", info: decode({ providers: { custom: { disabled: true } } }) }),
+              new Config.Document({ type: "document", info: decode({ providers: { custom: { disabled: false } } }) }),
+            ]),
+        }),
+      )
+      expect((yield* catalog.provider.available()).map((provider) => String(provider.id))).toEqual(["custom"])
+    }),
+  )
+
   it.effect("registers a key integration for a configured custom provider", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service

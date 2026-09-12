@@ -8,6 +8,8 @@ import type {
   SessionsListOutput,
   SessionsCreateInput,
   SessionsCreateOutput,
+  SessionsUsageInput,
+  SessionsUsageOutput,
   SessionsActiveOutput,
   SessionsGetInput,
   SessionsGetOutput,
@@ -19,6 +21,10 @@ import type {
   SessionsPromptOutput,
   SessionsPendingInputsInput,
   SessionsPendingInputsOutput,
+  SessionsTurnDiffInput,
+  SessionsTurnDiffOutput,
+  SessionsCancelInputInput,
+  SessionsCancelInputOutput,
   SessionsShellInput,
   SessionsShellOutput,
   SessionsTodosInput,
@@ -367,6 +373,18 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      usage: (input?: SessionsUsageInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsUsageOutput }>(
+          {
+            method: "GET",
+            path: `/api/usage`,
+            query: { sessionID: input?.["sessionID"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       active: (requestOptions?: RequestOptions) =>
         request<{ readonly data: SessionsActiveOutput }>(
           {
@@ -432,6 +450,28 @@ export function make(options: ClientOptions) {
             path: `/api/session/${encodeURIComponent(input.sessionID)}/input/pending`,
             successStatus: 200,
             declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      turnDiff: (input: SessionsTurnDiffInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsTurnDiffOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/message/${encodeURIComponent(input.messageID)}/diff`,
+            successStatus: 200,
+            declaredStatuses: [404, 503, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      cancelInput: (input: SessionsCancelInputInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsCancelInputOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/input/${encodeURIComponent(input.messageID)}/cancel`,
+            successStatus: 200,
+            declaredStatuses: [404, 409, 400, 401],
             empty: false,
           },
           requestOptions,

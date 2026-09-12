@@ -295,11 +295,69 @@ test("keeps the locked write schema, semantics docstring, and deferred UX TODOs 
   )
   for (const todo of [
     "Revisit whether model-facing mutation schemas should prefer absolute `filePath` naming for trained-in compatibility after evaluating model behavior.",
-    "Add formatter integration after V2 formatter runtime exists.",
     "Publish watcher/file-edit events after V2 watcher integration exists.",
     "Add snapshots / undo after design exists.",
-    "Add LSP notification and diagnostics after V2 LSP runtime exists.",
   ]) {
     expect(source).toContain(`TODO: ${todo}`)
   }
 })
+
+it.live("formats actual write output and reports a failed formatter", () =>
+  Effect.acquireUseRelease(
+    Effect.promise(() => tmpdir()),
+    (tmp) =>
+      Effect.gen(function* () {
+        reset()
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(tmp.path, "zaovra.json"),
+            JSON.stringify({
+              formatter: {
+                custom: {
+                  extensions: [".audit"],
+                  command: [
+                    process.execPath,
+                    "-e",
+                    "require('fs').appendFileSync(process.argv[1], ' formatted')",
+                    "$FILE",
+                  ],
+                },
+                failing: { extensions: [".audit"], command: [process.execPath, "-e", "process.exit(1)"] },
+              },
+              lsp: {
+                missing: { extensions: [".audit"], command: ["zaovra-nonexistent-lsp-tool-test"] },
+                test: {
+                  extensions: [".audit"],
+                  command: [
+                    process.execPath,
+                    path.join(import.meta.dirname, "fixture/lsp-diagnostics.cjs"),
+                    path.join(tmp.path, "lsp.log"),
+                  ],
+                },
+              },
+            }),
+          ),
+        )
+        yield* withTool(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const settled = yield* settleTool(registry, call({ path: "new.audit", content: "bad" }))
+            expect(settled.output?.structured).toMatchObject({ formatting: { ran: ["custom"], failed: ["failing"] } })
+            expect(settled.result.type).toBe("text")
+            expect(settled.result.value).toContain("Automatic formatting failed: failing")
+            expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "new.audit")).text())).toBe("bad formatted")
+            expect(settled.output?.structured).toMatchObject({
+              lsp: {
+                diagnostics: { [path.join(tmp.path, "new.audit")]: [{ message: "Bad text" }] },
+                failed: ["missing"],
+              },
+            })
+            expect(settled.result.value).toContain("ERROR: Bad text")
+            expect(settled.result.value).toContain(
+              "Language diagnostics unavailable: missing. File changes remain saved.",
+            )
+          }),
+        )
+      }),
+    (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+  ),
+)

@@ -1,5 +1,5 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
-const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
+import { providerBaseURL, providerProtocols, type ProviderDiscoveryInput } from "../provider-discovery"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -28,6 +28,7 @@ export type HeaderRow = {
 }
 
 export type FormState = {
+  protocol?: ProviderDiscoveryInput["kind"]
   providerID: string
   name: string
   baseURL: string
@@ -90,7 +91,7 @@ export function validateCustomProvider(input: ValidateArgs) {
           })()
     return { id: idError, name: undefined }
   })
-  const modelsValid = models.every((m) => !m.id && !m.name)
+  const modelsValid = models.length > 0 && models.every((m) => !m.id && !m.name)
   const modelConfig = Object.fromEntries(
     input.form.models.map((m) => [m.id.trim(), { name: m.name.trim() || m.id.trim() }]),
   )
@@ -138,14 +139,15 @@ export function validateCustomProvider(input: ValidateArgs) {
       name,
       key,
       config: {
-        npm: OPENAI_COMPATIBLE,
+        npm: providerProtocols[input.form.protocol ?? "openai"].npm,
         name,
         ...(env ? { env: [env] } : {}),
         options: {
-          baseURL,
+          baseURL: providerBaseURL(baseURL, input.form.protocol),
           ...(Object.keys(headerConfig).length ? { headers: headerConfig } : {}),
         },
         models: modelConfig,
+        whitelist: Object.keys(modelConfig),
       },
     },
   }

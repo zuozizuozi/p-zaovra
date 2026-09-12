@@ -3,12 +3,24 @@ import { createStore } from "solid-js/store"
 import { QueryClient } from "@tanstack/solid-query"
 import type { Config, ZaovraClient, Project, Session } from "@zaovra-ai/sdk/v2/client"
 import type { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
-import { bootstrapDirectory, loadPathQuery, loadProvidersQuery } from "./bootstrap"
+import {
+  bootstrapDirectory,
+  loadAgentsQuery,
+  loadPathQuery,
+  loadProvidersQuery,
+  loadReferencesQuery,
+} from "./bootstrap"
 import type { State, VcsCache } from "./types"
 import { createServerSession } from "../server-session"
 import { ServerScope } from "@/utils/server-scope"
+import { loadLspQuery, loadMcpQuery, loadMcpResourcesQuery } from "../server-sync"
 
 const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
+const emptyCatalog = {
+  provider: { list: async () => ({ data: { data: [] } }) },
+  model: { list: async () => ({ data: { data: [] } }) },
+  integration: { list: async () => ({ data: { data: [] } }) },
+}
 
 function directoryState() {
   return createStore<State>({
@@ -62,10 +74,19 @@ describe("bootstrapDirectory", () => {
         provider,
       },
       sdk: {
-        app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
         config: { get: async () => ({ data: {} }) },
         vcs: { get: async () => ({ data: undefined }) },
         v2: {
+          ...emptyCatalog,
+          agent: {
+            list: async () => ({
+              data: {
+                data: [
+                  { id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } },
+                ],
+              },
+            }),
+          },
           command: {
             list: async () => {
               mcpReads.push("command")
@@ -105,10 +126,19 @@ describe("bootstrapDirectory", () => {
     const [store, setStore] = directoryState()
     const stalled = Promise.withResolvers<never>()
     const client = {
-      app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
       config: { get: async () => ({ data: {} }) },
       vcs: { get: async () => ({ data: undefined }) },
       v2: {
+        ...emptyCatalog,
+        agent: {
+          list: async () => ({
+            data: {
+              data: [
+                { id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } },
+              ],
+            },
+          }),
+        },
         command: { list: async () => ({ data: { data: [] } }) },
         permission: { request: { list: async () => ({ data: { data: [] } }) } },
         question: { request: { list: async () => ({ data: { data: [] } }) } },
@@ -163,14 +193,23 @@ describe("bootstrapDirectory", () => {
     expect(session.data.session_status[stale.id]).toBeUndefined()
   })
 
-  test("bootstraps commands from the V2 location control plane", async () => {
+  test("refreshes cached agents and bootstraps commands from the V2 location control plane", async () => {
     const [store, setStore] = directoryState()
     const calls: string[] = []
     const client = {
-      app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
       config: { get: async () => ({ data: {} }) },
       vcs: { get: async () => ({ data: undefined }) },
       v2: {
+        ...emptyCatalog,
+        agent: {
+          list: async () => ({
+            data: {
+              data: [
+                { id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } },
+              ],
+            },
+          }),
+        },
         command: {
           list: async () => {
             calls.push("v2.command.list")
@@ -199,6 +238,11 @@ describe("bootstrapDirectory", () => {
       provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
     } as unknown as ZaovraClient
 
+    const queries = new QueryClient()
+    queries.setQueryData(loadAgentsQuery(ServerScope.local, "/project", client).queryKey, [
+      { name: "removed-agent", mode: "primary", hidden: false, options: {}, permission: [] },
+    ])
+
     await bootstrapDirectory({
       directory: "/project",
       scope: ServerScope.local,
@@ -215,12 +259,13 @@ describe("bootstrapDirectory", () => {
       vcsCache: { setStore() {} } as unknown as VcsCache,
       loadSessions() {},
       translate: (key) => key,
-      queryClient: new QueryClient(),
+      queryClient: queries,
     })
 
     await new Promise((resolve) => setTimeout(resolve, 80))
 
     expect(calls).toEqual(["v2.command.list"])
+    expect(store.agent.map((agent) => agent.name)).toEqual(["build"])
     expect(store.command).toEqual([
       {
         name: "review",
@@ -234,6 +279,47 @@ describe("bootstrapDirectory", () => {
 })
 
 describe("query keys", () => {
+  test("configuration refresh updates the provider cache observed by Windows directory stores", async () => {
+    let connected = ["custom"]
+    const client = {
+      v2: {
+        ...emptyCatalog,
+        provider: {
+          list: async () => ({
+            data: {
+              data: connected.map((id) => ({ id, name: id })),
+            },
+          }),
+        },
+      },
+    } as unknown as ZaovraClient
+    const queries = new QueryClient()
+    const observed = loadProvidersQuery(ServerScope.local, "C:/project", client)
+    await queries.fetchQuery(observed)
+    connected = []
+    await queries.fetchQuery(loadProvidersQuery(ServerScope.local, "C:\\project\\", client))
+    expect(queries.getQueryData(observed.queryKey)?.connected).toEqual([])
+    expect(queries.getQueryCache().getAll()).toHaveLength(1)
+    queries.clear()
+  })
+
+  test("normalizes directory keys consistently across bootstrap queries", () => {
+    const client = {} as ZaovraClient
+    for (const load of [
+      loadProvidersQuery,
+      loadAgentsQuery,
+      loadPathQuery,
+      loadReferencesQuery,
+      loadMcpQuery,
+      loadMcpResourcesQuery,
+      loadLspQuery,
+    ]) {
+      expect(load(ServerScope.local, "C:\\project\\", client).queryKey).toEqual(
+        load(ServerScope.local, "C:/project", client).queryKey,
+      )
+    }
+  })
+
   test("partitions identical directories by server scope", () => {
     const client = {} as ZaovraClient
     const remote = "https://debian.example" as typeof ServerScope.local

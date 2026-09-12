@@ -90,4 +90,8 @@ function makeRoutes<AuthError, AuthServices>(auth: Layer.Layer<ServerAuth.Config
 export const routes = createRoutes()
 
 export const webHandler = () =>
-  HttpRouter.toWebHandler(routes.pipe(Layer.provide(HttpServer.layerServices)), { disableLogger: true })
+  HttpRouter.toWebHandler(routes.pipe(Layer.provide(HttpServer.layerServices)), {
+    disableLogger: true,
+    // Durable task IDs include the parent, assistant message and tool call IDs.
+    routerConfig: { maxParamLength: 1024 },
+  })

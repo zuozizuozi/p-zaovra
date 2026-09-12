@@ -2,7 +2,11 @@ import { Agent } from "@/agent/agent"
 import * as InstanceState from "@/effect/instance-state"
 import { Format } from "@/format"
 import { Global } from "@zaovra-ai/core/global"
-import { LSP } from "@/lsp/lsp"
+import { Service } from "@/lsp/lsp"
+import { LSP } from "@zaovra-ai/core/lsp"
+import { Location } from "@zaovra-ai/core/location"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
 import { Effect } from "effect"
@@ -15,12 +19,13 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
   Effect.gen(function* () {
     const agent = yield* Agent.Service
     const format = yield* Format.Service
-    const lsp = yield* LSP.Service
+    const lsp = yield* Service
+    const locations = yield* LocationServiceMap.Service
     const skill = yield* Skill.Service
     const vcs = yield* Vcs.Service
 
     const dispose = Effect.fn("InstanceHttpApi.dispose")(function* () {
-      yield* markInstanceForDisposal(yield* InstanceState.context)
+      yield* markInstanceForDisposal(yield* InstanceState.context, true)
       return true
     })
 
@@ -80,7 +85,18 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {
-      return yield* lsp.status()
+      const ctx = yield* InstanceState.context
+      const [legacy, current] = yield* Effect.all(
+        [
+          lsp.status(),
+          Effect.gen(function* () {
+            const lsp = yield* LSP.Service
+            return yield* lsp.status()
+          }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) })))),
+        ],
+        { concurrency: "unbounded" },
+      )
+      return [...new Map([...legacy, ...current].map((item) => [JSON.stringify([item.id, item.root]), item])).values()]
     })
 
     const getFormatter = Effect.fn("InstanceHttpApi.formatter")(function* () {

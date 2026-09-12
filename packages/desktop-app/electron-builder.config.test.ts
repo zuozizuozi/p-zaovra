@@ -3,6 +3,52 @@ import type { Configuration } from "electron-builder"
 
 const legacyDesktopEntry = "resources/linux/zaovra-desktop.desktop"
 
+test("passes the trusted Windows publisher to update metadata generation", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      'const c = (await import("./electron-builder.config.ts")).default; console.log(JSON.stringify({ verify: c.win.verifyUpdateCodeSignature, publisher: c.win.signtoolOptions.publisherName }))',
+    ],
+    {
+      cwd: import.meta.dir,
+      env: { ...process.env, WINDOWS_SIGNING_PUBLISHER_NAME: "  Fixture Publisher  " },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(code, stderr).toBe(0)
+  expect(JSON.parse(stdout)).toEqual({ verify: true, publisher: "Fixture Publisher" })
+})
+
+test.skipIf(process.platform !== "win32")("rejects CI signing without an explicit update publisher", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      'const c = (await import("./electron-builder.config.ts")).default; await c.win.signtoolOptions.sign({ path: "fixture.exe" })',
+    ],
+    {
+      cwd: import.meta.dir,
+      env: { ...process.env, GITHUB_ACTIONS: "true", WINDOWS_SIGNING_PUBLISHER_NAME: " " },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(code).not.toBe(0)
+  expect(stdout + stderr).toContain("WINDOWS_SIGNING_PUBLISHER_NAME is required")
+})
+
 const channels = [
   { channel: "dev", appId: "ai.zaovra.desktop.dev" },
   { channel: "beta", appId: "ai.zaovra.desktop.beta" },

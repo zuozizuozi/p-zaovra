@@ -113,6 +113,55 @@ const call = (input: typeof EditTool.Input.Type, id = "call-edit") => ({
 const it = testEffect(Layer.empty)
 
 describe("EditTool", () => {
+  it.live("returns the formatted diff and reports formatter failures after a successful edit", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const target = path.join(tmp.path, "sample.audit")
+          yield* Effect.promise(() => Bun.write(target, "before\n"))
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(tmp.path, "zaovra.json"),
+              JSON.stringify({
+                formatter: {
+                  custom: {
+                    extensions: [".audit"],
+                    command: [
+                      process.execPath,
+                      "-e",
+                      "require('fs').writeFileSync(process.argv[1], 'FORMATTED\\n')",
+                      "$FILE",
+                    ],
+                  },
+                  failing: { extensions: [".audit"], command: [process.execPath, "-e", "process.exit(1)"] },
+                },
+              }),
+            ),
+          )
+          yield* withTool(tmp.path, (registry) =>
+            Effect.gen(function* () {
+              const settled = yield* settleTool(
+                registry,
+                call({ path: "sample.audit", oldString: "before", newString: "after" }),
+              )
+              expect(settled.output?.structured).toMatchObject({
+                formatting: { ran: ["custom"], failed: ["failing"] },
+                files: [{ additions: 1, deletions: 1, patch: expect.stringContaining("-before\n+FORMATTED") }],
+              })
+              expect(settled.result).toMatchObject({
+                type: "text",
+                value: expect.stringContaining("Automatic formatting failed: failing"),
+              })
+              expect(yield* Effect.promise(() => Bun.file(target).text())).toBe("FORMATTED\n")
+            }),
+          )
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and replaces relative exact text through FileMutation once", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -424,11 +473,51 @@ test("keeps the locked edit schema, semantics docstring, and deferred TODOs visi
   )
   for (const todo of [
     "Port V1 fuzzy correction strategies only after exact-edit behavior is established: line-trimmed matching, block-anchor fallback, indentation correction, and similarity-threshold review.",
-    "Add formatter integration after V2 formatter runtime exists.",
     "Publish watcher/file-edit events after V2 watcher integration exists.",
     "Add snapshots / undo after design exists.",
-    "Add LSP notification and diagnostics after V2 LSP runtime exists.",
   ]) {
     expect(source).toContain(`TODO: ${todo}`)
   }
 })
+
+it.live("returns current diagnostics after an actual edit", () =>
+  Effect.acquireUseRelease(
+    Effect.promise(() => tmpdir()),
+    (tmp) =>
+      Effect.gen(function* () {
+        reset()
+        yield* Effect.promise(() => Bun.write(path.join(tmp.path, "sample.audit"), "before"))
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(tmp.path, "zaovra.json"),
+            JSON.stringify({
+              lsp: {
+                test: {
+                  extensions: [".audit"],
+                  command: [
+                    process.execPath,
+                    path.join(import.meta.dirname, "fixture/lsp-diagnostics.cjs"),
+                    path.join(tmp.path, "lsp.log"),
+                  ],
+                },
+              },
+            }),
+          ),
+        )
+        yield* withTool(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const settled = yield* settleTool(
+              registry,
+              call({ path: "sample.audit", oldString: "before", newString: "bad" }),
+            )
+            expect(settled.output?.structured).toMatchObject({
+              lsp: { diagnostics: { [path.join(tmp.path, "sample.audit")]: [{ message: "Bad text" }] }, failed: [] },
+            })
+            expect(settled.result.value).toContain("ERROR: Bad text")
+            expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "sample.audit")).text())).toBe("bad")
+          }),
+        )
+      }),
+    (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+  ),
+)

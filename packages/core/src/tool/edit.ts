@@ -12,6 +12,8 @@ import { createTwoFilesPatch, diffLines } from "diff"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileMutation } from "../file-mutation"
+import { Formatter } from "../formatter"
+import { LSP } from "../lsp"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
@@ -36,6 +38,9 @@ export const Input = Schema.Struct({
 export const Output = Schema.Struct({
   files: Schema.Array(FileDiff.Info),
   replacements: Schema.Number,
+  formatting: Formatter.Result.pipe(Schema.optional),
+  lsp: LSP.Report.pipe(Schema.optional),
+  target: Schema.String.pipe(Schema.optional),
 })
 export type Output = typeof Output.Type
 
@@ -75,23 +80,31 @@ export const toModelOutput = (output: Output, oldString: string, newString: stri
     `Edited file successfully: ${output.files[0]?.file}`,
     `Replacements: ${output.replacements}`,
     "```diff",
-    ...previewLines(oldString, "-"),
-    ...previewLines(newString, "+"),
+    ...(output.formatting
+      ? (output.files[0]?.patch ?? "").split("\n").slice(0, 20)
+      : [...previewLines(oldString, "-"), ...previewLines(newString, "+")]),
     "```",
-  ].join("\n")
+    ...(output.formatting?.failed.length
+      ? [
+          `Automatic formatting failed: ${output.formatting.failed.join(", ")}. Read the file before making further edits.`,
+        ]
+      : []),
+    LSP.describe(output.lsp),
+  ]
+    .filter(Boolean)
+    .join("\n")
 
 /** Deferred V2 edit behavior and UX integrations remain visible at the model-facing seam. */
 // TODO: Port V1 fuzzy correction strategies only after exact-edit behavior is established: line-trimmed matching, block-anchor fallback, indentation correction, and similarity-threshold review.
-// TODO: Add formatter integration after V2 formatter runtime exists.
 // TODO: Publish watcher/file-edit events after V2 watcher integration exists.
 // TODO: Add snapshots / undo after design exists.
-// TODO: Add LSP notification and diagnostics after V2 LSP runtime exists.
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
     const mutation = yield* LocationMutation.Service
     const files = yield* FileMutation.Service
+    const lsp = yield* LSP.Service
     const fs = yield* FSUtil.Service
     const permission = yield* PermissionV2.Service
 
@@ -180,31 +193,41 @@ const layer = Layer.effectDiscard(
                   input.replaceAll === true
                     ? source.text.replaceAll(oldString, newString)
                     : source.text.replace(oldString, newString)
-                const counts = diffLines(source.text, replaced).reduce(
-                  (result, item) => ({
-                    additions: result.additions + (item.added ? (item.count ?? 0) : 0),
-                    deletions: result.deletions + (item.removed ? (item.count ?? 0) : 0),
-                  }),
-                  { additions: 0, deletions: 0 },
-                )
                 const next = splitBom(replaced)
                 const result = yield* unableToEdit(
                   files.writeIfUnchanged({
                     target,
                     expected: source.content,
                     content: joinBom(next.text, source.bom || next.bom),
+                    format: true,
                   }),
                 )
+                const diagnostics = yield* lsp.changed(result.target)
                 return {
+                  ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                    ? { lsp: diagnostics, target: result.target }
+                    : {}),
                   files: [
                     {
                       file: result.resource,
-                      patch: createTwoFilesPatch(result.resource, result.resource, source.text, replaced),
+                      patch: createTwoFilesPatch(
+                        result.resource,
+                        result.resource,
+                        source.text,
+                        splitBom(result.content ?? replaced).text,
+                      ),
                       status: "modified" as const,
-                      ...counts,
+                      ...diffLines(source.text, splitBom(result.content ?? replaced).text).reduce(
+                        (counts, item) => ({
+                          additions: counts.additions + (item.added ? (item.count ?? 0) : 0),
+                          deletions: counts.deletions + (item.removed ? (item.count ?? 0) : 0),
+                        }),
+                        { additions: 0, deletions: 0 },
+                      ),
                     },
                   ],
                   replacements,
+                  ...(result.formatting ? { formatting: result.formatting } : {}),
                 } satisfies Output
               })
             },
@@ -219,5 +242,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/edit",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, FSUtil.node, PermissionV2.node],
+  deps: [ToolRegistry.node, LocationMutation.node, FileMutation.node, LSP.node, FSUtil.node, PermissionV2.node],
 })

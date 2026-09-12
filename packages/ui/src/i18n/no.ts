@@ -1,7 +1,10 @@
 import { dict as en } from "./en"
+
 type Keys = keyof typeof en
 
 export const dict: Record<Keys, string> = {
+  "ui.messagePart.diagnosticsFailed": "Filendringer lagret. Språkdiagnostikk kunne ikke fullføres: {{servers}}.",
+  "ui.messagePart.formattingFailed": "Filendringer lagret. Automatisk formatering mislyktes: {{formatters}}.",
   "ui.sessionReview.title": "Sesjonsendringer",
   "ui.sessionReview.title.lastTurn": "Endringer i siste tur",
   "ui.sessionReview.diffStyle.unified": "Samlet",

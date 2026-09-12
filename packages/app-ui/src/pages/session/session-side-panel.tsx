@@ -1,3 +1,4 @@
+import { ArtifactsPanel } from "@/components/artifacts-panel"
 import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -213,6 +214,7 @@ export function SessionSidePanel(props: {
   }
   const activateTab = (value: string) => {
     const next = normalizeTab(value)
+    if (next === "artifacts") tabs().open(next)
     const path = file.pathFromTab(next)
     if (path) void file.load(path)
     openReviewPanel()
@@ -234,7 +236,7 @@ export function SessionSidePanel(props: {
   })
   const fileBrowserVisible = createMemo(() => {
     const active = activeTab()
-    return active !== "review" && active !== "context" && active !== "empty"
+    return active !== "review" && active !== "context" && active !== "empty" && active !== "artifacts"
   })
   const openFileKeybind = createMemo(() => command.keybindParts("file.open"))
   const closeTabKeybind = createMemo(() => command.keybindParts("tab.close"))
@@ -359,6 +361,7 @@ export function SessionSidePanel(props: {
                                   </div>
                                 </Tabs.Trigger>
                               </Show>
+                              <Tabs.Trigger value="artifacts">成果</Tabs.Trigger>
                               <Show when={contextOpen()}>
                                 <Tabs.Trigger
                                   value="context"
@@ -460,6 +463,18 @@ export function SessionSidePanel(props: {
                             </Tabs.List>
                           </div>
 
+                          <Show when={tabs().all().includes("artifacts")}>
+                            <div
+                              role="tabpanel"
+                              aria-label="成果"
+                              class="h-full min-h-0 overflow-hidden"
+                              classList={{ hidden: activeTab() !== "artifacts" }}
+                            >
+                              <Show when={sessionKey()} keyed>
+                                {(_key) => <ArtifactsPanel active={activeTab() === "artifacts"} />}
+                              </Show>
+                            </div>
+                          </Show>
                           <Show when={reviewTab() && props.canReview() && activeTab() === "review"}>
                             <div
                               id={reviewTabPanelID}
@@ -567,6 +582,7 @@ export function SessionSidePanel(props: {
                                   : language.t("session.tab.review")}
                               </Tabs.Trigger>
                             </Show>
+                            <Tabs.Trigger value="artifacts">成果</Tabs.Trigger>
                             <Show when={contextOpen()}>
                               <Tabs.Trigger
                                 value="context"
@@ -688,6 +704,18 @@ export function SessionSidePanel(props: {
                           </div>
                         </div>
 
+                        <Show when={tabs().all().includes("artifacts")}>
+                          <div
+                            role="tabpanel"
+                            aria-label="成果"
+                            class="h-full min-h-0 overflow-hidden"
+                            classList={{ hidden: activeTab() !== "artifacts" }}
+                          >
+                            <Show when={sessionKey()} keyed>
+                              {(_key) => <ArtifactsPanel active={activeTab() === "artifacts"} />}
+                            </Show>
+                          </div>
+                        </Show>
                         <Show when={reviewTab() && props.canReview() && activeTab() === "review"}>
                           <div
                             id={reviewTabPanelID}
@@ -732,6 +760,7 @@ export function SessionSidePanel(props: {
                             inert={!fileBrowserVisible() || undefined}
                           >
                             <SessionFileBrowserTab
+                              visible={fileBrowserVisible()}
                               tab={browserTab() ?? activeFileTab() ?? SESSION_OPEN_FILE_TAB}
                               placeholder={
                                 (browserTab() ?? activeFileTab() ?? SESSION_OPEN_FILE_TAB) === SESSION_OPEN_FILE_TAB

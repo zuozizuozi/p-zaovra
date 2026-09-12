@@ -5,6 +5,7 @@ import { DialogProvider } from "@zaovra-ai/ui/context/dialog"
 import { FileComponentProvider } from "@zaovra-ai/ui/context/file"
 import { MarkedProvider } from "@zaovra-ai/ui/context/marked"
 import { File } from "@zaovra-ai/session-ui/file"
+import { Button } from "@zaovra-ai/ui/button"
 import { Font } from "@zaovra-ai/ui/font"
 import { Splash } from "@zaovra-ai/ui/logo"
 import { ThemeProvider } from "@zaovra-ai/ui/theme/context"
@@ -123,12 +124,27 @@ function TargetServerRoute(props: ParentProps) {
     // subtree (SessionRouteErrorBoundary resets and createSessionLineage
     // re-resolves reactively instead); both rely on this key for server changes.
     <Show when={requireServerKey(params.serverKey)} keyed>
-      <ServerSDKProvider server={conn}>
-        <AccountGate>
-          <ServerSyncProvider server={conn}>{props.children}</ServerSyncProvider>
-        </AccountGate>
-      </ServerSDKProvider>
+      <Show when={conn()} fallback={<UnavailableServer serverKey={requireServerKey(params.serverKey)} />}>
+        <ServerSDKProvider server={conn}>
+          <AccountGate>
+            <ServerSyncProvider server={conn}>{props.children}</ServerSyncProvider>
+          </AccountGate>
+        </ServerSDKProvider>
+      </Show>
     </Show>
+  )
+}
+
+function UnavailableServer(props: { serverKey: string }) {
+  const language = useLanguage()
+  const navigate = useNavigate()
+  return (
+    <div role="status" class="flex min-h-64 flex-col items-center justify-center gap-4 p-6">
+      <p>{language.t("app.server.unreachable", { server: props.serverKey })}</p>
+      <Button variant="secondary" onClick={() => navigate("/")}>
+        {language.t("home.title")}
+      </Button>
+    </div>
   )
 }
 
@@ -221,21 +237,23 @@ function ResolvedDraftRoute(props: { draft: DraftTab }) {
 
   return (
     <Show when={`${props.draft.server}\0${props.draft.directory}`} keyed>
-      <ServerSDKProvider server={conn}>
-        <AccountGate>
-          <ServerSyncProvider server={conn}>
-            <ModelsProvider directory={directory}>
-              <SDKProvider directory={directory}>
-                <DirectoryDataProvider directory={directory} server={serverKey}>
-                  <DraftProviders>
-                    <NewSession />
-                  </DraftProviders>
-                </DirectoryDataProvider>
-              </SDKProvider>
-            </ModelsProvider>
-          </ServerSyncProvider>
-        </AccountGate>
-      </ServerSDKProvider>
+      <Show when={conn()} fallback={<UnavailableServer serverKey={props.draft.server} />}>
+        <ServerSDKProvider server={conn}>
+          <AccountGate>
+            <ServerSyncProvider server={conn}>
+              <ModelsProvider directory={directory}>
+                <SDKProvider directory={directory}>
+                  <DirectoryDataProvider directory={directory} server={serverKey}>
+                    <DraftProviders>
+                      <NewSession />
+                    </DraftProviders>
+                  </DirectoryDataProvider>
+                </SDKProvider>
+              </ModelsProvider>
+            </ServerSyncProvider>
+          </AccountGate>
+        </ServerSDKProvider>
+      </Show>
     </Show>
   )
 }
@@ -335,7 +353,7 @@ function AccountGate(props: ParentProps) {
     () =>
       serverSDK()
         .client.experimental.console.get({}, { throwOnError: true })
-      .then((result) => result.data),
+        .then((result) => result.data),
   )
   const authorization = createMemo(() => {
     const current = state()
@@ -395,7 +413,8 @@ function AccountGate(props: ParentProps) {
             <div class="text-12-medium tracking-[0.12em] uppercase text-text-weak mb-5">Zaovra account</div>
             <h1 class="text-24-semibold text-text-strong mb-3">Sign in before you start coding.</h1>
             <p class="text-14-regular text-text-base leading-6 mb-6">
-              A Zaovra account is required for every desktop session. You can still use your own model keys without a paid membership.
+              A Zaovra account is required for every desktop session. You can still use your own model keys without a
+              paid membership.
             </p>
             <Show when={account.loading}>
               <p class="text-14-regular text-text-weak">Checking account…</p>
@@ -403,11 +422,12 @@ function AccountGate(props: ParentProps) {
             <Show when={!account.loading && state().status === "authorizing"}>
               <div class="rounded-lg border border-border-weak-base bg-surface-base p-4 mb-4">
                 <p class="text-12-regular text-text-weak mb-2">Enter this code in the browser</p>
-                <p class="font-mono text-20-semibold tracking-[0.18em] text-text-strong">
-                  {authorization()?.userCode}
-                </p>
+                <p class="font-mono text-20-semibold tracking-[0.18em] text-text-strong">{authorization()?.userCode}</p>
               </div>
-              <button class="w-full rounded-md bg-text-strong text-surface-base px-4 py-3" onClick={() => authorization() && platform.openLink(authorization()!.verificationUrl)}>
+              <button
+                class="w-full rounded-md bg-text-strong text-surface-base px-4 py-3"
+                onClick={() => authorization() && platform.openLink(authorization()!.verificationUrl)}
+              >
                 Reopen sign-in page
               </button>
             </Show>
@@ -415,7 +435,11 @@ function AccountGate(props: ParentProps) {
               <Show when={state().status === "error"}>
                 <p class="text-13-regular text-icon-critical-base mb-4">{error()}</p>
               </Show>
-              <button class="w-full rounded-md bg-text-strong text-surface-base px-4 py-3 disabled:opacity-50" disabled={state().status === "starting"} onClick={begin}>
+              <button
+                class="w-full rounded-md bg-text-strong text-surface-base px-4 py-3 disabled:opacity-50"
+                disabled={state().status === "starting"}
+                onClick={begin}
+              >
                 {state().status === "starting" ? "Starting sign-in…" : "Continue to sign in"}
               </button>
             </Show>
@@ -556,7 +580,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; start
     props.disableHealthCheck
       ? true
       : Effect.gen(function* () {
-          if (!server.current) return true
+          if (!server.current) return false
           const { http, type } = server.current
 
           while (true) {
@@ -578,7 +602,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; start
     <>
       <Show when={!checking()}>
         <Show
-          when={startupHealthCheck.latest}
+          when={startupHealthCheck.latest && server.current}
           fallback={
             <ConnectionError
               onRetry={() => {

@@ -1,5 +1,5 @@
 import { Component, createSignal, startTransition } from "solid-js"
-import { Dialog } from "@zaovra-ai/ui/v2/dialog-v2"
+import { Dialog, DialogHeader, DialogTitle } from "@zaovra-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@zaovra-ai/ui/v2/tabs-v2"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { useLanguage } from "@/context/language"
@@ -11,6 +11,7 @@ import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
+import { UsageDashboard } from "../usage-dashboard"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -27,6 +28,9 @@ export const DialogSettings: Component<{
 
   return (
     <Dialog size="x-large" variant="settings" class="settings-v2-dialog">
+      <DialogHeader closeLabel={language.t("common.close")}>
+        <DialogTitle>{language.t("sidebar.settings")}</DialogTitle>
+      </DialogHeader>
       <TabsV2
         orientation="vertical"
         variant="settings"
@@ -48,6 +52,10 @@ export const DialogSettings: Component<{
                     <TabsV2.Trigger value="shortcuts">
                       <Icon name="keyboard" />
                       {language.t("settings.tab.shortcuts")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="usage">
+                      <Icon name="models" />
+                      {language.t("usage.title")}
                     </TabsV2.Trigger>
                   </div>
                 </div>
@@ -82,6 +90,9 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="usage" class="settings-v2-panel">
+          <UsageDashboard />
         </TabsV2.Content>
         <TabsV2.Content value="servers" class="settings-v2-panel">
           <SettingsServersV2 />

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { discoverProviderModels, providerBaseURL } from "@zaovra-ai/app/provider-discovery"
+import { discoverProviderModels, providerBaseURL, changeProviderProtocolURL } from "@zaovra-ai/app/provider-discovery"
 
 describe("provider discovery", () => {
   test("normalizes service and completion URLs and rejects embedded credentials", () => {
@@ -126,4 +126,16 @@ describe("provider discovery", () => {
       server.stop(true)
     }
   })
+})
+
+test("protocol changes update standard endpoints while preserving proxy paths", () => {
+  expect(changeProviderProtocolURL("https://proxy.example/v1", "openai", "google")).toBe("https://proxy.example/v1beta")
+  expect(changeProviderProtocolURL("https://proxy.example/custom/v1", "openai", "google")).toBe(
+    "https://proxy.example/custom/v1",
+  )
+  expect(changeProviderProtocolURL("https://api.openai.com/v1", "openai", "anthropic")).toBe(
+    "https://api.anthropic.com/v1",
+  )
+  expect(providerBaseURL("https://proxy.example", "google")).toBe("https://proxy.example/v1beta")
+  expect(providerBaseURL("https://proxy.example/v1/messages", "anthropic")).toBe("https://proxy.example/v1")
 })

@@ -11,6 +11,9 @@ import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
+import { ConfigRefresh } from "@/server/shared/config-refresh"
+import { ConfigRead } from "@/server/shared/config-read"
+import { Global } from "@zaovra-ai/core/global"
 import { GlobalUpgradeInput } from "../groups/global"
 
 export function eventData(data: GlobalBusEvent): Sse.Event {
@@ -90,16 +93,19 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
-      return yield* config.getGlobal()
+      return yield* ConfigRead.preferences(config.getGlobal(), Global.Path.config)
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
       const result = yield* config.updateGlobal(ctx.payload)
+      if (result.changed) yield* ConfigRefresh.refresh()
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
       return result.info
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
+      yield* config.invalidate()
+      yield* ConfigRefresh.refresh()
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       return true
     })

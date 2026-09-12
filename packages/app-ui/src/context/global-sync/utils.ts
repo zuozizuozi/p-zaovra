@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentV2Info,
   CommandView,
   CommandV2Info,
   PermissionView,
@@ -16,6 +17,7 @@ export function adaptCommand(command: CommandV2Info): CommandView {
   return {
     ...command,
     model: command.model ? `${command.model.providerID}/${command.model.id}` : undefined,
+    variant: command.model?.variant,
     source: "command",
     hints: [],
   }
@@ -33,18 +35,20 @@ export function adaptPermissionRequest(request: PermissionV2Request): Permission
   }
 }
 
-function isAgent(input: unknown): input is Agent {
-  if (!input || typeof input !== "object") return false
-  const item = input as { name?: unknown; mode?: unknown }
-  if (typeof item.name !== "string") return false
-  return item.mode === "subagent" || item.mode === "primary" || item.mode === "all"
-}
-
-export function normalizeAgentList(input: unknown): Agent[] {
-  if (Array.isArray(input)) return input.filter(isAgent)
-  if (isAgent(input)) return [input]
-  if (!input || typeof input !== "object") return []
-  return Object.values(input).filter(isAgent)
+export function adaptAgent(agent: AgentV2Info): Agent {
+  return {
+    name: agent.id,
+    description: agent.description,
+    mode: agent.mode,
+    hidden: agent.hidden,
+    color: agent.color,
+    steps: agent.steps,
+    permission: agent.permissions,
+    model: agent.model && { modelID: agent.model.id, providerID: agent.model.providerID },
+    variant: agent.model?.variant,
+    prompt: agent.system,
+    options: agent.request.body,
+  }
 }
 
 export function normalizeProviderList(input: ProviderListResponse): NormalizedProviderListResponse {

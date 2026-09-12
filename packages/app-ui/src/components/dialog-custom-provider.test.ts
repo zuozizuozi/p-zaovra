@@ -49,7 +49,7 @@ describe("validateCustomProvider", () => {
         name: "Custom Provider",
         env: ["CUSTOM_PROVIDER_KEY"],
         options: {
-          baseURL: "https://api.example.com",
+          baseURL: "https://api.example.com/v1",
           headers: {
             "X-Test": "enabled",
           },
@@ -57,6 +57,7 @@ describe("validateCustomProvider", () => {
         models: {
           "model-a": { name: "Model A" },
         },
+        whitelist: ["model-a"],
       },
     })
   })
@@ -95,3 +96,31 @@ describe("validateCustomProvider", () => {
     })
   })
 })
+
+for (const [protocol, npm, version] of [
+  ["openai", "@ai-sdk/openai-compatible", "v1"],
+  ["anthropic", "@ai-sdk/anthropic", "v1"],
+  ["google", "@ai-sdk/google", "v1beta"],
+] as const) {
+  test(protocol + " configuration selects its real SDK and endpoint", () => {
+    const result = validateCustomProvider({
+      form: {
+        protocol,
+        providerID: "custom",
+        name: "Custom",
+        baseURL: "https://proxy.example.com",
+        apiKey: "test-key",
+        models: [{ row: "m", id: "example", name: "Example", err: {} }],
+        headers: [],
+        err: {},
+      },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set(),
+    }).result
+    expect(result?.config.npm).toBe(npm)
+    expect(result?.config.options.baseURL).toBe("https://proxy.example.com/" + version)
+    expect(result?.config.whitelist).toEqual(["example"])
+    expect(result?.config.options).not.toHaveProperty("apiKey")
+  })
+}

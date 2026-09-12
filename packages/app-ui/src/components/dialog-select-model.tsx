@@ -1,3 +1,4 @@
+import { modelSource } from "@/utils/model-source"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -229,7 +230,8 @@ export function ModelSelectorPopoverV2(props: {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
   const dialog = useDialog()
-  const [store, setStore] = createStore({ open: false, search: "", active: "" })
+  const local = useLocal()
+  const [store, setStore] = createStore({ open: false, search: "", active: "", source: "own" as "own" | "official" })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   let restoreTrigger = true
@@ -237,7 +239,7 @@ export function ModelSelectorPopoverV2(props: {
   const allModels = createMemo(() =>
     model
       .list()
-      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
+      .filter((item) => modelSource(item.provider) === store.source)
       .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
   )
   const models = createMemo(() => {
@@ -255,7 +257,7 @@ export function ModelSelectorPopoverV2(props: {
     }
     return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
   })
-  const keys = () => [...models().map(modelKey), manageKey]
+  const keys = () => [...models().map(modelKey), ...(store.source === "own" ? [manageKey] : [])]
   const current = () => {
     const value = model.current()
     return value ? `${value.provider.id}:${value.id}` : undefined
@@ -281,6 +283,7 @@ export function ModelSelectorPopoverV2(props: {
   const setOpen = (open: boolean) => {
     if (open) {
       restoreTrigger = true
+      setStore("source", model.current() ? modelSource(model.current()!.provider) : "own")
       setStore({ open: true, active: initialActive() })
       setTimeout(() =>
         requestAnimationFrame(() => {
@@ -305,8 +308,8 @@ export function ModelSelectorPopoverV2(props: {
     restoreTrigger = false
     setOpen(false)
     afterClose(() => {
-      void import("./dialog-manage-models").then((x) => {
-        dialog.show(() => <x.DialogManageModelsV2 />)
+      void import("./dialog-connect-provider").then((x) => {
+        dialog.show(() => <x.DialogConnectProvider directory={() => decode64(local.slug())} ownOnly />)
       })
     })
   }
@@ -345,13 +348,15 @@ export function ModelSelectorPopoverV2(props: {
   })
 
   return (
-    <MenuV2 open={store.open} modal={false} placement="top-start" gutter={6} onOpenChange={setOpen}>
-      <MenuV2.Trigger as={props.triggerAs ?? "div"} {...props.triggerProps}>
+    <Kobalte open={store.open} modal={false} placement="top-start" gutter={6} onOpenChange={setOpen}>
+      <Kobalte.Trigger as={props.triggerAs ?? "div"} {...props.triggerProps}>
         {props.children}
-      </MenuV2.Trigger>
-      <MenuV2.Portal>
-        <MenuV2.Content
-          ref={(el: HTMLDivElement) => (contentRef = el)}
+      </Kobalte.Trigger>
+      <Kobalte.Portal>
+        <Kobalte.Content
+          ref={(el) => {
+            contentRef = el
+          }}
           class="w-[284px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 !p-0 shadow-[var(--v2-elevation-floating)] focus:outline-none"
           onPointerDownOutside={() => (restoreTrigger = false)}
           onFocusOutside={() => (restoreTrigger = false)}
@@ -359,6 +364,25 @@ export function ModelSelectorPopoverV2(props: {
             if (!restoreTrigger) event.preventDefault()
           }}
         >
+          <div class="flex gap-1 p-2" role="group" aria-label={language.t("model.source.label")}>
+            <For each={["own", "official"] as const}>
+              {(source) => (
+                <button
+                  type="button"
+                  aria-pressed={store.source === source}
+                  class="h-9 min-w-0 flex-1 rounded-md px-3 text-[13px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2"
+                  classList={{ "bg-v2-overlay-simple-overlay-hover": store.source === source }}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setStore({ source, search: "", active: "" })
+                    setStore("active", initialActive())
+                  }}
+                >
+                  {language.t(source === "own" ? "model.source.own" : "model.source.official")}
+                </button>
+              )}
+            </For>
+          </div>
           <div class="flex flex-col p-0.5">
             <div class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
               <Icon name="magnifying-glass" size="small" class="shrink-0" />
@@ -418,18 +442,24 @@ export function ModelSelectorPopoverV2(props: {
               <Show
                 when={models().length > 0}
                 fallback={
-                  <div class="flex h-12 items-center px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
-                    {language.t("dialog.model.empty")}
+                  <div class="flex min-h-16 items-center px-3 py-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
+                    {language.t(
+                      store.search
+                        ? "dialog.model.empty"
+                        : store.source === "own"
+                          ? "model.source.ownEmpty"
+                          : "model.source.officialEmpty",
+                    )}
                   </div>
                 }
               >
                 <For each={groups()}>
                   {(group) => (
-                    <MenuV2.Group>
-                      <MenuV2.GroupLabel class="gap-2 px-3">
+                    <div role="group">
+                      <div class="gap-2 px-3 py-2 text-xs text-v2-text-text-muted">
                         <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
-                      </MenuV2.GroupLabel>
-                      <MenuV2.RadioGroup value={current()}>
+                      </div>
+                      <div role="menu">
                         <For each={group.items}>
                           {(item) => (
                             <TooltipV2
@@ -439,51 +469,62 @@ export function ModelSelectorPopoverV2(props: {
                               openDelay={0}
                               value={<ModelTooltip model={item} latest={item.latest} v2 />}
                             >
-                              <MenuV2.RadioItem
+                              <button
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={current() === modelKey(item)}
                                 value={modelKey(item)}
                                 data-option-key={modelKey(item)}
                                 data-selected-model={current() === modelKey(item) ? true : undefined}
-                                class="scroll-my-6 w-full"
+                                class="flex min-h-9 scroll-my-6 w-full items-center rounded-sm px-3 text-left text-[13px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2"
                                 classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
                                 onMouseEnter={() => {
                                   setStore("active", modelKey(item))
                                   setTimeout(() => searchRef?.focus())
                                 }}
-                                onSelect={() => selectModel(item)}
+                                onClick={() => selectModel(item)}
                               >
-                                <span class="min-w-0 truncate leading-5">{item.name}</span>
+                                <span class="min-w-0 flex-1 truncate leading-5">{item.name}</span>
+                                <Show when={current() === modelKey(item)}>
+                                  <Icon name="check" size="small" class="shrink-0" />
+                                </Show>
                                 <Show when={item.latest}>
                                   <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
                                 </Show>
-                              </MenuV2.RadioItem>
+                              </button>
                             </TooltipV2>
                           )}
                         </For>
-                      </MenuV2.RadioGroup>
-                    </MenuV2.Group>
+                      </div>
+                    </div>
                   )}
                 </For>
               </Show>
             </div>
           </ScrollView>
-          <div class="h-px bg-v2-border-border-muted" />
-          <div class="flex flex-col p-0.5">
-            <MenuV2.Item
-              data-option-key={manageKey}
-              classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === manageKey }}
-              onMouseEnter={() => {
-                setStore("active", manageKey)
-                setTimeout(() => searchRef?.focus())
-              }}
-              onSelect={manage}
-            >
-              <Icon name="outline-sliders" size="small" />
-              <span class="min-w-0 flex-1 truncate leading-5">{language.t("dialog.model.manage")}</span>
-            </MenuV2.Item>
-          </div>
-        </MenuV2.Content>
-      </MenuV2.Portal>
-    </MenuV2>
+          <Show when={store.source === "own"}>
+            <div class="h-px bg-v2-border-border-muted" />
+            <div class="flex flex-col p-0.5">
+              <button
+                type="button"
+                role="menuitem"
+                class="flex min-h-9 items-center gap-2 rounded-sm px-3 text-left text-[13px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2"
+                data-option-key={manageKey}
+                classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === manageKey }}
+                onMouseEnter={() => {
+                  setStore("active", manageKey)
+                  setTimeout(() => searchRef?.focus())
+                }}
+                onClick={manage}
+              >
+                <Icon name="outline-sliders" size="small" />
+                <span class="min-w-0 flex-1 truncate leading-5">{language.t("model.source.configure")}</span>
+              </button>
+            </div>
+          </Show>
+        </Kobalte.Content>
+      </Kobalte.Portal>
+    </Kobalte>
   )
 }
 

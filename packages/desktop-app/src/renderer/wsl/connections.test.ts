@@ -1,6 +1,36 @@
 import { describe, expect, test } from "bun:test"
 import type { WslServersState } from "@zaovra-ai/app/wsl/types"
-import { availableStartupServer, readyWslConnections } from "./connections"
+import { availableStartupServer, createStartupServer, readyWslConnections } from "./connections"
+import { createRoot, createSignal } from "solid-js"
+import { isServer } from "solid-js/web"
+
+test.skipIf(isServer)(
+  "startup choice waits for initialization and does not change when WSL becomes ready later",
+  () => {
+    createRoot((dispose) => {
+      const [ready, setReady] = createSignal(false)
+      const [wsl, setWsl] = createSignal(state("starting"))
+      const selected = createStartupServer({ ready, defaultServer: () => "wsl:Debian", wsl })
+      expect(selected()).toBeUndefined()
+      setReady(true)
+      expect(selected()).toBe("sidecar")
+      setWsl(state("ready"))
+      expect(selected()).toBe("sidecar")
+      dispose()
+    })
+  },
+)
+
+test.skipIf(isServer)("an initially ready WSL default retains its identity on connection failure", () => {
+  createRoot((dispose) => {
+    const [wsl, setWsl] = createSignal(state("ready"))
+    const selected = createStartupServer({ ready: () => true, defaultServer: () => "wsl:Debian", wsl })
+    expect(selected()).toBe("wsl:Debian")
+    setWsl(state("failed"))
+    expect(selected()).toBe("wsl:Debian")
+    dispose()
+  })
+})
 
 const state = (kind: "starting" | "ready" | "failed" | "stopped"): WslServersState => ({
   runtime: null,

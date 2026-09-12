@@ -108,7 +108,15 @@ export const ZaovraPlugin = define<HttpClient.HttpClient | EventV2.Service | Sco
 
     connected = (yield* ctx.integration.connection.active("zaovra")) !== undefined
     yield* ctx.catalog.transform((catalog) => {
-      for (const [providerID, item] of Object.entries(providers ?? {})) {
+      for (const [remoteID, item] of Object.entries(providers ?? {})) {
+        // Keep the user's direct provider and the official pool as distinct routes.
+        const providerID = remoteID === "zaovra" ? remoteID : `zaovra-${remoteID}`
+        // A pool is an explicit catalog, not an extension of the bundled presets.
+        for (const model of catalog.provider.get(providerID)?.models.values() ?? []) {
+          catalog.model.update(providerID, model.id, (draft) => {
+            draft.enabled = false
+          })
+        }
         catalog.provider.update(providerID, (provider) => {
           provider.integrationID = Integration.ID.make("zaovra")
           if (item.name !== undefined) provider.name = item.name
@@ -156,7 +164,10 @@ export const ZaovraPlugin = define<HttpClient.HttpClient | EventV2.Service | Sco
               model.cost = remoteCost(config.cost)
             }
             model.status = config.status ?? "active"
-            model.enabled = config.status !== "deprecated"
+            model.enabled =
+              config.status !== "deprecated" &&
+              (item.whitelist === undefined || item.whitelist.includes(modelID)) &&
+              !item.blacklist?.includes(modelID)
             if (config.limit !== undefined) model.limit = { ...config.limit }
           })
         }
@@ -164,7 +175,7 @@ export const ZaovraPlugin = define<HttpClient.HttpClient | EventV2.Service | Sco
 
       const item = catalog.provider.get(ProviderV2.ID.zaovra)
       if (!item) return
-      const hasKey = Boolean(process.env.ZAOVRA_API_KEY || connected || item.provider.request.body.apiKey)
+      const hasKey = connected && providers?.[item.provider.id] !== undefined
       catalog.provider.update(item.provider.id, (provider) => {
         provider.disabled = hasKey ? undefined : true
       })

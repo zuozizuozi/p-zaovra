@@ -3,6 +3,8 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "檔案修改已儲存，但語言診斷未能完成：{{servers}}。",
+  "ui.messagePart.formattingFailed": "檔案修改已儲存，但自動格式化失敗：{{formatters}}。",
   "ui.sessionReview.title": "工作階段變更",
   "ui.sessionReview.title.git": "Git 變更",
   "ui.sessionReview.title.branch": "分支變更",

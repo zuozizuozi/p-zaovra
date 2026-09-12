@@ -1,4 +1,6 @@
 import { ImagePreview } from "@zaovra-ai/ui/image-preview"
+import { SessionUsageBar } from "./usage-dashboard"
+import { DialogAttachmentText } from "./dialog-attachment-text"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
@@ -8,7 +10,7 @@ import { TooltipV2 } from "@zaovra-ai/ui/v2/tooltip-v2"
 import type { Prompt, ReferenceInfo } from "@zaovra-ai/sdk/v2/client"
 import { createEffect, createMemo, on, Show } from "solid-js"
 import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
-import { DialogSelectModelUnpaidV2 } from "@/components/dialog-select-model-unpaid-v2"
+import { modelSource } from "@/utils/model-source"
 import type { PromptInputProps } from "@/components/prompt-input/contracts"
 import { normalizePromptHistoryEntry, promptLength, type PromptHistoryComment } from "@/components/prompt-input/history"
 import { createPersistedPromptInputHistory } from "@/components/prompt-input/history-store"
@@ -19,6 +21,7 @@ import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { type ImageAttachmentPart, usePrompt } from "@/context/prompt"
 import { usePlatform } from "@/context/platform"
@@ -46,7 +49,6 @@ export type PromptInputV2ComposerController = PromptInputV2Interaction & {
 }
 
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
-  const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
 
@@ -56,30 +58,29 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   return (
     <div class="flex flex-col gap-3">
       <PromptInputV2
+        attachLabel={language.t("prompt.addFiles")}
         controller={props.controller}
         class={props.class}
         modelControl={
           <PromptInputV2ModelControl
             loading={props.controller.model.loading}
-            paid={props.controller.model.paid}
             title={language.t("command.model.choose")}
             keybind={command.keybindParts("model.choose")}
             model={props.controller.model.selection}
             providerID={props.controller.model.selection.current()?.provider?.id}
             modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
             onClose={props.controller.restoreFocus}
-            onUnpaidClick={() =>
-              dialog.show(() => <DialogSelectModelUnpaidV2 model={props.controller.model.selection} />)
-            }
           />
         }
       />
+      <SessionUsageBar />
     </div>
   )
 }
 
 const useEditHandler = (props: PromptInputV2ComposerProps) => {
   const prompt = usePrompt()
+  const local = useLocal()
 
   createEffect(
     on(
@@ -87,6 +88,11 @@ const useEditHandler = (props: PromptInputV2ComposerProps) => {
       (id) => {
         const edit = props.edit
         if (!id || !edit) return
+        if (edit.agent) local.agent.set(edit.agent)
+        if (edit.model) {
+          local.model.set(edit.model)
+          local.model.variant.set(edit.variant)
+        }
         prompt.context.items().forEach((item) => prompt.context.remove(item.key))
         edit.context.forEach((item) =>
           prompt.context.add({
@@ -408,7 +414,13 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       if (item?.commentID) comments.remove(item.path, item.commentID)
     },
     openAttachment: (attachment) =>
-      dialog.show(() => <ImagePreview src={attachment.dataUrl} alt={attachment.filename} />),
+      dialog.show(() =>
+        attachment.mime.startsWith("text/") ? (
+          <DialogAttachmentText name={attachment.filename} dataUrl={attachment.dataUrl} />
+        ) : (
+          <ImagePreview src={attachment.dataUrl} alt={attachment.filename} />
+        ),
+      ),
     openContext(key) {
       const item = controller.contextItem(key)
       if (item) openComment(item, props, sync, layout, files, comments)
@@ -424,6 +436,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       return () => command.trigger(selected.id, "slash")
     },
     attachments: {
+      prepare: platform.prepareAttachment,
       picker: platform.openAttachmentPickerDialog,
       directory: () => sdk().directory,
       isDialogActive: () => !!dialog.active,
@@ -470,15 +483,14 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
 
 function PromptInputV2ModelControl(props: {
   loading: boolean
-  paid: boolean
   title: string
   keybind: string[]
   model: PromptInputV2ComposerController["model"]["selection"]
   providerID?: string
   modelName: string
   onClose: () => void
-  onUnpaidClick: () => void
 }) {
+  const language = useLanguage()
   const shouldAnimate = createMemo<boolean>((previous) => previous ?? props.loading)
   const content = () => (
     <>
@@ -491,7 +503,12 @@ function PromptInputV2ModelControl(props: {
           />
         )}
       </Show>
-      <span class="truncate leading-4">{props.modelName}</span>
+      <span class="truncate leading-4">
+        {props.model.current()
+          ? `${language.t(modelSource(props.model.current()!.provider) === "official" ? "model.source.official" : "model.source.own")} · `
+          : ""}
+        {props.modelName}
+      </span>
       <span class="-ml-0.5 -mr-1 flex shrink-0">
         <Icon name="chevron-down" />
       </span>
@@ -509,38 +526,21 @@ function PromptInputV2ModelControl(props: {
           </>
         }
       >
-        <Show
-          when={props.paid}
-          fallback={
-            <ButtonV2
-              data-action="prompt-model"
-              variant="ghost-muted"
-              size="normal"
-              class="min-w-0 max-w-[220px] justify-start ![font-weight:440] group"
-              classList={{ "animate-in fade-in": shouldAnimate() }}
-              style={{ height: "28px" }}
-              onClick={props.onUnpaidClick}
-            >
-              {content()}
-            </ButtonV2>
-          }
+        <ModelSelectorPopoverV2
+          model={props.model}
+          triggerAs={ButtonV2}
+          triggerProps={{
+            variant: "ghost-muted",
+            size: "normal",
+            style: { height: "28px" },
+            class: "min-w-0 max-w-[220px] justify-start ![font-weight:440] group",
+            classList: { "animate-in fade-in": shouldAnimate() },
+            "data-action": "prompt-model",
+          }}
+          onClose={props.onClose}
         >
-          <ModelSelectorPopoverV2
-            model={props.model}
-            triggerAs={ButtonV2}
-            triggerProps={{
-              variant: "ghost-muted",
-              size: "normal",
-              style: { height: "28px" },
-              class: "min-w-0 max-w-[220px] justify-start ![font-weight:440] group",
-              classList: { "animate-in fade-in": shouldAnimate() },
-              "data-action": "prompt-model",
-            }}
-            onClose={props.onClose}
-          >
-            {content()}
-          </ModelSelectorPopoverV2>
-        </Show>
+          {content()}
+        </ModelSelectorPopoverV2>
       </TooltipV2>
     </Show>
   )

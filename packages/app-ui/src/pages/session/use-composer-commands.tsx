@@ -25,6 +25,11 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
   const agentCommand = withCategory(language.t("command.category.agent"))
 
   const chooseModel = async () => {
+    const trigger = document.querySelector<HTMLButtonElement>('[data-action="prompt-model"]')
+    if (trigger) {
+      trigger.click()
+      return
+    }
     const owner = sessionOwnership.capture()
     const editor = document.querySelector<HTMLElement>('[data-component="prompt-input"]')
     const selection = window.getSelection()

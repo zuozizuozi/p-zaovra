@@ -8,6 +8,7 @@ type MarkedInstance = {
   ctx: InstanceContext
   store: InstanceStore.Interface
   bridge: EffectBridge.Shape
+  current?: boolean
 }
 
 // Disposal is requested by an endpoint handler, but must run from the outer
@@ -20,13 +21,13 @@ const mark = (ctx: InstanceContext) =>
     return { ctx, store: yield* InstanceStore.Service, bridge: yield* EffectBridge.make() }
   })
 
-export const markInstanceForDisposal = (ctx: InstanceContext) =>
+export const markInstanceForDisposal = (ctx: InstanceContext, current = false) =>
   Effect.gen(function* () {
     const marked = yield* mark(ctx)
     return yield* HttpEffect.appendPreResponseHandler((request, response) =>
       Effect.sync(() => {
         // The response is sent before disposeMiddleware performs the teardown.
-        disposeAfterResponse.set(request.source, marked)
+        disposeAfterResponse.set(request.source, { ...marked, current })
         return response
       }),
     )
@@ -47,7 +48,7 @@ export const disposeMiddleware: HttpMiddleware.HttpMiddleware = (effect) =>
     const marked = disposeAfterResponse.get(request.source)
     if (!marked) return response
     disposeAfterResponse.delete(request.source)
-    yield* Effect.uninterruptible(marked.bridge.run(marked.store.dispose(marked.ctx))).pipe(
+    yield* Effect.uninterruptible(marked.bridge.run(marked.store.dispose(marked.ctx, marked.current))).pipe(
       Effect.catchCause((cause) => Effect.logWarning("instance disposal failed", { cause })),
     )
     return response

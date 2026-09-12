@@ -3,6 +3,10 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.messagePart.diagnosticsFailed":
+    "Dateiänderungen gespeichert. Sprachdiagnosen konnten nicht abgeschlossen werden: {{servers}}.",
+  "ui.messagePart.formattingFailed":
+    "Dateiänderungen gespeichert. Automatische Formatierung fehlgeschlagen: {{formatters}}.",
   "ui.sessionReview.title": "Sitzungsänderungen",
   "ui.sessionReview.title.git": "Git-Änderungen",
   "ui.sessionReview.title.branch": "Branch-Änderungen",

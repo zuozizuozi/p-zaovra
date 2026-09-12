@@ -2,7 +2,20 @@
 @import "@zaovra-ai/ui/v2/button-v2.css";
 
 [data-component="tabs-v2"][data-variant="settings"] {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.settings-v2-dialog > [data-slot="dialog-header"] {
+  border-bottom: 1px solid var(--v2-border-border-base);
+}
+
+.settings-v2-dialog [data-slot="dialog-header"] [data-slot="dialog-close-button"] {
+  width: 28px;
+  height: 28px;
+  margin-top: -6px;
+  margin-bottom: -6px;
 }
 
 [data-component="dialog-v2"][data-variant="settings"] [data-slot="dialog-container"] {
@@ -19,7 +32,8 @@
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--v2-border-border-base) transparent;
   user-select: none;
 }
 
@@ -28,7 +42,12 @@
 }
 
 .settings-v2-panel::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+}
+
+.settings-v2-panel::-webkit-scrollbar-thumb {
+  background: var(--v2-border-border-base);
+  border-radius: 4px;
 }
 
 .settings-v2-tab-header {

@@ -1,4 +1,7 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "تم حفظ تغييرات الملف. تعذّر إكمال تشخيصات اللغة: {{servers}}.",
+  "ui.messagePart.formattingFailed": "تم حفظ تغييرات الملف. فشل التنسيق التلقائي: {{formatters}}.",
+
   "ui.sessionReview.title": "تغييرات الجلسة",
   "ui.sessionReview.title.git": "تغييرات Git",
   "ui.sessionReview.title.branch": "تغييرات الفرع",

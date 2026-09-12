@@ -5,6 +5,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { dirname } from "path"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { FSUtil } from "./fs-util"
+import { Formatter } from "./formatter"
 
 export interface Target {
   readonly canonical: string
@@ -14,11 +15,13 @@ export interface Target {
 export interface WriteInput {
   readonly target: Target
   readonly content: string | Uint8Array
+  readonly format?: boolean
 }
 
 export interface TextWriteInput {
   readonly target: Target
   readonly content: string
+  readonly format?: boolean
 }
 
 export interface ConditionalWriteInput extends WriteInput {
@@ -42,6 +45,9 @@ export interface WriteResult {
   readonly target: string
   readonly resource: string
   readonly existed: boolean
+  readonly formatting?: Formatter.Result
+  /** Final content captured under the mutation lock for formatted text writes. */
+  readonly content?: string
 }
 
 export interface RemoveResult {
@@ -75,6 +81,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
+    const formatter = yield* Formatter.Service
     const locks = KeyedMutex.makeUnsafe<string>()
     const withTargetLock =
       (target: Target) =>
@@ -86,6 +93,17 @@ const layer = Layer.effect(
       target: target.canonical,
       resource: target.resource,
       existed,
+    })
+
+    const formattedResult = Effect.fn("FileMutation.formattedResult")(function* (input: WriteInput, existed: boolean) {
+      if (!input.format) return writeResult(input.target, existed)
+      const formatting = yield* formatter.format(input.target.canonical)
+      const content = yield* fs.readFileString(input.target.canonical)
+      return {
+        ...writeResult(input.target, existed),
+        content,
+        ...(formatting.ran.length || formatting.failed.length ? { formatting } : {}),
+      }
     })
 
     const removeResult = (target: Target, existed: boolean): RemoveResult => ({
@@ -100,7 +118,7 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const existed = yield* fs.exists(input.target.canonical)
           yield* fs.writeWithDirs(input.target.canonical, input.content)
-          return writeResult(input.target, existed)
+          return yield* formattedResult(input, existed)
         }),
       ),
     )
@@ -116,7 +134,7 @@ const layer = Layer.effect(
             input.target.canonical,
             joinBom(next.text, Boolean(current && hasUtf8Bom(current)) || next.bom),
           )
-          return writeResult(input.target, current !== undefined)
+          return yield* formattedResult(input, current !== undefined)
         }),
       ),
     )
@@ -136,7 +154,7 @@ const layer = Layer.effect(
               Effect.fail(new TargetExistsError({ path: input.target.canonical })),
             ),
           )
-          return writeResult(input.target, false)
+          return yield* formattedResult(input, false)
         }),
       ),
     )
@@ -151,7 +169,7 @@ const layer = Layer.effect(
           yield* typeof input.content === "string"
             ? fs.writeFileString(input.target.canonical, input.content)
             : fs.writeFile(input.target.canonical, input.content)
-          return writeResult(input.target, true)
+          return yield* formattedResult(input, true)
         }),
       ),
     )
@@ -193,12 +211,11 @@ function sameBytes(left: Uint8Array, right: Uint8Array) {
 
 export const locationLayer = layer
 
-export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node, Formatter.node] })
 
 /**
  * Deferred until the corresponding V2 integrations exist.
  */
-// TODO: Add formatter integration after V2 formatter runtime exists.
 // TODO: Publish watcher/file-edit events after V2 watcher integration exists.
 // TODO: Add snapshots / undo after V2 snapshot design exists.
 // TODO: Notify LSP and collect diagnostics after V2 LSP runtime exists.

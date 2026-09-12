@@ -1,4 +1,7 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "ファイルの変更は保存されました。言語診断を完了できませんでした：{{servers}}。",
+  "ui.messagePart.formattingFailed": "ファイルの変更は保存されました。自動フォーマットに失敗しました：{{formatters}}。",
+
   "ui.sessionReview.title": "セッションの変更",
   "ui.sessionReview.title.git": "Gitの変更",
   "ui.sessionReview.title.branch": "ブランチの変更",

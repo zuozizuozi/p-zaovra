@@ -1,3 +1,5 @@
+// Initialize the provider registry in application order before importing an individual plugin.
+import "@zaovra-ai/core/plugin/provider"
 import { AISDK } from "@zaovra-ai/core/aisdk"
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"

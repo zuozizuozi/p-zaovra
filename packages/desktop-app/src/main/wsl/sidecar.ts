@@ -5,9 +5,13 @@ import { app } from "electron"
 import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslZaovra, shellEscape, wslArgs } from "./runtime"
 import { pollWslHealth } from "./startup"
+import { createWslStop, wslSidecarScript } from "./lifecycle"
 
 export type WslSidecar = {
-  listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
+  listener: {
+    stop: () => Promise<void>
+    onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void
+  }
   url: string
   username: string | null
   password: string
@@ -40,7 +44,7 @@ export async function spawnWslSidecar(
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   })
-  child.stdin.end(script)
+  const stop = createWslStop(child)
 
   const recentOutput: string[] = []
   const emit = (line: WslCommandLine) => {
@@ -54,8 +58,10 @@ export async function spawnWslSidecar(
 
   const exit = new Promise<never>((_, reject) => {
     child.once("error", reject)
+    child.stdin.once("error", reject)
     child.once("exit", (code, signal) => reject(new Error(startupFailure(code, signal, recentOutput))))
   })
+  child.stdin.write(wslSidecarScript(script))
   const url = `http://127.0.0.1:${port}`
   const startup = new AbortController()
   const health = pollWslHealth(() => checkHealth(url, password), startup.signal)
@@ -70,8 +76,8 @@ export async function spawnWslSidecar(
   )
 
   await Promise.race([health, exit, timedOut])
-    .catch((error) => {
-      child.kill()
+    .catch(async (error) => {
+      await stop()
       throw error
     })
     .finally(() => {
@@ -80,7 +86,7 @@ export async function spawnWslSidecar(
     })
   return {
     listener: {
-      stop: () => child.kill(),
+      stop,
       onExit: (cb) => child.once("exit", cb),
     },
     url,

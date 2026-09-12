@@ -105,6 +105,7 @@ describe("ZaovraPlugin", () => {
                       npm: "@ai-sdk/openai-compatible",
                       api: `${origin}/v1`,
                       env: ["REMOTE_API_KEY"],
+                      whitelist: ["model"],
                       options: {
                         apiKey: "{env:REMOTE_API_KEY}",
                         headers: { "x-org-id": "org" },
@@ -123,6 +124,7 @@ describe("ZaovraPlugin", () => {
                           limit: { context: 1000, output: 100 },
                         },
                         disabled: { name: "Disabled", status: "deprecated" },
+                        excluded: { name: "Not in pool allowlist" },
                       },
                     },
                   },
@@ -155,7 +157,7 @@ describe("ZaovraPlugin", () => {
 
           const provider = required(
             yield* eventually(
-              catalog.provider.get(ProviderV2.ID.make("remote")),
+              catalog.provider.get(ProviderV2.ID.make("zaovra-remote")),
               (item) => item?.integrationID === Integration.ID.make("zaovra"),
             ),
           )
@@ -171,7 +173,9 @@ describe("ZaovraPlugin", () => {
           expect(provider.request).toEqual({ headers: { "x-org-id": "org" }, body: { custom: "value" } })
           expect(yield* (yield* Integration.Service).get(Integration.ID.make("remote"))).toBeUndefined()
 
-          const model = required(yield* catalog.model.get(ProviderV2.ID.make("remote"), ModelV2.ID.make("model")))
+          const model = required(
+            yield* catalog.model.get(ProviderV2.ID.make("zaovra-remote"), ModelV2.ID.make("model")),
+          )
           expect(model).toMatchObject({
             name: "Remote Model",
             family: "remote",
@@ -188,9 +192,19 @@ describe("ZaovraPlugin", () => {
             },
           ])
           expect(
-            required(yield* catalog.model.get(ProviderV2.ID.make("remote"), ModelV2.ID.make("disabled"))).enabled,
+            required(yield* catalog.model.get(ProviderV2.ID.make("zaovra-remote"), ModelV2.ID.make("disabled")))
+              .enabled,
           ).toBe(false)
-          expect(yield* catalog.model.get(ProviderV2.ID.make("remote"), ModelV2.ID.make("stale"))).toBeDefined()
+          expect(
+            required(yield* catalog.model.get(ProviderV2.ID.make("zaovra-remote"), ModelV2.ID.make("excluded")))
+              .enabled,
+          ).toBe(false)
+          expect(
+            yield* catalog.model.get(ProviderV2.ID.make("zaovra-remote"), ModelV2.ID.make("stale")),
+          ).toBeUndefined()
+          expect(
+            required(yield* catalog.model.get(ProviderV2.ID.make("remote"), ModelV2.ID.make("stale"))).enabled,
+          ).toBe(true)
           expect(authorization).toContain("Bearer secret")
         }),
       ({ server }) => Effect.promise(() => server.stop(true)),
@@ -223,7 +237,7 @@ describe("ZaovraPlugin", () => {
     ),
   )
 
-  it.effect("uses ZAOVRA_API_KEY as credentials", () =>
+  it.effect("does not expose preset pool models from an environment key alone", () =>
     withEnv({ ZAOVRA_API_KEY: "secret" }, () =>
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
@@ -244,12 +258,12 @@ describe("ZaovraPlugin", () => {
         })
         yield* addPlugin()
         expect(required(yield* catalog.provider.get(ProviderV2.ID.zaovra)).request.body.apiKey).toBeUndefined()
-        expect(required(yield* catalog.model.get(ProviderV2.ID.zaovra, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect(required(yield* catalog.model.get(ProviderV2.ID.zaovra, ModelV2.ID.make("paid"))).enabled).toBe(false)
       }),
     ),
   )
 
-  it.effect("uses configured provider env vars as credentials", () =>
+  it.effect("does not expose preset pool models from a configured environment key alone", () =>
     withEnv({ ZAOVRA_API_KEY: undefined, CUSTOM_ZAOVRA_API_KEY: "secret" }, () =>
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
@@ -277,12 +291,12 @@ describe("ZaovraPlugin", () => {
         })
         yield* addPlugin()
         expect(required(yield* catalog.provider.get(ProviderV2.ID.zaovra)).request.body.apiKey).toBeUndefined()
-        expect(required(yield* catalog.model.get(ProviderV2.ID.zaovra, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect(required(yield* catalog.model.get(ProviderV2.ID.zaovra, ModelV2.ID.make("paid"))).enabled).toBe(false)
       }),
     ),
   )
 
-  it.effect("uses configured apiKey as credentials", () =>
+  it.effect("does not expose preset pool models from a configured key alone", () =>
     withEnv({ ZAOVRA_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
@@ -309,7 +323,7 @@ describe("ZaovraPlugin", () => {
         })
         yield* addPlugin()
         expect(required(yield* catalog.provider.get(ProviderV2.ID.zaovra)).request.body.apiKey).toBe("configured")
-        expect(required(yield* catalog.model.get(ProviderV2.ID.zaovra, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect(required(yield* catalog.model.get(ProviderV2.ID.zaovra, ModelV2.ID.make("paid"))).enabled).toBe(false)
       }),
     ),
   )

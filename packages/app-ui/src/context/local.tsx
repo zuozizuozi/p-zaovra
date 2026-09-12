@@ -13,6 +13,7 @@ import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { parseModelKey } from "@/utils/model-key"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string }
 
@@ -151,9 +152,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const configuredModel = () => {
       const configured = sync().data.config.model
       if (!configured) return
-      const [providerID, modelID] = configured.split("/")
-      const model = { providerID, modelID }
-      if (validModel(model)) return model
+      const model = parseModelKey(configured)
+      if (model && validModel(model)) return model
     }
 
     const recentModel = () => {
@@ -232,6 +232,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const current = () => {
+      const selected = scope()?.model
+      if (selected) return validModel(selected) ? models.find(selected) : undefined
       const item = firstModel(
         () => scope()?.model,
         () => agent.current()?.model,

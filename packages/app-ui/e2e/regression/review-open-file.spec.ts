@@ -105,6 +105,14 @@ test("opens and searches project files inline", async ({ page }) => {
   await panel.getByRole("button", { name: "Open file" }).click()
   const filter = panel.getByRole("combobox", { name: "Filter files" })
   await expect(filter).toBeFocused()
+  // Exercise the desktop theme override as well as the shared input component.
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "oc-2"))
+  await expect(filter).toHaveCSS("outline-style", "none")
+  const field = filter.locator('xpath=ancestor::*[@data-component="text-input-v2"]')
+  await expect(field).toHaveCSS("outline-style", "solid")
+  await expect(field).toHaveCSS("outline-width", "1px")
+  await expect(field).not.toHaveCSS("outline-color", "rgba(0, 0, 0, 0)")
+  await page.screenshot({ path: "../../quality/desktop-audit-20260909/focus-review-fixed.png" })
   await expect(panel.getByRole("tab", { name: "Open file" })).toHaveAttribute("data-selected", "")
   await expect(panel.getByText("open-file-project", { exact: true })).toBeVisible()
 

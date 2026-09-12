@@ -1,3 +1,4 @@
+import { viteStaticCopy } from "vite-plugin-static-copy"
 import { readFileSync } from "node:fs"
 import solidPlugin from "vite-plugin-solid"
 import tailwindcss from "@tailwindcss/vite"
@@ -16,6 +17,13 @@ const channel = (() => {
  * @type {import("vite").PluginOption}
  */
 export default [
+  viteStaticCopy({
+    targets: ["cmaps", "standard_fonts", "wasm"].map((folder) => ({
+      src: fileURLToPath(new URL(`./node_modules/pdfjs-dist/${folder}/*`, import.meta.url)).replaceAll("\\", "/"),
+      dest: `pdfjs/${folder}`,
+      rename: { stripBase: true },
+    })),
+  }),
   {
     name: "zaovra-desktop:config",
     config() {

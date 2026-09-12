@@ -33,6 +33,7 @@ export type {
 export type PromptInputV2Mode = "normal" | "shell"
 
 export type PromptInputV2Props = {
+  attachLabel?: string
   controller: PromptInputV2Interaction
   disabled?: boolean
   readOnly?: boolean
@@ -72,7 +73,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
         ref={props.controller.setFileInput}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/*,application/json,application/ld+json,application/toml,application/x-toml,application/x-yaml,application/xml,application/yaml,.c,.cc,.cjs,.conf,.cpp,.css,.csv,.cts,.env,.go,.gql,.graphql,.h,.hh,.hpp,.htm,.html,.ini,.java,.js,.json,.jsx,.log,.md,.mdx,.mjs,.mts,.py,.rb,.rs,.sass,.scss,.sh,.sql,.toml,.ts,.tsx,.txt,.xml,.yaml,.yml,.zsh"
+        accept=".docx,.xlsx,.pptx,.zip,.wav,.mp3,.m4a,.ogg,.flac,.aac,.mp4,.webm,.mov,.mkv,image/png,image/jpeg,image/gif,image/webp,application/pdf,text/*,application/json,application/ld+json,application/toml,application/x-toml,application/x-yaml,application/xml,application/yaml,.c,.cc,.cjs,.conf,.cpp,.css,.csv,.cts,.env,.go,.gql,.graphql,.h,.hh,.hpp,.htm,.html,.ini,.java,.js,.json,.jsx,.log,.md,.mdx,.mjs,.mts,.py,.rb,.rs,.sass,.scss,.sh,.sql,.toml,.ts,.tsx,.txt,.xml,.yaml,.yml,.zsh"
         class="hidden"
         onChange={(event) => {
           const list = event.currentTarget.files
@@ -132,6 +133,33 @@ export function PromptInputV2(props: PromptInputV2Props) {
           />
         </Show>
 
+        <div class="max-h-40 overflow-y-auto">
+          <For each={props.controller.attachmentJobs()}>
+            {(job) => (
+              <div
+                class="flex items-center gap-3 rounded-md border border-v2-border-border-muted px-3 py-2 text-xs"
+                role="status"
+                aria-live="polite"
+              >
+                <span class="min-w-0 flex-1 break-words">
+                  {job.name} · {job.state === "processing" ? "正在读取附件…" : job.error}
+                </span>
+                <Show when={job.state === "error"}>
+                  <button type="button" class="shrink-0 underline" onClick={job.retry}>
+                    重试
+                  </button>
+                </Show>
+                <button
+                  type="button"
+                  class="shrink-0 underline"
+                  onClick={() => props.controller.dismissAttachmentJob(job.id)}
+                >
+                  移除
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
         <div class="relative min-h-[60px]">
           <div
             ref={(element) => {
@@ -191,17 +219,11 @@ export function PromptInputV2(props: PromptInputV2Props) {
           >
             <PromptInputV2AddMenu
               disabled={state.mode === "shell"}
-              title="Add images and files"
+              title={props.attachLabel ?? "Add files"}
               keybind={["Mod", "U"]}
-              attachLabel="Images and files"
+              attachLabel={props.attachLabel ?? "Add files"}
               attachShortcut="Mod+U"
-              commandsLabel="Commands"
-              contextLabel="Context"
-              shellLabel="Shell command"
               onAttach={props.controller.attach}
-              onCommands={props.controller.openCommands}
-              onContext={props.controller.openContext}
-              onShell={props.controller.openShell}
             />
             <Show when={view.agent}>
               {(control) => (
@@ -445,13 +467,7 @@ export function PromptInputV2AddMenu(props: {
   keybind?: string[]
   attachLabel: string
   attachShortcut?: string
-  commandsLabel: string
-  contextLabel: string
-  shellLabel: string
   onAttach: () => void
-  onCommands: () => void
-  onContext: () => void
-  onShell: () => void
 }) {
   return (
     <TooltipV2
@@ -478,16 +494,6 @@ export function PromptInputV2AddMenu(props: {
           <MenuV2.Content style={{ "min-width": "180px" }}>
             <MenuV2.Item onSelect={props.onAttach} shortcut={props.attachShortcut}>
               {props.attachLabel}
-            </MenuV2.Item>
-            <MenuV2.Separator />
-            <MenuV2.Item onSelect={props.onCommands} shortcut="/">
-              {props.commandsLabel}
-            </MenuV2.Item>
-            <MenuV2.Item onSelect={props.onContext} shortcut="@">
-              {props.contextLabel}
-            </MenuV2.Item>
-            <MenuV2.Item onSelect={props.onShell} shortcut="!">
-              {props.shellLabel}
             </MenuV2.Item>
           </MenuV2.Content>
         </MenuV2.Portal>

@@ -6,6 +6,7 @@ import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useProviders } from "@/hooks/use-providers"
+import { parseModelKey } from "@/utils/model-key"
 
 export function createPromptModelSelection(input: { agent: () => { model?: ModelKey; variant?: string } | undefined }) {
   const sdk = useSDK()
@@ -23,9 +24,8 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   const configured = () => {
     const value = sync().data.config.model
     if (!value) return
-    const [providerID, modelID] = value.split("/")
-    const model = { providerID, modelID }
-    if (valid(model)) return model
+    const model = parseModelKey(value)
+    if (model && valid(model)) return model
   }
 
   const recent = () => models.recent.list().find(valid)
@@ -38,6 +38,10 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   }
 
   const current = () => {
+    const selected = prompt.model.current()
+    // An unavailable explicit choice must never silently change the billing source.
+    if (selected)
+      return valid({ providerID: selected.providerID, modelID: selected.modelID }) ? models.find(selected) : undefined
     const key = [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()].find(
       (item): item is ModelKey => !!item && valid(item),
     )

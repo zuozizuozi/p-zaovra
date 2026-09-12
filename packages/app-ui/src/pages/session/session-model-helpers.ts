@@ -1,9 +1,10 @@
 import type { UserMessage } from "@zaovra-ai/sdk/v2"
+import type { SessionView } from "@/context/v2-session-adapter"
 
 type Local = {
   session: {
     reset(): void
-    restore(msg: UserMessage): void
+    restore(msg: Pick<UserMessage, "sessionID" | "agent" | "model">): void
   }
 }
 
@@ -31,6 +32,15 @@ export const resetSessionModel = (local: Local) => {
 
 export const syncSessionModel = (local: Local, msg: UserMessage) => {
   local.session.restore(msg)
+}
+
+export const syncEmptySessionModel = (local: Local, session: SessionView) => {
+  if (!session.model) return
+  local.session.restore({
+    sessionID: session.id,
+    agent: session.agent ?? "build",
+    model: { providerID: session.model.providerID, modelID: session.model.id, variant: session.model.variant },
+  })
 }
 
 export const syncPromptModel = (local: ModelSelection, prompt: PromptState) => {

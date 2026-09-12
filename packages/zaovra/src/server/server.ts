@@ -99,6 +99,8 @@ const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unkno
 
 function listenerLayer(opts: ListenOptions, port: number) {
   return HttpRouter.serve(HttpApiApp.createRoutes(opts), {
+    // Durable task IDs include the parent, assistant message and tool call IDs.
+    routerConfig: { maxParamLength: 1024 },
     middleware: disposeMiddleware,
     disableLogger: true,
     disableListenLog: true,

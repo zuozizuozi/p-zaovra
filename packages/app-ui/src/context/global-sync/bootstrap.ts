@@ -15,7 +15,8 @@ import { batch } from "solid-js"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type { State, VcsCache } from "./types"
 import type { ServerSession } from "../server-session"
-import { adaptCommand, adaptPermissionRequest, cmp, normalizeAgentList, normalizeProviderList } from "./utils"
+import { adaptAgent, adaptCommand, adaptPermissionRequest, cmp, directoryKey } from "./utils"
+import { adaptProviderCatalog } from "./provider-catalog"
 import { formatServerError } from "@/utils/server-errors"
 import { QueryClient, queryOptions } from "@tanstack/solid-query"
 import { loadMcpQuery, loadMcpResourcesQuery } from "../server-sync"
@@ -179,25 +180,33 @@ function warmSessions(input: {
 
 export const loadProvidersQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>
   queryOptions({
-    queryKey: [scope, directory, "providers"],
-    queryFn: () => retry(() => sdk.provider.list().then((x) => normalizeProviderList(x.data!))),
+    queryKey: [scope, directory === null ? null : directoryKey(directory), "providers"],
+    queryFn: () =>
+      retry(async () => {
+        const [providers, models, integrations] = await Promise.all([
+          sdk.v2.provider.list(),
+          sdk.v2.model.list(),
+          sdk.v2.integration.list(),
+        ])
+        return adaptProviderCatalog(providers.data!.data, models.data!.data, integrations.data!.data)
+      }),
   })
 
 export const loadAgentsQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>
   queryOptions({
-    queryKey: [scope, directory, "agents"],
-    queryFn: () => retry(() => sdk.app.agents().then((x) => normalizeAgentList(x.data))),
+    queryKey: [scope, directory === null ? null : directoryKey(directory), "agents"],
+    queryFn: () => retry(() => sdk.v2.agent.list().then((x) => (x.data?.data ?? []).map(adaptAgent))),
   })
 
 export const loadPathQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>
   queryOptions<Path>({
-    queryKey: [scope, directory, "path"],
+    queryKey: [scope, directory === null ? null : directoryKey(directory), "path"],
     queryFn: () => retry(() => sdk.path.get().then((x) => x.data!)),
   })
 
 export const loadReferencesQuery = (scope: ServerScope, directory: string, sdk: ZaovraClient) =>
   queryOptions<ReferenceInfo[]>({
-    queryKey: [scope, directory, "references"] as const,
+    queryKey: [scope, directoryKey(directory), "references"] as const,
     queryFn: () => retry(() => sdk.v2.reference.list().then((x) => x.data?.data ?? [])).catch(() => []),
     placeholderData: [],
   })
@@ -239,7 +248,7 @@ export async function bootstrapDirectory(input: {
       () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
         input.queryClient
-          .ensureQueryData(loadAgentsQuery(input.scope, input.directory, input.sdk))
+          .fetchQuery(loadAgentsQuery(input.scope, input.directory, input.sdk))
           .then((data) => input.setStore("agent", data)),
       () =>
         retry(() => input.sdk.config.get().then((x) => input.setStore("config", reconcile(x.data!, { merge: false })))),
@@ -264,6 +273,7 @@ export async function bootstrapDirectory(input: {
             )
             for (const [sessionID, status] of Object.entries(statuses)) {
               input.session.set("session_status", sessionID, reconcile(status))
+              void input.session.watchExecution(sessionID).catch(() => {})
             }
             // Warm session info only after seeding statuses so a stalled session
             // fetch cannot park busy indicators behind it, mirroring how live

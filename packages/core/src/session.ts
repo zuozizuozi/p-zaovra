@@ -26,6 +26,7 @@ import { spawn } from "node:child_process"
 import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
+import { SessionLive } from "./session/live"
 import { SessionExecution } from "./session/execution"
 import { makeGlobalNode } from "./effect/app-node"
 import { LocationServiceMap } from "./location-service-map"
@@ -34,10 +35,13 @@ import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
 import { Snapshot } from "./snapshot"
 import { SessionRevert } from "./session/revert"
+import { SessionTurnDiff } from "./session/turn-diff"
 import { Revert } from "@zaovra-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@zaovra-ai/schema/durable-event-manifest"
 import { SessionTodo } from "./session/todo"
+import { SessionUsage } from "@zaovra-ai/schema/session-usage"
+import { SessionUsageQuery } from "./session/usage"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -119,6 +123,7 @@ export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
 
 export interface Interface {
+  readonly usage: (sessionID?: SessionSchema.ID) => Effect.Effect<SessionUsage.Summary>
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
@@ -162,7 +167,13 @@ export interface Interface {
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
   readonly pending: (sessionID: SessionSchema.ID) => Effect.Effect<boolean, NotFoundError>
-  readonly pendingInputs: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<SessionInput.Admitted>, NotFoundError>
+  readonly pendingInputs: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<ReadonlyArray<SessionInput.Admitted>, NotFoundError>
+  readonly cancelInput: (input: {
+    sessionID: SessionSchema.ID
+    messageID: SessionMessage.ID
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
   readonly todos: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<SessionTodo.Info>, NotFoundError>
   readonly shell: (input: {
     id?: EventV2.ID
@@ -190,6 +201,10 @@ export interface Interface {
     readonly clear: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | Snapshot.Error>
     readonly commit: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   }
+  readonly turnDiff: (input: {
+    sessionID: SessionSchema.ID
+    messageID: SessionMessage.ID
+  }) => Effect.Effect<ReadonlyArray<Revert.FileDiff>, NotFoundError | MessageNotFoundError | Snapshot.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/Session") {}
@@ -203,6 +218,7 @@ const layer = Layer.effect(
     const projects = yield* ProjectV2.Service
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
+    const live = yield* SessionLive.Service
     const locations = yield* LocationServiceMap.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
@@ -218,6 +234,7 @@ const layer = Layer.effect(
       )
 
     const result = Service.of({
+      usage: (sessionID) => SessionUsageQuery.read(sessionID).pipe(Effect.provideService(Database.Service, database)),
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)
@@ -241,7 +258,9 @@ const layer = Layer.effect(
               agent: input.agent,
               model: input.model,
               location: input.location,
-              subpath: RelativePath.make(path.relative(project.directory, input.location.directory).replaceAll("\\", "/")),
+              subpath: RelativePath.make(
+                path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
+              ),
               title: `New session - ${new Date(now).toISOString()}`,
               slug: Slug.create(),
               version: InstallationVersion,
@@ -334,6 +353,7 @@ const layer = Layer.effect(
         return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
+        const restore = live.capture()
         yield* result.get(input.sessionID)
         const direction = input.cursor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
@@ -365,7 +385,7 @@ const layer = Layer.effect(
         const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
           Effect.orDie,
         )
-        return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
+        return restore(yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode))
       }),
       message: Effect.fn("V2Session.message")(function* (input) {
         const stored = yield* store.message(input.messageID)
@@ -411,7 +431,7 @@ const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            if (input.resume !== false) yield* execution.wake(admitted.sessionID)
+            if (input.resume !== false && admitted.cancelledSeq === undefined) yield* execution.wake(admitted.sessionID)
             return admitted
           }),
         ),
@@ -426,6 +446,34 @@ const layer = Layer.effect(
       pendingInputs: Effect.fn("V2Session.pendingInputs")(function* (sessionID) {
         yield* result.get(sessionID)
         return yield* SessionInput.pending(db, sessionID)
+      }),
+      cancelInput: Effect.fn("V2Session.cancelInput")(function* (input) {
+        yield* result.get(input.sessionID)
+        const stored = yield* SessionInput.find(db, input.messageID)
+        if (!stored || stored.sessionID !== input.sessionID || stored.promotedSeq !== undefined)
+          return yield* new PromptConflictError(input)
+        if (stored.cancelledSeq !== undefined) return stored
+        yield* events
+          .publish(SessionEvent.PromptCancelled, {
+            ...input,
+            timestamp: yield* DateTime.now,
+          })
+          .pipe(
+            Effect.catchDefect((defect) =>
+              defect instanceof SessionInput.LifecycleConflict
+                ? SessionInput.find(db, input.messageID).pipe(
+                    Effect.flatMap((current) =>
+                      current?.sessionID === input.sessionID && current.cancelledSeq !== undefined
+                        ? Effect.void
+                        : new PromptConflictError(input),
+                    ),
+                  )
+                : Effect.die(defect),
+            ),
+          )
+        const cancelled = yield* SessionInput.find(db, input.messageID)
+        if (!cancelled) return yield* new PromptConflictError(input)
+        return cancelled
       }),
       todos: Effect.fn("V2Session.todos")(function* (sessionID) {
         const session = yield* result.get(sessionID)
@@ -480,7 +528,9 @@ const layer = Layer.effect(
             return `${stdout}${stderr}${exit === 0 ? "" : `\nProcess exited with code ${exit}.`}`
           },
           catch: (error) => error,
-        }).pipe(Effect.catch((error) => Effect.succeed(`Command failed: ${error instanceof Error ? error.message : error}`)))
+        }).pipe(
+          Effect.catch((error) => Effect.succeed(`Command failed: ${error instanceof Error ? error.message : error}`)),
+        )
         yield* events.publish(
           SessionEvent.Shell.Ended,
           { sessionID: input.sessionID, callID, output, timestamp: yield* DateTime.now },
@@ -531,6 +581,13 @@ const layer = Layer.effect(
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
         Effect.uninterruptible(execution.interrupt(sessionID)),
       ),
+      turnDiff: Effect.fn("V2Session.turnDiff")(function* (input) {
+        const session = yield* result.get(input.sessionID)
+        return yield* SessionTurnDiff.diff(input).pipe(
+          Effect.provideService(Database.Service, database),
+          Effect.provide(locations.get(session.location)),
+        )
+      }),
       revert: {
         stage: Effect.fn("V2Session.revert.stage")(function* (input) {
           const session = yield* result.get(input.sessionID)
@@ -561,7 +618,10 @@ const layer = Layer.effect(
 const resolvePrompt = (input: PromptInput.Prompt) =>
   Prompt.make({
     text: input.text,
+    invocation: input.invocation,
     agents: input.agents,
+    selection: input.selection,
+    subtask: input.subtask,
     files: input.files?.map((file) => {
       const dataMime = file.uri.match(/^data:([^;,]+)[;,]/i)?.[1]
       const target = URL.canParse(file.uri) ? new URL(file.uri).pathname : (file.name ?? file.uri)
@@ -581,6 +641,7 @@ export const node = makeGlobalNode({
     ProjectV2.node,
     SessionExecution.node,
     SessionStore.node,
+    SessionLive.node,
     LocationServiceMap.node,
     SessionProjector.node,
   ],

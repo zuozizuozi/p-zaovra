@@ -30,7 +30,10 @@ import {
 } from "./runtime"
 
 type RunningSidecar = {
-  listener: { stop: () => void; onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void }
+  listener: {
+    stop: () => void | Promise<void>
+    onExit: (cb: (code: number | null, signal: NodeJS.Signals | null) => void) => void
+  }
   url: string
   username: string | null
   password: string
@@ -66,6 +69,10 @@ export function createWslServersController(
   let state: WslServersState = initialState()
   const listeners = new Set<(event: WslServersEvent) => void>()
   const sidecars = new Map<string, RunningSidecar>()
+  const ownedSidecars = new Set<RunningSidecar>()
+  const starts = new Set<Promise<void>>()
+  let closing = false
+  let stopping: Promise<void> | undefined
   const startAttempts = new Map<string, number>()
   let jobAbort: AbortController | undefined
   const logger = options?.logger
@@ -216,24 +223,38 @@ export function createWslServersController(
   }
 
   const isCurrentStartAttempt = (id: string, attempt: number) => {
-    return startAttempts.get(id) === attempt && state.servers.some((item) => item.config.id === id)
+    return !closing && startAttempts.get(id) === attempt && state.servers.some((item) => item.config.id === id)
   }
 
-  const startServer = async (id: string) => {
+  const startServer = (id: string) => {
+    if (closing) return Promise.resolve()
+    const pending = runStartServer(id)
+    starts.add(pending)
+    void pending.then(
+      () => starts.delete(pending),
+      () => starts.delete(pending),
+    )
+    return pending
+  }
+
+  const runStartServer = async (id: string) => {
     const item = state.servers.find((x) => x.config.id === id)
     if (!item) return
     const attempt = nextStartAttempt(id)
-    await stopServerInternal(id)
-    if (!isCurrentStartAttempt(id, attempt)) return
-    setRuntime(id, { kind: "starting" })
-    logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
     try {
+      await stopServerInternal(id)
+      if (!isCurrentStartAttempt(id, attempt)) return
+      setRuntime(id, { kind: "starting" })
+      logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
       const sidecar = await spawnSidecar(item.config.distro)
+      ownedSidecars.add(sidecar)
+      sidecar.listener.onExit(() => ownedSidecars.delete(sidecar))
       if (!isCurrentStartAttempt(id, attempt)) {
         try {
-          sidecar.listener.stop()
+          await sidecar.listener.stop()
+          ownedSidecars.delete(sidecar)
         } catch {
-          // ignore stop errors for stale sidecars
+          // Retain ownership so shutdown can retry failed cleanup.
         }
         return
       }
@@ -267,12 +288,9 @@ export function createWslServersController(
   const stopServerInternal = async (id: string) => {
     const existing = sidecars.get(id)
     if (!existing) return
-    sidecars.delete(id)
-    try {
-      existing.listener.stop()
-    } catch {
-      // ignore stop errors
-    }
+    await existing.listener.stop()
+    ownedSidecars.delete(existing)
+    if (sidecars.get(id) === existing) sidecars.delete(id)
   }
 
   const runJob = async <T>(job: WslJob, runner: (abort: AbortController) => Promise<T>) => {
@@ -407,15 +425,24 @@ export function createWslServersController(
     startServer,
 
     stopAll() {
+      if (stopping) return stopping
+      closing = true
+      jobAbort?.abort()
       for (const item of state.servers) invalidateStartAttempt(item.config.id)
-      for (const existing of sidecars.values()) {
-        try {
-          existing.listener.stop()
-        } catch {
-          // ignore
-        }
-      }
-      sidecars.clear()
+      stopping = (async () => {
+        await Promise.all(starts)
+        await Promise.all(
+          Array.from(ownedSidecars, async (existing) => {
+            await existing.listener.stop()
+            ownedSidecars.delete(existing)
+          }),
+        )
+        sidecars.clear()
+      })().catch((error) => {
+        stopping = undefined
+        throw error
+      })
+      return stopping
     },
   }
 }

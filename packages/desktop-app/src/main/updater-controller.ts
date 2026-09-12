@@ -7,7 +7,7 @@ export type UpdaterReadyRecord = { version: string }
 export type UpdaterBackend = {
   checkForUpdates(): Promise<{ isUpdateAvailable?: boolean; updateInfo?: { version?: string } } | null | undefined>
   downloadUpdate(): Promise<unknown>
-  quitAndInstall(): void
+  quitAndInstall(): void | Promise<void>
 }
 
 type UpdaterPersistence = {
@@ -21,7 +21,6 @@ export function createUpdaterController(input: {
   currentVersion: string
   backend: UpdaterBackend
   persistence: UpdaterPersistence
-  stop: () => Promise<void>
   log?: (message: string, data?: object) => void
 }) {
   let state: UpdaterState = input.enabled ? { status: "idle" } : { status: "disabled" }
@@ -37,7 +36,7 @@ export function createUpdaterController(input: {
 
   const check = () => {
     if (!input.enabled) return Promise.resolve(state)
-    if (state.status === "ready") return Promise.resolve(state)
+    if (state.status === "ready" || state.status === "installing") return Promise.resolve(state)
     if (pending) return pending
 
     pending = (async () => {
@@ -80,12 +79,8 @@ export function createUpdaterController(input: {
       if (state.status !== "ready") throw new Error("Update is not ready to install")
       const version = state.version
       transition({ status: "installing", version })
-      await input
-        .stop()
-        .then(() => {
-          input.backend.quitAndInstall()
-          transition({ status: "ready", version })
-        })
+      await Promise.resolve()
+        .then(() => input.backend.quitAndInstall())
         .catch((error) => {
           transition({ status: "ready", version })
           throw error

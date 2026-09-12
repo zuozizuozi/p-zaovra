@@ -39,6 +39,7 @@ export type ReviewPanelV2Props = {
   diffsReady: () => boolean
   diffVersion?: number
   loadDiff?: (path: string, version?: number) => Promise<RenderDiff | undefined>
+  filePath?: (path: string) => string
   activeFile?: string
   onSelectFile: (path: string) => void
   diffStyle: SessionReviewDiffStyle
@@ -101,7 +102,7 @@ export function ReviewPanelV2(props: ReviewPanelV2Props) {
 
   const readFile = async (path: string) =>
     sdk()
-      .client.file.read({ path })
+      .client.file.read({ path: props.filePath?.(path) ?? path })
       .then((x) => x.data)
       .catch((error) => {
         console.debug("[session-review-v2] failed to read file", { path, error })

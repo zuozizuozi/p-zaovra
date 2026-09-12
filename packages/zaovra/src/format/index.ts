@@ -7,6 +7,7 @@ import { InstanceState } from "@/effect/instance-state"
 import path from "path"
 import { mergeDeep } from "remeda"
 import { Config } from "@/config/config"
+import { ConfigTooling } from "@/config/tooling"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { errorMessage } from "@/util/error"
 import * as Formatter from "./formatter"
@@ -77,6 +78,7 @@ const layer = Layer.effect(
 
             if (!formatters.length) return false
 
+            const results: boolean[] = []
             for (const { item, cmd } of formatters) {
               yield* Effect.logInfo("running", { command: cmd })
               const replaced = cmd.map((x) => x.replace("$FILE", filepath))
@@ -97,7 +99,6 @@ const layer = Layer.effect(
                     Effect.logError("failed to format file", {
                       error: "spawn failed",
                       command: cmd,
-                      ...item.environment,
                       file: filepath,
                       cause: errorMessage(error.cause ?? error),
                     }).pipe(Effect.as(undefined)),
@@ -106,16 +107,17 @@ const layer = Layer.effect(
               if (result && result.exitCode !== 0) {
                 yield* Effect.logError("failed", {
                   command: cmd,
-                  ...item.environment,
+                  exitCode: result.exitCode,
                 })
               }
+              results.push(result?.exitCode === 0)
             }
 
-            return true
+            return results.every(Boolean)
           })
         }
 
-        const cfg = yield* config.get()
+        const cfg = yield* ConfigTooling.read(config.get(), ctx)
 
         if (!cfg.formatter) {
           yield* Effect.logInfo("all formatters are disabled")
@@ -151,8 +153,8 @@ const layer = Layer.effect(
             formatters[name] = {
               ...info,
               name,
-              extensions: info.extensions ?? [],
-              enabled: builtIn && !info.command ? builtIn.enabled : async (_context) => info.command ?? false,
+              extensions: [...(info.extensions ?? [])],
+              enabled: builtIn && !info.command ? builtIn.enabled : async (_context) => info.command?.slice() ?? false,
             }
           }
         }

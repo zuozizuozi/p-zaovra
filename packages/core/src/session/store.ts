@@ -5,6 +5,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import { SessionHistory } from "./history"
+import { SessionLive } from "./live"
 import { MessageDecodeError } from "./error"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
@@ -29,6 +30,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const { db } = yield* Database.Service
+    const live = yield* SessionLive.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
 
     return Service.of({
@@ -37,12 +39,14 @@ const layer = Layer.effect(
         return row ? fromRow(row) : undefined
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
-        return yield* SessionHistory.load(db, sessionID)
+        const restore = live.capture()
+        return restore(yield* SessionHistory.load(db, sessionID))
       }),
       runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq) {
         return yield* SessionHistory.loadForRunner(db, sessionID, baselineSeq)
       }),
       message: Effect.fn("SessionStore.message")(function* (messageID) {
+        const restore = live.capture()
         const row = yield* db
           .select()
           .from(SessionMessageTable)
@@ -52,7 +56,9 @@ const layer = Layer.effect(
         return row
           ? {
               sessionID: SessionSchema.ID.make(row.session_id),
-              message: yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
+              message: restore([
+                yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
+              ])[0]!,
             }
           : undefined
       }),
@@ -60,4 +66,4 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node] })
+export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node, SessionLive.node] })

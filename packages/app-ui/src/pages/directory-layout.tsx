@@ -53,8 +53,10 @@ export function DirectoryDataProvider(
   createEffect(() => {
     const sessionID = params.id
     if (!sessionID) return
-    serverSync().session.pin(sessionID)
-    onCleanup(() => serverSync().session.unpin(sessionID))
+    const session = serverSync().session
+    session.pin(sessionID)
+    // Release the same server that owns the pin, even while its route is being disposed.
+    onCleanup(() => session.unpin(sessionID))
   })
 
   return (

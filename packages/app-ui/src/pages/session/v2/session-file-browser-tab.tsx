@@ -26,6 +26,7 @@ export type SessionFileBrowserState = {
 
 export function SessionFileBrowserTab(props: {
   tab: string
+  visible?: boolean
   placeholder: boolean
   active?: string
   kinds: ReadonlyMap<string, Kind>
@@ -172,7 +173,7 @@ export function SessionFileBrowserTab(props: {
       >
         <div class="min-h-0 flex-1">
           <Show when={props.tab} keyed>
-            {(tab) => <SessionFileView tab={tab} />}
+            {(tab) => <SessionFileView tab={tab} active={props.visible} />}
           </Show>
         </div>
       </Show>

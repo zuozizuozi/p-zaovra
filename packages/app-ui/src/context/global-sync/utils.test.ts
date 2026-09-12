@@ -1,36 +1,37 @@
 import { describe, expect, test } from "bun:test"
-import type { Agent } from "@zaovra-ai/sdk/v2/client"
-import { directoryKey, normalizeAgentList } from "./utils"
+import { adaptAgent, directoryKey } from "./utils"
 
-const agent = (name = "build") =>
-  ({
-    name,
-    mode: "primary",
-    permission: {},
-    options: {},
-  }) as Agent
-
-describe("normalizeAgentList", () => {
-  test("keeps array payloads", () => {
-    expect(normalizeAgentList([agent("build"), agent("docs")])).toEqual([agent("build"), agent("docs")])
-  })
-
-  test("wraps a single agent payload", () => {
-    expect(normalizeAgentList(agent("docs"))).toEqual([agent("docs")])
-  })
-
-  test("extracts agents from keyed objects", () => {
+describe("adaptAgent", () => {
+  test("preserves the executor agent identity, selection and ordered permissions", () => {
+    const permissions = [
+      { action: "edit", resource: "*", effect: "deny" },
+      { action: "edit", resource: "src/*", effect: "allow" },
+      { action: "edit", resource: "src/private/*", effect: "ask" },
+    ] as const
     expect(
-      normalizeAgentList({
-        build: agent("build"),
-        docs: agent("docs"),
+      adaptAgent({
+        id: "reviewer",
+        mode: "subagent",
+        hidden: false,
+        color: "accent",
+        steps: 4,
+        model: { id: "review", providerID: "native", variant: "deep" },
+        system: "Review actual changes",
+        permissions: [...permissions],
+        request: { headers: { "x-agent": "review" }, body: { temperature: 0.2 } },
       }),
-    ).toEqual([agent("build"), agent("docs")])
-  })
-
-  test("drops invalid payloads", () => {
-    expect(normalizeAgentList({ name: "AbortError" })).toEqual([])
-    expect(normalizeAgentList([{ name: "build" }, agent("docs")])).toEqual([agent("docs")])
+    ).toMatchObject({
+      name: "reviewer",
+      mode: "subagent",
+      hidden: false,
+      color: "accent",
+      steps: 4,
+      model: { modelID: "review", providerID: "native" },
+      variant: "deep",
+      prompt: "Review actual changes",
+      permission: permissions,
+      options: { temperature: 0.2 },
+    })
   })
 })
 

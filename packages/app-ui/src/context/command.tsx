@@ -378,6 +378,7 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
 
     const run = (id: string, source?: CommandSource) => {
       const option = optionMap().get(id)
+      if (option?.disabled) return
       option?.onSelect?.(source)
     }
 

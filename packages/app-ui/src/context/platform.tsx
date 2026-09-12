@@ -1,3 +1,4 @@
+import type { ArtifactPreviewAPI } from "../artifact-preview"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
 import type { Accessor } from "solid-js"
@@ -29,6 +30,7 @@ export type FatalRendererErrorLog = {
 }
 
 type PlatformBase = {
+  artifactPreview?: ArtifactPreviewAPI
   /** App version */
   version?: string
 
@@ -61,12 +63,14 @@ type PlatformBase = {
 
   /** Resolve the native source path for a desktop File. */
   getPathForFile?(file: File): string
+  prepareAttachment?(file: File, signal?: AbortSignal): Promise<File[]>
 
   /** Open a native save file picker dialog (desktop only) */
   saveFilePickerDialog?(opts?: SaveFilePickerOptions): Promise<string | null>
 
   /** Storage mechanism, defaults to localStorage */
   storage?: (name?: string) => SyncStorage | AsyncStorage
+  subscribeStorageWrites?: (name: string, key: string, callback: (value: string) => void) => () => void
 
   /** Stable platform window identity for window-scoped persistence */
   windowID?: string

@@ -214,6 +214,109 @@ async function waitFor(check: () => boolean) {
   throw new Error("Timed out waiting for condition")
 }
 
+test("shutdown waits for startup and stale sidecar cleanup", async () => {
+  persistedServers = []
+  const spawned = Promise.withResolvers<void>()
+  const stopped = Promise.withResolvers<void>()
+  let spawns = 0
+  let stops = 0
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => {
+      spawns++
+      await spawned.promise
+      return {
+        listener: {
+          stop: () => {
+            stops++
+            return stopped.promise
+          },
+          onExit: () => undefined,
+        },
+        url: "http://127.0.0.1:4096",
+        username: null,
+        password: "fixture",
+      }
+    },
+    testControllerOptions(),
+  )
+  await controller.addServer("Debian")
+  await waitFor(() => spawns === 1)
+  let finished = false
+  const pending = controller.stopAll()
+  expect(controller.stopAll()).toBe(pending)
+  void pending.then(() => {
+    finished = true
+  })
+  await Bun.sleep(0)
+  expect(finished).toBe(false)
+  spawned.resolve()
+  await waitFor(() => stops === 1)
+  expect(finished).toBe(false)
+  stopped.resolve()
+  await pending
+  expect(finished).toBe(true)
+  expect(stops).toBe(1)
+  await controller.startServer("wsl:Debian")
+  expect(spawns).toBe(1)
+})
+
+test("shutdown retains failed cleanup for a later retry", async () => {
+  persistedServers = []
+  let stops = 0
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => ({
+      listener: {
+        stop: async () => {
+          if (++stops === 1) throw new Error("cleanup failed")
+        },
+        onExit: () => undefined,
+      },
+      url: "http://127.0.0.1:4096",
+      username: null,
+      password: "fixture",
+    }),
+    testControllerOptions(),
+  )
+  await controller.addServer("Debian")
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
+  await expect(controller.stopAll()).rejects.toThrow("cleanup failed")
+  await controller.stopAll()
+  expect(stops).toBe(2)
+})
+
+test("restarting does not spawn a replacement when the old server cannot stop", async () => {
+  persistedServers = []
+  let spawns = 0
+  let stops = 0
+  const controller = createWslServersController(
+    "1.16.2",
+    async () => {
+      spawns++
+      return {
+        listener: {
+          stop: async () => {
+            if (++stops === 1) throw new Error("old server still running")
+          },
+          onExit: () => undefined,
+        },
+        url: "http://127.0.0.1:4096",
+        username: null,
+        password: "fixture",
+      }
+    },
+    testControllerOptions(),
+  )
+  await controller.addServer("Debian")
+  await waitFor(() => controller.getState().servers[0]?.runtime.kind === "ready")
+  await controller.startServer("wsl:Debian")
+  expect(spawns).toBe(1)
+  expect(controller.getState().servers[0]?.runtime).toEqual({ kind: "failed", message: "old server still running" })
+  await controller.stopAll()
+  expect(stops).toBe(2)
+})
+
 function testControllerOptions() {
   return {
     readServers: () => persistedServers,

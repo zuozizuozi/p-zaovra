@@ -18,11 +18,18 @@ $vars = @{
   endpoint = $env:AZURE_TRUSTED_SIGNING_ENDPOINT
   account = $env:AZURE_TRUSTED_SIGNING_ACCOUNT_NAME
   profile = $env:AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE
+  publisher = $env:WINDOWS_SIGNING_PUBLISHER_NAME
 }
 
-if ($vars.Values | Where-Object { -not $_ }) {
-  Write-Host "Skipping Windows signing because Azure Artifact Signing is not configured"
-  exit 0
+if ($vars.Values | Where-Object { [string]::IsNullOrWhiteSpace($_) }) {
+  throw "Windows signing configuration is incomplete: endpoint, account, certificate profile and publisher name are required in CI"
+}
+
+$files = @($Path | ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).Path } | Select-Object -Unique)
+foreach ($file in $files) {
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+    throw "Signing target is not a file: $file"
+  }
 }
 
 $moduleVersion = "0.5.8"
@@ -40,12 +47,6 @@ if (-not $module) {
 }
 
 Import-Module TrustedSigning -RequiredVersion $moduleVersion -Force
-
-$files = @($Path | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue } | Select-Object -ExpandProperty Path -Unique)
-
-if (-not $files -or $files.Count -eq 0) {
-  throw "No files matched the requested paths"
-}
 
 $params = @{
   Endpoint                         = $vars.endpoint
@@ -68,3 +69,15 @@ $params = @{
 }
 
 Invoke-TrustedSigning @params
+
+foreach ($file in $files) {
+  $signature = Get-AuthenticodeSignature -LiteralPath $file
+  if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+    throw "Windows signing verification failed for ${file}: $($signature.Status)"
+  }
+  $publisher = $vars.publisher.Trim()
+  $commonName = $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+  if ($commonName -cne $publisher -and $signature.SignerCertificate.Subject -cne $publisher) {
+    throw "Windows signing publisher does not match WINDOWS_SIGNING_PUBLISHER_NAME for ${file}"
+  }
+}

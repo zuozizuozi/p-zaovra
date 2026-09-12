@@ -1,4 +1,7 @@
 export const dict = {
+  "ui.messagePart.diagnosticsFailed": "파일 변경 사항이 저장되었습니다. 언어 진단을 완료하지 못했습니다: {{servers}}.",
+  "ui.messagePart.formattingFailed": "파일 변경 사항이 저장되었습니다. 자동 서식 지정 실패: {{formatters}}.",
+
   "ui.sessionReview.title": "세션 변경 사항",
   "ui.sessionReview.title.lastTurn": "마지막 턴 변경 사항",
   "ui.sessionReview.diffStyle.unified": "통합 보기",

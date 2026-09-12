@@ -33,6 +33,8 @@ import {
   type SidecarListener,
 } from "./server"
 import { setupAutoUpdater, showUpdaterDialog } from "./updater"
+import { createQuitHandler } from "./quit-handler"
+import { createRelaunchHandler } from "./relaunch"
 import { safeWebContentsURL } from "./window-state"
 import {
   getLastFocusedWindow,
@@ -66,6 +68,7 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let stoppingServer: Promise<void> | undefined
 
 const pendingDeepLinks: string[] = []
 
@@ -86,10 +89,14 @@ function emitDeepLinks(urls: string[]) {
 }
 
 async function killSidecar() {
+  if (stoppingServer) return stoppingServer
   if (!server) return
   const current = server
   server = null
-  await current.stop()
+  stoppingServer = current.stop().finally(() => {
+    stoppingServer = undefined
+  })
+  return stoppingServer
 }
 
 function ensureLoopbackNoProxy() {
@@ -168,15 +175,17 @@ const main = Effect.gen(function* () {
   )
   const stopSidecars = async () => {
     await killSidecar()
-    wslServers.stopAll()
+    await wslServers.stopAll()
   }
-  const relaunch = () => {
-    setAppQuitting()
-    void stopSidecars().finally(() => {
+  const relaunch = createRelaunchHandler({
+    stop: stopSidecars,
+    quitting: setAppQuitting,
+    relaunch: () => {
       app.relaunch()
       app.exit(0)
-    })
-  }
+    },
+    failed: (error) => logger.error("Failed to stop background services before relaunching", error),
+  })
 
   try {
     setDefaultCACertificates([...new Set([...getCACertificates("default"), ...getCACertificates("system")])])
@@ -213,6 +222,8 @@ const main = Effect.gen(function* () {
 
   preferAppEnv(app.getPath("userData"))
 
+  emitDeepLinks(process.argv.filter((arg) => arg.startsWith("zaovra://")))
+
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("zaovra://"))
     if (urls.length) {
@@ -232,14 +243,23 @@ const main = Effect.gen(function* () {
     emitDeepLinks([url])
   })
 
-  app.on("before-quit", () => {
-    setAppQuitting()
-    void stopSidecars()
-  })
+  app.on(
+    "before-quit",
+    createQuitHandler({
+      stop: async () => {
+        setAppQuitting()
+        await stopSidecars()
+      },
+      quit: () => app.quit(),
+      failed: (error) => {
+        setAppQuitting(false)
+        logger.error("Failed to stop background services before quitting", error)
+      },
+    }),
+  )
 
   app.on("will-quit", () => {
     setAppQuitting()
-    void stopSidecars()
   })
 
   app.on("child-process-gone", (_event, details) => {
@@ -282,7 +302,7 @@ const main = Effect.gen(function* () {
   app.setAsDefaultProtocolClient("zaovra")
   registerRendererProtocol()
   setDockIcon()
-  const updater = setupAutoUpdater(stopSidecars)
+  const updater = setupAutoUpdater()
   registerIpcHandlers({
     killSidecar: () => killSidecar(),
     relaunch,

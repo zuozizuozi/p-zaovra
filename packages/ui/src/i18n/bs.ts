@@ -3,6 +3,10 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.messagePart.diagnosticsFailed":
+    "Izmjene datoteke su sačuvane. Jezička dijagnostika nije mogla biti završena: {{servers}}.",
+  "ui.messagePart.formattingFailed":
+    "Izmjene datoteke su sačuvane. Automatsko formatiranje nije uspjelo: {{formatters}}.",
   "ui.sessionReview.title": "Promjene sesije",
   "ui.sessionReview.title.git": "Git promjene",
   "ui.sessionReview.title.branch": "Promjene na grani",

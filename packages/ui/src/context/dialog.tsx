@@ -1,6 +1,5 @@
 import {
   createContext,
-  createEffect,
   createRoot,
   createSignal,
   getOwner,
@@ -14,7 +13,6 @@ import {
   For,
 } from "solid-js"
 import { Dialog as Kobalte } from "@kobalte/core/dialog"
-import { makeEventListener } from "@solid-primitives/event-listener"
 
 type DialogElement = () => JSX.Element
 
@@ -62,19 +60,6 @@ function init() {
     }, 100)
   }
 
-  createEffect(() => {
-    if (stack().length === 0) return
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
-      close()
-      event.preventDefault()
-      event.stopPropagation()
-    }
-
-    makeEventListener(window, "keydown", onKeyDown, { capture: true })
-  })
-
   const mount = (element: DialogElement, owner: Owner, onClose: (() => void) | undefined, layer: number) => {
     const id = Math.random().toString(36).slice(2)
     const zIndex = 50 + layer * 10
@@ -88,7 +73,8 @@ function init() {
         setClosing = setClosingSignal
         return (
           <Kobalte
-            modal
+            // Only the top dialog may trap focus or hide other layers.
+            modal={stack().at(-1)?.id === id}
             open={!closing()}
             onOpenChange={(open: boolean) => {
               if (open) return
@@ -97,9 +83,13 @@ function init() {
           >
             <Kobalte.Portal>
               {/* Dismiss explicitly so switching away to copy credentials cannot discard a form. */}
-              <Kobalte.Overlay
-                data-component="dialog-overlay"
-                style={{ "z-index": String(zIndex) }}
+              <Kobalte.Overlay data-component="dialog-overlay" style={{ "z-index": String(zIndex) }} />
+              {/* Keep a native drag strip above the modal without making form controls draggable. */}
+              <div
+                data-component="dialog-window-drag-region"
+                data-tauri-drag-region
+                aria-hidden="true"
+                style={{ "z-index": String(zIndex + 1) }}
               />
               <div
                 data-dialog-layer={layer}
