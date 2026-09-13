@@ -103,6 +103,46 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
+  it.effect("rejects an approval after its configured rules change to deny", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const waiting = yield* waitForRequest()
+      yield* setRules([{ action: "read", resource: "*", effect: "deny" }])
+      yield* waiting.service.reply({ requestID: waiting.request.id, reply: "always" })
+      const exit = yield* Fiber.await(waiting.fiber)
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") expect(Cause.squash(exit.cause)).toBeInstanceOf(PermissionV2.CorrectedError)
+      const saved = yield* PermissionSaved.Service
+      expect(yield* saved.list()).toEqual([])
+      expect(yield* waiting.service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("does not apply always-allow replies to another Location's pending requests", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const original = yield* PermissionV2.Service
+      const first = yield* original.ask(assertion({ save: ["src/*"] }))
+      yield* Effect.gen(function* () {
+        yield* setRules([])
+        const other = yield* PermissionV2.Service
+        const second = yield* other.ask(assertion({ id: PermissionV2.ID.create("per_other") }))
+        expect(other).not.toBe(original)
+        expect(second.effect).toBe("ask")
+        expect(yield* other.get(second.id)).toBeDefined()
+        yield* original.reply({ requestID: first.id, reply: "always" })
+        expect(yield* other.get(second.id)).toBeDefined()
+        yield* other.reply({ requestID: second.id, reply: "reject" })
+      }).pipe(
+        Effect.provide(Layer.fresh(PermissionV2.locationLayer)),
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/other") })),
+        ),
+      )
+    }),
+  )
+
   it.effect("returns the evaluated effect and only queues prompts", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])

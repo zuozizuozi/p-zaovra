@@ -24,6 +24,34 @@ const childID = SessionV2.ID.make("ses_task_child")
 const location = { directory: AbsolutePath.make("/project") }
 
 describe("TaskTool", () => {
+  for (const finish of ["length", "max-steps", "interrupted", "tool-calls", undefined]) {
+    it.effect(`does not report a stopped child as completed (${finish})`, () =>
+      Effect.gen(function* () {
+        yield* registerExplore()
+        const sessions = {
+          ...sessionOps(),
+          messages: () => Effect.succeed([{ ...assistant(AgentV2.ID.make("explore")), finish }]),
+        }
+        const context = { sessionID: parentID, ...toolIdentity, toolCallID: "call-stopped" }
+        expect(yield* TaskTool.status(sessions, info(parentID), childID, context)).toMatchObject({
+          status: "unknown",
+          content: expect.stringContaining("stopped without completing"),
+        })
+        expect(
+          yield* TaskTool.run(
+            sessions,
+            info(parentID),
+            {
+              description: "Inspect",
+              prompt: "Inspect",
+              subagent_type: "explore",
+            },
+            context,
+          ).pipe(Effect.exit),
+        ).toMatchObject({ _tag: "Failure" })
+      }),
+    )
+  }
   it.effect("allows a configured subtask command to run a primary agent in a child", () =>
     Effect.gen(function* () {
       yield* registerExplore()
@@ -280,6 +308,7 @@ function assistant(agent: AgentV2.ID) {
   return SessionMessage.Assistant.make({
     id: SessionMessage.ID.create(),
     type: "assistant",
+    finish: "stop",
     agent,
     model: ModelV2.Ref.make({ id: ModelV2.ID.make("test"), providerID: ProviderV2.ID.make("test") }),
     content: [{ type: "text", id: "text", text: "The state machine is durable." }],

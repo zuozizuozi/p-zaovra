@@ -7,6 +7,7 @@ import {
   SessionReviewV2Sidebar,
 } from "@zaovra-ai/session-ui/v2/session-review-v2"
 import { SessionReviewFilePreviewV2 } from "@zaovra-ai/session-ui/v2/session-review-file-preview-v2"
+import { Button } from "@zaovra-ai/ui/button"
 import { DiffChanges } from "@zaovra-ai/ui/v2/diff-changes-v2"
 import type {
   SessionReviewComment,
@@ -56,6 +57,7 @@ export type ReviewPanelV2Props = {
 
 export function ReviewPanelV2(props: ReviewPanelV2Props) {
   const sdk = useSDK()
+  const language = useLanguage()
 
   const diffs = createMemo(() => props.diffs().filter(filterRenderableDiff))
   const filteredFiles = createMemo(() =>
@@ -86,16 +88,25 @@ export function ReviewPanelV2(props: ReviewPanelV2Props) {
     if (!diff || !load || !reviewDiffNeedsLoad(diff)) return
     return { diff, load, version: props.diffVersion }
   })
-  const [loadedDiff] = createResource(detailSource, async ({ diff, load, version }) => {
+  const [loadedDiff, detailActions] = createResource(detailSource, async ({ diff, load, version }) => {
     const value = await load(diff.file, version)
     if (value?.file !== diff.file) return
     return { source: diff, version, value }
   })
 
+  const detailFailed = () =>
+    !!detailSource() && (loadedDiff.state === "errored" || (loadedDiff.state === "ready" && !loadedDiff()))
+
   const activeItem = createMemo(() => {
     const source = sourceActiveItem()
-    if (loadedDiff.state !== "ready") return source
-    const loaded = loadedDiff()
+    if (loadedDiff.state !== "ready" && loadedDiff.state !== "refreshing") return source
+    const loaded = loadedDiff.latest
+    if (
+      loadedDiff.state === "refreshing" &&
+      loaded?.value.file === source?.file &&
+      loaded?.version === props.diffVersion
+    )
+      return loaded?.value
     if (loaded && loaded.source === source && loaded.version === props.diffVersion) return loaded.value
     return source
   })
@@ -143,23 +154,48 @@ export function ReviewPanelV2(props: ReviewPanelV2Props) {
         // updates the mounted preview instead of remounting the whole viewer.
         <Show when={activeDiff()} keyed>
           {(file) => (
-            <Show when={activeItem()}>
-              {(diff) => (
-                <SessionReviewFilePreviewV2
-                  file={file}
-                  diff={diff()}
-                  diffStyle={props.diffStyle}
-                  expandMode={props.state.expandMode()}
-                  readFile={readFile}
-                  onLineComment={props.onLineComment}
-                  onLineCommentUpdate={props.onLineCommentUpdate}
-                  onLineCommentDelete={props.onLineCommentDelete}
-                  lineCommentActions={props.lineCommentActions}
-                  comments={props.comments}
-                  focusedComment={props.focusedComment}
-                  onFocusedCommentChange={props.onFocusedCommentChange}
-                />
-              )}
+            <Show
+              when={
+                !detailSource() || (!detailFailed() && (!loadedDiff.loading || activeItem() !== sourceActiveItem()))
+              }
+              fallback={
+                <div
+                  class="p-6 flex flex-col items-start gap-3 text-13-regular text-text-weak"
+                  role={detailFailed() ? "alert" : "status"}
+                >
+                  <span>
+                    {language.t(detailFailed() ? "session.review.loadFailed" : "session.review.loadingChanges")}
+                  </span>
+                  <Show when={detailFailed()}>
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      onClick={() => void Promise.resolve(detailActions.refetch()).catch(() => {})}
+                    >
+                      {language.t("session.review.retry")}
+                    </Button>
+                  </Show>
+                </div>
+              }
+            >
+              <Show when={activeItem()}>
+                {(diff) => (
+                  <SessionReviewFilePreviewV2
+                    file={file}
+                    diff={diff()}
+                    diffStyle={props.diffStyle}
+                    expandMode={props.state.expandMode()}
+                    readFile={readFile}
+                    onLineComment={props.onLineComment}
+                    onLineCommentUpdate={props.onLineCommentUpdate}
+                    onLineCommentDelete={props.onLineCommentDelete}
+                    lineCommentActions={props.lineCommentActions}
+                    comments={props.comments}
+                    focusedComment={props.focusedComment}
+                    onFocusedCommentChange={props.onFocusedCommentChange}
+                  />
+                )}
+              </Show>
             </Show>
           )}
         </Show>
@@ -235,7 +271,14 @@ function ReviewPanelV2Sidebar(props: {
         >
           <Show
             when={props.filteredFiles().length > 0}
-            fallback={<div class="px-2 py-2 text-12-regular text-text-weak">{language.t("palette.empty")}</div>}
+            fallback={
+              <div class="px-2 py-2 flex flex-col items-start gap-2 text-12-regular text-text-weak" role="status">
+                <span>{language.t("session.review.noFilterMatches")}</span>
+                <Button size="small" variant="ghost" onClick={() => props.state.setFilter("")}>
+                  {language.t("session.review.clearFilter")}
+                </Button>
+              </div>
+            }
           >
             <SessionFileListV2
               files={props.filteredFiles()}

@@ -87,6 +87,7 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
   let customRef: HTMLButtonElement | undefined
   let optsRef: HTMLButtonElement[] = []
   let replied = false
+  let mounted = true
   let focusFrame: number | undefined
 
   const question = createMemo(() => questions()[store.tab])
@@ -195,7 +196,9 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
       if (raf !== undefined) cancelAnimationFrame(raf)
     })
 
-    focus(pickFocus())
+    if (!document.activeElement || document.activeElement === document.body || root?.contains(document.activeElement)) {
+      focus(pickFocus())
+    }
   })
 
   createEffect(() => {
@@ -207,6 +210,7 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
   })
 
   onCleanup(() => {
+    mounted = false
     if (focusFrame !== undefined) cancelAnimationFrame(focusFrame)
     if (replied) return
     cache.set(cacheKey, {
@@ -224,47 +228,49 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
 
   const replyMutation = useMutation(() => ({
     mutationFn: (answers: QuestionAnswer[]) =>
-      sdk().client.v2.session.question.reply({
-        sessionID: props.request.sessionID,
-        requestID: props.request.id,
-        questionV2Reply: { answers },
-      }),
-    onMutate: () => {
-      props.onSubmit()
-    },
+      sdk().client.v2.session.question.reply(
+        {
+          sessionID: props.request.sessionID,
+          requestID: props.request.id,
+          questionV2Reply: { answers },
+        },
+        { throwOnError: true },
+      ),
     onSuccess: () => {
       replied = true
       cache.delete(cacheKey)
+      if (mounted) props.onSubmit()
     },
     onError: fail,
   }))
 
   const rejectMutation = useMutation(() => ({
     mutationFn: () =>
-      sdk().client.v2.session.question.reject({
-        sessionID: props.request.sessionID,
-        requestID: props.request.id,
-      }),
-    onMutate: () => {
-      props.onSubmit()
-    },
+      sdk().client.v2.session.question.reject(
+        {
+          sessionID: props.request.sessionID,
+          requestID: props.request.id,
+        },
+        { throwOnError: true },
+      ),
     onSuccess: () => {
       replied = true
       cache.delete(cacheKey)
+      if (mounted) props.onSubmit()
     },
     onError: fail,
   }))
 
   const sending = createMemo(() => replyMutation.isPending || rejectMutation.isPending)
 
-  const reply = async (answers: QuestionAnswer[]) => {
+  const reply = (answers: QuestionAnswer[]) => {
     if (sending()) return
-    await replyMutation.mutateAsync(answers)
+    replyMutation.mutate(answers)
   }
 
-  const reject = async () => {
+  const reject = () => {
     if (sending()) return
-    await rejectMutation.mutateAsync()
+    rejectMutation.mutate()
   }
 
   const submit = () => void reply(questions().map((_, i) => store.answers[i] ?? []))

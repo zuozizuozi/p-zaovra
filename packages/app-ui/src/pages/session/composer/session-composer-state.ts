@@ -75,21 +75,26 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     return store.responding === perm.id
   })
 
-  const decide = (response: "once" | "always" | "reject") => {
+  const decide = async (response: "once" | "always" | "reject") => {
     const perm = permissionRequest()
-    if (!perm) return
-    if (store.responding === perm.id) return
+    if (!perm || store.responding === perm.id) return false
+    const sessionID = params.id
 
     setStore("responding", perm.id)
-    sdk()
-      .client.v2.session.permission.reply({
-        sessionID: perm.sessionID,
-        requestID: perm.id,
-        reply: response,
-      })
+    return sdk()
+      .client.v2.session.permission.reply(
+        {
+          sessionID: perm.sessionID,
+          requestID: perm.id,
+          reply: response,
+        },
+        { throwOnError: true },
+      )
+      .then(() => params.id === sessionID)
       .catch((err: unknown) => {
         const description = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description })
+        return false
       })
       .finally(() => {
         setStore("responding", (id) => (id === perm.id ? undefined : id))

@@ -29,6 +29,27 @@ const waitForFile = (file: string) =>
 describe("AppProcess", () => {
   describe("run", () => {
     it.effect(
+      "retains the beginning and latest output within the combined capture budget",
+      Effect.gen(function* () {
+        const svc = yield* AppProcess.Service
+        const snapshots: string[] = []
+        const result = yield* svc.run(cmd("-e", "process.stdout.write('HEAD' + 'x'.repeat(50000) + 'TAIL')"), {
+          combineOutput: true,
+          maxOutputBytes: 16,
+          onOutput: (output) =>
+            Effect.sync(() => {
+              snapshots.push(output.toString("utf8"))
+            }),
+        })
+        expect(result.output?.length).toBe(16)
+        expect(result.output?.toString("utf8")).toBe("HEADxxxxxxxxTAIL")
+        expect(result.outputTruncated).toBe(true)
+        expect(snapshots.every((item) => item.length <= 16)).toBe(true)
+        expect(snapshots.at(-1)).toBe("HEADxxxxxxxxTAIL")
+      }),
+    )
+
+    it.effect(
       "captures stdout and exit code zero",
       Effect.gen(function* () {
         const svc = yield* AppProcess.Service

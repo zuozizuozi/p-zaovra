@@ -198,6 +198,29 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
       return json(route, pageData.items, { "x-next-cursor": cursor })
     }
 
+    if (path === "/api/usage") {
+      const totals = {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 0,
+        calls: 0,
+        unreported: 0,
+      }
+      return json(route, {
+        data: {
+          total: totals,
+          own: totals,
+          official: totals,
+          unknown: totals,
+          lastTurn: null,
+          updatedAt: 0,
+          billing: "unavailable",
+        },
+      })
+    }
     if (path.startsWith("/api/")) throw new Error(`Unhandled mock API route: ${path}`)
     if (url.port === targetPort && targetPort !== appPort) return json(route, {})
     return route.fallback()

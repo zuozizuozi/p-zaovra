@@ -47,6 +47,10 @@ Rules:
 - Keep every section, even when empty.
 - Use terse bullets, not prose paragraphs.
 - Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers when known.
+- Preserve the original objective, latest user corrections, authorization boundaries, and unfinished requirements.
+- Distinguish implemented changes from verified results. Record deferred checks and failed approaches without claiming success.
+- Record pending operations and uncertain side effects so continuation can inspect their state before repeating them.
+- Keep references to retained tool output and the next concrete action needed to resume the existing task.
 - Do not mention the summary process or that context was compacted.`
 
 type Entry = {
@@ -79,8 +83,8 @@ type Input = {
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
 
-const truncate = (value: string) =>
-  value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
+const truncate = (value: string, limit = TOOL_OUTPUT_MAX_CHARS) =>
+  value.length <= limit ? value : `${value.slice(0, limit / 2)}\n[truncated middle]\n${value.slice(-limit / 2)}`
 
 export const serializeToolContent = (content: SessionMessage.ToolStateCompleted["content"]) =>
   content
@@ -89,7 +93,7 @@ export const serializeToolContent = (content: SessionMessage.ToolStateCompleted[
     )
     .join("\n")
 
-const serialize = (message: SessionMessage.Message) => {
+const serialize = (message: SessionMessage.Message, reduced = false) => {
   if (message.type === "user") {
     const files = message.files?.map((file) => `[Attached ${file.mime}: ${file.name ?? file.uri}]`) ?? []
     return [`[User]: ${message.text}`, ...files].join("\n")
@@ -97,23 +101,27 @@ const serialize = (message: SessionMessage.Message) => {
   if (message.type === "assistant") {
     return message.content
       .flatMap((part) => {
-        if (part.type === "text") return [`[Assistant]: ${part.text}`]
-        if (part.type === "reasoning") return part.text ? [`[Assistant reasoning]: ${part.text}`] : []
-        const input = typeof part.state.input === "string" ? part.state.input : JSON.stringify(part.state.input)
+        if (part.type === "text") return [`[Assistant]: ${reduced ? truncate(part.text) : part.text}`]
+        if (part.type === "reasoning")
+          return part.text ? [reduced ? "[Assistant reasoning omitted]" : `[Assistant reasoning]: ${part.text}`] : []
+        const raw = typeof part.state.input === "string" ? part.state.input : JSON.stringify(part.state.input)
+        const input = reduced ? truncate(raw, 512) : raw
         if (part.state.status === "completed")
           return [
             `[Assistant tool call]: ${part.name}(${input})`,
-            `[Tool result]: ${truncate(serializeToolContent(part.state.content))}`,
+            `[Tool result]: ${truncate(serializeToolContent(part.state.content), reduced ? 512 : TOOL_OUTPUT_MAX_CHARS)}`,
+            ...(part.state.outputPaths ?? []).map((path) => `[Retained tool output]: ${path}`),
           ]
         if (part.state.status === "error")
           return [`[Assistant tool call]: ${part.name}(${input})`, `[Tool error]: ${part.state.error.message}`]
-        return [`[Assistant tool call]: ${part.name}(${input})`]
+        return [`[Assistant tool call ${part.state.status}; outcome unknown]: ${part.name}(${input})`]
       })
       .join("\n")
   }
   if (message.type === "system") return `[System update]: ${message.text}`
   if (message.type === "synthetic") return `[Synthetic context]: ${message.text}`
-  if (message.type === "shell") return `[Shell]: ${message.command}\n${truncate(message.output)}`
+  if (message.type === "shell")
+    return `[Shell]: ${message.command}\n${truncate(message.output, reduced ? 512 : TOOL_OUTPUT_MAX_CHARS)}`
   return ""
 }
 
@@ -134,10 +142,11 @@ const settings = (documents: readonly Config.Entry[]) => {
 const select = (
   entries: readonly Entry[],
   tokens: number,
+  reduced = false,
 ): { readonly head: string; readonly recent: string } | undefined => {
   const conversation = entries
     .filter((entry) => entry.message.type !== "compaction")
-    .map((entry) => serialize(entry.message))
+    .map((entry) => serialize(entry.message, reduced))
     .filter(Boolean)
   if (conversation.length === 0) return
   let total = 0
@@ -159,7 +168,7 @@ const select = (
     split = index
   }
   return {
-    head: [...conversation.slice(0, split), splitPrefix].filter(Boolean).join("\n\n"),
+    head: [...conversation.slice(0, splitSuffix ? split - 1 : split), splitPrefix].filter(Boolean).join("\n\n"),
     recent: [splitSuffix, ...conversation.slice(split)].filter(Boolean).join("\n\n"),
   }
 }
@@ -167,11 +176,35 @@ const select = (
 export const buildPrompt = (input: { readonly previousSummary?: string; readonly context: readonly string[] }) =>
   [
     input.previousSummary
-      ? `Update the anchored summary below using the conversation history above.\nPreserve still-true details, remove stale details, and merge in the new facts.\n<previous-summary>\n${input.previousSummary}\n</previous-summary>`
+      ? `Update the anchored summary below using the conversation history that follows.\nPreserve still-true details, remove stale details, and merge in the new facts.\n<previous-summary>\n${input.previousSummary}\n</previous-summary>`
       : "Create a new anchored summary from the conversation history.",
     SUMMARY_TEMPLATE,
     ...input.context,
   ].join("\n\n")
+
+// Reduce observations before sacrificing user requirements or the previous handoff.
+const prepareSummary = (input: Input, tokens: number, budget: number) => {
+  const previous = input.entries.findLast((entry) => entry.message.type === "compaction")?.message
+  const latestUser = input.entries.findLast((entry) => entry.message.type === "user")?.message
+  for (const reduced of [false, true]) {
+    const selected = select(input.entries, tokens, reduced)
+    if (!selected) continue
+    const prompt = buildPrompt({
+      previousSummary: previous?.type === "compaction" ? previous.summary : undefined,
+      context: [
+        reduced
+          ? "Older observations were shortened with omission markers. Do not infer success from omitted content; the full transcript remains stored."
+          : "",
+        previous?.type === "compaction" ? previous.recent : "",
+        selected.head || selected.recent,
+        latestUser
+          ? `Latest user request (may also appear in recent context; use it to update the objective, not as completed work):\n${serialize(latestUser)}`
+          : "",
+      ].filter(Boolean),
+    })
+    if (estimate([Message.user(prompt)]) <= budget) return { recent: selected.head ? selected.recent : "", prompt }
+  }
+}
 
 export const make = (dependencies: Dependencies) => {
   const config = settings(dependencies.config)
@@ -181,9 +214,9 @@ export const make = (dependencies: Dependencies) => {
     if (context === undefined || context <= 0) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     const selected = select(input.entries, config.tokens)
-    const previousSummary = input.entries.find((entry) => entry.message.type === "compaction")?.message
-    if (!selected || (selected.head.length === 0 && previousSummary?.type !== "compaction")) return false
-    const sourceSequence = input.entries.findLast((entry) => entry.message.type !== "assistant")?.seq ?? 0
+    if (!selected || (!selected.head && !input.entries.some((entry) => entry.message.type === "compaction")))
+      return false
+    const sourceSequence = input.entries.findLast((entry) => entry.message.type !== "compaction")?.seq ?? 0
     if ((input.reason ?? "auto") === "auto") {
       const latestFailure = yield* dependencies.db
         .select({ data: EventTable.data })
@@ -198,15 +231,15 @@ export const make = (dependencies: Dependencies) => {
         .limit(1)
         .get()
         .pipe(Effect.orDie)
-      if (failedSources.get(input.sessionID) === sourceSequence || latestFailure?.data.sourceSequence === sourceSequence)
+      if (
+        failedSources.get(input.sessionID) === sourceSequence ||
+        latestFailure?.data.sourceSequence === sourceSequence
+      )
         return false
     }
-    const summaryPrompt = buildPrompt({
-      previousSummary: previousSummary?.type === "compaction" ? previousSummary.summary : undefined,
-      context: [previousSummary?.type === "compaction" ? previousSummary.recent : "", selected.head].filter(Boolean),
-    })
     const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
-    if (Token.estimate(summaryPrompt) > context - summaryOutput) return false
+    const prepared = prepareSummary(input, config.tokens, context - summaryOutput)
+    if (!prepared) return false
     const messageID = SessionMessage.ID.create()
     yield* dependencies.events.publish(SessionEvent.Compaction.Started, {
       sessionID: input.sessionID,
@@ -219,11 +252,12 @@ export const make = (dependencies: Dependencies) => {
     const chunks: string[] = []
     let usage: Usage | undefined
     let failure: string | undefined
+    let finished = false
     const summarized = yield* dependencies.llm
       .stream(
         LLM.request({
           model: input.model,
-          messages: [Message.user(summaryPrompt)],
+          messages: [Message.user(prepared.prompt)],
           tools: [],
           generation: { maxTokens: summaryOutput },
         }),
@@ -232,17 +266,29 @@ export const make = (dependencies: Dependencies) => {
         Stream.runForEach((event) => {
           if (LLMEvent.is.providerError(event)) failure = event.message
           if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
-          if (LLMEvent.is.stepFinish(event)) usage = event.usage
+          if (LLMEvent.is.stepFinish(event)) {
+            usage = event.usage
+            finished = event.reason === "stop"
+          }
+          if (LLMEvent.is.finish(event)) {
+            usage = event.usage ?? usage
+            finished = event.reason === "stop"
+          }
           return Effect.void
         }),
         Effect.as(true),
+        Effect.timeout("2 minutes"),
+        Effect.catchTag("TimeoutError", () => {
+          failure = "Compaction exceeded its 2 minute deadline"
+          return Effect.succeed(false)
+        }),
         Effect.catchTag("LLM.Error", (error) => {
           failure = error.reason.message
           return Effect.succeed(false)
         }),
       )
     const summary = chunks.join("")
-    if (!summarized || failure || !summary.trim()) {
+    if (!summarized || failure || !finished || !summary.trim()) {
       failedSources.set(input.sessionID, sourceSequence)
       yield* dependencies.events.publish(SessionEvent.Compaction.Failed, {
         sessionID: input.sessionID,
@@ -250,7 +296,11 @@ export const make = (dependencies: Dependencies) => {
         timestamp: yield* DateTime.now,
         reason: input.reason ?? "auto",
         sourceSequence,
-        error: { type: "unknown", message: failure ?? "Compaction returned an empty summary" },
+        error: {
+          type: "unknown",
+          message:
+            failure ?? (finished ? "Compaction returned an empty summary" : "Compaction did not finish normally"),
+        },
         usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
       })
       return false
@@ -262,7 +312,7 @@ export const make = (dependencies: Dependencies) => {
       reason: input.reason ?? "auto",
       sourceSequence,
       text: summary,
-      recent: selected.recent,
+      recent: prepared.recent,
       usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
     })
     failedSources.delete(input.sessionID)

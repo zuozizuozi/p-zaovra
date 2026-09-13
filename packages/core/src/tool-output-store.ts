@@ -40,12 +40,35 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()("ToolO
 export type Error = StorageError
 
 export interface Interface {
+  readonly capture: () => CaptureHandle
   readonly limits: () => Effect.Effect<{ readonly maxLines: number; readonly maxBytes: number }>
   readonly bound: (input: BoundInput) => Effect.Effect<BoundResult, Error>
   readonly cleanup: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/ToolOutputStore") {}
+
+export interface CaptureHandle {
+  readonly append: (chunk: Uint8Array) => Effect.Effect<void, StorageError>
+  readonly paths: () => ReadonlyArray<string>
+}
+
+/** Registry-owned raw capture; producers can append bytes without choosing storage paths. */
+export class Capture extends Context.Service<Capture, Pick<CaptureHandle, "append">>()("@zaovra/ToolOutputCapture") {}
+
+export function makeCapture(fs: FSUtil.Interface, directory: string): CaptureHandle {
+  const file = path.join(directory, `tool_${Identifier.ascending()}`)
+  let created = false
+  return {
+    append: (chunk) =>
+      Effect.gen(function* () {
+        if (!created) yield* fs.ensureDir(directory)
+        yield* fs.writeFile(file, chunk, { flag: created ? "a" : "wx", mode: 0o600 })
+        created = true
+      }).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause }))),
+    paths: () => (created ? [file] : []),
+  }
+}
 
 const takePrefix = (input: string, maximumBytes: number) => {
   let bytes = 0
@@ -188,7 +211,7 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ limits, bound, cleanup })
+    return Service.of({ limits, bound, cleanup, capture: () => makeCapture(fs, directory) })
   }),
 )
 

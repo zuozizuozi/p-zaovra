@@ -6,6 +6,7 @@
 
 ## Desktop interactions
 - For desktop interaction changes, use Codex as the primary UX reference. Keep controls aligned with implemented capabilities and avoid duplicate navigation or unsupported placeholder actions.
+- Use development mode and ordinary builds for routine desktop tests. Generate packages only for a requested release or a specific packaging regression; reuse an ignored output directory instead of retaining a new full package for each test.
 
 ## Website preview synchronization
 

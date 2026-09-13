@@ -73,7 +73,7 @@ import { llmClient } from "../../effect/app-node-platform"
  *   - [x] Durably record each tool call before side effects begin.
  *   - [x] Authorize and execute recorded local calls through a core-owned registry hook.
  *   - [x] Persist typed success, failure, and provider-executed tool outcomes.
- *   - [x] Start each recorded local call eagerly and await all settlements before continuation.
+ *   - [x] Execute recorded local calls in declaration order and await settlement before continuation.
  *   - [ ] Add scoped runtime context, progress updates, attachment normalization,
  *     plugins, and cancellation settlement.
  *   - [x] Reload projected history and start the next explicit provider turn after local tool results.
@@ -194,6 +194,7 @@ const layer = Layer.effect(
       step: number,
       toolCallAttempts: Map<string, number>,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
+      allowCompaction = true,
     ) {
       yield* plugins.wait(PluginInternal.readyID)
       const placement = yield* getSession(sessionID)
@@ -213,7 +214,10 @@ const layer = Layer.effect(
       const selectedAgent = yield* agents.select(selected?.agent ?? placement.agent)
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(selectedAgent), sessionID)
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
+      const withTool = Semaphore.makeUnsafe(1).withPermit
+      let toolsStopped = false
       let needsContinuation = false
+      let loopStopped = false
       let currentStep = step
       if (promotion) {
         let promoted = 0
@@ -260,7 +264,7 @@ const layer = Layer.effect(
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
-      if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
+      if (allowCompaction && (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request })))
         return yield* Effect.die(continueAfterCompaction(currentStep))
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
@@ -328,51 +332,81 @@ const layer = Layer.effect(
             }
             yield* publish(event)
             if (event.type !== "tool-call" || event.providerExecuted) return
-            const fingerprint = `${event.name}:${JSON.stringify(event.input)}`
-            const attempts = (toolCallAttempts.get(fingerprint) ?? 0) + 1
-            toolCallAttempts.set(fingerprint, attempts)
-            if (attempts > MAX_IDENTICAL_TOOL_CALLS) {
-              needsContinuation = true
+            if (!toolMaterialization || loopStopped) {
               yield* publish(
                 LLMEvent.toolResult({
                   id: event.id,
                   name: event.name,
                   result: {
                     type: "error",
-                    value: `Identical tool call blocked after ${MAX_IDENTICAL_TOOL_CALLS} attempts`,
+                    value: loopStopped
+                      ? "Repeated tool loop stopped"
+                      : "Tools are disabled after the maximum agent steps",
                   },
                 }),
               )
               return
             }
-            if (!toolMaterialization) {
-              yield* withPublication(publisher.failUnsettledTools("Tools are disabled after the maximum agent steps"))
+            const fingerprint = `${event.name}:${JSON.stringify(event.input, (_key, value: unknown) =>
+              value && typeof value === "object" && !Array.isArray(value)
+                ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+                : value,
+            )}`
+            // Only consecutive repetition is suspicious; editing between test runs is normal work.
+            if (!toolCallAttempts.has(fingerprint)) toolCallAttempts.clear()
+            const attempts = (toolCallAttempts.get(fingerprint) ?? 0) + 1
+            toolCallAttempts.set(fingerprint, attempts)
+            if (attempts > MAX_IDENTICAL_TOOL_CALLS) {
+              needsContinuation = true
+              loopStopped = attempts > MAX_IDENTICAL_TOOL_CALLS + 1
+              yield* publish(
+                LLMEvent.toolResult({
+                  id: event.id,
+                  name: event.name,
+                  result: {
+                    type: "error",
+                    value: `Identical tool call blocked after ${MAX_IDENTICAL_TOOL_CALLS} attempts. Inspect the previous result and use a different approach; repeating this call again will stop execution.`,
+                  },
+                }),
+              )
               return
             }
             needsContinuation = true
             const assistantMessageID = yield* publisher.assistantMessageID(event.id)
-            yield* Effect.uninterruptibleMask((restore) =>
-              restore(
-                toolMaterialization.settle({
-                  sessionID: session.id,
-                  agent: agent.id,
-                  assistantMessageID,
-                  call: event,
-                }),
-              ).pipe(
-                Effect.flatMap((settlement) =>
-                  publish(
-                    LLMEvent.toolResult({
-                      id: event.id,
-                      name: event.name,
-                      result: settlement.result,
-                      output: settlement.output,
-                    }),
-                    settlement.outputPaths ?? [],
+            yield* Effect.suspend(() =>
+              toolsStopped
+                ? Effect.interrupt
+                : Effect.uninterruptibleMask((restore) =>
+                    restore(
+                      toolMaterialization.settle({
+                        sessionID: session.id,
+                        agent: agent.id,
+                        assistantMessageID,
+                        call: event,
+                      }),
+                    ).pipe(
+                      Effect.flatMap((settlement) =>
+                        publish(
+                          LLMEvent.toolResult({
+                            id: event.id,
+                            name: event.name,
+                            result: settlement.result,
+                            output: settlement.output,
+                          }),
+                          settlement.outputPaths ?? [],
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+            ).pipe(
+              Effect.onExit((exit) =>
+                Effect.sync(() => {
+                  if (exit._tag === "Failure") toolsStopped = true
+                }),
               ),
-            ).pipe(FiberSet.run(toolFibers))
+              withTool,
+              FiberSet.run(toolFibers),
+            )
           }),
         ),
         Effect.ensuring(withPublication(publisher.flush())),
@@ -432,7 +466,7 @@ const layer = Layer.effect(
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
-                finish: stepSettlement.finish,
+                finish: isLastStep ? "max-steps" : stepSettlement.finish,
                 cost: 0,
                 tokens: stepSettlement.tokens,
                 usageReported: stepSettlement.usageReported,
@@ -446,11 +480,24 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
           if (stream._tag === "Success" && !publisher.hasProviderError())
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
+          const incomplete = loopStopped
+            ? "Stopped after repeated identical tool calls without a change of approach"
+            : stepSettlement?.finish === "length"
+              ? "Model output limit reached before the turn completed"
+              : stepSettlement?.finish === "content-filter"
+                ? "Model output was blocked by the provider content filter"
+                : stepSettlement?.finish === "error" || stepSettlement?.finish === "unknown"
+                  ? `Provider ended the turn with ${stepSettlement.finish}`
+                  : !stepSettlement && publisher.hasAssistantStarted()
+                    ? "Provider stream ended without completing the turn"
+                    : undefined
+          if (incomplete && stream._tag === "Success" && !publisher.hasProviderError())
+            yield* withPublication(publisher.failAssistant(incomplete))
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
           return {
-            needsContinuation: !publisher.hasProviderError() && needsContinuation,
+            needsContinuation: !isLastStep && !incomplete && !publisher.hasProviderError() && needsContinuation,
             step: subtask ? currentStep - 1 : currentStep,
           }
         }),
@@ -463,31 +510,21 @@ const layer = Layer.effect(
       toolCallAttempts: Map<string, number>,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runAfterOverflowCompaction: RunTurn = Effect.fnUntraced(
-      function* (sessionID, promotion, step, toolCallAttempts) {
-        return yield* runTurnAttempt(sessionID, promotion, step, toolCallAttempts).pipe(
-          Effect.catchDefect(
-            Effect.fnUntraced(function* (defect) {
-              if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
-              if (defect.transition._tag === "ContinueAfterOverflowCompaction")
-                return yield* Effect.die("Post-compaction provider attempt cannot recover another overflow")
-              yield* Effect.yieldNow
-              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, toolCallAttempts)
-            }),
-          ),
-        )
-      },
-    )
-
     const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
       return yield* runTurnAttempt(sessionID, promotion, step, toolCallAttempts, compaction.compactAfterOverflow).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
             yield* Effect.yieldNow
-            if (defect.transition._tag === "ContinueAfterOverflowCompaction")
-              return yield* runAfterOverflowCompaction(sessionID, undefined, defect.transition.step, toolCallAttempts)
-            return yield* runTurn(sessionID, undefined, defect.transition.step, toolCallAttempts)
+            // Rebuild once from durable history; another compaction cannot make this turn loop forever.
+            return yield* runTurnAttempt(
+              sessionID,
+              undefined,
+              defect.transition.step,
+              toolCallAttempts,
+              undefined,
+              false,
+            )
           }),
         ),
       )

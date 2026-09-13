@@ -1,7 +1,8 @@
-import { For, Show, createMemo } from "solid-js"
+import { For, Show, createMemo, createUniqueId } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@zaovra-ai/ui/button"
 import { DockTray } from "@zaovra-ai/ui/dock-surface"
+import { Icon } from "@zaovra-ai/ui/icon"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { useLanguage } from "@/context/language"
 
@@ -10,8 +11,10 @@ export function SessionFollowupDock(props: {
   sending?: string
   onSend: (id: string) => void
   onEdit: (id: string) => void
+  onRemove: (id: string) => void
 }) {
   const language = useLanguage()
+  const listID = createUniqueId()
   const [store, setStore] = createStore({
     collapsed: false,
   })
@@ -34,53 +37,43 @@ export function SessionFollowupDock(props: {
         "border-bottom-right-radius": 0,
       }}
     >
-      <div
-        class="pl-3 pr-2 py-2 flex items-center gap-2"
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
+        class="w-full pl-3 pr-2 py-2 flex items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-border-active"
+        aria-expanded={!store.collapsed}
+        aria-controls={listID}
         onClick={toggle}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return
-          event.preventDefault()
-          toggle()
-        }}
       >
         <span class="shrink-0 text-13-medium text-text-strong cursor-default">{label()}</span>
         <Show when={store.collapsed && preview()}>
           <span class="min-w-0 flex-1 truncate text-13-regular text-text-base cursor-default">{preview()}</span>
         </Show>
-        <div class="ml-auto shrink-0">
-          <IconButton
-            data-collapsed={store.collapsed ? "true" : "false"}
-            icon="chevron-down"
-            size="normal"
-            variant="ghost"
-            style={{ transform: `rotate(${store.collapsed ? 180 : 0}deg)` }}
-            onMouseDown={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onClick={(event) => {
-              event.stopPropagation()
-              toggle()
-            }}
-            aria-label={
-              store.collapsed ? language.t("session.followupDock.expand") : language.t("session.followupDock.collapse")
-            }
-          />
-        </div>
-      </div>
+        <span
+          class="ml-auto shrink-0"
+          aria-hidden="true"
+          style={{ transform: `rotate(${store.collapsed ? 180 : 0}deg)` }}
+        >
+          <Icon name="chevron-down" size="normal" />
+        </span>
+      </button>
 
       <Show when={store.collapsed}>
         <div class="h-5" aria-hidden="true" />
       </Show>
 
       <Show when={!store.collapsed}>
-        <div class="px-3 pb-7 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar">
+        <div
+          id={listID}
+          aria-busy={!!props.sending}
+          class="px-3 pb-7 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar"
+        >
+          <p class="text-12-regular text-text-weak">{language.t("session.followupDock.hint")}</p>
           <For each={props.items}>
             {(item) => (
               <div class="flex items-center gap-2 min-w-0 py-1">
-                <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong">{item.text}</span>
+                <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong" title={item.text}>
+                  {item.text}
+                </span>
                 <Button
                   size="small"
                   variant="secondary"
@@ -90,6 +83,14 @@ export function SessionFollowupDock(props: {
                 >
                   {language.t("session.followupDock.sendNow")}
                 </Button>
+                <IconButton
+                  icon="close"
+                  variant="ghost"
+                  size="small"
+                  disabled={!!props.sending}
+                  aria-label={language.t("session.followupDock.remove")}
+                  onClick={() => props.onRemove(item.id)}
+                />
                 <Button
                   size="small"
                   variant="ghost"

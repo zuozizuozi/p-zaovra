@@ -550,6 +550,7 @@ export const layerWith = (options?: LayerOptions) =>
               .from(EventTable)
               .where(and(eq(EventTable.aggregate_id, aggregateID), gt(EventTable.seq, after)))
               .orderBy(asc(EventTable.seq))
+              .limit(256)
               .all(),
           ),
           Effect.orDie,
@@ -598,12 +599,15 @@ export const layerWith = (options?: LayerOptions) =>
                 }),
               ),
             )
-            const historical = yield* read
-            const live = Stream.fromSubscription(wakes).pipe(
-              Stream.mapEffect(() => read),
-              Stream.flattenIterable,
-            )
-            return Stream.concat(Stream.fromIterable(historical), live)
+            return Stream.fromEffectRepeat(
+              read.pipe(
+                Effect.tap((events) =>
+                  events.length > 0
+                    ? Effect.void
+                    : PubSub.take(wakes).pipe(Effect.timeoutOption("5 seconds"), Effect.asVoid),
+                ),
+              ),
+            ).pipe(Stream.flattenIterable)
           }),
         )
 

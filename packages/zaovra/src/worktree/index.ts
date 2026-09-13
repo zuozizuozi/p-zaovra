@@ -118,7 +118,7 @@ function failedRemoves(...chunks: string[]) {
 
 export interface Interface {
   readonly makeWorktreeInfo: (options?: { name?: string; detached?: boolean }) => Effect.Effect<Info, Error>
-  readonly createFromInfo: (info: Info, startCommand?: string) => Effect.Effect<void, Error>
+  readonly createFromInfo: (info: Info, startCommand?: string, waitForReady?: boolean) => Effect.Effect<void, Error>
   readonly create: (input?: CreateInput) => Effect.Effect<Info, Error>
   readonly list: () => Effect.Effect<(Omit<Info, "branch"> & { branch?: string })[], Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<boolean, Error>
@@ -244,7 +244,7 @@ const layer: Layer.Layer<
           workspace: workspaceID,
           payload: { type: Event.Failed.type, properties: { message } },
         })
-        return
+        return yield* new CreateFailedError({ message })
       }
 
       const booted = yield* store.load({ directory: info.directory }).pipe(
@@ -263,7 +263,7 @@ const layer: Layer.Layer<
           }),
         ),
       )
-      if (!booted) return
+      if (!booted) return yield* new CreateFailedError({ message: "Worktree bootstrap failed" })
 
       GlobalBus.emit("event", {
         directory: info.directory,
@@ -278,8 +278,13 @@ const layer: Layer.Layer<
       yield* runStartScripts(info.directory, { projectID, extra })
     })
 
-    const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (info: Info, startCommand?: string) {
+    const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (
+      info: Info,
+      startCommand?: string,
+      waitForReady = false,
+    ) {
       yield* setup(info)
+      if (waitForReady) return yield* boot(info, startCommand)
       yield* boot(info, startCommand).pipe(
         Effect.catchCause((cause) => Effect.logError("worktree bootstrap failed", { cause })),
         Effect.forkIn(scope),

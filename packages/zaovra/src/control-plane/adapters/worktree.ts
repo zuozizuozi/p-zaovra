@@ -48,11 +48,15 @@ export const WorktreeAdapter: WorkspaceAdapter = {
     await AppRuntime.runPromise(
       provideContext(
         Worktree.Service.use((svc) =>
-          svc.createFromInfo({
-            name: config.name,
-            directory: config.directory,
-            ...(config.branch ? { branch: config.branch } : {}),
-          }),
+          svc.createFromInfo(
+            {
+              name: config.name,
+              directory: config.directory,
+              ...(config.branch ? { branch: config.branch } : {}),
+            },
+            undefined,
+            true,
+          ),
         ),
         context,
       ),

@@ -332,20 +332,21 @@ function createServerNotificationState(input: {
       if (!session) return
       if (session.parentID) return
 
-      if (settings.sounds.agentEnabled()) {
+      const viewed = viewedInCurrentSession(directory, sessionID)
+      if (!viewed && settings.sounds.agentEnabled()) {
         void playSoundById(settings.sounds.agent())
       }
 
       append({
         directory,
         time,
-        viewed: viewedInCurrentSession(directory, sessionID),
+        viewed,
         type: "turn-complete",
         session: sessionID,
       })
 
       const href = `/${base64Encode(directory)}/session/${sessionID}`
-      if (settings.notifications.agent()) {
+      if (!viewed && settings.notifications.agent()) {
         void platform.notify(language.t("notification.session.responseReady.title"), session.title ?? sessionID, href)
       }
     })
@@ -361,7 +362,8 @@ function createServerNotificationState(input: {
       if (meta.disposed) return
       if (session?.parentID) return
 
-      if (settings.sounds.errorsEnabled()) {
+      const viewed = viewedInCurrentSession(directory, sessionID)
+      if (!viewed && settings.sounds.errorsEnabled()) {
         void playSoundById(settings.sounds.errors())
       }
 
@@ -369,7 +371,7 @@ function createServerNotificationState(input: {
       append({
         directory,
         time,
-        viewed: viewedInCurrentSession(directory, sessionID),
+        viewed,
         type: "error",
         session: sessionID ?? "global",
         error,
@@ -378,7 +380,7 @@ function createServerNotificationState(input: {
         session?.title ??
         (typeof error === "string" ? error : language.t("notification.session.error.fallbackDescription"))
       const href = sessionID ? `/${base64Encode(directory)}/session/${sessionID}` : `/${base64Encode(directory)}`
-      if (settings.notifications.errors()) {
+      if (!viewed && settings.notifications.errors()) {
         void platform.notify(language.t("notification.session.error.title"), description, href)
       }
     })

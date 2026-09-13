@@ -9,6 +9,8 @@ export class AppProcessError extends Schema.TaggedErrorClass<AppProcessError>()(
   command: Schema.String,
   exitCode: Schema.optional(Schema.Number),
   stderr: Schema.optional(Schema.String),
+  output: Schema.optional(Schema.String),
+  outputTruncated: Schema.optional(Schema.Boolean),
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message() {
@@ -25,6 +27,10 @@ export interface RunOptions {
   readonly maxErrorBytes?: number
   readonly signal?: AbortSignal
   readonly timeout?: Duration.Input
+  /** Receives combined-output snapshots, bounded by maxOutputBytes when set. */
+  readonly onOutput?: (output: Buffer, truncated: boolean) => Effect.Effect<void>
+  /** Receives every combined-output chunk before the in-memory preview is bounded. */
+  readonly onChunk?: (chunk: Uint8Array) => Effect.Effect<void, unknown>
   readonly stdin?: string | Uint8Array | Stream.Stream<Uint8Array, PlatformError>
 }
 
@@ -55,6 +61,16 @@ export type Interface = ChildProcessSpawner["Service"] & {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/AppProcess") {}
+
+/** Shared shell process lifecycle; callers retain their own authorization and output policy. */
+export const shellCommand = (command: string, cwd: string, shell?: string) =>
+  ChildProcess.make(command, [], {
+    cwd,
+    shell: shell ?? (process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh"),
+    stdin: "ignore",
+    detached: process.platform !== "win32",
+    forceKillAfter: Duration.seconds(3),
+  })
 
 export const requireSuccess = (result: RunResult): Effect.Effect<RunResult, AppProcessError> =>
   result.exitCode === 0
@@ -141,60 +157,93 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner
 
-    const runCommand = (command: ChildProcess.Command, options?: RunOptions) => {
-      const description = describeCommand(command)
-      const collect = Effect.scoped(
-        Effect.gen(function* () {
-          const handle = yield* spawner.spawn(command)
-          if (options?.combineOutput) {
-            const [output, exitCode] = yield* Effect.all(
-              [collectStream(handle.all, options.maxOutputBytes), handle.exitCode],
+    const runCommand = (command: ChildProcess.Command, options?: RunOptions) =>
+      Effect.suspend(() => {
+        const description = describeCommand(command)
+        if (options?.signal?.aborted) return Effect.fail(wrapError(description, abortError(options.signal)))
+        let captured = Buffer.alloc(0)
+        let truncated = false
+        const collect = Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* spawner.spawn(command)
+            if (options?.combineOutput) {
+              const [output, exitCode] = yield* Effect.all(
+                [
+                  handle.all
+                    .pipe(
+                      Stream.runForEach((chunk) =>
+                        Effect.gen(function* () {
+                          if (options.onChunk) yield* options.onChunk(chunk)
+                          const next = Buffer.concat([captured, chunk])
+                          const maximum = options.maxOutputBytes
+                          const overflow = maximum !== undefined && next.length > maximum
+                          truncated ||= overflow
+                          captured = overflow
+                            ? Buffer.concat([
+                                next.subarray(0, Math.ceil(maximum / 2)),
+                                next.subarray(next.length - Math.floor(maximum / 2)),
+                              ])
+                            : next
+                          if (options.onOutput) yield* options.onOutput(captured, truncated)
+                        }),
+                      ),
+                    )
+                    .pipe(Effect.map(() => ({ buffer: captured, truncated }))),
+                  handle.exitCode,
+                ],
+                { concurrency: "unbounded" },
+              )
+              return {
+                command: description,
+                exitCode,
+                output: output.buffer,
+                stdout: Buffer.alloc(0),
+                stderr: Buffer.alloc(0),
+                outputTruncated: output.truncated,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              } satisfies RunResult
+            }
+            const [stdout, stderr, exitCode] = yield* Effect.all(
+              [
+                collectStream(handle.stdout, options?.maxOutputBytes),
+                collectStream(handle.stderr, options?.maxErrorBytes),
+                handle.exitCode,
+              ],
               { concurrency: "unbounded" },
             )
             return {
               command: description,
               exitCode,
-              output: output.buffer,
-              stdout: Buffer.alloc(0),
-              stderr: Buffer.alloc(0),
-              outputTruncated: output.truncated,
-              stdoutTruncated: false,
-              stderrTruncated: false,
+              stdout: stdout.buffer,
+              stderr: stderr.buffer,
+              stdoutTruncated: stdout.truncated,
+              stderrTruncated: stderr.truncated,
             } satisfies RunResult
-          }
-          const [stdout, stderr, exitCode] = yield* Effect.all(
-            [
-              collectStream(handle.stdout, options?.maxOutputBytes),
-              collectStream(handle.stderr, options?.maxErrorBytes),
-              handle.exitCode,
-            ],
-            { concurrency: "unbounded" },
-          )
-          return {
-            command: description,
-            exitCode,
-            stdout: stdout.buffer,
-            stderr: stderr.buffer,
-            stdoutTruncated: stdout.truncated,
-            stderrTruncated: stderr.truncated,
-          } satisfies RunResult
-        }),
-      )
-      const timed = options?.timeout
-        ? Effect.timeoutOrElse(collect, {
-            duration: options.timeout,
-            orElse: () => Effect.fail(new AppProcessError({ command: description, cause: new Error("Timed out") })),
-          })
-        : collect
-      const aborted = options?.signal
-        ? timed.pipe(
-            Effect.raceFirst(
-              waitForAbort(options.signal).pipe(Effect.mapError((cause) => wrapError(description, cause))),
-            ),
-          )
-        : timed
-      return aborted.pipe(Effect.catch((cause) => Effect.fail(wrapError(description, cause))))
-    }
+          }),
+        )
+        const timed = options?.timeout
+          ? Effect.timeoutOrElse(collect, {
+              duration: options.timeout,
+              orElse: () =>
+                Effect.fail(
+                  new AppProcessError({
+                    command: description,
+                    cause: new Error("Timed out"),
+                    ...(options.combineOutput ? { output: captured.toString("utf8"), outputTruncated: truncated } : {}),
+                  }),
+                ),
+            })
+          : collect
+        const aborted = options?.signal
+          ? timed.pipe(
+              Effect.raceFirst(
+                waitForAbort(options.signal).pipe(Effect.mapError((cause) => wrapError(description, cause))),
+              ),
+            )
+          : timed
+        return aborted.pipe(Effect.catch((cause) => Effect.fail(wrapError(description, cause))))
+      })
 
     const run = Effect.fn("AppProcess.run")(function* (command: ChildProcess.Command, options?: RunOptions) {
       if (options?.stdin === undefined) return yield* runCommand(command, options)

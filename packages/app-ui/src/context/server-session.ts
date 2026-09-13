@@ -1110,6 +1110,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       event.type === "session.next.tool.progress" ||
       event.type === "session.next.tool.success" ||
       event.type === "session.next.tool.failed" ||
+      event.type === "session.next.shell.started" ||
       event.type === "session.next.shell.ended" ||
       event.type === "session.next.compaction.ended"
     ) {

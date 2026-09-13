@@ -234,6 +234,27 @@ const layer = Layer.effect(
         EffectRuntime.gen(function* () {
           const existing = pending.get(input.requestID)
           if (existing?.locationID !== locationID) return yield* new NotFoundError({ requestID: input.requestID })
+          if (input.reply !== "reject") {
+            const rules = yield* configured(existing.request.sessionID, existing.agent).pipe(
+              EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),
+            )
+            if (!rules || denied(existing.request, rules)) {
+              yield* events.publish(Event.Replied, {
+                sessionID: existing.request.sessionID,
+                requestID: existing.request.id,
+                reply: "reject",
+              })
+              yield* Deferred.fail(
+                existing.deferred,
+                new CorrectedError({
+                  feedback:
+                    "This approval is no longer valid: the Session is unavailable or its permission rules now deny the action.",
+                }),
+              )
+              pending.delete(input.requestID)
+              return
+            }
+          }
           yield* events.publish(Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
@@ -272,6 +293,7 @@ const layer = Layer.effect(
 
           const rememberedRules = yield* savedRules()
           for (const [id, item] of pending) {
+            if (item.locationID !== locationID) continue
             const input = { ...item.request }
             const rules = yield* configured(item.request.sessionID, item.agent).pipe(
               EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),

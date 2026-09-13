@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
+import { EventV2 } from "@zaovra-ai/core/event"
 import { Config } from "@zaovra-ai/core/config"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -24,6 +25,7 @@ import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/to
 
 const sessionID = SessionV2.ID.make("ses_bash_tool_test")
 const assertions: PermissionV2.AssertInput[] = []
+const progress: Array<{ readonly type: string; readonly data: unknown }> = []
 const runs: Array<{
   readonly command: string
   readonly cwd?: string
@@ -81,6 +83,7 @@ const config = Layer.succeed(
 
 const reset = () => {
   assertions.length = 0
+  progress.length = 0
   runs.length = 0
   denyAction = undefined
   runFailure = undefined
@@ -118,6 +121,18 @@ const withTool = <A, E, R>(
           [AppProcess.node, processLayer],
           [Config.node, config],
           [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
+          [
+            EventV2.node,
+            Layer.mock(EventV2.Service, {
+              listen: () => Effect.succeed(Effect.void),
+              recentAfter: () => ({ events: [], complete: false }),
+              publish: (definition, data) =>
+                Effect.sync(() => {
+                  progress.push({ type: definition.type, data })
+                  return { id: EventV2.ID.create(), type: definition.type, data } as EventV2.Payload<typeof definition>
+                }),
+            }),
+          ],
         ],
       ),
     ),
@@ -133,6 +148,64 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("preserves real command output and bounded progress when a command times out", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const script = path.join(tmp.path, "timeout.js")
+          yield* Effect.promise(() =>
+            Bun.write(script, "process.stdout.write('diagnostic before timeout'); setInterval(() => {}, 1000)"),
+          )
+          const settled = yield* withTool(
+            tmp.path,
+            (registry) =>
+              settleTool(
+                registry,
+                call({
+                  command: `"${process.execPath}" "${script}"`,
+                  timeout: 1_000,
+                }),
+              ),
+            LayerNode.compile(AppProcess.node),
+          )
+          expect(settled.output?.structured).toMatchObject({ timeout: true, truncated: false })
+          expect(settled.output?.content[0]).toMatchObject({
+            text: expect.stringContaining("diagnostic before timeout"),
+          })
+          expect(progress).toMatchObject([
+            {
+              type: "session.next.tool.progress",
+              data: { callID: "call-bash", content: [{ text: "diagnostic before timeout" }] },
+            },
+          ])
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("keeps the concrete process failure in model-facing errors", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        runFailure = new AppProcess.AppProcessError({ command: "missing", cause: new Error("spawn ENOENT") })
+        return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "missing" }))).pipe(
+          Effect.tap((settled) =>
+            Effect.sync(() =>
+              expect(settled.result).toMatchObject({
+                type: "error",
+                value: expect.stringContaining("spawn ENOENT"),
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and returns structured successful output from the active Location", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -141,12 +214,20 @@ describe("BashTool", () => {
         return withTool(tmp.path, (registry) =>
           Effect.gen(function* () {
             const definitions = yield* toolDefinitions(registry)
-            expect(definitions.map((tool) => tool.name)).toEqual(["bash"])
-            expect(definitions[0]?.inputSchema).not.toHaveProperty("properties.background")
-            expect(definitions[0]?.inputSchema).not.toHaveProperty("properties.description")
-            expect(definitions[0]?.outputSchema).not.toHaveProperty("properties.output")
-            expect(definitions[0]?.outputSchema).not.toHaveProperty("properties.command")
-            expect(definitions[0]?.outputSchema).not.toHaveProperty("properties.cwd")
+            expect(definitions.map((tool) => tool.name)).toEqual(["bash_job", "bash"])
+            expect(definitions.find((tool) => tool.name === "bash")?.inputSchema).not.toHaveProperty(
+              "properties.background",
+            )
+            expect(definitions.find((tool) => tool.name === "bash")?.inputSchema).not.toHaveProperty(
+              "properties.description",
+            )
+            expect(definitions.find((tool) => tool.name === "bash")?.outputSchema).not.toHaveProperty(
+              "properties.output",
+            )
+            expect(definitions.find((tool) => tool.name === "bash")?.outputSchema).not.toHaveProperty(
+              "properties.command",
+            )
+            expect(definitions.find((tool) => tool.name === "bash")?.outputSchema).not.toHaveProperty("properties.cwd")
             expect(yield* toolDefinitions(registry, [{ action: "bash", resource: "*", effect: "deny" }])).toEqual([])
             expect(yield* settleTool(registry, call({ command: "pwd" }))).toEqual({
               result: {
@@ -381,7 +462,7 @@ describe("BashTool", () => {
               expect(settled.output?.structured).toMatchObject({ truncated: true })
               expect(settled.output?.content[0]).toMatchObject({
                 type: "text",
-                text: expect.stringContaining("output capture truncated"),
+                text: expect.stringContaining("in-memory preview truncated"),
               })
               expect(settled.output?.structured).not.toHaveProperty("resource")
             }),
@@ -426,11 +507,9 @@ test("keeps locked deferred parity TODOs visible", async () => {
     "Replace token-based command-argument external-directory advisories with parser-based detection.",
     "Restore PowerShell and cmd-specific invocation/path handling on Windows.",
     "Add plugin shell.env environment augmentation once V2 plugin hooks exist.",
-    "Add durable/live progress metadata streaming for long-running commands once V2 tool invocation progress context is wired.",
     "Persist background job status and define restart recovery before exposing remote observation.",
     "Revisit process-group cleanup and platform coverage with shell-specific tests if current AppProcess semantics do not fully cover it.",
     "Revisit binary output handling if stdout/stderr decoding is text-only.",
-    "Stream full shell output into managed storage while retaining only a bounded in-memory preview.",
   ]) {
     expect(source).toContain(`TODO: ${todo}`)
   }

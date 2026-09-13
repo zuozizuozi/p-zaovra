@@ -4,6 +4,7 @@ import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { sessionPermissionRequest, sessionQuestionRequest } from "@/pages/session/composer/session-request-tree"
 import { ServerConnection } from "@/context/server"
+import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 
 export function useSessionTabAvatarState(
   server: Accessor<ServerConnection.Key>,
@@ -34,8 +35,13 @@ export function useSessionTabAvatarState(
     return !!sessionQuestionRequest(store.session, serverSync.session.data.question, sessionId())
   })
   const needsAttention = createMemo(() => hasPermissions() || hasQuestions())
+  const unfinished = createMemo(() => {
+    const data = sync()?.session.data
+    return !!data && hasUnfinishedShell(data.message[sessionId()] ?? [], data.part)
+  })
   const unread = createMemo(
-    () => needsAttention() || notification.ensureServerState(server()).session.unseenCount(sessionId()) > 0,
+    () =>
+      needsAttention() || unfinished() || notification.ensureServerState(server()).session.unseenCount(sessionId()) > 0,
   )
   const loading = createMemo(() => {
     const serverSync = sync()
@@ -43,5 +49,15 @@ export function useSessionTabAvatarState(
     if (needsAttention()) return false
     return serverSync.session.data.session_working(sessionId())
   })
-  return { unread, loading }
+  const status = createMemo(() => {
+    if (hasPermissions()) return "session.activity.permission" as const
+    if (hasQuestions()) return "session.activity.question" as const
+    if (loading()) return "session.activity.running" as const
+    if (unfinished()) return "session.activity.shell" as const
+    if (notification.ensureServerState(server()).session.unseenHasError(sessionId()))
+      return "session.activity.error" as const
+    if (unread()) return "session.activity.unread" as const
+    return "session.activity.idle" as const
+  })
+  return { unread, loading, status }
 }

@@ -61,6 +61,7 @@ import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
+import { tmpdir } from "./fixture/tmpdir"
 
 const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
@@ -1818,7 +1819,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("starts recorded local tools eagerly and awaits settlement before continuing", () =>
+  it.effect("executes recorded local tools in order while the provider continues streaming", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
@@ -1828,7 +1829,9 @@ describe("SessionRunnerLLM", () => {
       executions.length = 0
       toolExecutionGate = yield* Deferred.make<void>()
       toolExecutionsStarted = yield* Deferred.make<void>()
+      toolExecutionsReady = 1
       const providerGate = yield* Deferred.make<void>()
+      const callsRecorded = yield* Deferred.make<void>()
       response = []
       responses = undefined
       const initial = Stream.fromIterable([
@@ -1843,15 +1846,17 @@ describe("SessionRunnerLLM", () => {
       ])
       streamGate = undefined
       responseStream = Stream.concat(
-        initial,
+        initial.pipe(Stream.ensuring(Deferred.succeed(callsRecorded, undefined))),
         Stream.fromEffect(Deferred.await(providerGate)).pipe(Stream.flatMap(() => final)),
       )
 
       const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(toolExecutionsStarted)
 
-      expect(executions).toHaveLength(5)
-      expect(maxActiveToolExecutions).toBe(5)
+      expect(executions).toEqual(["0"])
+      expect(maxActiveToolExecutions).toBe(1)
+      yield* Deferred.succeed(providerGate, undefined)
+      yield* Deferred.await(callsRecorded)
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Echo five times" },
         {
@@ -1864,8 +1869,6 @@ describe("SessionRunnerLLM", () => {
         },
       ])
 
-      yield* Deferred.succeed(providerGate, undefined)
-      yield* Effect.yieldNow
       expect(requests).toHaveLength(1)
 
       yield* Deferred.succeed(toolExecutionGate, undefined)
@@ -1873,8 +1876,8 @@ describe("SessionRunnerLLM", () => {
       toolExecutionGate = undefined
       toolExecutionsStarted = undefined
 
-      expect(executions).toHaveLength(5)
-      expect(maxActiveToolExecutions).toBe(5)
+      expect(executions).toEqual(["0", "1", "2", "3", "4"])
+      expect(maxActiveToolExecutions).toBe(1)
       expect(requests).toHaveLength(2)
     }),
   )
@@ -2873,9 +2876,11 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Call declined" }), resume: false })
 
       requests.length = 0
+      executions.length = 0
       response = [
         LLMEvent.stepStart({ index: 0 }),
         LLMEvent.toolCall({ id: "call-declined", name: "declined", input: {} }),
+        LLMEvent.toolCall({ id: "call-after-decline", name: "echo", input: { text: "must not run" } }),
         LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ]
@@ -2885,6 +2890,7 @@ describe("SessionRunnerLLM", () => {
       expect(exit._tag).toBe("Failure")
       if (exit._tag === "Failure") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
       expect(requests).toHaveLength(1)
+      expect(executions).toEqual([])
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Call declined" },
         {
@@ -2895,6 +2901,11 @@ describe("SessionRunnerLLM", () => {
             {
               type: "tool",
               id: "call-declined",
+              state: { status: "error", error: { message: "Tool execution interrupted" } },
+            },
+            {
+              type: "tool",
+              id: "call-after-decline",
               state: { status: "error", error: { message: "Tool execution interrupted" } },
             },
           ],
@@ -3152,6 +3163,53 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const reason of ["length", "content-filter", "error", "unknown"] as const) {
+    it.effect(`records ${reason} as incomplete instead of successful completion`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Finish the change" }), resume: false })
+        requests.length = 0
+        response = [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "partial" }),
+          LLMEvent.textDelta({ id: "partial", text: "I have started" }),
+          LLMEvent.textEnd({ id: "partial" }),
+          LLMEvent.stepFinish({ index: 0, reason }),
+          LLMEvent.finish({ reason }),
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(1)
+        expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+          type: "assistant",
+          finish: "error",
+          error: { message: expect.any(String) },
+        })
+      }),
+    )
+  }
+
+  it.effect("preserves partial output and records an unfinished provider stream as failed", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Finish the change" }), resume: false })
+      requests.length = 0
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "partial" }),
+        LLMEvent.textDelta({ id: "partial", text: "Partial result" }),
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+        finish: "error",
+        error: { message: "Provider stream ended without completing the turn" },
+        content: [{ type: "text", text: "Partial result" }],
+      })
+    }),
+  )
+
   it.effect("forces a text response on an agent's configured final step", () =>
     Effect.gen(function* () {
       yield* setup
@@ -3195,7 +3253,11 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Finish at the limit" },
         { type: "assistant", content: [{ type: "tool", id: "call-terminal", state: { status: "completed" } }] },
-        { type: "assistant", content: [{ type: "tool", id: "call-forbidden", state: { status: "error" } }] },
+        {
+          type: "assistant",
+          finish: "max-steps",
+          content: [{ type: "tool", id: "call-forbidden", state: { status: "error" } }],
+        },
       ])
     }),
   )
@@ -3230,13 +3292,121 @@ describe("SessionRunnerLLM", () => {
               type: "tool",
               state: {
                 status: "error",
-                error: { message: "Identical tool call blocked after 3 attempts" },
+                error: { message: expect.stringContaining("Identical tool call blocked after 3 attempts") },
               },
             },
           ],
         },
       ])
     }),
+  )
+
+  it.effect("stops a repeated tool loop after one corrective response", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Avoid a loop" }), resume: false })
+      requests.length = 0
+      executions.length = 0
+      responses = Array.from({ length: 6 }, (_, index) => [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({
+          id: `repeat-${index}`,
+          name: "echo",
+          input: index % 2 ? { text: "same", extra: 1 } : { extra: 1, text: "same" },
+        }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ])
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(5)
+      expect(executions).toEqual(["same", "same", "same"])
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+        finish: "error",
+        error: { message: expect.stringContaining("repeated identical tool calls") },
+      })
+    }),
+  )
+
+  it.effect("enforces the turn budget even when the final call repeats a blocked tool", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("build"), (agent) => {
+          agent.steps = 5
+        }),
+      )
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Respect the budget" }), resume: false })
+      requests.length = 0
+      executions.length = 0
+      responses = Array.from({ length: 7 }, (_, index) => [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: `budget-${index}`, name: "echo", input: { text: "same" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ])
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(5)
+      expect(executions).toHaveLength(3)
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
+    }),
+  )
+
+  it.effect("allows repeated verification after edits and checks the updated file in declaration order", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          yield* setup
+          const file = `${tmp.path}/value.txt`
+          yield* Effect.promise(() => Bun.write(file, "0"))
+          const registry = yield* ToolRegistry.Service
+          const observations: string[] = []
+          yield* registry.register({
+            change: Tool.make({
+              description: "Change the fixture",
+              input: Schema.Struct({ value: Schema.String }),
+              output: Schema.String,
+              execute: (input) => Effect.promise(() => Bun.write(file, input.value)).pipe(Effect.as("written")),
+            }),
+            verify: Tool.make({
+              description: "Read the fixture",
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () =>
+                Effect.promise(() => Bun.file(file).text()).pipe(
+                  Effect.tap((text) =>
+                    Effect.sync(() => {
+                      observations.push(text)
+                    }),
+                  ),
+                ),
+            }),
+          })
+          const session = yield* SessionV2.Service
+          yield* session.prompt({
+            sessionID,
+            prompt: Prompt.make({ text: "Edit and verify repeatedly" }),
+            resume: false,
+          })
+          requests.length = 0
+          responses = Array.from({ length: 5 }, (_, index) => [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: `change-${index}`, name: "change", input: { value: String(index + 1) } }),
+            LLMEvent.toolCall({ id: `verify-${index}`, name: "verify", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ])
+          responses.push(fragmentFixture("text", "done", ["Verified five edits."]).completeEvents)
+          yield* session.resume(sessionID)
+          expect(observations).toEqual(["1", "2", "3", "4", "5"])
+          expect(requests).toHaveLength(6)
+          expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
   )
 
   it.effect("resets the configured step allowance when steering input promotes", () =>

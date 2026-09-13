@@ -159,16 +159,21 @@ const layer = Layer.effect(
         names.push(toolName)
       }
 
-      const registration = yield* Scope.fork(parentScope)
-      yield* tools.register(registered).pipe(
-        Scope.provide(registration),
-        Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(registration, exit) : Effect.void)),
-      )
       const previous = active.get(serverName)
-      if (!previous) return yield* Effect.die(`MCP server disappeared while refreshing: ${serverName}`)
-      active.set(serverName, { ...previous, definitionNames: names, registration })
-      if (previous) yield* Scope.close(previous.registration, Exit.void).pipe(Effect.ignore)
-      statuses[serverName] = { status: "connected", tools: names.length }
+      if (previous?.client !== client) return
+      // Network discovery is interruptible; replacing the registration and its owner is one commit.
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const registration = yield* Scope.fork(parentScope)
+          yield* tools.register(registered).pipe(
+            Scope.provide(registration),
+            Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(registration, exit) : Effect.void)),
+          )
+          active.set(serverName, { ...previous, definitionNames: names, registration })
+          yield* Scope.close(previous.registration, Exit.void).pipe(Effect.ignore)
+          statuses[serverName] = { status: "connected", tools: names.length }
+        }),
+      )
     })
 
     const markClosed = (name: string, client: Client) =>

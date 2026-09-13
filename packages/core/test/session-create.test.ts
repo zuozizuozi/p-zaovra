@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { asc, eq } from "drizzle-orm"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -333,6 +333,11 @@ describe("SessionV2.create", () => {
       const callID = EventV2.ID.create()
       yield* session.shell({ id: callID, sessionID: created.id, command: "echo zaovra-shell", resume: false })
       yield* session.shell({ id: callID, sessionID: created.id, command: "echo zaovra-shell", resume: false })
+      expect(
+        yield* unavailable(
+          session.shell({ id: callID, sessionID: created.id, command: "echo different", resume: false }),
+        ),
+      ).toBe("shell")
 
       expect(yield* session.messages({ sessionID: created.id })).toMatchObject([
         {
@@ -345,6 +350,37 @@ describe("SessionV2.create", () => {
       ])
       expect(yield* unavailable(session.skill({ sessionID: created.id, skill: "review" }))).toBe("skill")
     }),
+  )
+
+  it.live(
+    "session interruption settles its explicit shell before returning",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* SessionV2.Service
+        const created = yield* session.create({ location: { directory: AbsolutePath.make(process.cwd()) } })
+        const fiber = yield* session
+          .shell({
+            sessionID: created.id,
+            command: `"${process.execPath}" -e "setInterval(() => {}, 1000)"`,
+            resume: false,
+          })
+          .pipe(Effect.forkScoped)
+        yield* session.events({ sessionID: created.id }).pipe(
+          Stream.filter((event) => event.type === "session.next.shell.started"),
+          Stream.take(1),
+          Stream.runDrain,
+        )
+        yield* session.interrupt(created.id)
+        yield* Fiber.join(fiber)
+        expect(yield* session.messages({ sessionID: created.id })).toMatchObject([
+          {
+            type: "shell",
+            output: expect.stringContaining("Command interrupted"),
+            time: { completed: expect.anything() },
+          },
+        ])
+      }),
+    10_000,
   )
 
   it.effect("switches the selected agent through the durable Session event", () =>
@@ -460,9 +496,9 @@ describe("SessionV2.create", () => {
       expect(archived.time.archived).toBeDefined()
       expect(restored.time.archived).toBeUndefined()
       expect(
-        Array.from(yield* session.events({ sessionID: created.id, after: 0 }).pipe(Stream.take(2), Stream.runCollect)).map(
-          (event) => event.type,
-        ),
+        Array.from(
+          yield* session.events({ sessionID: created.id, after: 0 }).pipe(Stream.take(2), Stream.runCollect),
+        ).map((event) => event.type),
       ).toEqual(["session.next.updated", "session.next.updated"])
     }),
   )

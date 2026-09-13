@@ -228,6 +228,8 @@ export const run = Effect.fn("TaskTool.execute")(function* (
   if (!response || response.type !== "assistant")
     return yield* failure(`Subagent Session ${child.id} produced no assistant response`)
   if (response.error) return yield* failure(response.error.message)
+  if (!response.time.completed || response.finish !== "stop")
+    return yield* failure(`Subagent stopped without completing: ${response.finish ?? "unfinished turn"}`)
   const content = response.content
     .filter((part) => part.type === "text")
     .map((part) => part.text)
@@ -303,7 +305,13 @@ const inspect = Effect.fnUntraced(function* (sessions: SessionOps, child: Sessio
     .join("\n")
   return latest.error
     ? { task_id: child.id, status: "failed" as const, content: latest.error.message }
-    : { task_id: child.id, status: "completed" as const, ...(content ? { content } : {}) }
+    : latest.time.completed && latest.finish === "stop"
+      ? { task_id: child.id, status: "completed" as const, ...(content ? { content } : {}) }
+      : {
+          task_id: child.id,
+          status: "unknown" as const,
+          content: `Subagent stopped without completing: ${latest.finish ?? "unfinished turn"}${content ? `\n\n${content}` : ""}`,
+        }
 })
 
 const requireChild = Effect.fnUntraced(function* (sessions: SessionOps, parent: SessionV2.Info, taskID: SessionV2.ID) {

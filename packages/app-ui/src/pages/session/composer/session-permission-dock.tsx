@@ -37,14 +37,16 @@ export function SessionPermissionDock(props: {
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
               {language.t("ui.permission.deny")}
             </Button>
-            <Button
-              variant="secondary"
-              size="normal"
-              onClick={() => props.onDecide("always")}
-              disabled={props.responding}
-            >
-              {language.t("ui.permission.allowAlways")}
-            </Button>
+            <Show when={props.request.always.length > 0}>
+              <Button
+                variant="secondary"
+                size="normal"
+                onClick={() => props.onDecide("always")}
+                disabled={props.responding}
+              >
+                {language.t("ui.permission.allowAlways")}
+              </Button>
+            </Show>
             <Button variant="primary" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
               {language.t("ui.permission.allowOnce")}
             </Button>
@@ -52,10 +54,24 @@ export function SessionPermissionDock(props: {
         </>
       }
     >
+      <div data-slot="permission-row">
+        <span data-slot="permission-spacer" aria-hidden="true" />
+        <code class="text-12-regular text-text-strong break-all">{props.request.permission}</code>
+      </div>
       <Show when={toolDescription()}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-hint">{toolDescription()}</div>
+        </div>
+      </Show>
+      <Show when={props.request.always.length > 0}>
+        <div data-slot="permission-row">
+          <span data-slot="permission-spacer" aria-hidden="true" />
+          <details class="min-w-0 text-12-regular text-text-base">
+            <summary class="cursor-pointer">{language.t("session.permission.rememberScope")}</summary>
+            <p class="py-1 text-text-weak">{language.t("session.permission.rememberHint")}</p>
+            <For each={props.request.always}>{(pattern) => <code class="block break-all">{pattern}</code>}</For>
+          </details>
         </div>
       </Show>
 

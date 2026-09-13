@@ -241,26 +241,45 @@ describe("Worktree", () => {
   })
 
   describe("createFromInfo", () => {
-    wintest(
-      "creates git worktree and boots asynchronously",
+    ;(it.instance(
+      "can wait for checkout and bootstrap before reporting creation",
       () =>
         Effect.gen(function* () {
-          const test = yield* TestInstance
           const svc = yield* Worktree.Service
-          const info = yield* svc.makeWorktreeInfo({ name: "from-info-test" })
-          const ready = yield* waitReady().pipe(Effect.forkScoped)
-          yield* svc.createFromInfo(info)
-
-          const list = yield* git(test.directory, ["worktree", "list", "--porcelain"])
-          const normalizedList = list.replace(/\\/g, "/")
-          const normalizedDir = info.directory.replace(/\\/g, "/")
-          expect(normalizedList).toContain(normalizedDir)
-
-          yield* Fiber.join(ready)
-          yield* removeCreatedWorktree(info.directory)
+          const fs = yield* FSUtil.Service
+          const info = yield* svc.makeWorktreeInfo({ name: "await-ready" })
+          yield* Effect.acquireUseRelease(
+            svc.createFromInfo(info, undefined, true).pipe(Effect.as(info)),
+            (created) =>
+              Effect.gen(function* () {
+                expect(yield* fs.exists(path.join(created.directory, ".git"))).toBe(true)
+                expect((yield* git(created.directory, ["status", "--porcelain"])).trim()).toBe("")
+              }),
+            (created) => removeCreatedWorktree(created.directory).pipe(Effect.orDie),
+          )
         }),
       { git: true },
-    )
+    ),
+      wintest(
+        "creates git worktree and boots asynchronously",
+        () =>
+          Effect.gen(function* () {
+            const test = yield* TestInstance
+            const svc = yield* Worktree.Service
+            const info = yield* svc.makeWorktreeInfo({ name: "from-info-test" })
+            const ready = yield* waitReady().pipe(Effect.forkScoped)
+            yield* svc.createFromInfo(info)
+
+            const list = yield* git(test.directory, ["worktree", "list", "--porcelain"])
+            const normalizedList = list.replace(/\\/g, "/")
+            const normalizedDir = info.directory.replace(/\\/g, "/")
+            expect(normalizedList).toContain(normalizedDir)
+
+            yield* Fiber.join(ready)
+            yield* removeCreatedWorktree(info.directory)
+          }),
+        { git: true },
+      ))
   })
 
   describe("list", () => {

@@ -2,9 +2,11 @@ export * as BashTool from "./bash"
 
 import path from "path"
 import { ToolFailure } from "@zaovra-ai/llm"
-import { Duration, Effect, Layer, Schema } from "effect"
-import { ChildProcess } from "effect/unstable/process"
+import { DateTime, Duration, Effect, Layer, Schema, Option } from "effect"
+import { ToolOutputStore } from "../tool-output-store"
 import { Config } from "../config"
+import { EventV2 } from "../event"
+import { SessionEvent } from "../session/event"
 import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
@@ -14,6 +16,7 @@ import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { BashJob } from "./bash-job"
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -21,6 +24,9 @@ export const MAX_TIMEOUT_MS = 10 * 60 * 1_000
 export const MAX_CAPTURE_BYTES = 1024 * 1024
 
 export const Input = Schema.Struct({
+  run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
+    description: "Start a bounded background command; use bash_job to inspect, wait, or cancel it.",
+  }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
   workdir: Schema.String.pipe(Schema.optional).annotate({
     description: "Working directory. Defaults to the active Location; relative paths resolve from that Location.",
@@ -33,6 +39,7 @@ export const Input = Schema.Struct({
 })
 
 const StructuredOutput = Schema.Struct({
+  job_id: Schema.String.pipe(Schema.optional),
   exit: Schema.Number.pipe(Schema.optional),
   truncated: Schema.Boolean,
   timeout: Schema.Boolean.pipe(Schema.optional),
@@ -52,6 +59,8 @@ const modelOutput = (output: Output) => {
   const warnings = output.warnings?.length
     ? `\n\nWarnings:\n${output.warnings.map((warning) => `- ${warning}`).join("\n")}`
     : ""
+  if (output.job_id)
+    return `Background command started: ${output.job_id}. Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
   if (output.timeout) return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command timed out before completion.`
   return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command exited with code ${output.exit}.`
 }
@@ -68,13 +77,10 @@ const isTimeout = (error: AppProcess.AppProcessError) =>
 // TODO: Replace token-based command-argument external-directory advisories with parser-based detection.
 // TODO: Restore PowerShell and cmd-specific invocation/path handling on Windows.
 // TODO: Add plugin shell.env environment augmentation once V2 plugin hooks exist.
-// TODO: Add durable/live progress metadata streaming for long-running commands once V2 tool invocation progress context is wired.
 // TODO: Persist background job status and define restart recovery before exposing remote observation.
-// TODO: Re-add model-facing background launch only with owner-bound get/wait/cancel tools and completion delivery.
 // TODO: Add HTTP background-job observation only after durable status, restart recovery, and authorization are defined.
 // TODO: Revisit process-group cleanup and platform coverage with shell-specific tests if current AppProcess semantics do not fully cover it.
 // TODO: Revisit binary output handling if stdout/stderr decoding is text-only.
-// TODO: Stream full shell output into managed storage while retaining only a bounded in-memory preview.
 
 const shellTokens = (command: string) => command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
 const unquote = (value: string) => value.replace(/^(['"])(.*)\1$/, "$2")
@@ -102,6 +108,8 @@ const layer = Layer.effectDiscard(
     const appProcess = yield* AppProcess.Service
     const config = yield* Config.Service
     const permission = yield* PermissionV2.Service
+    const events = yield* EventV2.Service
+    const jobs = yield* BashJob.Service
 
     yield* tools
       .register({
@@ -112,6 +120,7 @@ const layer = Layer.effectDiscard(
           structured: StructuredOutput,
           toStructuredOutput: ({ output }) => ({
             truncated: output.truncated,
+            ...(output.job_id ? { job_id: output.job_id } : {}),
             ...(output.exit === undefined ? {} : { exit: output.exit }),
             ...(output.timeout === undefined ? {} : { timeout: output.timeout }),
           }),
@@ -155,45 +164,86 @@ const layer = Layer.effectDiscard(
               const shell =
                 Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
                   .shell ?? defaultShell()
-              const command = ChildProcess.make(input.command, [], {
-                cwd: target.canonical,
-                shell,
-                stdin: "ignore",
-                detached: process.platform !== "win32",
-                forceKillAfter: Duration.seconds(3),
-              })
+              const command = AppProcess.shellCommand(input.command, target.canonical, shell)
               const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
-              const result = yield* appProcess
-                .run(command, {
-                  combineOutput: true,
-                  timeout: Duration.millis(timeout),
-                  maxOutputBytes: MAX_CAPTURE_BYTES,
-                })
-                .pipe(
-                  Effect.catchTag("AppProcessError", (error) =>
-                    isTimeout(error) ? Effect.succeed(undefined) : Effect.fail(error),
-                  ),
-                )
-              if (!result) {
+              let lastProgress = Number.NEGATIVE_INFINITY
+              const capture = Option.getOrUndefined(yield* Effect.serviceOption(ToolOutputStore.Capture))
+              const run = Effect.gen(function* () {
+                const result = yield* appProcess
+                  .run(command, {
+                    combineOutput: true,
+                    timeout: Duration.millis(timeout),
+                    maxOutputBytes: MAX_CAPTURE_BYTES,
+                    onChunk: capture?.append,
+                    onOutput: (output, truncated) =>
+                      Effect.gen(function* () {
+                        const timestamp = yield* DateTime.now
+                        const now = DateTime.toEpochMillis(timestamp)
+                        if (input.run_in_background || now - lastProgress < 1_000) return
+                        lastProgress = now
+                        yield* events.publish(SessionEvent.Tool.Progress, {
+                          sessionID: context.sessionID,
+                          assistantMessageID: context.assistantMessageID,
+                          callID: context.toolCallID,
+                          timestamp,
+                          structured: { truncated: truncated || output.length > 8_192 },
+                          content: [
+                            {
+                              type: "text",
+                              text: output.subarray(Math.max(0, output.length - 8_192)).toString("utf8"),
+                            },
+                          ],
+                        })
+                      }),
+                  })
+                  .pipe(
+                    Effect.catchTag("AppProcessError", (error) =>
+                      isTimeout(error) ? Effect.succeed(error) : Effect.fail(error),
+                    ),
+                  )
+                if (result instanceof AppProcess.AppProcessError) {
+                  return {
+                    output: `${result.output || "(no output)"}${result.outputTruncated ? "\n[in-memory preview truncated; consult the command log for captured bytes]" : ""}\nCommand exceeded timeout of ${timeout} ms. Inspect the output before deciding whether to change the command or allow more time.`,
+                    truncated: result.outputTruncated === true,
+                    timeout: true,
+                    ...(warnings.length ? { warnings } : {}),
+                  }
+                }
+
+                const output = result.output?.toString("utf8") || "(no output)"
+                const notice = result.outputTruncated
+                  ? "[in-memory preview truncated; consult the command log for captured bytes]"
+                  : undefined
                 return {
-                  output: `Command exceeded timeout of ${timeout} ms. Retry with a larger timeout if the command is expected to take longer.`,
-                  truncated: false,
-                  timeout: true,
+                  exit: result.exitCode,
+                  output: notice ? `${output}\n\n${notice}` : output,
+                  truncated: result.outputTruncated === true,
                   ...(warnings.length ? { warnings } : {}),
                 }
-              }
-
-              const output = result.output?.toString("utf8") || "(no output)"
-              const notice = result.outputTruncated
-                ? "[output capture truncated at the in-memory safety limit]"
-                : undefined
-              return {
-                exit: result.exitCode,
-                output: notice ? `${output}\n\n${notice}` : output,
-                truncated: result.outputTruncated === true,
-                ...(warnings.length ? { warnings } : {}),
-              }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to execute command: ${input.command}` }))),
+              })
+              if (!input.run_in_background) return yield* run
+              const job_id = yield* jobs.start(
+                input.command,
+                run.pipe(
+                  Effect.flatMap((output) => {
+                    const text = `${output.output}\n${modelOutput(output)}`
+                    return "timeout" in output || output.exit !== 0
+                      ? Effect.fail(new Error(text))
+                      : Effect.succeed(text)
+                  }),
+                ),
+                context,
+                capture ? capture.append(new Uint8Array()) : Effect.void,
+              )
+              return { job_id, output: "Command log is retained while the job runs.", truncated: false }
+            }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new ToolFailure({
+                    message: `Unable to execute command: ${input.command}\n${error instanceof Error ? error.message : String(error)}`,
+                  }),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)
@@ -203,5 +253,14 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/bash",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FSUtil.node, AppProcess.node, Config.node, PermissionV2.node],
+  deps: [
+    ToolRegistry.node,
+    BashJob.node,
+    LocationMutation.node,
+    FSUtil.node,
+    AppProcess.node,
+    Config.node,
+    PermissionV2.node,
+    EventV2.node,
+  ],
 })

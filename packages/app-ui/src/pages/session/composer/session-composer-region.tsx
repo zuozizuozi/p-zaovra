@@ -7,6 +7,9 @@ import { SessionFollowupDock } from "@/pages/session/composer/session-followup-d
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
+import { useServerSync } from "@/context/server-sync"
+import { useParams } from "@solidjs/router"
+import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 
 export function SessionComposerRegion(props: {
   controller: SessionComposerRegionController
@@ -15,6 +18,10 @@ export function SessionComposerRegion(props: {
   const language = useLanguage()
   const controller = props.controller
   const settings = useSettings()
+  const sync = useServerSync()
+  const params = useParams()
+  const unfinished = () =>
+    hasUnfinishedShell(sync().session.data.message[params.id ?? ""] ?? [], sync().session.data.part)
   const rolled = () => {
     const revert = controller.revert()
     return revert?.items.length ? revert : undefined
@@ -36,6 +43,11 @@ export function SessionComposerRegion(props: {
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": controller.centered(),
         }}
       >
+        <Show when={unfinished()}>
+          <div role="status" class="px-1 py-2 text-12-regular text-text-weak">
+            {language.t("session.activity.shellHint")}
+          </div>
+        </Show>
         <Show when={controller.state.questionRequest()} keyed>
           {(request) => (
             <div>
@@ -51,8 +63,9 @@ export function SessionComposerRegion(props: {
                 request={request}
                 responding={controller.state.permissionResponding()}
                 onDecide={(response) => {
-                  controller.onResponseSubmit()
-                  controller.state.decide(response)
+                  void controller.state.decide(response).then((accepted) => {
+                    if (accepted) controller.onResponseSubmit()
+                  })
                 }}
               />
             </div>
@@ -137,6 +150,7 @@ export function SessionComposerRegion(props: {
                   sending={controller.followup()!.sending}
                   onSend={controller.followup()!.onSend}
                   onEdit={controller.followup()!.onEdit}
+                  onRemove={controller.followup()!.onRemove}
                 />
               </Show>
               <Show

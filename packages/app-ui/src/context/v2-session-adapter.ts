@@ -204,6 +204,7 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
             type: "text",
             text: item.type === "shell" ? `$ ${item.command}\n\n${item.output}` : item.text,
             synthetic: true,
+            ...(item.type === "shell" ? { metadata: { zaovraShellPending: item.time.completed === undefined } } : {}),
           },
         ],
       })
@@ -211,6 +212,13 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
   }
 
   return result
+}
+
+/** Unfinished history is not proof that a process is still alive after reconnecting. */
+export function hasUnfinishedShell(messages: readonly Message[], parts: Readonly<Record<string, Part[]>>) {
+  return messages.some((message) =>
+    parts[message.id]?.some((part) => part.type === "text" && part.metadata?.zaovraShellPending === true),
+  )
 }
 
 function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAssistantTool): Part {

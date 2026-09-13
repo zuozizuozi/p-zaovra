@@ -47,9 +47,10 @@ Next reviewed slices:
   remaining one-turn native-adapter use with a narrow typed dispatcher
 - batch streamed deltas and add covering context indexes
 - expose replayable Session event cursors over HTTP and the generated SDK where remote consumers need them
-- integrate the new BackgroundJob service with V2 tool execution: support background
-  bash jobs and background agent dispatch with durable status observation,
-  completion delivery, and explicit cancellation / continuation semantics
+- local Bash now uses BackgroundJob for owner-bound get/wait/cancel, managed logs,
+  and durable shell completion events. Remote process ownership, restart adoption,
+  and automatic provider continuation on completion remain separate deferred slices;
+  do not turn shell completion into a synthetic user prompt.
 - add durable/clustered interruption, retries, and stale-owner fencing only as
   their slices become concrete
 
@@ -126,11 +127,9 @@ failure appears during canary work:
 - simplify process-local durable-tail wake lifecycle with Effect `RcMap` and one
   shared `PubSub.sliding<void>(1)` per active aggregate; keep SQLite cursor replay
   and subscribe-before-history semantics unchanged
-- page large durable aggregate replay reads instead of loading every row after a
-  stale cursor into one array
-- decide whether connected tails need a periodic polling fallback for
-  cross-process SQLite writers; current advisory wakes are intentionally
-  process-local
+- durable aggregate tails now read pages of 256 events and poll every five seconds
+  while idle to observe other SQLite writers; shared per-aggregate polling remains
+  a possible optimization if subscriber count justifies it
 - stream-cap websearch body collection before parsing
 - add ripgrep execution timeout and bounded line framing
 - materialize or consistently reject unresolved URL and file attachment sources

@@ -450,6 +450,31 @@ describe("EventV2", () => {
     }),
   )
 
+  it.live(
+    "observes another event service without sharing its wake notifications",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* EventV2.Service
+        const aggregateID = Session.ID.create()
+        const observed = yield* Deferred.make<void>()
+        yield* events.publish(DurableMessage, durableData(aggregateID, "first"))
+        const fiber = yield* events.durable({ aggregateID }).pipe(
+          Stream.tap(() => Deferred.succeed(observed, undefined)),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkScoped,
+        )
+      yield* Deferred.await(observed)
+      // Let the reader exhaust its local history and enter the notification wait.
+      yield* Effect.sleep("50 millis")
+        yield* EventV2.Service.use((writer) =>
+          writer.publish(DurableMessage, durableData(aggregateID, "external")),
+        ).pipe(Effect.provide(EventV2.layerWith({})))
+        expect(Array.from(yield* Fiber.join(fiber)).map((event) => event.durable?.seq)).toEqual([0, 1])
+      }),
+    10_000,
+  )
+
   it.effect("catches durable aggregate events published during replay handoff", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service

@@ -92,7 +92,6 @@ import {
 } from "@/pages/session/session-panel-width"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { sessionPanelLayout } from "@/pages/session/session-panel-layout"
-import { SessionReviewEmptyChangesV2 } from "@zaovra-ai/session-ui/v2/session-review-empty-changes-v2"
 import { SessionReviewEmptyNoGitV2 } from "@zaovra-ai/session-ui/v2/session-review-empty-no-git-v2"
 import { SessionReviewV2SidebarToggle } from "@zaovra-ai/session-ui/v2/session-review-v2"
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
@@ -401,6 +400,7 @@ export default function Page() {
   const [ui, setUi] = createStore({
     pendingMessage: undefined as string | undefined,
     reviewSnap: false,
+    followupRemoving: undefined as { sessionID: string; id: string } | undefined,
     scrollGesture: 0,
     scroll: {
       overflow: false,
@@ -753,7 +753,7 @@ export default function Page() {
   const hasReview = () => reviewCount() > 0
   const reviewReady = () => {
     if (reviewMode() === "git" || reviewMode() === "branch") return !vcsQuery.isPending
-    return true
+    return !turnQuery.isPending || turnQuery.fetchStatus === "idle"
   }
   const loadReviewDiff = async (file: string, version?: number): Promise<VcsFileDiff | undefined> => {
     const mode = vcsMode()
@@ -1264,9 +1264,24 @@ export default function Page() {
     return language.t("session.review.noChanges")
   })
 
+  const reviewFailure = () => {
+    const query = reviewMode() === "turn" ? turnQuery : vcsQuery
+    if (!query.isError) return
+    return (
+      <div role="alert" class="px-6 py-4 flex flex-col items-start gap-3 text-text-weak">
+        <span>{language.t("session.review.loadFailed")}</span>
+        <Button size="small" variant="secondary" disabled={query.isFetching} onClick={() => void query.refetch()}>
+          {language.t("session.review.retry")}
+        </Button>
+      </div>
+    )
+  }
+
   const reviewEmpty = (input: { loadingClass: string; emptyClass: string }) => {
+    const failure = reviewFailure()
+    if (failure) return failure
+    if (!reviewReady()) return <div class={input.loadingClass}>{language.t("session.review.loadingChanges")}</div>
     if (reviewMode() === "git" || reviewMode() === "branch") {
-      if (!reviewReady()) return <div class={input.loadingClass}>{language.t("session.review.loadingChanges")}</div>
       return empty(reviewEmptyText())
     }
 
@@ -1283,13 +1298,19 @@ export default function Page() {
   }
 
   const reviewEmptyV2 = () => {
-    if ((reviewMode() === "git" || reviewMode() === "branch") && !reviewReady()) {
+    const failure = reviewFailure()
+    if (failure) return failure
+    if (!reviewReady()) {
       return <div class="px-6 py-4 text-text-weak">{language.t("session.review.loadingChanges")}</div>
     }
     if (reviewMode() === "turn" && nogit()) {
       return <SessionReviewEmptyNoGitV2 pending={gitMutation.isPending} onInitGit={initGit} />
     }
-    return <SessionReviewEmptyChangesV2 />
+    return (
+      <div role="status" class="px-6 py-4 text-text-weak">
+        {reviewEmptyText()}
+      </div>
+    )
   }
 
   const reviewContent = (input: {
@@ -1857,7 +1878,7 @@ export default function Page() {
           )
         return sendFollowupDraft({
           messageID: item.id,
-          delivery: item.cancelID ? "steer" : "queue",
+          delivery: input.manual || item.cancelID ? "steer" : "queue",
           client,
           sync: sync(),
           serverSync: serverSync(),
@@ -1879,11 +1900,13 @@ export default function Page() {
   }))
 
   const followupBusy = (sessionID: string) =>
-    followupMutation.isPending && followupMutation.variables?.sessionID === sessionID
+    ui.followupRemoving?.sessionID === sessionID ||
+    (followupMutation.isPending && followupMutation.variables?.sessionID === sessionID)
 
   const sendingFollowup = createMemo(() => {
     const id = params.id
     if (!id) return
+    if (ui.followupRemoving?.sessionID === id) return ui.followupRemoving.id
     if (!followupBusy(id)) return
     return followupMutation.variables?.id
   })
@@ -1939,10 +1962,10 @@ export default function Page() {
     return followupMutation.mutateAsync({ sessionID, id, manual: opts?.manual })
   }
 
-  const editFollowup = async (id: string) => {
+  const removeFollowup = async (id: string) => {
     const sessionID = params.id
     if (!sessionID) return
-    if (followupBusy(sessionID)) return
+    if (followupBusy(sessionID) || ui.followupRemoving) return
 
     const item = queuedFollowups().find((entry) => entry.id === id)
     if (!item) return
@@ -1950,6 +1973,7 @@ export default function Page() {
     const client = sdk().client
     const target = serverSync()
     const currentSync = sync()
+    setUi("followupRemoving", { sessionID, id })
     const cancelled = await (async () => {
       await cancelFollowupDraft({
         client,
@@ -1965,18 +1989,29 @@ export default function Page() {
       fail(error)
       return false
     })
+    batch(() => {
+      if (cancelled) {
+        target.session.set("pending_input", sessionID, (items = []) => items.filter((input) => input.id !== id))
+        setFollowup("items", sessionID, (items) => (items ?? []).filter((entry) => entry.id !== id))
+        setFollowup("failed", sessionID, (value) => (value === id ? undefined : value))
+      }
+      // Remove the draft before unblocking automatic queue admission.
+      setUi("followupRemoving", undefined)
+    })
     if (!cancelled) return
-    target.session.set("pending_input", sessionID, (items = []) => items.filter((input) => input.id !== id))
+    return { sessionID, item }
+  }
 
-    setFollowup("items", sessionID, (items) => (items ?? []).filter((entry) => entry.id !== id))
-    setFollowup("failed", sessionID, (value) => (value === id ? undefined : value))
-    setFollowup("edit", sessionID, {
-      id: item.id,
-      prompt: item.prompt,
-      context: item.context,
-      agent: item.agent,
-      model: item.model,
-      variant: item.variant,
+  const editFollowup = async (id: string) => {
+    const removed = await removeFollowup(id)
+    if (!removed) return
+    setFollowup("edit", removed.sessionID, {
+      id: removed.item.id,
+      prompt: removed.item.prompt,
+      context: removed.item.context,
+      agent: removed.item.agent,
+      model: removed.item.model,
+      variant: removed.item.variant,
     })
   }
 
@@ -2329,6 +2364,7 @@ export default function Page() {
                     sending: sendingFollowup(),
                     onSend: (id) => void sendFollowup(params.id!, id, { manual: true }),
                     onEdit: editFollowup,
+                    onRemove: (id) => void removeFollowup(id),
                   }
                 : undefined,
             revert: () =>

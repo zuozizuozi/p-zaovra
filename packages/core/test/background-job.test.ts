@@ -1,35 +1,57 @@
 import { describe, expect } from "bun:test"
 import { BackgroundJob } from "@zaovra-ai/core/background-job"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
-import { Deferred, Effect, Exit, Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, Scope } from "effect"
 import { it } from "./lib/effect"
 
 const jobsLayer = LayerNode.compile(BackgroundJob.node)
 
 describe("BackgroundJob", () => {
-  it.live("tracks process-local work through explicit observation", () =>
+  ;(it.live("waiting for a cancelled job waits for its cleanup", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
-      const latch = yield* Deferred.make<void>()
+      const cleaning = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       const job = yield* jobs.start({
         type: "test",
-        metadata: { durable: false },
-        run: Deferred.await(latch).pipe(Effect.as("done")),
+        run: Effect.never.pipe(
+          Effect.ensuring(Deferred.succeed(cleaning, undefined).pipe(Effect.andThen(Deferred.await(release)))),
+        ),
       })
-
-      expect(job).toMatchObject({ type: "test", status: "running", metadata: { durable: false } })
+      const cancelled = yield* jobs.cancel(job.id).pipe(Effect.forkScoped)
+      yield* Deferred.await(cleaning)
+      expect((yield* jobs.wait({ id: job.id, timeout: 1 })).timedOut).toBe(true)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(cancelled)
       expect(yield* jobs.wait({ id: job.id, timeout: 0 })).toMatchObject({
-        timedOut: true,
-        info: { status: "running" },
-      })
-
-      yield* Deferred.succeed(latch, undefined)
-      expect(yield* jobs.wait({ id: job.id })).toMatchObject({
         timedOut: false,
-        info: { status: "completed", output: "done" },
+        info: { status: "cancelled" },
       })
     }).pipe(Effect.provide(jobsLayer)),
-  )
+  ),
+    it.live("tracks process-local work through explicit observation", () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const latch = yield* Deferred.make<void>()
+        const job = yield* jobs.start({
+          type: "test",
+          metadata: { durable: false },
+          run: Deferred.await(latch).pipe(Effect.as("done")),
+        })
+
+        expect(job).toMatchObject({ type: "test", status: "running", metadata: { durable: false } })
+        expect(yield* jobs.wait({ id: job.id, timeout: 0 })).toMatchObject({
+          timedOut: true,
+          info: { status: "running" },
+        })
+
+        yield* Deferred.succeed(latch, undefined)
+        expect(yield* jobs.wait({ id: job.id })).toMatchObject({
+          timedOut: false,
+          info: { status: "completed", output: "done" },
+        })
+      }).pipe(Effect.provide(jobsLayer)),
+    ))
 
   it.live("publishes jobs before starting immediately settling work", () =>
     Effect.gen(function* () {

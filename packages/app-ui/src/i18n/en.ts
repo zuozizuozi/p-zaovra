@@ -1,9 +1,30 @@
 export const dict = {
+  "session.review.loadFailed": "Changes could not be loaded. Retry to see the current changes.",
+  "session.review.retry": "Retry",
+  "session.review.noFilterMatches": "No changed files match this filter.",
+  "session.review.clearFilter": "Clear filter",
+  "session.followupDock.hint":
+    "Queued messages wait until the current task finishes. Send to current task applies your message at the next safe step.",
+  "session.followupDock.remove": "Remove queued message",
+  "session.permission.rememberScope": "What does Always allow remember?",
+  "session.permission.rememberHint":
+    "Allow future matching operations in this project. Explicit deny rules still apply. Allow once only approves this request.",
+  "session.activity.permission": "Waiting for approval",
+  "session.activity.question": "Waiting for your answer",
+  "session.activity.running": "Running",
+  "session.activity.shell": "Command has not reported completion",
+  "session.activity.error": "Execution error",
+  "session.activity.unread": "New response",
+  "session.activity.idle": "Not executing",
+  "session.activity.shellHint":
+    "A command has not reported completion. Check its log and result in the conversation; after reconnecting, confirm its state before retrying.",
   "usage.title": "Usage dashboard",
   "usage.conversation": "Conversation",
   "usage.lastTurn": "Last turn",
-  "usage.sessionScope": "Recorded tokens in this conversation, excluding separate subagent conversations. Open the dashboard for all conversations.",
-  "usage.scope": "All usage recorded on this server, including subagent conversations. Usage from other apps or devices is not included. Cached and reasoning tokens are counted once.",
+  "usage.sessionScope":
+    "Recorded tokens in this conversation, excluding separate subagent conversations. Open the dashboard for all conversations.",
+  "usage.scope":
+    "All usage recorded on this server, including subagent conversations. Usage from other apps or devices is not included. Cached and reasoning tokens are counted once.",
   "usage.refresh": "Refresh",
   "usage.loading": "Loading usage…",
   "usage.error": "Usage could not be refreshed. Open the dashboard to retry.",
@@ -21,10 +42,12 @@ export const dict = {
   "usage.planSpent": "Official plan spending",
   "usage.remaining": "Remaining plan quota",
   "usage.billingUnavailable": "Account data not connected",
-  "usage.billingNote": "Tokens above reflect recorded usage, not money or quota deducted. Spending and remaining quota require account billing data; they are not assumed to be zero.",
+  "usage.billingNote":
+    "Tokens above reflect recorded usage, not money or quota deducted. Spending and remaining quota require account billing data; they are not assumed to be zero.",
   "usage.updated": "Last synchronized",
   "provider.custom.protocol.label": "API protocol",
-  "provider.custom.protocol.hint": "Choose the API format documented by your service, not the model brand. Authentication headers are added automatically.",
+  "provider.custom.protocol.hint":
+    "Choose the API format documented by your service, not the model brand. Authentication headers are added automatically.",
   "prompt.addFiles": "Add files",
   "model.source.label": "Model source",
   "model.source.own": "Own Key",
@@ -234,7 +257,8 @@ export const dict = {
   "provider.custom.discovery.saved": "{provider} configuration saved",
   "provider.custom.discovery.savedDescription":
     "Select a model to start a task. Generation and tool calling have not been verified.",
-  "provider.custom.discovery.intro": "Choose the API protocol, enter the service URL and Key, then fetch and select models.",
+  "provider.custom.discovery.intro":
+    "Choose the API protocol, enter the service URL and Key, then fetch and select models.",
   "provider.custom.discovery.fetch": "Fetch models",
   "provider.custom.discovery.loading": "Fetching models…",
   "provider.custom.discovery.manual": "Enter models manually",
@@ -771,7 +795,7 @@ export const dict = {
   "session.question.pending.other": "{{count}} pending questions",
   "session.followupDock.summary.one": "{{count}} queued message",
   "session.followupDock.summary.other": "{{count}} queued messages",
-  "session.followupDock.sendNow": "Send now",
+  "session.followupDock.sendNow": "Send to current task",
   "session.followupDock.edit": "Edit",
   "session.followupDock.collapse": "Collapse queued messages",
   "session.followupDock.expand": "Expand queued messages",

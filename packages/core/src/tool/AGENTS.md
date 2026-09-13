@@ -52,6 +52,8 @@ Built-ins return complete validated domain output. `ToolRegistry.Materialization
 
 Producer capture limits are separate. For example, Bash keeps `AppProcess.maxOutputBytes` and accurately reports stdout/stderr capture loss, but it does not run model-output truncation or return a managed `outputPath`.
 
+The registry provides a per-invocation `ToolOutputStore.Capture` byte sink for raw producer logs and includes its retained paths at settlement. Producers may append raw chunks but never choose or return storage paths. A background producer may retain the sink after settlement; it must initialize it before returning so the registry can expose the log reference.
+
 ## Current Gaps
 
 - Plugin boot has not been redesigned to register canonical tools through `Tools.Service`; do not redesign it as part of leaf migrations.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionInputAdmitted, SessionMessage, SessionV2Info } from "@zaovra-ai/sdk/v2/client"
-import { adaptSessionInput, adaptSessionMessages } from "./v2-session-adapter"
+import { adaptSessionInput, adaptSessionMessages, hasUnfinishedShell } from "./v2-session-adapter"
 
 const session: SessionV2Info = {
   id: "ses_test",
@@ -15,22 +15,57 @@ const session: SessionV2Info = {
 }
 
 describe("V2 session timeline adapter", () => {
+  test("only reports shell history without a completion record, including after reload", () => {
+    const pending: SessionMessage = {
+      id: "shell_pending",
+      type: "shell",
+      callID: "call_pending",
+      command: "build",
+      output: "building",
+      time: { created: 1 },
+    }
+    const running = adaptSessionMessages(session, [pending])
+    expect(
+      hasUnfinishedShell(
+        running.map((item) => item.message),
+        Object.fromEntries(running.map((item) => [item.message.id, item.parts])),
+      ),
+    ).toBe(true)
+    const completed = adaptSessionMessages(session, [{ ...pending, time: { created: 1, completed: 2 } }])
+    expect(
+      hasUnfinishedShell(
+        completed.map((item) => item.message),
+        Object.fromEntries(completed.map((item) => [item.message.id, item.parts])),
+      ),
+    ).toBe(false)
+    expect(hasUnfinishedShell([], {})).toBe(false)
+  })
   test("isolates reasoning and tool IDs across messages without changing tool call IDs", () => {
     const messages: SessionMessage[] = [
       { id: "msg_user", type: "user", text: "run", time: { created: 1 } },
-      ...["msg_first", "msg_second"].map((id, index): SessionMessage => ({
-        id,
-        type: "assistant",
-        agent: "build",
-        model: session.model!,
-        time: { created: index + 2 },
-        content: [
-          { id: "reasoning-0", type: "reasoning", text: id },
-          { id: "call-0", type: "tool", name: "read", time: { created: index + 2 }, state: { status: "pending", input: "" } },
-        ],
-      })),
+      ...["msg_first", "msg_second"].map(
+        (id, index): SessionMessage => ({
+          id,
+          type: "assistant",
+          agent: "build",
+          model: session.model!,
+          time: { created: index + 2 },
+          content: [
+            { id: "reasoning-0", type: "reasoning", text: id },
+            {
+              id: "call-0",
+              type: "tool",
+              name: "read",
+              time: { created: index + 2 },
+              state: { status: "pending", input: "" },
+            },
+          ],
+        }),
+      ),
     ]
-    const parts = adaptSessionMessages(session, messages).slice(1).flatMap((message) => message.parts)
+    const parts = adaptSessionMessages(session, messages)
+      .slice(1)
+      .flatMap((message) => message.parts)
     expect(new Set(parts.map((part) => part.id)).size).toBe(4)
     expect(parts.filter((part) => part.type === "tool").map((part) => part.callID)).toEqual(["call-0", "call-0"])
   })

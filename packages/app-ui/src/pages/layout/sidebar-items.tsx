@@ -15,7 +15,7 @@ import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
-import { sessionPermissionRequest } from "../session/composer/session-request-tree"
+import { sessionPermissionRequest, sessionQuestionRequest } from "../session/composer/session-request-tree"
 import { childSessionOnPath, getProjectAvatarSource, hasProjectPermissions } from "./helpers"
 
 export const ProjectIcon = (props: {
@@ -163,8 +163,13 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       },
     )
   })
+  const needsAttention = createMemo(
+    () =>
+      hasPermissions() ||
+      !!sessionQuestionRequest(sessionStore.session, serverSync().session.data.question, props.session.id),
+  )
   const isWorking = createMemo(() => {
-    if (hasPermissions()) return false
+    if (needsAttention()) return false
     return serverSync().session.data.session_working(props.session.id)
   })
 
@@ -205,7 +210,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       dense={props.dense}
       tint={tint}
       isWorking={isWorking}
-      hasPermissions={hasPermissions}
+      hasPermissions={needsAttention}
       hasError={hasError}
       unseenCount={unseenCount}
       clearHoverProjectSoon={props.clearHoverProjectSoon}

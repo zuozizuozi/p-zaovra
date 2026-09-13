@@ -59,25 +59,45 @@ const registryLayer = Layer.effect(
         }
       if (advertised && registration.identity !== advertised)
         return { result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
+      const capture = resources.capture()
       const pending = yield* settle(registration.tool, input.call, {
         sessionID: input.sessionID,
         agent: input.agent,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
       }).pipe(
+        Effect.provideService(ToolOutputStore.Capture, capture),
         Effect.map((output) => ({ output })),
         Effect.catchTag("LLM.ToolFailure", (failure) =>
           Effect.succeed({ result: { type: "error" as const, value: failure.message } }),
         ),
       )
-      if ("result" in pending) return pending
-      const output = pending.output
+      if ("result" in pending)
+        return capture.paths().length === 0
+          ? pending
+          : {
+              result: {
+                ...pending.result,
+                value: `${pending.result.value}\nCommand log: ${capture.paths().join(", ")}`,
+              },
+              outputPaths: capture.paths(),
+            }
+      const output =
+        capture.paths().length === 0
+          ? pending.output
+          : {
+              ...pending.output,
+              content: [
+                ...pending.output.content,
+                { type: "text" as const, text: `\nCommand log: ${capture.paths().join(", ")}` },
+              ],
+            }
       const bounded = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
+      const outputPaths = [...capture.paths(), ...bounded.outputPaths]
       const result = ToolOutput.toResultValue(bounded.output)
-      if (result.type === "error")
-        return bounded.outputPaths.length > 0 ? { result, outputPaths: bounded.outputPaths } : { result }
-      return bounded.outputPaths.length > 0
-        ? { result, output: bounded.output, outputPaths: bounded.outputPaths }
+      if (result.type === "error") return outputPaths.length > 0 ? { result, outputPaths } : { result }
+      return outputPaths.length > 0
+        ? { result, output: bounded.output, outputPaths }
         : { result, output: bounded.output }
     })
 

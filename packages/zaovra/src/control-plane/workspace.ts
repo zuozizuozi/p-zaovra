@@ -1,3 +1,4 @@
+import { KeyedMutex } from "@zaovra-ai/core/effect/keyed-mutex"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { httpClient } from "@zaovra-ai/core/effect/app-node-platform"
 import { Context, DateTime, Effect, FiberMap, Iterable, Layer, Schema, Stream } from "effect"
@@ -167,6 +168,7 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const fs = yield* FSUtil.Service
     const { db } = yield* Database.Service
+    const lifecycle = KeyedMutex.makeUnsafe<WorkspaceV2.ID>()
     const connections = new Map<WorkspaceV2.ID, ConnectionStatus>()
     const syncFibers = yield* FiberMap.make<WorkspaceV2.ID, void, SyncLoopError>()
 
@@ -494,70 +496,90 @@ const layer = Layer.effect(
       connections.delete(id)
     })
 
-    const create = Effect.fn("Workspace.create")(function* (input: CreateInput) {
+    const create = Effect.fn("Workspace.create")((input: CreateInput) => {
       const id = WorkspaceV2.ID.ascending(input.id)
-      const adapter = getAdapter(input.projectID, input.type)
-      const config = yield* WorkspaceAdapterRuntime.configure(adapter, {
-        ...input,
-        id,
-        name: Slug.create(),
-        directory: null,
-        extra: input.extra ?? null,
-      })
+      return lifecycle.withLock(id)(
+        Effect.gen(function* () {
+          const existing = yield* get(id)
+          if (existing) {
+            if (
+              existing.projectID !== input.projectID ||
+              existing.type !== input.type ||
+              (input.branch !== null && existing.branch !== input.branch)
+            )
+              return yield* Effect.fail(new Error(`Conflicting workspace retry: ${id}`))
+            // An interrupted adapter may already have provisioned resources. Never blindly create them twice.
+            yield* startSync(existing)
+            return existing
+          }
+          const adapter = getAdapter(input.projectID, input.type)
+          const config = yield* WorkspaceAdapterRuntime.configure(adapter, {
+            ...input,
+            id,
+            name: Slug.create(),
+            directory: null,
+            extra: input.extra ?? null,
+          })
 
-      const info: Info = {
-        id,
-        type: config.type,
-        branch: config.branch ?? null,
-        name: config.name ?? null,
-        directory: config.directory ?? null,
-        extra: config.extra ?? null,
-        projectID: input.projectID,
-        timeUsed: Date.now(),
-      }
+          const info: Info = {
+            id,
+            type: config.type,
+            branch: config.branch ?? null,
+            name: config.name ?? null,
+            directory: config.directory ?? null,
+            extra: config.extra ?? null,
+            projectID: input.projectID,
+            timeUsed: Date.now(),
+          }
 
-      yield* db
-        .insert(WorkspaceTable)
-        .values({
-          id: info.id,
-          type: info.type,
-          branch: info.branch,
-          name: info.name,
-          directory: info.directory,
-          extra: info.extra,
-          project_id: info.projectID,
-          time_used: info.timeUsed,
-        })
-        .run()
-        .pipe(Effect.orDie)
+          yield* db
+            .insert(WorkspaceTable)
+            .values({
+              id: info.id,
+              type: info.type,
+              branch: info.branch,
+              name: info.name,
+              directory: info.directory,
+              extra: info.extra,
+              project_id: info.projectID,
+              time_used: info.timeUsed,
+            })
+            .run()
+            .pipe(Effect.orDie)
 
-      const env = {
-        ZAOVRA_WORKSPACE_ID: config.id,
-        ZAOVRA_EXPERIMENTAL_WORKSPACES: "true",
-        OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
-        OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-        OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
-      }
+          const env = {
+            ZAOVRA_WORKSPACE_ID: config.id,
+            ZAOVRA_EXPERIMENTAL_WORKSPACES: "true",
+            OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
+            OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+            OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
+          }
 
-      yield* WorkspaceAdapterRuntime.create(adapter, config, env)
-      yield* Effect.all(
-        [
-          waitEvent({
-            timeout: TIMEOUT,
-            fn(event) {
-              if (event.workspace === info.id && event.payload.type === Event.Status.type) {
-                const { status } = event.payload.properties
-                return status === "error" || status === "connected"
-              }
-              return false
-            },
-          }),
-          startSync(info),
-        ],
-        { concurrency: 2, discard: true },
+          yield* WorkspaceAdapterRuntime.create(adapter, config, env).pipe(
+            // Adapter promises have no cancellation contract; retain ownership until they settle.
+            Effect.uninterruptible,
+            Effect.onError(() => Effect.sync(() => setStatus(id, "error"))),
+          )
+          yield* Effect.all(
+            [
+              waitEvent({
+                timeout: TIMEOUT,
+                fn(event) {
+                  if (event.workspace === info.id && event.payload.type === Event.Status.type) {
+                    const { status } = event.payload.properties
+                    return status === "error" || status === "connected"
+                  }
+                  return false
+                },
+              }),
+              startSync(info),
+            ],
+            { concurrency: 2, discard: true },
+          )
+
+          return info
+        }),
       )
-
-      return info
     })
 
     const sessionWarp = Effect.fn("Workspace.sessionWarp")(function* (input: SessionWarpInput) {
@@ -768,37 +790,38 @@ const layer = Layer.effect(
       return fromRow(row)
     })
 
-    const remove = Effect.fn("Workspace.remove")(function* (id: WorkspaceV2.ID) {
-      const sessions = yield* db
-        .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
-        .from(SessionTable)
-        .where(eq(SessionTable.workspace_id, id))
-        .all()
-        .pipe(Effect.orDie)
-      const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
-      yield* Effect.forEach(
-        sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),
-        (sessionInfo) =>
-          session.remove(Session.ID.make(sessionInfo.id)).pipe(Effect.catch(() => Effect.void)),
-        { discard: true },
-      )
-
-      const row = yield* db.select().from(WorkspaceTable).where(eq(WorkspaceTable.id, id)).get().pipe(Effect.orDie)
-      if (!row) return
-
-      yield* stopSync(id)
-
-      const info = fromRow(row)
-      yield* Effect.catchCause(
+    const remove = Effect.fn("Workspace.remove")((id: WorkspaceV2.ID) =>
+      lifecycle.withLock(id)(
         Effect.gen(function* () {
-          yield* WorkspaceAdapterRuntime.remove(info)
+          const row = yield* db.select().from(WorkspaceTable).where(eq(WorkspaceTable.id, id)).get().pipe(Effect.orDie)
+          if (!row) return
+          const sessions = yield* db
+            .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
+            .from(SessionTable)
+            .where(eq(SessionTable.workspace_id, id))
+            .all()
+            .pipe(Effect.orDie)
+          yield* Effect.forEach(sessions, (item) => session.interrupt(Session.ID.make(item.id)), { discard: true })
+          yield* stopSync(id)
+          const info = fromRow(row)
+          // Keep the record and transcript as the retry/diagnostic handle if external cleanup fails.
+          yield* WorkspaceAdapterRuntime.remove(info).pipe(
+            Effect.uninterruptible,
+            Effect.onError(() => Effect.sync(() => setStatus(id, "error"))),
+            Effect.orDie,
+          )
+          const sessionIDs = new Set(sessions.map((item) => item.id))
+          yield* Effect.forEach(
+            sessions.filter((item) => !item.parentID || !sessionIDs.has(item.parentID)),
+            (item) => session.remove(Session.ID.make(item.id)).pipe(Effect.orDie),
+            { discard: true },
+          )
+          yield* db.delete(WorkspaceTable).where(eq(WorkspaceTable.id, id)).run().pipe(Effect.orDie)
+          connections.delete(id)
+          return info
         }),
-        () => Effect.logError("adapter not available when removing workspace", { type: row.type }),
-      )
-
-      yield* db.delete(WorkspaceTable).where(eq(WorkspaceTable.id, id)).run().pipe(Effect.orDie)
-      return info
-    })
+      ),
+    )
 
     const status = Effect.fn("Workspace.status")(function* () {
       return [...connections.values()]

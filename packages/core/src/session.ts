@@ -1,7 +1,7 @@
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
-import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
+import { DateTime, Effect, Layer, Schema, Context, Stream, Cause, Exit, Deferred } from "effect"
 import { ListAnchor } from "@zaovra-ai/schema/session"
 import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -22,7 +22,11 @@ import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
 import path from "path"
-import { spawn } from "node:child_process"
+import { AppProcess } from "./process"
+import { BackgroundJob } from "./background-job"
+import { ToolOutputStore } from "./tool-output-store"
+import { Global } from "./global"
+import { KeyedMutex } from "./effect/keyed-mutex"
 import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
@@ -220,6 +224,23 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const live = yield* SessionLive.Service
     const locations = yield* LocationServiceMap.Service
+    const appProcess = yield* AppProcess.Service
+    const jobs = yield* BackgroundJob.Service
+    const fs = yield* FSUtil.Service
+    const global = yield* Global.Service
+    const shellLocks = KeyedMutex.makeUnsafe<string>()
+    const shells = new Map<SessionSchema.ID, Set<{ controller: AbortController; done: Deferred.Deferred<void> }>>()
+    const interruptShells = (sessionID: SessionSchema.ID) =>
+      Effect.suspend(() =>
+        Effect.forEach(
+          Array.from(shells.get(sessionID) ?? []),
+          (shell) =>
+            Effect.sync(() => shell.controller.abort(new Error("Command interrupted"))).pipe(
+              Effect.andThen(Deferred.await(shell.done)),
+            ),
+          { concurrency: "unbounded", discard: true },
+        ),
+      )
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const decode = (row: typeof SessionMessageTable.$inferSelect) =>
@@ -308,7 +329,7 @@ const layer = Layer.effect(
       }),
       remove: Effect.fn("V2Session.remove")(function* (sessionID) {
         const session = yield* result.get(sessionID)
-        yield* execution.interrupt(sessionID)
+        yield* result.interrupt(sessionID)
         yield* events.publish(
           SessionEvent.Deleted,
           { sessionID, timestamp: yield* DateTime.now },
@@ -481,62 +502,91 @@ const layer = Layer.effect(
           Effect.provide(locations.get(session.location)),
         )
       }),
-      shell: Effect.fn("V2Session.shell")(function* (input) {
-        const session = yield* result.get(input.sessionID)
+      shell: Effect.fn("V2Session.shell")((input) => {
         const callID = input.id ?? EventV2.ID.create()
-        const existing = (yield* result.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).find(
-          (message): message is SessionMessage.Shell => message.type === "shell" && message.callID === callID,
-        )
-        if (existing?.time.completed) return
-        if (existing) return yield* new OperationUnavailableError({ operation: "shell" })
-        yield* events.publish(
-          SessionEvent.Shell.Started,
-          {
-            sessionID: input.sessionID,
-            messageID: SessionMessage.ID.create(),
-            callID,
-            command: input.command,
-            timestamp: yield* DateTime.now,
-          },
-          { id: callID, location: session.location },
-        )
-        const output = yield* Effect.tryPromise({
-          try: async (signal) => {
-            const command =
-              process.platform === "win32"
-                ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", input.command]
-                : ["/bin/sh", "-lc", input.command]
-            const child = spawn(command[0]!, command.slice(1), {
-              cwd: session.location.directory,
-              signal,
-            })
-            const read = (stream: NodeJS.ReadableStream) =>
-              new Promise<string>((resolve, reject) => {
-                const chunks: Buffer[] = []
-                stream.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)))
-                stream.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
-                stream.once("error", reject)
+        return shellLocks.withLock(callID)(
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const session = yield* result.get(input.sessionID)
+              const existing = (yield* result.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).find(
+                (message): message is SessionMessage.Shell => message.type === "shell" && message.callID === callID,
+              )
+              if (existing && existing.command !== input.command)
+                return yield* new OperationUnavailableError({ operation: "shell" })
+              if (existing?.time.completed) return
+              if (existing) return yield* new OperationUnavailableError({ operation: "shell" })
+              const shell = { controller: new AbortController(), done: Deferred.makeUnsafe<void>() }
+              const running = shells.get(input.sessionID) ?? new Set()
+              running.add(shell)
+              shells.set(input.sessionID, running)
+              const releaseShell = Effect.sync(() => {
+                running.delete(shell)
+                if (running.size === 0) shells.delete(input.sessionID)
+                Deferred.doneUnsafe(shell.done, Effect.void)
               })
-            const [stdout, stderr, exit] = await Promise.all([
-              read(child.stdout),
-              read(child.stderr),
-              new Promise<number>((resolve, reject) => {
-                child.once("error", reject)
-                child.once("close", (code) => resolve(code ?? -1))
-              }),
-            ])
-            return `${stdout}${stderr}${exit === 0 ? "" : `\nProcess exited with code ${exit}.`}`
-          },
-          catch: (error) => error,
-        }).pipe(
-          Effect.catch((error) => Effect.succeed(`Command failed: ${error instanceof Error ? error.message : error}`)),
+              yield* events
+                .publish(
+                  SessionEvent.Shell.Started,
+                  {
+                    sessionID: input.sessionID,
+                    messageID: SessionMessage.ID.create(),
+                    callID,
+                    command: input.command,
+                    timestamp: yield* DateTime.now,
+                  },
+                  { id: callID, location: session.location },
+                )
+                .pipe(Effect.onError(() => releaseShell))
+              let captured = ""
+              let truncated = false
+              const capture = ToolOutputStore.makeCapture(fs, path.join(global.data, ToolOutputStore.MANAGED_DIRECTORY))
+              yield* restore(
+                appProcess.run(AppProcess.shellCommand(input.command, session.location.directory), {
+                  combineOutput: true,
+                  signal: shell.controller.signal,
+                  maxOutputBytes: 1024 * 1024,
+                  timeout: "10 minutes",
+                  onChunk: capture.append,
+                  onOutput: (output, lost) =>
+                    Effect.sync(() => {
+                      captured = output.toString("utf8")
+                      truncated = lost
+                    }),
+                }),
+              ).pipe(
+                Effect.onExit((exit) => {
+                  const status = Exit.isSuccess(exit)
+                    ? exit.value.exitCode === 0
+                      ? ""
+                      : `Process exited with code ${exit.value.exitCode}.`
+                    : shell.controller.signal.aborted || Cause.hasInterrupts(exit.cause)
+                      ? "Command interrupted. Its effects may be partial; inspect the workspace before retrying."
+                      : `Command failed: ${Cause.pretty(exit.cause)}`
+                  return events.publish(
+                    SessionEvent.Shell.Ended,
+                    {
+                      sessionID: input.sessionID,
+                      callID,
+                      output: [
+                        captured,
+                        truncated ? "[output capture truncated at the in-memory safety limit]" : "",
+                        ...capture.paths().map((file) => `Command log: ${file}`),
+                        status,
+                      ]
+                        .filter(Boolean)
+                        .join("\n"),
+                      timestamp: DateTime.nowUnsafe(),
+                    },
+                    { location: session.location },
+                  )
+                }),
+                Effect.ensuring(releaseShell),
+                Effect.catchTag("AppProcessError", () => Effect.void),
+              )
+              if (!shell.controller.signal.aborted && input.resume !== false) yield* execution.wake(input.sessionID)
+            }),
+          ),
         )
-        yield* events.publish(
-          SessionEvent.Shell.Ended,
-          { sessionID: input.sessionID, callID, output, timestamp: yield* DateTime.now },
-          { location: session.location },
-        )
-        if (input.resume !== false) yield* execution.wake(input.sessionID)
       }),
       skill: Effect.fn("V2Session.skill")(function* () {
         return yield* new OperationUnavailableError({ operation: "skill" })
@@ -579,7 +629,33 @@ const layer = Layer.effect(
         yield* execution.resume(sessionID)
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
-        Effect.uninterruptible(execution.interrupt(sessionID)),
+        Effect.uninterruptible(
+          execution.interrupt(sessionID).pipe(
+            Effect.andThen(
+              Effect.all(
+                [
+                  interruptShells(sessionID),
+                  jobs.list().pipe(
+                    Effect.flatMap((items) =>
+                      Effect.forEach(
+                        items.filter(
+                          (job) =>
+                            job.type === "bash" && job.metadata?.sessionID === sessionID && job.status === "running",
+                        ),
+                        (job) => jobs.cancel(job.id),
+                        { discard: true },
+                      ),
+                    ),
+                  ),
+                ],
+                {
+                  concurrency: "unbounded",
+                  discard: true,
+                },
+              ),
+            ),
+          ),
+        ),
       ),
       turnDiff: Effect.fn("V2Session.turnDiff")(function* (input) {
         const session = yield* result.get(input.sessionID)
@@ -637,6 +713,10 @@ export const node = makeGlobalNode({
   layer: layer.pipe(Layer.orDie),
   deps: [
     Database.node,
+    AppProcess.node,
+    BackgroundJob.node,
+    FSUtil.node,
+    Global.node,
     EventV2.node,
     ProjectV2.node,
     SessionExecution.node,

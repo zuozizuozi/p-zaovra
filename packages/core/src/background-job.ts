@@ -292,7 +292,7 @@ export const make = Effect.gen(function* () {
   const wait: Interface["wait"] = Effect.fn("BackgroundJob.wait")(function* (input) {
     const job = (yield* SynchronizedRef.get(state.jobs)).get(input.id)
     if (!job) return { timedOut: false }
-    if (job.info.status !== "running") return { info: snapshot(job), timedOut: false }
+    if (yield* Deferred.isDone(job.done)) return { info: yield* Deferred.await(job.done), timedOut: false }
     if (input.timeout === undefined) return { info: yield* Deferred.await(job.done), timedOut: false }
     if (input.timeout <= 0) return { info: snapshot(job), timedOut: true }
     const info = yield* Deferred.await(job.done).pipe(Effect.timeoutOption(input.timeout))
@@ -334,28 +334,35 @@ export const make = Effect.gen(function* () {
     return result.info
   })
 
-  const cancel: Interface["cancel"] = Effect.fn("BackgroundJob.cancel")(function* (id) {
-    const completed_at = yield* Clock.currentTimeMillis
-    const result = yield* SynchronizedRef.modify(state.jobs, (jobs): readonly [FinishResult, Map<string, Active>] => {
-      const job = jobs.get(id)
-      if (!job) return [{}, jobs]
-      if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
-      const next = {
-        ...job,
-        onPromote: undefined,
-        pending: 0,
-        info: {
-          ...job.info,
-          status: "cancelled" as const,
-          completed_at,
-        },
-      }
-      return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]
-    })
-    if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
-    if (result.scope) yield* Scope.close(result.scope, Exit.void)
-    return result.info
-  })
+  const cancel: Interface["cancel"] = Effect.fn("BackgroundJob.cancel")((id) =>
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const completed_at = yield* Clock.currentTimeMillis
+        const result = yield* SynchronizedRef.modify(
+          state.jobs,
+          (jobs): readonly [FinishResult, Map<string, Active>] => {
+            const job = jobs.get(id)
+            if (!job) return [{}, jobs]
+            if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
+            const next = {
+              ...job,
+              onPromote: undefined,
+              pending: 0,
+              info: {
+                ...job.info,
+                status: "cancelled" as const,
+                completed_at,
+              },
+            }
+            return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]
+          },
+        )
+        if (result.scope) yield* Scope.close(result.scope, Exit.void)
+        if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
+        return (yield* wait({ id })).info
+      }),
+    ),
+  )
 
   return Service.of({ list, get, start, extend, wait, waitForPromotion, promote, cancel })
 })

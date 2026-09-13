@@ -6,6 +6,7 @@ import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
 import { ProjectAvatar } from "@zaovra-ai/ui/v2/project-avatar-v2"
 import { SessionProgressIndicatorV2 } from "@zaovra-ai/session-ui/v2/session-progress-indicator-v2"
 import { Show } from "solid-js"
+import { useLanguage } from "@/context/language"
 
 export function SessionTabAvatar(props: {
   project?: LocalProject
@@ -14,6 +15,7 @@ export function SessionTabAvatar(props: {
   server: ServerConnection.Key
   revealProjectOnHover?: boolean
 }) {
+  const language = useLanguage()
   const state = useSessionTabAvatarState(
     () => props.server,
     () => props.directory,
@@ -28,15 +30,22 @@ export function SessionTabAvatar(props: {
     />
   )
   return (
-    <Show when={state.loading()} fallback={projectAvatar()}>
-      <span class="relative block size-4 shrink-0">
-        <SessionProgressIndicatorV2
-          class={`absolute inset-0 ${props.revealProjectOnHover === false ? "" : "group-hover:invisible"}`}
-        />
-        <Show when={props.revealProjectOnHover !== false}>
-          <span class="invisible absolute inset-0 group-hover:visible">{projectAvatar()}</span>
-        </Show>
-      </span>
-    </Show>
+    <span
+      class="inline-flex shrink-0"
+      role="img"
+      aria-label={language.t(state.status())}
+      title={language.t(state.status())}
+    >
+      <Show when={state.loading()} fallback={projectAvatar()}>
+        <span class="relative block size-4 shrink-0">
+          <SessionProgressIndicatorV2
+            class={`absolute inset-0 ${props.revealProjectOnHover === false ? "" : "group-hover:invisible"}`}
+          />
+          <Show when={props.revealProjectOnHover !== false}>
+            <span class="invisible absolute inset-0 group-hover:visible">{projectAvatar()}</span>
+          </Show>
+        </span>
+      </Show>
+    </span>
   )
 }
