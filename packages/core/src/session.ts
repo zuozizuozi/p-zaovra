@@ -2,6 +2,8 @@ export * as SessionV2 from "./session"
 export * from "./session/schema"
 
 import { DateTime, Effect, Layer, Schema, Context, Stream, Cause, Exit, Deferred } from "effect"
+import { SessionOutcome } from "./session/outcome"
+import type { Info } from "@zaovra-ai/schema/session-outcome"
 import { ListAnchor } from "@zaovra-ai/schema/session"
 import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -111,7 +113,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ses
 export class OperationUnavailableError extends Schema.TaggedErrorClass<OperationUnavailableError>()(
   "Session.OperationUnavailableError",
   {
-    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "compact", "wait"]),
+    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "compact", "wait", "recover"]),
   },
 ) {}
 
@@ -127,6 +129,14 @@ export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
 
 export interface Interface {
+  readonly recover: (input: {
+    sessionID: SessionSchema.ID
+    messageID: string
+    action: "continue" | "retry" | "abandon"
+  }) => Effect.Effect<Info, Error>
+
+  readonly outcome: (sessionID: SessionSchema.ID) => Effect.Effect<Info, NotFoundError>
+
   readonly usage: (sessionID?: SessionSchema.ID) => Effect.Effect<SessionUsage.Summary>
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
@@ -307,6 +317,77 @@ const layer = Layer.effect(
         if (projected.type === "existing") return projected.session
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         return yield* result.get(sessionID).pipe(Effect.orDie)
+      }),
+      recover: Effect.fn("V2Session.recover")(function* (input) {
+        if (!execution.exclusive) return yield* new OperationUnavailableError({ operation: "recover" })
+        let completed: Exit.Exit<Info, Error> | undefined
+        yield* execution
+          .exclusive(
+            input.sessionID,
+            Effect.gen(function* () {
+              completed = yield* Effect.exit(
+                Effect.gen(function* () {
+                  yield* result.get(input.sessionID)
+                  const messages = yield* store.context(input.sessionID).pipe(Effect.orDie)
+                  const previous = SessionOutcome.derive(messages, false)
+                  if (
+                    previous.messageID !== input.messageID ||
+                    (previous.state !== "interrupted" && previous.state !== "failed") ||
+                    (yield* jobs.list()).some(
+                      (job) => job.status === "running" && job.metadata?.sessionID === input.sessionID,
+                    )
+                  )
+                    return yield* new OperationUnavailableError({ operation: "recover" })
+                  if (input.action === "abandon") {
+                    for (const pending of yield* SessionInput.pending(db, input.sessionID))
+                      yield* result.cancelInput({ sessionID: input.sessionID, messageID: pending.id })
+                    yield* result.update({ sessionID: input.sessionID, archived: true })
+                    return previous
+                  }
+                  const user = messages.findLast((message) => message.type === "user")
+                  if (!user) return yield* new OperationUnavailableError({ operation: "recover" })
+                  const prompt =
+                    input.action === "retry"
+                      ? Prompt.fromUserMessage(user)
+                      : Prompt.make({
+                          text: "Continue the existing task. The previous execution was interrupted or failed. Inspect its retained logs and current workspace before any side effect. Do not assume unfinished commands completed, and do not blindly repeat them.",
+                        })
+                  yield* result.prompt({ sessionID: input.sessionID, prompt, resume: false })
+                  return { ...previous, state: "running" as const, outcomeUnknown: previous.outcomeUnknown }
+                }),
+              )
+            }),
+          )
+          .pipe(Effect.orDie)
+        if (!completed) return yield* Effect.die("Recovery did not settle")
+        const outcome = yield* completed
+        if (input.action !== "abandon") yield* execution.wake(input.sessionID)
+        return outcome
+      }),
+      outcome: Effect.fn("V2Session.outcome")(function* (sessionID) {
+        const session = yield* store.get(sessionID)
+        if (!session) return yield* new NotFoundError({ sessionID })
+        const messages = yield* store.context(sessionID).pipe(Effect.orDie)
+        const active =
+          (yield* execution.active).has(sessionID) ||
+          (shells.get(sessionID)?.size ?? 0) > 0 ||
+          (yield* jobs.list()).some((job) => job.status === "running" && job.metadata?.sessionID === sessionID)
+        const preliminary = SessionOutcome.derive(messages, active)
+        if (active || !preliminary.checks.length) return preliminary
+        const snapshot = yield* Snapshot.Service.use((service) => service.capture()).pipe(
+          Effect.provide(locations.get(session.location)),
+        )
+        const current = yield* store.context(sessionID).pipe(Effect.orDie)
+        const running =
+          (yield* execution.active).has(sessionID) ||
+          (shells.get(sessionID)?.size ?? 0) > 0 ||
+          (yield* jobs.list()).some((job) => job.status === "running" && job.metadata?.sessionID === sessionID)
+        // A provider turn may settle while the workspace snapshot is being captured.
+        return SessionOutcome.derive(
+          current,
+          running,
+          JSON.stringify(current) === JSON.stringify(messages) ? snapshot : undefined,
+        )
       }),
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)

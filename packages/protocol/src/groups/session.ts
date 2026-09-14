@@ -1,3 +1,4 @@
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { SessionMessage } from "@zaovra-ai/schema/session-message"
 import { SessionInput } from "@zaovra-ai/schema/session-input"
 import { PromptInput } from "@zaovra-ai/schema/prompt-input"
@@ -150,11 +151,14 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
       HttpApiEndpoint.get("session.usage", "/api/usage", {
         query: Schema.Struct({ sessionID: Session.ID.pipe(Schema.optional) }),
         success: Schema.Struct({ data: SessionUsage.Summary }),
-      }).annotateMerge(OpenApi.annotations({
-        identifier: "v2.session.usage",
-        summary: "Recorded token usage",
-        description: "Usage recorded by this server, optionally limited to one conversation. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.",
-      })),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.usage",
+          summary: "Recorded token usage",
+          description:
+            "Usage recorded by this server, optionally limited to one conversation. Includes durable settlements after deletion or revert, excludes copied history. Monetary billing is unavailable.",
+        }),
+      ),
     )
     .add(
       HttpApiEndpoint.get("session.active", "/api/session/active", {
@@ -434,6 +438,35 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.events",
             summary: "Subscribe to session events",
             description: "Replay durable events after an aggregate sequence, then continue with new durable events.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.recover", "/api/session/:sessionID/recover", {
+        params: { sessionID: Session.ID },
+        payload: Schema.Struct({ messageID: Schema.String, action: Schema.Literals(["continue", "retry", "abandon"]) }),
+        success: Schema.Struct({ data: SessionOutcome.Info }),
+        error: [SessionNotFoundError, ConflictError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.recover",
+            summary: "Explicitly continue, retry or abandon interrupted work",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.outcome", "/api/session/:sessionID/outcome", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: SessionOutcome.Info }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.outcome",
+            summary: "Inspect execution and verification outcome",
           }),
         ),
     )

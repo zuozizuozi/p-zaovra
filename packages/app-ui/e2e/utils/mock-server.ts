@@ -198,6 +198,8 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
       return json(route, pageData.items, { "x-next-cursor": cursor })
     }
 
+    if (/^\/api\/session\/[^/]+\/outcome$/.test(path))
+      return json(route, { data: { state: "idle", outcomeUnknown: false, checks: [], missing: [] } })
     if (path === "/api/usage") {
       const totals = {
         input: 0,

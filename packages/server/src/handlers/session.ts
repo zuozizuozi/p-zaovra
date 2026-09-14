@@ -21,9 +21,12 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
     const session = yield* SessionV2.Service
 
     return handlers
-      .handle("session.usage", Effect.fn(function* (ctx) {
-        return { data: yield* session.usage(ctx.query.sessionID) }
-      }))
+      .handle(
+        "session.usage",
+        Effect.fn(function* (ctx) {
+          return { data: yield* session.usage(ctx.query.sessionID) }
+        }),
+      )
       .handle(
         "session.list",
         Effect.fn(function* (ctx) {
@@ -87,6 +90,37 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             data: Object.fromEntries(
               Array.from(yield* session.active, (sessionID) => [sessionID, { type: "running" as const }]),
             ),
+          }
+        }),
+      )
+      .handle(
+        "session.recover",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session
+              .recover({ sessionID: ctx.params.sessionID, ...ctx.payload })
+              .pipe(
+                Effect.mapError((error) =>
+                  error._tag === "Session.NotFoundError"
+                    ? new SessionNotFoundError({ sessionID: error.sessionID, message: error.message })
+                    : new ConflictError({ message: error.message }),
+                ),
+              ),
+          }
+        }),
+      )
+      .handle(
+        "session.outcome",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session
+              .outcome(ctx.params.sessionID)
+              .pipe(
+                Effect.catchTag(
+                  "Session.NotFoundError",
+                  (error) => new SessionNotFoundError({ sessionID: error.sessionID, message: error.message }),
+                ),
+              ),
           }
         }),
       )

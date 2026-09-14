@@ -63,6 +63,21 @@ import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
+// Context epoch assertions exclude the separately checked per-request baseline.
+function privilegedTexts(request: LLMRequest | undefined) {
+  if (!request) return
+  const parts = request.system.map((part) => part.text)
+  const identity = parts.find((part) => part.startsWith("Provider: "))
+  if (identity) {
+    expect(identity).toContain(`Provider: ${request.model.provider}; model: ${request.model.id}.`)
+    expect(identity).toContain("not proof of successful verification")
+  }
+  return parts.filter(
+    (part) =>
+      !part.startsWith("Provider: ") && !part.startsWith("You are a coding assistant. Inspect relevant context,"),
+  )
+}
+
 const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
 let responses: LLMEvent[][] | undefined
@@ -258,6 +273,8 @@ const execution = Layer.effect(
     })
     return SessionExecution.Service.of({
       active: coordinator.active,
+      exclusive: coordinator.exclusive,
+      wait: coordinator.wait,
       resume: coordinator.run,
       wake: coordinator.wake,
       interrupt: coordinator.interrupt,
@@ -943,10 +960,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
-        ["Initial context"],
-        ["Initial context"],
-      ])
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([["Initial context"], ["Initial context"]])
       expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "user", "system"])
       expect(requests[1]?.messages.at(-1)?.content).toEqual([{ type: "text", text: "Changed context" }])
       expect(yield* session.messages({ sessionID })).toHaveLength(3)
@@ -981,7 +995,7 @@ describe("SessionRunnerLLM", () => {
       response = fragmentFixture("text", "text-build", ["Done"]).completeEvents
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Build agent instructions", "Initial context"])
+      expect(privilegedTexts(requests.at(-1))).toEqual(["Build agent instructions", "Initial context"])
     }),
   )
 
@@ -1007,7 +1021,7 @@ describe("SessionRunnerLLM", () => {
       response = fragmentFixture("text", "text-reviewer", ["Done"]).completeEvents
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Reviewer instructions", "Initial context"])
+      expect(privilegedTexts(requests.at(-1))).toEqual(["Reviewer instructions", "Initial context"])
       expect((yield* session.messages({ sessionID }))[0]).toMatchObject({ type: "assistant", agent: "reviewer" })
     }),
   )
@@ -1036,7 +1050,7 @@ describe("SessionRunnerLLM", () => {
       response = fragmentFixture("text", "text-selected", ["Done"]).completeEvents
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Reviewer instructions", "Initial context"])
+      expect(privilegedTexts(requests.at(-1))).toEqual(["Reviewer instructions", "Initial context"])
       expect((yield* session.messages({ sessionID }))[0]).toMatchObject({ type: "assistant", agent: "reviewer" })
     }),
   )
@@ -1062,7 +1076,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([
         ["Initial context\n\nBuild skills"],
         ["Initial context\n\nBuild skills"],
       ])
@@ -1096,9 +1110,7 @@ describe("SessionRunnerLLM", () => {
       response = []
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
-        ["Initial context\n\nBuild skills"],
-      ])
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([["Initial context\n\nBuild skills"]])
     }),
   )
 
@@ -1126,7 +1138,7 @@ describe("SessionRunnerLLM", () => {
       response = []
       yield* session.resume(sessionID)
       expect(requests.map((request) => request.model)).toEqual([model])
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([["Initial context"]])
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([["Initial context"]])
     }),
   )
 
@@ -1174,7 +1186,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([
         ["Initial context"],
         ["Initial context"],
         ["Initial context"],
@@ -1220,7 +1232,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([
         ["Initial context"],
         ["Initial context"],
         ["Initial context"],
@@ -1257,7 +1269,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([
         ["Initial context"],
         ["Replacement context"],
       ])
@@ -1501,7 +1513,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Initial context"])
+      expect(privilegedTexts(requests.at(-1))).toEqual(["Initial context"])
       expect(systemTexts(requests.at(-1)!)).toContain("Changed context")
     }),
   )
@@ -1699,10 +1711,7 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(run)
 
       expect(requests.map((request) => request.model)).toEqual([model, replacementModel])
-      expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
-        ["Initial context"],
-        ["Initial context"],
-      ])
+      expect(requests.map((request) => privilegedTexts(request))).toEqual([["Initial context"], ["Initial context"]])
       expect(systemTexts(requests[1]!)).toContain("Replacement context")
     }),
   )
@@ -2395,6 +2404,55 @@ describe("SessionRunnerLLM", () => {
       expect(userTexts(requests[1]!)).toEqual(["Start working", "Recover with this"])
     }),
   )
+
+  for (const action of ["continue", "retry", "abandon"] as const) {
+    it.effect(`requires explicit ${action} for an unfinished durable turn`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        requests.length = 0
+        const session = yield* SessionV2.Service
+        const events = yield* EventV2.Service
+        const database = yield* Database.Service
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Original unfinished request" }),
+          resume: false,
+        })
+        yield* SessionInput.promoteSteers(database.db, events, sessionID, Number.MAX_SAFE_INTEGER)
+        const assistantMessageID = SessionMessage.ID.create()
+        yield* events.publish(SessionEvent.Step.Started, {
+          sessionID,
+          assistantMessageID,
+          timestamp: yield* DateTime.now,
+          agent: "build",
+          model: { id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") },
+        })
+        expect(yield* session.outcome(sessionID)).toMatchObject({
+          state: "interrupted",
+          outcomeUnknown: true,
+          messageID: assistantMessageID,
+        })
+        expect(requests).toHaveLength(0)
+        expect(Exit.isFailure(yield* Effect.exit(session.recover({ sessionID, messageID: "stale", action })))).toBe(
+          true,
+        )
+        response = fragmentFixture("text", "recovered-answer", ["Recovered safely"]).completeEvents
+        yield* session.recover({ sessionID, messageID: assistantMessageID, action })
+        if (action === "abandon") {
+          expect(requests).toHaveLength(0)
+          expect((yield* session.get(sessionID)).time.archived).toBeDefined()
+          return
+        }
+        yield* session.wait(sessionID)
+        expect(requests).toHaveLength(1)
+        const texts = userTexts(requests[0])
+        expect(texts.at(-1)).toContain(
+          action === "retry" ? "Original unfinished request" : "Do not assume unfinished commands completed",
+        )
+        expect((yield* session.outcome(sessionID)).state).toBe("completed_unverified")
+      }),
+    )
+  }
 
   it.effect("durably fails local tools left running by a prior process before continuing", () =>
     Effect.gen(function* () {

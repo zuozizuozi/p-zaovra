@@ -30,6 +30,7 @@ const layer = Layer.effect(
 
     return SessionExecution.Service.of({
       active: coordinator.active,
+      exclusive: coordinator.exclusive,
       interrupt: coordinator.interrupt,
       resume: coordinator.run,
       wait: coordinator.wait,

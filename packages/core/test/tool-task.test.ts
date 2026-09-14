@@ -133,7 +133,7 @@ describe("TaskTool", () => {
           { description: "Inspect code", prompt: "Find the state machine", subagent_type: "explore" },
           { sessionID: parentID, ...toolIdentity, toolCallID: "call-task" },
         ),
-      ).toEqual({ task_id: childID, content: "The state machine is durable." })
+      ).toEqual({ task_id: childID, content: "The state machine is durable.", outcome: "completed_unverified" })
       expect(creates).toMatchObject([{ id: "ses_task_ses_task_parent_msg_tool_test_call-task" }])
       expect(prompts).toEqual([
         {

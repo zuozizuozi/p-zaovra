@@ -253,6 +253,8 @@ import type {
   V2SessionMessageResponses,
   V2SessionMessagesErrors,
   V2SessionMessagesResponses,
+  V2SessionOutcomeErrors,
+  V2SessionOutcomeResponses,
   V2SessionPendingInputsErrors,
   V2SessionPendingInputsResponses,
   V2SessionPermissionCreateErrors,
@@ -271,6 +273,8 @@ import type {
   V2SessionQuestionRejectResponses,
   V2SessionQuestionReplyErrors,
   V2SessionQuestionReplyResponses,
+  V2SessionRecoverErrors,
+  V2SessionRecoverResponses,
   V2SessionRemoveErrors,
   V2SessionRemoveResponses,
   V2SessionRevertClearErrors,
@@ -4020,6 +4024,58 @@ export class Session extends HeyApiClient {
     )
     return (options?.client ?? this.client).sse.get<V2SessionEventsResponses, V2SessionEventsErrors, ThrowOnError>({
       url: "/api/session/{sessionID}/event",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Explicitly continue, retry or abandon interrupted work
+   */
+  public recover<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID?: string
+      action?: "continue" | "retry" | "abandon"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "body", key: "messageID" },
+            { in: "body", key: "action" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2SessionRecoverResponses, V2SessionRecoverErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/recover",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Inspect execution and verification outcome
+   */
+  public outcome<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionOutcomeResponses, V2SessionOutcomeErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/outcome",
       ...options,
       ...params,
     })

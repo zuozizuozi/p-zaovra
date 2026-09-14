@@ -63,14 +63,39 @@ export type Interface = ChildProcessSpawner["Service"] & {
 export class Service extends Context.Service<Service, Interface>()("@zaovra/AppProcess") {}
 
 /** Shared shell process lifecycle; callers retain their own authorization and output policy. */
-export const shellCommand = (command: string, cwd: string, shell?: string) =>
-  ChildProcess.make(command, [], {
+export const shellCommand = (command: string, cwd: string, shell?: string) => {
+  const executable = shell ?? (process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh")
+  const powershell = /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable)
+  if (powershell) {
+    // EncodedCommand avoids the second quoting/parser pass through cmd.exe.
+    const script = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $global:LASTEXITCODE = 0; & {
+${command}
+}; if (-not $?) { if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; exit 1 }; exit $LASTEXITCODE`
+    return ChildProcess.make(
+      executable,
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        cwd,
+        stdin: "ignore",
+        detached: process.platform !== "win32",
+        forceKillAfter: Duration.seconds(3),
+      },
+    )
+  }
+  return ChildProcess.make(command, [], {
     cwd,
-    shell: shell ?? (process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh"),
+    shell: executable,
     stdin: "ignore",
     detached: process.platform !== "win32",
     forceKillAfter: Duration.seconds(3),
   })
+}
 
 export const requireSuccess = (result: RunResult): Effect.Effect<RunResult, AppProcessError> =>
   result.exitCode === 0

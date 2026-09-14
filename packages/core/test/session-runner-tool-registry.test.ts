@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import { Evidence } from "@zaovra-ai/core/evidence"
 import { Tool } from "@zaovra-ai/core/tool/tool"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -30,11 +31,18 @@ const outputStore = Layer.mock(ToolOutputStore.Service, {
     )
   },
 })
-const registryLayer = AppNodeBuilder.build(ToolRegistry.node, [[ToolOutputStore.node, outputStore]])
+const evidence = Layer.mock(Evidence.Service, {
+  retain: (_session, _call, files) => Effect.succeed(files.map(() => "ev_test")),
+})
+const registryLayer = AppNodeBuilder.build(ToolRegistry.node, [
+  [ToolOutputStore.node, outputStore],
+  [Evidence.node, evidence],
+])
 const it = testEffect(registryLayer)
 const integrated = testEffect(
   AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node]), [
     [ToolOutputStore.node, outputStore],
+    [Evidence.node, evidence],
   ]),
 )
 const identity = {

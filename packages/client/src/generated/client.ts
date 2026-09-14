@@ -45,6 +45,10 @@ import type {
   SessionsHistoryOutput,
   SessionsEventsInput,
   SessionsEventsOutput,
+  SessionsRecoverInput,
+  SessionsRecoverOutput,
+  SessionsOutcomeInput,
+  SessionsOutcomeOutput,
   SessionsInterruptInput,
   SessionsInterruptOutput,
   SessionsMessageInput,
@@ -590,6 +594,29 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      recover: (input: SessionsRecoverInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsRecoverOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/recover`,
+            body: { messageID: input["messageID"], action: input["action"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      outcome: (input: SessionsOutcomeInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsOutcomeOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/outcome`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       interrupt: (input: SessionsInterruptInput, requestOptions?: RequestOptions) =>
         request<SessionsInterruptOutput>(
           {

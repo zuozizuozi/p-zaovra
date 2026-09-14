@@ -8,6 +8,7 @@ import * as OpenAIResponses from "@zaovra-ai/llm/protocols/openai-responses"
 import { Auth, type AnyRoute } from "@zaovra-ai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
+import { AgentV2 } from "../../agent"
 import { Catalog } from "../../catalog"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
@@ -183,9 +184,12 @@ export const locationLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
+    const agents = yield* AgentV2.Service
     const integrations = yield* Integration.Service
     return Service.of({
-      resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
+      resolve: Effect.fn("SessionRunnerModel.resolve")(function* (input) {
+        const agent = yield* agents.resolve(input.agent)
+        const session = input.model || !agent?.model ? input : { ...input, model: agent.model }
         // Location plugins populate and filter the catalog asynchronously during layer startup.
         const defaultModel = session.model ? undefined : yield* catalog.model.default()
         const selected = session.model
@@ -205,9 +209,15 @@ export const locationLayer = Layer.effect(
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
         )
+        const configured = agent
+          ? produce(selected, (draft) => {
+              Object.assign(draft.request.headers, agent.request.headers)
+              Object.assign(draft.request.body, agent.request.body)
+            })
+          : selected
         return yield* resolve(
           session,
-          selected,
+          configured,
           connection ? yield* integrations.connection.resolve(connection) : undefined,
         )
       }),
@@ -215,4 +225,8 @@ export const locationLayer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer: locationLayer, deps: [Catalog.node, Integration.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer: locationLayer,
+  deps: [Catalog.node, Integration.node, AgentV2.node],
+})

@@ -3,6 +3,8 @@ export * as BashTool from "./bash"
 import path from "path"
 import { ToolFailure } from "@zaovra-ai/llm"
 import { DateTime, Duration, Effect, Layer, Schema, Option } from "effect"
+import { Snapshot } from "../snapshot"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { ToolOutputStore } from "../tool-output-store"
 import { Config } from "../config"
 import { EventV2 } from "../event"
@@ -27,6 +29,10 @@ export const Input = Schema.Struct({
   run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
     description: "Start a bounded background command; use bash_job to inspect, wait, or cancel it.",
   }),
+  verification: Schema.optional(SessionOutcome.Check.fields.kind).annotate({
+    description:
+      "Declare a build/test/lint/typecheck command. The host records its actual exit and workspace snapshot; this is not a claim that acceptance criteria passed.",
+  }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
   workdir: Schema.String.pipe(Schema.optional).annotate({
     description: "Working directory. Defaults to the active Location; relative paths resolve from that Location.",
@@ -39,6 +45,7 @@ export const Input = Schema.Struct({
 })
 
 const StructuredOutput = Schema.Struct({
+  verification: Schema.optional(SessionOutcome.Check),
   job_id: Schema.String.pipe(Schema.optional),
   exit: Schema.Number.pipe(Schema.optional),
   truncated: Schema.Boolean,
@@ -75,7 +82,7 @@ const isTimeout = (error: AppProcess.AppProcessError) =>
 // TODO: Port tree-sitter bash / PowerShell parser-based approval reduction.
 // TODO: Port BashArity reusable command-prefix approvals.
 // TODO: Replace token-based command-argument external-directory advisories with parser-based detection.
-// TODO: Restore PowerShell and cmd-specific invocation/path handling on Windows.
+// Shell invocation is centralized in AppProcess.shellCommand; preserve its argument boundary.
 // TODO: Add plugin shell.env environment augmentation once V2 plugin hooks exist.
 // TODO: Persist background job status and define restart recovery before exposing remote observation.
 // TODO: Add HTTP background-job observation only after durable status, restart recovery, and authorization are defined.
@@ -103,6 +110,7 @@ const externalCommandDirectories = Effect.fn("BashTool.externalCommandDirectorie
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
+    const snapshots = yield* Snapshot.Service
     const mutation = yield* LocationMutation.Service
     const fs = yield* FSUtil.Service
     const appProcess = yield* AppProcess.Service
@@ -119,6 +127,7 @@ const layer = Layer.effectDiscard(
           output: Output,
           structured: StructuredOutput,
           toStructuredOutput: ({ output }) => ({
+            ...(output.verification ? { verification: output.verification } : {}),
             truncated: output.truncated,
             ...(output.job_id ? { job_id: output.job_id } : {}),
             ...(output.exit === undefined ? {} : { exit: output.exit }),
@@ -168,7 +177,15 @@ const layer = Layer.effectDiscard(
               const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
               let lastProgress = Number.NEGATIVE_INFINITY
               const capture = Option.getOrUndefined(yield* Effect.serviceOption(ToolOutputStore.Capture))
+              const inferred = input.command.match(
+                /^(?:bun|npm|pnpm|yarn)(?: run)? (build|test|lint|typecheck)(?:\s+[^;&|<>]*)?$/,
+              )?.[1]
+              const verification =
+                input.verification ?? (inferred as "build" | "test" | "lint" | "typecheck" | undefined)
+              if (verification && input.run_in_background)
+                return yield* Effect.fail(new Error("Verification must run in the foreground to record its result"))
               const run = Effect.gen(function* () {
+                const before = verification ? yield* snapshots.capture() : undefined
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
@@ -206,6 +223,16 @@ const layer = Layer.effectDiscard(
                     output: `${result.output || "(no output)"}${result.outputTruncated ? "\n[in-memory preview truncated; consult the command log for captured bytes]" : ""}\nCommand exceeded timeout of ${timeout} ms. Inspect the output before deciding whether to change the command or allow more time.`,
                     truncated: result.outputTruncated === true,
                     timeout: true,
+                    ...(verification
+                      ? {
+                          verification: {
+                            kind: verification,
+                            command: input.command,
+                            exit: -1,
+                            callID: context.toolCallID,
+                          },
+                        }
+                      : {}),
                     ...(warnings.length ? { warnings } : {}),
                   }
                 }
@@ -215,6 +242,17 @@ const layer = Layer.effectDiscard(
                   ? "[in-memory preview truncated; consult the command log for captured bytes]"
                   : undefined
                 return {
+                  ...(verification
+                    ? {
+                        verification: {
+                          kind: verification,
+                          command: input.command,
+                          exit: result.exitCode,
+                          callID: context.toolCallID,
+                          snapshot: before && before === (yield* snapshots.capture()) ? before : undefined,
+                        },
+                      }
+                    : {}),
                   exit: result.exitCode,
                   output: notice ? `${output}\n\n${notice}` : output,
                   truncated: result.outputTruncated === true,
@@ -255,6 +293,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     ToolRegistry.node,
+    Snapshot.node,
     BashJob.node,
     LocationMutation.node,
     FSUtil.node,

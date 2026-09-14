@@ -6246,6 +6246,22 @@ export type SessionNextRevertCommitted = {
   }
 }
 
+export type SessionOutcomeCheck = {
+  kind: "build" | "test" | "lint" | "typecheck"
+  command: string
+  exit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  snapshot?: string
+  callID: string
+}
+
+export type SessionOutcomeInfo = {
+  state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
+  outcomeUnknown: boolean
+  checks: Array<SessionOutcomeCheck>
+  missing: Array<string>
+  messageID?: string
+}
+
 export type WorkProjectMemoryCandidate = {
   handoffID: string
   goalID: string
@@ -13268,6 +13284,87 @@ export type V2SessionEventsResponses = {
 }
 
 export type V2SessionEventsResponse = V2SessionEventsResponses[keyof V2SessionEventsResponses]
+
+export type V2SessionRecoverData = {
+  body: {
+    messageID: string
+    action: "continue" | "retry" | "abandon"
+  }
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/recover"
+}
+
+export type V2SessionRecoverErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2SessionRecoverError = V2SessionRecoverErrors[keyof V2SessionRecoverErrors]
+
+export type V2SessionRecoverResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOutcomeInfo
+  }
+}
+
+export type V2SessionRecoverResponse = V2SessionRecoverResponses[keyof V2SessionRecoverResponses]
+
+export type V2SessionOutcomeData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/outcome"
+}
+
+export type V2SessionOutcomeErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionOutcomeError = V2SessionOutcomeErrors[keyof V2SessionOutcomeErrors]
+
+export type V2SessionOutcomeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOutcomeInfo
+  }
+}
+
+export type V2SessionOutcomeResponse = V2SessionOutcomeResponses[keyof V2SessionOutcomeResponses]
 
 export type V2SessionInterruptData = {
   body?: never

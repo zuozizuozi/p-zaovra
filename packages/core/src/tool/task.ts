@@ -43,6 +43,7 @@ export const Input = Schema.Struct({
 })
 
 export const Output = Schema.Struct({
+  outcome: Schema.String.pipe(Schema.optional),
   task_id: SessionV2.ID,
   content: Schema.String,
 })
@@ -52,6 +53,7 @@ export type Status = typeof Status.Type
 
 export const StatusInput = Schema.Struct({ task_id: SessionV2.ID })
 export const StatusOutput = Schema.Struct({
+  outcome: Schema.String.pipe(Schema.optional),
   task_id: SessionV2.ID,
   status: Status,
   content: Schema.String.pipe(Schema.optional),
@@ -75,7 +77,7 @@ const layer = Layer.effectDiscard(
               type: "text",
               text: input.run_in_background
                 ? `Subagent @${input.subagent_type} started in background. task_id=${output.task_id}\n\n${output.content}`
-                : `Subagent @${input.subagent_type} completed. task_id=${output.task_id}\n\n${output.content}`,
+                : `Subagent @${input.subagent_type} execution ended (${output.outcome ?? "completed_unverified"}). task_id=${output.task_id}\n\n${output.content}`,
             },
           ],
           execute: (input, context) =>
@@ -149,7 +151,8 @@ const layer = Layer.effectDiscard(
 type SessionOps = Pick<
   SessionV2.Interface,
   "list" | "get" | "create" | "prompt" | "pending" | "resume" | "interrupt" | "active" | "messages"
->
+> &
+  Partial<Pick<SessionV2.Interface, "outcome">>
 
 export const run = Effect.fn("TaskTool.execute")(function* (
   sessions: SessionOps,
@@ -234,7 +237,10 @@ export const run = Effect.fn("TaskTool.execute")(function* (
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n")
-  return { task_id: child.id, content: content || "Subagent completed without a textual response." }
+  const outcome = sessions.outcome
+    ? (yield* sessions.outcome(child.id).pipe(Effect.mapError((error) => failure(error.message)))).state
+    : "completed_unverified"
+  return { task_id: child.id, outcome, content: content || "Subagent completed without a textual response." }
 })
 
 export const status = Effect.fn("TaskTool.status")(function* (
@@ -303,10 +309,13 @@ const inspect = Effect.fnUntraced(function* (sessions: SessionOps, child: Sessio
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n")
+  const outcome = sessions.outcome
+    ? (yield* sessions.outcome(child.id).pipe(Effect.mapError((error) => failure(error.message)))).state
+    : "completed_unverified"
   return latest.error
     ? { task_id: child.id, status: "failed" as const, content: latest.error.message }
     : latest.time.completed && latest.finish === "stop"
-      ? { task_id: child.id, status: "completed" as const, ...(content ? { content } : {}) }
+      ? { task_id: child.id, status: "completed" as const, outcome, ...(content ? { content } : {}) }
       : {
           task_id: child.id,
           status: "unknown" as const,

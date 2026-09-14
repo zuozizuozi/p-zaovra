@@ -3,6 +3,21 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.outcome.unavailable": "暂时无法检查结果，验证状态未知。",
+  "session.outcome.idle": "尚未开始",
+  "session.outcome.running": "执行中",
+  "session.outcome.completed_verified": "执行结束 · 当前代码快照的构建、测试与 lint 已通过",
+  "session.outcome.completed_unverified": "执行结束 · 尚未完成验证",
+  "session.outcome.failed": "执行或验证失败",
+  "session.outcome.interrupted": "执行已中断",
+  "session.outcome.unknown": "部分操作没有结束记录，请先检查日志与工作区，再决定是否重复执行。",
+  "session.outcome.checks": "查看验证记录",
+  "session.outcome.missing": "尚未通过或已失效：",
+  "session.outcome.continue": "核对现场后继续",
+  "session.outcome.retry": "重新执行原请求",
+  "session.outcome.abandon": "放弃并归档",
+  "session.outcome.abandoned": "已放弃 · 已产生的修改没有回滚",
+  "session.outcome.refresh": "刷新验证状态",
   "session.review.loadFailed": "改动加载失败，请重试以查看当前改动。",
   "session.review.retry": "重试",
   "session.review.noFilterMatches": "没有符合筛选条件的改动文件。",

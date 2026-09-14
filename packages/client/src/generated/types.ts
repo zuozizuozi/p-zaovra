@@ -2081,6 +2081,46 @@ export type SessionsEventsOutput =
       readonly data: { readonly timestamp: number; readonly sessionID: string; readonly messageID: string }
     }
 
+export type SessionsRecoverInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly messageID: { readonly messageID: string; readonly action: "continue" | "retry" | "abandon" }["messageID"]
+  readonly action: { readonly messageID: string; readonly action: "continue" | "retry" | "abandon" }["action"]
+}
+
+export type SessionsRecoverOutput = {
+  readonly data: {
+    readonly state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
+    readonly outcomeUnknown: boolean
+    readonly checks: ReadonlyArray<{
+      readonly kind: "build" | "test" | "lint" | "typecheck"
+      readonly command: string
+      readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+      readonly snapshot?: string
+      readonly callID: string
+    }>
+    readonly missing: ReadonlyArray<string>
+    readonly messageID?: string
+  }
+}["data"]
+
+export type SessionsOutcomeInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsOutcomeOutput = {
+  readonly data: {
+    readonly state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
+    readonly outcomeUnknown: boolean
+    readonly checks: ReadonlyArray<{
+      readonly kind: "build" | "test" | "lint" | "typecheck"
+      readonly command: string
+      readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+      readonly snapshot?: string
+      readonly callID: string
+    }>
+    readonly missing: ReadonlyArray<string>
+    readonly messageID?: string
+  }
+}["data"]
+
 export type SessionsInterruptInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionsInterruptOutput = void

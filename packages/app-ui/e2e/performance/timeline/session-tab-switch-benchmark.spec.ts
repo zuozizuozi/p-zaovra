@@ -13,6 +13,38 @@ import { measureSessionSwitch, waitForStableTimeline } from "./session-tab-switc
 
 type Result = Awaited<ReturnType<typeof measureSessionSwitch>>
 
+benchmark("renders a cold destination while its outcome request is pending", async ({ page, report }) => {
+  await mockStressTimeline(page)
+  await installTimelineSettings(page)
+  await installStressSessionTabs(page)
+  const response = Promise.withResolvers<void>()
+  const requested = Promise.withResolvers<void>()
+  await page.route(`**/api/session/${fixture.targetID}/outcome*`, async (route) => {
+    requested.resolve()
+    await response.promise
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ data: { state: "completed_unverified", outcomeUnknown: false, checks: [], missing: [] } }),
+    })
+  })
+  try {
+    await page.goto(stressSessionHref(fixture.sourceID))
+    await expectSessionTitle(page, fixture.expected.sourceTitle)
+    await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
+    await page
+      .locator(`[data-slot="titlebar-tabs"] a[href="${stressSessionHref(fixture.targetID)}"]`)
+      .first()
+      .click()
+    await requested.promise
+    await expectSessionTitle(page, fixture.expected.targetTitle)
+    await waitForStableTimeline(page, fixture.expected.targetMessageIDs.at(-1)!)
+  } finally {
+    response.resolve()
+  }
+  await expect(page.getByText("Finished — verification incomplete", { exact: true })).toBeVisible()
+  report({ renderedBeforeOutcomeResponse: true, outcomeRenderedAfterResponse: true })
+})
+
 benchmark("benchmarks cold and hot session tab switching", async ({ browser, report }, testInfo) => {
   benchmark.setTimeout(180_000)
   const results = { cold: [] as Result[], hot: [] as Result[] }
@@ -49,7 +81,14 @@ benchmark(
         }
       }
     }
-    report({ results, summary: summarizeReviewPane(results) }, { runs, reviewDiffs: createReviewDiffs().length })
+    report(
+      { results, summary: summarizeReviewPane(results) },
+      {
+        runs,
+        reviewDiffs: createReviewDiffs().length,
+        outcomeDelayMs: Number(process.env.SESSION_OUTCOME_DELAY_MS ?? 0),
+      },
+    )
   },
 )
 
@@ -60,6 +99,15 @@ async function trial(
 ) {
   const reviewDiffs = options?.newLayoutDesigns ? createReviewDiffs() : undefined
   await mockStressTimeline(page, { vcsDiff: reviewDiffs })
+  const outcomeDelay = Number(process.env.SESSION_OUTCOME_DELAY_MS ?? 0)
+  if (outcomeDelay > 0)
+    await page.route("**/api/session/*/outcome*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, outcomeDelay))
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ data: { state: "idle", outcomeUnknown: false, checks: [], missing: [] } }),
+      })
+    })
   if (options?.newLayoutDesigns) await installTimelineSettings(page)
   await installStressSessionTabs(page)
   if (mode === "hot") {

@@ -1,15 +1,13 @@
-import { Show, type JSX } from "solid-js"
+import { Show, Suspense, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
+import { SessionOutcomeDock } from "./session-outcome-dock"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
-import { useServerSync } from "@/context/server-sync"
-import { useParams } from "@solidjs/router"
-import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 
 export function SessionComposerRegion(props: {
   controller: SessionComposerRegionController
@@ -18,10 +16,6 @@ export function SessionComposerRegion(props: {
   const language = useLanguage()
   const controller = props.controller
   const settings = useSettings()
-  const sync = useServerSync()
-  const params = useParams()
-  const unfinished = () =>
-    hasUnfinishedShell(sync().session.data.message[params.id ?? ""] ?? [], sync().session.data.part)
   const rolled = () => {
     const revert = controller.revert()
     return revert?.items.length ? revert : undefined
@@ -43,11 +37,10 @@ export function SessionComposerRegion(props: {
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": controller.centered(),
         }}
       >
-        <Show when={unfinished()}>
-          <div role="status" class="px-1 py-2 text-12-regular text-text-weak">
-            {language.t("session.activity.shellHint")}
-          </div>
-        </Show>
+        {/* Outcome reads suspend on a cold query; keep that wait local to this optional status. */}
+        <Suspense>
+          <SessionOutcomeDock />
+        </Suspense>
         <Show when={controller.state.questionRequest()} keyed>
           {(request) => (
             <div>

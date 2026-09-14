@@ -2,6 +2,7 @@ export * as ToolRegistry from "./registry"
 
 import { ToolOutput, type ToolCall, type ToolDefinition, type ToolResultValue } from "@zaovra-ai/llm"
 import { Context, Effect, Layer, Scope } from "effect"
+import { Evidence } from "../evidence"
 import { AgentV2 } from "../agent"
 import { PermissionV2 } from "../permission"
 import { SessionMessage } from "../session/message"
@@ -44,6 +45,7 @@ const registryLayer = Layer.effect(
   Effect.gen(function* () {
     const applications = yield* ApplicationTools.Service
     const resources = yield* ToolOutputStore.Service
+    const evidence = yield* Evidence.Service
     type Registration = { readonly identity: object; readonly tool: AnyTool }
     const local = new Map<string, Array<{ readonly token: object; readonly registration: Registration }>>()
 
@@ -72,16 +74,20 @@ const registryLayer = Layer.effect(
           Effect.succeed({ result: { type: "error" as const, value: failure.message } }),
         ),
       )
-      if ("result" in pending)
-        return capture.paths().length === 0
+      if ("result" in pending) {
+        const ids = yield* evidence
+          .retain(input.sessionID, input.call.id, capture.paths())
+          .pipe(Effect.mapError((cause) => new ToolOutputStore.StorageError({ operation: "write", cause })))
+        return ids.length === 0
           ? pending
           : {
               result: {
                 ...pending.result,
-                value: `${pending.result.value}\nCommand log: ${capture.paths().join(", ")}`,
+                value: `${pending.result.value}\nEvidence: ${ids.join(", ")} (use evidence_read or evidence_search)`,
               },
               outputPaths: capture.paths(),
             }
+      }
       const output =
         capture.paths().length === 0
           ? pending.output
@@ -94,11 +100,36 @@ const registryLayer = Layer.effect(
             }
       const bounded = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
       const outputPaths = [...capture.paths(), ...bounded.outputPaths]
-      const result = ToolOutput.toResultValue(bounded.output)
+      const ids = yield* evidence
+        .retain(
+          input.sessionID,
+          input.call.id,
+          outputPaths,
+          pending.output.structured !== null &&
+            typeof pending.output.structured === "object" &&
+            "job_id" in pending.output.structured &&
+            typeof pending.output.structured.job_id === "string"
+            ? pending.output.structured.job_id
+            : undefined,
+        )
+        .pipe(Effect.mapError((cause) => new ToolOutputStore.StorageError({ operation: "write", cause })))
+      const retained = {
+        ...bounded.output,
+        content: bounded.output.content.map((part) =>
+          part.type !== "text"
+            ? part
+            : {
+                ...part,
+                text: outputPaths.reduce(
+                  (text, file, index) => text.replaceAll(file, `${ids[index]} (evidence_read / evidence_search)`),
+                  part.text,
+                ),
+              },
+        ),
+      }
+      const result = ToolOutput.toResultValue(retained)
       if (result.type === "error") return outputPaths.length > 0 ? { result, outputPaths } : { result }
-      return outputPaths.length > 0
-        ? { result, output: bounded.output, outputPaths }
-        : { result, output: bounded.output }
+      return outputPaths.length > 0 ? { result, output: retained, outputPaths } : { result, output: retained }
     })
 
     return Service.of({
@@ -157,11 +188,11 @@ function whollyDisabled(action: string, rules: PermissionV2.Ruleset) {
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [ApplicationTools.node, ToolOutputStore.node],
+  deps: [ApplicationTools.node, ToolOutputStore.node, Evidence.node],
 })
 
 export const toolsNode = makeLocationNode({
   service: Tools.Service,
   layer,
-  deps: [ApplicationTools.node, ToolOutputStore.node],
+  deps: [ApplicationTools.node, ToolOutputStore.node, Evidence.node],
 })

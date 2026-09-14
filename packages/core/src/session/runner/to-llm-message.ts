@@ -13,7 +13,7 @@ import { Buffer } from "node:buffer"
 
 const media = (file: FileAttachment): ContentPart => {
   const data = file.uri.match(/^data:([^;,]+)(;base64)?,(.*)$/s)
-  if (file.mime.startsWith("text/") && data) {
+  if ((file.mime.startsWith("text/") || /^(application\/(json|xml|javascript|x-yaml))$/.test(file.mime)) && data) {
     const text = data[2] ? Buffer.from(data[3], "base64").toString("utf8") : decodeURIComponent(data[3])
     return {
       type: "text",

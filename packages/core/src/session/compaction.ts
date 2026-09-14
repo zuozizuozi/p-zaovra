@@ -216,7 +216,12 @@ export const make = (dependencies: Dependencies) => {
     const selected = select(input.entries, config.tokens)
     if (!selected || (!selected.head && !input.entries.some((entry) => entry.message.type === "compaction")))
       return false
-    const sourceSequence = input.entries.findLast((entry) => entry.message.type !== "compaction")?.seq ?? 0
+    const sourceSequence =
+      input.entries.findLast(
+        (entry) =>
+          entry.message.type !== "compaction" &&
+          !(entry.message.type === "assistant" && entry.message.error && entry.message.content.length === 0),
+      )?.seq ?? 0
     if ((input.reason ?? "auto") === "auto") {
       const latestFailure = yield* dependencies.db
         .select({ data: EventTable.data })

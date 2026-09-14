@@ -8,6 +8,10 @@ import { SessionSchema } from "./schema"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
+  readonly exclusive?: (
+    sessionID: SessionSchema.ID,
+    operation: Effect.Effect<void>,
+  ) => Effect.Effect<void, SessionRunner.RunError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
   /** Starts execution while idle or joins the active execution. */
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
