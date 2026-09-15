@@ -1,3 +1,5 @@
+import { useModelService } from "@/hooks/use-model-service"
+import { useServerSync } from "@/context/server-sync"
 import { modelSource } from "@/utils/model-source"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show, ValidComponent } from "solid-js"
@@ -228,6 +230,8 @@ export function ModelSelectorPopoverV2(props: {
   onClose?: () => void
 }) {
   const model = props.model ?? useLocal().model
+  const service = useModelService()
+  const sync = useServerSync()
   const language = useLanguage()
   const dialog = useDialog()
   const local = useLocal()
@@ -236,11 +240,31 @@ export function ModelSelectorPopoverV2(props: {
   let contentRef: HTMLDivElement | undefined
   let restoreTrigger = true
 
+  const services = createMemo(() => [
+    ...new Map(
+      model
+        .list()
+        .filter((item) => modelSource(item.provider) === "own")
+        .map((item) => [item.provider.id, item.provider]),
+    ).values(),
+  ])
+  const selectedService = () =>
+    props.provider ??
+    [
+      service.current(),
+      ...Object.keys(sync().data.config.provider ?? {}).reverse(),
+      model.current()?.provider.id,
+      services()[0]?.id,
+    ].find((id) => services().some((item) => item.id === id))
   const allModels = createMemo(() =>
     model
       .list()
       .filter((item) => modelSource(item.provider) === store.source)
-      .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
+      .filter((item) =>
+        store.source === "own"
+          ? item.provider.id === selectedService()
+          : !props.provider || item.provider.id === props.provider,
+      ),
   )
   const models = createMemo(() => {
     const search = store.search.trim()
@@ -383,6 +407,23 @@ export function ModelSelectorPopoverV2(props: {
               )}
             </For>
           </div>
+          <Show when={store.source === "own" && services().length > 0}>
+            <label class="flex items-center gap-2 px-3 pb-2 text-xs text-v2-text-text-muted">
+              {language.t("model.service.label")}
+              <select
+                aria-label={language.t("model.service.label")}
+                value={selectedService()}
+                class="min-w-0 flex-1 rounded bg-v2-background-bg-layer-01 p-1 text-v2-text-text-base"
+                disabled={!!props.provider}
+                onChange={(event) => {
+                  service.select(event.currentTarget.value)
+                  setSearch("")
+                }}
+              >
+                <For each={services()}>{(item) => <option value={item.id}>{item.name}</option>}</For>
+              </select>
+            </label>
+          </Show>
           <div class="flex flex-col p-0.5">
             <div class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
               <Icon name="magnifying-glass" size="small" class="shrink-0" />
@@ -485,6 +526,16 @@ export function ModelSelectorPopoverV2(props: {
                                 onClick={() => selectModel(item)}
                               >
                                 <span class="min-w-0 flex-1 truncate leading-5">{item.name}</span>
+                                <span aria-hidden="true" class="ml-2 shrink-0 text-[11px] text-v2-text-text-muted">
+                                  {language.t(
+                                    item.provider.id === "openrouter" &&
+                                      (item.id.endsWith(":free") || item.id === "openrouter/free")
+                                      ? "model.price.free"
+                                      : item.cost.input > 0 || item.cost.output > 0
+                                        ? "model.price.paid"
+                                        : "model.price.unknown",
+                                  )}
+                                </span>
                                 <Show when={current() === modelKey(item)}>
                                   <Icon name="check" size="small" class="shrink-0" />
                                 </Show>

@@ -4,8 +4,6 @@ import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
 import { createMemo, type Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
-import { configuredModelIDs, modelSource } from "@/utils/model-source"
-import { parseModelKey } from "@/utils/model-key"
 
 export const popularProviders = ["zaovra", "anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
 const popularProviderSet = new Set(popularProviders)
@@ -21,6 +19,7 @@ export function useProviders(directory?: Accessor<string | undefined>) {
       ? selectProviderCatalog({
           explicit: true,
           directory: value,
+          global: serverSync().data.provider,
           catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
         })
       : selectProviderCatalog({
@@ -29,28 +28,12 @@ export function useProviders(directory?: Accessor<string | undefined>) {
           catalog: projectStore && { ready: projectStore.provider_ready, providers: projectStore.provider },
           global: serverSync().data.provider,
         })
-    const config = projectStore?.config ?? serverSync().data.config
-    const defaultModel = config.model ? parseModelKey(config.model) : undefined
+    // The V2 catalog already applies credentials, provider policy and model filters.
+    // Re-filtering through the legacy preference cache can hide valid models after
+    // a key is saved or when native V2 config has no legacy provider projection.
     return {
       ...selected,
-      all: new Map(
-        [...selected.all]
-          .filter(([id]) => id !== "zaovra-go")
-          .map(([id, provider]) => {
-            if (modelSource(provider) === "official") return [id, provider]
-            const configured = configuredModelIDs(
-              config.provider?.[id],
-              defaultModel?.providerID === id ? defaultModel.modelID : undefined,
-            )
-            return [
-              id,
-              {
-                ...provider,
-                models: Object.fromEntries(Object.entries(provider.models).filter(([id]) => configured.has(id))),
-              },
-            ]
-          }),
-      ),
+      all: new Map([...selected.all].filter(([id]) => id !== "zaovra-go")),
       connected: selected.connected.filter((id) => id !== "zaovra-go"),
     }
   })

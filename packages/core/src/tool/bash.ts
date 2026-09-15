@@ -5,6 +5,7 @@ import { ToolFailure } from "@zaovra-ai/llm"
 import { DateTime, Duration, Effect, Layer, Schema, Option } from "effect"
 import { Snapshot } from "../snapshot"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
+import { fingerprint } from "../session/outcome"
 import { ToolOutputStore } from "../tool-output-store"
 import { Config } from "../config"
 import { EventV2 } from "../event"
@@ -33,6 +34,10 @@ export const Input = Schema.Struct({
     description:
       "Declare a build/test/lint/typecheck command. The host records its actual exit and workspace snapshot; this is not a claim that acceptance criteria passed.",
   }),
+  verification_targets: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "Files actually covered by this check, relative to workdir or absolute. Required for standalone/external artifacts. HTML acceptance needs syntax, smoke (actual browser startup), and interaction checks. Do not claim a check without executing assertions; an exit code alone is not proof of functionality.",
+  }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
   workdir: Schema.String.pipe(Schema.optional).annotate({
     description: "Working directory. Defaults to the active Location; relative paths resolve from that Location.",
@@ -59,8 +64,6 @@ const Output = Schema.Struct({
 })
 
 type Output = typeof Output.Type
-
-const defaultShell = () => (process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh")
 
 const modelOutput = (output: Output) => {
   const warnings = output.warnings?.length
@@ -122,7 +125,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
@@ -170,9 +173,7 @@ const layer = Layer.effectDiscard(
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
 
               const entries = yield* config.entries()
-              const shell =
-                Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
-                  .shell ?? defaultShell()
+              const shell = AppProcess.resolveShell(Config.latest(entries, "shell"))
               const command = AppProcess.shellCommand(input.command, target.canonical, shell)
               const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
               let lastProgress = Number.NEGATIVE_INFINITY
@@ -182,10 +183,33 @@ const layer = Layer.effectDiscard(
               )?.[1]
               const verification =
                 input.verification ?? (inferred as "build" | "test" | "lint" | "typecheck" | undefined)
+              const targets = verification
+                ? yield* Effect.forEach(input.verification_targets ?? [], (file) =>
+                    Effect.gen(function* () {
+                      const resolved = yield* mutation.resolve({
+                        path: path.resolve(target.canonical, file),
+                        kind: "file",
+                      })
+                      if (resolved.externalDirectory)
+                        yield* permission.assert({
+                          ...LocationMutation.externalDirectoryPermission(resolved.externalDirectory),
+                          sessionID: context.sessionID,
+                          agent: context.agent,
+                          source,
+                        })
+                      return resolved.canonical
+                    }),
+                  )
+                : []
               if (verification && input.run_in_background)
                 return yield* Effect.fail(new Error("Verification must run in the foreground to record its result"))
               const run = Effect.gen(function* () {
                 const before = verification ? yield* snapshots.capture() : undefined
+                const filesBefore = yield* fingerprint(fs, targets)
+                if (filesBefore.some((file) => !file.digest))
+                  return yield* Effect.fail(
+                    new Error("Verification target is missing or unreadable. No command was executed."),
+                  )
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
@@ -238,6 +262,13 @@ const layer = Layer.effectDiscard(
                 }
 
                 const output = result.output?.toString("utf8") || "(no output)"
+                const filesAfter = yield* fingerprint(fs, targets)
+                if (verification && capture)
+                  yield* capture.append(
+                    new TextEncoder().encode(
+                      `\nVerification record: ${verification}; exit ${result.exitCode}; cwd ${target.canonical}. This records the command result, not complete task acceptance.\n`,
+                    ),
+                  )
                 const notice = result.outputTruncated
                   ? "[in-memory preview truncated; consult the command log for captured bytes]"
                   : undefined
@@ -249,7 +280,20 @@ const layer = Layer.effectDiscard(
                           command: input.command,
                           exit: result.exitCode,
                           callID: context.toolCallID,
-                          snapshot: before && before === (yield* snapshots.capture()) ? before : undefined,
+                          cwd: target.canonical,
+                          ...(targets.length
+                            ? {
+                                targets: filesBefore.map((file) => ({
+                                  ...file,
+                                  digest: filesAfter.some(
+                                    (after) => after.path === file.path && after.digest === file.digest,
+                                  )
+                                    ? file.digest
+                                    : "",
+                                })),
+                              }
+                            : {}),
+                          snapshot: !external && before && before === (yield* snapshots.capture()) ? before : undefined,
                         },
                       }
                     : {}),

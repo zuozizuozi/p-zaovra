@@ -19,6 +19,7 @@ test("evidence is stable, session-owned, paginated and searchable without rerunn
       const evidence = yield* Evidence.Service
       const session = SessionV2.ID.make("ses_evidence")
       const ids = yield* evidence.retain(session, "call", [file])
+      expect(ids[0]).toBe(Evidence.reference(session, file))
       expect(yield* evidence.retain(session, "call", [file])).toEqual(ids)
       const first = yield* evidence.read(session, ids[0], 0, 32768)
       expect(first.text.startsWith("前文")).toBe(true)

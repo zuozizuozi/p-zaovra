@@ -54,6 +54,46 @@ const withRuntime = <A, E, R>(
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   )
 
+it.live("records real syntax failures and file-bound verification evidence", () =>
+  withRuntime((directory, sessions, registry) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const target = path.join(directory, "game.html")
+      const script = path.join(directory, "check.cjs")
+      yield* Effect.promise(() => Bun.write(target, "<script>const x = ];</script>"))
+      yield* Effect.promise(() =>
+        Bun.write(
+          script,
+          `const fs=require('fs'); const vm=require('vm');new vm.Script(fs.readFileSync(${JSON.stringify(target)},'utf8').match(/<script>([\\s\\S]*)<\\/script>/)[1]).runInNewContext();`,
+        ),
+      )
+      const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`
+      const run = (id: string) =>
+        settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id,
+            name: "bash",
+            input: { command, verification: "syntax", verification_targets: [target] },
+          },
+        })
+      const failed = yield* run("syntax-failed")
+      expect(failed.output?.structured).toMatchObject({
+        verification: { kind: "syntax", exit: 1, targets: [{ path: target, digest: expect.any(String) }] },
+      })
+      yield* Effect.promise(() => Bun.write(target, "<script>const x = 1;</script>"))
+      const passed = yield* run("syntax-passed")
+      expect(passed.output?.structured).toMatchObject({
+        verification: { kind: "syntax", exit: 0, targets: [{ path: target, digest: expect.any(String) }] },
+      })
+      expect(JSON.stringify(passed.output?.content)).toContain("ev_")
+      expect(passed.outputPaths?.length).toBeGreaterThan(0)
+    }),
+  ),
+)
+
 it.live("retains bytes beyond the shell preview cap in the registry-owned log", () =>
   withRuntime((directory, sessions, registry) =>
     Effect.gen(function* () {
@@ -68,7 +108,7 @@ it.live("retains bytes beyond the shell preview cap in the registry-owned log", 
           type: "tool-call",
           id: "verbose",
           name: "bash",
-          input: { command: `"${process.execPath}" "${script}"` },
+          input: { command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"` },
         },
       })
       expect(result.result.type).not.toBe("error")
@@ -93,7 +133,10 @@ it.live("background commands settle durably, enforce ownership, and stop with th
             type: "tool-call",
             id,
             name: "bash",
-            input: { command: `"${process.execPath}" "${script}"`, run_in_background: true },
+            input: {
+              command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+              run_in_background: true,
+            },
           },
         })
       const first = yield* start("background")

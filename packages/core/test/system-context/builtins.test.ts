@@ -40,7 +40,7 @@ const instructionFS = Layer.effect(
     Effect.map((fs) =>
       FSUtil.Service.of({
         ...fs,
-        up: () => Effect.succeed([instructionFile]),
+        up: (options) => Effect.succeed(options.targets.includes("AGENTS.md") ? [instructionFile] : []),
         readFileStringSafe: (path) => Effect.succeed(path === instructionFile ? "Be precise." : undefined),
       }),
     ),
@@ -61,7 +61,8 @@ describe("SystemContextBuiltIns", () => {
       const context = yield* SystemContextRegistry.Service
       const initialized = yield* SystemContext.initialize(yield* context.load())
 
-      expect(initialized.baseline).toBe(
+      expect(initialized.baseline).toContain("Execution shell:")
+      expect(initialized.baseline.replace(/\nExecution shell: [^\n]+/, "")).toBe(
         [
           "Here is some useful information about the environment you are running in:",
           "<env>",
@@ -109,7 +110,9 @@ describe("SystemContextBuiltIns", () => {
       yield* TestClock.setTime(timestamp)
       const context = yield* SystemContextRegistry.Service
 
-      expect((yield* SystemContext.initialize(yield* context.load())).baseline).toBe(
+      expect(
+        (yield* SystemContext.initialize(yield* context.load())).baseline.replace(/\nExecution shell: [^\n]+/, ""),
+      ).toBe(
         [
           "Here is some useful information about the environment you are running in:",
           "<env>",

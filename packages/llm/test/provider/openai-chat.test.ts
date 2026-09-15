@@ -616,6 +616,27 @@ describe("OpenAI Chat route", () => {
     }),
   )
 
+  it.effect("rejects incomplete write JSON before emitting an executable tool call", () =>
+    Effect.gen(function* () {
+      const events: LLMEvent[] = []
+      const body = sseEvents(
+        deltaChunk({
+          tool_calls: [{ index: 0, id: "call-invalid-json", function: { name: "write", arguments: '{"path":' } }],
+        }),
+        deltaChunk({}, "tool_calls"),
+      )
+      const error = yield* LLMClient.stream(request).pipe(
+        Stream.tap((event) => Effect.sync(() => events.push(event))),
+        Stream.runDrain,
+        Effect.provide(fixedResponse(body)),
+        Effect.flip,
+      )
+      expect(events.some(LLMEvent.is.toolInputStart)).toBe(true)
+      expect(events.filter(LLMEvent.is.toolCall)).toEqual([])
+      expect(error.message).toContain("Invalid JSON input")
+    }),
+  )
+
   it.effect("fails on malformed stream events", () =>
     Effect.gen(function* () {
       const body = sseEvents(deltaChunk({ content: 123 }))

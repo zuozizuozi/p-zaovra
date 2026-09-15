@@ -132,6 +132,15 @@ describe("markdown stream", () => {
     expect(canReusePendingBlock({ mode: "code", raw: "```ts\none" }, { mode: "live", raw: "one", src: "" })).toBe(false)
   })
 
+  test("preserves formatted prose during append and finalization without preserving edits", () => {
+    const current = { mode: "live" as const, raw: "- **Plan**: inspect" }
+    expect(canReusePendingBlock(current, { mode: "live", raw: "- **Plan**: inspect files", src: "" })).toBe(true)
+    expect(canReusePendingBlock(current, { mode: "full", raw: current.raw, src: "" })).toBe(true)
+    expect(canReusePendingBlock(current, { mode: "live", raw: "- **Plan**: test", src: "" })).toBe(false)
+    expect(canReusePendingBlock(current, { mode: "live", raw: "- **Plan**", src: "" })).toBe(false)
+    expect(canReusePendingBlock(current, { mode: "code", raw: current.raw, src: "" })).toBe(false)
+  })
+
   test("appends plain code deltas without reprojecting frozen blocks", () => {
     const previous = project(undefined, "# Plan\n\n```ts\nconst one = 1\n", true)
     const next = project(previous, `${previous.text}const two = 2\n`, true)

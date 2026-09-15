@@ -18,6 +18,10 @@ const Record = Schema.Struct({
   jobID: Schema.optional(Schema.String),
 })
 const RecordJson = Schema.UnknownFromJsonString.pipe(Schema.decodeTo(Record))
+export const reference = (sessionID: string, file: string) =>
+  `ev_${createHash("sha256")
+    .update(JSON.stringify([sessionID, file]))
+    .digest("hex")}`
 export class Error extends Schema.TaggedErrorClass<Error>()("Evidence.Error", { message: Schema.String }) {}
 export interface Page {
   readonly producer: "complete" | "writing" | "outcome_unknown"
@@ -61,9 +65,7 @@ const layer = Layer.effect(
               files.map(async (file) => {
                 if (path.dirname(file) !== directory || !/^tool_[a-zA-Z0-9_-]+$/.test(path.basename(file)))
                   throw new Error({ message: "Unmanaged evidence source" })
-                const id = `ev_${createHash("sha256")
-                  .update(JSON.stringify([sessionID, file]))
-                  .digest("hex")}`
+                const id = reference(sessionID, file)
                 const record = { sessionID, toolCallID, file: path.basename(file), created: Date.now(), jobID }
                 await fs
                   .writeFile(path.join(directory, id), JSON.stringify(record), { flag: "wx", mode: 0o600 })

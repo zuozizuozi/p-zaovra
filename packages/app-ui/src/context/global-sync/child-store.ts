@@ -210,7 +210,7 @@ export function createChildStoreManager(input: {
             },
             get provider() {
               const EMPTY = { all: new Map(), connected: [], default: {} }
-              if (providerQuery.isLoading) return EMPTY
+              if (providerQuery.isLoading || providerQuery.isError) return EMPTY
               return providerQuery.data ?? EMPTY
             },
             config: {},

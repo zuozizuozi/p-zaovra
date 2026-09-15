@@ -336,8 +336,7 @@ export const locationLayer = Layer.effect(
         const implementation = state.get().integrations.get(result.integrationID)?.implementations.get(result.methodID)
         yield* credentials.create({
           integrationID: result.integrationID,
-          label:
-            result.label ?? (exit.value.type === "oauth" ? implementation?.label?.(exit.value) : undefined),
+          label: result.label ?? (exit.value.type === "oauth" ? implementation?.label?.(exit.value) : undefined),
           value: exit.value,
         })
         yield* events.publish(Event.ConnectionUpdated, { integrationID: result.integrationID })
@@ -405,6 +404,8 @@ export const locationLayer = Layer.effect(
           return value
         }),
         key: Effect.fn("Integration.connection.key")(function* (input) {
+          const key = input.key.trim()
+          if (!key) return yield* new AuthorizationError({ cause: "API key is required" })
           const method = state
             .get()
             .integrations.get(input.integrationID)
@@ -415,7 +416,7 @@ export const locationLayer = Layer.effect(
             label: input.label,
             value: Credential.Key.make({
               type: "key",
-              key: input.key,
+              key,
               ...(input.inputs && Object.keys(input.inputs).length > 0 ? { metadata: input.inputs } : {}),
             }),
           })

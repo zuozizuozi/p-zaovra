@@ -139,7 +139,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     },
     get provider() {
       const EMPTY = { all: new Map(), connected: [], default: {} }
-      if (providerQuery.isLoading) return EMPTY
+      if (providerQuery.isLoading || providerQuery.isError) return EMPTY
       return providerQuery.data ?? EMPTY
     },
     get config() {
@@ -469,6 +469,11 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     mutationFn: (config: Config) => serverSDK.client.global.config.update({ config }),
     onSuccess: () => {
       bootstrap.refetch()
+      // A model selector filters against the resolved project config as well as
+      // the catalog. The refresh queue is paused inside this mutation callback.
+      for (const directory of Object.keys(children.children)) {
+        if (children.active(directory)) void bootstrapInstance(directory)
+      }
       // Invalidate all provider queries so newly configured custom providers
       // appear immediately in the available provider list across all directories.
       queryClient.invalidateQueries({ queryKey: [serverSDK.scope, null, "providers"] })
@@ -493,6 +498,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     queryOptions: queryOptionsApi,
     // bootstrap,
     updateConfig: updateConfigMutation.mutateAsync,
+    queryClient,
     project: projectApi,
     session,
     homeSessions,

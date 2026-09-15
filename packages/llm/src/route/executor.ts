@@ -241,7 +241,7 @@ const statusReason = (input: {
     return new AuthenticationReason({ message: input.message, kind: "insufficient-permissions", http: input.http })
   }
   if (input.status === 429) {
-    if (/insufficient[-_\s]?quota|quota[-_\s]?exceeded/i.test(body)) {
+    if (/insufficient[-_\s]?quota|quota[-_\s]?exceeded|free-models-per-day|openrouter_free_tier_daily/i.test(body)) {
       return new QuotaExceededReason({ message: input.message, http: input.http })
     }
     return new RateLimitReason({

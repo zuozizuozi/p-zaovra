@@ -6247,11 +6247,17 @@ export type SessionNextRevertCommitted = {
 }
 
 export type SessionOutcomeCheck = {
-  kind: "build" | "test" | "lint" | "typecheck"
+  kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
   command: string
   exit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   snapshot?: string
   callID: string
+  cwd?: string
+  targets?: Array<{
+    path: string
+    digest: string
+  }>
+  logs?: Array<string>
 }
 
 export type SessionOutcomeInfo = {

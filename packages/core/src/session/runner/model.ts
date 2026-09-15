@@ -5,6 +5,7 @@ import { type Model } from "@zaovra-ai/llm"
 import * as AnthropicMessages from "@zaovra-ai/llm/protocols/anthropic-messages"
 import * as OpenAICompatibleChat from "@zaovra-ai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@zaovra-ai/llm/protocols/openai-responses"
+import { Gemini } from "@zaovra-ai/llm/protocols/gemini"
 import { Auth, type AnyRoute } from "@zaovra-ai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
@@ -147,6 +148,13 @@ export const fromCatalogModel = (
         .model({ id: resolved.api.id }),
     )
   }
+  if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/google") {
+    return Effect.succeed(
+      withDefaults(resolved, Gemini.route)
+        .with({ auth: key === undefined ? Auth.none : Auth.header("x-goog-api-key", key) })
+        .model({ id: resolved.api.id }),
+    )
+  }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
       withDefaults(resolved, AnthropicMessages.route)
@@ -154,10 +162,17 @@ export const fromCatalogModel = (
         .model({ id: resolved.api.id }),
     )
   }
-  if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
+  if (
+    resolved.api.type === "aisdk" &&
+    (resolved.api.package === "@openrouter/ai-sdk-provider" ||
+      (resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url))
+  ) {
     return Effect.succeed(
       withDefaults(resolved, OpenAICompatibleChat.route)
-        .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
+        .with({
+          endpoint: { baseURL: resolved.api.url ?? "https://openrouter.ai/api/v1" },
+          auth: key === undefined ? Auth.none : Auth.bearer(key),
+        })
         .model({ id: resolved.api.id }),
     )
   }
@@ -177,6 +192,8 @@ export const supported = (model: ModelV2.Info) =>
   model.api.type === "aisdk" &&
   (model.api.package === "@ai-sdk/openai" ||
     model.api.package === "@ai-sdk/anthropic" ||
+    model.api.package === "@ai-sdk/google" ||
+    model.api.package === "@openrouter/ai-sdk-provider" ||
     (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined))
 
 /** Resolves models from the catalog belonging to the current Location runtime. */

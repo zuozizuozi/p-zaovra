@@ -3,10 +3,13 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "provider.catalog.failed": "模型服务列表加载失败，请刷新或配置自定义服务。",
+  "provider.catalog.empty": "暂未获取到模型服务，请刷新或配置自定义服务。",
+  "provider.catalog.retry": "刷新模型服务",
   "session.outcome.unavailable": "暂时无法检查结果，验证状态未知。",
   "session.outcome.idle": "尚未开始",
   "session.outcome.running": "执行中",
-  "session.outcome.completed_verified": "执行结束 · 当前代码快照的构建、测试与 lint 已通过",
+  "session.outcome.completed_verified": "执行结束 · 所列检查已通过，范围见验证记录",
   "session.outcome.completed_unverified": "执行结束 · 尚未完成验证",
   "session.outcome.failed": "执行或验证失败",
   "session.outcome.interrupted": "执行已中断",
@@ -64,6 +67,10 @@ export const dict = {
   "provider.custom.protocol.label": "兼容协议",
   "provider.custom.protocol.hint": "按服务商提供的接口协议选择，不是按模型品牌选择。常规鉴权请求头会自动处理。",
   "prompt.addFiles": "添加文件",
+  "model.service.label": "模型服务",
+  "model.price.free": "免费",
+  "model.price.paid": "收费",
+  "model.price.unknown": "价格未知",
   "model.source.label": "模型来源",
   "model.source.own": "自有 Key",
   "model.source.official": "官方服务",
@@ -276,7 +283,7 @@ export const dict = {
   "provider.connect.oauth.auto.visit.suffix": " 并输入以下代码，以连接你的帐户并在 Zaovra 中使用 {{provider}} 模型。",
   "provider.connect.oauth.auto.confirmationCode": "确认码",
   "provider.connect.toast.connected.title": "{{provider}} 已连接",
-  "provider.connect.toast.connected.description": "现在可以使用 {{provider}} 模型了。",
+  "provider.connect.toast.connected.description": "{{provider}} 的凭据已保存；模型生成和工具调用尚未验证。",
 
   "provider.custom.discovery.restart": "桌面连接组件已更新，请关闭并重新启动 Zaovra 后获取模型。当前输入已保留。",
   "provider.custom.discovery.environment": "此处无法读取环境变量中的密钥，请手动填写模型 ID，或粘贴 Key 后获取。",

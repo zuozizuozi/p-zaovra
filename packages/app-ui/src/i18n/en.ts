@@ -1,8 +1,11 @@
 export const dict = {
+  "provider.catalog.failed": "Could not load model services. Retry or configure a custom service.",
+  "provider.catalog.empty": "No model services are available yet. Refresh or configure a custom service.",
+  "provider.catalog.retry": "Refresh model services",
   "session.outcome.unavailable": "Outcome could not be checked; verification is unknown.",
   "session.outcome.idle": "Not started",
   "session.outcome.running": "Running",
-  "session.outcome.completed_verified": "Finished — build, test and lint passed for the current code snapshot",
+  "session.outcome.completed_verified": "Finished — listed checks passed; see records for coverage",
   "session.outcome.completed_unverified": "Finished — verification incomplete",
   "session.outcome.failed": "Execution or verification failed",
   "session.outcome.interrupted": "Interrupted",
@@ -65,6 +68,10 @@ export const dict = {
   "provider.custom.protocol.hint":
     "Choose the API format documented by your service, not the model brand. Authentication headers are added automatically.",
   "prompt.addFiles": "Add files",
+  "model.service.label": "Model service",
+  "model.price.free": "Free",
+  "model.price.paid": "Paid",
+  "model.price.unknown": "Price unknown",
   "model.source.label": "Model source",
   "model.source.own": "Own Key",
   "model.source.official": "Official service",
@@ -261,7 +268,7 @@ export const dict = {
     " and enter the code below to connect your account and use {{provider}} models in Zaovra.",
   "provider.connect.oauth.auto.confirmationCode": "Confirmation code",
   "provider.connect.toast.connected.title": "{{provider}} connected",
-  "provider.connect.toast.connected.description": "{{provider}} models are now available to use.",
+  "provider.connect.toast.connected.description": "Credentials for {{provider}} are saved; generation and tool calling have not been verified.",
 
   "provider.custom.discovery.restart":
     "The desktop connection component was updated. Close and reopen Zaovra to fetch models. Your current input is kept.",

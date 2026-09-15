@@ -85,9 +85,11 @@ export function stream(text: string, live: boolean): Block[] {
 }
 
 export function canReusePendingBlock(current: Pick<Block, "mode" | "raw"> | undefined, next: Block) {
-  if (!current || current.mode !== next.mode) return false
-  if (next.mode === "code") return next.raw.startsWith(current.raw)
-  return current.raw === next.raw
+  if (!current) return false
+  if ((current.mode === "code") !== (next.mode === "code")) return false
+  // Keep the last formatted block while appended text is parsed. Replacing it
+  // with raw Markdown on every delta makes lists/headings change height twice.
+  return next.raw.startsWith(current.raw)
 }
 
 export function project(previous: Projection | undefined, text: string, live: boolean): Projection {

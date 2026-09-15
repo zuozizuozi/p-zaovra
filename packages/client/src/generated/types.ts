@@ -2092,11 +2092,14 @@ export type SessionsRecoverOutput = {
     readonly state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
-      readonly kind: "build" | "test" | "lint" | "typecheck"
+      readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
       readonly command: string
       readonly exit: number | "Infinity" | "-Infinity" | "NaN"
       readonly snapshot?: string
       readonly callID: string
+      readonly cwd?: string
+      readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+      readonly logs?: ReadonlyArray<string>
     }>
     readonly missing: ReadonlyArray<string>
     readonly messageID?: string
@@ -2110,11 +2113,14 @@ export type SessionsOutcomeOutput = {
     readonly state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
-      readonly kind: "build" | "test" | "lint" | "typecheck"
+      readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
       readonly command: string
       readonly exit: number | "Infinity" | "-Infinity" | "NaN"
       readonly snapshot?: string
       readonly callID: string
+      readonly cwd?: string
+      readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+      readonly logs?: ReadonlyArray<string>
     }>
     readonly missing: ReadonlyArray<string>
     readonly messageID?: string

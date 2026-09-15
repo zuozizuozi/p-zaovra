@@ -164,7 +164,7 @@ describe("BashTool", () => {
               settleTool(
                 registry,
                 call({
-                  command: `"${process.execPath}" "${script}"`,
+                  command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
                   timeout: 1_000,
                 }),
               ),
@@ -248,7 +248,12 @@ describe("BashTool", () => {
                 ],
               },
             })
-            expect(runs).toMatchObject([{ command: "pwd", cwd: realpathSync(tmp.path) }])
+            expect(runs).toMatchObject([
+              {
+                command: process.platform === "win32" ? AppProcess.resolveShell() : "pwd",
+                cwd: realpathSync(tmp.path),
+              },
+            ])
             expect(runs[0]?.options).toMatchObject({
               combineOutput: true,
               maxOutputBytes: BashTool.MAX_CAPTURE_BYTES,

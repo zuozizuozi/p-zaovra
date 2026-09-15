@@ -74,7 +74,9 @@ function privilegedTexts(request: LLMRequest | undefined) {
   }
   return parts.filter(
     (part) =>
-      !part.startsWith("Provider: ") && !part.startsWith("You are a coding assistant. Inspect relevant context,"),
+      !part.startsWith("Provider: ") &&
+      !part.startsWith("Verification records (") &&
+      !part.startsWith("You are a coding assistant. Inspect relevant context,"),
   )
 }
 
@@ -557,7 +559,11 @@ const verifyPartialFlushOnFailure = (kind: FragmentKind) =>
         type: "assistant",
         finish: "error",
         error: { type: "unknown", message: "Provider unavailable" },
-        content: [fixture.expectedContent],
+        content: [
+          kind === "tool input"
+            ? { type: "tool", id: fragmentID(kind, "partial"), state: { status: "error" } }
+            : fixture.expectedContent,
+        ],
       },
     ])
   })
@@ -2869,6 +2875,44 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("stops varied failed shell attempts with a final report instead of spending more tool turns", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        bash: Tool.make({
+          description: "A shell failure fixture",
+          input: Schema.Struct({ command: Schema.String }),
+          output: Schema.Struct({}),
+          execute: () => Effect.fail(new Tool.Failure({ message: "Command could not execute" })),
+        }),
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Verify the artifact" }), resume: false })
+      requests.length = 0
+      responses = [
+        ...Array.from({ length: 4 }, (_, index) => [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: `failed-shell-${index}`, name: "bash", input: { command: `bad-command-${index}` } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ]),
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(5)
+      expect(requests[4]!.tools).toEqual([])
+      expect(requests[4]!.toolChoice).toMatchObject({ type: "none" })
+      expect(JSON.stringify(requests[3]!.system)).toContain("Change approach")
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
+      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "failed", outcomeUnknown: false })
+    }),
+  )
+
   it.effect("returns policy-blocked tools to the model and continues", () =>
     Effect.gen(function* () {
       yield* setup
@@ -3721,6 +3765,34 @@ describe("SessionRunnerLLM", () => {
           content: [{ type: "tool", id: "call-hosted-raw-failure", state: { status: "error" } }],
         },
       ])
+    }),
+  )
+
+  it.effect("settles local input-only calls when the provider stream fails before tool execution", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Reject invalid tool JSON" }), resume: false })
+      const failure = providerUnavailable()
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolInputStart({ id: "call-invalid-json", name: "write" }),
+          LLMEvent.toolInputDelta({ id: "call-invalid-json", name: "write", text: '{"path":' }),
+        ]),
+        Stream.fail(failure),
+      )
+      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBe(failure)
+      yield* replaySessionProjection(sessionID)
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user" },
+        {
+          type: "assistant",
+          finish: "error",
+          content: [{ type: "tool", id: "call-invalid-json", state: { status: "error" } }],
+        },
+      ])
+      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "failed", outcomeUnknown: false })
     }),
   )
 

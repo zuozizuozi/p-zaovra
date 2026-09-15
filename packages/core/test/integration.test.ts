@@ -98,6 +98,17 @@ describe("Integration", () => {
     }),
   )
 
+  it.effect("rejects blank keys without writing a credential", () =>
+    Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const credentials = yield* Credential.Service
+      const integrationID = Integration.ID.make("blank-key-test")
+      const failure = yield* integrations.connection.key({ integrationID, key: "   " }).pipe(Effect.flip)
+      expect(failure).toBeInstanceOf(Integration.AuthorizationError)
+      expect(yield* credentials.list(integrationID)).toEqual([])
+    }),
+  )
+
   it.effect("connects with a key and stores the credential", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
@@ -117,7 +128,7 @@ describe("Integration", () => {
 
       yield* integrations.connection.key({
         integrationID,
-        key: "secret",
+        key: "  secret  ",
         inputs: { tenant: "work" },
         label: "Work",
       })

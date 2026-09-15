@@ -1,3 +1,4 @@
+import { useModelService } from "@/hooks/use-model-service"
 import { modelSource } from "@/utils/model-source"
 import type { IntegrationAttempt, IntegrationMethod } from "@zaovra-ai/sdk/v2/types"
 import { Button } from "@zaovra-ai/ui/button"
@@ -34,13 +35,59 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
-import { popularProviders, useProviders } from "@/hooks/use-providers"
+import { popularProviders } from "@/hooks/use-providers"
+import { useQuery } from "@tanstack/solid-query"
+import { directoryKey } from "@/context/global-sync/utils"
 import { resolveProviderIntegration } from "@/utils/provider-integration"
 import { CustomProviderForm } from "./dialog-custom-provider"
 import { usePlatform } from "@/context/platform"
 import { discoverProviderModels, providerDiscoveryPresets, providerProtocols } from "@/provider-discovery"
 
 const CUSTOM_ID = "_custom"
+
+// Connecting a service does not require a selected project. Observe the existing
+// scoped catalog query directly instead of waiting for a Session's child store.
+function useConnectionProviders(directory?: Accessor<string | undefined>) {
+  const sync = useServerSync()
+  const query = useQuery(
+    () => {
+      const value = directory?.()
+      return sync().queryOptions.providers(value ? directoryKey(value) : null)
+    },
+    () => sync().queryClient,
+  )
+  const all = createMemo(
+    () =>
+      new Map(
+        query.isPending || query.isError ? [] : [...(query.data?.all ?? [])].filter(([id]) => id !== "zaovra-go"),
+      ),
+  )
+  return { all, loading: () => query.isPending, error: () => query.isError, refresh: () => query.refetch() }
+}
+
+function ProviderCatalogStatus(props: { providers: ReturnType<typeof useConnectionProviders> }) {
+  const language = useLanguage()
+  return (
+    <Show when={props.providers.loading() || props.providers.error() || !props.providers.all().size}>
+      <div role={props.providers.error() ? "alert" : "status"} class="px-3 text-14-regular text-text-weak">
+        <span>
+          {language.t(
+            props.providers.error()
+              ? "provider.catalog.failed"
+              : props.providers.loading()
+                ? "common.loading"
+                : "provider.catalog.empty",
+          )}
+        </span>
+        <Show when={!props.providers.loading()}>
+          <Button size="small" variant="ghost" onClick={() => void props.providers.refresh()}>
+            {language.t("provider.catalog.retry")}
+          </Button>
+        </Show>
+      </div>
+    </Show>
+  )
+}
 
 export function useProviderConnectController(options: { onBack?: () => void } = {}) {
   const [store, setStore] = createStore({ selected: undefined as string | undefined })
@@ -168,7 +215,7 @@ function ProviderPicker(props: {
         onPrepare={props.onPrepare}
       />
     )
-  const providers = useProviders(props.directory)
+  const providers = useConnectionProviders(props.directory)
   const language = useLanguage()
   const popularGroup = () => language.t("dialog.provider.group.popular")
   const otherGroup = () => language.t("dialog.provider.group.other")
@@ -182,61 +229,64 @@ function ProviderPicker(props: {
   }
 
   return (
-    <List
-      class="px-3"
-      search={{ placeholder: language.t("dialog.provider.search.placeholder"), autofocus: true }}
-      emptyMessage={language.t("dialog.provider.empty")}
-      activeIcon="plus-small"
-      key={(x) => x?.id}
-      items={() => {
-        language.locale()
-        return [
-          { id: CUSTOM_ID, name: customLabel() },
-          ...Array.from(providers.all().values()).filter(
-            (provider) => !props.ownOnly || modelSource(provider) === "own",
-          ),
-        ]
-      }}
-      filterKeys={["id", "name"]}
-      groupBy={(x) => (popularProviders.includes(x.id) ? popularGroup() : otherGroup())}
-      sortBy={(a, b) => {
-        if (a.id === CUSTOM_ID) return -1
-        if (b.id === CUSTOM_ID) return 1
-        if (popularProviders.includes(a.id) && popularProviders.includes(b.id))
-          return popularProviders.indexOf(a.id) - popularProviders.indexOf(b.id)
-        return a.name.localeCompare(b.name)
-      }}
-      sortGroupsBy={(a, b) => {
-        const popular = popularGroup()
-        if (a.category === popular && b.category !== popular) return -1
-        if (b.category === popular && a.category !== popular) return 1
-        return 0
-      }}
-      onSelect={(x) => {
-        if (!x) return
-        props.onSelect(x.id)
-      }}
-    >
-      {(i) => (
-        <div class="px-1.25 w-full flex items-center gap-x-3">
-          <ProviderIcon data-slot="list-item-extra-icon" id={i.id} />
-          <span>{i.name}</span>
-          <Show when={i.id === "zaovra"}>
-            <div class="text-14-regular text-text-weak">{language.t("dialog.provider.zaovra.tagline")}</div>
-          </Show>
-          <Show when={i.id === CUSTOM_ID}>
-            <Tag>{language.t("settings.providers.tag.custom")}</Tag>
-          </Show>
-          <Show when={i.id === "zaovra"}>
-            <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-          </Show>
-          <Show when={note(i.id)}>{(value) => <div class="text-14-regular text-text-weak">{value()}</div>}</Show>
-          <Show when={i.id === "zaovra-go"}>
-            <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
-          </Show>
-        </div>
-      )}
-    </List>
+    <>
+      <ProviderCatalogStatus providers={providers} />
+      <List
+        class="px-3"
+        search={{ placeholder: language.t("dialog.provider.search.placeholder"), autofocus: true }}
+        emptyMessage={language.t("dialog.provider.empty")}
+        activeIcon="plus-small"
+        key={(x) => x?.id}
+        items={() => {
+          language.locale()
+          return [
+            { id: CUSTOM_ID, name: customLabel() },
+            ...Array.from(providers.all().values()).filter(
+              (provider) => !props.ownOnly || modelSource(provider) === "own",
+            ),
+          ]
+        }}
+        filterKeys={["id", "name"]}
+        groupBy={(x) => (popularProviders.includes(x.id) ? popularGroup() : otherGroup())}
+        sortBy={(a, b) => {
+          if (a.id === CUSTOM_ID) return -1
+          if (b.id === CUSTOM_ID) return 1
+          if (popularProviders.includes(a.id) && popularProviders.includes(b.id))
+            return popularProviders.indexOf(a.id) - popularProviders.indexOf(b.id)
+          return a.name.localeCompare(b.name)
+        }}
+        sortGroupsBy={(a, b) => {
+          const popular = popularGroup()
+          if (a.category === popular && b.category !== popular) return -1
+          if (b.category === popular && a.category !== popular) return 1
+          return 0
+        }}
+        onSelect={(x) => {
+          if (!x) return
+          props.onSelect(x.id)
+        }}
+      >
+        {(i) => (
+          <div class="px-1.25 w-full flex items-center gap-x-3">
+            <ProviderIcon data-slot="list-item-extra-icon" id={i.id} />
+            <span>{i.name}</span>
+            <Show when={i.id === "zaovra"}>
+              <div class="text-14-regular text-text-weak">{language.t("dialog.provider.zaovra.tagline")}</div>
+            </Show>
+            <Show when={i.id === CUSTOM_ID}>
+              <Tag>{language.t("settings.providers.tag.custom")}</Tag>
+            </Show>
+            <Show when={i.id === "zaovra"}>
+              <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
+            </Show>
+            <Show when={note(i.id)}>{(value) => <div class="text-14-regular text-text-weak">{value()}</div>}</Show>
+            <Show when={i.id === "zaovra-go"}>
+              <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
+            </Show>
+          </div>
+        )}
+      </List>
+    </>
   )
 }
 
@@ -246,7 +296,7 @@ function ProviderPickerV2(props: {
   onSelect: (provider: string) => void
   onPrepare?: () => void
 }) {
-  const providers = useProviders(props.directory)
+  const providers = useConnectionProviders(props.directory)
   const language = useLanguage()
   const [store, setStore] = createStore({
     filter: "",
@@ -325,6 +375,7 @@ function ProviderPickerV2(props: {
           }}
         />
       </div>
+      <ProviderCatalogStatus providers={providers} />
       <div class="relative min-h-0 flex-1">
         <div class="flex size-full min-h-0 flex-col gap-4 overflow-y-auto pb-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <For
@@ -404,10 +455,11 @@ function ProviderConnection(props: {
   const dialog = useDialog()
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
+  const service = useModelService()
   const language = useLanguage()
   const settings = useSettings()
   const newLayout = settings.general.newLayoutDesigns
-  const providers = useProviders(props.directory)
+  const providers = useConnectionProviders(props.directory)
 
   const alive = { value: true }
   const timer = { current: undefined as ReturnType<typeof setTimeout> | undefined }
@@ -426,13 +478,24 @@ function ProviderConnection(props: {
       .catch(() => undefined)
   })
 
-  const provider = createMemo(
-    () => providers.all().get(props.provider) ?? serverSync().data.provider.all.get(props.provider)!,
+  const provider = createMemo<{ id: string; name: string }>(
+    (previous) =>
+      providers.all().get(props.provider) ??
+      (previous?.id === props.provider ? previous : { id: props.provider, name: props.provider }),
   )
   type ConnectMethod = Extract<IntegrationMethod, { type: "key" | "oauth" }>
-  const [auth] = createResource(
+  const [auth, authActions] = createResource(
     () => [props.provider, props.directory?.()] as const,
-    ([providerID, directory]) => resolveProviderIntegration(serverSDK().client, providerID, directory),
+    ([providerID, directory]) =>
+      resolveProviderIntegration(serverSDK().client, providerID, directory).then(
+        (value) => ({ ...value, error: undefined as string | undefined }),
+        (error: unknown) => ({
+          integrationID: providerID,
+          location: directory ? { directory } : undefined,
+          integration: undefined,
+          error: formatError(error, language.t("common.requestFailed")),
+        }),
+      ),
   )
   const loading = createMemo(() => auth.loading)
   const methods = createMemo<ConnectMethod[]>(() =>
@@ -748,9 +811,9 @@ function ProviderConnection(props: {
   createEffect(() => {
     if (auto) return
     if (loading()) return
-    if (auth.error) {
+    if (auth.latest?.error) {
       auto = true
-      dispatch({ type: "auth.error", error: formatError(auth.error, language.t("common.requestFailed")) })
+      dispatch({ type: "auth.error", error: auth.latest.error })
       return
     }
     if (methods().length === 0) {
@@ -768,14 +831,21 @@ function ProviderConnection(props: {
   })
 
   async function complete() {
+    const name = provider().name
     attempt.complete = true
-    await serverSDK().client.global.dispose()
+    await serverSDK().client.global.dispose({ throwOnError: true })
+    // Discovery precedes credential admission. Refresh again after admission so
+    // selectors do not retain the earlier, disconnected catalog.
+    await serverSync().queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === serverSDK().scope && query.queryKey[2] === "providers",
+    })
+    service.select(props.provider)
     dialog.close()
     showToast({
       variant: "success",
       icon: "circle-check",
-      title: language.t("provider.connect.toast.connected.title", { provider: provider().name }),
-      description: language.t("provider.connect.toast.connected.description", { provider: provider().name }),
+      title: language.t("provider.connect.toast.connected.title", { provider: name }),
+      description: language.t("provider.connect.toast.connected.description", { provider: name }),
     })
   }
 
@@ -880,9 +950,18 @@ function ProviderConnection(props: {
       try {
         const preset = providerDiscoveryPresets[props.provider]
         const configured = serverSync().data.config.provider?.[props.provider]?.options
-        if (preset && !configured?.baseURL && !Object.keys(store.promptInputs ?? {}).length) {
+        if (preset && !Object.keys(store.promptInputs ?? {}).length) {
           const discovered = await (platform.discoverProviderModels ?? discoverProviderModels)({
             ...preset,
+            baseURL: typeof configured?.baseURL === "string" ? configured.baseURL : preset.baseURL,
+            headers:
+              configured?.headers && typeof configured.headers === "object"
+                ? Object.fromEntries(
+                    Object.entries(configured.headers).filter(
+                      (entry): entry is [string, string] => typeof entry[1] === "string",
+                    ),
+                  )
+                : undefined,
             apiKey: key,
           })
           await serverSync().updateConfig({
@@ -1234,6 +1313,22 @@ function ProviderConnection(props: {
                   <Spinner />
                   <span>{language.t("provider.connect.status.inProgress")}</span>
                 </div>
+              </div>
+            </Match>
+            <Match when={store.state === "error" && store.methodIndex === undefined}>
+              <div role="alert" class="px-3 text-14-regular text-text-base">
+                <p>{store.error}</p>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  onClick={() => {
+                    auto = false
+                    dispatch({ type: "method.reset" })
+                    void authActions.refetch()
+                  }}
+                >
+                  {language.t("provider.catalog.retry")}
+                </Button>
               </div>
             </Match>
             <Match when={store.methodIndex === undefined}>

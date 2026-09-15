@@ -80,13 +80,15 @@ export function SessionOutcomeDock() {
           <Show when={query.data?.outcomeUnknown && !abandoned()}>
             <span>{language.t("session.outcome.unknown")}</span>
           </Show>
-          <Show when={query.data?.checks.length}>
+          <Show when={query.data?.checks.length || query.data?.missing.length}>
             <details>
               <summary>{language.t("session.outcome.checks")}</summary>
               <For each={query.data?.checks}>
                 {(check) => (
                   <div class="break-all">
                     {check.kind}: {check.command} · exit {check.exit}
+                    <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
+                    <For each={check.logs}>{(log) => <div>{log}</div>}</For>
                   </div>
                 )}
               </For>

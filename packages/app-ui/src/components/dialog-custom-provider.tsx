@@ -1,3 +1,4 @@
+import { useModelService } from "@/hooks/use-model-service"
 import { Button } from "@zaovra-ai/ui/button"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { Dialog } from "@zaovra-ai/ui/dialog"
@@ -49,6 +50,7 @@ export function DialogCustomProvider(props: Props) {
 
 export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
   const dialog = useDialog()
+  const service = useModelService()
   const platform = usePlatform()
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
@@ -74,6 +76,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     advanced: false,
   })
   const alive = { value: true }
+  const saved = { providerID: undefined as string | undefined }
   onCleanup(() => {
     alive.value = false
   })
@@ -89,7 +92,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     const id = Array.from({ length: used.size + 2 }, (_, i) => (i === 0 ? stem : `${stem}-${i + 1}`)).find(
       (id) => !used.has(id),
     )!
-    return { baseURL, name: form.name.trim() || host, providerID: form.providerID.trim() || id }
+    return { baseURL, name: form.name.trim() || host, providerID: form.providerID.trim() || saved.providerID || id }
   }
   const discover = async () => {
     if (discovery.pending || saveMutation.isPending) return
@@ -211,7 +214,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       form: { ...form, ...automatic() },
       t: language.t,
       disabledProviders: serverSync().data.config.disabled_providers ?? [],
-      existingProviderIDs: new Set(serverSync().data.provider.all.keys()),
+      existingProviderIDs: new Set([...serverSync().data.provider.all.keys()].filter((id) => id !== saved.providerID)),
     })
     batch(() => {
       setForm("err", output.err)
@@ -232,6 +235,8 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         provider: { [result.providerID]: result.config },
         disabled_providers: nextDisabled,
       })
+      // A credential failure must retry the same config, not create another provider.
+      saved.providerID = result.providerID
       if (result.key) {
         const resolved = await resolveProviderIntegration(serverSDK().client, result.providerID)
         if (!resolved.integration?.methods.some((method) => method.type === "key")) {
@@ -246,11 +251,15 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           },
           { throwOnError: true },
         )
-        await serverSDK().client.global.dispose()
+        await serverSDK().client.global.dispose({ throwOnError: true })
       }
+      await serverSync().queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === serverSDK().scope && query.queryKey[2] === "providers",
+      })
       return result
     },
     onSuccess: (result) => {
+      service.select(result.providerID)
       dialog.close()
       showToast({
         variant: "success",

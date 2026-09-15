@@ -42,6 +42,60 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
+  for (const url of [undefined, "https://router.example/api/v1"]) {
+    it.effect(`routes OpenRouter through native Chat with ${url ?? "the default endpoint"}`, () =>
+      Effect.gen(function* () {
+        const catalog = ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@openrouter/ai-sdk-provider", url }),
+          api: { type: "aisdk", package: "@openrouter/ai-sdk-provider", url, id: ModelV2.ID.make("vendor/model") },
+          request: { headers: { "HTTP-Referer": "https://zaovra.com/" }, body: { reasoning: { effort: "low" } } },
+        })
+        expect(SessionRunnerModel.supported(catalog)).toBe(true)
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(catalog, { type: "key", key: "test-only" })
+        const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "Hello" }))
+        expect(resolved.route.id).toBe("openai-compatible-chat")
+        expect(resolved.route.endpoint).toMatchObject({ baseURL: url ?? "https://openrouter.ai/api/v1" })
+        expect(prepared.body).toMatchObject({ model: "vendor/model" })
+        expect(resolved.route.defaults.http?.body).toEqual({ reasoning: { effort: "low" } })
+        const headers = yield* resolved.route.auth.apply({
+          request: LLM.request({ model: resolved, prompt: "Hello" }),
+          method: "POST",
+          url: `${url ?? "https://openrouter.ai/api/v1"}/chat/completions`,
+          body: "{}",
+          headers: Headers.empty,
+        })
+        expect(headers.authorization).toBe("Bearer test-only")
+        expect(JSON.stringify(prepared.body)).not.toContain("test-only")
+      }),
+    )
+  }
+
+  for (const url of [undefined, "https://proxy.example/v1beta"]) {
+    it.effect(`routes Gemini with header authentication at ${url ?? "the default endpoint"}`, () =>
+      Effect.gen(function* () {
+        const catalog = model({ type: "aisdk", package: "@ai-sdk/google", url })
+        expect(SessionRunnerModel.supported(catalog)).toBe(true)
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(catalog, { type: "key", key: "test-only" })
+        expect(resolved.route.endpoint).toMatchObject({
+          baseURL: url ?? "https://generativelanguage.googleapis.com/v1beta",
+        })
+        const request = LLM.request({ model: resolved, prompt: "Hello" })
+        const prepared = yield* LLMClient.prepare(request)
+        const headers = yield* resolved.route.auth.apply({
+          request,
+          method: "POST",
+          url: "https://proxy.example",
+          body: "{}",
+          headers: Headers.empty,
+        })
+        expect(headers["x-goog-api-key"]).toBe("test-only")
+        expect(headers.authorization).toBeUndefined()
+        expect(JSON.stringify(prepared.body)).not.toContain("test-only")
+        expect(prepared.body).toHaveProperty("contents")
+      }),
+    )
+  }
+
   it.effect("maps catalog OpenAI AI SDK models into native Responses routes", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(
@@ -316,16 +370,16 @@ describe("SessionRunnerModel", () => {
   it.effect("rejects catalog APIs without a native route", () =>
     Effect.gen(function* () {
       const failure = yield* SessionRunnerModel.fromCatalogModel(
-        model({ type: "aisdk", package: "@ai-sdk/google", url: "https://google.example/v1" }),
+        model({ type: "aisdk", package: "@ai-sdk/not-supported", url: "https://google.example/v1" }),
       ).pipe(Effect.flip)
 
       expect(failure).toMatchObject({
         _tag: "SessionRunnerModel.UnsupportedApiError",
         providerID: "test-provider",
         modelID: "test-model",
-        api: "aisdk:@ai-sdk/google",
+        api: "aisdk:@ai-sdk/not-supported",
       })
-      expect(failure.message).toBe("Unsupported API for test-provider/test-model: aisdk:@ai-sdk/google")
+      expect(failure.message).toBe("Unsupported API for test-provider/test-model: aisdk:@ai-sdk/not-supported")
     }),
   )
 
@@ -338,7 +392,7 @@ describe("SessionRunnerModel", () => {
       ).toBe(true)
       expect(
         SessionRunnerModel.supported(
-          model({ type: "aisdk", package: "@ai-sdk/google", url: "https://google.example/v1" }),
+          model({ type: "aisdk", package: "@ai-sdk/not-supported", url: "https://google.example/v1" }),
         ),
       ).toBe(false)
       expect(SessionRunnerModel.supported(model({ type: "native", settings: {} }))).toBe(false)

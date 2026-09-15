@@ -3,6 +3,8 @@ import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { CrossSpawnSpawner } from "./cross-spawn-spawner"
+import { existsSync } from "node:fs"
+import path from "node:path"
 import { makeGlobalNode } from "./effect/app-node"
 
 export class AppProcessError extends Schema.TaggedErrorClass<AppProcessError>()("AppProcessError", {
@@ -63,8 +65,21 @@ export type Interface = ChildProcessSpawner["Service"] & {
 export class Service extends Context.Service<Service, Interface>()("@zaovra/AppProcess") {}
 
 /** Shared shell process lifecycle; callers retain their own authorization and output policy. */
+export const resolveShell = (configured?: string) => {
+  if (configured) return configured
+  if (process.platform !== "win32") return "/bin/sh"
+  const powershell = path.join(
+    process.env.SystemRoot ?? "C:\\Windows",
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  )
+  return existsSync(powershell) ? powershell : (process.env.COMSPEC ?? "cmd.exe")
+}
+
 export const shellCommand = (command: string, cwd: string, shell?: string) => {
-  const executable = shell ?? (process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh")
+  const executable = resolveShell(shell)
   const powershell = /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable)
   if (powershell) {
     // EncodedCommand avoids the second quoting/parser pass through cmd.exe.
@@ -185,6 +200,20 @@ const layer = Layer.effect(
     const runCommand = (command: ChildProcess.Command, options?: RunOptions) =>
       Effect.suspend(() => {
         const description = describeCommand(command)
+        if (
+          command._tag === "StandardCommand" &&
+          typeof command.options.shell === "string" &&
+          /(?:^|[\\/])cmd(?:\.exe)?$/i.test(command.options.shell) &&
+          /[\r\n]/.test(command.command)
+        )
+          return Effect.fail(
+            new AppProcessError({
+              command: description,
+              cause: new Error(
+                "cmd cannot reliably execute multiline command strings. No command was executed. Write a .cmd or language script file and invoke it with a single-line command, or configure PowerShell.",
+              ),
+            }),
+          )
         if (options?.signal?.aborted) return Effect.fail(wrapError(description, abortError(options.signal)))
         let captured = Buffer.alloc(0)
         let truncated = false

@@ -4,6 +4,7 @@ export * from "./session/schema"
 import { DateTime, Effect, Layer, Schema, Context, Stream, Cause, Exit, Deferred } from "effect"
 import { SessionOutcome } from "./session/outcome"
 import type { Info } from "@zaovra-ai/schema/session-outcome"
+import { Config } from "./config"
 import { ListAnchor } from "@zaovra-ai/schema/session"
 import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -373,7 +374,13 @@ const layer = Layer.effect(
           (shells.get(sessionID)?.size ?? 0) > 0 ||
           (yield* jobs.list()).some((job) => job.status === "running" && job.metadata?.sessionID === sessionID)
         const preliminary = SessionOutcome.derive(messages, active)
-        if (active || !preliminary.checks.length) return preliminary
+        if (active) return preliminary
+        const required = yield* SessionOutcome.requirements(fs, session.location.directory)
+        if (!preliminary.checks.length) return SessionOutcome.derive(messages, false, undefined, [], required)
+        const targets = yield* SessionOutcome.fingerprint(
+          fs,
+          preliminary.checks.flatMap((check) => check.targets?.map((target) => target.path) ?? []),
+        )
         const snapshot = yield* Snapshot.Service.use((service) => service.capture()).pipe(
           Effect.provide(locations.get(session.location)),
         )
@@ -383,11 +390,21 @@ const layer = Layer.effect(
           (shells.get(sessionID)?.size ?? 0) > 0 ||
           (yield* jobs.list()).some((job) => job.status === "running" && job.metadata?.sessionID === sessionID)
         // A provider turn may settle while the workspace snapshot is being captured.
-        return SessionOutcome.derive(
+        const outcome = SessionOutcome.derive(
           current,
           running,
           JSON.stringify(current) === JSON.stringify(messages) ? snapshot : undefined,
+          JSON.stringify(current) === JSON.stringify(messages) ? targets : [],
+          required,
         )
+        const { Evidence } = yield* Effect.promise(() => import("./evidence"))
+        return {
+          ...outcome,
+          checks: outcome.checks.map((check) => ({
+            ...check,
+            logs: check.logs?.map((file) => (file.startsWith("ev_") ? file : Evidence.reference(sessionID, file))),
+          })),
+        }
       }),
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
@@ -621,19 +638,25 @@ const layer = Layer.effect(
               let captured = ""
               let truncated = false
               const capture = ToolOutputStore.makeCapture(fs, path.join(global.data, ToolOutputStore.MANAGED_DIRECTORY))
+              const entries = yield* Config.Service.use((service) => service.entries()).pipe(
+                Effect.provide(locations.get(session.location)),
+              )
               yield* restore(
-                appProcess.run(AppProcess.shellCommand(input.command, session.location.directory), {
-                  combineOutput: true,
-                  signal: shell.controller.signal,
-                  maxOutputBytes: 1024 * 1024,
-                  timeout: "10 minutes",
-                  onChunk: capture.append,
-                  onOutput: (output, lost) =>
-                    Effect.sync(() => {
-                      captured = output.toString("utf8")
-                      truncated = lost
-                    }),
-                }),
+                appProcess.run(
+                  AppProcess.shellCommand(input.command, session.location.directory, Config.latest(entries, "shell")),
+                  {
+                    combineOutput: true,
+                    signal: shell.controller.signal,
+                    maxOutputBytes: 1024 * 1024,
+                    timeout: "10 minutes",
+                    onChunk: capture.append,
+                    onOutput: (output, lost) =>
+                      Effect.sync(() => {
+                        captured = output.toString("utf8")
+                        truncated = lost
+                      }),
+                  },
+                ),
               ).pipe(
                 Effect.onExit((exit) => {
                   const status = Exit.isSuccess(exit)

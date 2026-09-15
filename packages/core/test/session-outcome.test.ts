@@ -84,3 +84,81 @@ test("a later errored verification invalidates an earlier successful check", () 
     checks: [{ kind: "test", exit: -1, callID: "new" }],
   })
 })
+
+test("HTML acceptance binds syntax, startup and interaction to the same current artifact", () => {
+  const target = { path: "C:/desktop/game.html", digest: "game-v1" }
+  const checks: SessionMessage.AssistantTool[] = ["syntax", "smoke", "interaction"].map((kind) => ({
+    id: kind,
+    type: "tool",
+    name: "bash",
+    time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+    state: {
+      status: "completed",
+      input: {},
+      content: [],
+      structured: {
+        verification: {
+          kind,
+          command: `check-${kind}`,
+          exit: 0,
+          callID: kind,
+          targets: [target],
+        },
+      },
+    },
+  }))
+  expect(
+    SessionOutcome.derive([{ ...assistant, content: checks.slice(0, 2) }], false, undefined, [target], []).state,
+  ).toBe("completed_unverified")
+  expect(SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [target], []).state).toBe(
+    "completed_verified",
+  )
+  expect(
+    SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [{ ...target, digest: "changed" }], [])
+      .state,
+  ).toBe("completed_unverified")
+  expect(SessionOutcome.derive([{ ...assistant, content: checks }], false, "unrelated-project", [], []).state).toBe(
+    "completed_unverified",
+  )
+})
+
+test("one successful test cannot hide another failing test command", () => {
+  const content: SessionMessage.AssistantTool[] = [1, 0].map((exit, index) => ({
+    id: String(index),
+    type: "tool",
+    name: "bash",
+    time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+    state: {
+      status: "completed",
+      input: {},
+      content: [],
+      structured: {
+        verification: {
+          kind: "test",
+          command: `test-${index}`,
+          exit,
+          callID: String(index),
+          snapshot: "tree",
+        },
+      },
+    },
+  }))
+  expect(SessionOutcome.derive([{ ...assistant, content }], false, "tree", [], ["test"]).state).toBe("failed")
+})
+
+test("changed shell arguments do not reset failed recovery; inspection does", () => {
+  const content: SessionMessage.AssistantTool[] = [1, 2, 3, 4].map((index) => ({
+    id: String(index),
+    type: "tool",
+    name: "bash",
+    time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+    state: { status: "completed", input: { command: `variation-${index}` }, content: [], structured: { exit: 1 } },
+  }))
+  expect(SessionOutcome.recoveryFailures([{ ...assistant, content }])).toBe(4)
+  const inspect = {
+    ...content[0],
+    name: "read",
+    state: { status: "completed" as const, input: {}, content: [], structured: {} },
+  }
+  expect(SessionOutcome.recoveryFailures([{ ...assistant, content: [...content, inspect] }])).toBe(0)
+})

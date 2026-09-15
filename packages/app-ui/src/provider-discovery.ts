@@ -20,6 +20,8 @@ export const providerProtocols = {
 } as const
 
 export const providerDiscoveryPresets: Record<string, { baseURL: string; kind?: ProviderDiscoveryInput["kind"] }> = {
+  deepseek: { baseURL: "https://api.deepseek.com/v1" },
+  openrouter: { baseURL: "https://openrouter.ai/api/v1" },
   openai: { baseURL: "https://api.openai.com/v1" },
   anthropic: { baseURL: "https://api.anthropic.com/v1", kind: "anthropic" },
   google: { baseURL: "https://generativelanguage.googleapis.com/v1beta", kind: "google" },
@@ -62,6 +64,12 @@ export async function discoverProviderModels(input: ProviderDiscoveryInput) {
   const models = new Map<string, { id: string; name: string }>()
   const signal = AbortSignal.timeout(15000)
   const endpoint = new URL(`${base}/models`)
+  // OpenRouter's model catalog is public; listing it does not validate a key.
+  if (base === providerDiscoveryPresets.openrouter.baseURL) {
+    const response = await fetch(`${base}/key`, { headers, signal, redirect: "error", credentials: "omit" })
+    if (!response.ok) throw new Error(`http${response.status}`)
+    endpoint.pathname += "/user"
+  }
   // Follow only pagination tokens on the same endpoint, never response-supplied URLs.
   for (let page = 0; page < 20; page++) {
     const response = await fetch(endpoint, { headers, signal, redirect: "error", credentials: "omit" })

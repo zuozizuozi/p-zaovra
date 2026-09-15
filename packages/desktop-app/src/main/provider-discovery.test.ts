@@ -1,7 +1,36 @@
 import { describe, expect, test } from "bun:test"
-import { discoverProviderModels, providerBaseURL, changeProviderProtocolURL } from "@zaovra-ai/app/provider-discovery"
+import {
+  discoverProviderModels,
+  providerBaseURL,
+  changeProviderProtocolURL,
+  providerDiscoveryPresets,
+} from "@zaovra-ai/app/provider-discovery"
 
 describe("provider discovery", () => {
+  test("OpenRouter connection discovers vendor-prefixed models using its API path", async () => {
+    const preset = providerDiscoveryPresets.openrouter
+    expect(preset.baseURL).toBe("https://openrouter.ai/api/v1")
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        expect(new URL(request.url).pathname).toBe("/api/v1/models")
+        expect(request.headers.get("authorization")).toBe("Bearer test-only")
+        return Response.json({ data: [{ id: "vendor/model", name: "Vendor Model" }] })
+      },
+    })
+    try {
+      const models = await discoverProviderModels({
+        ...preset,
+        baseURL: new URL(new URL(preset.baseURL).pathname, server.url).href,
+        apiKey: "test-only",
+      })
+      expect(models).toEqual([{ id: "vendor/model", name: "Vendor Model" }])
+    } finally {
+      server.stop(true)
+    }
+  })
+
   test("normalizes service and completion URLs and rejects embedded credentials", () => {
     expect(providerBaseURL(" https://api.example.com/ ")).toBe("https://api.example.com/v1")
     expect(providerBaseURL("https://api.example.com/api/v1/chat/completions/")).toBe("https://api.example.com/api/v1")

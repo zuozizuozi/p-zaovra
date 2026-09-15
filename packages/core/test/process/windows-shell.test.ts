@@ -11,6 +11,22 @@ const it = testEffect(LayerNode.compile(AppProcess.node))
 
 describe.skipIf(process.platform !== "win32")("Windows shell boundary", () => {
   it.live(
+    "does not silently accept multiline cmd input",
+    Effect.gen(function* () {
+      const service = yield* AppProcess.Service
+      const rejected = yield* Effect.exit(
+        service.run(AppProcess.shellCommand("node -e \"\nconsole.log('CHECK_RAN');\n\"", process.cwd(), "cmd.exe")),
+      )
+      expect(Exit.isFailure(rejected)).toBe(true)
+      const result = yield* service.run(AppProcess.shellCommand("Write-Output 'CHECK_RAN'", process.cwd()))
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout.toString()).toContain("CHECK_RAN")
+      const silent = yield* service.run(AppProcess.shellCommand("$value = 1", process.cwd()))
+      expect(silent.exitCode).toBe(0)
+      expect(silent.stdout.length).toBe(0)
+    }),
+  )
+  it.live(
     "preserves PowerShell quotes, Unicode paths, multiline scripts and native exit codes",
     Effect.acquireUseRelease(
       Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "zaovra shell 中文 "))),

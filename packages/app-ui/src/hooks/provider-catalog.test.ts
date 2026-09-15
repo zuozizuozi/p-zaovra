@@ -57,3 +57,13 @@ test("falls back to the global catalog for route consumers", () => {
     }),
   ).toBe(global)
 })
+
+test("a draft without a directory uses the global catalog, but an unresolved project does not", () => {
+  const global = catalog("global")
+  expect(selectProviderCatalog({ explicit: true, directory: undefined, global })).toBe(global)
+  expect(selectProviderCatalog({ explicit: true, directory: "/pending-project", global })).toEqual({
+    all: new Map(),
+    connected: [],
+    default: {},
+  })
+})

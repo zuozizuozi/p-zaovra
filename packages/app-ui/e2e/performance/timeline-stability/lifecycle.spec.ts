@@ -28,7 +28,7 @@ test.describe("timeline visual lifecycle stability", () => {
     const ids = ["prt_parallel_01_empty", "prt_parallel_02_short", "prt_parallel_03_long"] as const
     const initial = ids.map((id) => shell(id, "running"))
     const followingID = "prt_parallel_04_following"
-    const assistant = assistantMessage([...initial, textPart(followingID, "Following all parallel shells.")], {
+    const assistant = assistantMessage([], {
       completed: false,
     })
     const timeline = await setupTimeline(page, {
@@ -39,6 +39,10 @@ test.describe("timeline visual lifecycle stability", () => {
       seedHistory: true,
     })
     await timeline.send(status("busy"), 150)
+    // Deliver live parts through SSE so their IDs match subsequent deltas;
+    // historical hydration namespaces part IDs with their message ID.
+    for (const part of [...initial, textPart(followingID, "Following all parallel shells.")])
+      await timeline.send(partUpdated(part))
     for (const id of ids) await timeline.waitForPart(id)
     const scroller = page.locator(".scroll-view__viewport", {
       has: page.locator('[data-timeline-row="AssistantPart"]'),
