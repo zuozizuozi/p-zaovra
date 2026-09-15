@@ -507,7 +507,7 @@ function PromptInputV2ModelControl(props: {
         {props.model.current()
           ? `${language.t(modelSource(props.model.current()!.provider) === "official" ? "model.source.official" : "model.source.own")} · `
           : ""}
-        {props.modelName}
+        {props.loading && !props.model.current() ? language.t("model.catalog.loading") : props.modelName}
       </span>
       <span class="-ml-0.5 -mr-1 flex shrink-0">
         <Icon name="chevron-down" />
@@ -515,7 +515,7 @@ function PromptInputV2ModelControl(props: {
     </>
   )
   return (
-    <Show when={!props.loading}>
+    <>
       <TooltipV2
         placement="top"
         gutter={4}
@@ -542,7 +542,7 @@ function PromptInputV2ModelControl(props: {
           {content()}
         </ModelSelectorPopoverV2>
       </TooltipV2>
-    </Show>
+    </>
   )
 }
 

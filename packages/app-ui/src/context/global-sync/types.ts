@@ -40,6 +40,8 @@ export type State = {
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
   provider_ready: boolean
+  provider_loading?: boolean
+  provider_error?: boolean
   provider: NormalizedProviderListResponse
   config: Config
   path: Path

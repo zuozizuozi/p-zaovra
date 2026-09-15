@@ -1,4 +1,5 @@
 import { useModelService } from "@/hooks/use-model-service"
+import { useModels } from "@/context/models"
 import { useServerSync } from "@/context/server-sync"
 import { modelSource } from "@/utils/model-source"
 import { Popover as Kobalte } from "@kobalte/core/popover"
@@ -230,6 +231,7 @@ export function ModelSelectorPopoverV2(props: {
   onClose?: () => void
 }) {
   const model = props.model ?? useLocal().model
+  const catalog = useModels().catalog
   const service = useModelService()
   const sync = useServerSync()
   const language = useLanguage()
@@ -479,17 +481,26 @@ export function ModelSelectorPopoverV2(props: {
           </div>
           <div class="h-px bg-v2-border-border-muted" />
           <ScrollView data-slot="model-selector-scroll" class="max-h-[220px] min-h-0">
+            <Show when={catalog.error()}>
+              <div role="alert" class="px-3 py-2 text-[13px]">
+                {language.t("model.catalog.error")}
+              </div>
+            </Show>
             <div class="flex flex-col p-0.5 pt-0">
               <Show
                 when={models().length > 0}
                 fallback={
                   <div class="flex min-h-16 items-center px-3 py-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
                     {language.t(
-                      store.search
-                        ? "dialog.model.empty"
-                        : store.source === "own"
-                          ? "model.source.ownEmpty"
-                          : "model.source.officialEmpty",
+                      catalog.loading()
+                        ? "model.catalog.loading"
+                        : catalog.error()
+                          ? "model.catalog.unavailable"
+                          : store.search
+                            ? "dialog.model.empty"
+                            : store.source === "own"
+                              ? "model.source.ownEmpty"
+                              : "model.source.officialEmpty",
                     )}
                   </div>
                 }
@@ -556,6 +567,9 @@ export function ModelSelectorPopoverV2(props: {
           <Show when={store.source === "own"}>
             <div class="h-px bg-v2-border-border-muted" />
             <div class="flex flex-col p-0.5">
+              <Button size="small" variant="ghost" disabled={catalog.loading()} onClick={() => void catalog.refresh()}>
+                {language.t("model.catalog.retry")}
+              </Button>
               <button
                 type="button"
                 role="menuitem"

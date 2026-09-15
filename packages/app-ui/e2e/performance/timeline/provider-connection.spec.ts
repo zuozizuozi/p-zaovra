@@ -21,6 +21,7 @@ for (const service of [
     await installTimelineSettings(page)
     await installStressSessionTabs(page)
     let connected = false
+    let catalogFailed = false
     let connectionAttempts = 0
     let config: Record<string, unknown> = {}
     const requests: string[] = []
@@ -71,6 +72,7 @@ for (const service of [
     )
     await page.route("**/api/model**", (route) =>
       route.fulfill({
+        ...(catalogFailed ? { status: 503 } : {}),
         json: {
           data: [
             ...(connected ? models : []),
@@ -194,6 +196,20 @@ for (const service of [
     await page.getByRole("combobox", { name: "Model service" }).selectOption(other.id)
     await expect(page.getByRole("menuitemradio", { name: "Other service model", exact: true })).toBeVisible()
     await expect(page.getByRole("menuitemradio", { name: "Router test model", exact: true })).toHaveCount(0)
+    if (service.id === "openrouter") {
+      catalogFailed = true
+      await page.getByRole("button", { name: "Refresh models", exact: true }).click()
+      await expect(page.getByRole("alert")).toContainText("Could not refresh models")
+      await expect(page.getByRole("menuitemradio", { name: "Other service model", exact: true })).toBeVisible()
+      await expect(
+        page.getByText("No configured models. Connect your model service to get started.", { exact: true }),
+      ).toHaveCount(0)
+      await expect(page.getByRole("combobox", { name: "Model service" })).toHaveValue(other.id)
+      catalogFailed = false
+      await page.getByRole("button", { name: "Refresh models", exact: true }).click()
+      await expect(page.getByRole("alert")).toHaveCount(0)
+      await expect(page.getByRole("menuitemradio", { name: "Other service model", exact: true })).toBeVisible()
+    }
     expect(errors).toEqual([])
   })
 }
@@ -219,6 +235,10 @@ test("provider catalog failures stay in the dialog and can be retried", async ({
   await welcome.getByRole("button", { name: "Continue to session" }).click()
   await page.locator('[data-action="prompt-model"]').click()
   await page.getByRole("button", { name: "Own Key", exact: true }).click()
+  await expect(page.getByRole("alert")).toContainText("Could not refresh models")
+  await expect(
+    page.getByText("No configured models. Connect your model service to get started.", { exact: true }),
+  ).toHaveCount(0)
   await page.getByRole("menuitem", { name: "Configure your model service" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByRole("alert")).toContainText("Could not load model services", { timeout: 45000 })
@@ -228,4 +248,33 @@ test("provider catalog failures stay in the dialog and can be retried", async ({
   await expect(dialog.getByRole("button", { name: "OpenRouter", exact: true })).toBeVisible()
   await expect(dialog.getByRole("alert")).toHaveCount(0)
   expect(errors).toEqual([])
+})
+
+test("a slow initial model catalog shows loading instead of asking for another key", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installTimelineSettings(page)
+  await installStressSessionTabs(page)
+  const gate = Promise.withResolvers<void>()
+  await page.route("**/api/model**", async (route) => {
+    await gate.promise
+    await route.fulfill({ json: { data: [] } })
+  })
+  try {
+    await page.goto("/")
+    const welcome = page.getByRole("region", { name: "What will we create today?" })
+    await welcome.getByRole("textbox").fill("Keep my draft while loading")
+    await welcome.getByRole("button", { name: "Continue to session" }).click()
+    await page.locator('[data-action="prompt-model"]').click()
+    await page.getByRole("button", { name: "Own Key", exact: true }).click()
+    await expect(page.getByRole("dialog").getByText("Loading models…", { exact: true })).toBeVisible()
+    await expect(
+      page.getByText("No configured models. Connect your model service to get started.", { exact: true }),
+    ).toHaveCount(0)
+    gate.resolve()
+    await expect(
+      page.getByText("No configured models. Connect your model service to get started.", { exact: true }),
+    ).toBeVisible()
+  } finally {
+    gate.resolve()
+  }
 })

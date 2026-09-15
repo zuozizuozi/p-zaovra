@@ -4,6 +4,7 @@ import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
 import { createMemo, type Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
+import { directoryKey } from "@/context/global-sync/utils"
 
 export const popularProviders = ["zaovra", "anthropic", "github-copilot", "openai", "google", "openrouter", "vercel"]
 const popularProviderSet = new Set(popularProviders)
@@ -38,6 +39,20 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     }
   })
   return {
+    loading: () => {
+      const value = dir()
+      return value ? serverSync().child(value)[0].provider_loading : serverSync().data.provider_loading
+    },
+    error: () => {
+      const value = dir()
+      return value ? serverSync().child(value)[0].provider_error : serverSync().data.provider_error
+    },
+    refresh: () =>
+      serverSync().queryClient.refetchQueries({
+        queryKey: serverSync().queryOptions.providers(dir() ? directoryKey(dir()!) : null).queryKey,
+        exact: true,
+        type: "active",
+      }),
     all: () => providers().all,
     default: () => providers().default,
     popular: () =>

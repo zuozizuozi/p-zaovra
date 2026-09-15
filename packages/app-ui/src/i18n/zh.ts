@@ -3,6 +3,11 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "model.catalog.loading": "正在加载模型…",
+  "model.catalog.error": "模型列表刷新失败；若下方仍有模型，显示的是上次成功加载的列表。",
+  "model.catalog.unavailable": "暂时无法获取模型列表，已保存的凭据没有被删除。",
+  "model.catalog.retry": "刷新模型列表",
+  "model.catalog.saved": "{{provider}} 的凭据已保存，但模型列表尚未就绪，请刷新模型列表重试。",
   "provider.catalog.failed": "模型服务列表加载失败，请刷新或配置自定义服务。",
   "provider.catalog.empty": "暂未获取到模型服务，请刷新或配置自定义服务。",
   "provider.catalog.retry": "刷新模型服务",

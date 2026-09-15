@@ -112,9 +112,11 @@ export async function bootstrapGlobal(input: {
   setGlobalStore: SetStoreFunction<GlobalStore>
   queryClient: QueryClient
 }) {
+  // The model picker owns catalog loading/error UI. A slow catalog must not
+  // block the entire new-session page from mounting.
+  void input.queryClient.fetchQuery(loadProvidersQuery(input.scope, null, input.serverSDK)).catch(() => {})
   const slow = [
     () => input.queryClient.fetchQuery(loadGlobalConfigQuery(input.scope, input.serverSDK)),
-    () => input.queryClient.fetchQuery(loadProvidersQuery(input.scope, null, input.serverSDK)),
     () => input.queryClient.fetchQuery(loadPathQuery(input.scope, null, input.serverSDK)),
     () =>
       input.queryClient
@@ -181,15 +183,17 @@ function warmSessions(input: {
 export const loadProvidersQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>
   queryOptions({
     queryKey: [scope, directory === null ? null : directoryKey(directory), "providers"],
-    queryFn: () =>
-      retry(async () => {
-        const [providers, models, integrations] = await Promise.all([
-          sdk.v2.provider.list(),
-          sdk.v2.model.list(),
-          sdk.v2.integration.list(),
-        ])
-        return adaptProviderCatalog(providers.data!.data, models.data!.data, integrations.data!.data)
-      }),
+    // Let the query own retries; nesting retries hides failures for too long.
+    retry: 1,
+    queryFn: async ({ signal }) => {
+      const options = { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]), throwOnError: true as const }
+      const [providers, models, integrations] = await Promise.all([
+        sdk.v2.provider.list(undefined, options),
+        sdk.v2.model.list(undefined, options),
+        sdk.v2.integration.list(undefined, options),
+      ])
+      return adaptProviderCatalog(providers.data!.data, models.data!.data, integrations.data!.data)
+    },
   })
 
 export const loadAgentsQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>
@@ -244,6 +248,7 @@ export async function bootstrapDirectory(input: {
   const rev = (providerRev.get(revKey) ?? 0) + 1
   providerRev.set(revKey, rev)
   ;(async () => {
+    void input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)).catch(() => {})
     const slow = [
       () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
@@ -376,15 +381,6 @@ export async function bootstrapDirectory(input: {
       () => Promise.resolve(input.loadSessions(input.directory)),
       input.mcp && (() => input.queryClient.fetchQuery(loadMcpQuery(input.scope, input.directory, input.sdk))),
       input.mcp && (() => input.queryClient.fetchQuery(loadMcpResourcesQuery(input.scope, input.directory, input.sdk))),
-      () =>
-        input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)).catch((err) => {
-          const project = getFilename(input.directory)
-          showToast({
-            variant: "error",
-            title: input.translate("toast.project.reloadFailed.title", { project }),
-            description: formatServerError(err, input.translate),
-          })
-        }),
     ].filter(Boolean) as (() => Promise<any>)[]
 
     await waitForPaint()

@@ -49,6 +49,8 @@ type GlobalStore = {
   path: Path
   project: Project[]
   provider: NormalizedProviderListResponse
+  provider_loading?: boolean
+  provider_error?: boolean
   config: Config
   reload: undefined | "pending" | "complete"
 }
@@ -139,8 +141,14 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     },
     get provider() {
       const EMPTY = { all: new Map(), connected: [], default: {} }
-      if (providerQuery.isLoading || providerQuery.isError) return EMPTY
+      if (providerQuery.isPending) return EMPTY
       return providerQuery.data ?? EMPTY
+    },
+    get provider_loading() {
+      return providerQuery.isFetching || providerQuery.isPending
+    },
+    get provider_error() {
+      return providerQuery.isError
     },
     get config() {
       if (configQuery.isLoading) return {}

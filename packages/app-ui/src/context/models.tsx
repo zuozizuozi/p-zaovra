@@ -156,6 +156,7 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
     )
     return {
       ready,
+      catalog: { loading: providers.loading, error: providers.error, refresh: providers.refresh },
       list,
       find,
       visible,

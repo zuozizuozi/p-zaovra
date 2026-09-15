@@ -76,6 +76,12 @@ export const dict = {
   "model.source.own": "Own Key",
   "model.source.official": "Official service",
   "model.source.ownEmpty": "No configured models. Connect your model service to get started.",
+  "model.catalog.loading": "Loading models…",
+  "model.catalog.error": "Could not refresh models. Any models shown are from the last successful load.",
+  "model.catalog.unavailable": "The model list is unavailable. Your saved credentials have not been removed.",
+  "model.catalog.retry": "Refresh models",
+  "model.catalog.saved":
+    "Credentials for {{provider}} are saved, but its model list is not ready. Refresh models to retry.",
   "model.source.officialEmpty": "No official models are available for this account. You can use your own Key.",
   "model.source.configure": "Configure your model service",
   "home.welcome.title": "What will we create today?",
@@ -268,7 +274,8 @@ export const dict = {
     " and enter the code below to connect your account and use {{provider}} models in Zaovra.",
   "provider.connect.oauth.auto.confirmationCode": "Confirmation code",
   "provider.connect.toast.connected.title": "{{provider}} connected",
-  "provider.connect.toast.connected.description": "Credentials for {{provider}} are saved; generation and tool calling have not been verified.",
+  "provider.connect.toast.connected.description":
+    "Credentials for {{provider}} are saved; generation and tool calling have not been verified.",
 
   "provider.custom.discovery.restart":
     "The desktop connection component was updated. Close and reopen Zaovra to fetch models. Your current input is kept.",

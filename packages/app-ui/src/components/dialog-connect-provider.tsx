@@ -839,13 +839,28 @@ function ProviderConnection(props: {
     await serverSync().queryClient.invalidateQueries({
       predicate: (query) => query.queryKey[0] === serverSDK().scope && query.queryKey[2] === "providers",
     })
+    const { directoryKey } = await import("@/context/global-sync/utils")
+    const directory = props.directory?.()
+    const visible = await serverSync()
+      .queryClient.fetchQuery({
+        ...serverSync().queryOptions.providers(directory ? directoryKey(directory) : null),
+        staleTime: 0,
+      })
+      .then(
+        (catalog) =>
+          catalog.connected.includes(props.provider) &&
+          Object.keys(catalog.all.get(props.provider)?.models ?? {}).length > 0,
+        () => false,
+      )
     service.select(props.provider)
     dialog.close()
     showToast({
       variant: "success",
       icon: "circle-check",
       title: language.t("provider.connect.toast.connected.title", { provider: name }),
-      description: language.t("provider.connect.toast.connected.description", { provider: name }),
+      description: language.t(visible ? "provider.connect.toast.connected.description" : "model.catalog.saved", {
+        provider: name,
+      }),
     })
   }
 
