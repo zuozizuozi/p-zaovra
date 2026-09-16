@@ -20,7 +20,7 @@ for (const configured of [false, true]) {
             name: "My service",
             models: {
               usable: { id: "usable", name: "My model", limit: { context: 200000 } },
-              ghost: { id: "ghost", name: "Unconfigured preset", limit: { context: 200000 } },
+              // V2 model.list applies the whitelist before returning the catalog.
             },
           },
         ],
@@ -75,6 +75,10 @@ for (const configured of [false, true]) {
     const search = page.getByPlaceholder("Search models")
     await search.focus()
     await search.press("Shift+Tab")
+    if (configured) {
+      await expect(page.getByRole("combobox", { name: "Model service" })).toBeFocused()
+      await page.keyboard.press("Shift+Tab")
+    }
     await expect(page.getByRole("button", { name: "Official service", exact: true })).toBeFocused()
     await page.keyboard.press("Enter")
     await expect(page.getByRole("button", { name: "Official service", exact: true })).toHaveAttribute(

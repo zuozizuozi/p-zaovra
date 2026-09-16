@@ -308,6 +308,8 @@ export function ModelSelectorPopoverV2(props: {
   }
   const setOpen = (open: boolean) => {
     if (open) {
+      // Reconcile catalogs that changed during startup or outside this window.
+      void catalog.refresh()
       restoreTrigger = true
       setStore("source", model.current() ? modelSource(model.current()!.provider) : "own")
       setStore({ open: true, active: initialActive() })

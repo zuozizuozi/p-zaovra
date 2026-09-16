@@ -1,13 +1,14 @@
 export * as SessionRunnerModel from "./model"
 
 import { makeLocationNode } from "../../effect/app-node"
-import { type Model } from "@zaovra-ai/llm"
+import { GenerationOptions, type Model } from "@zaovra-ai/llm"
 import * as AnthropicMessages from "@zaovra-ai/llm/protocols/anthropic-messages"
 import * as OpenAICompatibleChat from "@zaovra-ai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@zaovra-ai/llm/protocols/openai-responses"
 import { Gemini } from "@zaovra-ai/llm/protocols/gemini"
+import { OpenRouter } from "@zaovra-ai/llm/providers/openrouter"
 import { Auth, type AnyRoute } from "@zaovra-ai/llm/route"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { produce } from "immer"
 import { AgentV2 } from "../../agent"
 import { Catalog } from "../../catalog"
@@ -91,13 +92,54 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
 
 const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
   const body = model.request.body
-  const httpBody = Object.hasOwn(body, "apiKey")
-    ? Object.fromEntries(Object.entries(body).filter(([key]) => key !== "apiKey"))
-    : body
+  const generationKeys: Record<string, string> = {
+    temperature: "temperature",
+    max_tokens: "maxTokens",
+    maxTokens: "maxTokens",
+    top_p: "topP",
+    topP: "topP",
+    top_k: "topK",
+    topK: "topK",
+    frequency_penalty: "frequencyPenalty",
+    frequencyPenalty: "frequencyPenalty",
+    presence_penalty: "presencePenalty",
+    presencePenalty: "presencePenalty",
+    seed: "seed",
+    stop: "stop",
+    stop_sequences: "stop",
+    stopSequences: "stop",
+  }
+  const generation = Schema.decodeUnknownOption(GenerationOptions)(
+    Object.fromEntries(
+      Object.entries(body).flatMap(([key, value]) =>
+        Object.hasOwn(generationKeys, key)
+          ? [[generationKeys[key], generationKeys[key] === "stop" && typeof value === "string" ? [value] : value]]
+          : [],
+      ),
+    ),
+  ).pipe(Option.getOrUndefined)
+  const thinking =
+    model.api.type === "aisdk" &&
+    model.api.package === "@ai-sdk/anthropic" &&
+    Schema.is(Schema.Struct({ type: Schema.Literals(["enabled", "disabled"]) }))(body.thinking)
+      ? body.thinking
+      : undefined
+  // Invalid generation values remain in the overlay so request validation rejects
+  // them. Never let catalog settings overwrite model, messages, or tool schemas.
+  const httpBody = Object.fromEntries(
+    Object.entries(body).filter(
+      ([key]) =>
+        key !== "apiKey" &&
+        !(generation && Object.hasOwn(generationKeys, key)) &&
+        !(key === "thinking" && thinking !== undefined),
+    ),
+  )
   return route.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
     headers: model.request.headers,
+    generation,
+    providerOptions: thinking === undefined ? undefined : { anthropic: { thinking } },
     http: { body: httpBody },
     limits: { context: model.limit.context, output: model.limit.output },
   })
@@ -165,10 +207,13 @@ export const fromCatalogModel = (
   if (
     resolved.api.type === "aisdk" &&
     (resolved.api.package === "@openrouter/ai-sdk-provider" ||
-      (resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url))
+      (resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url?.trim()))
   ) {
     return Effect.succeed(
-      withDefaults(resolved, OpenAICompatibleChat.route)
+      withDefaults(
+        resolved,
+        resolved.api.package === "@openrouter/ai-sdk-provider" ? OpenRouter.route : OpenAICompatibleChat.route,
+      )
         .with({
           endpoint: { baseURL: resolved.api.url ?? "https://openrouter.ai/api/v1" },
           auth: key === undefined ? Auth.none : Auth.bearer(key),
@@ -194,7 +239,7 @@ export const supported = (model: ModelV2.Info) =>
     model.api.package === "@ai-sdk/anthropic" ||
     model.api.package === "@ai-sdk/google" ||
     model.api.package === "@openrouter/ai-sdk-provider" ||
-    (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined))
+    (model.api.package === "@ai-sdk/openai-compatible" && Boolean(model.api.url?.trim())))
 
 /** Resolves models from the catalog belonging to the current Location runtime. */
 export const locationLayer = Layer.effect(

@@ -79,6 +79,19 @@ const assistant = (id: string, text: string, created: number): Extract<SessionMe
 })
 
 describe("V2 server session store", () => {
+  test("reconciles the completed transcript when all completion events are missed", async () => {
+    const initial = { ...assistant("msg_answer", "", 2), time: { created: 2 } }
+    const completed = { ...assistant("msg_answer", "READY", 2), finish: "stop" as const }
+    const ctx = setup({
+      pages: [{ data: [initial, user("msg_user", "hello", 1)] }, { data: [completed, user("msg_user", "hello", 1)] }],
+    })
+    await ctx.store.sync("ses_child")
+    ctx.store.set("session_status", "ses_child", { type: "busy" })
+    await ctx.store.watchExecution("ses_child")
+    expect(ctx.store.data.session_working("ses_child")).toBe(false)
+    expect(ctx.store.data.part.msg_answer[0]).toMatchObject({ text: "READY" })
+    expect(ctx.store.data.message.ses_child.find((m) => m.id === "msg_answer")?.time).toMatchObject({ completed: 3 })
+  })
   test("distinguishes backend-confirmed history from an unacknowledged optimistic message", async () => {
     const ctx = setup({ pages: [{ data: [user("msg_persisted", "Already sent", 1)] }] })
     await ctx.store.sync("ses_child")
@@ -431,6 +444,39 @@ describe("V2 server session store", () => {
       "msg_003",
       "msg_004",
     ])
+  })
+
+  test("shows a V2 provider retry and clears it when model output starts", async () => {
+    const finished = Promise.withResolvers<void>()
+    const ctx = setup({ wait: () => finished.promise })
+    await ctx.store.sync("ses_child")
+    ctx.store.apply({
+      type: "session.next.retried",
+      properties: {
+        sessionID: "ses_child",
+        timestamp: 1000,
+        attempt: 2,
+        error: { message: "Retrying provider", isRetryable: true, metadata: { delayMs: "2000" } },
+      },
+    })
+    expect(ctx.store.data.session_status.ses_child).toEqual({
+      type: "retry",
+      attempt: 2,
+      message: "Retrying provider",
+      next: 3000,
+    })
+    ctx.store.apply({
+      type: "session.next.step.started",
+      properties: {
+        sessionID: "ses_child",
+        timestamp: 3100,
+        assistantMessageID: "msg_retry",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+      },
+    })
+    expect(ctx.store.data.session_status.ses_child).toEqual({ type: "busy" })
+    finished.resolve()
   })
 
   test("promotes a durable V2 prompt without waiting for a legacy message event", () => {

@@ -218,6 +218,11 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         if (generations.get(sessionID) !== active) return
         if (!result.data.data[sessionID]) {
           setData("session_status", sessionID, { type: "idle" })
+          // A final SSE event may be missed while a new task mounts or reconnects.
+          // Reconcile persisted history after any older in-flight snapshot settles.
+          await inflight.get(sessionID)?.catch(() => {})
+          if (generations.get(sessionID) !== active) return
+          await sync(sessionID, { force: true })
           return
         }
         if (failure) throw failure
@@ -927,6 +932,23 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       setData("session_status", props.sessionID, { type: "busy" })
       return
     }
+    if (event.type === "session.next.retried") {
+      const props = event.properties as {
+        sessionID: string
+        timestamp: number
+        attempt: number
+        error: { message: string; metadata?: Record<string, string> }
+      }
+      const delay = Number(props.error.metadata?.delayMs ?? 0)
+      setData("session_status", props.sessionID, {
+        type: "retry",
+        attempt: props.attempt,
+        message: props.error.message,
+        next: props.timestamp + (Number.isFinite(delay) ? Math.max(0, delay) : 0),
+      })
+      void watchExecution(props.sessionID).catch(() => {})
+      return
+    }
     if (event.type === "session.next.step.started") {
       const props = event.properties as {
         timestamp: number
@@ -935,7 +957,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         agent: string
         model: { id: string; providerID: string; variant?: string }
       }
-      setData("session_status", props.sessionID, { type: "busy" })
+      setData("session_status", props.sessionID, reconcile({ type: "busy" }))
       void watchExecution(props.sessionID).catch(() => {})
       const session = data.info[props.sessionID]
       const parentID = data.message[props.sessionID]?.findLast((message) => message.role === "user")?.id

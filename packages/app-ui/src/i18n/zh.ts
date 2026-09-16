@@ -447,6 +447,12 @@ export const dict = {
   "prompt.toast.pasteUnsupported.title": "不支持的附件",
   "prompt.toast.pasteUnsupported.description": "此处仅能附加图片、PDF 或文本文件。",
   "prompt.toast.modelAgentRequired.title": "请选择智能体和模型",
+  "prompt.toast.modelUnavailable.title": "所选模型当前不可用",
+  "prompt.toast.modelUnavailable.description":
+    "已连接的服务中未找到所选模型。请打开模型配置，核对服务商与模型 ID；本次尚未发送 API 请求。",
+  "prompt.toast.agentUnavailable.title": "智能体尚未就绪",
+  "prompt.toast.agentUnavailable.description":
+    "当前项目的智能体配置尚未加载成功，不代表 API Key 无效；本次尚未发送 API 请求。",
   "prompt.toast.modelAgentRequired.description": "发送提示前请先选择智能体和模型。",
   "prompt.toast.worktreeCreateFailed.title": "创建工作树失败",
   "prompt.toast.sessionCreateFailed.title": "创建会话失败",

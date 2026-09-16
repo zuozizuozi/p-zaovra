@@ -387,6 +387,9 @@ export const layer = Layer.effect(
       }
 
       const interrupted = Cause.hasInterrupts(exit.cause)
+      // An execution error does not prove that its tools had no side effects.
+      // Transport retries remain bounded below this layer; resuming an unknown
+      // execution requires an explicit recovery decision.
       yield* events.publish(Work.Event.AttemptSettled, {
         goalID: goal.id,
         attemptID: attempt.id,
@@ -396,13 +399,20 @@ export const layer = Layer.effect(
         failure: {
           kind: interrupted ? "interrupted" : "error",
           message: interrupted ? "Work execution interrupted" : errorText(Cause.squash(exit.cause)),
-          retryable: !interrupted,
+          retryable: false,
         },
         timestamp,
       })
       if (interrupted) return
-      if (retryAvailable(goal, task)) return
-      yield* exhaustBudget(goal, task, "Retryable Executor failure exhausted the Attempt budget")
+      const reason = errorText(Cause.squash(exit.cause))
+      yield* events.publish(Work.Event.TaskBlocked, {
+        goalID: goal.id,
+        taskID: task.id,
+        status: "blocked",
+        reason,
+        timestamp,
+      })
+      yield* blockGoal(goal.id, reason, timestamp)
       return
     })
 
@@ -1571,7 +1581,10 @@ export const layer = Layer.effect(
         yield* exhaustBudget(goal, task, "Attempt budget exhausted")
         return false
       }
-      if (task.attemptCount > 0 && goal.usage.repairs >= (goal.budget?.maxRepairAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS)) {
+      if (
+        task.attemptCount > 0 &&
+        goal.usage.repairs >= (goal.budget?.maxRepairAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS)
+      ) {
         yield* exhaustBudget(goal, task, "Repair budget exhausted")
         return false
       }
@@ -1867,8 +1880,7 @@ function exhaustedBudgetReason(goal: Work.GoalInfo, now: number) {
     return "Goal duration budget exhausted"
   if (goal.budget?.maxTurns !== undefined && goal.usage.turns >= goal.budget.maxTurns)
     return "Goal provider-turn budget exhausted"
-  if (goal.budget?.maxCost !== undefined && goal.usage.cost >= goal.budget.maxCost)
-    return "Goal cost budget exhausted"
+  if (goal.budget?.maxCost !== undefined && goal.usage.cost >= goal.budget.maxCost) return "Goal cost budget exhausted"
   return undefined
 }
 

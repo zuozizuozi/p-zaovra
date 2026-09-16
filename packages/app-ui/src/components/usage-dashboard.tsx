@@ -45,6 +45,8 @@ function useUsage(sessionID: () => string | undefined, enabled: () => boolean = 
       )
         return
       if (sessionID() && value.properties.sessionID !== sessionID()) return
+      // Usage settlements are durable before this event; expose them during long tasks too.
+      refresh()
       if (pending.has(value.properties.sessionID)) return
       pending.add(value.properties.sessionID)
       // Share the existing execution watcher: tool continuations are one user turn.

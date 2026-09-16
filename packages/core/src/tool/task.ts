@@ -203,6 +203,17 @@ export const run = Effect.fn("TaskTool.execute")(function* (
   if (child.agent !== targetID)
     return yield* failure(`Subagent Session ${child.id} is not owned by @${input.subagent_type}`)
 
+  // A fresh child must not silently switch to the global default provider.
+  // Explicit role/command models and an existing child's selection remain authoritative.
+  const model =
+    input.model ??
+    (!input.task_id && !target.model && !command?.model
+      ? (yield* sessions
+          .messages({ sessionID: parent.id, order: "desc", limit: 50 })
+          .pipe(Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error)))))
+          .filter((message) => message.type === "assistant")
+          .find((message) => message.id === context.assistantMessageID)?.model
+      : undefined)
   const admission = sessions
     .prompt({
       id: SessionMessage.ID.make(`msg_task_${parent.id}_${context.assistantMessageID}_${context.toolCallID}`),
@@ -211,7 +222,7 @@ export const run = Effect.fn("TaskTool.execute")(function* (
         text: input.prompt,
         files: input.files,
         agents: input.agents,
-        ...(input.model ? { selection: { agent: targetID, model: input.model } } : {}),
+        ...(model ? { selection: { agent: targetID, model } } : {}),
       },
       resume: input.run_in_background === true,
     })

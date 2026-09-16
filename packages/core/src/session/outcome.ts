@@ -41,6 +41,7 @@ export function derive(
   snapshot?: string,
   targets: readonly { path: string; digest: string }[] = [],
   required: readonly string[] = ["build", "test", "lint"],
+  liveBackgroundShells: ReadonlySet<string> = new Set(),
 ): SessionOutcome.Info {
   const start = messages.findLastIndex((message) => message.type === "user")
   const turn = messages.slice(Math.max(0, start))
@@ -103,7 +104,7 @@ export function derive(
   if (!required.length && !html.length) missing.push("acceptance")
   const unknown = turn.some(
     (message) =>
-      (message.type === "shell" && message.time.completed === undefined) ||
+      (message.type === "shell" && message.time.completed === undefined && !liveBackgroundShells.has(message.id)) ||
       (message.type === "assistant" &&
         (message.time.completed === undefined ||
           message.content.some(

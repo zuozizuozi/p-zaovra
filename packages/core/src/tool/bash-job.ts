@@ -22,6 +22,7 @@ export class Service extends Context.Service<
       run: Effect.Effect<string, unknown>,
       context: Tool.Context,
       prepare: Effect.Effect<void, unknown>,
+      background?: { kind: "task" | "preview"; workdir: string },
     ) => Effect.Effect<string, Tool.Failure>
   }
 >()("@zaovra/BashJob") {}
@@ -44,6 +45,7 @@ const layer = Layer.effect(
       run: Effect.Effect<string, unknown>,
       context: Tool.Context,
       prepare: Effect.Effect<void, unknown>,
+      background?: { kind: "task" | "preview"; workdir: string },
     ) => {
       const id = `msg_bash_${context.assistantMessageID}_${context.toolCallID}`
       return locks.withLock(id)(
@@ -76,6 +78,8 @@ const layer = Layer.effect(
                 sessionID: context.sessionID,
                 directory: location.directory,
                 workspaceID: location.workspaceID,
+                kind: background?.kind ?? "task",
+                workdir: background?.workdir ?? location.directory,
               },
               run: restore(run).pipe(
                 Effect.onExit((exit) =>
@@ -114,10 +118,24 @@ const layer = Layer.effect(
               action: Schema.Literals(["get", "wait", "cancel"]),
               timeout: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 60_000 })).pipe(Schema.optional),
             }),
-            output: Schema.Struct({ status: Schema.String, output: Schema.String }),
-            structured: Schema.Struct({ status: Schema.String }),
-            toStructuredOutput: ({ output }) => ({ status: output.status }),
-            toModelOutput: ({ output }) => [{ type: "text", text: `${output.status}\n${output.output}` }],
+            output: Schema.Struct({
+              status: Schema.String,
+              output: Schema.String,
+              kind: Schema.optional(Schema.String),
+              workdir: Schema.optional(Schema.String),
+            }),
+            structured: Schema.Struct({
+              status: Schema.String,
+              kind: Schema.optional(Schema.String),
+              workdir: Schema.optional(Schema.String),
+            }),
+            toStructuredOutput: ({ output }) => ({ status: output.status, kind: output.kind, workdir: output.workdir }),
+            toModelOutput: ({ output }) => [
+              {
+                type: "text",
+                text: `${output.status}${output.kind ? ` (${output.kind})` : ""}${output.workdir ? ` in ${output.workdir}` : ""}\n${output.output}`,
+              },
+            ],
             execute: (input, context) =>
               Effect.gen(function* () {
                 const record = yield* sessions.message(SessionMessage.ID.make(input.job_id))
@@ -166,6 +184,8 @@ const layer = Layer.effect(
                       : job
                 return {
                   status: result?.status ?? "unavailable",
+                  kind: typeof result?.metadata?.kind === "string" ? result.metadata.kind : undefined,
+                  workdir: typeof result?.metadata?.workdir === "string" ? result.metadata.workdir : undefined,
                   output:
                     result?.output ?? result?.error ?? "Still running. Read the command log or wait for completion.",
                 }

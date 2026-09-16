@@ -107,6 +107,35 @@ describe("TaskTool", () => {
     }),
   )
 
+  it.effect("inherits the invoking model for a fresh child without overriding a configured role model", () =>
+    Effect.gen(function* () {
+      yield* registerExplore()
+      const prompts: Parameters<SessionV2.Interface["prompt"]>[0][] = []
+      const invoking = { ...assistant(AgentV2.ID.make("build")), id: toolIdentity.assistantMessageID }
+      const sessions = {
+        ...sessionOps({
+          prompt: (input) =>
+            Effect.sync(() => prompts.push(input)).pipe(Effect.as(admitted(input.sessionID, input.prompt.text))),
+        }),
+        messages: () => Effect.succeed([invoking]),
+      }
+      const input = { description: "Inspect", prompt: "Inspect this", subagent_type: "explore" }
+      const context = { sessionID: parentID, ...toolIdentity, toolCallID: "call-inherit" }
+      yield* TaskTool.run(sessions, info(parentID), input, context)
+      expect(prompts[0].prompt.selection).toEqual({ agent: "explore", model: invoking.model })
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("explore"), (agent) => {
+          agent.model = invoking.model
+        }),
+      )
+      yield* TaskTool.run(sessions, info(parentID), input, context)
+      expect(prompts[1].prompt.selection).toBeUndefined()
+      yield* TaskTool.run(sessions, info(parentID), { ...input, task_id: childID }, context)
+      expect(prompts[2].prompt.selection).toBeUndefined()
+    }),
+  )
+
   it.effect("runs a permitted subagent in an independent child Session", () =>
     Effect.gen(function* () {
       assertions.length = 0

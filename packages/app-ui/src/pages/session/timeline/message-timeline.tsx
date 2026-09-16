@@ -953,7 +953,9 @@ export function MessageTimeline(props: {
 
   const workingTurn = (userMessageID: string) => sessionStatus().type !== "idle" && activeMessageID() === userMessageID
   const waitingToJoin = (userMessageID: string) =>
-    sessionStatus().type !== "idle" && (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0
+    sessionStatus().type !== "idle" &&
+    (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0 &&
+    activeMessageID() !== userMessageID
 
   const turnDurationMs = (userMessageID: string) => {
     const message = messageByID().get(userMessageID)

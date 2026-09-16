@@ -14,6 +14,27 @@ const assistant: SessionMessage.Assistant = {
   finish: "stop",
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
+
+test("live background shells do not block completion, but lost ownership remains unknown", () => {
+  const shell: SessionMessage.Shell = {
+    id: SessionMessage.ID.make("msg_preview"),
+    type: "shell",
+    callID: "preview",
+    command: "preview",
+    output: "",
+    time: { created: DateTime.makeUnsafe(1) },
+  }
+  const messages = [shell, assistant]
+  expect(SessionOutcome.derive(messages, false, undefined, [], [], new Set([shell.id]))).toMatchObject({
+    state: "completed_unverified",
+    outcomeUnknown: false,
+  })
+  expect(SessionOutcome.derive(messages, false, undefined, [], [], new Set(["another-preview"]))).toMatchObject({
+    state: "interrupted",
+    outcomeUnknown: true,
+  })
+  expect(SessionOutcome.derive(messages, false)).toMatchObject({ state: "interrupted", outcomeUnknown: true })
+})
 test("a normal model stop does not claim engineering verification", () => {
   expect(SessionOutcome.derive([assistant], false).state).toBe("completed_unverified")
   expect(SessionOutcome.derive([assistant], true).state).toBe("running")
@@ -113,6 +134,27 @@ test("HTML acceptance binds syntax, startup and interaction to the same current 
   expect(SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [target], []).state).toBe(
     "completed_verified",
   )
+  const preview: SessionMessage.Shell = {
+    id: SessionMessage.ID.make("msg_preview"),
+    type: "shell",
+    callID: "preview",
+    command: "preview",
+    output: "",
+    time: { created: DateTime.makeUnsafe(1) },
+  }
+  expect(
+    SessionOutcome.derive(
+      [preview, { ...assistant, content: checks }],
+      false,
+      undefined,
+      [target],
+      [],
+      new Set([preview.id]),
+    ).state,
+  ).toBe("completed_verified")
+  expect(
+    SessionOutcome.derive([preview, { ...assistant, content: checks }], false, undefined, [target], []).state,
+  ).toBe("interrupted")
   expect(
     SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [{ ...target, digest: "changed" }], [])
       .state,

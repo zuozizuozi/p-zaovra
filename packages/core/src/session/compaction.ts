@@ -86,12 +86,16 @@ const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
 const truncate = (value: string, limit = TOOL_OUTPUT_MAX_CHARS) =>
   value.length <= limit ? value : `${value.slice(0, limit / 2)}\n[truncated middle]\n${value.slice(-limit / 2)}`
 
-export const serializeToolContent = (content: SessionMessage.ToolStateCompleted["content"]) =>
-  content
-    .map((item) =>
-      item.type === "text" ? item.text : `[Attached ${item.mime}${item.name === undefined ? "" : `: ${item.name}`}]`,
-    )
-    .join("\n")
+export const serializeToolContent = (content: SessionMessage.ToolStateCompleted["content"], structured?: unknown) =>
+  content.length === 0 && structured !== undefined
+    ? JSON.stringify(structured)
+    : content
+        .map((item) =>
+          item.type === "text"
+            ? item.text
+            : `[Attached ${item.mime}${item.name === undefined ? "" : `: ${item.name}`}]`,
+        )
+        .join("\n")
 
 const serialize = (message: SessionMessage.Message, reduced = false) => {
   if (message.type === "user") {
@@ -109,7 +113,7 @@ const serialize = (message: SessionMessage.Message, reduced = false) => {
         if (part.state.status === "completed")
           return [
             `[Assistant tool call]: ${part.name}(${input})`,
-            `[Tool result]: ${truncate(serializeToolContent(part.state.content), reduced ? 512 : TOOL_OUTPUT_MAX_CHARS)}`,
+            `[Tool result]: ${truncate(serializeToolContent(part.state.content, part.state.structured), reduced ? 512 : TOOL_OUTPUT_MAX_CHARS)}`,
             ...(part.state.outputPaths ?? []).map((path) => `[Retained tool output]: ${path}`),
           ]
         if (part.state.status === "error")

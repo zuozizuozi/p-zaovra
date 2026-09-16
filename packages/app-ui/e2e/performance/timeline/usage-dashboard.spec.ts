@@ -3,8 +3,9 @@ import { mockZaovraServer } from "../../utils/mock-server"
 import { fixture, pageMessages } from "./session-timeline-stress.fixture"
 import { installStressSessionTabs, installTimelineSettings } from "./timeline-test-helpers"
 
-test("usage synchronizes after execution finishes and both dashboard entry points work", async ({ page }) => {
+test("usage synchronizes between provider turns and after execution finishes", async ({ page }) => {
   let emit = false
+  let liveTotal = 100
   let completed = false
   let waiting = false
   let unavailable = false
@@ -58,8 +59,8 @@ test("usage synchronizes after execution finishes and both dashboard entry point
     return route.fulfill({
       json: {
         data: {
-          total: totals(completed ? 495 : 100),
-          own: totals(completed ? 330 : 100),
+          total: totals(completed ? 495 : liveTotal),
+          own: totals(completed ? 330 : liveTotal),
           official: totals(completed ? 165 : 0),
           unknown: totals(0),
           lastTurn: totals(completed ? 395 : 100),
@@ -79,9 +80,14 @@ test("usage synchronizes after execution finishes and both dashboard entry point
   await expect(bar).toContainText("Conversation 0")
   await page.locator(`a[href*="${fixture.sourceID}"]`).first().click()
   await expect(bar).toContainText("Conversation 100")
+  liveTotal = 250
   emit = true
   await expect.poll(() => waiting).toBe(true)
-  await expect(bar).toContainText("Conversation 100")
+  await expect(bar).toContainText("Conversation 250")
+  // A second provider turn must refresh even while the same execution wait is pending.
+  liveTotal = 310
+  emit = true
+  await expect(bar).toContainText("Conversation 310")
   completed = true
   release()
   await expect(bar).toContainText("Conversation 495")

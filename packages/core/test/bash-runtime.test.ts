@@ -11,6 +11,7 @@ import { ProjectV2 } from "@zaovra-ai/core/project"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { BackgroundJob } from "@zaovra-ai/core/background-job"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { location } from "./fixture/location"
@@ -20,7 +21,12 @@ import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
 const withRuntime = <A, E, R>(
-  body: (directory: string, sessions: SessionV2.Interface, registry: ToolRegistry.Interface) => Effect.Effect<A, E, R>,
+  body: (
+    directory: string,
+    sessions: SessionV2.Interface,
+    registry: ToolRegistry.Interface,
+    jobs: BackgroundJob.Interface,
+  ) => Effect.Effect<A, E, R>,
 ) =>
   Effect.acquireUseRelease(
     Effect.promise(() => tmpdir()),
@@ -32,23 +38,31 @@ const withRuntime = <A, E, R>(
             agent.permissions = [{ action: "bash", resource: "*", effect: "allow" }]
           }),
         )
-        return yield* body(tmp.path, yield* SessionV2.Service, yield* ToolRegistry.Service)
+        return yield* body(
+          tmp.path,
+          yield* SessionV2.Service,
+          yield* ToolRegistry.Service,
+          yield* BackgroundJob.Service,
+        )
       }).pipe(
         Effect.provide(
-          AppNodeBuilder.build(LayerNode.group([SessionV2.node, BashTool.node, AgentV2.node, ToolRegistry.node]), [
-            [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
-            [Global.node, Global.layerWith({ data: tmp.path })],
-            [Config.node, Layer.succeed(Config.Service, { entries: () => Effect.succeed([]) })],
-            [SessionExecution.node, SessionExecution.noopLayer],
+          AppNodeBuilder.build(
+            LayerNode.group([SessionV2.node, BashTool.node, AgentV2.node, ToolRegistry.node, BackgroundJob.node]),
             [
-              ProjectV2.node,
-              Layer.succeed(ProjectV2.Service, {
-                resolve: (directory) => Effect.succeed({ id: ProjectV2.ID.global, directory }),
-                directories: () => Effect.succeed([]),
-                commit: () => Effect.void,
-              }),
+              [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
+              [Global.node, Global.layerWith({ data: tmp.path })],
+              [Config.node, Layer.succeed(Config.Service, { entries: () => Effect.succeed([]) })],
+              [SessionExecution.node, SessionExecution.noopLayer],
+              [
+                ProjectV2.node,
+                Layer.succeed(ProjectV2.Service, {
+                  resolve: (directory) => Effect.succeed({ id: ProjectV2.ID.global, directory }),
+                  directories: () => Effect.succeed([]),
+                  commit: () => Effect.void,
+                }),
+              ],
             ],
-          ]),
+          ),
         ),
       ),
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
@@ -125,7 +139,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       const other = yield* sessions.create({ location: session.location })
       const script = path.join(directory, "background.js")
       yield* Effect.promise(() => Bun.write(script, "process.stdout.write('finished');"))
-      const start = (id: string) =>
+      const start = (id: string, timeout?: number) =>
         settleTool(registry, {
           sessionID: session.id,
           ...toolIdentity,
@@ -136,6 +150,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
             input: {
               command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
               run_in_background: true,
+              ...(timeout === undefined ? {} : { timeout }),
             },
           },
         })
@@ -162,7 +177,9 @@ it.live("background commands settle durably, enforce ownership, and stop with th
         (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell"),
       ).toHaveLength(1)
       yield* Effect.promise(() => Bun.write(script, "process.stdout.write('running'); setInterval(() => {}, 1000)"))
-      const second = yield* start("long")
+      const second = yield* start("long", 0)
+      // Ordinary background work remains part of task execution.
+      expect((yield* sessions.outcome(session.id)).state).toBe("running")
       yield* sessions.interrupt(session.id)
       const stopped = yield* settleTool(registry, {
         sessionID: session.id,
@@ -177,6 +194,77 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       expect(stopped.output?.structured).toMatchObject({ status: "cancelled" })
       const shells = (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell")
       expect(shells.every((message) => message.time.completed !== undefined)).toBe(true)
+      const bounded = yield* start("bounded", 300)
+      const timed = yield* settleTool(registry, {
+        sessionID: session.id,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "timed",
+          name: "bash_job",
+          input: { job_id: (bounded.output?.structured as { job_id: string }).job_id, action: "wait" },
+        },
+      })
+      expect(timed.output?.structured).toMatchObject({ status: "error" })
+      expect(timed.output?.content[0]).toMatchObject({
+        type: "text",
+        text: expect.stringContaining("timeout of 300 ms"),
+      })
+    }),
+  ),
+)
+
+it.live("Stop preserves explicit previews; archive closes only owned services", () =>
+  withRuntime((directory, sessions, registry, jobs) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const other = yield* sessions.create({ location: session.location })
+      const script = path.join(directory, "preview.js")
+      yield* Effect.promise(() => Bun.write(script, "setInterval(() => {}, 1000)"))
+      const start = (sessionID: SessionV2.ID) =>
+        settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: sessionID,
+            name: "bash",
+            input: {
+              command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+              run_in_background: true,
+              background_kind: "preview",
+              workdir: directory,
+            },
+          },
+        })
+      const first = yield* start(session.id)
+      const second = yield* start(other.id)
+      const observe = (sessionID: SessionV2.ID, job: typeof first, action = "get") =>
+        settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: `observe-${action}`,
+            name: "bash_job",
+            input: {
+              job_id: (job.output?.structured as { job_id: string }).job_id,
+              action,
+            },
+          },
+        })
+      expect((yield* sessions.outcome(session.id)).state).toBe("idle")
+      yield* sessions.interrupt(session.id)
+      expect((yield* observe(session.id, first)).output?.structured).toMatchObject({
+        status: "running",
+        kind: "preview",
+        workdir: directory,
+      })
+      yield* sessions.update({ sessionID: session.id, archived: true })
+      expect((yield* observe(session.id, first)).output?.structured).toMatchObject({ status: "cancelled" })
+      expect((yield* observe(other.id, second)).output?.structured).toMatchObject({ status: "running" })
+      yield* sessions.remove(other.id)
+      expect((yield* jobs.get((second.output?.structured as { job_id: string }).job_id))?.status).toBe("cancelled")
     }),
   ),
 )

@@ -715,7 +715,12 @@ export default function Page() {
   const refreshVcs = debounce(() => void queryClient.invalidateQueries({ queryKey: vcsKey() }), 100)
   const turnQuery = createQuery(() => {
     const sessionID = params.id
-    const messageID = lastUserMessage()?.id
+    // Shell and synthetic history rows render as users, but do not own a turn diff.
+    const messageID = messages().findLast(
+      (message) =>
+        message.role === "user" &&
+        !(sync().data.part[message.id] ?? []).some((part) => part.type === "text" && part.synthetic),
+    )?.id
     const latest = messages().findLast((message) => message.role === "assistant")
     return {
       queryKey: ["session-turn-diff", serverSDK().scope, sessionID, messageID, latest?.id, latest?.time.completed],
@@ -741,7 +746,8 @@ export default function Page() {
     if (reviewMode() === "git" || reviewMode() === "branch")
       // avoids suspense
       return vcsQuery.isFetched ? (vcsQuery.data ?? []) : []
-    return list(turnQuery.data)
+    // Reading pending query data suspends the entire workspace, including the composer.
+    return turnQuery.isFetched ? list(turnQuery.data) : []
   }
   const activeReviewFile = () => {
     const diffs = reviewDiffs()

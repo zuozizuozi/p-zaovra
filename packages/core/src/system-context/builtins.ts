@@ -30,7 +30,10 @@ const builtIns = Layer.effectDiscard(
         codec: Schema.toCodecJson(Schema.String),
         load: Effect.gen(function* () {
           const shell = AppProcess.resolveShell(Config.latest(yield* config.entries(), "shell"))
-          return `${environment}\nExecution shell: ${shell}. Use this shell's syntax, not another shell's quoting or operators. For embedded multiline code, write a script file and invoke it. An exit code of 0 only reports process success, not task acceptance.`
+          const powershell = /(?:^|[\\/])powershell(?:\.exe)?$/i.test(shell)
+            ? " Windows PowerShell does not support && or Bash redirection syntax. Use workdir for directories; quote literal @ arguments such as '@e1'."
+            : ""
+          return `${environment}\nExecution shell: ${shell}. Use this shell's syntax, not another shell's quoting or operators.${powershell} For embedded multiline code, write a script file and invoke it. An exit code of 0 only reports process success, not task acceptance.`
         }),
         baseline: (environment) =>
           ["Here is some useful information about the environment you are running in:", environment].join("\n"),

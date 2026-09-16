@@ -38,6 +38,7 @@ export function SessionOutcomeDock() {
       staleTime: 0,
     }
   })
+  const outcome = () => (query.isFetched ? query.data : undefined)
   const recover = useMutation(() => ({
     mutationFn: (input: { sessionID: string; messageID: string; action: "continue" | "retry" | "abandon" }) =>
       sdk().client.v2.session.recover(input, { throwOnError: true }),
@@ -65,9 +66,9 @@ export function SessionOutcomeDock() {
     >
       <Show
         when={
-          query.data &&
-          query.data.state !== "idle" &&
-          query.data.state !== "running" &&
+          outcome() &&
+          outcome()?.state !== "idle" &&
+          outcome()?.state !== "running" &&
           !sync().session.data.session_working(params.id ?? "")
         }
       >
@@ -76,14 +77,14 @@ export function SessionOutcomeDock() {
           role="status"
           aria-busy={recover.isPending}
         >
-          <span>{language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${query.data!.state}`)}</span>
-          <Show when={query.data?.outcomeUnknown && !abandoned()}>
+          <span>{language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`)}</span>
+          <Show when={outcome()?.outcomeUnknown && !abandoned()}>
             <span>{language.t("session.outcome.unknown")}</span>
           </Show>
-          <Show when={query.data?.checks.length || query.data?.missing.length}>
+          <Show when={outcome()?.checks.length || outcome()?.missing.length}>
             <details>
               <summary>{language.t("session.outcome.checks")}</summary>
-              <For each={query.data?.checks}>
+              <For each={outcome()?.checks}>
                 {(check) => (
                   <div class="break-all">
                     {check.kind}: {check.command} · exit {check.exit}
@@ -92,9 +93,9 @@ export function SessionOutcomeDock() {
                   </div>
                 )}
               </For>
-              <Show when={query.data?.missing.length}>
+              <Show when={outcome()?.missing.length}>
                 <div>
-                  {language.t("session.outcome.missing")} {query.data?.missing.join(", ")}
+                  {language.t("session.outcome.missing")} {outcome()?.missing.join(", ")}
                 </div>
               </Show>
             </details>
@@ -102,7 +103,7 @@ export function SessionOutcomeDock() {
           <Show when={!abandoned()}>
             <div class="flex flex-wrap gap-1">
               <Show
-                when={query.data?.messageID && (query.data.state === "interrupted" || query.data.state === "failed")}
+                when={outcome()?.messageID && (outcome()?.state === "interrupted" || outcome()?.state === "failed")}
               >
                 <For each={["continue", "retry", "abandon"] as const}>
                   {(action) => (
@@ -111,7 +112,7 @@ export function SessionOutcomeDock() {
                       variant="ghost"
                       disabled={recover.isPending}
                       onClick={() =>
-                        recover.mutate({ sessionID: params.id!, messageID: query.data!.messageID!, action })
+                        recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action })
                       }
                     >
                       {language.t(`session.outcome.${action}`)}

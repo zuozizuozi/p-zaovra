@@ -18,6 +18,7 @@ import { Worktree as WorktreeState } from "@/utils/worktree"
 import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { ScopedKey } from "@/utils/server-scope"
+import { pathKey } from "@/utils/path-key"
 import { createPromptSubmissionState } from "./submission-state"
 import { toLegacySessionSummary } from "@/context/global-sync/home-session-index"
 
@@ -27,6 +28,7 @@ type PendingPrompt = {
 }
 
 const pending = new Map<string, PendingPrompt>()
+const interruptions = new Map<string, Promise<void>>()
 
 class CancelledFollowupInput extends Error {
   constructor() {
@@ -241,6 +243,8 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       resume: input.resume,
     })
     if (admitted.data?.data.cancelledSeq !== undefined) throw new CancelledFollowupInput()
+    if (input.resume !== false && input.delivery !== "queue")
+      void input.serverSync.session.watchExecution(input.draft.sessionID).catch(() => {})
     return true
   } catch (err) {
     batch(() => {
@@ -326,23 +330,33 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const sessionID = params.id
     if (!sessionID) return Promise.resolve()
 
-    serverSync().session.set("todo", sessionID, [])
-
-    input.onAbort?.()
-
     const key = pendingKey(sessionID)
+    const stopping = interruptions.get(key)
+    if (stopping) return stopping
     const queued = pending.get(key)
     if (queued) {
       queued.abort.abort()
       queued.cleanup()
       pending.delete(key)
+      input.onAbort?.()
       return Promise.resolve()
     }
-    return sdk()
-      .client.v2.session.interrupt({
-        sessionID,
+    const request = sdk()
+      .client.v2.session.interrupt({ sessionID }, { throwOnError: true })
+      .then(() => {
+        input.onAbort?.()
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: `${language.t("prompt.action.stop")}: ${errorMessage(error)}`,
+        })
+      })
+      .finally(() => {
+        interruptions.delete(key)
+      })
+    interruptions.set(key, request)
+    return request
   }
 
   const restoreCommentItems = (
@@ -407,10 +421,32 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const currentModel = modelSelection.current()
     const currentAgent = local.agent.current()
     const variant = modelSelection.variant.current()
-    if (!currentModel || !currentAgent) {
+    if (!currentModel) {
       showToast({
-        title: language.t("prompt.toast.modelAgentRequired.title"),
-        description: language.t("prompt.toast.modelAgentRequired.description"),
+        title: language.t("prompt.toast.modelUnavailable.title"),
+        description: language.t("prompt.toast.modelUnavailable.description"),
+      })
+      return
+    }
+    if (!currentAgent) {
+      const target = sync()
+      const server = serverSync()
+      const directory = pathKey(sdk().directory)
+      showToast({
+        title: language.t("prompt.toast.agentUnavailable.title"),
+        description: language.t("prompt.toast.agentUnavailable.description"),
+        actions: [
+          {
+            label: language.t("common.retry"),
+            onClick: () =>
+              void server.queryClient
+                .fetchQuery(server.queryOptions.agents(directory))
+                .then((agents) => target.set("agent", agents))
+                .catch((error: unknown) =>
+                  showToast({ title: language.t("common.requestFailed"), description: errorMessage(error) }),
+                ),
+          },
+        ],
       })
       return
     }

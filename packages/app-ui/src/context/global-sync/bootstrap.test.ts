@@ -279,6 +279,33 @@ describe("bootstrapDirectory", () => {
 })
 
 describe("query keys", () => {
+  test("agent loading surfaces failure and can recover without saving an empty catalog", async () => {
+    let unavailable = true
+    const client = {
+      v2: {
+        agent: {
+          list: async (_input: unknown, options: { throwOnError?: boolean; signal?: AbortSignal }) => {
+            expect(options.throwOnError).toBe(true)
+            expect(options.signal).toBeInstanceOf(AbortSignal)
+            if (unavailable) throw new Error("temporarily unavailable")
+            return {
+              data: {
+                data: [{ id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } }],
+              },
+            }
+          },
+        },
+      },
+    } as unknown as ZaovraClient
+    const queries = new QueryClient()
+    const query = { ...loadAgentsQuery(ServerScope.local, "C:/project", client), retryDelay: 0 }
+    await expect(queries.fetchQuery(query)).rejects.toThrow("temporarily unavailable")
+    expect(queries.getQueryData(query.queryKey)).toBeUndefined()
+    unavailable = false
+    expect(await queries.fetchQuery(query)).toMatchObject([{ name: "build", mode: "primary" }])
+    queries.clear()
+  })
+
   test("configuration refresh updates the provider cache observed by Windows directory stores", async () => {
     let connected = ["custom"]
     const client = {

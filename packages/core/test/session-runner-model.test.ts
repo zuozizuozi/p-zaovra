@@ -1,8 +1,8 @@
 import { describe, expect } from "bun:test"
-import { LLM } from "@zaovra-ai/llm"
-import { LLMClient } from "@zaovra-ai/llm/route"
-import { DateTime, Effect } from "effect"
-import { Headers } from "effect/unstable/http"
+import { LLM, Message } from "@zaovra-ai/llm"
+import { LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
+import { DateTime, Effect, Layer } from "effect"
+import { FetchHttpClient, Headers } from "effect/unstable/http"
 import { Credential } from "@zaovra-ai/core/credential"
 import { Integration } from "@zaovra-ai/core/integration"
 import { ModelV2 } from "@zaovra-ai/core/model"
@@ -42,6 +42,104 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
+  for (const pkg of ["@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider", "@ai-sdk/anthropic"]) {
+    it.effect(`sends catalog generation settings through real local HTTP for ${pkg}`, () =>
+      Effect.gen(function* () {
+        const received: Array<{ body: unknown; authorized: boolean }> = []
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            Bun.serve({
+              hostname: "127.0.0.1",
+              port: 0,
+              async fetch(request) {
+                received.push({
+                  body: await request.json(),
+                  authorized:
+                    pkg === "@ai-sdk/anthropic"
+                      ? request.headers.get("x-api-key") === "test-only"
+                      : request.headers.get("authorization") === "Bearer test-only",
+                })
+                const events =
+                  pkg === "@ai-sdk/anthropic"
+                    ? [
+                        { type: "message_start", message: { usage: { input_tokens: 1 } } },
+                        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+                        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "OK" } },
+                        { type: "content_block_stop", index: 0 },
+                        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+                        { type: "message_stop" },
+                      ]
+                    : [{ choices: [{ delta: { content: "OK" }, finish_reason: "stop" }] }]
+                return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+                  headers: { "content-type": "text/event-stream" },
+                })
+              },
+            }),
+          ),
+          (server) => Effect.sync(() => server.stop(true)),
+        )
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(
+          ModelV2.Info.make({
+            ...model({ type: "aisdk", package: pkg, url: `http://127.0.0.1:${server.port}/v1` }),
+            request: {
+              headers: {},
+              body: {
+                temperature: 0.2,
+                max_tokens: 16000,
+                top_p: 0.9,
+                stop: "END",
+                custom_extension: true,
+                ...(pkg === "@ai-sdk/anthropic" ? { thinking: { type: "enabled", budget_tokens: 12000 } } : {}),
+              },
+            },
+          }),
+          { type: "key", key: "test-only" },
+        )
+        const result = yield* LLMClient.generate(LLM.request({ model: resolved, prompt: "Hello" })).pipe(
+          Effect.provide(
+            LLMClient.layer.pipe(Layer.provide(RequestExecutor.layer.pipe(Layer.provide(FetchHttpClient.layer)))),
+          ),
+        )
+        expect(result.text).toBe("OK")
+        expect(received).toHaveLength(1)
+        expect(received[0]).toMatchObject({
+          authorized: true,
+          body: {
+            model: "api-test-model",
+            temperature: 0.2,
+            max_tokens: 16000,
+            top_p: 0.9,
+            custom_extension: true,
+            ...(pkg === "@ai-sdk/anthropic"
+              ? { stop_sequences: ["END"], thinking: { type: "enabled", budget_tokens: 12000 } }
+              : { stop: ["END"] }),
+          },
+        })
+      }),
+    )
+  }
+
+  for (const body of [
+    { temperature: "wrong" },
+    { model: "override" },
+    { messages: [] },
+    { tools: [] },
+    { thinking: { type: "unsupported" } },
+  ]) {
+    it.effect(`rejects invalid or protocol-owned catalog settings: ${Object.keys(body)[0]}`, () =>
+      Effect.gen(function* () {
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(
+          ModelV2.Info.make({
+            ...model({ type: "aisdk", package: "@ai-sdk/anthropic" }),
+            request: { headers: {}, body },
+          }),
+        )
+        const error = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "Hello" })).pipe(Effect.flip)
+        expect(error.reason.message).toContain("cannot overlay protocol-owned")
+      }),
+    )
+  }
+
   for (const url of [undefined, "https://router.example/api/v1"]) {
     it.effect(`routes OpenRouter through native Chat with ${url ?? "the default endpoint"}`, () =>
       Effect.gen(function* () {
@@ -52,8 +150,28 @@ describe("SessionRunnerModel", () => {
         })
         expect(SessionRunnerModel.supported(catalog)).toBe(true)
         const resolved = yield* SessionRunnerModel.fromCatalogModel(catalog, { type: "key", key: "test-only" })
-        const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "Hello" }))
-        expect(resolved.route.id).toBe("openai-compatible-chat")
+        const prepared = yield* LLMClient.prepare(
+          LLM.request({
+            model: resolved,
+            messages: [
+              Message.assistant([
+                {
+                  type: "reasoning",
+                  text: "Thought",
+                  providerMetadata: {
+                    openrouter: { reasoning_details: [{ type: "reasoning.text", text: "Thought", signature: "sig" }] },
+                  },
+                },
+              ]),
+            ],
+          }),
+        )
+        expect(resolved.route.id).toBe("openrouter")
+        expect(prepared.body).toMatchObject({
+          messages: [
+            { role: "assistant", reasoning_details: [{ type: "reasoning.text", text: "Thought", signature: "sig" }] },
+          ],
+        })
         expect(resolved.route.endpoint).toMatchObject({ baseURL: url ?? "https://openrouter.ai/api/v1" })
         expect(prepared.body).toMatchObject({ model: "vendor/model" })
         expect(resolved.route.defaults.http?.body).toEqual({ reasoning: { effort: "low" } })
@@ -190,9 +308,10 @@ describe("SessionRunnerModel", () => {
         custom_extension: { enabled: true },
         store: false,
         service_tier: "priority",
-        temperature: 0.2,
         reasoning: { effort: "high" },
       })
+      const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "Hello" }))
+      expect(prepared.body).toMatchObject({ temperature: 0.2 })
     }),
   )
 
@@ -283,8 +402,9 @@ describe("SessionRunnerModel", () => {
 
       expect(resolved.route.defaults.http?.body).toEqual({
         custom_extension: { enabled: true },
-        thinking: { type: "enabled", budget_tokens: 12000 },
       })
+      const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "Hello" }))
+      expect(prepared.body).toMatchObject({ thinking: { type: "enabled", budget_tokens: 12000 } })
     }),
   )
 

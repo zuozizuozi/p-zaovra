@@ -2,6 +2,8 @@ import { Location } from "@zaovra-ai/core/location"
 import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { WorkspaceV2 } from "@zaovra-ai/core/workspace"
+import { PluginV2 } from "@zaovra-ai/core/plugin"
+import { PluginInternal } from "@zaovra-ai/core/plugin/internal"
 import { Effect, Layer } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
@@ -12,8 +14,14 @@ export class LocationMiddleware extends HttpApiMiddleware.Service<LocationMiddle
   "@zaovra/HttpApiLocation",
 ) {}
 
-export function response<A, E, R>(data: Effect.Effect<A, E, R>) {
+export function response<A, E, R>(data: Effect.Effect<A, E, R>, readiness?: "agents" | "catalog") {
   return Effect.gen(function* () {
+    if (readiness) {
+      const plugins = yield* PluginV2.Service
+      yield* plugins
+        .wait(readiness === "agents" ? PluginInternal.agentReadyID : PluginInternal.readyID)
+        .pipe(Effect.timeout("15 seconds"), Effect.orDie)
+    }
     const location = yield* Location.Service
     return {
       location: new Location.Info({

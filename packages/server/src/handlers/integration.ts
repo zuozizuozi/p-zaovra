@@ -23,7 +23,7 @@ export const IntegrationHandler = HttpApiBuilder.group(Api, "server.integration"
         "integration.list",
         Effect.fn(function* () {
           const service = yield* Integration.Service
-          return yield* response(service.list())
+          return yield* response(service.list(), "catalog")
         }),
       )
       .handle(

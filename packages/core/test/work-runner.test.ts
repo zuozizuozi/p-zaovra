@@ -3,6 +3,7 @@ import { afterAll, describe, expect } from "bun:test"
 import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Work } from "@zaovra-ai/core/work"
+import { LLMError, InvalidProviderOutputReason } from "@zaovra-ai/llm"
 import { Database } from "@zaovra-ai/core/database/database"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -236,8 +237,50 @@ const concurrencyIt = testEffect(
   ),
 )
 const goalID = Work.GoalID.make("goal_runner")
+const providerFailureIt = testEffect(
+  runnerLayer(
+    reviewers,
+    Layer.succeed(
+      SessionExecution.Service,
+      SessionExecution.Service.of({
+        active: Effect.succeed(new Set()),
+        resume: () =>
+          Effect.fail(
+            new LLMError({
+              module: "SessionRunner",
+              method: "run",
+              reason: new InvalidProviderOutputReason({
+                message: "Model output limit reached before the turn completed",
+              }),
+            }),
+          ),
+        wake: () => Effect.void,
+        interrupt: () => Effect.void,
+      }),
+    ),
+  ),
+)
 
 describe("WorkRunner", () => {
+  providerFailureIt.effect("blocks a failed provider turn without replaying the Work attempt or verifying it", () =>
+    Effect.gen(function* () {
+      const work = yield* Work.Service
+      const runner = yield* WorkRunner.Service
+      const store = yield* WorkStore.Service
+      const created = yield* work.create({
+        id: goalID,
+        location: { directory: AbsolutePath.make("/project") },
+        objective: "Do not report truncated output as success",
+        acceptanceCriteria: [],
+      })
+      yield* runner.run({ goalID, force: true })
+      expect(yield* work.get(goalID)).toMatchObject({ status: "blocked", usage: { attempts: 1 } })
+      expect(yield* store.attempts(created.tasks[0].id)).toMatchObject([
+        { kind: "execute", status: "failed", failure: { retryable: false } },
+      ])
+      expect(yield* store.evaluations(created.tasks[0].id)).toEqual([])
+    }),
+  )
   it.effect("runs a durable Planner Attempt before executing its validated graph", () =>
     Effect.gen(function* () {
       const work = yield* Work.Service
@@ -793,7 +836,7 @@ describe("WorkRunner", () => {
     }),
   )
 
-  retryIt.effect("retries retryable Session failures within the hard Attempt bound", () =>
+  retryIt.effect("blocks an unclassified execution defect instead of replaying possible side effects", () =>
     Effect.gen(function* () {
       retryExecution.calls = 0
       const work = yield* Work.Service
@@ -802,25 +845,22 @@ describe("WorkRunner", () => {
       const created = yield* work.create({
         id: goalID,
         location: { directory: AbsolutePath.make("/project") },
-        objective: "Recover from a temporary provider failure",
+        objective: "Preserve an execution with an unknown outcome",
         budget: { maxAttemptsPerTask: 5 },
         acceptanceCriteria: [{ description: "Work completes", required: true, evidence: "review" }],
       })
 
       yield* runner.run({ goalID, force: true })
 
-      expect(retryExecution.calls).toBe(3)
-      expect(yield* work.get(goalID)).toMatchObject({ status: "completed", usage: { attempts: 4 } })
+      expect(retryExecution.calls).toBe(1)
+      expect(yield* work.get(goalID)).toMatchObject({ status: "blocked", usage: { attempts: 1 } })
       expect(yield* store.attempts(created.tasks[0].id)).toMatchObject([
-        { kind: "execute", status: "failed", failure: { retryable: true } },
-        { kind: "execute", status: "failed", failure: { retryable: true } },
-        { kind: "execute", status: "succeeded" },
-        { kind: "review", status: "succeeded" },
+        { kind: "execute", status: "failed", failure: { retryable: false } },
       ])
     }),
   )
 
-  retryIt.effect("stops retryable Session failures at the hard Attempt bound", () =>
+  retryIt.effect("keeps unknown execution outcomes blocked when runner wakeups repeat", () =>
     Effect.gen(function* () {
       retryExecution.calls = 0
       const work = yield* Work.Service
@@ -829,18 +869,21 @@ describe("WorkRunner", () => {
       const created = yield* work.create({
         id: goalID,
         location: { directory: AbsolutePath.make("/project") },
-        objective: "Bound repeated provider failures",
-        budget: { maxAttemptsPerTask: 2 },
+        objective: "Do not mistake a repeated wakeup for recovery approval",
+        budget: { maxAttemptsPerTask: 3 },
         acceptanceCriteria: [{ description: "Work completes", required: true, evidence: "review" }],
       })
 
       yield* runner.run({ goalID, force: true })
 
-      expect(retryExecution.calls).toBe(2)
-      expect(yield* work.get(goalID)).toMatchObject({ status: "budget_exhausted", usage: { attempts: 2 } })
+      expect(retryExecution.calls).toBe(1)
+      expect(yield* work.get(goalID)).toMatchObject({ status: "blocked", usage: { attempts: 1 } })
+      yield* runner.run({ goalID, force: false })
+      yield* runner.run({ goalID, force: true })
+      expect(retryExecution.calls).toBe(1)
+      expect(yield* work.get(goalID)).toMatchObject({ status: "blocked", usage: { attempts: 1 } })
       expect(yield* store.attempts(created.tasks[0].id)).toMatchObject([
-        { kind: "execute", status: "failed", failure: { retryable: true } },
-        { kind: "execute", status: "failed", failure: { retryable: true } },
+        { kind: "execute", status: "failed", failure: { retryable: false } },
       ])
     }),
   )
@@ -983,11 +1026,7 @@ describe("WorkRunner", () => {
         seq: 1,
         data: { time: { created: 1 } },
       }
-      yield* db
-        .insert(SessionMessageTable)
-        .values(corruptMessage)
-        .run()
-        .pipe(Effect.orDie)
+      yield* db.insert(SessionMessageTable).values(corruptMessage).run().pipe(Effect.orDie)
       yield* events.publish(Work.Event.AttemptSettled, {
         goalID,
         attemptID,

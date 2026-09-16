@@ -12,7 +12,7 @@ export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (han
         "provider.list",
         Effect.fn(function* () {
           const catalog = yield* Catalog.Service
-          return yield* response(catalog.provider.available())
+          return yield* response(catalog.provider.available(), "catalog")
         }),
       )
       .handle(

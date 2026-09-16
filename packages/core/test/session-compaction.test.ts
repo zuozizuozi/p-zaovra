@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test"
 import { SessionCompaction } from "@zaovra-ai/core/session/compaction"
 
+test("compaction preserves structured-only read results and does not duplicate rendered output", () => {
+  const structured = { type: "text-page", content: "const answer = 42", offset: 1, next: 2 }
+  expect(SessionCompaction.serializeToolContent([], structured)).toContain("const answer = 42")
+  expect(SessionCompaction.serializeToolContent([{ type: "text", text: "bounded preview" }], structured)).toBe(
+    "bounded preview",
+  )
+})
+
 test("compaction prompt preserves detailed work state and relevant files", () => {
   const prompt = SessionCompaction.buildPrompt({ context: ["conversation history"] })
 

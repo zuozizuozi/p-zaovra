@@ -328,21 +328,40 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               completed = yield* Effect.exit(
                 Effect.gen(function* () {
-                  yield* result.get(input.sessionID)
+                  const session = yield* result.get(input.sessionID)
+                  if (session.time.archived) return yield* new OperationUnavailableError({ operation: "recover" })
                   const messages = yield* store.context(input.sessionID).pipe(Effect.orDie)
-                  const previous = SessionOutcome.derive(messages, false)
+                  const background = (yield* jobs.list()).filter(
+                    (job) => job.status === "running" && job.metadata?.sessionID === input.sessionID,
+                  )
+                  const previous = SessionOutcome.derive(
+                    messages,
+                    false,
+                    undefined,
+                    [],
+                    undefined,
+                    new Set(
+                      background
+                        .filter((job) => job.type === "bash" && job.metadata?.kind === "preview")
+                        .map((job) => job.id),
+                    ),
+                  )
                   if (
                     previous.messageID !== input.messageID ||
                     (previous.state !== "interrupted" && previous.state !== "failed") ||
-                    (yield* jobs.list()).some(
-                      (job) => job.status === "running" && job.metadata?.sessionID === input.sessionID,
-                    )
+                    background.some((job) => job.type !== "bash" || job.metadata?.kind !== "preview")
                   )
                     return yield* new OperationUnavailableError({ operation: "recover" })
                   if (input.action === "abandon") {
                     for (const pending of yield* SessionInput.pending(db, input.sessionID))
                       yield* result.cancelInput({ sessionID: input.sessionID, messageID: pending.id })
-                    yield* result.update({ sessionID: input.sessionID, archived: true })
+                    // Recovery already owns the coordinator; interrupting it here would wait on itself.
+                    yield* Effect.forEach(background, (job) => jobs.cancel(job.id), { discard: true })
+                    yield* events.publish(SessionEvent.Updated, {
+                      sessionID: input.sessionID,
+                      timestamp: yield* DateTime.now,
+                      archived: true,
+                    })
                     return previous
                   }
                   const user = messages.findLast((message) => message.type === "user")
@@ -351,7 +370,7 @@ const layer = Layer.effect(
                     input.action === "retry"
                       ? Prompt.fromUserMessage(user)
                       : Prompt.make({
-                          text: "Continue the existing task. The previous execution was interrupted or failed. Inspect its retained logs and current workspace before any side effect. Do not assume unfinished commands completed, and do not blindly repeat them.",
+                          text: "核对现场后继续上一项任务：先检查保留的日志、当前工作区和仍在运行的预览，确认已完成的部分与结果不明的操作。不要假定未结束的命令已经成功，也不要重复执行已完成的操作；未验证的结果需明确说明。",
                         })
                   yield* result.prompt({ sessionID: input.sessionID, prompt, resume: false })
                   return { ...previous, state: "running" as const, outcomeUnknown: previous.outcomeUnknown }
@@ -369,14 +388,23 @@ const layer = Layer.effect(
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
         const messages = yield* store.context(sessionID).pipe(Effect.orDie)
+        // A live preview server is not an unfinished model turn. Only process-local
+        // ownership can exempt its shell row; after a crash it remains unknown.
+        const background = (yield* jobs.list()).filter(
+          (job) => job.status === "running" && job.metadata?.sessionID === sessionID,
+        )
+        const liveShells = new Set(
+          background.filter((job) => job.type === "bash" && job.metadata?.kind === "preview").map((job) => job.id),
+        )
         const active =
           (yield* execution.active).has(sessionID) ||
           (shells.get(sessionID)?.size ?? 0) > 0 ||
-          (yield* jobs.list()).some((job) => job.status === "running" && job.metadata?.sessionID === sessionID)
-        const preliminary = SessionOutcome.derive(messages, active)
+          background.some((job) => job.type !== "bash" || job.metadata?.kind !== "preview")
+        const preliminary = SessionOutcome.derive(messages, active, undefined, [], undefined, liveShells)
         if (active) return preliminary
         const required = yield* SessionOutcome.requirements(fs, session.location.directory)
-        if (!preliminary.checks.length) return SessionOutcome.derive(messages, false, undefined, [], required)
+        if (!preliminary.checks.length)
+          return SessionOutcome.derive(messages, false, undefined, [], required, liveShells)
         const targets = yield* SessionOutcome.fingerprint(
           fs,
           preliminary.checks.flatMap((check) => check.targets?.map((target) => target.path) ?? []),
@@ -385,10 +413,13 @@ const layer = Layer.effect(
           Effect.provide(locations.get(session.location)),
         )
         const current = yield* store.context(sessionID).pipe(Effect.orDie)
+        const currentBackground = (yield* jobs.list()).filter(
+          (job) => job.status === "running" && job.metadata?.sessionID === sessionID,
+        )
         const running =
           (yield* execution.active).has(sessionID) ||
           (shells.get(sessionID)?.size ?? 0) > 0 ||
-          (yield* jobs.list()).some((job) => job.status === "running" && job.metadata?.sessionID === sessionID)
+          currentBackground.some((job) => job.type !== "bash" || job.metadata?.kind !== "preview")
         // A provider turn may settle while the workspace snapshot is being captured.
         const outcome = SessionOutcome.derive(
           current,
@@ -396,6 +427,11 @@ const layer = Layer.effect(
           JSON.stringify(current) === JSON.stringify(messages) ? snapshot : undefined,
           JSON.stringify(current) === JSON.stringify(messages) ? targets : [],
           required,
+          new Set(
+            currentBackground
+              .filter((job) => job.type === "bash" && job.metadata?.kind === "preview")
+              .map((job) => job.id),
+          ),
         )
         const { Evidence } = yield* Effect.promise(() => import("./evidence"))
         return {
@@ -423,11 +459,25 @@ const layer = Layer.effect(
           },
           { location: session.location },
         )
+        if (input.archived) {
+          yield* result.interrupt(input.sessionID)
+          yield* Effect.forEach(
+            (yield* jobs.list()).filter(
+              (job) => job.metadata?.sessionID === input.sessionID && job.status === "running",
+            ),
+            (job) => jobs.cancel(job.id),
+            { discard: true },
+          )
+          for (const pending of yield* SessionInput.pending(db, input.sessionID))
+            yield* result
+              .cancelInput({ sessionID: input.sessionID, messageID: pending.id })
+              .pipe(Effect.catchTag("Session.PromptConflictError", () => Effect.void))
+        }
         return yield* result.get(input.sessionID).pipe(Effect.orDie)
       }),
       remove: Effect.fn("V2Session.remove")(function* (sessionID) {
         const session = yield* result.get(sessionID)
-        yield* result.interrupt(sessionID)
+        yield* result.update({ sessionID, archived: true })
         yield* events.publish(
           SessionEvent.Deleted,
           { sessionID, timestamp: yield* DateTime.now },
@@ -744,7 +794,10 @@ const layer = Layer.effect(
                       Effect.forEach(
                         items.filter(
                           (job) =>
-                            job.type === "bash" && job.metadata?.sessionID === sessionID && job.status === "running",
+                            job.type === "bash" &&
+                            job.metadata?.sessionID === sessionID &&
+                            job.status === "running" &&
+                            job.metadata?.kind !== "preview",
                         ),
                         (job) => jobs.cancel(job.id),
                         { discard: true },

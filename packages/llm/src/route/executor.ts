@@ -32,6 +32,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/LLM/RequestExecutor") {}
 
+export const RetryObserver = Context.Reference<
+  (input: { attempt: number; delayMs: number; error: LLMError }) => Effect.Effect<void>
+>("@zaovra/LLM/RetryObserver", { defaultValue: () => () => Effect.void })
+
 const BODY_LIMIT = 16_384
 const MAX_RETRIES = 2
 const REQUEST_TIMEOUT = "120 seconds"
@@ -80,6 +84,7 @@ const normalizedHeaders = (headers: Headers.Headers) =>
 
 const requestId = (headers: Record<string, string>) => {
   return (
+    headers["x-generation-id"] ??
     headers["x-request-id"] ??
     headers["request-id"] ??
     headers["x-amzn-requestid"] ??
@@ -280,7 +285,10 @@ const statusError =
   (response: HttpClientResponse.HttpClientResponse) =>
     Effect.gen(function* () {
       if (response.status < 400) return response
-      const body = yield* response.text.pipe(Effect.catch(() => Effect.void))
+      const body = yield* response.text.pipe(
+        Effect.timeout("10 seconds"),
+        Effect.catch(() => Effect.void),
+      )
       const headers = normalizedHeaders(response.headers)
       const retryAfter = retryAfterMs(headers)
       const rateLimit = rateLimitDetails(headers, retryAfter)
@@ -323,7 +331,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
     })
 
   if (Cause.isTimeoutError(error)) {
-    return transportError({ message: error.message, kind: "Timeout" })
+    return transportError({ message: "模型请求建立超时：单次等待 120 秒仍未收到响应头。", kind: "Timeout" })
   }
   if (!HttpClientError.isHttpClientError(error)) {
     return transportError({ message: "HTTP transport failed" })
@@ -357,9 +365,20 @@ const retryStatusFailures = <A, R>(
   attempt = 0,
 ): Effect.Effect<A, LLMError, R> =>
   Effect.catchTag(effect, "LLM.Error", (error): Effect.Effect<A, LLMError, R> => {
-    if (!error.retryable || retries <= 0) return Effect.fail(error)
+    if (!error.retryable || retries <= 0 || (error.retryAfterMs ?? 0) > MAX_DELAY_MS) return Effect.fail(error)
     return retryDelay(error, attempt).pipe(
-      Effect.flatMap((delay) => Effect.sleep(delay)),
+      Effect.flatMap((delay) =>
+        Effect.gen(function* () {
+          const observe = yield* RetryObserver
+          yield* observe({ attempt: attempt + 2, delayMs: delay, error })
+          yield* Effect.logInfo("provider.request.retry", {
+            attempt: attempt + 2,
+            delayMs: delay,
+            category: error.reason._tag,
+          })
+          yield* Effect.sleep(delay)
+        }),
+      ),
       Effect.flatMap(() => retryStatusFailures(effect, retries - 1, attempt + 1)),
     )
   })
@@ -371,13 +390,26 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
     const executeOnce = (request: HttpClientRequest.HttpClientRequest) =>
       Effect.gen(function* () {
         const redactedNames = yield* Headers.CurrentRedactedNames
-        return yield* http
-          .execute(request)
-          .pipe(
-            Effect.timeout(REQUEST_TIMEOUT),
-            Effect.mapError(toHttpError(redactedNames)),
-            Effect.flatMap(statusError(request, redactedNames)),
-          )
+        const started = Date.now()
+        yield* Effect.logInfo("provider.request.start", { host: new URL(request.url).hostname })
+        return yield* http.execute(request).pipe(
+          Effect.timeout(REQUEST_TIMEOUT),
+          Effect.mapError(toHttpError(redactedNames)),
+          Effect.tap((response) =>
+            Effect.logInfo("provider.request.headers", {
+              status: response.status,
+              elapsedMs: Date.now() - started,
+              requestID: requestId(normalizedHeaders(response.headers)),
+            }),
+          ),
+          Effect.flatMap(statusError(request, redactedNames)),
+          Effect.tapError((error) =>
+            Effect.logInfo("provider.request.failed", {
+              category: error.reason._tag,
+              elapsedMs: Date.now() - started,
+            }),
+          ),
+        )
       })
     return Service.of({
       execute: (request) => retryStatusFailures(executeOnce(request)),

@@ -78,6 +78,55 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("lists only configured models supported by the V2 runner", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (directory) =>
+        Bun.write(
+          `${directory}/zaovra.json`,
+          JSON.stringify({
+            providers: Object.fromEntries(
+              [
+                ["audit-azure", "@ai-sdk/azure"],
+                ["audit-compatible", "@ai-sdk/openai-compatible"],
+                ["audit-openrouter", "@openrouter/ai-sdk-provider"],
+              ].map(([id, npm]) => [
+                id,
+                {
+                  api: { type: "aisdk", package: npm, url: "http://127.0.0.1:1/v1" },
+                  request: { body: { apiKey: "audit-only" } },
+                  models: { "audit-model": { name: "Audit model", disabled: false } },
+                },
+              ]),
+            ),
+          }),
+        ),
+    })
+    // These are issued together by the model picker on a cold Location.
+    const [listed, providers, integrations, agents] = await Promise.all(
+      ["/api/model", "/api/provider", "/api/integration", "/api/agent"].map((route) => request(route, tmp.path)),
+    )
+    expect(listed.status).toBe(200)
+    expect(providers.status).toBe(200)
+    expect(integrations.status).toBe(200)
+    expect(agents.status).toBe(200)
+    expect((await providers.json()).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "audit-compatible" })]),
+    )
+    expect((await integrations.json()).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "audit-compatible" })]),
+    )
+    expect((await agents.json()).data).toEqual(expect.arrayContaining([expect.objectContaining({ id: "build" })]))
+    const body = await listed.json()
+    expect(body.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ providerID: "audit-compatible", id: "audit-model" }),
+        expect.objectContaining({ providerID: "audit-openrouter", id: "audit-model" }),
+      ]),
+    )
+    expect(body.data.some((model: { providerID: string }) => model.providerID === "audit-azure")).toBe(false)
+  }, 30000)
+
   test("reads and cancels durable task inputs whose IDs exceed the router default", async () => {
     await using tmp = await tmpdir({ git: true })
     const id = `ses_task_${"parent_assistant_call_".repeat(7)}`

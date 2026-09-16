@@ -1,4 +1,5 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema, Stream } from "effect"
+import { Framing } from "../route/framing"
 import { Route } from "../route/client"
 import { Auth } from "../route/auth"
 import { Endpoint } from "../route/endpoint"
@@ -64,7 +65,7 @@ const OpenAIChatUserContent = Schema.Union([
   }),
 ])
 
-const OpenAIChatMessage = Schema.Union([
+export const OpenAIChatMessage = Schema.Union([
   Schema.Struct({ role: Schema.Literal("system"), content: Schema.String }),
   Schema.Struct({
     role: Schema.Literal("user"),
@@ -142,7 +143,7 @@ const OpenAIChatToolCallDelta = Schema.Struct({
 })
 type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta>
 
-const OpenAIChatDelta = Schema.Struct({
+export const OpenAIChatDelta = Schema.Struct({
   content: optionalNull(Schema.String),
   reasoning_content: optionalNull(Schema.String),
   tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
@@ -153,7 +154,7 @@ const OpenAIChatChoice = Schema.Struct({
   finish_reason: optionalNull(Schema.String),
 })
 
-const OpenAIChatEvent = Schema.Struct({
+export const OpenAIChatEvent = Schema.Struct({
   choices: Schema.Array(OpenAIChatChoice),
   usage: optionalNull(OpenAIChatUsage),
 })
@@ -492,7 +493,33 @@ export const protocol = Protocol.make({
   },
 })
 
-export const httpTransport = HttpTransport.sseJson.with<OpenAIChatBody>()
+// Chat servers sometimes send role-only or empty deltas as JSON keep-alives.
+// Drop only known no-ops before the transport's progress timer. Preserve usage,
+// finish/error frames and unknown extensions (including signed reasoning).
+const decodeFrame = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+export const framing: Framing.Framing<string> = {
+  id: "sse/chat",
+  frame: (bytes) =>
+    Framing.sse.frame(bytes).pipe(
+      Stream.filter((frame) => {
+        const value = decodeFrame(frame).pipe(Option.getOrUndefined)
+        if (!isRecord(value) || value.usage != null || value.error != null || !Array.isArray(value.choices)) return true
+        return !value.choices.every(
+          (choice) =>
+            isRecord(choice) &&
+            choice.finish_reason == null &&
+            (choice.delta == null ||
+              (isRecord(choice.delta) &&
+                Object.entries(choice.delta).every(
+                  ([key, item]) =>
+                    key === "role" || item == null || item === "" || (Array.isArray(item) && item.length === 0),
+                ))),
+        )
+      }),
+    ),
+}
+
+export const httpTransport = HttpTransport.httpJson<OpenAIChatBody, string>({ framing })
 
 export const route = Route.make({
   id: ADAPTER,

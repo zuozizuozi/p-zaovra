@@ -199,7 +199,14 @@ export const loadProvidersQuery = (scope: ServerScope, directory: string | null,
 export const loadAgentsQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>
   queryOptions({
     queryKey: [scope, directory === null ? null : directoryKey(directory), "agents"],
-    queryFn: () => retry(() => sdk.v2.agent.list().then((x) => (x.data?.data ?? []).map(adaptAgent))),
+    retry: 1,
+    queryFn: ({ signal }) =>
+      sdk.v2.agent
+        .list(undefined, {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+          throwOnError: true,
+        })
+        .then((x) => x.data!.data.map(adaptAgent)),
   })
 
 export const loadPathQuery = (scope: ServerScope, directory: string | null, sdk: ZaovraClient) =>

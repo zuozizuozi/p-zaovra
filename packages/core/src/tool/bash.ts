@@ -15,7 +15,6 @@ import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { AppProcess } from "../process"
 import { PermissionV2 } from "../permission"
-import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -27,12 +26,17 @@ export const MAX_TIMEOUT_MS = 10 * 60 * 1_000
 export const MAX_CAPTURE_BYTES = 1024 * 1024
 
 export const Input = Schema.Struct({
+  background_kind: Schema.optional(Schema.Literals(["task", "preview"])).annotate({
+    description:
+      "For background commands only. Use preview only for a local development/preview server: it survives Stop, but is closed on archive or bash_job cancel. Other work defaults to task and stops with execution.",
+  }),
   run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
-    description: "Start a bounded background command; use bash_job to inspect, wait, or cancel it.",
+    description:
+      "Start a Session-owned background command; use bash_job to inspect, wait, or cancel it. Preview servers should run in the background without a timeout.",
   }),
   verification: Schema.optional(SessionOutcome.Check.fields.kind).annotate({
     description:
-      "Declare a build/test/lint/typecheck command. The host records its actual exit and workspace snapshot; this is not a claim that acceptance criteria passed.",
+      "Declare a verification command only when executing actual checks. Omit this field for ordinary commands; do not use 'none'. The host records its actual exit and workspace snapshot; this is not a claim that acceptance criteria passed.",
   }),
   verification_targets: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
@@ -42,10 +46,10 @@ export const Input = Schema.Struct({
   workdir: Schema.String.pipe(Schema.optional).annotate({
     description: "Working directory. Defaults to the active Location; relative paths resolve from that Location.",
   }),
-  timeout: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_TIMEOUT_MS))
+  timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
     .annotate({
-      description: `Timeout in milliseconds. Defaults to ${DEFAULT_TIMEOUT_MS} and may not exceed ${MAX_TIMEOUT_MS}.`,
+      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Background defaults to no timeout; 0 explicitly selects no timeout for background only.`,
     }),
 })
 
@@ -125,7 +129,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
@@ -147,6 +151,8 @@ const layer = Layer.effectDiscard(
                 messageID: context.assistantMessageID,
                 callID: context.toolCallID,
               }
+              if (input.background_kind && !input.run_in_background)
+                return yield* new ToolFailure({ message: "background_kind requires run_in_background=true" })
               const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
               const external = target.externalDirectory
               if (external)
@@ -175,7 +181,9 @@ const layer = Layer.effectDiscard(
               const entries = yield* config.entries()
               const shell = AppProcess.resolveShell(Config.latest(entries, "shell"))
               const command = AppProcess.shellCommand(input.command, target.canonical, shell)
-              const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
+              const timeout = input.timeout ?? (input.run_in_background ? 0 : DEFAULT_TIMEOUT_MS)
+              if (timeout === 0 && !input.run_in_background)
+                return yield* new ToolFailure({ message: "A zero timeout requires run_in_background=true" })
               let lastProgress = Number.NEGATIVE_INFINITY
               const capture = Option.getOrUndefined(yield* Effect.serviceOption(ToolOutputStore.Capture))
               const inferred = input.command.match(
@@ -213,7 +221,7 @@ const layer = Layer.effectDiscard(
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
-                    timeout: Duration.millis(timeout),
+                    timeout: timeout === 0 ? undefined : Duration.millis(timeout),
                     maxOutputBytes: MAX_CAPTURE_BYTES,
                     onChunk: capture?.append,
                     onOutput: (output, truncated) =>
@@ -316,6 +324,7 @@ const layer = Layer.effectDiscard(
                 ),
                 context,
                 capture ? capture.append(new Uint8Array()) : Effect.void,
+                { kind: input.background_kind ?? "task", workdir: target.canonical },
               )
               return { job_id, output: "Command log is retained while the job runs.", truncated: false }
             }).pipe(

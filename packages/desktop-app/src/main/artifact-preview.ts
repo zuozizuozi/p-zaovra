@@ -6,6 +6,7 @@ import { previewURL, serveArtifact, readArtifactPDF } from "./artifact-server"
 export function createArtifactPreview(owner: WebContents) {
   let current: { id: string; view: WebContentsView; state: ArtifactState; closeServer?: () => void } | undefined
   let requested: string | undefined
+  let opening: object | undefined
   const browsing = session.fromPartition(`artifact-${owner.id}`)
   browsing.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   browsing.setPermissionCheckHandler(() => false)
@@ -24,16 +25,19 @@ export function createArtifactPreview(owner: WebContents) {
   }
   owner.once("destroyed", () => {
     requested = undefined
+    opening = undefined
     browsing.removeListener("will-download", download)
     close()
   })
   const api: ArtifactPreviewAPI = {
     readPDF: (input) => readArtifactPDF(input.target, input.directory),
     async open(input) {
+      const request = {}
+      opening = request
       requested = input.id
       close()
       const local = /^https?:\/\//i.test(input.target) ? undefined : await serveArtifact(input.target, input.directory)
-      if (requested !== input.id || owner.isDestroyed()) {
+      if (opening !== request || requested !== input.id || owner.isDestroyed()) {
         local?.close()
         return
       }
@@ -114,7 +118,10 @@ export function createArtifactPreview(owner: WebContents) {
       current.view.setVisible(input.visible && bounds.width > 0 && bounds.height > 0)
     },
     async action(input) {
-      if (input.action === "close" && requested === input.id) requested = undefined
+      if (input.action === "close" && requested === input.id) {
+        requested = undefined
+        opening = undefined
+      }
       if (current?.id !== input.id) return
       if (input.action === "close") {
         close()

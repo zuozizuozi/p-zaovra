@@ -5,7 +5,7 @@ import { render as renderEndpoint } from "../endpoint"
 import { Framing, type Framing as FramingDef } from "../framing"
 import type { Transport, TransportPrepareInput } from "./index"
 import * as ProviderShared from "../../protocols/shared"
-import { mergeJsonRecords, type LLMRequest } from "../../schema"
+import { LLMError, TransportReason, mergeJsonRecords, type LLMRequest } from "../../schema"
 
 export type JsonRequestInput<Body> = TransportPrepareInput<Body>
 
@@ -129,11 +129,26 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
     ),
   frames: (prepared, request, runtime) =>
     Stream.unwrap(
-      runtime.http
-        .execute(prepared.request)
-        .pipe(
-          Effect.map((response) =>
-            prepared.framing.frame(
+      runtime.http.execute(prepared.request).pipe(
+        Effect.map((response) => {
+          let receivedFrame = false
+          const accepted = Date.now()
+          const requestID = response.headers["x-generation-id"] ?? response.headers["x-request-id"]
+          const timeout = (kind: string, message: string) =>
+            Stream.fail(
+              new LLMError({
+                module: "HttpTransport",
+                method: "frames",
+                reason: new TransportReason({
+                  kind,
+                  message: `${message}${requestID ? ` (request: ${requestID})` : ""}`,
+                }),
+              }),
+            )
+          // These clocks start only after response headers arrive. Request
+          // establishment and its bounded retries are owned by the executor.
+          return prepared.framing
+            .frame(
               response.stream.pipe(
                 Stream.mapError((error) =>
                   ProviderShared.eventError(
@@ -142,10 +157,57 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
                     ProviderShared.errorText(error),
                   ),
                 ),
+                Stream.timeoutOrElse({
+                  duration: "120 seconds",
+                  orElse: () =>
+                    timeout("StreamIdle", "模型连接已建立，但连续 120 秒未收到网络数据；请求已停止，未自动重放工具。"),
+                }),
               ),
-            ),
-          ),
-        ),
+            )
+            .pipe(
+              Stream.tap(() =>
+                Effect.suspend(() => {
+                  if (receivedFrame) return Effect.void
+                  receivedFrame = true
+                  return Effect.logInfo("provider.response.first_frame", {
+                    requestID,
+                    elapsedMs: Date.now() - accepted,
+                  })
+                }),
+              ),
+              Stream.timeoutOrElse({
+                duration: "180 seconds",
+                orElse: () =>
+                  timeout(
+                    receivedFrame ? "ProgressTimeout" : "FirstEventTimeout",
+                    receivedFrame
+                      ? "模型响应连续 180 秒没有新的有效数据；请求已停止，已执行的操作不会自动重放。"
+                      : "模型连接已建立，但 180 秒内没有有效响应（保活消息不算输出）；请求已停止。",
+                  ),
+              }),
+              Stream.concat(
+                Stream.unwrap(
+                  Effect.sync(() =>
+                    receivedFrame
+                      ? Stream.empty
+                      : Stream.fail(
+                          ProviderShared.eventError(request.model.route.id, "模型连接已结束，但没有返回有效响应。"),
+                        ),
+                  ),
+                ),
+              ),
+              Stream.ensuring(
+                Effect.suspend(() =>
+                  Effect.logInfo("provider.response.closed", {
+                    requestID,
+                    elapsedMs: Date.now() - accepted,
+                    receivedFrame,
+                  }),
+                ),
+              ),
+            )
+        }),
+      ),
     ),
 })
 

@@ -99,8 +99,10 @@ export async function setupTimelineBenchmark(
     historyTurns: number
     eventBatch: number
     newLayoutDesigns?: boolean
+    awaitingProvider?: boolean
     vcsDiff?: unknown[]
     turnDiffs?: unknown[]
+    git?: boolean
   },
 ) {
   const events: EventPayload[] = []
@@ -110,15 +112,16 @@ export async function setupTimelineBenchmark(
     : userMessage
   await mockZaovraServer(page, {
     directory,
-    project: project(),
+    project: { ...project(), ...(options.git === false ? { vcs: undefined } : {}) },
     provider: provider(),
     sessions: [session()],
+    sessionStatus: options.awaitingProvider ? { [sessionID]: { type: "busy" } } : undefined,
     vcsDiff: options.vcsDiff,
     pageMessages: () => ({
       items: [
         ...Array.from({ length: options.historyTurns }, (_, index) => performanceTurn(index)).flat(),
         currentUserMessage,
-        assistantMessage,
+        ...(options.awaitingProvider ? [] : [assistantMessage]),
       ],
     }),
     events: () => events.splice(0, eventBatch),

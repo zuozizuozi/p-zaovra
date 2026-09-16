@@ -446,6 +446,12 @@ export const dict = {
   "prompt.toast.pasteUnsupported.title": "Unsupported attachment",
   "prompt.toast.pasteUnsupported.description": "Only images, PDFs, or text files can be attached here.",
   "prompt.toast.modelAgentRequired.title": "Select an agent and model",
+  "prompt.toast.modelUnavailable.title": "Selected model is unavailable",
+  "prompt.toast.modelUnavailable.description":
+    "The selected model is not in the connected provider catalog. Open model settings to check its provider and model ID. No request was sent.",
+  "prompt.toast.agentUnavailable.title": "Agent is not ready",
+  "prompt.toast.agentUnavailable.description":
+    "The project agent configuration has not loaded. This does not mean your API key is invalid. No request was sent.",
   "prompt.toast.modelAgentRequired.description": "Choose an agent and model before sending a prompt.",
   "prompt.toast.worktreeCreateFailed.title": "Failed to create worktree",
   "prompt.toast.sessionCreateFailed.title": "Failed to create session",

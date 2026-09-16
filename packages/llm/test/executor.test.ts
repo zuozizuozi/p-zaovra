@@ -73,6 +73,63 @@ const expectLLMError = (error: unknown) => {
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
 
 describe("RequestExecutor", () => {
+  it.effect("reports each bounded retry through the caller's observer", () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<number[]>([])
+      const response = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          responsesLayer([
+            new Response("busy", { status: 503, headers: { "retry-after-ms": "0" } }),
+            new Response("ok"),
+          ]),
+        ),
+        Effect.provideService(RequestExecutor.RetryObserver, ({ attempt }) =>
+          Ref.update(notices, (values) => [...values, attempt]),
+        ),
+      )
+      expect(response.status).toBe(200)
+      expect(yield* Ref.get(notices)).toEqual([2])
+    }),
+  )
+  it.effect("returns a long Retry-After without retrying earlier than the provider permits", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const error = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          countedResponsesLayer(attempts, [
+            new Response("busy", {
+              status: 429,
+              headers: { "retry-after": "60" },
+            }),
+          ]),
+        ),
+        Effect.flip,
+      )
+      expect(error.retryAfterMs).toBe(60_000)
+      expect(yield* Ref.get(attempts)).toBe(1)
+    }),
+  )
+  it.effect("cancels retry backoff without sending another request", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const run = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          countedResponsesLayer(attempts, [
+            new Response("busy", {
+              status: 503,
+              headers: { "retry-after": "2" },
+            }),
+          ]),
+        ),
+        Effect.forkChild,
+      )
+      yield* TestClock.adjust(1_000)
+      expect(yield* Ref.get(attempts)).toBe(1)
+      yield* Fiber.interrupt(run)
+      yield* TestClock.adjust(10_000)
+      expect(yield* Ref.get(attempts)).toBe(1)
+    }),
+  )
   it.effect("classifies context overflow responses", () =>
     Effect.gen(function* () {
       const executor = yield* RequestExecutor.Service

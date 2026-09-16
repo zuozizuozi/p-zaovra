@@ -32,12 +32,12 @@ test("restores an empty session's model after catalog loading and preserves a la
   })
   await installTimelineSettings(page)
   await page.goto(stressSessionHref("ses_empty_model"))
-  await expect(page.getByRole("button", { name: "Session-only model", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Session-only model", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Own Key · Session-only model", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Own Key · Session-only model", exact: true }).click()
   await page.getByRole("menuitemradio", { name: model.name, exact: true }).click()
-  await expect(page.getByRole("button", { name: model.name, exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: `Own Key · ${model.name}`, exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole("button", { name: model.name, exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: `Own Key · ${model.name}`, exact: true })).toBeVisible()
 })
 
 for (const newLayout of [true, false]) {
@@ -71,6 +71,6 @@ for (const newLayout of [true, false]) {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns } }))
     }, newLayout)
     await page.goto(stressSessionHref("ses_configured_model"))
-    await expect(page.getByRole("button", { name: "Configured nested model", exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Own Key · Configured nested model", exact: true })).toBeVisible()
   })
 }
