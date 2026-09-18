@@ -56,6 +56,8 @@ const filesystem = Layer.effect(
       ...fs,
       writeWithDirs: (target, content, mode) =>
         Effect.sync(() => writes.push(target)).pipe(Effect.andThen(fs.writeWithDirs(target, content, mode))),
+      writeFileString: (target, content, options) =>
+        fs.writeFileString(target, content, options).pipe(Effect.tap(() => Effect.sync(() => writes.push(target)))),
     })
   }),
 ).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))
@@ -97,6 +99,36 @@ const call = (input: typeof WriteTool.Input.Type, id = "call-write") => ({
 const it = testEffect(Layer.empty)
 
 describe("WriteTool", () => {
+  it.live("rejects blind and stale replacement without changing existing content", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return Effect.promise(() => fs.writeFile(path.join(tmp.path, "index.html"), "user work")).pipe(
+          Effect.andThen(
+            withTool(tmp.path, (registry) =>
+              Effect.gen(function* () {
+                const blind = yield* executeTool(registry, call({ path: "index.html", content: "replacement" }))
+                expect(blind.type).toBe("error")
+                expect(blind).toMatchObject({ value: expect.stringContaining("Nothing was overwritten") })
+                const stale = yield* executeTool(
+                  registry,
+                  call({ path: "index.html", content: "replacement", expectedContent: "old work" }, "stale"),
+                )
+                expect(stale).toMatchObject({ type: "error", value: expect.stringContaining("does not match") })
+                expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "index.html"), "utf8"))).toBe(
+                  "user work",
+                )
+                expect(writes).toEqual([])
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and creates a relative file through FileMutation once", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -137,7 +169,9 @@ describe("WriteTool", () => {
         reset()
         return Effect.promise(() => fs.writeFile(path.join(tmp.path, "existing.txt"), "before")).pipe(
           Effect.andThen(
-            withTool(tmp.path, (registry) => settleTool(registry, call({ path: "existing.txt", content: "after" }))),
+            withTool(tmp.path, (registry) =>
+              settleTool(registry, call({ path: "existing.txt", content: "after", expectedContent: "before" })),
+            ),
           ),
           Effect.andThen((settled) =>
             Effect.gen(function* () {
@@ -168,10 +202,16 @@ describe("WriteTool", () => {
           Effect.andThen(
             withTool(tmp.path, (registry) =>
               Effect.gen(function* () {
-                yield* settleTool(registry, call({ path: "preserved.txt", content: "after" }, "call-preserved"))
                 yield* settleTool(
                   registry,
-                  call({ path: "deduplicated.txt", content: "\uFEFFafter" }, "call-deduplicated"),
+                  call({ path: "preserved.txt", content: "after", expectedContent: "before" }, "call-preserved"),
+                )
+                yield* settleTool(
+                  registry,
+                  call(
+                    { path: "deduplicated.txt", content: "\uFEFFafter", expectedContent: "\uFEFFbefore" },
+                    "call-deduplicated",
+                  ),
                 )
 
                 expect(yield* Effect.promise(() => fs.readFile(preserved, "utf8"))).toBe("\uFEFFafter")
@@ -289,7 +329,7 @@ test("keeps the locked write schema, semantics docstring, and deferred UX TODOs 
   )
   const schema = definition[0]?.inputSchema as { readonly properties?: Record<string, unknown> }
 
-  expect(Object.keys(schema.properties ?? {}).sort()).toEqual(["content", "path"])
+  expect(Object.keys(schema.properties ?? {}).sort()).toEqual(["content", "expectedContent", "path"])
   expect(source).toContain(
     "absolute external paths retain mutation capability through a separate\n * external_directory approval before edit approval.",
   )

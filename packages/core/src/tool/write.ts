@@ -27,6 +27,10 @@ export const Input = Schema.Struct({
       "File path to write. Relative paths resolve within the active Location. Absolute paths inside that Location are accepted; external absolute paths require external_directory approval.",
   }),
   content: Schema.String.annotate({ description: "Content to write to the file" }),
+  expectedContent: Schema.String.pipe(Schema.optional).annotate({
+    description:
+      "Exact current file content required to replace an existing file. Omit when creating a new file. Prefer read followed by edit for focused changes instead of resending the entire file.",
+  }),
 })
 
 export const Output = Schema.Struct({
@@ -60,7 +64,7 @@ const layer = Layer.effectDiscard(
         [name]: Tool.withPermission(
           Tool.make({
             description:
-              "Write content to one file. Relative paths resolve within the active Location. Absolute paths inside the Location are accepted. Explicit external absolute paths require external_directory approval before edit approval.",
+              "Create a file, or replace an existing file only with matching expectedContent. Prefer read and edit for existing files. Relative paths resolve within the active Location, never a previous shell command's cd/workdir. Use an absolute path when targeting another directory. Explicit external absolute paths require external_directory approval before edit approval.",
             input: Input,
             output: Output,
             toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
@@ -88,7 +92,12 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
-                const result = yield* files.writeTextPreservingBom({ target, content: input.content, format: true })
+                const result = yield* files.writeTextPreservingBom({
+                  target,
+                  content: input.content,
+                  expected: input.expectedContent ?? null,
+                  format: true,
+                })
                 const diagnostics = yield* lsp.changed(result.target)
                 return {
                   ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
@@ -101,7 +110,19 @@ const layer = Layer.effectDiscard(
                   ...(result.formatting ? { formatting: result.formatting } : {}),
                   ...(result.formatting ? { content: result.content } : {}),
                 }
-              }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to write ${input.path}` }))),
+              }).pipe(
+                Effect.mapError(
+                  (error) =>
+                    new ToolFailure({
+                      message:
+                        error instanceof FileMutation.TargetExistsError
+                          ? `File already exists: ${error.path}. Nothing was overwritten. Check the destination, then read and edit the file, or provide its exact current expectedContent to replace it.`
+                          : error instanceof FileMutation.StaleContentError
+                            ? `File content changed or does not match expectedContent: ${error.path}. Nothing was overwritten. Read the file again before editing.`
+                            : `Unable to write ${input.path}`,
+                    }),
+                ),
+              ),
           }),
           "edit",
         ),

@@ -92,7 +92,9 @@ export function make<
     },
     settle: (call, context) =>
       Schema.decodeUnknownEffect(config.input)(call.input).pipe(
-        Effect.mapError((error) => new ToolFailure({ message: `Invalid tool input: ${error.message}` })),
+        Effect.mapError(
+          (error) => new ToolFailure({ message: `Invalid tool input: ${error.message}`, metadata: { phase: "input" } }),
+        ),
         Effect.flatMap((input) =>
           config.execute(input, context).pipe(
             Effect.flatMap((output) =>

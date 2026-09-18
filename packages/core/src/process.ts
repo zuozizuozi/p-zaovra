@@ -82,26 +82,18 @@ export const shellCommand = (command: string, cwd: string, shell?: string) => {
   const executable = resolveShell(shell)
   const powershell = /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable)
   if (powershell) {
-    // EncodedCommand avoids the second quoting/parser pass through cmd.exe.
-    const script = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $global:LASTEXITCODE = 0; & {
+    // Pass one script argument directly, as Codex does; no cmd.exe or extra shell parses it.
+    // Out-Default drains PowerShell's deferred table formatter before our explicit exit.
+    // Capture command failure before that output pipeline can replace $?.
+    const script = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $ProgressPreference = 'SilentlyContinue'; $global:LASTEXITCODE = 0; & {
 ${command}
-}; if (-not $?) { if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; exit 1 }; exit $LASTEXITCODE`
-    return ChildProcess.make(
-      executable,
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-EncodedCommand",
-        Buffer.from(script, "utf16le").toString("base64"),
-      ],
-      {
-        cwd,
-        stdin: "ignore",
-        detached: process.platform !== "win32",
-        forceKillAfter: Duration.seconds(3),
-      },
-    )
+if (-not $? -and $LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 1 } } | Out-Default; if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }; exit $LASTEXITCODE`
+    return ChildProcess.make(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+      cwd,
+      stdin: "ignore",
+      detached: process.platform !== "win32",
+      forceKillAfter: Duration.seconds(3),
+    })
   }
   return ChildProcess.make(command, [], {
     cwd,

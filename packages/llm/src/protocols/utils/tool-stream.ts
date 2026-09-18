@@ -210,6 +210,18 @@ export const finishAll = <K extends StreamKey>(route: string, tools: State<K>) =
             LLMEvent.toolInputEnd({ id: tool.id, name: tool.name, providerMetadata: tool.providerMetadata }),
             call,
           ]),
+          Effect.catch(() =>
+            Effect.succeed([
+              LLMEvent.toolInputEnd({ id: tool.id, name: tool.name }),
+              LLMEvent.toolError({
+                id: tool.id,
+                name: tool.name,
+                inputRejected: true,
+                message:
+                  "Tool arguments are invalid or incomplete JSON. This call was not executed. Submit a corrected call; do not repeat completed calls or invent missing content.",
+              }),
+            ]),
+          ),
         ),
       ).pipe(Effect.map((events) => events.flat())),
     }

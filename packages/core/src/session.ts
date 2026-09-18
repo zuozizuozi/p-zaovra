@@ -387,7 +387,7 @@ const layer = Layer.effect(
       outcome: Effect.fn("V2Session.outcome")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
-        const messages = yield* store.context(sessionID).pipe(Effect.orDie)
+        const messages = yield* SessionOutcome.history(db, sessionID)
         // A live preview server is not an unfinished model turn. Only process-local
         // ownership can exempt its shell row; after a crash it remains unknown.
         const background = (yield* jobs.list()).filter(
@@ -400,11 +400,19 @@ const layer = Layer.effect(
           (yield* execution.active).has(sessionID) ||
           (shells.get(sessionID)?.size ?? 0) > 0 ||
           background.some((job) => job.type !== "bash" || job.metadata?.kind !== "preview")
-        const preliminary = SessionOutcome.derive(messages, active, undefined, [], undefined, liveShells)
+        const preliminary = SessionOutcome.derive(
+          messages,
+          active,
+          undefined,
+          [],
+          undefined,
+          liveShells,
+          session.location.directory,
+        )
         if (active) return preliminary
         const required = yield* SessionOutcome.requirements(fs, session.location.directory)
         if (!preliminary.checks.length)
-          return SessionOutcome.derive(messages, false, undefined, [], required, liveShells)
+          return SessionOutcome.derive(messages, false, undefined, [], required, liveShells, session.location.directory)
         const targets = yield* SessionOutcome.fingerprint(
           fs,
           preliminary.checks.flatMap((check) => check.targets?.map((target) => target.path) ?? []),
@@ -412,7 +420,7 @@ const layer = Layer.effect(
         const snapshot = yield* Snapshot.Service.use((service) => service.capture()).pipe(
           Effect.provide(locations.get(session.location)),
         )
-        const current = yield* store.context(sessionID).pipe(Effect.orDie)
+        const current = yield* SessionOutcome.history(db, sessionID)
         const currentBackground = (yield* jobs.list()).filter(
           (job) => job.status === "running" && job.metadata?.sessionID === sessionID,
         )
@@ -432,6 +440,7 @@ const layer = Layer.effect(
               .filter((job) => job.type === "bash" && job.metadata?.kind === "preview")
               .map((job) => job.id),
           ),
+          session.location.directory,
         )
         const { Evidence } = yield* Effect.promise(() => import("./evidence"))
         return {

@@ -61,6 +61,7 @@ export function isTrustedIpcSender(event: Pick<IpcMainInvokeEvent, "sender" | "s
 }
 
 type Deps = {
+  localServerExit: () => number | null
   killSidecar: () => Promise<void> | void
   relaunch: () => void
   awaitInitialization: () => Promise<ServerReadyData>
@@ -161,6 +162,7 @@ export function registerIpcHandlers(deps: Deps) {
 
   handle("kill-sidecar", () => deps.killSidecar())
   handle("await-initialization", () => deps.awaitInitialization())
+  handle("local-server-exit", () => deps.localServerExit())
   handle("consume-initial-deep-links", () => deps.consumeInitialDeepLinks())
   handle("get-default-server-url", () => deps.getDefaultServerUrl())
   handle("set-default-server-url", (_event: IpcMainInvokeEvent, url: string | null) => deps.setDefaultServerUrl(url))
@@ -401,4 +403,10 @@ export function sendMenuCommand(win: BrowserWindow, id: string) {
 
 export function sendDeepLinks(win: BrowserWindow, urls: string[]) {
   win.webContents.send("deep-link", urls)
+}
+
+export function sendLocalServerExit(code: number) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.webContents.isDestroyed()) win.webContents.send("local-server-exit", code)
+  })
 }

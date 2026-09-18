@@ -6,8 +6,7 @@ import { getLogger } from "./logging"
 import { getUserShell, loadShellEnv } from "./shell-env"
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
-
-export type HealthCheck = { wait: Promise<void> }
+import { waitForServerHealth } from "./server-health"
 
 type SidecarMessage =
   | { type: "ready" }
@@ -139,26 +138,13 @@ export async function spawnLocalServer(
     throw error
   })
 
-  const wait = (async () => {
-    const url = `http://${hostname}:${port}`
-    let healthy = false
-    const gone = exit.promise.then((code) => {
-      if (healthy) return
-      throw new Error(`Sidecar exited before health check passed with code ${code}`)
-    })
-
-    const ready = async () => {
-      while (true) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
-        if (await checkHealth(url, password)) {
-          healthy = true
-          return
-        }
-      }
-    }
-
-    await Promise.race([ready(), gone])
-  })()
+  await waitForServerHealth(
+    (signal) => checkHealth(`http://${hostname}:${port}`, password, signal),
+    exit.promise,
+  ).catch((error) => {
+    if (!exited) child.kill()
+    throw error
+  })
 
   let stopping: Promise<void> | undefined
 
@@ -177,11 +163,10 @@ export async function spawnLocalServer(
         return stopping
       },
     },
-    health: { wait },
   }
 }
 
-export async function checkHealth(url: string, password?: string | null): Promise<boolean> {
+export async function checkHealth(url: string, password?: string | null, signal?: AbortSignal): Promise<boolean> {
   let healthUrl: URL
   try {
     healthUrl = new URL("/global/health", url)
@@ -199,7 +184,7 @@ export async function checkHealth(url: string, password?: string | null): Promis
     const res = await fetch(healthUrl, {
       method: "GET",
       headers,
-      signal: AbortSignal.timeout(3000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
     })
     return res.ok
   } catch {

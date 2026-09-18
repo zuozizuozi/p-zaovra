@@ -5,7 +5,7 @@ import { ToolFailure } from "@zaovra-ai/llm"
 import { DateTime, Duration, Effect, Layer, Schema, Option } from "effect"
 import { Snapshot } from "../snapshot"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
-import { fingerprint } from "../session/outcome"
+import { executionIssue, fingerprint, assertionPath, singleCommand } from "../session/outcome"
 import { ToolOutputStore } from "../tool-output-store"
 import { Config } from "../config"
 import { EventV2 } from "../event"
@@ -38,6 +38,22 @@ export const Input = Schema.Struct({
     description:
       "Declare a verification command only when executing actual checks. Omit this field for ordinary commands; do not use 'none'. The host records its actual exit and workspace snapshot; this is not a claim that acceptance criteria passed.",
   }),
+  verification_report: Schema.optional(Schema.Boolean).annotate({
+    description:
+      'Legacy compatibility only: leave unset for ordinary checks and prefer verification_requirements. Set true only for an EXISTING runner that already emits only JSON: {"checks":[{"kind":"test","status":"passed","requirements":["User requirement and boundary cases actually asserted"]}]}. Allowed kinds: build, test, lint, typecheck, syntax, smoke, interaction (not acceptance). Each kind occurs once; status is passed, failed or skipped. requirements describes actual assertions against user requirements, not a claim that all work is complete. Include the checked source and test script files in verification_targets. Nonzero exit, malformed/truncated output or changed targets cannot certify success.',
+  }),
+  verification_requirements: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))).annotate({
+    description:
+      "Preferred: describe requirements actually asserted by this command. Use verification plus verification_targets and verification_assertions. Run a normal command, e.g. npm test; ordinary stdout is accepted. Never put report JSON in command or claim unchecked requirements.",
+  }),
+  verification_assertions: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "Files defining assertions, fixtures and test configuration for this check, relative to workdir or absolute. Include these in verification_targets. The host retains their fingerprints on failures; changing a failed test does not prove the original requirement was fixed.",
+  }),
+  verification_replaces: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "Optional call IDs of previous checks this execution revalidates. The host only resolves failures with the same category, directory and covered targets; actual failures additionally require the original assertion files unchanged. This is not permission to waive a failure.",
+  }),
   verification_targets: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
       "Files actually covered by this check, relative to workdir or absolute. Required for standalone/external artifacts. HTML acceptance needs syntax, smoke (actual browser startup), and interaction checks. Do not claim a check without executing assertions; an exit code alone is not proof of functionality.",
@@ -55,6 +71,7 @@ export const Input = Schema.Struct({
 
 const StructuredOutput = Schema.Struct({
   verification: Schema.optional(SessionOutcome.Check),
+  verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
   job_id: Schema.String.pipe(Schema.optional),
   exit: Schema.Number.pipe(Schema.optional),
   truncated: Schema.Boolean,
@@ -76,6 +93,8 @@ const modelOutput = (output: Output) => {
   if (output.job_id)
     return `Background command started: ${output.job_id}. Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
   if (output.timeout) return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command timed out before completion.`
+  if (output.verification?.execution === "not-run")
+    return "Verification did not run successfully; inspect the diagnostic and correct its setup."
   return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command exited with code ${output.exit}.`
 }
 
@@ -129,12 +148,13 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
           toStructuredOutput: ({ output }) => ({
             ...(output.verification ? { verification: output.verification } : {}),
+            ...(output.verifications ? { verifications: output.verifications } : {}),
             truncated: output.truncated,
             ...(output.job_id ? { job_id: output.job_id } : {}),
             ...(output.exit === undefined ? {} : { exit: output.exit }),
@@ -189,24 +209,54 @@ const layer = Layer.effectDiscard(
               const inferred = input.command.match(
                 /^(?:bun|npm|pnpm|yarn)(?: run)? (build|test|lint|typecheck)(?:\s+[^;&|<>]*)?$/,
               )?.[1]
-              const verification =
-                input.verification ?? (inferred as "build" | "test" | "lint" | "typecheck" | undefined)
+              const verification = input.verification_report
+                ? "test"
+                : (input.verification ?? (inferred as "build" | "test" | "lint" | "typecheck" | undefined))
+              if (
+                input.verification_requirements?.length &&
+                (!verification || input.verification_report || !input.verification_targets?.length)
+              )
+                return yield* new ToolFailure({
+                  message:
+                    "Coverage requires verification and verification_targets. Test assertions are discovered in standard test directories; declare verification_assertions for custom locations. Omit verification_report; run the ordinary test command. No command was executed.",
+                })
+              if (input.verification_report && (input.verification || !input.verification_targets?.length))
+                return yield* new ToolFailure({
+                  message:
+                    "A suite report requires explicit verification_targets and cannot be combined with verification. No command was executed.",
+                })
+              const discovered =
+                verification && ["test", "smoke", "interaction"].includes(verification)
+                  ? yield* fs.glob("{test,tests,__tests__,fixtures}/**/*", {
+                      cwd: target.canonical,
+                      absolute: true,
+                      include: "file",
+                    })
+                  : []
               const targets = verification
-                ? yield* Effect.forEach(input.verification_targets ?? [], (file) =>
-                    Effect.gen(function* () {
-                      const resolved = yield* mutation.resolve({
-                        path: path.resolve(target.canonical, file),
-                        kind: "file",
-                      })
-                      if (resolved.externalDirectory)
-                        yield* permission.assert({
-                          ...LocationMutation.externalDirectoryPermission(resolved.externalDirectory),
-                          sessionID: context.sessionID,
-                          agent: context.agent,
-                          source,
+                ? yield* Effect.forEach(
+                    [
+                      ...new Set([
+                        ...(input.verification_targets ?? []),
+                        ...(input.verification_assertions ?? []),
+                        ...discovered,
+                      ]),
+                    ],
+                    (file) =>
+                      Effect.gen(function* () {
+                        const resolved = yield* mutation.resolve({
+                          path: path.resolve(target.canonical, file),
+                          kind: "file",
                         })
-                      return resolved.canonical
-                    }),
+                        if (resolved.externalDirectory)
+                          yield* permission.assert({
+                            ...LocationMutation.externalDirectoryPermission(resolved.externalDirectory),
+                            sessionID: context.sessionID,
+                            agent: context.agent,
+                            source,
+                          })
+                        return resolved.canonical
+                      }),
                   )
                 : []
               if (verification && input.run_in_background)
@@ -214,10 +264,45 @@ const layer = Layer.effectDiscard(
               const run = Effect.gen(function* () {
                 const before = verification ? yield* snapshots.capture() : undefined
                 const filesBefore = yield* fingerprint(fs, targets)
-                if (filesBefore.some((file) => !file.digest))
-                  return yield* Effect.fail(
-                    new Error("Verification target is missing or unreadable. No command was executed."),
-                  )
+                const assertions = filesBefore.filter(
+                  (file) =>
+                    assertionPath(file.path) ||
+                    input.verification_assertions?.some((value) => path.resolve(target.canonical, value) === file.path),
+                )
+                if (verification && !singleCommand(input.command))
+                  return {
+                    output:
+                      "Verification needs one executable command with its own exit status. Run build and tests separately, without pipes, redirects, chained commands or report JSON as a command. Use a script file for complex assertions. No command was executed.",
+                    exit: -1,
+                    truncated: false,
+                    verification: {
+                      kind: verification,
+                      command: input.command,
+                      exit: -1,
+                      execution: "not-run" as const,
+                      callID: context.toolCallID,
+                      cwd: target.canonical,
+                      targets: filesBefore,
+                    },
+                  }
+                if (verification && filesBefore.some((file) => !file.digest))
+                  return {
+                    output:
+                      "Verification target is missing or unreadable. No command was executed. For a build, target existing source inputs; check generated outputs after building.",
+                    exit: -1,
+                    truncated: false,
+                    verification: {
+                      kind: verification,
+                      command: input.command,
+                      exit: -1,
+                      execution: "not-run" as const,
+                      callID: context.toolCallID,
+                      cwd: target.canonical,
+                      ...(assertions.length ? { assertions } : {}),
+                      ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),
+                      targets: filesBefore,
+                    },
+                  }
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
@@ -261,6 +346,7 @@ const layer = Layer.effectDiscard(
                             kind: verification,
                             command: input.command,
                             exit: -1,
+                            execution: "timeout" as const,
                             callID: context.toolCallID,
                           },
                         }
@@ -269,7 +355,11 @@ const layer = Layer.effectDiscard(
                   }
                 }
 
-                const output = result.output?.toString("utf8") || "(no output)"
+                const output =
+                  (result.output?.toString("utf8") || "(no output)") +
+                  (verification && !input.verification_report && result.exitCode !== 0 && assertions.length
+                    ? `\nFailed assertion files are protected: ${assertions.map((file) => file.path).join(", ")}. Fix implementation and rerun this check with these files UNCHANGED first. Once that exact version passes, new tests can be added normally. Until then put additional tests in separate files. Changing expectations cannot prove a repair.`
+                    : "")
                 const filesAfter = yield* fingerprint(fs, targets)
                 if (verification && capture)
                   yield* capture.append(
@@ -280,31 +370,96 @@ const layer = Layer.effectDiscard(
                 const notice = result.outputTruncated
                   ? "[in-memory preview truncated; consult the command log for captured bytes]"
                   : undefined
+                const record = verification
+                  ? {
+                      kind: verification,
+                      command: input.command,
+                      exit: result.exitCode,
+                      ...(assertions.length ? { assertions } : {}),
+                      ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),
+                      ...(result.exitCode !== 0 && executionIssue(input.command, output)
+                        ? { execution: "not-run" as const }
+                        : {}),
+                      callID: context.toolCallID,
+                      cwd: target.canonical,
+                      ...(targets.length
+                        ? {
+                            targets: filesBefore.map((file) => ({
+                              ...file,
+                              digest: filesAfter.some(
+                                (after) => after.path === file.path && after.digest === file.digest,
+                              )
+                                ? file.digest
+                                : "",
+                            })),
+                          }
+                        : {}),
+                      snapshot: !external && before && before === (yield* snapshots.capture()) ? before : undefined,
+                    }
+                  : undefined
+                if (input.verification_report && record) {
+                  const report = result.outputTruncated
+                    ? Option.none()
+                    : Schema.decodeUnknownOption(
+                        Schema.fromJsonString(
+                          Schema.Struct({
+                            checks: Schema.Array(
+                              Schema.Struct({
+                                kind: SessionOutcome.Check.fields.kind,
+                                status: Schema.Literals(["passed", "failed", "skipped"]),
+                                requirements: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
+                              }),
+                            ),
+                          }),
+                        ),
+                      )(output.trim())
+                  if (
+                    Option.isNone(report) ||
+                    !report.value.checks.length ||
+                    new Set(report.value.checks.map((check) => check.kind)).size !== report.value.checks.length ||
+                    report.value.checks.every((check) => check.status === "skipped")
+                  )
+                    return {
+                      output: `${output}\nInvalid legacy verification report. Prefer rerunning the ordinary check with verification and verification_requirements, without verification_report; normal stdout is accepted. Existing JSON runners must emit only {"checks":[{"kind":"test","status":"passed"}]} with actual results. Allowed kinds: build, test, lint, typecheck, syntax, smoke, interaction; "acceptance" is not a kind. Status: passed, failed or skipped. Kinds must be distinct. No checks certified.`,
+                      exit: result.exitCode,
+                      truncated: result.outputTruncated === true,
+                      verification: {
+                        ...record,
+                        exit: result.exitCode || -1,
+                        ...(result.exitCode === 0 ? { execution: "invalid-report" as const } : {}),
+                      },
+                      ...(warnings.length ? { warnings } : {}),
+                    }
+                  return {
+                    output,
+                    exit: result.exitCode,
+                    truncated: false,
+                    // The process result is authoritative even if a reporter says passed.
+                    verification: report.value.checks.some((check) => check.status === "skipped")
+                      ? {
+                          ...record,
+                          targets: record.targets?.map((file) => ({ ...file, digest: "" })),
+                          snapshot: undefined,
+                        }
+                      : record,
+                    verifications: report.value.checks.map((check) => ({
+                      ...record,
+                      kind: check.kind,
+                      ...(check.requirements ? { requirements: check.requirements } : {}),
+                      exit: result.exitCode !== 0 ? result.exitCode : check.status === "passed" ? 0 : 1,
+                      ...(check.status === "skipped"
+                        ? {
+                            exit: result.exitCode,
+                            snapshot: undefined,
+                            targets: record.targets?.map((file) => ({ ...file, digest: "" })),
+                          }
+                        : {}),
+                    })),
+                    ...(warnings.length ? { warnings } : {}),
+                  }
+                }
                 return {
-                  ...(verification
-                    ? {
-                        verification: {
-                          kind: verification,
-                          command: input.command,
-                          exit: result.exitCode,
-                          callID: context.toolCallID,
-                          cwd: target.canonical,
-                          ...(targets.length
-                            ? {
-                                targets: filesBefore.map((file) => ({
-                                  ...file,
-                                  digest: filesAfter.some(
-                                    (after) => after.path === file.path && after.digest === file.digest,
-                                  )
-                                    ? file.digest
-                                    : "",
-                                })),
-                              }
-                            : {}),
-                          snapshot: !external && before && before === (yield* snapshots.capture()) ? before : undefined,
-                        },
-                      }
-                    : {}),
+                  ...(record ? { verification: record } : {}),
                   exit: result.exitCode,
                   output: notice ? `${output}\n\n${notice}` : output,
                   truncated: result.outputTruncated === true,

@@ -151,7 +151,7 @@ export function summarize(
             timestamp: row.data.timestamp,
             agent: "compaction",
             model: { id: "compaction", providerID: data.usage.providerID },
-            inputSequence: preceding?.data.inputSequence,
+            ...(preceding?.data.inputSequence === undefined ? {} : { inputSequence: preceding.data.inputSequence }),
           }),
         )
     })

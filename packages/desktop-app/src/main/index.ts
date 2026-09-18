@@ -14,7 +14,7 @@ import contextMenu from "electron-context-menu"
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL } from "./constants"
-import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
+import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendLocalServerExit } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
 import { exportDebugLogs, initCrashReporter, initLogging, write as writeLog } from "./logging"
 import { parseMarkdown } from "./markdown"
@@ -282,6 +282,7 @@ const main = Effect.gen(function* () {
   }
 
   const serverReady = Deferred.makeUnsafe<ServerReadyData, unknown>()
+  let serverExit: number | null = null
 
   yield* Effect.promise(() => app.whenReady())
 
@@ -304,12 +305,19 @@ const main = Effect.gen(function* () {
   setDockIcon()
   const updater = setupAutoUpdater()
   registerIpcHandlers({
+    localServerExit: () => serverExit,
     killSidecar: () => killSidecar(),
     relaunch,
     awaitInitialization: Effect.fnUntraced(
       function* () {
         logger.log("awaiting server ready")
         const res = yield* Deferred.await(serverReady)
+        if (serverExit !== null)
+          return yield* Effect.fail(
+            new Error(
+              `Local server exited with code ${serverExit}. Restart Zaovra to reconnect; tasks will not be replayed automatically.`,
+            ),
+          )
         logger.log("server ready", { url: res.url })
         return res
       },
@@ -371,12 +379,17 @@ const main = Effect.gen(function* () {
     useEnvProxy()
 
     logger.log("spawning sidecar", { url })
-    const { listener, health } = yield* Effect.promise(() =>
+    const { listener } = yield* Effect.promise(() =>
       spawnLocalServer(hostname, port, password, {
         userDataPath: app.getPath("userData"),
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
-        onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
+        onExit: (code) => {
+          writeLog("utility", "sidecar exited", { code }, "warn")
+          serverExit = code
+          // Intentional shutdown clears server before stopping the child.
+          if (server) sendLocalServerExit(code)
+        },
       }),
     )
     server = listener
@@ -389,15 +402,6 @@ const main = Effect.gen(function* () {
     if (process.platform === "win32") {
       void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))
     }
-
-    yield* Effect.promise(() => health.wait).pipe(
-      Effect.timeout("30 seconds"),
-      Effect.catch((e) =>
-        Effect.sync(() => {
-          logger.error("sidecar health check failed", e.toString())
-        }),
-      ),
-    )
 
     logger.log("loading task finished")
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)

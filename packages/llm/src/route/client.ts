@@ -1,8 +1,10 @@
-import { Cause, Context, Effect, Layer, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, References, Schema, Stream } from "effect"
 import * as Option from "effect/Option"
 import { Auth, type Auth as AuthDef } from "./auth"
 import { Endpoint, type EndpointPatch } from "./endpoint"
 import { RequestExecutor } from "./executor"
+import { randomUUID } from "node:crypto"
+import { usageNumbers } from "./diagnostics"
 import type { Framing } from "./framing"
 import { HttpTransport } from "./transport"
 import type { Transport, TransportRuntime } from "./transport"
@@ -374,8 +376,31 @@ const prepareWith = Effect.fn("LLMClient.prepare")(function* (request: LLMReques
 const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest) =>
   Stream.unwrap(
     Effect.gen(function* () {
-      const compiled = yield* compile(request)
-      return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime)
+      const requestTraceID = randomUUID()
+      const annotations = {
+        ...(yield* References.CurrentLogAnnotations),
+        requestTraceID,
+        routeID: request.model.route.id,
+      }
+      const compiled = yield* compile(request).pipe(Effect.annotateLogs(annotations))
+      return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime).pipe(
+        Stream.tap((event) =>
+          event.type === "step-finish"
+            ? Effect.logInfo("provider.response.usage", {
+                finishReason: event.reason,
+                rawFinishReason: event.providerMetadata?.openai?.finishReason,
+                reported: event.usage !== undefined,
+                input: event.usage?.nonCachedInputTokens,
+                output: event.usage?.visibleOutputTokens,
+                reasoning: event.usage?.reasoningTokens,
+                cacheRead: event.usage?.cacheReadInputTokens,
+                cacheWrite: event.usage?.cacheWriteInputTokens,
+                raw: usageNumbers(event.usage?.providerMetadata),
+              })
+            : Effect.void,
+        ),
+        Stream.provideService(References.CurrentLogAnnotations, annotations),
+      )
     }),
   )
 

@@ -12,6 +12,12 @@ export const dict = {
   "session.outcome.unknown":
     "Some operations have no recorded result. Inspect the logs and workspace before repeating them.",
   "session.outcome.checks": "Recorded checks",
+  "session.outcome.execution.not-run": "Check did not run successfully",
+  "session.outcome.execution.invalid-report": "Check produced no usable report",
+  "session.outcome.execution.timeout": "Check timed out",
+  "session.outcome.superseded": "Replaced by a passing check in the same scope:",
+  "session.outcome.coverage": "Reported assertion coverage:",
+  "session.outcome.requirements": "Requirement coverage has not been recorded",
   "session.outcome.missing": "Missing or no longer valid:",
   "session.outcome.continue": "Inspect and continue",
   "session.outcome.retry": "Retry original request",

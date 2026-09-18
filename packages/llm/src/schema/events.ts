@@ -175,6 +175,8 @@ export const ToolError = Schema.Struct({
   id: ToolCallID,
   name: Schema.String,
   message: Schema.String,
+  /** Arguments were rejected before any executable call was emitted. */
+  inputRejected: Schema.optional(Schema.Boolean),
   error: Schema.optional(Schema.Defect()),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.ToolError" })

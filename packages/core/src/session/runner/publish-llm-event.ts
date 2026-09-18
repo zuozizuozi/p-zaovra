@@ -370,7 +370,9 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       }
       case "tool-error": {
         const tool = tools.get(event.id)
-        if (!tool?.called) return yield* Effect.die(`Tool error before call: ${event.id}`)
+        if (!tool || (!tool.called && !event.inputRejected))
+          return yield* Effect.die(`Tool error before call: ${event.id}`)
+        if (event.inputRejected && tool.called) return yield* Effect.die(`Input rejection after call: ${event.id}`)
         if (tool.name !== event.name)
           return yield* Effect.die(`Tool error name changed for ${event.id}: ${tool.name} -> ${event.name}`)
         if (tool.settled) return yield* Effect.die(`Duplicate tool error: ${event.id}`)
@@ -383,7 +385,11 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
           error: { type: "unknown", message: event.message },
           provider: {
             executed: tool.providerExecuted,
-            ...(event.providerMetadata === undefined ? {} : { metadata: event.providerMetadata }),
+            ...(event.inputRejected
+              ? { metadata: { zaovra: { inputRejected: true } } }
+              : event.providerMetadata === undefined
+                ? {}
+                : { metadata: event.providerMetadata }),
           },
         })
         return

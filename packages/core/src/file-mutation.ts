@@ -22,6 +22,8 @@ export interface TextWriteInput {
   readonly target: Target
   readonly content: string
   readonly format?: boolean
+  /** null creates only; text permits replacement only while the observed content still matches. */
+  readonly expected?: string | null
 }
 
 export interface ConditionalWriteInput extends WriteInput {
@@ -62,7 +64,9 @@ export interface Interface {
   readonly create: (input: WriteInput) => Effect.Effect<WriteResult, TargetExistsError | FSUtil.Error>
   readonly write: (input: WriteInput) => Effect.Effect<WriteResult, FSUtil.Error>
   /** Write text while retaining an existing UTF-8 BOM and emitting at most one BOM. */
-  readonly writeTextPreservingBom: (input: TextWriteInput) => Effect.Effect<WriteResult, FSUtil.Error>
+  readonly writeTextPreservingBom: (
+    input: TextWriteInput,
+  ) => Effect.Effect<WriteResult, TargetExistsError | StaleContentError | FSUtil.Error>
   /** Commit only if an existing target still has the expected bytes. */
   readonly writeIfUnchanged: (
     input: ConditionalWriteInput,
@@ -123,21 +127,31 @@ const layer = Layer.effect(
       ),
     )
 
-    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")((input: TextWriteInput) =>
-      withTargetLock(input.target)(
+    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")(function* (input: TextWriteInput) {
+      if (input.expected === null) {
+        const next = splitBom(input.content)
+        return yield* create({ ...input, content: joinBom(next.text, next.bom) })
+      }
+      return yield* withTargetLock(input.target)(
         Effect.gen(function* () {
           const next = splitBom(input.content)
           const current = yield* fs
             .readFile(input.target.canonical)
             .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+          if (
+            typeof input.expected === "string" &&
+            (current === undefined ||
+              splitBom(new TextDecoder().decode(current)).text !== splitBom(input.expected).text)
+          )
+            return yield* new StaleContentError({ path: input.target.canonical })
           yield* fs.writeWithDirs(
             input.target.canonical,
             joinBom(next.text, Boolean(current && hasUtf8Bom(current)) || next.bom),
           )
           return yield* formattedResult(input, current !== undefined)
         }),
-      ),
-    )
+      )
+    })
 
     const create = Effect.fn("FileMutation.create")((input: WriteInput) =>
       withTargetLock(input.target)(

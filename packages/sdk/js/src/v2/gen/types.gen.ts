@@ -6250,6 +6250,13 @@ export type SessionOutcomeCheck = {
   kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
   command: string
   exit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  execution?: "not-run" | "invalid-report" | "timeout"
+  requirements?: Array<string>
+  assertions?: Array<{
+    path: string
+    digest: string
+  }>
+  supersededBy?: string
   snapshot?: string
   callID: string
   cwd?: string
@@ -6260,11 +6267,33 @@ export type SessionOutcomeCheck = {
   logs?: Array<string>
 }
 
+export type SessionOutcomeReview = {
+  userMessageID: string
+  items: Array<{
+    requirement: number
+    evidence: Array<string>
+    kind?: "result" | "process"
+    history?: Array<{
+      callID: string
+      exit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      before?: string
+    }>
+    status: "verified" | "unverified"
+    note: string
+  }>
+  unverified: Array<string>
+  notes?: Array<{
+    text: string
+    requirements: Array<number>
+  }>
+}
+
 export type SessionOutcomeInfo = {
   state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
   outcomeUnknown: boolean
   checks: Array<SessionOutcomeCheck>
   missing: Array<string>
+  review?: SessionOutcomeReview
   messageID?: string
 }
 

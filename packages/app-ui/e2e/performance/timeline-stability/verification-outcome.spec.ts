@@ -20,9 +20,18 @@ test("keeps host verification incomplete even when the assistant claims all test
               callID: "syntax",
               targets: [{ path: "C:/desktop/game.html", digest: "v1" }],
               logs: ["ev_test_evidence"],
+              requirements: ["Empty input is accepted"],
+            },
+            {
+              kind: "test",
+              command: "broken-inline-check",
+              exit: 1,
+              callID: "old",
+              execution: "not-run",
+              supersededBy: "syntax",
             },
           ],
-          missing: ["smoke: C:/desktop/game.html", "interaction: C:/desktop/game.html"],
+          missing: ["smoke: C:/desktop/game.html", "interaction: C:/desktop/game.html", "requirements"],
         },
       }),
     }),
@@ -32,5 +41,9 @@ test("keeps host verification incomplete even when the assistant claims all test
   await expect(page.getByText("Finished — verification incomplete", { exact: true })).toBeVisible()
   await page.locator("summary").filter({ hasText: "Recorded checks" }).click()
   await expect(page.getByText("ev_test_evidence", { exact: true })).toBeVisible()
+  await expect(page.getByText("Check did not run successfully", { exact: true })).toBeVisible()
+  await expect(page.getByText("Reported assertion coverage: Empty input is accepted", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Replaced by a passing check in the same scope:/)).toBeVisible()
+  await expect(page.getByText(/Requirement coverage has not been recorded/)).toBeVisible()
   await expect(page.getByText(/interaction: C:\/desktop\/game.html/)).toBeVisible()
 })

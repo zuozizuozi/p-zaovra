@@ -34,6 +34,37 @@ function withTmp<A, E, R>(f: (directory: string) => Effect.Effect<A, E, R>) {
 }
 
 describe("FileMutation", () => {
+  it.live("guards text creation and permits only one replacement of the same observed content", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        const mutation = yield* LocationMutation.Service
+        const files = yield* FileMutation.Service
+        const target = yield* mutation.resolve({ path: "guarded.txt" })
+        yield* files.writeTextPreservingBom({ target, content: "\uFEFFbefore", expected: null })
+        expect(
+          yield* files.writeTextPreservingBom({ target, content: "blind", expected: null }).pipe(Effect.flip),
+        ).toBeInstanceOf(FileMutation.TargetExistsError)
+        const results = yield* Effect.all(
+          [
+            files.writeTextPreservingBom({ target, content: "first", expected: "before" }).pipe(Effect.result),
+            files.writeTextPreservingBom({ target, content: "second", expected: "before" }).pipe(Effect.result),
+          ],
+          { concurrency: "unbounded" },
+        )
+        expect(results.filter((result) => result._tag === "Success")).toHaveLength(1)
+        expect(results.filter((result) => result._tag === "Failure")).toHaveLength(1)
+        expect(["\uFEFFfirst", "\uFEFFsecond"]).toContain(
+          yield* Effect.promise(() => fs.readFile(target.canonical, "utf8")),
+        )
+        yield* Effect.promise(() => fs.unlink(target.canonical))
+        expect(
+          yield* files.writeTextPreservingBom({ target, content: "resurrected", expected: "before" }).pipe(Effect.flip),
+        ).toBeInstanceOf(FileMutation.StaleContentError)
+        expect(yield* Effect.promise(() => Bun.file(target.canonical).exists())).toBe(false)
+      }).pipe(provide(directory)),
+    ),
+  )
+
   it.live("writes an existing internal file and returns a stable result", () =>
     withTmp((directory) =>
       Effect.gen(function* () {

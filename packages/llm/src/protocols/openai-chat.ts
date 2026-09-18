@@ -166,6 +166,7 @@ interface ParserState {
   readonly toolCallEvents: ReadonlyArray<LLMEvent>
   readonly usage?: Usage
   readonly finishReason?: FinishReason
+  readonly rawFinishReason?: string
   readonly lifecycle: Lifecycle.State
 }
 
@@ -441,11 +442,28 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       events.push(...result.events)
     }
 
-    // Finalize accumulated tool inputs eagerly when finish_reason arrives so
-    // JSON parse failures fail the stream at the boundary rather than at halt.
+    // Reject invalid calls individually, but retain the terminal reason and drain
+    // trailing usage. Rejected arguments must never become executable calls.
     const finished =
       finishReason !== undefined && state.finishReason === undefined && Object.keys(tools).length > 0
-        ? yield* ToolStream.finishAll(ADAPTER, tools)
+        ? finishReason === "tool-calls" || finishReason === "stop"
+          ? yield* ToolStream.finishAll(ADAPTER, tools)
+          : {
+              tools: ToolStream.empty<number>(),
+              events: Object.values(tools).flatMap((tool) =>
+                tool
+                  ? [
+                      LLMEvent.toolInputEnd({ id: tool.id, name: tool.name }),
+                      LLMEvent.toolError({
+                        id: tool.id,
+                        name: tool.name,
+                        inputRejected: true,
+                        message: `Provider ended with ${finishReason}; this call was not executed. Inspect the retained work and submit only the missing work with smaller arguments if appropriate.`,
+                      }),
+                    ]
+                  : [],
+              ),
+            }
         : undefined
 
     return [
@@ -454,6 +472,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         toolCallEvents: finished?.events ?? state.toolCallEvents,
         usage,
         finishReason,
+        rawFinishReason: choice?.finish_reason ?? state.rawFinishReason,
         lifecycle,
       },
       events,
@@ -466,7 +485,12 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
   const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
   events.push(...state.toolCallEvents)
-  if (reason) Lifecycle.finish(lifecycle, events, { reason, usage: state.usage })
+  if (reason)
+    Lifecycle.finish(lifecycle, events, {
+      reason,
+      usage: state.usage,
+      providerMetadata: { openai: { finishReason: state.rawFinishReason } },
+    })
   return events
 }
 

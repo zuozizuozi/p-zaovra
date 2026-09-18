@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, ne, or } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, lte, ne, or } from "drizzle-orm"
 import { Effect, Schema } from "effect"
 import { Database } from "../database/database"
 import { MessageDecodeError } from "./error"
@@ -19,6 +19,49 @@ export const latestCompaction = Effect.fnUntraced(function* (db: DatabaseService
     .limit(1)
     .get()
     .pipe(Effect.orDie)
+})
+
+/** Read original promoted requests, independently of generated summaries. No inbox admission or replay. */
+export const originalRequests = Effect.fnUntraced(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  through: number,
+) {
+  const rows = yield* db
+    .select()
+    .from(SessionMessageTable)
+    .where(
+      and(
+        eq(SessionMessageTable.session_id, sessionID),
+        eq(SessionMessageTable.type, "user"),
+        lte(SessionMessageTable.seq, through),
+      ),
+    )
+    .orderBy(asc(SessionMessageTable.seq))
+    .all()
+    .pipe(Effect.orDie)
+  const messages = yield* Effect.forEach(rows, decodeMessageRow)
+  return JSON.stringify(
+    messages.flatMap((message) =>
+      message.type === "user"
+        ? [
+            {
+              id: message.id,
+              text: message.text,
+              ...(message.files?.length
+                ? {
+                    files: message.files.map((file) => ({
+                      uri: file.uri.startsWith("data:") ? "[embedded attachment in original message]" : file.uri,
+                      mime: file.mime,
+                      name: file.name,
+                    })),
+                  }
+                : {}),
+            },
+          ]
+        : [],
+    ),
+  )
 })
 
 const messageRows = Effect.fnUntraced(function* (

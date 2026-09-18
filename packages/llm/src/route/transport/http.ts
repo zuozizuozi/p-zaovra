@@ -1,6 +1,7 @@
-import { Effect, Stream } from "effect"
+import { Effect, LogLevel, Stream } from "effect"
 import { Headers, HttpClientRequest } from "effect/unstable/http"
 import { Auth } from "../auth"
+import { requestShape } from "../diagnostics"
 import { render as renderEndpoint } from "../endpoint"
 import { Framing, type Framing as FramingDef } from "../framing"
 import type { Transport, TransportPrepareInput } from "./index"
@@ -92,6 +93,8 @@ export const jsonRequestParts = <Body>(input: JsonRequestInput<Body>) =>
       input.request.http?.query,
     )
     const body = yield* bodyWithOverlay(input.body, input.request, input.encodeBody)
+    if (yield* LogLevel.isEnabled("Debug"))
+      yield* Effect.logDebug("provider.request.shape", requestShape(body.jsonBody, body.bodyText))
     const headers = yield* Auth.toEffect(input.auth)({
       request: input.request,
       method: "POST",

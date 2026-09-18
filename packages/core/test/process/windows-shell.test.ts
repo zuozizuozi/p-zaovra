@@ -11,6 +11,44 @@ const it = testEffect(LayerNode.compile(AppProcess.node))
 
 describe.skipIf(process.platform !== "win32")("Windows shell boundary", () => {
   it.live(
+    "flushes formatted objects before exiting and returns human-readable streams",
+    Effect.gen(function* () {
+      const service = yield* AppProcess.Service
+      const result = yield* service.run(
+        AppProcess.shellCommand(
+          "[pscustomobject]@{ Name = 'TABLE_OUTPUT_SENTINEL'; Value = 42 }; Write-Warning 'WARNING_SENTINEL'",
+          process.cwd(),
+          "powershell.exe",
+        ),
+      )
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout.toString()).toContain("TABLE_OUTPUT_SENTINEL")
+      expect(result.stdout.toString()).toContain("42")
+      expect(result.stdout.toString() + result.stderr.toString()).toContain("WARNING_SENTINEL")
+      expect(result.stdout.toString() + result.stderr.toString()).not.toContain("#< CLIXML")
+    }),
+    15000,
+  )
+  it.live(
+    "does not let output formatting turn command failures into success",
+    Effect.gen(function* () {
+      const service = yield* AppProcess.Service
+      for (const command of ["Write-Error 'ERROR_SENTINEL'", "throw 'ERROR_SENTINEL'"]) {
+        const result = yield* service.run(AppProcess.shellCommand(command, process.cwd(), "powershell.exe"))
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr.toString()).toContain("ERROR_SENTINEL")
+      }
+      const native = yield* service.run(
+        AppProcess.shellCommand("cmd.exe /d /c exit 7; Write-Output 'AFTER_NATIVE'", process.cwd(), "powershell.exe"),
+      )
+      expect(native.exitCode).toBe(7)
+      expect(native.stdout.toString()).toContain("AFTER_NATIVE")
+      const explicit = yield* service.run(AppProcess.shellCommand("exit 9", process.cwd(), "powershell.exe"))
+      expect(explicit.exitCode).toBe(9)
+    }),
+    15000,
+  )
+  it.live(
     "does not silently accept multiline cmd input",
     Effect.gen(function* () {
       const service = yield* AppProcess.Service

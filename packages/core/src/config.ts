@@ -9,7 +9,7 @@ import { FSUtil } from "./fs-util"
 import { Global } from "./global"
 import { Location } from "./location"
 import { Policy } from "./policy"
-import { AbsolutePath } from "./schema"
+import { AbsolutePath, PositiveInt } from "./schema"
 import { ConfigAgent } from "./config/agent"
 import { ConfigAttachments } from "./config/attachments"
 import { ConfigCompaction } from "./config/compaction"
@@ -35,6 +35,19 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   shell: Schema.String.pipe(Schema.optional).annotate({
     description: "Default shell to use for terminal and shell tool execution",
   }),
+  session_token_budget: PositiveInt.pipe(Schema.optional).annotate({
+    description:
+      "Optional cumulative reported token limit per session, including cache and compaction. Checked between provider requests; an in-flight request may exceed it. Not a monetary or cross-session budget. Loaded with the Location configuration; restart the backend after changing it.",
+  }),
+  session_output: Schema.Record(
+    Schema.String,
+    Schema.Record(Schema.String, Schema.Struct({ initial: PositiveInt, maximum: PositiveInt })),
+  )
+    .pipe(Schema.optional)
+    .annotate({
+      description:
+        "Optional provider ID -> model ID -> { initial, maximum } output policy. Initial is a soft per-request budget; maximum is a hard ceiling. Explicit model request max_tokens/max_output_tokens remains a hard ceiling. No automatic inference from model names; restart the backend after changing this policy.",
+    }),
   model: Schema.String.pipe(Schema.optional).annotate({
     description: "Default model to use when no session or agent model is selected",
   }),

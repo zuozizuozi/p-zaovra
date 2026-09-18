@@ -3,6 +3,7 @@ export * as BuiltInTools from "./builtins"
 import { makeLocationNode } from "../effect/app-node"
 import { Layer } from "effect"
 import { BashTool } from "./bash"
+import { VerificationReviewTool } from "./verification-review"
 import { ApplyPatchTool } from "./apply-patch"
 import { EvidenceTool } from "./evidence"
 import { EditTool } from "./edit"
@@ -35,6 +36,7 @@ export const node = makeLocationNode({
   deps: [
     ApplyPatchTool.node,
     BashTool.node,
+    VerificationReviewTool.node,
     EditTool.node,
     EvidenceTool.node,
     GlobTool.node,

@@ -1,4 +1,6 @@
 export const dict = {
+  "desktop.server.exited":
+    "本地服务已停止（退出码 {{code}}），当前任务状态无法确认。请关闭并重新打开 Zaovra 恢复连接，核对任务后再继续；命令不会自动重跑。",
   "desktop.menu.checkForUpdates": "检查更新...",
   "desktop.menu.installCli": "安装 CLI...",
   "desktop.menu.reloadWebview": "重新加载 Webview",

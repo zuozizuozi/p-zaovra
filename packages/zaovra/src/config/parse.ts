@@ -52,6 +52,19 @@ export function jsonc(text: string, filepath: string): unknown {
   return data
 }
 
+/** These execution controls belong to V2; legacy bootstrap must not reject them. */
+export function legacyConfiguration(data: unknown, source: string) {
+  configuration(data, source)
+  const fields = Object.fromEntries(
+    // Other native fields still use the existing native compatibility view.
+    // Silently dropping provider_filter here would lose its inherited allow list.
+    Object.entries(data as Record<string, unknown>).filter(
+      ([key]) => key !== "session_token_budget" && key !== "session_output" && key !== "permissions",
+    ),
+  )
+  return schema(ConfigV1.Info, fields, source)
+}
+
 export function schema<S extends EffectSchema.Decoder<unknown, never>>(
   schema: S,
   data: unknown,

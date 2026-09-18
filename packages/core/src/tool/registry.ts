@@ -33,6 +33,7 @@ export interface Materialization {
 }
 
 export interface Settlement {
+  readonly inputRejected?: boolean
   readonly result: ToolResultValue
   readonly output?: ToolOutput
   readonly outputPaths?: ReadonlyArray<string>
@@ -71,7 +72,10 @@ const registryLayer = Layer.effect(
         Effect.provideService(ToolOutputStore.Capture, capture),
         Effect.map((output) => ({ output })),
         Effect.catchTag("LLM.ToolFailure", (failure) =>
-          Effect.succeed({ result: { type: "error" as const, value: failure.message } }),
+          Effect.succeed({
+            result: { type: "error" as const, value: failure.message },
+            inputRejected: failure.metadata?.phase === "input",
+          }),
         ),
       )
       if ("result" in pending) {
@@ -81,6 +85,7 @@ const registryLayer = Layer.effect(
         return ids.length === 0
           ? pending
           : {
+              ...pending,
               result: {
                 ...pending.result,
                 value: `${pending.result.value}\nEvidence: ${ids.join(", ")} (use evidence_read or evidence_search)`,
@@ -163,7 +168,9 @@ const registryLayer = Layer.effect(
         for (const [name, registration] of registrations)
           if (whollyDisabled(permission(registration.tool, name), permissions)) registrations.delete(name)
         return {
-          definitions: Array.from(registrations, ([name, registration]) => definition(name, registration.tool)),
+          definitions: Array.from(registrations, ([name, registration]) => definition(name, registration.tool)).sort(
+            (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+          ),
           settle: (input) => {
             const registration = registrations.get(input.call.name)
             if (registration) return settleWith(input, registration.identity)

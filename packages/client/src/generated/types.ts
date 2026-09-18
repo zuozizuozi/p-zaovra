@@ -2095,6 +2095,10 @@ export type SessionsRecoverOutput = {
       readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
       readonly command: string
       readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+      readonly execution?: "not-run" | "invalid-report" | "timeout"
+      readonly requirements?: ReadonlyArray<string>
+      readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+      readonly supersededBy?: string
       readonly snapshot?: string
       readonly callID: string
       readonly cwd?: string
@@ -2102,6 +2106,23 @@ export type SessionsRecoverOutput = {
       readonly logs?: ReadonlyArray<string>
     }>
     readonly missing: ReadonlyArray<string>
+    readonly review?: {
+      readonly userMessageID: string
+      readonly items: ReadonlyArray<{
+        readonly requirement: number
+        readonly evidence: ReadonlyArray<string>
+        readonly kind?: "result" | "process"
+        readonly history?: ReadonlyArray<{
+          readonly callID: string
+          readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+          readonly before?: string
+        }>
+        readonly status: "verified" | "unverified"
+        readonly note: string
+      }>
+      readonly unverified: ReadonlyArray<string>
+      readonly notes?: ReadonlyArray<{ readonly text: string; readonly requirements: ReadonlyArray<number> }>
+    }
     readonly messageID?: string
   }
 }["data"]
@@ -2116,6 +2137,10 @@ export type SessionsOutcomeOutput = {
       readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
       readonly command: string
       readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+      readonly execution?: "not-run" | "invalid-report" | "timeout"
+      readonly requirements?: ReadonlyArray<string>
+      readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+      readonly supersededBy?: string
       readonly snapshot?: string
       readonly callID: string
       readonly cwd?: string
@@ -2123,6 +2148,23 @@ export type SessionsOutcomeOutput = {
       readonly logs?: ReadonlyArray<string>
     }>
     readonly missing: ReadonlyArray<string>
+    readonly review?: {
+      readonly userMessageID: string
+      readonly items: ReadonlyArray<{
+        readonly requirement: number
+        readonly evidence: ReadonlyArray<string>
+        readonly kind?: "result" | "process"
+        readonly history?: ReadonlyArray<{
+          readonly callID: string
+          readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+          readonly before?: string
+        }>
+        readonly status: "verified" | "unverified"
+        readonly note: string
+      }>
+      readonly unverified: ReadonlyArray<string>
+      readonly notes?: ReadonlyArray<{ readonly text: string; readonly requirements: ReadonlyArray<number> }>
+    }
     readonly messageID?: string
   }
 }["data"]

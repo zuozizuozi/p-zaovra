@@ -1,4 +1,6 @@
 export const dict = {
+  "desktop.server.exited":
+    "The local service stopped (code {{code}}). Task status cannot be confirmed. Close and reopen Zaovra to reconnect, then inspect the task before continuing. Commands will not be replayed automatically.",
   "desktop.menu.checkForUpdates": "Check for Updates...",
   "desktop.menu.installCli": "Install CLI...",
   "desktop.menu.reloadWebview": "Reload Webview",

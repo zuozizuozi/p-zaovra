@@ -88,6 +88,21 @@ export function SessionOutcomeDock() {
                 {(check) => (
                   <div class="break-all">
                     {check.kind}: {check.command} · exit {check.exit}
+                    <Show when={check.execution}>
+                      <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
+                    </Show>
+                    <Show when={check.supersededBy}>
+                      <div>
+                        {language.t("session.outcome.superseded")} {check.supersededBy}
+                      </div>
+                    </Show>
+                    <For each={check.requirements}>
+                      {(requirement) => (
+                        <div>
+                          {language.t("session.outcome.coverage")} {requirement}
+                        </div>
+                      )}
+                    </For>
                     <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
                     <For each={check.logs}>{(log) => <div>{log}</div>}</For>
                   </div>
@@ -95,7 +110,12 @@ export function SessionOutcomeDock() {
               </For>
               <Show when={outcome()?.missing.length}>
                 <div>
-                  {language.t("session.outcome.missing")} {outcome()?.missing.join(", ")}
+                  {language.t("session.outcome.missing")}{" "}
+                  {outcome()
+                    ?.missing.map((item) =>
+                      item === "requirements" ? language.t("session.outcome.requirements") : item,
+                    )
+                    .join(", ")}
                 </div>
               </Show>
             </details>

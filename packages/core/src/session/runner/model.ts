@@ -72,7 +72,13 @@ export type Error =
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
+  | InvalidOutputLimitError
   | Integration.AuthorizationError
+
+export class InvalidOutputLimitError extends Schema.TaggedErrorClass<InvalidOutputLimitError>()(
+  "SessionRunnerModel.InvalidOutputLimitError",
+  { message: Schema.String },
+) {}
 
 export interface Interface {
   readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Model, Error>
@@ -95,6 +101,8 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
   const generationKeys: Record<string, string> = {
     temperature: "temperature",
     max_tokens: "maxTokens",
+    max_output_tokens: "maxTokens",
+    max_completion_tokens: "maxTokens",
     maxTokens: "maxTokens",
     top_p: "topP",
     topP: "topP",
@@ -175,7 +183,7 @@ const apiName = (model: ModelV2.Info) =>
 export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
-): Effect.Effect<Model, UnsupportedApiError> => {
+): Effect.Effect<Model, UnsupportedApiError | InvalidOutputLimitError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
       ? model
@@ -183,6 +191,19 @@ export const fromCatalogModel = (
           Object.assign(draft.request.body, credential.metadata)
         })
   const key = apiKey(resolved, credential)
+  const outputLimits = ["max_tokens", "maxTokens", "max_output_tokens", "max_completion_tokens"]
+    .filter((name) => Object.hasOwn(resolved.request.body, name))
+    .map((name) => resolved.request.body[name])
+  if (
+    outputLimits.some((value) => typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) ||
+    new Set(outputLimits).size > 1
+  )
+    return Effect.fail(
+      new InvalidOutputLimitError({
+        message:
+          "Output token limits must be positive integers; max_tokens, maxTokens, max_output_tokens and max_completion_tokens must agree when supplied together",
+      }),
+    )
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
       withDefaults(resolved, OpenAIResponses.route)

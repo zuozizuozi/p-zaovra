@@ -516,11 +516,18 @@ describe("OpenAI Chat route", () => {
         { type: "text-delta", id: "text-0", text: "Hello" },
         { type: "text-delta", id: "text-0", text: "!" },
         { type: "text-end", id: "text-0" },
-        { type: "step-finish", index: 0, reason: "stop", usage, providerMetadata: undefined },
+        {
+          type: "step-finish",
+          index: 0,
+          reason: "stop",
+          usage,
+          providerMetadata: { openai: { finishReason: "stop" } },
+        },
         {
           type: "finish",
           reason: "stop",
           usage,
+          providerMetadata: { openai: { finishReason: "stop" } },
         },
       ])
     }),
@@ -582,8 +589,19 @@ describe("OpenAI Chat route", () => {
           providerExecuted: undefined,
           providerMetadata: undefined,
         },
-        { type: "step-finish", index: 0, reason: "tool-calls", usage: undefined, providerMetadata: undefined },
-        { type: "finish", reason: "tool-calls", usage: undefined },
+        {
+          type: "step-finish",
+          index: 0,
+          reason: "tool-calls",
+          usage: undefined,
+          providerMetadata: { openai: { finishReason: "tool_calls" } },
+        },
+        {
+          type: "finish",
+          reason: "tool-calls",
+          usage: undefined,
+          providerMetadata: { openai: { finishReason: "tool_calls" } },
+        },
       ])
     }),
   )
@@ -624,18 +642,71 @@ describe("OpenAI Chat route", () => {
           tool_calls: [{ index: 0, id: "call-invalid-json", function: { name: "write", arguments: '{"path":' } }],
         }),
         deltaChunk({}, "tool_calls"),
+        usageChunk({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }),
       )
-      const error = yield* LLMClient.stream(request).pipe(
+      yield* LLMClient.stream(request).pipe(
         Stream.tap((event) => Effect.sync(() => events.push(event))),
         Stream.runDrain,
         Effect.provide(fixedResponse(body)),
-        Effect.flip,
       )
       expect(events.some(LLMEvent.is.toolInputStart)).toBe(true)
       expect(events.filter(LLMEvent.is.toolCall)).toEqual([])
-      expect(error.message).toContain("Invalid JSON input")
+      expect(events.filter(LLMEvent.is.toolError)).toMatchObject([{ id: "call-invalid-json", inputRejected: true }])
+      expect(events.find(LLMEvent.is.stepFinish)).toMatchObject({ reason: "tool-calls", usage: { totalTokens: 120 } })
     }),
   )
+
+  it.effect("isolates rejected calls and preserves valid interleaved long arguments", () =>
+    Effect.gen(function* () {
+      const text = '中文\\quoted"\n'.repeat(4000)
+      const raw = JSON.stringify({ text })
+      const events = yield* LLMClient.stream(request).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              deltaChunk({
+                tool_calls: [
+                  { index: 0, id: "bad", function: { name: "write", arguments: '{"path":' } },
+                  { index: 1, id: "good", function: { name: "echo", arguments: raw.slice(0, 27) } },
+                ],
+              }),
+              deltaChunk({ tool_calls: [{ index: 1, function: { arguments: raw.slice(27) } }] }),
+              deltaChunk({}, "tool_calls"),
+              usageChunk({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }),
+            ),
+          ),
+        ),
+      )
+      expect(events.filter(LLMEvent.is.toolCall)).toMatchObject([{ id: "good", input: { text } }])
+      expect(events.filter(LLMEvent.is.toolError)).toMatchObject([{ id: "bad", inputRejected: true }])
+      expect(events.find(LLMEvent.is.stepFinish)?.usage?.totalTokens).toBe(120)
+    }),
+  )
+
+  for (const reason of ["length", "content_filter"]) {
+    it.effect(`does not execute even well-formed calls when terminated by ${reason}`, () =>
+      Effect.gen(function* () {
+        const events = yield* LLMClient.stream(request).pipe(
+          Stream.runCollect,
+          Effect.provide(
+            fixedResponse(
+              sseEvents(
+                deltaChunk({
+                  tool_calls: [{ index: 0, id: "cut", function: { name: "write", arguments: '{"path":"x"}' } }],
+                }),
+                deltaChunk({}, reason),
+                usageChunk({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }),
+              ),
+            ),
+          ),
+        )
+        expect(events.filter(LLMEvent.is.toolCall)).toEqual([])
+        expect(events.find(LLMEvent.is.toolError)?.message).toContain(reason === "length" ? "length" : "content-filter")
+        expect(events.find(LLMEvent.is.stepFinish)?.usage?.totalTokens).toBe(120)
+      }),
+    )
+  }
 
   it.effect("fails on malformed stream events", () =>
     Effect.gen(function* () {

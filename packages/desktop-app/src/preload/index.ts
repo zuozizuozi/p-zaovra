@@ -13,6 +13,12 @@ const updaterHandler = (_: unknown, state: UpdaterState) => {
 const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
+  localServerExit: () => ipcRenderer.invoke("local-server-exit"),
+  onLocalServerExit: (callback) => {
+    const handler = (_: unknown, code: number) => callback(code)
+    ipcRenderer.on("local-server-exit", handler)
+    return () => ipcRenderer.removeListener("local-server-exit", handler)
+  },
   wslServers: {
     getState: () => ipcRenderer.invoke("wsl-servers-get-state"),
     subscribe: (cb) => {

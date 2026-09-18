@@ -2,6 +2,8 @@
 
 日期：2026-09-15。以下保留原审计与五步方案；实施结果及验证边界见文末。不能把计划中的验收项目自动视为已经验证。
 
+2026-09-17 最新专项：[工具参数恢复与验收收尾修复](./tool-recovery-acceptance-audit-20260917.md)。第 1、2 步代码与离线回归已完成，真实网关/桌面任务尚待验证；第 3 步“重复探索/验收与预算控制”和第 4 步“分层真实交付与成本比较”明确待办。新真实模型测试须先申请 Token 预算。
+
 ## 结论与责任
 
 造物改进.txt 将 Cline 定位为任务理解和验证闭环参考，将 Codex 定位为执行工程参考。codex-runtime-review.md 记录的实现包括共享 Shell 生命周期、取消、超时和输出保留；preflight-completion-review.md 中的 build/test/lint + snapshot 完成状态是 Zaovra 的本地设计，不能称为完整移植了任一竞品的验收机制。
@@ -279,3 +281,56 @@ D2/D3 的 Agent 实际运行检查，退出码均为 0，分别输出 `CHECK-2-P
 - 尚存边界：独立一次生成与自主完整验收的成功率仍未建立；单项小改动约 30 万 Tokens，效率仍偏低；首次验收模型的完成措辞曾与保守状态冲突，新增提示不是形式化保证，系统仍以记录为准。日志出现 ResizeObserver 警告，未据此直接宣称已找到全部闪屏根因。此次不引入第二模型审查器、自动模型路由或激进压缩。
 
 最终生产性能对比（相同 30 倍 CPU 限速、320 轮历史、160 段流式增量、审查面板打开）：修改前 179557.4ms / RAF P95 683.3ms；修改后 176069.1ms / RAF P95 633.3ms。前后空白采样均为 0、滚动漂移均为 0、行与 Markdown 节点均未替换。此单次对比未观察到回退，不能推断所有机器均提速或所有黑屏均已解决。原始日志为 `0917-usage-before-performance.log` 与 `0917-usage-after-performance.log`。
+
+### 2026-09-17 DeepSeek R1 实测与文件覆盖保护
+
+用户确认服务地址 `https://api.edgecloudapp.com/v2/llm`，最初的 `r1` 返回 404 / model_not_found；随后更正为 `deepseek-r1`，真实请求成功。连接独立保存为 `api-edgecloudapp-com-2`，未覆盖 GLM 凭据。密钥只在内存使用。200 响应仅证明接入成功，不证明模型能力或完整任务可靠性。
+
+本轮先复查参考项目，再定位实际链路：
+
+- [Cline act 提示](https://github.com/cline/cline/blob/964a0fc36d9ddcb47838c661152a8b0bbcc1f542/sdk/packages/shared/src/prompt/system/act.ts) 强调绝对路径、合并独立工具请求与结束前验证。[输出限制](https://github.com/cline/cline/blob/964a0fc36d9ddcb47838c661152a8b0bbcc1f542/sdk/packages/core/src/extensions/tools/executors/output-limits.ts) 解释工具结果在后续轮次重复传送的成本。
+- [OpenCode write](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/write.ts) 使用绝对路径描述并在覆盖前生成差异，但该版本的实现不提供本次需要的原内容匹配保护，不能据此声称竞品自动解决了误写。
+- [Context Mode](https://github.com/mksglu/context-mode) 的核心是外部保留原始输出、按需提取；没有直接安装其插件或引入 FTS5、自动摘要。Zaovra 已有 Evidence 原始输出取回。本地旧 GLM 修改会话中，read 输出约 24148 字符，bash 总输出约 3923 字符、单次最大 875 字符；这些是字符数，不是 Tokens，也不是请求累计。现有证据不支持将压缩日志视为本次耗用的主要解法，更不能引用其示例节省比例作为 Zaovra 实测收益。
+
+真实结果：
+
+1. `ses_f54a96ad7ffeTrr24EjWqwioCE`（商单测试 / **R1实测 · 目录误写已停止**）：模型先 mkdir、再单独 cd，错误地以为后续 write 会继承目录。实际将 `index.html` 写到商单测试根目录，覆盖了已有机械花作品。验证工具发现目标目录内没有文件，拒绝运行检查。发现后停止会话并确认 active 为空；保留误写内容，使用此前留存且哈希匹配的原件恢复。恢复后 SHA256 为 `5cc1f790351ef7e27a9a134792bd3c6cadf9e98693cf625a463ccf4526ad5a28`，与此前交付记录一致。新建的误放测试脚本核对备份哈希后移除，没有改写旧作品实现。
+2. 独立无头浏览器检查误写游戏的备份：页面无运行异常、390px 窗口无横向溢出，但第一次鼠标点击得分 1，第二次仍为 1。源码将鼠标点击也锁进只在空格抬起时释放的状态；生成的测试脚本还有不正确的分数预期、无法满足的结束文本等待、访问未挂在 window 上的函数等问题。这不是成功交付，也未由主机替模型修好游戏。
+3. 最小修复复用 FileMutation 原有锁、独占创建和条件变更机制：write 未提供 `expectedContent` 时仅创建，已有文件拒绝覆盖；提供原内容时在同一进程锁内核对后替换，内容不匹配或文件消失均拒绝。正常精确修改仍优先 read + edit，避免发送双份完整文件。Shell 描述明确每次调用独立、cd 不影响后续 read/write/edit。这是意外覆盖保护，不是完整版本历史或对任意 shell 写文件的沙箱。
+4. 重建并重启后，`ses_f549dded7ffe7axgEQlCl7shyq`（**R1实测 · 写入保护回归**）：第一次模型仅输出混合语言计划，未调用工具；追加明确执行要求后，真实 write 被拒绝，真实 read 返回 `KEEP_ORIGINAL_20260917`，主机再次核对磁盘内容未变。保护用例通过，包含一次人工提醒。后台 `completed_unverified`、checks 空、missing acceptance，与前端“执行结束 · 尚未完成验证”一致；不会把该单项用例冒充工程验收完成。UI 28362 Tokens 与会话记录一致。
+
+验证与边界：
+
+- Core 文件变更、write、edit、apply_patch 共 46 项测试、164 断言通过；Core 类型检查通过。覆盖盲写、过期内容、同内容并发竞争、删除后拒绝覆盖、BOM 保留、权限及原有编辑行为。普通开发构建已加载本次修复，未生成安装包。未修改 UI 或时间线，因此没有新增该区域的生产性能对比。
+- 本次真实任务的可见窗口观测记录 40 次 ResizeObserver 警告，聊天行全空采样 0；这不等同于没有 GPU 黑帧，也不证明闪屏根因已消失。最小化窗口时，模型选择依赖的 requestAnimationFrame 回调出现延迟，恢复窗口后生效；这一交互问题本轮未修。
+- 重试原请求仍沿用原输入的模型选择；修改配置后应新建明确选择新模型的请求。此行为与用户直觉可能冲突，本轮仅记录，未变更恢复协议。
+- 按原预算水位累计已记录 595365 Tokens，另两次完成的直连探测 222 + 272。三项无完整用量的历史请求及一次主动截断的流式探测保守共预留 400000，预算计入 995859，低于 150 万。预留不是供应商账单；中断或缺失用量不记为免费。本轮原始证据在忽略目录 `quality/chain-audit/0917-*`，不含密钥。
+
+仍未完成：R1 独立生成并通过完整验收；一般化的测试覆盖可靠性；所有完成措辞与验证证据的一致性；闪屏根因；同任务 Context Mode 思路的受控 Token A/B。不能将本次文件保护修复称作上述四类问题全部解决。
+
+## 2026-09-17 V4 Flash 独立交付与本地服务边界修复
+
+范围：按用户要求保留 Session 编排，不进行 Universal Attempt / Supervisor / 租约体系迁移；不因 R1 的个别表现添加模型特例。本轮新增产品变更仅在 desktop-app，上一节 Core 文件保护改动保留。
+
+真实任务：
+
+- 使用用户确认的 `https://api.edgecloudapp.com/v2/llm`、`deepseek-v4-flash-0731`，通过配置 UI 独立保存为 `api-edgecloudapp-com-3`，原连接未覆盖。密钥不进入报告。
+- 独立项目 `C:/Users/Administrator/Desktop/Zaovra-Flash验收-20260917`；会话 `ses_f5474b969ffevvPzffjTA4XDMZ`。Zaovra 自行创建 index.html、smoke-test.js、verify.js，自行修复验收脚本的计时采样错误；主机未编辑这三个交付文件，也没有中途提示修法。
+- 成品为中文 30 秒点击挑战。最终模型验收 13/13；主机独立重跑同一脚本 13/13，另以全新 Chromium 检查界面和空格得分。包含真实 30 秒等待、鼠标连点、长按防重复、按钮焦点、持久化、重置和窄屏。复跑同一脚本不代表独立证明全部未知边界。
+- UI 耗时 7 分 47 秒；30 个 provider turns；累计 998879 Tokens（input 429736、output 13928、reasoning 26831、cacheRead 528384）。没有未结算请求和额外直连调用，未人为截停；不再追加真实模型任务。
+- 后台 `completed_verified` / missing 空，与前端“执行结束 · 所列检查已通过，范围见验证记录”一致。这里只证明所列检查，并非通用交付保证。
+
+本轮修复与依据：
+
+- 对照 OpenCode desktop WSL 启动实现（https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/desktop/src/main/wsl/sidecar.ts），采用现有的健康检查、退出、超时竞争与清理模式。本地后台原来先发布连接、再等健康检查且吞掉失败；现在 spawn 成功意味着健康检查已通过，失败经原初始化失败通道传递，终止失败子进程并取消未完成的探测/轮询。
+- 后台运行中退出通过现有 IPC 边界通知所有窗口，显示持久错误提示，保留会话内容。重新读取初始化结果不再返回已死亡后台的连接。仅报告服务故障，不自动恢复模型执行或重跑工具。
+- 实际终止空闲后台 utility process 后，UI 立即出现退出提示；随后关闭并重新打开开发实例，连接恢复、模型仍为 V4 Flash、已完成会话仍为 completed_verified，active 为空，用量未增加。
+- 开发实例的 app.relaunch 未能恢复整个开发环境；electron-vite 在 Electron close 后退出其宿主，前端开发服务也随之退出（本地依赖 startElectron 的 close/process.exit 行为）。新提示不提供未经验证的快捷重启按钮，明确要求关闭并重新打开。既有开发模式重启按钮限制另行保留，未扩大为新启动器重构；打包版重启未在本轮验证。
+
+回归：Desktop 健康/初始化/WSL 26 项通过；另 relaunch 2 项通过；Core runner、tool events、work recovery、task recovery 119 项通过；desktop bun typecheck 通过。健康新增用例包含真实 HTTP 503→200、挂起请求超时取消、启动前退出、探测异常、启动后退出不重新轮询。未修改 session/timeline，不以短时观察宣称闪屏已根治。
+
+尚未解决：接近 100 万 Tokens 的交付成本；生成测试覆盖不足的一般性风险；闪屏根因；运行中强杀后跨所有工具的恢复证明；流式增量的周期持久化；同任务 Context Mode A/B。原计划中的额外修改任务因首个任务已耗尽本轮预算未执行。这些不以已有单测或本次小项目成功冒充全部完成。
+
+### 2026-09-17 第3、4步状态更新
+
+第3步已实现重复探索提示、统一会话用量预算与请求边界停止。第4步本轮获批100万Tokens，已上报909290，另一次失败请求用量未知。小模块7项通过且前后端状态一致；新游戏独立26项21通过5失败，最后一关存在真实越界错误，尚未完整交付。追加功能测试未启动。宿主另修复非HTML验收闭环及V2配置与旧启动解析冲突。详情、证据和待办见 efficiency-delivery-validation-20260917.md；不得将第4步标为全部完成。

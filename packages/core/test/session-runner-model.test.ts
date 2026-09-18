@@ -42,6 +42,35 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
   })
 
 describe("SessionRunnerModel", () => {
+  for (const name of ["max_tokens", "maxTokens", "max_output_tokens", "max_completion_tokens"]) {
+    it.effect(`normalizes the explicit output ceiling ${name}`, () =>
+      Effect.gen(function* () {
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(
+          ModelV2.Info.make({
+            ...model({ type: "aisdk", package: "@ai-sdk/openai-compatible", url: "https://example.test/v1" }),
+            request: { headers: {}, body: { [name]: 32000 } },
+          }),
+        )
+        expect(resolved.route.defaults.generation?.maxTokens).toBe(32000)
+        expect(resolved.route.defaults.http?.body).not.toHaveProperty(name)
+      }),
+    )
+  }
+
+  for (const body of [{ max_tokens: 10, max_output_tokens: 20 }, { maxTokens: 0 }, { max_tokens: "16000" }]) {
+    it.effect(`rejects invalid or conflicting output ceilings ${JSON.stringify(body)}`, () =>
+      Effect.gen(function* () {
+        const error = yield* SessionRunnerModel.fromCatalogModel(
+          ModelV2.Info.make({
+            ...model({ type: "aisdk", package: "@ai-sdk/openai-compatible", url: "https://example.test/v1" }),
+            request: { headers: {}, body },
+          }),
+        ).pipe(Effect.flip)
+        expect(error).toBeInstanceOf(SessionRunnerModel.InvalidOutputLimitError)
+      }),
+    )
+  }
+
   for (const pkg of ["@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider", "@ai-sdk/anthropic"]) {
     it.effect(`sends catalog generation settings through real local HTTP for ${pkg}`, () =>
       Effect.gen(function* () {

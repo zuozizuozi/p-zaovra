@@ -82,10 +82,10 @@ describe("ToolRegistry", () => {
         toolDefinitions(service, rules).pipe(Effect.map((definitions) => definitions.map((tool) => tool.name)))
 
       expect(yield* names([{ action: "question", resource: "*", effect: "deny" }])).toEqual([
+        "apply_patch",
         "bash",
         "edit",
         "write",
-        "apply_patch",
       ])
       expect(
         yield* names([
@@ -99,7 +99,7 @@ describe("ToolRegistry", () => {
           { action: "*", resource: "*", effect: "deny" },
         ]),
       ).toEqual([])
-      expect(yield* names([{ action: "edit", resource: "*", effect: "deny" }])).toEqual(["question", "bash"])
+      expect(yield* names([{ action: "edit", resource: "*", effect: "deny" }])).toEqual(["bash", "question"])
     }),
   )
 
@@ -127,6 +127,17 @@ describe("ToolRegistry", () => {
       const second = yield* toolDefinitions(service)
 
       expect(second[0]).toBe(first[0])
+    }),
+  )
+
+  it.effect("keeps declaration order stable when registration order changes", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      yield* service.register({ zebra: make(), alpha: make() })
+      const first = yield* toolDefinitions(service)
+      yield* service.register({ alpha: make(), zebra: make() })
+      expect(yield* toolDefinitions(service)).toEqual(first)
+      expect(first.map((tool) => tool.name)).toEqual(["alpha", "zebra"])
     }),
   )
 

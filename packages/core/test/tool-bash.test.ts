@@ -2,7 +2,15 @@ import fs from "fs/promises"
 import { realpathSync } from "node:fs"
 import path from "path"
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer } from "effect"
+import { DateTime, Effect, Layer, Schema } from "effect"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
+import { derive } from "@zaovra-ai/core/session/outcome"
+import { toLLMMessages } from "@zaovra-ai/core/session/runner/to-llm-message"
+import { SessionMessage } from "@zaovra-ai/core/session/message"
+import { ModelV2 } from "@zaovra-ai/core/model"
+import { ProviderV2 } from "@zaovra-ai/core/provider"
+import { Model } from "@zaovra-ai/llm"
+import { route } from "@zaovra-ai/llm/protocols/openai-chat"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { EventV2 } from "@zaovra-ai/core/event"
@@ -148,6 +156,269 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("marks schema rejection before invoking the process", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const invocation = call({ command: 'Write-Output "report"' })
+          const settled = yield* withTool(tmp.path, (registry) =>
+            settleTool(registry, {
+              ...invocation,
+              call: {
+                ...invocation.call,
+                input: { command: 'Write-Output "report"', verification_report: { checks: [] } },
+              },
+            }),
+          )
+          expect(settled.inputRejected).toBe(true)
+          expect(settled.result).toMatchObject({ type: "error", value: expect.stringContaining("Invalid tool input:") })
+          expect(runs).toHaveLength(0)
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+  it.live(
+    "ordinary test output carries coverage, and weakening a failed assertion cannot certify the requirement",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            reset()
+            const source = path.join(tmp.path, "product.mjs")
+            const script = path.join(tmp.path, "check.mjs")
+            const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`
+            const history: SessionMessage.AssistantTool[] = []
+            const time = { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) }
+            for (const stage of ["broken", "weakened", "fixed"] as const) {
+              yield* Effect.promise(() =>
+                Bun.write(
+                  source,
+                  stage === "fixed"
+                    ? "export const roundtrip = value => value"
+                    : 'export const roundtrip = value => value.replace(/^\\uFEFF/, "")',
+                ),
+              )
+              yield* Effect.promise(() =>
+                Bun.write(
+                  script,
+                  `import assert from 'node:assert/strict'; import { roundtrip } from './product.mjs'; assert.equal(roundtrip('\\uFEFFfirst'), '${stage === "weakened" ? "" : "\\uFEFF"}first'); console.log('ordinary test output: passed')`,
+                ),
+              )
+              const input = {
+                command,
+                verification: "test" as const,
+                verification_targets: [source, script],
+                verification_assertions: [script],
+                verification_requirements: ["Round trips preserve a leading BOM in field data"],
+              }
+              const settled = yield* withTool(
+                tmp.path,
+                (registry) => settleTool(registry, call(input, stage)),
+                LayerNode.compile(AppProcess.node),
+              )
+              const structured = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(
+                settled.output?.structured,
+              )
+              const check = Schema.decodeUnknownSync(SessionOutcome.Check)(structured.verification)
+              expect(check.exit).toBe(stage === "broken" ? 1 : 0)
+              expect(check.requirements).toEqual(input.verification_requirements)
+              expect(check.assertions).toHaveLength(1)
+              history.push({
+                id: stage,
+                type: "tool",
+                name: "bash",
+                time,
+                state: { status: "completed", input, content: settled.output?.content ?? [], structured },
+              })
+              const outcome = derive(
+                [
+                  SessionMessage.Assistant.make({
+                    id: toolIdentity.assistantMessageID,
+                    type: "assistant",
+                    agent: "build",
+                    model: { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") },
+                    finish: "stop",
+                    time,
+                    content: [...history],
+                  }),
+                ],
+                false,
+                undefined,
+                check.targets ?? [],
+                [],
+              )
+              expect(outcome.state).toBe(
+                stage === "broken" ? "failed" : stage === "weakened" ? "completed_unverified" : "completed_verified",
+              )
+            }
+          }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+  )
+
+  it.live("rejects compound verification before execution and keeps its scope for a corrected check", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const target = path.join(tmp.path, "source.js")
+          yield* Effect.promise(() => Bun.write(target, "ok"))
+          const settled = yield* withTool(tmp.path, (registry) =>
+            settleTool(
+              registry,
+              call({ command: "npm test; echo success", verification: "test", verification_targets: [target] }),
+            ),
+          )
+          expect(runs).toHaveLength(0)
+          expect(settled.output?.structured).toMatchObject({
+            verification: { execution: "not-run", cwd: realpathSync(tmp.path), targets: [{ path: target }] },
+          })
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+  it.live("retains canonical scope when a missing target prevents execution", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const settled = yield* withTool(tmp.path, (registry) =>
+            settleTool(registry, call({ command: "npm run build", verification_targets: ["missing.js"] })),
+          )
+          expect(runs).toHaveLength(0)
+          expect(settled.output?.structured).toMatchObject({
+            exit: -1,
+            verification: {
+              kind: "build",
+              execution: "not-run",
+              cwd: realpathSync(tmp.path),
+              targets: [{ path: path.join(realpathSync(tmp.path), "missing.js"), digest: "" }],
+            },
+          })
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+  for (const scenario of [
+    "passed",
+    "failed",
+    "skipped",
+    "nonzero",
+    "malformed",
+    "malformed-nonzero",
+    "changed",
+    "duplicate",
+  ] as const) {
+    it.live(`records real suite output conservatively: ${scenario}`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            reset()
+            const script = path.join(tmp.path, "verify.cjs")
+            const target = path.join(tmp.path, "game.html")
+            yield* Effect.promise(() => Bun.write(target, "initial"))
+            yield* Effect.promise(() =>
+              Bun.write(
+                script,
+                `
+          const fs = require('fs');
+          if (${JSON.stringify(scenario)} === 'changed') fs.writeFileSync(${JSON.stringify(target)}, 'changed');
+          const checks = ['syntax','smoke','interaction'].map(kind => ({kind, requirements: ['Empty input and restart behavior'], status: kind === 'interaction' && ['failed','skipped'].includes(${JSON.stringify(scenario)}) ? ${JSON.stringify(scenario)} : 'passed'}));
+          if (${JSON.stringify(scenario)} === 'duplicate') checks.push(checks[0]);
+          process.stdout.write(${JSON.stringify(scenario)}.startsWith('malformed') ? '14/14 passed' : JSON.stringify({checks}));
+          if (${JSON.stringify(scenario)}.includes('nonzero')) process.exitCode = 7;
+        `,
+              ),
+            )
+            const settled = yield* withTool(
+              tmp.path,
+              (registry) =>
+                settleTool(
+                  registry,
+                  call({
+                    command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+                    verification_report: true,
+                    verification_targets: [target, script],
+                  }),
+                ),
+              LayerNode.compile(AppProcess.node),
+            )
+            const record = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(
+              settled.output?.structured,
+            )
+            if (scenario === "malformed-nonzero") {
+              const check = Schema.decodeUnknownSync(SessionOutcome.Check)(record.verification)
+              expect(check.exit).toBe(7)
+              expect(check.execution).toBeUndefined()
+              return
+            }
+            if (scenario === "malformed" || scenario === "duplicate") {
+              expect(record).toMatchObject({ verification: { exit: -1, execution: "invalid-report" } })
+              expect(record?.verifications).toBeUndefined()
+              return
+            }
+            const checks = Schema.decodeUnknownSync(Schema.Array(SessionOutcome.Check))(record?.verifications)
+            expect(checks).toHaveLength(3)
+            expect(checks[0].requirements).toEqual(["Empty input and restart behavior"])
+            expect(checks.map((check) => check.kind)).toEqual(["syntax", "smoke", "interaction"])
+            expect(checks[2].exit).toBe(scenario === "nonzero" ? 7 : scenario === "failed" ? 1 : 0)
+            if (scenario === "changed")
+              expect(checks[0].targets?.find((file) => file.path.endsWith("game.html"))?.digest).toBe("")
+            if (scenario === "skipped") expect(checks[2].targets?.every((file) => file.digest === "")).toBe(true)
+            if (scenario === "passed")
+              expect(checks.every((check) => check.targets?.every((file) => !!file.digest))).toBe(true)
+            const message = SessionMessage.Assistant.make({
+              id: toolIdentity.assistantMessageID,
+              type: "assistant",
+              agent: "build",
+              model: { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") },
+              finish: "stop",
+              time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+              content: [
+                SessionMessage.AssistantTool.make({
+                  id: "call-bash",
+                  type: "tool",
+                  name: "bash",
+                  time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+                  state: SessionMessage.ToolStateCompleted.make({
+                    status: "completed",
+                    input: {},
+                    structured: record,
+                    content: settled.output?.content ?? [],
+                  }),
+                }),
+              ],
+            })
+            const outcome = derive([message], false, undefined, checks[0].targets ?? [], [])
+            expect(outcome.state).toBe(
+              ["failed", "nonzero"].includes(scenario)
+                ? "failed"
+                : ["skipped", "changed"].includes(scenario)
+                  ? "completed_unverified"
+                  : "completed_verified",
+            )
+            const history = toLLMMessages([message], Model.make({ id: "offline", provider: "offline", route }))
+            const toolResult = history.at(-1)?.content[0]
+            if (toolResult?.type !== "tool-result" || toolResult.result.type !== "content")
+              throw new Error("Expected model-facing tool result")
+            expect(
+              toolResult.result.value.find(
+                (part: { type: string; text?: string }) =>
+                  part.type === "text" && part.text?.startsWith("Verification record"),
+              ),
+            ).toMatchObject({ text: expect.stringContaining('"kind":"interaction"') })
+          }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+  }
+
   it.live("preserves real command output and bounded progress when a command times out", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -214,7 +485,7 @@ describe("BashTool", () => {
         return withTool(tmp.path, (registry) =>
           Effect.gen(function* () {
             const definitions = yield* toolDefinitions(registry)
-            expect(definitions.map((tool) => tool.name)).toEqual(["bash_job", "bash"])
+            expect(definitions.map((tool) => tool.name)).toEqual(["bash", "bash_job"])
             expect(definitions.find((tool) => tool.name === "bash")?.inputSchema).not.toHaveProperty(
               "properties.background",
             )

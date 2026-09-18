@@ -366,8 +366,20 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
 
   const [windowCount] = createResource(() => window.api.getWindowCount())
 
-  // Fetch sidecar credentials (available immediately, before health check)
+  // Credentials are published only after the local server passes its health check.
   const [sidecar] = createResource(() => window.api.awaitInitialization())
+  const [serverExit, setServerExit] = createSignal<number | null>(null)
+  onMount(() => {
+    const dispose = window.api.onLocalServerExit(setServerExit)
+    let active = true
+    void window.api.localServerExit().then((code) => {
+      if (active && code !== null) setServerExit(code)
+    })
+    onCleanup(() => {
+      active = false
+      dispose()
+    })
+  })
 
   const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(loadLocale)
@@ -448,6 +460,14 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
               }
             >
               <Inner />
+              <Show when={serverExit() !== null}>
+                <div
+                  role="alert"
+                  class="fixed bottom-3 left-3 right-3 z-50 rounded-lg border border-border-base bg-background-base p-4 text-text-base shadow-lg"
+                >
+                  <p>{t("desktop.server.exited", { code: serverExit() ?? 0 })}</p>
+                </div>
+              </Show>
             </AppInterface>
           )}
         </Show>
