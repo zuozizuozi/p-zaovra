@@ -370,7 +370,7 @@ const layer = Layer.effect(
                     input.action === "retry"
                       ? Prompt.fromUserMessage(user)
                       : Prompt.make({
-                          text: "核对现场后继续上一项任务：先检查保留的日志、当前工作区和仍在运行的预览，确认已完成的部分与结果不明的操作。不要假定未结束的命令已经成功，也不要重复执行已完成的操作；未验证的结果需明确说明。",
+                          text: SessionOutcome.RECOVERY_PROMPT,
                         })
                   yield* result.prompt({ sessionID: input.sessionID, prompt, resume: false })
                   return { ...previous, state: "running" as const, outcomeUnknown: previous.outcomeUnknown }
@@ -415,7 +415,9 @@ const layer = Layer.effect(
           return SessionOutcome.derive(messages, false, undefined, [], required, liveShells, session.location.directory)
         const targets = yield* SessionOutcome.fingerprint(
           fs,
-          preliminary.checks.flatMap((check) => check.targets?.map((target) => target.path) ?? []),
+          preliminary.checks.flatMap((check) =>
+            [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path),
+          ),
         )
         const snapshot = yield* Snapshot.Service.use((service) => service.capture()).pipe(
           Effect.provide(locations.get(session.location)),

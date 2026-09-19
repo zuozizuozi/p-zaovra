@@ -3452,6 +3452,99 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect(
+    "continues durable acceptance after two compactions without replaying tools or inheriting another task",
+    () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        const events = yield* EventV2.Service
+        const database = yield* Database.Service
+        let executions = 0
+        yield* registry.register({
+          bash: Tool.make({
+            description: "Observed execution fixture",
+            input: Schema.Struct({}),
+            output: Schema.Struct({ exit: Schema.Number }),
+            execute: () =>
+              Effect.sync(() => {
+                executions++
+                return { exit: 0 }
+              }),
+          }),
+        })
+        const original = "实现 CSV 往返；交付 README.md。"
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: original }), resume: false })
+        const call = (id: string, name: string) => [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id, name, input: {} }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ]
+        const stop = fragmentFixture("text", "done", ["Done."]).completeEvents
+        responses = [call("executed-once", "bash"), stop, stop]
+        yield* session.resume(sessionID)
+        for (const index of [1, 2]) {
+          const messageID = SessionMessage.ID.create()
+          yield* events.publish(SessionEvent.Compaction.Started, {
+            sessionID,
+            messageID,
+            timestamp: DateTime.makeUnsafe(index * 2),
+            reason: "manual",
+          })
+          yield* events.publish(SessionEvent.Compaction.Ended, {
+            sessionID,
+            messageID,
+            timestamp: DateTime.makeUnsafe(index * 2 + 1),
+            reason: "manual",
+            text: "Everything done; README not needed",
+            recent: "",
+          })
+        }
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+        requests.length = 0
+        responses = [stop, call("inspect-original", "verification_review"), stop]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(3)
+        expect(JSON.stringify(requests[1].messages)).toContain("Verification closing review:")
+        expect(JSON.stringify(requests[1].messages)).toContain("交付 README.md")
+        const history = yield* SessionOutcome.history(database.db, sessionID)
+        expect(SessionOutcome.requested(history).clauses).toEqual(["实现 CSV 往返；", "交付 README.md。"])
+        const inspection = history
+          .flatMap((message) => (message.type === "assistant" ? message.content : []))
+          .find((part) => part.type === "tool" && part.id === "inspect-original")
+        expect(inspection).toMatchObject({
+          state: {
+            status: "completed",
+            structured: {
+              requirements: [
+                { id: 1, text: "实现 CSV 往返；" },
+                { id: 2, text: "交付 README.md。" },
+              ],
+            },
+          },
+        })
+        expect(executions).toBe(1)
+        expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed_unverified" })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "解释一个新概念" }), resume: false })
+        requests.length = 0
+        responses = [stop]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(1)
+        expect(SessionOutcome.requested(yield* SessionOutcome.history(database.db, sessionID)).clauses).toEqual([
+          "解释一个新概念",
+        ])
+        expect(executions).toBe(1)
+      }).pipe(
+        Effect.provide(
+          VerificationReviewTool.layer.pipe(
+            Layer.provide(Layer.mock(PermissionV2.Service, { assert: () => Effect.void })),
+          ),
+        ),
+      ),
+  )
+
   it.effect("persists a real requirement review and keeps declared gaps unverified despite a done message", () =>
     Effect.gen(function* () {
       yield* setup

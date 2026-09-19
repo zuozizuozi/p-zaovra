@@ -7,31 +7,69 @@ import { Effect } from "effect"
 import { FSUtil } from "../fs-util"
 import { createHash } from "node:crypto"
 import path from "node:path"
-import { and, asc, desc, eq, gte } from "drizzle-orm"
+import { and, asc, eq, gte } from "drizzle-orm"
 import type { Database } from "../database/database"
 import type { SessionSchema } from "./schema"
 import { SessionMessageTable } from "./sql"
 
-/** Evidence is scoped to the durable user request, not the model's compacted view. */
+export const RECOVERY_PROMPT =
+  "核对现场后继续上一项任务：先检查保留的日志、当前工作区和仍在运行的预览，确认已完成的部分与结果不明的操作。不要假定未结束的命令已经成功，也不要重复执行已完成的操作；未验证的结果需明确说明。"
+
+/** Recognize only bare continuations and the Desktop's own recovery prompt.
+ * Substantive new requests retain their existing boundary; this is not intent inference.
+ */
+export function acceptanceHistory(messages: readonly SessionMessage.Message[]) {
+  let start = 0
+  let original: SessionMessage.User | undefined
+  for (const [index, message] of messages.entries()) {
+    if (message.type !== "user") continue
+    const continuation =
+      !message.files?.length &&
+      !message.agents?.length &&
+      !message.subtask &&
+      !message.invocation &&
+      (/^(?:请\s*)?(?:继续|继续执行|继续完成|继续修复|接着做)[。.!！\s]*$/u.test(message.text.trim()) ||
+        /^(?:please\s+)?(?:continue|resume|keep going)[.!\s]*$/iu.test(message.text.trim()) ||
+        message.text === RECOVERY_PROMPT)
+    const repeated =
+      original &&
+      message.text === original.text &&
+      JSON.stringify([message.files, message.agents, message.subtask, message.invocation]) ===
+        JSON.stringify([original.files, original.agents, original.subtask, original.invocation])
+    if (original && (continuation || repeated)) continue
+    original = message
+    start = index
+  }
+  return messages.slice(start)
+}
+
+/** Load durable acceptance history, independently of generated compaction. */
 export const history = (db: Database.Interface["db"], sessionID: SessionSchema.ID) =>
   Effect.gen(function* () {
-    const user = yield* db
-      .select({ seq: SessionMessageTable.seq })
-      .from(SessionMessageTable)
-      .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "user")))
-      .orderBy(desc(SessionMessageTable.seq))
-      .limit(1)
-      .get()
-      .pipe(Effect.orDie)
-    const rows = yield* db
+    const users = yield* db
       .select()
       .from(SessionMessageTable)
-      .where(and(eq(SessionMessageTable.session_id, sessionID), gte(SessionMessageTable.seq, user?.seq ?? 0)))
+      .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "user")))
       .orderBy(asc(SessionMessageTable.seq))
       .all()
       .pipe(Effect.orDie)
-    return rows.map((row) =>
-      Schema.decodeUnknownSync(SessionMessage.Message)({ ...row.data, id: row.id, type: row.type }),
+    const source = acceptanceHistory(
+      users.map((row) => Schema.decodeUnknownSync(SessionMessage.Message)({ ...row.data, id: row.id, type: row.type })),
+    )[0]
+    const rows = yield* db
+      .select()
+      .from(SessionMessageTable)
+      .where(
+        and(
+          eq(SessionMessageTable.session_id, sessionID),
+          gte(SessionMessageTable.seq, users.find((row) => row.id === source?.id)?.seq ?? 0),
+        ),
+      )
+      .orderBy(asc(SessionMessageTable.seq))
+      .all()
+      .pipe(Effect.orDie)
+    return acceptanceHistory(
+      rows.map((row) => Schema.decodeUnknownSync(SessionMessage.Message)({ ...row.data, id: row.id, type: row.type })),
     )
   })
 
@@ -131,9 +169,11 @@ export const requirements = (fs: FSUtil.Interface, directory: string) =>
 
 /** Stable references to the user's actual clauses, not a model-written replacement spec. */
 export function requested(messages: readonly SessionMessage.Message[]) {
-  const user = messages.findLast((message) => message.type === "user")
+  const scope = acceptanceHistory(messages)
+  const user = scope.find((message) => message.type === "user")
   return {
-    userMessageID: user?.id,
+    userMessageID: scope.findLast((message) => message.type === "user")?.id,
+    sourceMessageID: user?.id,
     clauses:
       user?.text
         .split(/(?<=[。；;\n])/u)
@@ -144,13 +184,7 @@ export function requested(messages: readonly SessionMessage.Message[]) {
 
 /** Host-observed execution order. Rejected, timed-out and provider-owned calls are not evidence. */
 export function executions(messages: readonly SessionMessage.Message[]) {
-  return messages
-    .slice(
-      Math.max(
-        0,
-        messages.findLastIndex((message) => message.type === "user"),
-      ),
-    )
+  return acceptanceHistory(messages)
     .flatMap((message) =>
       message.type === "assistant"
         ? message.content.filter(
@@ -204,9 +238,10 @@ export function derive(
   liveBackgroundShells: ReadonlySet<string> = new Set(),
   directory?: string,
 ): SessionOutcome.Info {
-  const start = messages.findLastIndex((message) => message.type === "user")
-  const turn = messages.slice(Math.max(0, start))
-  const last = turn.findLast((message) => message.type === "assistant")
+  const turn = acceptanceHistory(messages)
+  const start = turn.findLastIndex((message) => message.type === "user")
+  const latest = turn.slice(Math.max(0, start))
+  const last = latest.findLast((message) => message.type === "assistant")
   const checks = new Map<string, SessionOutcome.Check>()
   const failedAssertions = new Map<string, { check: SessionOutcome.Check; digest: string }>()
   const fresh = (check: SessionOutcome.Check) =>
@@ -406,7 +441,7 @@ export function derive(
       missing.push(`${check.execution}: ${check.kind} (${check.callID})`)
   }
   const request = requested(turn)
-  const reviews = turn.flatMap((message) =>
+  const reviews = latest.flatMap((message) =>
     message.type === "assistant"
       ? message.content.flatMap((part) => {
           if (
@@ -423,7 +458,10 @@ export function derive(
   )
   const review = reviews.at(-1)
   const observed = executions(turn)
-  if (turn.some((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))) {
+  if (
+    (start > 0 && engineeringWork(turn)) ||
+    latest.some((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
+  ) {
     if (!review) missing.push("requirements review: submit verification_review before claiming completion")
     if (review) {
       for (const [index, clause] of request.clauses.entries()) {

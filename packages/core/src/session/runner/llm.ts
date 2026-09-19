@@ -423,9 +423,14 @@ const layer = Layer.effect(
         isLastStep || textOnlyRecovery ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const verificationHistory = yield* SessionOutcome.history(db, session.id)
-      const reviewing = verificationHistory.some(
-        (message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"),
-      )
+      const reviewing = verificationHistory
+        .slice(
+          Math.max(
+            0,
+            verificationHistory.findLastIndex((message) => message.type === "user"),
+          ),
+        )
+        .some((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
       const evidence = reviewing
         ? yield* Effect.gen(function* () {
             const history = verificationHistory
@@ -939,12 +944,6 @@ const layer = Layer.effect(
           // the UI. Persist it at the tail, never rewrite the cached system prefix.
           if (!needsContinuation && !recoverText && !recoverInput && !isLastStep && stepSettlement?.finish === "stop") {
             const messages = yield* restore(SessionOutcome.history(db, session.id))
-            const turn = messages.slice(
-              Math.max(
-                0,
-                messages.findLastIndex((message) => message.type === "user"),
-              ),
-            )
             const preliminary = SessionOutcome.derive(
               messages,
               false,
@@ -975,7 +974,7 @@ const layer = Layer.effect(
               .all()
               .pipe(Effect.orDie)
             if (
-              (preliminary.checks.length || SessionOutcome.engineeringWork(turn)) &&
+              (preliminary.checks.length || SessionOutcome.engineeringWork(messages)) &&
               !reviews.some(
                 (row) =>
                   "text" in row.data &&
@@ -987,7 +986,9 @@ const layer = Layer.effect(
               const targets = yield* restore(
                 SessionOutcome.fingerprint(
                   fs,
-                  preliminary.checks.flatMap((check) => check.targets?.map((target) => target.path) ?? []),
+                  preliminary.checks.flatMap((check) =>
+                    [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path),
+                  ),
                 ),
               )
               const outcome = SessionOutcome.derive(
