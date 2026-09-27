@@ -724,7 +724,12 @@ export default function Page() {
     const latest = messages().findLast((message) => message.role === "assistant")
     return {
       queryKey: ["session-turn-diff", serverSDK().scope, sessionID, messageID, latest?.id, latest?.time.completed],
-      enabled: wantsReview() && reviewMode() === "turn" && !!sessionID && !!messageID,
+      enabled:
+        wantsReview() &&
+        reviewMode() === "turn" &&
+        !!sessionID &&
+        !!messageID &&
+        sync().session.messageConfirmed(sessionID, messageID),
       queryFn:
         sessionID && messageID
           ? () =>
@@ -1178,18 +1183,29 @@ export default function Page() {
   useSessionCommands({
     navigateMessageByOffset,
     setActiveMessage,
-    focusInput,
     review: reviewTab,
     fileBrowser: () => newSessionDesign() && isDesktop() && !!params.id,
   })
-  command.register("session-palette", () => [
-    {
-      id: "command.palette",
-      title: language.t("command.palette"),
-      hidden: true,
-      onSelect: () => command.trigger("file.open", "palette"),
-    },
-  ])
+  // Draft and session pages replace the same command slot during transitions.
+  command.register("prompt-navigation", () =>
+    params.id && location.pathname !== "/new-session"
+      ? [
+          {
+            id: "command.palette",
+            title: language.t("command.palette"),
+            hidden: true,
+            onSelect: () => command.trigger("file.open", "palette"),
+          },
+          {
+            id: "input.focus",
+            title: language.t("command.input.focus"),
+            category: language.t("command.category.view"),
+            keybind: "ctrl+l",
+            onSelect: focusInput,
+          },
+        ]
+      : [],
+  )
 
   const reviewPath = (path: string) => resolveReviewFilePath(sync().project?.worktree ?? sdk().directory, path)
   const openReviewFile = createOpenReviewFile({

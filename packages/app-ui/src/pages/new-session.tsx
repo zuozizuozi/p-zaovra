@@ -1,7 +1,7 @@
 import { Show, createEffect, createMemo, createResource, createSignal, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
-import { useSearchParams } from "@solidjs/router"
+import { useLocation, useSearchParams } from "@solidjs/router"
 import { Tooltip } from "@zaovra-ai/ui/tooltip"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
@@ -62,6 +62,7 @@ export default function NewSessionPage() {
   }
   useSettingsCommand()
   const route = useSessionKey()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string }>()
   const local = useLocal()
   const model = createPromptModelSelection({ agent: local.agent.current })
@@ -109,24 +110,28 @@ export default function NewSessionPage() {
     onDone: promptInputV2Controller.restoreFocus,
   })
 
-  command.register("new-session", () => [
-    {
-      id: "command.palette",
-      title: language.t("command.palette"),
-      hidden: true,
-      onSelect: async () => {
-        const { DialogSelectFile } = await import("@/components/dialog-select-file")
-        void dialog.show(() => <DialogSelectFile />)
-      },
-    },
-    {
-      id: "input.focus",
-      title: language.t("command.input.focus"),
-      category: language.t("command.category.view"),
-      keybind: "ctrl+l",
-      onSelect: () => promptInputV2Controller.restoreFocus(),
-    },
-  ])
+  command.register("prompt-navigation", () =>
+    location.pathname !== "/new-session"
+      ? []
+      : [
+          {
+            id: "command.palette",
+            title: language.t("command.palette"),
+            hidden: true,
+            onSelect: async () => {
+              const { DialogSelectFile } = await import("@/components/dialog-select-file")
+              void dialog.show(() => <DialogSelectFile />)
+            },
+          },
+          {
+            id: "input.focus",
+            title: language.t("command.input.focus"),
+            category: language.t("command.category.view"),
+            keybind: "ctrl+l",
+            onSelect: () => promptInputV2Controller.restoreFocus(),
+          },
+        ],
+  )
 
   createEffect(() => {
     if (!prompt.ready()) return

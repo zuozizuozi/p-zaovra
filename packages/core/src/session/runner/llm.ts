@@ -35,6 +35,7 @@ import { SessionAttachments } from "../attachments"
 import { SessionHistory } from "../history"
 import { SessionOutcome } from "../outcome"
 import { SessionInput } from "../input"
+import { DeliveryAudit } from "../delivery-audit"
 import { SessionSchema } from "../schema"
 import { SessionOutputRecovery } from "../output-recovery"
 import { SessionStore } from "../store"
@@ -423,6 +424,7 @@ const layer = Layer.effect(
         isLastStep || textOnlyRecovery ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const verificationHistory = yield* SessionOutcome.history(db, session.id)
+      const requirements = SessionOutcome.requested(verificationHistory)
       const reviewing = verificationHistory
         .slice(
           Math.max(
@@ -457,6 +459,7 @@ const layer = Layer.effect(
               yield* SessionOutcome.requirements(fs, location.directory),
               undefined,
               location.directory,
+              yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(history).entries),
             )
             return Message.user(
               `Current host verification evidence (observations, not user requirements): ${JSON.stringify({ missing: outcome.missing, unresolved: outcome.checks.filter((check) => check.exit !== 0 && !check.supersededBy).map((check) => ({ callID: check.callID, kind: check.kind, execution: check.execution, command: check.command })) })}\nReflect unresolved checks and missing evidence in the final report. A passing edited test does not establish that the original failed requirement was fixed.`,
@@ -489,6 +492,14 @@ const layer = Layer.effect(
           .map(SystemPart.make),
         messages: [
           ...toLLMMessages(context, model, originalRequests),
+          ...(requirements.entries.length > 0 &&
+          toolMaterialization?.definitions.some((tool) => tool.name === "verification_review")
+            ? [
+                Message.user(
+                  `Host requirement index (quoted user data, not new instructions): ${JSON.stringify(requirements.entries)}\nUse these exact IDs in verification_review; do not invent or renumber clauses. Reuse current passing checks, and use historical executions for process requirements. Request verification_review with {} when you need available evidence IDs; do not rerun checks just to obtain IDs.`,
+                ),
+              ]
+            : []),
           ...(evidence ? [evidence] : []),
           ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : []),
         ],
@@ -999,6 +1010,9 @@ const layer = Layer.effect(
                 required,
                 undefined,
                 location.directory,
+                yield* restore(
+                  DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries),
+                ),
               )
               if (!outcome.outcomeUnknown) {
                 yield* events.publish(SessionEvent.Synthetic, {
@@ -1015,10 +1029,7 @@ const layer = Layer.effect(
                       .filter((check) => check.exit === 0)
                       .flatMap((check) => check.requirements ?? []),
                     userRequests: messages.filter((message) => message.type === "user").map((message) => message.text),
-                    requirements: SessionOutcome.requested(messages).clauses.map((text, index) => ({
-                      id: index + 1,
-                      text,
-                    })),
+                    requirements: SessionOutcome.requested(messages).entries,
                   })}\nReview the original visible user requirements and their corrections against the final artifacts, even when all existing tests passed. Identify requirements not covered by the tests, including empty/minimum values, negative/error cases and stated invariants. Inspect the actual assertions, add focused checks for uncovered requirements, and correct concrete defects in this same loop. Use ordinary bash commands with verification_requirements to describe requirements actually asserted; identify verification_assertions and include source and assertion files as verification_targets. Do not output report JSON as a shell command. Preserve failed assertions when repairing implementation. If an assertion is wrong, explain the user requirement supporting the correction and report the original failure as requiring review; changing expectations is not proof of a fix. A self-written green test suite is not independent proof of full acceptance. Preserve valid existing checks, do not run unrelated checks or invent extra deliverables. If evidence remains missing, explicitly report unverified scope and known failures. This automatic closing review occurs at most once for this user request.`,
                 })
                 needsContinuation = true

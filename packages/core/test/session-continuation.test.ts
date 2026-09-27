@@ -149,11 +149,55 @@ test("multiple continues, Desktop inspect, and exact retry keep the same source"
       clauses: ["实现 CSV 往返；", "交付 README.md。"],
     })
   }
-  for (const text of ["新任务：继续按钮改成蓝色", "继续，但不要 README", "Explain why the text says continue"]) {
+  for (const text of ["新任务：继续按钮改成蓝色", "Explain why the text says continue"]) {
     expect(SessionOutcome.requested([original, user("different", text)]).sourceMessageID).toBe(
       SessionMessage.ID.make("msg_different"),
     )
   }
+})
+
+test("explicit substantive continuation appends requirements with stable original IDs", () => {
+  const amendment = user("amend", "继续，再增加暂停按钮。")
+  const request = SessionOutcome.requested([original, amendment, user("retry", amendment.text), next])
+  expect(request.sourceMessageID).toBe(original.id)
+  expect(request.clauses).toEqual(["实现 CSV 往返；", "交付 README.md。", "再增加暂停按钮。"])
+  expect(
+    result([
+      original,
+      { ...assistant, content: [check("ok", 0)] },
+      amendment,
+      marker,
+      { ...assistant, content: [review(amendment, "ok", [1, 3])] },
+    ]).missing.join(" "),
+  ).toContain("README")
+})
+
+test("an exact quoted withdrawal is traceable and does not renumber remaining requirements", () => {
+  const cancellation = user("cancel", "继续，取消要求“交付 README.md。”")
+  const request = SessionOutcome.requested([original, cancellation])
+  expect(request.entries[1]).toMatchObject({ id: 2, text: "交付 README.md。", withdrawnBy: cancellation.id })
+  expect(
+    result([
+      original,
+      { ...assistant, content: [check("ok", 0)] },
+      cancellation,
+      marker,
+      { ...assistant, content: [review(cancellation, "ok", [1])] },
+    ]).state,
+  ).toBe("completed_verified")
+})
+
+test("ambiguous corrections preserve the original requirement rather than silently waiving it", () => {
+  const amendment = user("amend", "继续，但不要 README")
+  expect(SessionOutcome.requested([original, amendment]).clauses).toContain("交付 README.md。")
+  expect(SessionOutcome.requested([original, amendment]).entries.every((entry) => !entry.withdrawnBy)).toBe(true)
+})
+
+test("explicit amendment labels retain the source while ordinary new requests remain independent", () => {
+  for (const text of ["补充要求：增加暂停按钮。", "追加要求：增加暂停按钮。", "continue, add a pause button."])
+    expect(SessionOutcome.requested([original, user("amendment", text)]).sourceMessageID).toBe(original.id)
+  for (const text of ["新任务：交付新的 README.md。", "解释如何增加暂停按钮。"])
+    expect(SessionOutcome.requested([original, user("new", text)]).sourceMessageID).toBe(SessionMessage.ID.make("msg_new"))
 })
 
 test("changed attachments are a new request, not an exact retry", () => {

@@ -1,4 +1,4 @@
-import { useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { useCommand, type CommandOption } from "@/context/command"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { previewSelectedLines } from "@zaovra-ai/session-ui/pierre/selection-bridge"
@@ -19,11 +19,11 @@ import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@zaovra-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionOwnership } from "./session-ownership"
+import { createStore } from "solid-js/store"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
   setActiveMessage: (message: UserMessage | undefined) => void
-  focusInput: () => void
   review?: () => boolean
   fileBrowser?: () => boolean
 }
@@ -49,8 +49,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const terminal = useTerminal()
   const layout = useLayout()
   const navigate = useNavigate()
+  const location = useLocation()
   const { params, sessionKey, tabs, view } = useSessionLayout()
   const sessionOwnership = createSessionOwnership(sessionKey)
+  const [compaction, setCompaction] = createStore({ running: false })
   const openDialog = async <T,>(load: () => Promise<T>, show: (value: T) => void) => {
     const owner = sessionOwnership.capture()
     const value = await load()
@@ -128,7 +130,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
 
   const navigateMessageByOffset = actions.navigateMessageByOffset
   const setActiveMessage = actions.setActiveMessage
-  const focusInput = actions.focusInput
 
   const sessionCommand = withCategory(language.t("command.category.session"))
   const fileCommand = withCategory(language.t("command.category.file"))
@@ -344,18 +345,25 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
 
   const compact = async () => {
     const sessionID = params.id
-    if (!sessionID) return
+    if (!sessionID || compaction.running) return
 
-    const model = local.model.current()
-    if (!model) {
-      showToast({
-        title: language.t("toast.model.none.title"),
-        description: language.t("toast.model.none.description"),
-      })
-      return
-    }
-
-    await sdk().client.v2.session.compact({ sessionID })
+    setCompaction("running", true)
+    showToast({ title: language.t("session.compact.running") })
+    await sdk()
+      .client.v2.session.compact({ sessionID }, { throwOnError: true })
+      .then(
+        (result) =>
+          showToast({
+            title: language.t(result.data.data.compacted ? "session.compact.done" : "session.compact.skipped"),
+            description: result.data.data.compacted ? undefined : language.t("session.compact.skipped.description"),
+          }),
+        () =>
+          showToast({
+            title: language.t("session.compact.failed"),
+            description: language.t("session.compact.failed.description"),
+          }),
+      )
+      .finally(() => setCompaction("running", false))
   }
 
   const shareCmds = () => []
@@ -379,7 +387,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.undo"),
       description: language.t("command.session.undo.description"),
       slash: "undo",
-      disabled: !params.id || visibleUserMessages().length === 0,
+      disabled: !params.id || visibleUserMessages().length === 0 || compaction.running,
       onSelect: undo,
     }),
     sessionCommand({
@@ -413,7 +421,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       }),
       tab &&
         fileCommand({
-          id: "tab.close",
+          id: "file.close",
           title: language.t("command.tab.close"),
           keybind: "mod+w",
           onSelect: closeTab,
@@ -464,12 +472,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
           }),
         ]
       : []),
-    viewCommand({
-      id: "input.focus",
-      title: language.t("command.input.focus"),
-      keybind: "ctrl+l",
-      onSelect: focusInput,
-    }),
   ]
 
   const terminalCmds = () => [
@@ -532,15 +534,21 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
-  command.register("session", () => [
-    ...sessionCmds(),
-    ...shareCmds(),
-    ...fileCmds(),
-    ...contextCmds(),
-    ...viewCmds(),
-    ...terminalCmds(),
-    ...messageCmds(),
-    ...mcpCmds(),
-    ...permissionsCmds(),
-  ])
+  // Route params can still describe the outgoing page during a transition.
+  // The current pathname selects the owner before that page is disposed.
+  command.register("session", () =>
+    location.pathname === "/new-session"
+      ? []
+      : [
+          ...sessionCmds(),
+          ...shareCmds(),
+          ...fileCmds(),
+          ...contextCmds(),
+          ...viewCmds(),
+          ...terminalCmds(),
+          ...messageCmds(),
+          ...mcpCmds(),
+          ...permissionsCmds(),
+        ],
+  )
 }

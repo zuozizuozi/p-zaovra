@@ -11,13 +11,27 @@ import { and, asc, eq, gte } from "drizzle-orm"
 import type { Database } from "../database/database"
 import type { SessionSchema } from "./schema"
 import { SessionMessageTable } from "./sql"
+import { DeliveryAudit } from "./delivery-audit"
 
 export const RECOVERY_PROMPT =
   "核对现场后继续上一项任务：先检查保留的日志、当前工作区和仍在运行的预览，确认已完成的部分与结果不明的操作。不要假定未结束的命令已经成功，也不要重复执行已完成的操作；未验证的结果需明确说明。"
 
-/** Recognize only bare continuations and the Desktop's own recovery prompt.
- * Substantive new requests retain their existing boundary; this is not intent inference.
- */
+// Only explicit continuation syntax establishes this relationship. Delivery
+// scheduling (steer/queue) and model-generated summaries are not task identity.
+function continuationText(text: string) {
+  if (text === RECOVERY_PROMPT) return ""
+  if (
+    /^(?:请\s*)?(?:继续|继续执行|继续完成|继续修复|接着做)[。.!！\s]*$/u.test(text.trim()) ||
+    /^(?:please\s+)?(?:continue|resume|keep going)[.!\s]*$/iu.test(text.trim())
+  )
+    return ""
+  return text
+    .trim()
+    .match(
+      /^(?:(?:请\s*)?(?:继续|继续执行|继续完成|继续修复|接着做)[，,:：]\s*|(?:补充要求|追加要求|修改要求)[:：]\s*|(?:please\s+)?(?:continue|resume|keep going)[,:]\s+)(.+)$/isu,
+    )?.[1]
+}
+
 export function acceptanceHistory(messages: readonly SessionMessage.Message[]) {
   let start = 0
   let original: SessionMessage.User | undefined
@@ -28,9 +42,7 @@ export function acceptanceHistory(messages: readonly SessionMessage.Message[]) {
       !message.agents?.length &&
       !message.subtask &&
       !message.invocation &&
-      (/^(?:请\s*)?(?:继续|继续执行|继续完成|继续修复|接着做)[。.!！\s]*$/u.test(message.text.trim()) ||
-        /^(?:please\s+)?(?:continue|resume|keep going)[.!\s]*$/iu.test(message.text.trim()) ||
-        message.text === RECOVERY_PROMPT)
+      continuationText(message.text) !== undefined
     const repeated =
       original &&
       message.text === original.text &&
@@ -171,14 +183,32 @@ export const requirements = (fs: FSUtil.Interface, directory: string) =>
 export function requested(messages: readonly SessionMessage.Message[]) {
   const scope = acceptanceHistory(messages)
   const user = scope.find((message) => message.type === "user")
+  const entries: { id: number; text: string; sourceMessageID: SessionMessage.ID; withdrawnBy?: SessionMessage.ID }[] =
+    []
+  const seen = new Set<string>()
+  for (const message of scope) {
+    if (message.type !== "user" || seen.has(message.text)) continue
+    seen.add(message.text)
+    const text = message.id === user?.id ? message.text : (continuationText(message.text) ?? message.text)
+    // An exact, whole-message withdrawal can retire a clause without trusting
+    // the model to waive it. Ambiguous corrections remain visible for review.
+    const withdrawal = text.trim().match(/^(?:取消要求|撤销要求)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)?.[1]
+    const matches = withdrawal ? entries.filter((entry) => entry.text === withdrawal && !entry.withdrawnBy) : []
+    if (matches.length === 1) {
+      matches[0].withdrawnBy = message.id
+      continue
+    }
+    for (const clause of text
+      .split(/(?<=[。；;\n])/u)
+      .map((text) => text.trim())
+      .filter(Boolean))
+      entries.push({ id: entries.length + 1, text: clause, sourceMessageID: message.id })
+  }
   return {
     userMessageID: scope.findLast((message) => message.type === "user")?.id,
     sourceMessageID: user?.id,
-    clauses:
-      user?.text
-        .split(/(?<=[。；;\n])/u)
-        .map((text) => text.trim())
-        .filter(Boolean) ?? [],
+    clauses: entries.map((entry) => entry.text),
+    entries,
   }
 }
 
@@ -216,17 +246,52 @@ export function historicalEvidence(
   reference: { callID: string; exit: number; before?: string },
   observed: ReturnType<typeof executions>,
 ) {
+  return historicalEvidenceProblem(reference, observed) === undefined
+}
+
+export function historicalEvidenceProblem(
+  reference: { callID: string; exit: number; before?: string },
+  observed: ReturnType<typeof executions>,
+) {
   const execution = observed.find((entry) => entry.callID === reference.callID)
-  if (!execution || execution.tool !== "bash" || execution.exit !== reference.exit) return false
-  if (reference.before === undefined) return true
+  if (!execution) return "callID is not in the current request's observed executions"
+  if (execution.tool !== "bash")
+    return "only bash executions can be history evidence; other tools may only be before targets"
+  if (execution.exit !== reference.exit) return `exit does not match the observed exit ${execution.exit}`
+  if (reference.before === undefined) return
   const before = observed.find((entry) => entry.callID === reference.before)
-  return (
-    !!before &&
-    execution.order < before.order &&
-    execution.completed !== undefined &&
-    before.started !== undefined &&
-    execution.completed <= before.started
+  if (!before) return "before callID is not in the current request's observed executions"
+  if (
+    execution.order >= before.order ||
+    execution.completed === undefined ||
+    before.started === undefined ||
+    execution.completed > before.started
   )
+    return "the observed timestamps do not prove that this execution completed before the referenced tool started"
+}
+
+export function historyCandidates(observed: ReturnType<typeof executions>) {
+  return observed.flatMap((entry) =>
+    entry.tool === "bash" && entry.exit !== undefined ? [{ callID: entry.callID, exit: entry.exit }] : [],
+  )
+}
+
+export function checkFreshness(
+  check: SessionOutcome.Check,
+  targets: readonly { path: string; digest: string }[],
+  snapshot?: string,
+) {
+  const changedTargets = (check.targets ?? [])
+    .filter(
+      (target) =>
+        !target.digest || !targets.some((current) => current.path === target.path && current.digest === target.digest),
+    )
+    .map((target) => target.path)
+  return {
+    fresh: check.targets?.length ? changedTargets.length === 0 : !!snapshot && check.snapshot === snapshot,
+    changedTargets,
+    snapshotBased: !check.targets?.length,
+  }
 }
 
 export function derive(
@@ -237,6 +302,8 @@ export function derive(
   required: readonly string[] = ["build", "test", "lint"],
   liveBackgroundShells: ReadonlySet<string> = new Set(),
   directory?: string,
+  artifacts: readonly DeliveryAudit.Observation[] = [],
+  observationsComplete = true,
 ): SessionOutcome.Info {
   const turn = acceptanceHistory(messages)
   const start = turn.findLastIndex((message) => message.type === "user")
@@ -244,14 +311,7 @@ export function derive(
   const last = latest.findLast((message) => message.type === "assistant")
   const checks = new Map<string, SessionOutcome.Check>()
   const failedAssertions = new Map<string, { check: SessionOutcome.Check; digest: string }>()
-  const fresh = (check: SessionOutcome.Check) =>
-    check.targets?.length
-      ? check.targets.every(
-          (target) =>
-            target.digest &&
-            targets.some((current) => current.path === target.path && current.digest === target.digest),
-        )
-      : !!snapshot && check.snapshot === snapshot
+  const fresh = (check: SessionOutcome.Check) => checkFreshness(check, targets, snapshot).fresh
   for (const message of turn) {
     if (message.type !== "assistant") continue
     for (const part of message.content) {
@@ -441,6 +501,15 @@ export function derive(
       missing.push(`${check.execution}: ${check.kind} (${check.callID})`)
   }
   const request = requested(turn)
+  if (directory) {
+    for (const expected of DeliveryAudit.expected(request.entries)) {
+      const current = artifacts.find((item) => item.requirement === expected.requirement)
+      if (!current?.digest || current.problem)
+        missing.push(
+          `requirement ${expected.requirement} artifact ${expected.path}: ${current?.problem ?? "not inspected"}`,
+        )
+    }
+  }
   const reviews = latest.flatMap((message) =>
     message.type === "assistant"
       ? message.content.flatMap((part) => {
@@ -457,6 +526,43 @@ export function derive(
       : [],
   )
   const review = reviews.at(-1)
+  // Artifacts are captured by the host in the same durable tool result as the
+  // review. Model input cannot supply these observations. A later mutation
+  // invalidates that observation even when unrelated tests still pass.
+  const reviewTool = latest
+    .flatMap((message) => (message.type === "assistant" ? message.content : []))
+    .findLast(
+      (part) =>
+        part.type === "tool" &&
+        part.name === "verification_review" &&
+        !part.provider?.executed &&
+        part.state.status === "completed" &&
+        Schema.is(SessionOutcome.Review)(part.state.structured.review) &&
+        part.state.structured.review.userMessageID === request.userMessageID,
+    )
+  const recorded =
+    reviewTool?.type === "tool" && reviewTool.state.status === "completed"
+      ? Schema.decodeUnknownOption(Schema.Array(DeliveryAudit.Observation))(reviewTool.state.structured.artifacts)
+      : Option.none()
+  if (directory && review) {
+    for (const expected of DeliveryAudit.expected(request.entries)) {
+      const current = artifacts.find((item) => item.requirement === expected.requirement)
+      if (!current?.digest || current.problem) continue
+      if (
+        Option.isNone(recorded) ||
+        !recorded.value.some(
+          (item) =>
+            item.requirement === current.requirement &&
+            item.path === current.path &&
+            item.digest === current.digest &&
+            !item.problem,
+        )
+      )
+        missing.push(
+          `requirement ${expected.requirement} artifact ${expected.path}: changed or not captured in latest review; inspect and update verification_review`,
+        )
+    }
+  }
   const observed = executions(turn)
   if (
     (start > 0 && engineeringWork(turn)) ||
@@ -465,6 +571,7 @@ export function derive(
     if (!review) missing.push("requirements review: submit verification_review before claiming completion")
     if (review) {
       for (const [index, clause] of request.clauses.entries()) {
+        if (request.entries[index].withdrawnBy) continue
         const items = review.items.filter((item) => item.requirement === index + 1)
         if (
           items.length !== 1 ||
@@ -521,7 +628,10 @@ export function derive(
   const base = {
     outcomeUnknown: !active && unknown,
     checks: [...checks.values()],
-    missing,
+    // Running previews and concurrent history changes have no coherent file
+    // observation. Absence of that observation is not evidence of a stale file.
+    missing:
+      active || !observationsComplete ? ["verification pending: current workspace has not been inspected"] : missing,
     ...(review ? { review } : {}),
     messageID: turn.at(-1)?.id,
   }
@@ -531,7 +641,7 @@ export function derive(
   if (last.error || last.finish !== "stop") return { ...base, state: "failed" }
   if ([...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution))
     return { ...base, state: "failed" }
-  return { ...base, state: missing.length ? "completed_unverified" : "completed_verified" }
+  return { ...base, state: base.missing.length ? "completed_unverified" : "completed_verified" }
 }
 
 /** Old single-check records and newer suite records share the same check contract. */

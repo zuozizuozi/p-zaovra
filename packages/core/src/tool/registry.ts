@@ -161,17 +161,28 @@ const registryLayer = Layer.effect(
       }),
       materialize: Effect.fn("ToolRegistry.materialize")(function* (permissions = []) {
         const registrations = new Map(applications.entries())
+        const disabled = new Set<string>()
         for (const [name, entries] of local) {
           const registration = entries.at(-1)?.registration
           if (registration) registrations.set(name, registration)
         }
         for (const [name, registration] of registrations)
-          if (whollyDisabled(permission(registration.tool, name), permissions)) registrations.delete(name)
+          if (whollyDisabled(permission(registration.tool, name), permissions)) {
+            disabled.add(name)
+            registrations.delete(name)
+          }
         return {
           definitions: Array.from(registrations, ([name, registration]) => definition(name, registration.tool)).sort(
             (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
           ),
           settle: (input) => {
+            if (disabled.has(input.call.name))
+              return Effect.succeed({
+                result: {
+                  type: "error",
+                  value: `Tool ${input.call.name} is disabled by the selected agent's permissions. Nothing was executed. Continue with the available tools; an execution-enabled mode requires user authorization.`,
+                },
+              })
             const registration = registrations.get(input.call.name)
             if (registration) return settleWith(input, registration.identity)
             return Effect.succeed({ result: { type: "error", value: `Unknown tool: ${input.call.name}` } })

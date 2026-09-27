@@ -12,9 +12,13 @@ export function createSessionContextFormatter(locale: string) {
       if (value === null) return "—"
       return value.toLocaleString(locale) + "%"
     },
-    time(value: number | undefined) {
-      if (!value) return "—"
-      return DateTime.fromMillis(value).setLocale(locale).toLocaleString(DateTime.DATETIME_MED)
+    time(value: number | string | undefined) {
+      if (value === undefined) return "—"
+      const timestamp = typeof value === "string" ? Date.parse(value) : value
+      if (!Number.isFinite(timestamp)) return "—"
+      const date = DateTime.fromMillis(timestamp)
+      if (!date.isValid) return "—"
+      return date.setLocale(locale).toLocaleString(DateTime.DATETIME_MED)
     },
   }
 }

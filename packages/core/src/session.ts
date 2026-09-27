@@ -40,6 +40,7 @@ import { LocationServiceMap } from "./location-service-map"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
+import { DeliveryAudit } from "./session/delivery-audit"
 import { Snapshot } from "./snapshot"
 import { SessionRevert } from "./session/revert"
 import { SessionTurnDiff } from "./session/turn-diff"
@@ -411,8 +412,22 @@ const layer = Layer.effect(
         )
         if (active) return preliminary
         const required = yield* SessionOutcome.requirements(fs, session.location.directory)
+        const artifacts = yield* DeliveryAudit.inspect(
+          fs,
+          session.location.directory,
+          SessionOutcome.requested(messages).entries,
+        )
         if (!preliminary.checks.length)
-          return SessionOutcome.derive(messages, false, undefined, [], required, liveShells, session.location.directory)
+          return SessionOutcome.derive(
+            messages,
+            false,
+            undefined,
+            [],
+            required,
+            liveShells,
+            session.location.directory,
+            artifacts,
+          )
         const targets = yield* SessionOutcome.fingerprint(
           fs,
           preliminary.checks.flatMap((check) =>
@@ -443,6 +458,8 @@ const layer = Layer.effect(
               .map((job) => job.id),
           ),
           session.location.directory,
+          JSON.stringify(current) === JSON.stringify(messages) ? artifacts : [],
+          JSON.stringify(current) === JSON.stringify(messages),
         )
         const { Evidence } = yield* Effect.promise(() => import("./evidence"))
         return {

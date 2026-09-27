@@ -20,6 +20,7 @@ import { makeLocationNode } from "@zaovra-ai/core/effect/app-node"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@zaovra-ai/core/effect/app-node-platform"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
+import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { PermissionV2 } from "@zaovra-ai/core/permission"
 import { EventTable } from "@zaovra-ai/core/event/sql"
@@ -46,6 +47,8 @@ import { SessionRunnerModel } from "@zaovra-ai/core/session/runner/model"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { ApplicationTools } from "@zaovra-ai/core/tool/application-tools"
 import { AgentV2 } from "@zaovra-ai/core/agent"
+import { AgentPlugin } from "@zaovra-ai/core/plugin/agent"
+import { agentHost, host } from "./plugin/host"
 import { Config } from "@zaovra-ai/core/config"
 import { ConfigCompaction } from "@zaovra-ai/core/config/compaction"
 import { Tool } from "@zaovra-ai/core/tool/tool"
@@ -315,6 +318,8 @@ const execution = Layer.effect(
 const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([
+      FSUtil.node,
+      Location.node,
       Database.node,
       EventV2.node,
       QuestionV2.node,
@@ -1347,6 +1352,83 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("keeps plan permissions after compaction and resume, then allows an explicit build selection", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const agents = yield* AgentV2.Service
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agents) }))
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      const applications = yield* ApplicationTools.Service
+      const fs = yield* FSUtil.Service
+      const dir = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      const file = `${dir.path}/side-effect.txt`
+      const executed: string[] = []
+      const make = (name: string) => Tool.make({
+        description: name,
+        input: Schema.Struct({}),
+        output: Schema.Struct({ text: Schema.String }),
+        execute: () => Effect.gen(function* () {
+          executed.push(name)
+          if (name !== "read") yield* fs.writeFileString(file, name).pipe(Effect.orDie)
+          return { text: "observed" }
+        }),
+      })
+      yield* registry.register({ read: make("read"), bash: make("bash") })
+      yield* applications.register({ mcp_mutate: make("mcp_mutate") })
+      const call = (id: string, name: string) => [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id, name, input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      const stop = fragmentFixture("text", "plan-answer", ["Inspection only; implementation has not run."]).completeEvents
+      const selectedModel = { id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") }
+      requests.length = 0
+      responses = [call("denied-bash", "bash"), call("allowed-read", "read"), stop]
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Inspect only.", selection: { agent: "plan", model: selectedModel } }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+      expect(executed).toEqual(["read"])
+      expect(yield* fs.exists(file)).toBe(false)
+      expect(requests.every((request) => !request.tools.some((tool) => tool.name === "bash" || tool.name === "mcp_mutate"))).toBe(true)
+      expect(requests.some((request) => JSON.stringify(request.messages).includes("Nothing was executed"))).toBe(true)
+
+      const events = yield* EventV2.Service
+      const compactionID = SessionMessage.ID.create()
+      yield* events.publish(SessionEvent.Compaction.Started, {
+        sessionID, messageID: compactionID, timestamp: DateTime.makeUnsafe(1), reason: "manual",
+      })
+      yield* events.publish(SessionEvent.Compaction.Ended, {
+        sessionID, messageID: compactionID, timestamp: DateTime.makeUnsafe(2), reason: "manual",
+        text: "Inspection summary", recent: "",
+      })
+      yield* replaySessionProjection(sessionID)
+      responses = [call("denied-mcp", "mcp_mutate"), call("resumed-read", "read"), stop]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue inspecting." }), resume: false })
+      yield* session.resume(sessionID)
+      expect(executed).toEqual(["read", "read"])
+      expect(yield* fs.exists(file)).toBe(false)
+      expect(requests.every((request) => !request.tools.some((tool) => tool.name === "bash" || tool.name === "mcp_mutate"))).toBe(true)
+
+      responses = [call("authorized-bash", "bash"), stop]
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Execute now.", selection: { agent: "build", model: selectedModel } }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+      expect(executed).toEqual(["read", "read", "bash"])
+      expect(yield* fs.readFileString(file)).toBe("bash")
+    }),
+  )
+
   it.effect("uses the configured default agent system for omitted-agent sessions", () =>
     Effect.gen(function* () {
       yield* setup
@@ -1715,6 +1797,65 @@ describe("SessionRunnerLLM", () => {
         fragmentFixture("text", "invalid-replacement", ["## Objective\n- Drop all old constraints"]).completeEvents,
       ]
       expect(yield* runner.compact(sessionID)).toBe(false)
+      expect(yield* session.context(sessionID)).toEqual(before)
+    }),
+  )
+
+  for (const context of [undefined, 0]) {
+    it.effect(`manually compacts with unknown context metadata (${context}) without guessing a model limit`, () =>
+      Effect.gen(function* () {
+        const session = yield* setupOverflowRecovery
+        currentModel = Model.make({
+          id: "unknown-window",
+          provider: "fake",
+          route: OpenAIChat.route.with({ limits: { context } }),
+        })
+        requests.length = 0
+        response = fragmentFixture("text", "unknown-summary", [handoff("Keep original requirements")]).completeEvents
+        const runner = yield* SessionRunner.Service
+        expect(yield* runner.compact(sessionID)).toBe(true)
+        expect(requests).toHaveLength(1)
+        expect(requests[0].model.route.defaults.limits?.context).toBe(context)
+        expect(userTexts(requests[0])[0]).toContain("Earlier question")
+        expect(requests[0].tools).toEqual([])
+        expect((yield* session.context(sessionID))[0].type).toBe("compaction")
+      }),
+    )
+  }
+
+  it.effect("recovers actual overflow once even when the model window is unknown", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      currentModel = Model.make({ id: "unknown-window", provider: "fake", route: OpenAIChat.route })
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" }),
+        ],
+        fragmentFixture("text", "summary", [handoff("Recover unknown window")]).completeEvents,
+        fragmentFixture("text", "final", ["Recovered"]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(3)
+      expect(userTexts(requests[2])[0]).toContain("Earlier question ".repeat(700))
+    }),
+  )
+
+  it.effect("retains original history when an unknown-window summary is rejected", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      currentModel = Model.make({ id: "unknown-window", provider: "fake", route: OpenAIChat.route })
+      const before = yield* session.context(sessionID)
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.providerError({ message: "context limit exceeded", classification: "context-overflow" }),
+        ],
+      ]
+      const runner = yield* SessionRunner.Service
+      expect(yield* runner.compact(sessionID)).toBe(false)
+      expect(requests).toHaveLength(1)
       expect(yield* session.context(sessionID)).toEqual(before)
     }),
   )
@@ -3476,9 +3617,9 @@ describe("SessionRunnerLLM", () => {
         })
         const original = "实现 CSV 往返；交付 README.md。"
         yield* session.prompt({ sessionID, prompt: Prompt.make({ text: original }), resume: false })
-        const call = (id: string, name: string) => [
+        const call = (id: string, name: string, input: Record<string, unknown> = {}) => [
           LLMEvent.stepStart({ index: 0 }),
-          LLMEvent.toolCall({ id, name, input: {} }),
+          LLMEvent.toolCall({ id, name, input }),
           LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
           LLMEvent.finish({ reason: "tool-calls" }),
         ]
@@ -3504,9 +3645,18 @@ describe("SessionRunnerLLM", () => {
         }
         yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
         requests.length = 0
-        responses = [stop, call("inspect-original", "verification_review"), stop]
+        responses = [
+          stop,
+          call("inspect-original", "verification_review", {
+            items: [{ requirement: 999, status: "verified", evidence: [], note: "Invalid index fixture" }],
+            unverified: [],
+          }),
+          stop,
+        ]
         yield* session.resume(sessionID)
         expect(requests).toHaveLength(3)
+        expect(JSON.stringify(requests[0].messages)).toContain("Host requirement index")
+        expect(JSON.stringify(requests[0].messages)).toContain('\\"id\\":2')
         expect(JSON.stringify(requests[1].messages)).toContain("Verification closing review:")
         expect(JSON.stringify(requests[1].messages)).toContain("交付 README.md")
         const history = yield* SessionOutcome.history(database.db, sessionID)
@@ -3522,11 +3672,24 @@ describe("SessionRunnerLLM", () => {
                 { id: 1, text: "实现 CSV 往返；" },
                 { id: 2, text: "交付 README.md。" },
               ],
+              artifacts: [
+                { requirement: 2, path: "README.md", digest: "", problem: "missing or unreadable required file" },
+              ],
+              problems: expect.arrayContaining([expect.stringContaining("Requirement 999: unknown")]),
             },
           },
         })
         expect(executions).toBe(1)
         expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed_unverified" })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续，再增加暂停按钮。" }), resume: false })
+        responses = [stop, call("inspect-amendment", "verification_review"), stop]
+        yield* session.resume(sessionID)
+        expect(SessionOutcome.requested(yield* SessionOutcome.history(database.db, sessionID)).clauses).toEqual([
+          "实现 CSV 往返；",
+          "交付 README.md。",
+          "再增加暂停按钮。",
+        ])
+        expect(executions).toBe(1)
         yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "解释一个新概念" }), resume: false })
         requests.length = 0
         responses = [stop]
@@ -3543,6 +3706,112 @@ describe("SessionRunnerLLM", () => {
           ),
         ),
       ),
+  )
+
+  it.effect("review immediately identifies stale documentation evidence while reusing unchanged code evidence", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
+        Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      const fs = yield* FSUtil.Service
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      yield* fs.writeFileString(`${dir.path}/source.js`, "export const value = 1")
+      yield* fs.writeFileString(`${dir.path}/README.md`, "Original documentation")
+      let executions = 0
+      yield* registry.register({
+        bash: Tool.make({
+          description: "Recorded dependency fixture",
+          input: Schema.Struct({ document: Schema.Boolean }),
+          output: Schema.Struct({ verification: Schema.Unknown }),
+          execute: (input, context) =>
+            Effect.gen(function* () {
+              executions++
+              return {
+                verification: {
+                  kind: "test",
+                  command: input.document ? "node docs-test.js" : "node code-test.js",
+                  callID: context.toolCallID,
+                  exit: 0,
+                  targets: yield* SessionOutcome.fingerprint(fs, [
+                    `${dir.path}/source.js`,
+                    ...(input.document ? [`${dir.path}/README.md`] : []),
+                  ]),
+                  requirements: [input.document ? "documentation" : "code"],
+                },
+              }
+            }),
+        }),
+        edit: Tool.make({
+          description: "Edit only documentation",
+          input: Schema.Struct({}),
+          output: Schema.Struct({}),
+          execute: () =>
+            fs.writeFileString(`${dir.path}/README.md`, "Updated documentation").pipe(Effect.as({}), Effect.orDie),
+        }),
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "验证代码；验证文档。" }), resume: false })
+      const call = (id: string, name: string, input: Record<string, unknown>) => [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id, name, input }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      const stop = fragmentFixture("text", "done", ["Documentation requires a new check."]).completeEvents
+      responses = [
+        call("code", "bash", { document: false }),
+        call("docs", "bash", { document: true }),
+        call("change-docs", "edit", {}),
+        call("inspect-freshness", "verification_review", {
+          items: [
+            { requirement: 1, evidence: ["code"], status: "verified", note: "code" },
+            { requirement: 2, evidence: ["docs"], status: "verified", note: "docs" },
+          ],
+          unverified: [],
+        }),
+        stop,
+        stop,
+      ]
+      yield* session.resume(sessionID)
+      const messages = yield* session.context(sessionID)
+      const result = messages
+        .flatMap((message) => (message.type === "assistant" ? message.content : []))
+        .find((part) => part.type === "tool" && part.id === "inspect-freshness")
+      expect(result).toMatchObject({
+        state: {
+          status: "completed",
+          structured: {
+            checks: [
+              { callID: "code", fresh: true, changedTargets: [] },
+              { callID: "docs", fresh: false, changedTargets: [`${dir.path}/README.md`] },
+            ],
+            problems: [expect.stringContaining("stale check docs")],
+            historyCandidates: [
+              { callID: "code", exit: 0 },
+              { callID: "docs", exit: 0 },
+            ],
+          },
+        },
+      })
+      expect(requests.some((request) => JSON.stringify(request.messages).includes("stale check docs"))).toBe(true)
+      expect(executions).toBe(2)
+      expect(
+        SessionOutcome.derive(
+          messages,
+          false,
+          undefined,
+          yield* SessionOutcome.fingerprint(fs, [`${dir.path}/source.js`, `${dir.path}/README.md`]),
+          [],
+        ).state,
+      ).toBe("completed_unverified")
+    }).pipe(
+      Effect.provide(
+        VerificationReviewTool.layer.pipe(
+          Layer.provide(Layer.mock(PermissionV2.Service, { assert: () => Effect.void })),
+        ),
+      ),
+    ),
   )
 
   it.effect("persists a real requirement review and keeps declared gaps unverified despite a done message", () =>

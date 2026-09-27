@@ -3,6 +3,14 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.compact.running": "正在压缩会话…",
+  "session.compact.done": "会话已压缩",
+  "session.compact.skipped": "本次未执行压缩",
+  "session.compact.skipped.description":
+    "历史可能尚短，或未能生成安全摘要；原始历史已保留。请检查模型上下文配置及压缩错误后再重试。",
+  "session.compact.failed": "压缩请求失败",
+  "session.compact.failed.description": "请检查连接与会话状态；目前尚未确认压缩成功。",
+  "session.status.verifying": "正在复核交付物与验证结果",
   "model.catalog.loading": "正在加载模型…",
   "model.catalog.error": "模型列表刷新失败；若下方仍有模型，显示的是上次成功加载的列表。",
   "model.catalog.unavailable": "暂时无法获取模型列表，已保存的凭据没有被删除。",

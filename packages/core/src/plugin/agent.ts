@@ -5,7 +5,6 @@ import { define } from "./internal"
 import { Effect } from "effect"
 import { AgentV2 } from "../agent"
 import { Global } from "../global"
-import { Location } from "../location"
 import { PermissionV2 } from "../permission"
 
 const TRUNCATION_GLOB = path.join(Global.Path.data, "tool-output", "*")
@@ -154,8 +153,6 @@ Rules:
 export const Plugin = define({
   id: "agent",
   effect: Effect.fn(function* (ctx) {
-    const location = yield* Location.Service
-    const worktree = location.directory
     const whitelistedDirs = [TRUNCATION_GLOB, path.join(Global.Path.tmp, "*")]
     const readonlyExternalDirectory: PermissionV2.Ruleset = [
       { action: "external_directory", resource: "*", effect: "ask" },
@@ -207,20 +204,19 @@ export const Plugin = define({
       })
 
       draft.update(AgentV2.ID.make("plan"), (item) => {
-        item.description = "Plan mode. Disallows all edit tools."
+        item.description = "Read-only planning. Reads and searches only; no shell commands, file edits, or delegation."
+        item.system ??=
+          "Inspect the workspace using the available read and search tools and explain your plan. This mode does not permit shell commands, file edits, or delegation. Return the plan in your response. Implementation requires the user to select an execution-enabled agent; do not attempt to switch modes through a tool."
         item.mode = "primary"
         item.permissions.push(
           ...PermissionV2.merge(defaults, [
+            { action: "*", resource: "*", effect: "deny" },
+            ...defaults.filter((rule) => rule.action === "read" || rule.action === "external_directory"),
+            { action: "grep", resource: "*", effect: "allow" },
+            { action: "glob", resource: "*", effect: "allow" },
+            { action: "evidence_read", resource: "*", effect: "allow" },
+            { action: "evidence_search", resource: "*", effect: "allow" },
             { action: "question", resource: "*", effect: "allow" },
-            { action: "plan_exit", resource: "*", effect: "allow" },
-            { action: "external_directory", resource: path.join(Global.Path.data, "plans", "*"), effect: "allow" },
-            { action: "edit", resource: "*", effect: "deny" },
-            { action: "edit", resource: path.join(".zaovra", "plans", "*.md"), effect: "allow" },
-            {
-              action: "edit",
-              resource: path.relative(worktree, path.join(Global.Path.data, "plans", "*.md")),
-              effect: "allow",
-            },
           ]),
         )
       })

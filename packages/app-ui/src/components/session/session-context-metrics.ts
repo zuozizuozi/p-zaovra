@@ -44,7 +44,8 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
-  const limit = model?.limit.context
+  const configured = model?.limit.context
+  const limit = configured !== undefined && Number.isFinite(configured) && configured > 0 ? configured : undefined
   const total = tokenTotal(message)
 
   return {

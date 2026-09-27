@@ -90,8 +90,11 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
       ? language.t("model.tooltip.reasoning.allowed")
       : language.t("model.tooltip.reasoning.none")
   }
-  const context = () => language.t("model.tooltip.context", { limit: props.model.limit.context.toLocaleString() })
-  const contextLimit = () => props.model.limit.context.toLocaleString(language.intl())
+  const contextLimit = () =>
+    Number.isFinite(props.model.limit.context) && props.model.limit.context > 0
+      ? props.model.limit.context.toLocaleString(language.intl())
+      : language.t("common.unknown")
+  const context = () => language.t("model.tooltip.context", { limit: contextLimit() })
 
   if (props.v2) {
     return (

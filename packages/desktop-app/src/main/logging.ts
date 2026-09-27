@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { ZipWriter, BlobWriter, BlobReader } from "@zip.js/zip.js"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
+import { guardConsoleTransport } from "./console-transport"
 
 const MAX_LOG_AGE_DAYS = 7
 const TAIL_LINES = 1000
@@ -27,8 +28,8 @@ export function initLogging() {
       run,
       `${safeLogName(message?.scope ?? (message?.variables?.processType === "renderer" ? "renderer" : "main"))}.log`,
     )
+  guardConsoleTransport(log.transports.console)
   log.initialize({ preload: false, spyRendererConsole: true })
-  initConsoleTransport()
   cleanup()
   return (logger = log)
 }
@@ -186,20 +187,4 @@ async function writeZip(output: string, entries: Entry[]) {
   }
   const zip = await writer.close()
   writeFileSync(output, Buffer.from(await zip.arrayBuffer()))
-}
-
-function initConsoleTransport() {
-  const write = log.transports.console.writeFn.bind(log.transports.console)
-  log.transports.console.writeFn = (options) => {
-    try {
-      write(options)
-    } catch (err) {
-      if (!isBrokenPipe(err)) throw err
-      log.transports.console.level = false
-    }
-  }
-}
-
-function isBrokenPipe(err: unknown) {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "EPIPE"
 }

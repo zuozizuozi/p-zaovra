@@ -38,6 +38,12 @@ const user = (id: string) => {
 }
 
 describe("getSessionContext", () => {
+  test.each([0, -1, NaN, Infinity])("treats invalid context limit %s as unknown", (context) => {
+    const messages = [assistant("a1", { input: 40, output: 10, reasoning: 0, read: 0, write: 0 }, 0)]
+    const value = getSessionContext(messages, [{ id: "openai", models: { "gpt-4.1": { limit: { context } } } }])
+    expect(value?.limit).toBeUndefined()
+    expect(value?.usage).toBeNull()
+  })
   test("computes token totals and usage from latest assistant with tokens", () => {
     const messages = [
       user("u1"),

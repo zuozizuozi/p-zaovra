@@ -17,6 +17,8 @@ const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_OUTPUT_TOKENS = 4_096
+// Request-size safety policy, not an inferred provider context window.
+const UNKNOWN_CONTEXT_SUMMARY_INPUT = 32_000
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Objective
@@ -232,10 +234,10 @@ export const buildPrompt = (input: { readonly previousSummary?: string; readonly
   ].join("\n\n")
 
 // Reduce observations before sacrificing user requirements or the previous handoff.
-const prepareSummary = (input: Input, tokens: number, budget: number) => {
+const prepareSummary = (input: Input, tokens: number, budget: number, reducedOnly = false) => {
   const previous = input.entries.findLast((entry) => entry.message.type === "compaction")?.message
   const latestUser = input.entries.findLast((entry) => entry.message.type === "user")?.message
-  for (const reduced of [false, true]) {
+  for (const reduced of reducedOnly ? [true] : [false, true]) {
     const selected = select(input.entries, tokens, reduced)
     if (!selected) continue
     const prompt = buildPrompt({
@@ -261,7 +263,7 @@ export const make = (dependencies: Dependencies) => {
   const failedSources = new Map<SessionSchema.ID, number>()
   const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
     const context = input.model.route.defaults.limits?.context
-    if (context === undefined || context <= 0) return false
+    const knownContext = context !== undefined && Number.isFinite(context) && context > 0
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     const selected = select(input.entries, config.tokens)
     if (!selected || (!selected.head && !input.entries.some((entry) => entry.message.type === "compaction")))
@@ -293,7 +295,15 @@ export const make = (dependencies: Dependencies) => {
         return false
     }
     const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
-    const prepared = prepareSummary(input, config.tokens, context - summaryOutput)
+    // Manual requests and actual provider overflows can attempt a bounded handoff
+    // even without catalog metadata. Automatic pressure detection still requires
+    // a known window. Rejection leaves the complete original history intact.
+    const prepared = prepareSummary(
+      input,
+      config.tokens,
+      knownContext ? context - summaryOutput : UNKNOWN_CONTEXT_SUMMARY_INPUT,
+      !knownContext,
+    )
     const messageID = SessionMessage.ID.create()
     yield* dependencies.events.publish(SessionEvent.Compaction.Started, {
       sessionID: input.sessionID,
@@ -313,7 +323,7 @@ export const make = (dependencies: Dependencies) => {
         error: {
           type: "unknown",
           message:
-            "Safe compaction input cannot fit the configured model context. Original requests and history were retained; use a larger-context model or explicitly narrow the task.",
+            "Safe compaction input cannot fit the summary request budget. Original requests and history were retained; configure the model context limit or explicitly narrow the task.",
         },
         usage: { providerID: input.model.provider, tokens: usageTokens(undefined), reported: false },
       })
@@ -394,7 +404,7 @@ export const make = (dependencies: Dependencies) => {
   const compactIfNeeded = Effect.fn("SessionCompaction.compactIfNeeded")(function* (input: Input) {
     if (!config.auto) return false
     const context = input.model.route.defaults.limits?.context
-    if (context === undefined || context <= 0) return false
+    if (context === undefined || !Number.isFinite(context) || context <= 0) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     if (
       estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools }) <=

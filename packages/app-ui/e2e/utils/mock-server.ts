@@ -260,6 +260,18 @@ function v2Session(session: { id: string } & Record<string, unknown>, fallbackDi
 // the V2 wire shape so production builds exercise the real session adapter.
 function v2Message(value: unknown): SessionMessage {
   const item = value as { info: Message; parts: Part[] }
+  if (
+    item.info.role === "user" &&
+    item.parts.length > 0 &&
+    item.parts.every((part) => part.type === "text" && part.synthetic)
+  )
+    return {
+      id: item.info.id,
+      type: "synthetic",
+      sessionID: item.info.sessionID,
+      time: item.info.time,
+      text: item.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n\n"),
+    }
   if (item.info.role === "user")
     return {
       id: item.info.id,

@@ -1,4 +1,13 @@
 export const dict = {
+  "session.compact.running": "Compacting conversation…",
+  "session.compact.done": "Conversation compacted",
+  "session.compact.skipped": "Conversation was not compacted",
+  "session.compact.skipped.description":
+    "There may be too little history, or a safe summary could not be produced. Original history is retained. Check the model context settings and any compaction error before retrying.",
+  "session.compact.failed": "Compaction request failed",
+  "session.compact.failed.description":
+    "Check the connection and session status. No successful compaction was confirmed.",
+  "session.status.verifying": "Reviewing delivery and verification",
   "provider.catalog.failed": "Could not load model services. Retry or configure a custom service.",
   "provider.catalog.empty": "No model services are available yet. Refresh or configure a custom service.",
   "provider.catalog.retry": "Refresh model services",

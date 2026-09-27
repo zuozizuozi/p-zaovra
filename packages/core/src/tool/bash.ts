@@ -56,7 +56,7 @@ export const Input = Schema.Struct({
   }),
   verification_targets: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
-      "Files actually covered by this check, relative to workdir or absolute. Required for standalone/external artifacts. HTML acceptance needs syntax, smoke (actual browser startup), and interaction checks. Do not claim a check without executing assertions; an exit code alone is not proof of functionality.",
+      "Actual dependencies of this check: source, assertions, fixtures and runtime/build configuration, relative to workdir or absolute. A changed target invalidates the check. Do not list every deliverable: include documentation only when this command reads or validates it (including doctests/docs builds). Verify documentation separately when independent of code tests. Never omit a real dependency or retroactively narrow a stale check. Required for standalone/external artifacts. HTML acceptance needs syntax, smoke (actual browser startup), and interaction checks. Do not claim a check without executing assertions; an exit code alone is not proof of functionality.",
   }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
   workdir: Schema.String.pipe(Schema.optional).annotate({

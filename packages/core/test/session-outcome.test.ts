@@ -439,6 +439,8 @@ test("historical execution proves process facts, never substitutes for current f
     original: SessionMessage.AssistantTool = baseline,
     later: SessionMessage.AssistantTool = edit,
     kind: "process" | "result" = "process",
+    active = false,
+    observationsComplete = true,
   ) =>
     SessionOutcome.derive(
       [
@@ -485,12 +487,38 @@ test("historical execution proves process facts, never substitutes for current f
           ],
         },
       ],
-      false,
+      active,
       undefined,
       current,
       [],
+      new Set(),
+      undefined,
+      [],
+      observationsComplete,
     )
   expect(evaluate().state).toBe("completed_verified")
+  const pending = evaluate(undefined, undefined, [], undefined, undefined, undefined, true)
+  expect(pending.state).toBe("running")
+  expect(pending.missing).toEqual(["verification pending: current workspace has not been inspected"])
+  const raced = evaluate(undefined, undefined, [], undefined, undefined, undefined, false, false)
+  expect(raced.state).toBe("completed_unverified")
+  expect(raced.missing).toEqual(pending.missing)
+  // A coherent observation still rejects a changed/deleted target; a preview
+  // cannot weaken final acceptance or turn an unavailable snapshot into a pass.
+  expect(evaluate(undefined, undefined, []).missing.some((item) => item.includes("stale check"))).toBe(true)
+  expect(evaluate().missing).toEqual([])
+  const observed = SessionOutcome.executions([user, { ...assistant, content: [baseline, edit, check] }])
+  expect(SessionOutcome.historyCandidates(observed)).toEqual([
+    { callID: "baseline", exit: 1 },
+    { callID: "current", exit: 0 },
+  ])
+  for (const reference of SessionOutcome.historyCandidates(observed))
+    expect(SessionOutcome.historicalEvidence(reference, observed)).toBe(true)
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "repair", exit: 0 }, observed)).toContain("only bash")
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "old-turn", exit: 0 }, observed)).toContain("current request")
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 0 }, observed)).toContain("observed exit 1")
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 1, before: "baseline" }, observed)).toContain("timestamps")
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 1, before: "repair" }, observed)).toBeUndefined()
   expect(evaluate([{ callID: "baseline", exit: 0, before: "repair" }]).state).toBe("completed_unverified")
   expect(evaluate([{ callID: "event-id", exit: 1, before: "repair" }]).state).toBe("completed_unverified")
   expect(evaluate([{ callID: "baseline", exit: 1, before: "baseline" }]).state).toBe("completed_unverified")
@@ -528,6 +556,7 @@ test("historical execution proves process facts, never substitutes for current f
   ).toBe("completed_unverified")
   // Evidence from an older durable request cannot be reused for the current one.
   expect(SessionOutcome.executions([{ ...assistant, content: [baseline] }, user])).toEqual([])
+  expect(SessionOutcome.historyCandidates(SessionOutcome.executions([{ ...assistant, content: [baseline] }, user]))).toEqual([])
 })
 
 test("a different command can explicitly revalidate a failure only with unchanged original assertions", () => {

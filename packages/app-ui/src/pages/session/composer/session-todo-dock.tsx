@@ -7,7 +7,7 @@ import { useSpring } from "@zaovra-ai/ui/motion-spring"
 import { TextReveal } from "@zaovra-ai/ui/text-reveal"
 import { TextStrikethrough } from "@zaovra-ai/ui/text-strikethrough"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
-import { Index, createEffect, createMemo } from "solid-js"
+import { Index, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 
@@ -87,7 +87,17 @@ export function SessionTodoDock(props: {
       setStore("height", (height) => Math.max(height, el.scrollHeight))
     }
     update()
-    createResizeObserver(el, update)
+    let measurement: number | undefined
+    createResizeObserver(el, () => {
+      if (measurement !== undefined) return
+      measurement = requestAnimationFrame(() => {
+        measurement = undefined
+        update()
+      })
+    })
+    onCleanup(() => {
+      if (measurement !== undefined) cancelAnimationFrame(measurement)
+    })
   })
 
   return (

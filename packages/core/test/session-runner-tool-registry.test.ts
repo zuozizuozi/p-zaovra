@@ -2,6 +2,8 @@ import { describe, expect } from "bun:test"
 import { Evidence } from "@zaovra-ai/core/evidence"
 import { Tool } from "@zaovra-ai/core/tool/tool"
 import { AgentV2 } from "@zaovra-ai/core/agent"
+import { AgentPlugin } from "@zaovra-ai/core/plugin/agent"
+import { agentHost, host } from "./plugin/host"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { ApplicationTools } from "@zaovra-ai/core/tool/application-tools"
@@ -40,7 +42,7 @@ const registryLayer = AppNodeBuilder.build(ToolRegistry.node, [
 ])
 const it = testEffect(registryLayer)
 const integrated = testEffect(
-  AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node]), [
+  AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node, AgentV2.node]), [
     [ToolOutputStore.node, outputStore],
     [Evidence.node, evidence],
   ]),
@@ -68,6 +70,49 @@ const make = (permission?: string) => {
 }
 
 describe("ToolRegistry", () => {
+  integrated.effect("plan refuses direct calls across local and application registrations without executing them", () =>
+    Effect.gen(function* () {
+      const agents = yield* AgentV2.Service
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agents) }))
+      const registry = yield* ToolRegistry.Service
+      const applications = yield* ApplicationTools.Service
+      const executed: string[] = []
+      const tool = (name: string) =>
+        Tool.make({
+          description: name,
+          input: Schema.Struct({ text: Schema.String }),
+          output: Schema.Struct({ text: Schema.String }),
+          execute: () => Effect.sync(() => {
+            executed.push(name)
+            return { text: name }
+          }),
+        })
+      yield* registry.register({
+        read: tool("read"),
+        bash: tool("bash"),
+        write: Tool.withPermission(tool("write"), "edit"),
+        apply_patch: Tool.withPermission(tool("apply_patch"), "edit"),
+        task: tool("task"),
+      })
+      yield* applications.register({ plugin_mutate: tool("plugin_mutate"), mcp_server_write: tool("mcp_server_write") })
+      const plan = yield* registry.materialize((yield* agents.get(AgentV2.ID.make("plan")))?.permissions)
+      expect(plan.definitions.map((item) => item.name)).toEqual(["read"])
+      for (const name of ["bash", "write", "apply_patch", "task", "plugin_mutate", "mcp_server_write"]) {
+        const result = yield* plan.settle(call(name))
+        expect(result.result).toMatchObject({ type: "error", value: expect.stringContaining("Nothing was executed") })
+      }
+      expect(executed).toEqual([])
+      expect((yield* plan.settle(call("read"))).result.type).not.toBe("error")
+      expect(executed).toEqual(["read"])
+      yield* agents.reload()
+      const resumed = yield* registry.materialize((yield* agents.get(AgentV2.ID.make("plan")))?.permissions)
+      expect((yield* resumed.settle(call("bash"))).result.type).toBe("error")
+      const build = yield* registry.materialize((yield* agents.get(AgentV2.ID.make("build")))?.permissions)
+      expect((yield* build.settle(call("bash"))).result.type).not.toBe("error")
+      expect(executed).toEqual(["read", "bash"])
+    }),
+  )
+
   it.effect("filters disabled tools with edit aliases and ordered wildcard precedence", () =>
     Effect.gen(function* () {
       const service = yield* ToolRegistry.Service

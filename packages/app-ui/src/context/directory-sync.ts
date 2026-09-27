@@ -74,6 +74,8 @@ export const createDirSyncContext = (
       if (match.found) return serverSync.data.project[match.index]
     },
     session: {
+      messageConfirmed: (sessionID: string, messageID: string) =>
+        serverSync.session.messageConfirmed(sessionID, messageID),
       remember(session: Session) {
         serverSync.session.remember(session)
         index(session.id)

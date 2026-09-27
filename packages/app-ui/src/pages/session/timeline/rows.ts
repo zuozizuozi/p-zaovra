@@ -24,7 +24,7 @@ export type TimelineRowMap = {
     group: PartGroup
     previousAssistantPart: boolean
   }
-  Thinking: { userMessageID: string; reasoningHeading?: string }
+  Thinking: { userMessageID: string; reasoningHeading?: string; reviewing?: boolean }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -124,6 +124,7 @@ export namespace Timeline {
 
     if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
       const heading = assistantMessages
+        .slice(-1)
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
         .find((value): value is string => !!value)
@@ -132,6 +133,9 @@ export namespace Timeline {
         new TimelineRow.Thinking({
           userMessageID: userMessage.id,
           reasoningHeading: heading,
+          reviewing: userParts.some(
+            (part) => part.type === "text" && part.synthetic && part.text.startsWith("Verification closing review:"),
+          ),
         }),
       )
     }
