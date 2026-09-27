@@ -4,6 +4,7 @@ import { Effect, Layer, Schema } from "effect"
 import { ToolFailure } from "@zaovra-ai/llm"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { Database } from "../database/database"
+import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import {
   checkFreshness,
@@ -69,6 +70,8 @@ const Output = Schema.Struct({
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
+    const config = yield* Config.Service
+    if (Config.latest(yield* config.entries(), "experimental")?.verification === false) return
     const tools = yield* Tools.Service
     const database = yield* Database.Service
     const permission = yield* PermissionV2.Service
@@ -196,5 +199,5 @@ export const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/verification-review",
   layer,
-  deps: [ToolRegistry.node, Database.node, PermissionV2.node, FSUtil.node, Location.node, Snapshot.node],
+  deps: [Config.node, ToolRegistry.node, Database.node, PermissionV2.node, FSUtil.node, Location.node, Snapshot.node],
 })

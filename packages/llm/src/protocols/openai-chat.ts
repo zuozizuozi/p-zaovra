@@ -99,6 +99,7 @@ export const bodyFields = {
   store: Schema.optional(Schema.Boolean),
   reasoning_effort: Schema.optional(OpenAIOptions.OpenAIReasoningEffort),
   max_tokens: Schema.optional(Schema.Number),
+  max_completion_tokens: Schema.optional(Schema.Number),
   temperature: Schema.optional(Schema.Number),
   top_p: Schema.optional(Schema.Number),
   frequency_penalty: Schema.optional(Schema.Number),
@@ -347,6 +348,9 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
   // `fromRequest` returns the provider body only. Endpoint, auth, framing,
   // validation, and HTTP execution are composed by `Route.make`.
   const generation = request.generation
+  const outputParameter = request.providerOptions?.openai?.maxTokensParameter ?? "max_tokens"
+  if (outputParameter !== "max_tokens" && outputParameter !== "max_completion_tokens")
+    return yield* invalid("OpenAI Chat maxTokensParameter must be max_tokens or max_completion_tokens")
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
   return {
     model: request.model.id,
@@ -360,7 +364,8 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
     tool_choice: request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined,
     stream: true as const,
     stream_options: { include_usage: true },
-    max_tokens: generation?.maxTokens,
+    max_tokens: outputParameter === "max_tokens" ? generation?.maxTokens : undefined,
+    max_completion_tokens: outputParameter === "max_completion_tokens" ? generation?.maxTokens : undefined,
     temperature: generation?.temperature,
     top_p: generation?.topP,
     frequency_penalty: generation?.frequencyPenalty,

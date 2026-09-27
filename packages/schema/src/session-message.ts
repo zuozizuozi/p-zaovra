@@ -19,6 +19,7 @@ export interface UnknownError extends Schema.Schema.Type<typeof UnknownError> {}
 export const UnknownError = Schema.Struct({
   type: Schema.Literal("unknown"),
   message: Schema.String,
+  metadata: Schema.Record(Schema.String, Schema.String).pipe(optional),
 }).annotate({ identifier: "Session.Error.Unknown" })
 
 const Base = {

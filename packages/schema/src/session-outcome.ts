@@ -37,7 +37,15 @@ export const Review = Schema.Struct({
 }).annotate({ identifier: "SessionOutcome.Review" })
 export interface Review extends Schema.Schema.Type<typeof Review> {}
 export const Info = Schema.Struct({
-  state: Schema.Literals(["idle", "running", "completed_verified", "completed_unverified", "failed", "interrupted"]),
+  state: Schema.Literals([
+    "idle",
+    "running",
+    "completed",
+    "completed_verified",
+    "completed_unverified",
+    "failed",
+    "interrupted",
+  ]),
   outcomeUnknown: Schema.Boolean,
   checks: Schema.Array(Check),
   missing: Schema.Array(Schema.String),

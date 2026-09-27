@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Fiber, Layer, Random, Ref } from "effect"
 import * as TestClock from "effect/testing/TestClock"
-import { Headers, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { Headers, HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { LLM, LLMError } from "../src"
 import { LLMClient, RequestExecutor } from "../src/route"
 import * as OpenAIChat from "../src/protocols/openai-chat"
@@ -71,6 +71,43 @@ const expectLLMError = (error: unknown) => {
 }
 
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
+
+it.effect("retains safe transport cause identifiers after bounded retries", () =>
+  Effect.gen(function* () {
+    const layer = RequestExecutor.layer.pipe(
+      Layer.provide(
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request,
+                  cause: new TypeError("fetch failed with secret", {
+                    cause: Object.assign(new Error("private credential"), { code: "ECONNRESET" }),
+                  }),
+                }),
+              }),
+            ),
+          ),
+        ),
+      ),
+    )
+    const run = yield* RequestExecutor.Service.use((service) => service.execute(request)).pipe(
+      Effect.provide(layer),
+      Effect.flip,
+      Effect.forkChild,
+    )
+    yield* TestClock.adjust("10 seconds")
+    const error = yield* Fiber.join(run)
+    expect(error.reason).toMatchObject({
+      _tag: "Transport",
+      diagnostics: { phase: "request", errorName: "HttpClientError", causeName: "Error", causeCode: "ECONNRESET" },
+    })
+    expect(JSON.stringify(error.reason)).not.toContain("private credential")
+    expect(JSON.stringify(error.reason)).not.toContain("fetch failed with secret")
+  }),
+)
 
 describe("RequestExecutor", () => {
   it.effect("reports each bounded retry through the caller's observer", () =>

@@ -197,3 +197,39 @@ it.effect("cancels waiting response consumption and releases the body", () =>
     expect(cancelled).toBe(true)
   }),
 )
+
+it.effect("stream read failures retain HTTP status and never retry accepted responses", () =>
+  Effect.gen(function* () {
+    let calls = 0
+    const response = HttpClientResponse.fromWeb(
+      request,
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(Object.assign(new Error("private details"), { code: "ECONNRESET" }))
+          },
+        }),
+      ),
+    )
+    const error = yield* HttpTransport.sseJson
+      .with()
+      .frames({ request, framing: Framing.sse }, input, {
+        http: {
+          execute: () =>
+            Effect.sync(() => {
+              calls++
+              return response
+            }),
+        },
+      })
+      .pipe(Stream.runCollect, Effect.flip)
+    expect(error.reason).toMatchObject({
+      _tag: "Transport",
+      kind: "StreamReadError",
+      diagnostics: { phase: "stream", status: 200, causeCode: "ECONNRESET" },
+    })
+    expect(error.retryable).toBe(false)
+    expect(calls).toBe(1)
+    expect(JSON.stringify(error.reason)).not.toContain("private details")
+  }),
+)

@@ -39,6 +39,7 @@ const PROTOCOL_BODY_OVERLAY_DENYLIST = new Set([
   "input",
   "maxTokens",
   "max_tokens",
+  "max_completion_tokens",
   "messages",
   "model",
   "presencePenalty",
@@ -144,6 +145,7 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
                 method: "frames",
                 reason: new TransportReason({
                   kind,
+                  diagnostics: TransportReason.diagnostics(undefined, "stream", response.status),
                   message: `${message}${requestID ? ` (request: ${requestID})` : ""}`,
                 }),
               }),
@@ -153,12 +155,17 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
           return prepared.framing
             .frame(
               response.stream.pipe(
-                Stream.mapError((error) =>
-                  ProviderShared.eventError(
-                    `${request.model.provider}/${request.model.route.id}`,
-                    `Failed to read ${request.model.provider}/${request.model.route.id} stream`,
-                    ProviderShared.errorText(error),
-                  ),
+                Stream.mapError(
+                  (error) =>
+                    new LLMError({
+                      module: "HttpTransport",
+                      method: "frames",
+                      reason: new TransportReason({
+                        kind: "StreamReadError",
+                        message: `Failed to read ${request.model.provider}/${request.model.route.id} stream`,
+                        diagnostics: TransportReason.diagnostics(error, "stream", response.status),
+                      }),
+                    }),
                 ),
                 Stream.timeoutOrElse({
                   duration: "120 seconds",

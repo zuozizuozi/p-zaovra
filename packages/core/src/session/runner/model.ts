@@ -147,7 +147,12 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
     headers: model.request.headers,
     generation,
-    providerOptions: thinking === undefined ? undefined : { anthropic: { thinking } },
+    providerOptions: {
+      ...(thinking === undefined ? {} : { anthropic: { thinking } }),
+      ...(model.api.settings?.maxTokensParameter !== undefined || Object.hasOwn(body, "max_completion_tokens")
+        ? { openai: { maxTokensParameter: model.api.settings?.maxTokensParameter ?? "max_completion_tokens" } }
+        : {}),
+    },
     http: { body: httpBody },
     limits: { context: model.limit.context, output: model.limit.output },
   })

@@ -13,6 +13,7 @@ type Input = {
   readonly model: ModelV2.Ref
   readonly inputSequence: number
   readonly contextEpoch: number
+  readonly verificationEnabled?: boolean
   readonly snapshot?: string
 }
 
@@ -190,7 +191,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     yield* flushFragments()
   })
 
-  const failAssistant = Effect.fnUntraced(function* (message: string) {
+  const failAssistant = Effect.fnUntraced(function* (message: string, metadata?: Record<string, string>) {
     if (assistantFailed) return
     failureMessage = message
     yield* flush()
@@ -201,7 +202,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       sessionID: input.sessionID,
       timestamp: yield* timestamp,
       assistantMessageID,
-      error: { type: "unknown", message },
+      error: { type: "unknown", message, ...(metadata ? { metadata } : {}) },
     })
   })
 

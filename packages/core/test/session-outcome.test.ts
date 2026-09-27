@@ -515,10 +515,18 @@ test("historical execution proves process facts, never substitutes for current f
   for (const reference of SessionOutcome.historyCandidates(observed))
     expect(SessionOutcome.historicalEvidence(reference, observed)).toBe(true)
   expect(SessionOutcome.historicalEvidenceProblem({ callID: "repair", exit: 0 }, observed)).toContain("only bash")
-  expect(SessionOutcome.historicalEvidenceProblem({ callID: "old-turn", exit: 0 }, observed)).toContain("current request")
-  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 0 }, observed)).toContain("observed exit 1")
-  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 1, before: "baseline" }, observed)).toContain("timestamps")
-  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 1, before: "repair" }, observed)).toBeUndefined()
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "old-turn", exit: 0 }, observed)).toContain(
+    "current request",
+  )
+  expect(SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 0 }, observed)).toContain(
+    "observed exit 1",
+  )
+  expect(
+    SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 1, before: "baseline" }, observed),
+  ).toContain("timestamps")
+  expect(
+    SessionOutcome.historicalEvidenceProblem({ callID: "baseline", exit: 1, before: "repair" }, observed),
+  ).toBeUndefined()
   expect(evaluate([{ callID: "baseline", exit: 0, before: "repair" }]).state).toBe("completed_unverified")
   expect(evaluate([{ callID: "event-id", exit: 1, before: "repair" }]).state).toBe("completed_unverified")
   expect(evaluate([{ callID: "baseline", exit: 1, before: "baseline" }]).state).toBe("completed_unverified")
@@ -556,7 +564,9 @@ test("historical execution proves process facts, never substitutes for current f
   ).toBe("completed_unverified")
   // Evidence from an older durable request cannot be reused for the current one.
   expect(SessionOutcome.executions([{ ...assistant, content: [baseline] }, user])).toEqual([])
-  expect(SessionOutcome.historyCandidates(SessionOutcome.executions([{ ...assistant, content: [baseline] }, user]))).toEqual([])
+  expect(
+    SessionOutcome.historyCandidates(SessionOutcome.executions([{ ...assistant, content: [baseline] }, user])),
+  ).toEqual([])
 })
 
 test("a different command can explicitly revalidate a failure only with unchanged original assertions", () => {
@@ -998,4 +1008,45 @@ test("changed shell arguments do not reset failed recovery; inspection does", ()
     state: { status: "completed" as const, input: {}, content: [], structured: {} },
   }
   expect(SessionOutcome.recoveryFailures([{ ...assistant, content: [...content, inspect] }])).toBe(0)
+})
+
+test("verification disabled preserves failures, unknown effects and permission rejection", () => {
+  const off = { ...assistant, metadata: { verificationEnabled: false } }
+  expect(SessionOutcome.derive([off], false)).toMatchObject({ state: "completed", missing: [] })
+  expect(
+    SessionOutcome.derive([{ ...off, error: { type: "unknown", message: "connection failed" } }], false).state,
+  ).toBe("failed")
+  expect(SessionOutcome.derive([{ ...off, time: { created: off.time.created } }], false)).toMatchObject({
+    state: "interrupted",
+    outcomeUnknown: true,
+  })
+  const failed: SessionMessage.AssistantTool = {
+    type: "tool",
+    id: "check",
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { command: "npm test" },
+      content: [],
+      structured: {
+        verification: { kind: "test", command: "npm test", callID: "check", exit: 1 },
+      },
+    },
+  }
+  expect(SessionOutcome.derive([{ ...off, content: [failed] }], false)).toMatchObject({
+    state: "failed",
+    checks: [{ exit: 1 }],
+  })
+  const denied: SessionMessage.AssistantTool = {
+    ...failed,
+    state: {
+      status: "error",
+      input: { command: "npm test" },
+      content: [],
+      structured: {},
+      error: { type: "unknown", message: "Permission denied" },
+    },
+  }
+  expect(SessionOutcome.derive([{ ...off, content: [denied] }], false).state).not.toBe("completed_verified")
 })

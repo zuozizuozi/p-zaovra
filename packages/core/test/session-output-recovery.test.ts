@@ -60,3 +60,50 @@ describe("SessionOutputRecovery budgets", () => {
     expect(SessionOutputRecovery.budget(request(200000, 32000, 8000), { initial: 16000, maximum: 64000 })).toBe(8000)
   })
 })
+
+test("explicit unknown-capacity probe is bounded even across progress and reason changes", () => {
+  const original = request()
+  const value = LLM.request({
+    model: Model.make({
+      ...original.model,
+      route: original.model.route.with({ endpoint: { baseURL: "https://probe.test" } }),
+    }),
+    prompt: "task",
+    generation: { maxTokens: 16000 },
+  })
+  const policy = { initial: 16000, maximum: 64000, unknown_capacity: { endpoint: "https://probe.test" } }
+  expect(
+    SessionOutputRecovery.plan({ request: value, policy, attempts: 0, inputTokens: 100, outputTokens: 16000 }),
+  ).toEqual({ strategy: "increase-output", maxTokens: 32000 })
+  expect(
+    SessionOutputRecovery.plan({
+      request: value,
+      policy,
+      attempts: 0,
+      inputTokens: 100,
+      outputTokens: 16000,
+      expansionAttempted: true,
+    }),
+  ).toEqual({ strategy: "smaller-step", maxTokens: 16000 })
+  expect(
+    SessionOutputRecovery.plan({
+      request: LLM.updateRequest(request(100000, 64000), { generation: { maxTokens: 16000 } }),
+      policy,
+      attempts: 0,
+      inputTokens: 65000,
+      outputTokens: 16000,
+    }),
+  ).toEqual({ strategy: "smaller-step", maxTokens: 16000 })
+})
+
+test("existing known-context soft policy remains unchanged without probe opt-in", () => {
+  expect(
+    SessionOutputRecovery.plan({
+      request: request(200000),
+      policy: { initial: 16000, maximum: 64000 },
+      attempts: 0,
+      inputTokens: 100,
+      outputTokens: 16000,
+    }),
+  ).toEqual({ strategy: "increase-output", maxTokens: 32000 })
+})

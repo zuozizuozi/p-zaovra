@@ -22,6 +22,7 @@ export const dict = {
   "session.outcome.unavailable": "暂时无法检查结果，验证状态未知。",
   "session.outcome.idle": "尚未开始",
   "session.outcome.running": "执行中",
+  "session.outcome.completed": "执行结束 · 验证层已关闭",
   "session.outcome.completed_verified": "执行结束 · 所列检查已通过，范围见验证记录",
   "session.outcome.completed_unverified": "执行结束 · 尚未完成验证",
   "session.outcome.failed": "执行或验证失败",

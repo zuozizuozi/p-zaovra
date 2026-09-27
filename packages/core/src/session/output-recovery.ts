@@ -8,11 +8,15 @@ import { EventV2 } from "../event"
 import { SessionEvent } from "./event"
 import { SessionMessageTable } from "./sql"
 import type { SessionSchema } from "./schema"
-import type { LLMRequest, Model } from "@zaovra-ai/llm"
+import { LLMError, type LLMRequest, type Model } from "@zaovra-ai/llm"
 import { Token } from "../util/token"
 import { createHash } from "node:crypto"
 
-export type Policy = { readonly initial: number; readonly maximum: number }
+export type Policy = {
+  readonly initial: number
+  readonly maximum: number
+  readonly unknown_capacity?: { readonly endpoint: string }
+}
 export type Category = "reasoning-exhaustion" | "tool-truncation" | "empty-output"
 const retriedType = EventV2.versionedType(SessionEvent.Retried.type, SessionEvent.Retried.durable?.version ?? 1)
 const endedType = EventV2.versionedType(SessionEvent.Step.Ended.type, SessionEvent.Step.Ended.durable?.version ?? 1)
@@ -57,6 +61,8 @@ export const read = (db: Database.Interface["db"], sessionID: SessionSchema.ID) 
       .all()
       .pipe(Effect.orDie)
     const attempts = new Map<string, number>()
+    const rejected = new Set<string>()
+    const probed = new Set<string>()
     let pending: Record<string, string> | undefined
     for (const row of rows) {
       if (row.type === endedType) {
@@ -71,9 +77,16 @@ export const read = (db: Database.Interface["db"], sessionID: SessionSchema.ID) 
       const metadata = retry.error.metadata
       if (!metadata || !["reasoning-exhaustion", "tool-truncation", "empty-output"].includes(metadata.phase)) continue
       attempts.set(metadata.phase, (attempts.get(metadata.phase) ?? 0) + 1)
+      if (metadata.strategy === "fallback-output" && metadata.model) rejected.add(metadata.model)
+      if (
+        metadata.strategy === "increase-output" &&
+        metadata.model &&
+        (metadata.capacityKnown === "false" || metadata.contextHeadroomKnown === "false")
+      )
+        probed.add(metadata.model)
       pending = metadata
     }
-    return { attempts, pending }
+    return { attempts, pending, rejected, probed }
   })
 
 const positive = (value: number | undefined) =>
@@ -89,6 +102,7 @@ export function limits(model: Model, policy?: Policy) {
   )
   return {
     configured,
+    capability,
     context,
     maximum: Number.isFinite(maximum) ? maximum : undefined,
     initial: policy ? Math.min(policy.initial, maximum) : configured,
@@ -123,20 +137,29 @@ export function plan(input: {
   attempts: number
   outputTokens: number
   inputTokens: number
+  expansionAttempted?: boolean
 }) {
   if (input.attempts >= 2) return undefined
   const available = limits(input.request.model, input.policy)
   const current = positive(input.request.generation?.maxTokens) ?? available.initial ?? positive(input.outputTokens)
+  // Preserve the existing known-context policy path. Only requests which lacked
+  // a usable ceiling or context previously require the new explicit opt-in.
+  const unknown = available.maximum === undefined || available.context === undefined
+  const probe =
+    input.policy?.unknown_capacity?.endpoint === input.request.model.route.endpoint?.baseURL &&
+    !!input.policy?.unknown_capacity?.endpoint
   const desired =
-    current === undefined || available.maximum === undefined || available.context === undefined
+    current === undefined || (unknown && (!probe || input.attempts > 0 || input.expansionAttempted))
       ? undefined
       : budget(
           input.request,
           input.policy,
           Math.min(
             current * 2,
-            available.maximum,
-            Math.max(0, available.context - input.inputTokens - input.outputTokens - 4096),
+            available.maximum ?? current,
+            available.context === undefined
+              ? current * 2
+              : Math.max(0, available.context - input.inputTokens - input.outputTokens - 4096),
           ),
         )
   if (desired !== undefined && current !== undefined && desired > current)
@@ -148,6 +171,21 @@ export function plan(input: {
     strategy: "smaller-step",
     maxTokens: current === undefined ? undefined : (input.request.generation?.maxTokens ?? available.initial),
   }
+}
+
+/** Only an explicit parameter rejection before any output can authorize rollback. */
+export function rejectsExpansion(error: unknown) {
+  if (!(error instanceof LLMError) || error.reason._tag !== "InvalidRequest") return false
+  if (error.reason.classification === "context-overflow") return false
+  const status = error.reason.http?.response?.status
+  if (status !== undefined && status !== 400 && status !== 422) return false
+  const parameter = /\b(?:max_tokens|max_completion_tokens|max_output_tokens)\b/i
+  return (
+    parameter.test(`${error.reason.parameter ?? ""} ${error.reason.message}`) &&
+    /unsupported|not supported|not allowed|unrecognized|unknown parameter|too (?:large|high)|exceed|at most|must be (?:less|<=)|out of range|maximum allowed/i.test(
+      error.reason.message,
+    )
+  )
 }
 
 export function instruction(metadata: Record<string, string>) {

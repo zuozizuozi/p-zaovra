@@ -201,6 +201,7 @@ export namespace Step {
       model: Model.Ref,
       inputSequence: NonNegativeInt.pipe(optional),
       contextEpoch: NonNegativeInt.pipe(optional),
+      verificationEnabled: Schema.Boolean.pipe(optional),
       snapshot: Schema.String.pipe(optional),
     },
   })

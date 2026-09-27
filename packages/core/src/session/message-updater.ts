@@ -208,6 +208,9 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
               model: event.data.model,
               inputSequence: event.data.inputSequence,
               contextEpoch: event.data.contextEpoch,
+              ...(event.data.verificationEnabled === undefined
+                ? {}
+                : { metadata: { verificationEnabled: event.data.verificationEnabled } }),
               time: { created: event.data.timestamp },
               content: [],
               snapshot: event.data.snapshot ? { start: event.data.snapshot } : undefined,

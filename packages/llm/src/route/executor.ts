@@ -325,6 +325,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
       reason: new TransportReason({
         message: input.message,
         kind: input.kind,
+        diagnostics: TransportReason.diagnostics(error, "request"),
         url: input.request ? redactUrl(input.request.url) : undefined,
         http: input.request ? new HttpContext({ request: requestDetails(input.request, redactedNames) }) : undefined,
       }),
@@ -407,6 +408,8 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
             Effect.logInfo("provider.request.failed", {
               category: error.reason._tag,
               elapsedMs: Date.now() - started,
+              ...(error.reason._tag === "Transport" ? error.reason.diagnostics : {}),
+              status: "http" in error.reason ? error.reason.http?.response?.status : undefined,
             }),
           ),
         )

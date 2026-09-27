@@ -123,9 +123,36 @@ export class TransportReason extends Schema.Class<TransportReason>("LLM.Error.Tr
   _tag: Schema.tag("Transport"),
   message: Schema.String,
   kind: Schema.optional(Schema.String),
+  diagnostics: Schema.optional(
+    Schema.Struct({
+      phase: Schema.Literals(["request", "stream"]),
+      status: Schema.optional(Schema.Number),
+      errorName: Schema.optional(Schema.String),
+      causeName: Schema.optional(Schema.String),
+      causeCode: Schema.optional(Schema.String),
+    }),
+  ),
   url: Schema.optional(Schema.String),
   http: Schema.optional(HttpContext),
 }) {
+  /** Capture identifiers, never arbitrary error messages, URLs or credentials. */
+  static diagnostics(error: unknown, phase: "request" | "stream", status?: number) {
+    const record = (value: unknown): Record<string, unknown> =>
+      value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {}
+    const identifier = (value: unknown) =>
+      typeof value === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(value) ? value : undefined
+    const outer = record(error)
+    const reason = record(outer.reason)
+    const cause = record(reason.cause ?? outer.cause)
+    const nested = record(cause.cause)
+    return {
+      phase,
+      status,
+      errorName: identifier(outer.name ?? outer._tag),
+      causeName: identifier(nested.name ?? cause.name ?? reason._tag),
+      causeCode: identifier(nested.code ?? cause.code ?? outer.code),
+    }
+  }
   get retryable() {
     // Transport failures happen before a provider response is accepted, so replaying the
     // request is safe. The executor still applies a small hard retry limit.

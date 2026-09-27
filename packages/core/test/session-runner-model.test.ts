@@ -57,6 +57,25 @@ describe("SessionRunnerModel", () => {
     )
   }
 
+  it.effect("uses the configured Chat output parameter in the actual compiled request", () =>
+    Effect.gen(function* () {
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        model({
+          type: "aisdk",
+          package: "@ai-sdk/openai-compatible",
+          url: "https://example.test/openai",
+          settings: { maxTokensParameter: "max_completion_tokens" },
+        }),
+      )
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({ model: resolved, prompt: "test", generation: { maxTokens: 16384 } }),
+      )
+      expect(prepared.body).toMatchObject({ max_completion_tokens: 16384 })
+      expect(JSON.parse(JSON.stringify(prepared.body))).not.toHaveProperty("max_tokens")
+      expect(resolved.route.defaults.generation?.maxTokens).toBeUndefined()
+    }),
+  )
+
   for (const body of [{ max_tokens: 10, max_output_tokens: 20 }, { maxTokens: 0 }, { max_tokens: "16000" }]) {
     it.effect(`rejects invalid or conflicting output ceilings ${JSON.stringify(body)}`, () =>
       Effect.gen(function* () {

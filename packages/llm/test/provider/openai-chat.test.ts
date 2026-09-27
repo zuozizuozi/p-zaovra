@@ -29,6 +29,25 @@ const request = LLM.request({
 })
 
 describe("OpenAI Chat route", () => {
+  it.effect("selects the configured output parameter without changing the token ceiling", () =>
+    Effect.gen(function* () {
+      for (const parameter of ["max_tokens", "max_completion_tokens"] as const) {
+        const prepared = yield* LLMClient.prepare<OpenAIChat.OpenAIChatBody>(
+          LLM.updateRequest(request, {
+            providerOptions: { openai: { maxTokensParameter: parameter } },
+            generation: { maxTokens: 1234 },
+          }),
+        )
+        expect(prepared.body[parameter]).toBe(1234)
+        expect(prepared.body[parameter === "max_tokens" ? "max_completion_tokens" : "max_tokens"]).toBeUndefined()
+      }
+      const invalid = yield* LLMClient.prepare(
+        LLM.updateRequest(request, { providerOptions: { openai: { maxTokensParameter: "typo" } } }),
+      ).pipe(Effect.flip)
+      expect(invalid.reason._tag).toBe("InvalidRequest")
+    }),
+  )
+
   it.effect("prepares OpenAI Chat payload", () =>
     Effect.gen(function* () {
       // Pass the OpenAIChat payload type so `prepared.body` is statically

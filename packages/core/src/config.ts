@@ -41,12 +41,19 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   session_output: Schema.Record(
     Schema.String,
-    Schema.Record(Schema.String, Schema.Struct({ initial: PositiveInt, maximum: PositiveInt })),
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        initial: PositiveInt,
+        maximum: PositiveInt,
+        unknown_capacity: Schema.optional(Schema.Struct({ endpoint: Schema.String })),
+      }),
+    ),
   )
     .pipe(Schema.optional)
     .annotate({
       description:
-        "Optional provider ID -> model ID -> { initial, maximum } output policy. Initial is a soft per-request budget; maximum is a hard ceiling. Explicit model request max_tokens/max_output_tokens remains a hard ceiling. No automatic inference from model names; restart the backend after changing this policy.",
+        "Optional provider ID -> model ID output policy. Initial is a soft budget; maximum and explicit model max_tokens remain hard ceilings. unknown_capacity: { endpoint } opts that exact baseURL into one bounded expansion when capacity is unknown; it does not establish context capacity. Restart after changing this policy.",
     }),
   model: Schema.String.pipe(Schema.optional).annotate({
     description: "Default model to use when no session or agent model is selected",

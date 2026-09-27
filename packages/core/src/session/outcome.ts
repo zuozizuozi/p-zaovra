@@ -304,6 +304,8 @@ export function derive(
   directory?: string,
   artifacts: readonly DeliveryAudit.Observation[] = [],
   observationsComplete = true,
+  verificationEnabled = messages.findLast((message) => message.type === "assistant")?.metadata?.verificationEnabled !==
+    false,
 ): SessionOutcome.Info {
   const turn = acceptanceHistory(messages)
   const start = turn.findLastIndex((message) => message.type === "user")
@@ -630,8 +632,13 @@ export function derive(
     checks: [...checks.values()],
     // Running previews and concurrent history changes have no coherent file
     // observation. Absence of that observation is not evidence of a stale file.
-    missing:
-      active || !observationsComplete ? ["verification pending: current workspace has not been inspected"] : missing,
+    missing: !verificationEnabled
+      ? [...checks.values()]
+          .filter((check) => check.execution && !check.supersededBy && check.exit !== 0)
+          .map((check) => `${check.execution}: ${check.kind} (${check.callID})`)
+      : active || !observationsComplete
+        ? ["verification pending: current workspace has not been inspected"]
+        : missing,
     ...(review ? { review } : {}),
     messageID: turn.at(-1)?.id,
   }
@@ -641,6 +648,7 @@ export function derive(
   if (last.error || last.finish !== "stop") return { ...base, state: "failed" }
   if ([...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution))
     return { ...base, state: "failed" }
+  if (!verificationEnabled) return { ...base, state: base.missing.length ? "completed_unverified" : "completed" }
   return { ...base, state: base.missing.length ? "completed_unverified" : "completed_verified" }
 }
 

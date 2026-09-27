@@ -51,6 +51,7 @@ import { AgentPlugin } from "@zaovra-ai/core/plugin/agent"
 import { agentHost, host } from "./plugin/host"
 import { Config } from "@zaovra-ai/core/config"
 import { ConfigCompaction } from "@zaovra-ai/core/config/compaction"
+import { ConfigExperimental } from "@zaovra-ai/core/config/experimental"
 import { Tool } from "@zaovra-ai/core/tool/tool"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
 import { VerificationReviewTool } from "@zaovra-ai/core/tool/verification-review"
@@ -95,7 +96,7 @@ function privilegedTexts(request: LLMRequest | undefined) {
 
 const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
-let responses: LLMEvent[][] | undefined
+let responses: (LLMEvent[] | LLMError)[] | undefined
 let responseStream: Stream.Stream<LLMEvent, LLMError> | undefined
 let streamGate: Deferred.Deferred<void> | undefined
 let streamStarted: Deferred.Deferred<void> | undefined
@@ -116,9 +117,12 @@ const client = Layer.succeed(
         responseStream = undefined
         return stream
       }
+      const next = responses === undefined ? response : (responses.shift() ?? [])
       const events = streamFailure
         ? Stream.fail(streamFailure)
-        : Stream.fromIterable(responses === undefined ? response : (responses.shift() ?? []))
+        : next instanceof LLMError
+          ? Stream.fail(next)
+          : Stream.fromIterable(next)
       if (!streamGate) return events
       return Stream.unwrap(
         (streamStarted ? Deferred.succeed(streamStarted, undefined) : Effect.void).pipe(
@@ -259,6 +263,7 @@ const skillGuidance = Layer.mock(SkillGuidance.Service, {
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 let sessionTokenBudget: number | undefined
 let sessionOutput: Config.Info["session_output"]
+let verificationEnabled: boolean | undefined
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
@@ -269,6 +274,7 @@ const config = Layer.succeed(
           info: new Config.Info({
             session_token_budget: sessionTokenBudget,
             session_output: sessionOutput,
+            experimental: new ConfigExperimental.Experimental({ verification: verificationEnabled }),
             compaction: new ConfigCompaction.Info({
               buffer: 3_000,
               keep: new ConfigCompaction.Keep({ tokens: 1_000 }),
@@ -381,6 +387,7 @@ const setup = Effect.gen(function* () {
   response = []
   sessionTokenBudget = undefined
   sessionOutput = undefined
+  verificationEnabled = undefined
   systemBaseline = "Initial context"
   systemRemoved = false
   systemUnavailable = false
@@ -1367,16 +1374,18 @@ describe("SessionRunnerLLM", () => {
       )
       const file = `${dir.path}/side-effect.txt`
       const executed: string[] = []
-      const make = (name: string) => Tool.make({
-        description: name,
-        input: Schema.Struct({}),
-        output: Schema.Struct({ text: Schema.String }),
-        execute: () => Effect.gen(function* () {
-          executed.push(name)
-          if (name !== "read") yield* fs.writeFileString(file, name).pipe(Effect.orDie)
-          return { text: "observed" }
-        }),
-      })
+      const make = (name: string) =>
+        Tool.make({
+          description: name,
+          input: Schema.Struct({}),
+          output: Schema.Struct({ text: Schema.String }),
+          execute: () =>
+            Effect.gen(function* () {
+              executed.push(name)
+              if (name !== "read") yield* fs.writeFileString(file, name).pipe(Effect.orDie)
+              return { text: "observed" }
+            }),
+        })
       yield* registry.register({ read: make("read"), bash: make("bash") })
       yield* applications.register({ mcp_mutate: make("mcp_mutate") })
       const call = (id: string, name: string) => [
@@ -1385,7 +1394,9 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ]
-      const stop = fragmentFixture("text", "plan-answer", ["Inspection only; implementation has not run."]).completeEvents
+      const stop = fragmentFixture("text", "plan-answer", [
+        "Inspection only; implementation has not run.",
+      ]).completeEvents
       const selectedModel = { id: ModelV2.ID.make("fake-model"), providerID: ProviderV2.ID.make("fake") }
       requests.length = 0
       responses = [call("denied-bash", "bash"), call("allowed-read", "read"), stop]
@@ -1397,17 +1408,26 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
       expect(executed).toEqual(["read"])
       expect(yield* fs.exists(file)).toBe(false)
-      expect(requests.every((request) => !request.tools.some((tool) => tool.name === "bash" || tool.name === "mcp_mutate"))).toBe(true)
+      expect(
+        requests.every((request) => !request.tools.some((tool) => tool.name === "bash" || tool.name === "mcp_mutate")),
+      ).toBe(true)
       expect(requests.some((request) => JSON.stringify(request.messages).includes("Nothing was executed"))).toBe(true)
 
       const events = yield* EventV2.Service
       const compactionID = SessionMessage.ID.create()
       yield* events.publish(SessionEvent.Compaction.Started, {
-        sessionID, messageID: compactionID, timestamp: DateTime.makeUnsafe(1), reason: "manual",
+        sessionID,
+        messageID: compactionID,
+        timestamp: DateTime.makeUnsafe(1),
+        reason: "manual",
       })
       yield* events.publish(SessionEvent.Compaction.Ended, {
-        sessionID, messageID: compactionID, timestamp: DateTime.makeUnsafe(2), reason: "manual",
-        text: "Inspection summary", recent: "",
+        sessionID,
+        messageID: compactionID,
+        timestamp: DateTime.makeUnsafe(2),
+        reason: "manual",
+        text: "Inspection summary",
+        recent: "",
       })
       yield* replaySessionProjection(sessionID)
       responses = [call("denied-mcp", "mcp_mutate"), call("resumed-read", "read"), stop]
@@ -1415,7 +1435,9 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
       expect(executed).toEqual(["read", "read"])
       expect(yield* fs.exists(file)).toBe(false)
-      expect(requests.every((request) => !request.tools.some((tool) => tool.name === "bash" || tool.name === "mcp_mutate"))).toBe(true)
+      expect(
+        requests.every((request) => !request.tools.some((tool) => tool.name === "bash" || tool.name === "mcp_mutate")),
+      ).toBe(true)
 
       responses = [call("authorized-bash", "bash"), stop]
       yield* session.prompt({
@@ -4478,6 +4500,121 @@ describe("SessionRunnerLLM", () => {
       expect(requests.map((request) => request.generation?.maxTokens)).toEqual([16000, 32000, 64000])
       expect(requests.every((request) => request.tools.length > 0)).toBe(true)
     }),
+  )
+
+  for (const scenario of [
+    "accepted",
+    "rejected",
+    "other-error",
+    "hard-limit",
+    "wrong-endpoint",
+    "unconfigured",
+    "repeated",
+  ] as const) {
+    it.effect(`unknown-capacity Runner: ${scenario}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const endpoint = "https://probe.test/v1"
+        currentModel = Model.make({
+          id: "fake-model",
+          provider: "fake",
+          route: OpenAIChat.route.with({
+            endpoint: { baseURL: endpoint },
+            generation: scenario === "hard-limit" ? { maxTokens: 16000 } : undefined,
+          }),
+        })
+        sessionOutput = {
+          fake: {
+            "fake-model": {
+              initial: 16000,
+              maximum: 64000,
+              ...(scenario === "unconfigured"
+                ? {}
+                : { unknown_capacity: { endpoint: scenario === "wrong-endpoint" ? "https://other.test" : endpoint } }),
+            },
+          },
+        }
+        const session = yield* SessionV2.Service
+        const database = yield* Database.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Complete the change" }), resume: false })
+        requests.length = 0
+        const stop = fragmentFixture("text", "done", ["Done."]).completeEvents
+        const rejection = new LLMError({
+          module: "test",
+          method: "stream",
+          reason: new InvalidRequestReason({
+            message: scenario === "other-error" ? "invalid messages" : "max_completion_tokens exceeds maximum allowed",
+            parameter: scenario === "other-error" ? "messages" : "max_completion_tokens",
+          }),
+        })
+        responses =
+          scenario === "rejected" || scenario === "other-error"
+            ? [reasoningLimitResponse(), rejection, stop]
+            : scenario === "repeated"
+              ? [reasoningLimitResponse(), reasoningLimitResponse(), stop]
+              : [reasoningLimitResponse(), stop]
+        const result = yield* session.resume(sessionID).pipe(Effect.exit)
+        expect(Exit.isFailure(result)).toBe(scenario === "other-error" || scenario === "repeated")
+        expect(requests.map((request) => request.generation?.maxTokens)).toEqual(
+          scenario === "rejected"
+            ? [16000, 32000, 16000]
+            : [16000, ["hard-limit", "wrong-endpoint", "unconfigured"].includes(scenario) ? 16000 : 32000],
+        )
+        const state = yield* SessionOutputRecovery.read(database.db, sessionID)
+        expect(state.rejected.size).toBe(scenario === "rejected" ? 1 : 0)
+        if (scenario === "rejected") {
+          expect(
+            (yield* session.context(sessionID)).some(
+              (message) => message.type === "assistant" && message.error?.message.includes("maximum allowed"),
+            ),
+          ).toBe(true)
+          expect((yield* SessionUsageQuery.read(sessionID)).total.unreported).toBeGreaterThan(0)
+        }
+      }),
+    )
+  }
+
+  it.effect("verification off removes active interventions without granting verified", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      yield* Layer.build(VerificationReviewTool.layer.pipe(Layer.provide(permission)))
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        bash: Tool.make({
+          description: "check",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ exit: Schema.Number }),
+          execute: () => Effect.succeed({ exit: 0 }),
+        }),
+      })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Implement and test CSV parsing" }),
+        resume: false,
+      })
+      requests.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "check", name: "bash", input: {} }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "done", ["Done."]).completeEvents,
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(JSON.stringify(requests)).not.toContain("Verification rules:")
+      expect(JSON.stringify(requests)).not.toContain("Host requirement index")
+      expect(JSON.stringify(requests)).not.toContain("Verification closing review:")
+      expect(requests.every((request) => !request.tools.some((tool) => tool.name === "verification_review"))).toBe(true)
+      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
+      verificationEnabled = true
+      yield* replaySessionProjection(sessionID)
+      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
+    }).pipe(Effect.scoped),
   )
 
   it.effect("respects explicit output ceilings even when a soft policy permits more", () =>

@@ -14,6 +14,7 @@ export const dict = {
   "session.outcome.unavailable": "Outcome could not be checked; verification is unknown.",
   "session.outcome.idle": "Not started",
   "session.outcome.running": "Running",
+  "session.outcome.completed": "Finished — verification disabled",
   "session.outcome.completed_verified": "Finished — listed checks passed; see records for coverage",
   "session.outcome.completed_unverified": "Finished — verification incomplete",
   "session.outcome.failed": "Execution or verification failed",
