@@ -10,7 +10,7 @@ import {
   type LLMClientShape,
   type LLMRequest,
 } from "@zaovra-ai/llm"
-import { Auth } from "@zaovra-ai/llm/route"
+import { Auth, RequestExecutor } from "@zaovra-ai/llm/route"
 import { fixedResponse } from "../../llm/test/lib/http"
 import { sseEvents } from "../../llm/test/lib/sse"
 import { deltaChunk, usageChunk } from "../../llm/test/lib/openai-chunks"
@@ -4883,6 +4883,64 @@ describe("SessionRunnerLLM", () => {
       }),
     )
   }
+
+  it.effect("persists request retry countdowns with retry numbers rather than request numbers", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const db = yield* Database.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Retry visibility" }), resume: false })
+      responseStream = Stream.unwrap(
+        Effect.gen(function* () {
+          const observe = yield* RequestExecutor.RetryObserver
+          yield* observe({
+            attempt: 2,
+            delayMs: 2_000,
+            error: new LLMError({
+              module: "RequestExecutor",
+              method: "execute",
+              reason: new TransportReason({ message: "connection timed out", kind: "Timeout" }),
+            }),
+          })
+          yield* observe({
+            attempt: 6,
+            delayMs: 30_000,
+            error: new LLMError({
+              module: "RequestExecutor",
+              method: "execute",
+              reason: new TransportReason({ message: "connection timed out", kind: "Timeout" }),
+            }),
+          })
+          return Stream.fromIterable(fragmentFixture("text", "done-retry", ["Done."]).completeEvents)
+        }),
+      )
+      yield* session.resume(sessionID)
+      const retries = yield* db.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.Retried.type, 1)))
+        .all()
+        .pipe(Effect.orDie)
+      expect(retries.map((event) => event.data)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            attempt: 1,
+            error: expect.objectContaining({
+              message: expect.stringContaining("2 秒后进行第 1 次重试"),
+              metadata: expect.objectContaining({ delayMs: "2000" }),
+            }),
+          }),
+          expect.objectContaining({
+            attempt: 5,
+            error: expect.objectContaining({
+              message: expect.stringContaining("30 秒后进行第 5 次重试"),
+              metadata: expect.objectContaining({ delayMs: "30000" }),
+            }),
+          }),
+        ]),
+      )
+    }),
+  )
 
   it.effect("can cancel the reasoning recovery provider turn without another automatic attempt", () =>
     Effect.gen(function* () {

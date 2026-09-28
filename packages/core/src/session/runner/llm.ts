@@ -719,9 +719,9 @@ const layer = Layer.effect(
               yield* events.publish(SessionEvent.Retried, {
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
-                attempt,
+                attempt: attempt - 1,
                 error: {
-                  message: `模型请求暂时失败，${Math.ceil(delayMs / 1000)} 秒后进行第 ${attempt}/3 次请求。${error.reason.message}`,
+                  message: `模型请求暂时失败，${Math.ceil(delayMs / 1000)} 秒后进行第 ${attempt - 1} 次重试。${error.reason.message}`,
                   isRetryable: true,
                   metadata: {
                     phase: "request",

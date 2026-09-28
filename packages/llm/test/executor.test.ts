@@ -98,7 +98,7 @@ it.effect("retains safe transport cause identifiers after bounded retries", () =
       Effect.flip,
       Effect.forkChild,
     )
-    yield* TestClock.adjust("10 seconds")
+    yield* TestClock.adjust("70 seconds")
     const error = yield* Fiber.join(run)
     expect(error.reason).toMatchObject({
       _tag: "Transport",
@@ -110,6 +110,71 @@ it.effect("retains safe transport cause identifiers after bounded retries", () =
 )
 
 describe("RequestExecutor", () => {
+  for (const value of [0, 0.999999]) {
+    it.effect(`bounds the full jittered retry window at random ${value}`, () =>
+      Effect.gen(function* () {
+        const delays = yield* Ref.make<number[]>([])
+        const attempts = yield* Ref.make(0)
+        const run = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+          Effect.provide(
+            countedResponsesLayer(
+              attempts,
+              Array.from({ length: 6 }, () => new Response("busy", { status: 502 })),
+            ),
+          ),
+          Effect.provideService(Random.Random, { nextDoubleUnsafe: () => value, nextIntUnsafe: () => 0 }),
+          Effect.provideService(RequestExecutor.RetryObserver, ({ delayMs }) =>
+            Ref.update(delays, (all) => [...all, delayMs]),
+          ),
+          Effect.flip,
+          Effect.forkChild,
+        )
+        yield* TestClock.adjust(66_000)
+        yield* Fiber.join(run)
+        const actual = yield* Ref.get(delays)
+        expect(actual).toHaveLength(5)
+        expect(actual.every((delay) => delay <= 30_000)).toBe(true)
+        expect(actual.reduce((sum, delay) => sum + delay, 0)).toBe(value === 0 ? 49_600 : 66_000)
+        expect(yield* Ref.get(attempts)).toBe(6)
+      }),
+    )
+  }
+
+  for (const code of ["UND_ERR_CONNECT_TIMEOUT", "ECONNRESET", "EAI_AGAIN", "ENETUNREACH"]) {
+    it.effect(`recovers pre-response ${code} on the sixth attempt`, () =>
+      Effect.gen(function* () {
+        const attempts = yield* Ref.make(0)
+        const run = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+          Effect.provide(
+            RequestExecutor.layer.pipe(
+              Layer.provide(
+                Layer.succeed(
+                  HttpClient.HttpClient,
+                  HttpClient.make((input) =>
+                    Effect.gen(function* () {
+                      const count = yield* Ref.updateAndGet(attempts, (count) => count + 1)
+                      if (count === 6) return HttpClientResponse.fromWeb(input, new Response("ok"))
+                      return yield* new HttpClientError.HttpClientError({
+                        reason: new HttpClientError.TransportError({
+                          request: input,
+                          cause: Object.assign(new Error("network"), { code }),
+                        }),
+                      })
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Effect.forkChild,
+        )
+        yield* TestClock.adjust(70_000)
+        expect((yield* Fiber.join(run)).status).toBe(200)
+        expect(yield* Ref.get(attempts)).toBe(6)
+      }),
+    )
+  }
+
   it.effect("reports each bounded retry through the caller's observer", () =>
     Effect.gen(function* () {
       const notices = yield* Ref.make<number[]>([])
@@ -128,10 +193,10 @@ describe("RequestExecutor", () => {
       expect(yield* Ref.get(notices)).toEqual([2])
     }),
   )
-  it.effect("returns a long Retry-After without retrying earlier than the provider permits", () =>
+  it.effect("caps a long Retry-After at 30 seconds and exhausts five retries", () =>
     Effect.gen(function* () {
       const attempts = yield* Ref.make(0)
-      const error = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+      const run = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
         Effect.provide(
           countedResponsesLayer(attempts, [
             new Response("busy", {
@@ -141,9 +206,16 @@ describe("RequestExecutor", () => {
           ]),
         ),
         Effect.flip,
+        Effect.forkChild,
       )
-      expect(error.retryAfterMs).toBe(60_000)
+      yield* TestClock.adjust(29_999)
       expect(yield* Ref.get(attempts)).toBe(1)
+      yield* TestClock.adjust(1)
+      expect(yield* Ref.get(attempts)).toBe(2)
+      yield* TestClock.adjust(120_000)
+      const error = yield* Fiber.join(run)
+      expect(error.retryAfterMs).toBe(60_000)
+      expect(yield* Ref.get(attempts)).toBe(6)
     }),
   )
   it.effect("cancels retry backoff without sending another request", () =>
@@ -261,7 +333,7 @@ describe("RequestExecutor", () => {
       Effect.provide(
         responsesLayer(
           Array.from(
-            { length: 3 },
+            { length: 6 },
             () =>
               new Response("rate limited", {
                 status: 429,
@@ -304,7 +376,7 @@ describe("RequestExecutor", () => {
       Effect.provide(
         responsesLayer(
           Array.from(
-            { length: 3 },
+            { length: 6 },
             () =>
               new Response("rate limited", {
                 status: 429,
@@ -341,7 +413,7 @@ describe("RequestExecutor", () => {
       Effect.provide(
         responsesLayer(
           Array.from(
-            { length: 3 },
+            { length: 6 },
             () =>
               new Response("overloaded", {
                 status: 529,
@@ -378,7 +450,7 @@ describe("RequestExecutor", () => {
     ),
   )
 
-  it.effect("marks 504 and 529 status responses retryable", () =>
+  it.effect("marks server status responses retryable", () =>
     Effect.gen(function* () {
       const failWith = (status: number) =>
         Effect.gen(function* () {
@@ -392,7 +464,7 @@ describe("RequestExecutor", () => {
           Effect.provide(
             responsesLayer(
               Array.from(
-                { length: 3 },
+                { length: 6 },
                 () =>
                   new Response("retry", {
                     status,
@@ -403,6 +475,8 @@ describe("RequestExecutor", () => {
           ),
         )
 
+      yield* failWith(500)
+      yield* failWith(502)
       yield* failWith(504)
       yield* failWith(529)
     }),
@@ -508,7 +582,7 @@ describe("RequestExecutor", () => {
         yield* Effect.yieldNow
         expect(yield* Ref.get(attempts)).toBe(1)
 
-        yield* TestClock.adjust(499)
+        yield* TestClock.adjust(1_999)
         yield* Effect.yieldNow
         expect(yield* Ref.get(attempts)).toBe(1)
 
@@ -516,16 +590,25 @@ describe("RequestExecutor", () => {
         yield* Effect.yieldNow
         expect(yield* Ref.get(attempts)).toBe(2)
 
-        yield* TestClock.adjust(999)
+        yield* TestClock.adjust(3_999)
         yield* Effect.yieldNow
         expect(yield* Ref.get(attempts)).toBe(2)
 
+        yield* TestClock.adjust(1)
+        expect(yield* Ref.get(attempts)).toBe(3)
+        yield* TestClock.adjust(8_000)
+        expect(yield* Ref.get(attempts)).toBe(4)
+        yield* TestClock.adjust(16_000)
+        expect(yield* Ref.get(attempts)).toBe(5)
+        // Midpoint of the capped jitter range [25.6s, 30s].
+        yield* TestClock.adjust(27_799)
+        expect(yield* Ref.get(attempts)).toBe(5)
         yield* TestClock.adjust(1)
         const error = yield* Fiber.join(fiber)
 
         expectLLMError(error)
         expect(error.reason).toMatchObject({ _tag: "ProviderInternal" })
-        expect(yield* Ref.get(attempts)).toBe(3)
+        expect(yield* Ref.get(attempts)).toBe(6)
       }).pipe(
         Effect.provide(
           countedResponsesLayer(attempts, [

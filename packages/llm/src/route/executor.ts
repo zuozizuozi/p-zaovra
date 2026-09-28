@@ -37,10 +37,10 @@ export const RetryObserver = Context.Reference<
 >("@zaovra/LLM/RetryObserver", { defaultValue: () => () => Effect.void })
 
 const BODY_LIMIT = 16_384
-const MAX_RETRIES = 2
+const MAX_RETRIES = 5
 const REQUEST_TIMEOUT = "120 seconds"
-const BASE_DELAY_MS = 500
-const MAX_DELAY_MS = 10_000
+const BASE_DELAY_MS = 2_000
+const MAX_DELAY_MS = 30_000
 const REDACTED = "<redacted>"
 
 // One source of truth for what counts as a sensitive name across headers,
@@ -366,7 +366,9 @@ const retryStatusFailures = <A, R>(
   attempt = 0,
 ): Effect.Effect<A, LLMError, R> =>
   Effect.catchTag(effect, "LLM.Error", (error): Effect.Effect<A, LLMError, R> => {
-    if (!error.retryable || retries <= 0 || (error.retryAfterMs ?? 0) > MAX_DELAY_MS) return Effect.fail(error)
+    // This wraps request admission only. A successful response leaves this
+    // boundary before streaming, so retrying cannot replay emitted output.
+    if (!error.retryable || retries <= 0) return Effect.fail(error)
     return retryDelay(error, attempt).pipe(
       Effect.flatMap((delay) =>
         Effect.gen(function* () {
