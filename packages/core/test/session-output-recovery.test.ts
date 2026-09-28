@@ -107,3 +107,23 @@ test("existing known-context soft policy remains unchanged without probe opt-in"
     }),
   ).toEqual({ strategy: "increase-output", maxTokens: 32000 })
 })
+
+test("unknown-capacity opt-in requires an exact endpoint including its trailing slash", () => {
+  const value = LLM.request({
+    model: Model.make({
+      ...request().model,
+      route: OpenAIChat.route.with({ endpoint: { baseURL: "https://probe.test/v1" } }),
+    }),
+    prompt: "task",
+    generation: { maxTokens: 16000 },
+  })
+  expect(
+    SessionOutputRecovery.plan({
+      request: value,
+      policy: { initial: 16000, maximum: 32000, unknown_capacity: { endpoint: "https://probe.test/v1/" } },
+      attempts: 0,
+      inputTokens: 100,
+      outputTokens: 16000,
+    }),
+  ).toEqual({ strategy: "smaller-step", maxTokens: 16000 })
+})
