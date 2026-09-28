@@ -67,12 +67,17 @@ export const truncatedStream = (chunks: ReadonlyArray<string>) =>
   dynamicResponse((input) =>
     Effect.sync(() => {
       const encoder = new TextEncoder()
-      const stream = new ReadableStream({
-        start(controller) {
-          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
-          controller.error(new Error("connection reset"))
+      const remaining = chunks[Symbol.iterator]()
+      const stream = new ReadableStream(
+        {
+          pull(controller) {
+            const chunk = remaining.next()
+            if (chunk.done) return controller.error(new Error("connection reset"))
+            controller.enqueue(encoder.encode(chunk.value))
+          },
         },
-      })
+        { highWaterMark: 0 },
+      )
       return input.respond(stream, { headers: SSE_HEADERS })
     }),
   )

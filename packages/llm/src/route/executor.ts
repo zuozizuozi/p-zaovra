@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Random } from "effect"
+import { Cause, Context, Effect, Layer, Random, Stream } from "effect"
 import {
   FetchHttpClient,
   Headers,
@@ -16,6 +16,7 @@ import {
   HttpResponseDetails,
   InvalidRequestReason,
   LLMError,
+  type LLMEvent,
   ProviderInternalReason,
   QuotaExceededReason,
   RateLimitReason,
@@ -360,31 +361,77 @@ const retryDelay = (error: LLMError, attempt: number) => {
   ).pipe(Effect.map((delay) => Math.round(delay)))
 }
 
+const RetryBudget = Context.Reference<{ used: number } | undefined>("@zaovra/LLM/RetryBudget", {
+  defaultValue: () => undefined,
+})
+
+const waitForRetry = (error: LLMError, budget: { used: number }) =>
+  Effect.gen(function* () {
+    if (budget.used >= MAX_RETRIES) return yield* error
+    const attempt = budget.used++
+    const delay = yield* retryDelay(error, attempt)
+    const observe = yield* RetryObserver
+    yield* observe({ attempt: attempt + 2, delayMs: delay, error })
+    yield* Effect.logInfo("provider.request.retry", {
+      attempt: attempt + 2,
+      delayMs: delay,
+      category: error.reason._tag,
+      ...(error.reason._tag === "Transport" ? error.reason.diagnostics : {}),
+    })
+    yield* Effect.sleep(delay)
+  })
+
 const retryStatusFailures = <A, R>(
   effect: Effect.Effect<A, LLMError, R>,
-  retries = MAX_RETRIES,
-  attempt = 0,
+  budget: { used: number },
 ): Effect.Effect<A, LLMError, R> =>
   Effect.catchTag(effect, "LLM.Error", (error): Effect.Effect<A, LLMError, R> => {
     // This wraps request admission only. A successful response leaves this
     // boundary before streaming, so retrying cannot replay emitted output.
-    if (!error.retryable || retries <= 0) return Effect.fail(error)
-    return retryDelay(error, attempt).pipe(
-      Effect.flatMap((delay) =>
-        Effect.gen(function* () {
-          const observe = yield* RetryObserver
-          yield* observe({ attempt: attempt + 2, delayMs: delay, error })
-          yield* Effect.logInfo("provider.request.retry", {
-            attempt: attempt + 2,
-            delayMs: delay,
-            category: error.reason._tag,
-          })
-          yield* Effect.sleep(delay)
-        }),
-      ),
-      Effect.flatMap(() => retryStatusFailures(effect, retries - 1, attempt + 1)),
-    )
+    if (!error.retryable) return Effect.fail(error)
+    return waitForRetry(error, budget).pipe(Effect.flatMap(() => retryStatusFailures(effect, budget)))
   })
+
+/** Connection and pre-output read failures share one bounded retry allowance. */
+export const retryBeforeOutput = (stream: Stream.Stream<LLMEvent, LLMError>) =>
+  Stream.unwrap(
+    Effect.sync(() => {
+      const budget = { used: 0 }
+      const attempt = (): Stream.Stream<LLMEvent, LLMError> =>
+        Stream.unwrap(
+          Effect.sync(() => {
+            let committed = false
+            const pending: LLMEvent[] = []
+            return stream.pipe(
+              Stream.map((event) => {
+                // Metadata may contain encrypted reasoning. Only metadata-free starts
+                // are buffered; all tool, usage and terminal events commit immediately.
+                if (
+                  !committed &&
+                  pending.length < 32 &&
+                  (event.type === "step-start" ||
+                    ((event.type === "text-start" || event.type === "reasoning-start") && !event.providerMetadata))
+                ) {
+                  pending.push(event)
+                  return []
+                }
+                committed = true
+                return [...pending.splice(0), event]
+              }),
+              Stream.flattenIterable,
+              Stream.concat(Stream.unwrap(Effect.sync(() => Stream.fromIterable(pending.splice(0))))),
+              Stream.catchTag("LLM.Error", (error) => {
+                if (committed || error.reason._tag !== "Transport" || error.reason.kind !== "StreamReadError")
+                  return Stream.concat(Stream.fromIterable(pending.splice(0)), Stream.fail(error))
+                // A disconnected attempt may have unreported provider billing.
+                return Stream.unwrap(waitForRetry(error, budget).pipe(Effect.map(() => attempt())))
+              }),
+            )
+          }),
+        )
+      return attempt().pipe(Stream.provideService(RetryBudget, budget))
+    }),
+  )
 
 export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.effect(
   Service,
@@ -417,7 +464,11 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
         )
       })
     return Service.of({
-      execute: (request) => retryStatusFailures(executeOnce(request)),
+      execute: (request) =>
+        Effect.gen(function* () {
+          const budget = (yield* RetryBudget) ?? { used: 0 }
+          return yield* retryStatusFailures(executeOnce(request), budget)
+        }),
     })
   }),
 )

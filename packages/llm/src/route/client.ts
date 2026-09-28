@@ -384,6 +384,7 @@ const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest) =
       }
       const compiled = yield* compile(request).pipe(Effect.annotateLogs(annotations))
       return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime).pipe(
+        compiled.route.transport.id === "http-json" ? RequestExecutor.retryBeforeOutput : (stream) => stream,
         Stream.tap((event) =>
           event.type === "step-finish"
             ? Effect.logInfo("provider.response.usage", {
