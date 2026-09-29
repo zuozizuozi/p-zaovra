@@ -156,6 +156,36 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("rejects nonexistent assertion paths and directories before process execution or check creation", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          for (const file of ["the product should work", "missing.test.js", "."]) {
+            const settled = yield* withTool(tmp.path, (registry) =>
+              settleTool(
+                registry,
+                call({
+                  command: "npm test",
+                  verification: "test",
+                  verification_targets: ["source.js"],
+                  verification_assertions: [file],
+                }),
+              ),
+            )
+            expect(settled.inputRejected).toBe(true)
+            expect(settled.output).toBeUndefined()
+            expect(settled.result).toMatchObject({
+              type: "error",
+              value: expect.stringContaining("Invalid tool input: verification_assertions"),
+            })
+          }
+          expect(runs).toHaveLength(0)
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
   it.live("marks schema rejection before invoking the process", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

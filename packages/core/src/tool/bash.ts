@@ -212,6 +212,26 @@ const layer = Layer.effectDiscard(
               const verification = input.verification_report
                 ? "test"
                 : (input.verification ?? (inferred as "build" | "test" | "lint" | "typecheck" | undefined))
+              for (const file of input.verification_assertions ?? []) {
+                const resolved = yield* mutation.resolve({ path: path.resolve(target.canonical, file), kind: "file" })
+                if (resolved.externalDirectory)
+                  yield* permission.assert({
+                    ...LocationMutation.externalDirectoryPermission(resolved.externalDirectory),
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source,
+                  })
+                const valid = yield* fs.stat(resolved.canonical).pipe(
+                  Effect.map((stat) => stat.type === "File"),
+                  Effect.catch(() => Effect.succeed(false)),
+                )
+                if (!valid)
+                  return yield* new ToolFailure({
+                    metadata: { phase: "input" },
+                    message:
+                      "Invalid tool input: verification_assertions must contain existing assertion file paths relative to workdir or absolute, e.g. tests/game.test.js; not descriptions or directories. Put requirement descriptions in verification_requirements. No command was executed and no verification check was recorded.",
+                  })
+              }
               if (
                 input.verification_requirements?.length &&
                 (!verification || input.verification_report || !input.verification_targets?.length)
@@ -483,11 +503,12 @@ const layer = Layer.effectDiscard(
               )
               return { job_id, output: "Command log is retained while the job runs.", truncated: false }
             }).pipe(
-              Effect.mapError(
-                (error) =>
-                  new ToolFailure({
-                    message: `Unable to execute command: ${input.command}\n${error instanceof Error ? error.message : String(error)}`,
-                  }),
+              Effect.mapError((error) =>
+                error instanceof ToolFailure && error.metadata?.phase === "input"
+                  ? error
+                  : new ToolFailure({
+                      message: `Unable to execute command: ${input.command}\n${error instanceof Error ? error.message : String(error)}`,
+                    }),
               ),
             ),
         }),

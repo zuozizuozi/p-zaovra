@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { LLMError, LLMEvent, type ProviderMetadata, type ToolCall } from "../../schema"
+import { LLMError, LLMEvent, type ProviderMetadata } from "../../schema"
 import { eventError, parseToolInput, type ToolAccumulator } from "../shared"
 
 type StreamKey = string | number
@@ -66,7 +66,7 @@ const inputDelta = (tool: PendingTool, text: string) =>
 const toolCall = (route: string, tool: PendingTool, inputOverride?: string) =>
   parseToolInput(route, tool.name, inputOverride ?? tool.input).pipe(
     Effect.map(
-      (input): ToolCall =>
+      (input): LLMEvent =>
         LLMEvent.toolCall({
           id: tool.id,
           name: tool.name,
@@ -74,6 +74,17 @@ const toolCall = (route: string, tool: PendingTool, inputOverride?: string) =>
           providerExecuted: tool.providerExecuted ? true : undefined,
           providerMetadata: tool.providerMetadata,
         }),
+    ),
+    Effect.catch(() =>
+      Effect.succeed(
+        LLMEvent.toolError({
+          id: tool.id,
+          name: tool.name,
+          inputRejected: true,
+          message:
+            "Tool arguments are invalid or incomplete JSON. This call was not executed. Submit a corrected call; do not repeat completed calls or invent missing content.",
+        }),
+      ),
     ),
   )
 
@@ -210,18 +221,6 @@ export const finishAll = <K extends StreamKey>(route: string, tools: State<K>) =
             LLMEvent.toolInputEnd({ id: tool.id, name: tool.name, providerMetadata: tool.providerMetadata }),
             call,
           ]),
-          Effect.catch(() =>
-            Effect.succeed([
-              LLMEvent.toolInputEnd({ id: tool.id, name: tool.name }),
-              LLMEvent.toolError({
-                id: tool.id,
-                name: tool.name,
-                inputRejected: true,
-                message:
-                  "Tool arguments are invalid or incomplete JSON. This call was not executed. Submit a corrected call; do not repeat completed calls or invent missing content.",
-              }),
-            ]),
-          ),
         ),
       ).pipe(Effect.map((events) => events.flat())),
     }

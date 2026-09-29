@@ -17,6 +17,96 @@ const assistant: SessionMessage.Assistant = {
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
 
+test("same-command fresh target supersets replace failures without hiding different, stale or narrowed checks", () => {
+  const source = { path: path.resolve("product.js"), digest: "fixed" }
+  const extra = { path: path.resolve("favicon.svg"), digest: "added" }
+  const run = (
+    id: string,
+    exit: number,
+    targets = [source],
+    command = "node browser-test.cjs",
+    kind = "interaction",
+  ): SessionMessage.AssistantTool => ({
+    id,
+    type: "tool",
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { command, verification_targets: targets.map((t) => t.path) },
+      content: [],
+      structured: { verification: { callID: id, kind, command, cwd: path.dirname(source.path), exit, targets } },
+    },
+  })
+  const first = run("failed", 1)
+  const evaluate = (next: SessionMessage.AssistantTool, current = [source, extra]) =>
+    SessionOutcome.derive([{ ...assistant, content: [first, next] }], false, undefined, current, [])
+  expect(evaluate(run("fixed", 0, [source, extra])).checks[0].supersededBy).toBe("fixed")
+  expect(evaluate(run("fixed", 0, [source, extra])).state).toBe("completed_unverified")
+  for (const next of [
+    run("failed-again", 1, [source, extra]),
+    run("other", 0, [source, extra], "node other.cjs"),
+    run("narrow", 0, [extra]),
+    run("kind", 0, [source, extra], "node browser-test.cjs", "test"),
+  ])
+    expect(evaluate(next).state).toBe("failed")
+  expect(evaluate(run("stale", 0, [source, extra]), [{ ...source, digest: "changed" }, extra]).state).toBe("failed")
+})
+
+test("fresh HTML interaction covers HTML syntax but does not waive explicit syntax requirements", () => {
+  const target = { path: path.resolve("index.html"), digest: "html" }
+  const tool: SessionMessage.AssistantTool = {
+    id: "browser",
+    type: "tool",
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: {},
+      content: [],
+      structured: {
+        verification: {
+          callID: "browser",
+          kind: "interaction",
+          command: "node browser.cjs",
+          exit: 0,
+          targets: [target],
+        },
+      },
+    },
+  }
+  const messages = [{ ...assistant, content: [tool] }]
+  expect(SessionOutcome.derive(messages, false, undefined, [target], []).missing).toEqual([])
+  expect(SessionOutcome.derive(messages, false, undefined, [target], ["syntax"]).missing).toContain("syntax")
+  expect(SessionOutcome.derive(messages, false, undefined, [{ ...target, digest: "changed" }], []).missing).toContain(
+    `syntax: ${target.path}`,
+  )
+})
+
+test("invalid assertion input remains an input rejection rather than a projected verification check", () => {
+  const tool: SessionMessage.AssistantTool = {
+    id: "bad-path",
+    type: "tool",
+    name: "bash",
+    time: assistant.time,
+    provider: { executed: false, resultMetadata: { zaovra: { inputRejected: true } } },
+    state: {
+      status: "error",
+      content: [],
+      structured: {},
+      input: { command: "npm test", verification: "test", verification_assertions: ["works well"] },
+      error: {
+        type: "unknown",
+        message:
+          "Invalid tool input: verification_assertions must contain existing assertion file paths. No command was executed.",
+      },
+    },
+  }
+  const messages = [{ ...assistant, content: [tool] }]
+  expect(SessionOutcome.derive(messages, false, undefined, [], []).checks).toEqual([])
+  expect(SessionOutcome.inputRejections(messages)).toBe(1)
+})
+
 test("only host-observed task-created assertions can be corrected after failure", () => {
   const file = path.resolve("workspace/tests/new.test.js")
   const creation = {
@@ -1069,7 +1159,7 @@ test("HTML acceptance binds syntax, startup and interaction to the same current 
     [target],
     [],
   )
-  expect(interactionOnly.missing).toEqual([`syntax: ${target.path}`])
+  expect(interactionOnly.missing).toEqual([])
   expect(
     SessionOutcome.derive([{ ...assistant, content: [checks[0]!, checks[2]!] }], false, undefined, [target], []),
   ).toMatchObject({ state: "completed_verified", missing: [] })

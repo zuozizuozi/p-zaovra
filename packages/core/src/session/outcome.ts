@@ -409,6 +409,9 @@ export function derive(
         }
       }
       if (part.state.status === "error") {
+        // Invalid assertion paths never describe a check's actual scope.
+        if (rejected(part) && part.state.error.message.startsWith("Invalid tool input: verification_assertions "))
+          continue
         const command = typeof part.state.input.command === "string" ? part.state.input.command : ""
         const cwd = directory
           ? path.resolve(directory, typeof part.state.input.workdir === "string" ? part.state.input.workdir : ".")
@@ -492,8 +495,7 @@ export function derive(
                 (previous.command === check.command ||
                   (Array.isArray(part.state.input.verification_replaces) &&
                     part.state.input.verification_replaces.includes(previous.callID))) &&
-                previous.assertions?.length &&
-                previous.assertions.every(
+                (previous.assertions ?? []).every(
                   (assertion) =>
                     assertion.digest &&
                     check.assertions?.some(
@@ -550,7 +552,7 @@ export function derive(
           (kind) =>
             ![...checks.values()].some(
               (check) =>
-                (check.kind === kind || (kind === "smoke" && check.kind === "interaction")) &&
+                (check.kind === kind || (["smoke", "syntax"].includes(kind) && check.kind === "interaction")) &&
                 check.exit === 0 &&
                 fresh(check) &&
                 check.targets?.some((target) => target.path === path),

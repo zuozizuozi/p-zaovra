@@ -7,6 +7,27 @@ import { it } from "./lib/effect"
 const ADAPTER = "test-route"
 
 describe("ToolStream", () => {
+  it.effect("all finalizers reject malformed input without aborting the stream or replaying valid calls", () =>
+    Effect.gen(function* () {
+      const tools = ToolStream.start(ToolStream.empty<string>(), "bad", {
+        id: "bad",
+        name: "write",
+        input: '{"path":',
+      })
+      for (const result of [
+        yield* ToolStream.finish(ADAPTER, tools, "bad"),
+        yield* ToolStream.finishWithInput(ADAPTER, tools, "bad", '{"path":'),
+        yield* ToolStream.finishAll(ADAPTER, tools),
+      ]) {
+        expect(result.tools).toEqual({})
+        expect(result.events).toMatchObject([
+          { type: "tool-input-end", id: "bad" },
+          { type: "tool-error", id: "bad", inputRejected: true },
+        ])
+        expect((yield* ToolStream.finish(ADAPTER, result.tools, "bad")).events).toBeUndefined()
+      }
+    }),
+  )
   it.effect("starts from OpenAI-style deltas and finalizes parsed input", () =>
     Effect.gen(function* () {
       const first = ToolStream.appendOrStart(

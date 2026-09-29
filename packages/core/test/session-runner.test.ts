@@ -15,6 +15,7 @@ import { fixedResponse } from "../../llm/test/lib/http"
 import { sseEvents } from "../../llm/test/lib/sse"
 import { deltaChunk, usageChunk } from "../../llm/test/lib/openai-chunks"
 import * as OpenAIChat from "@zaovra-ai/llm/protocols/openai-chat"
+import { OpenAIResponses } from "@zaovra-ai/llm/protocols/openai-responses"
 import { Database } from "@zaovra-ai/core/database/database"
 import { makeLocationNode } from "@zaovra-ai/core/effect/app-node"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -761,6 +762,95 @@ describe("SessionRunnerLLM", () => {
       })
     }),
   )
+
+  for (const terminal of ["completed", "incomplete"] as const) {
+    it.effect(`synthetic Responses ${terminal} recovers rejected input without replaying an executed sibling`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        // Match the captured verification-off run and isolate tool recovery from closing review.
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const database = yield* Database.Service
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Correct the incomplete call only" }),
+          resume: false,
+        })
+        requests.length = 0
+        executions.length = 0
+        const prefix = sseEvents(
+          {
+            type: "response.output_item.added",
+            item: { type: "function_call", id: "item-sibling", call_id: "sibling", name: "echo" },
+          },
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              id: "item-sibling",
+              call_id: "sibling",
+              name: "echo",
+              arguments: '{"text":"sibling"}',
+            },
+          },
+        ).replace("data: [DONE]\n\n", "")
+        const fixture = process.env.ZAOVRA_T1_SYNTHETIC_DIR
+          ? yield* Effect.promise(() =>
+              Bun.file(`${process.env.ZAOVRA_T1_SYNTHETIC_DIR}/synthetic-${terminal}.sse`).text(),
+            )
+          : sseEvents(
+              {
+                type: "response.output_item.added",
+                item: { type: "function_call", id: "item-bad", call_id: "bad", name: "echo" },
+              },
+              { type: "response.function_call_arguments.delta", item_id: "item-bad", delta: '{"text":' },
+              {
+                type: "response.output_item.done",
+                item: { type: "function_call", id: "item-bad", call_id: "bad", name: "echo", arguments: '{"text":' },
+              },
+              {
+                type: `response.${terminal}`,
+                response: {
+                  status: terminal,
+                  ...(terminal === "incomplete" ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
+                },
+              },
+            )
+        responseStream = LLMClient.stream(
+          LLM.request({
+            model: OpenAIResponses.route.with({ auth: Auth.bearer("offline") }).model({ id: "offline" }),
+            prompt: "synthetic fixture",
+          }),
+        ).pipe(Stream.provide(fixedResponse(prefix + fixture)))
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "fixed", name: "echo", input: { text: "fixed" } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "done", ["Completed."]).completeEvents,
+        ]
+        yield* session.resume(sessionID)
+        expect(executions).toEqual(["sibling", "fixed"])
+        expect(requests).toHaveLength(3)
+        expect(JSON.stringify(requests[1].messages)).toContain("This call was not executed")
+        const retries = yield* database.db
+          .select()
+          .from(EventTable)
+          .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.Retried.type, 1)))
+          .all()
+        expect(retries.map((event) => event.data.error)).toContainEqual(
+          expect.objectContaining({
+            metadata: expect.objectContaining({
+              phase: terminal === "incomplete" ? "tool-truncation" : "tool-input-correction",
+            }),
+          }),
+        )
+        expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+      }),
+    )
+  }
 
   it.effect("honors Stop after an input rejection without starting correction", () =>
     Effect.gen(function* () {
