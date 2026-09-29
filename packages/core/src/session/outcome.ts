@@ -468,7 +468,7 @@ export function derive(
           (kind) =>
             ![...checks.values()].some(
               (check) =>
-                check.kind === kind &&
+                (check.kind === kind || (kind === "smoke" && check.kind === "interaction")) &&
                 check.exit === 0 &&
                 fresh(check) &&
                 check.targets?.some((target) => target.path === path),

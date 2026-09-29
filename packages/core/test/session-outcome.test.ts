@@ -876,6 +876,47 @@ test("HTML acceptance binds syntax, startup and interaction to the same current 
   expect(SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [target], []).state).toBe(
     "completed_verified",
   )
+  const interactionOnly = SessionOutcome.derive(
+    [{ ...assistant, content: [checks[2]!] }],
+    false,
+    undefined,
+    [target],
+    [],
+  )
+  expect(interactionOnly.missing).toEqual([`syntax: ${target.path}`])
+  expect(
+    SessionOutcome.derive([{ ...assistant, content: [checks[0]!, checks[2]!] }], false, undefined, [target], []),
+  ).toMatchObject({ state: "completed_verified", missing: [] })
+  expect(
+    SessionOutcome.derive([{ ...assistant, content: [checks[0]!, checks[2]!] }], false, undefined, [target], ["build"]),
+  ).toMatchObject({ state: "completed_unverified", missing: ["build"] })
+  for (const changed of [
+    { exit: 1, targets: [target] },
+    { exit: 0, targets: [{ ...target, digest: "older" }] },
+    { exit: 0, targets: [{ ...target, path: "C:/desktop/other.html" }] },
+  ]) {
+    const interaction: SessionMessage.AssistantTool = {
+      ...checks[2]!,
+      state: {
+        status: "completed",
+        input: {},
+        content: [],
+        structured: {
+          verification: { kind: "interaction", command: "browser-check", callID: "interaction", ...changed },
+        },
+      },
+    }
+    const outcome = SessionOutcome.derive(
+      [{ ...assistant, content: [checks[0]!, interaction] }],
+      false,
+      undefined,
+      [target, { ...target, path: "C:/desktop/other.html" }],
+      [],
+    )
+    expect(outcome.missing).toContain(`smoke: ${target.path}`)
+    expect(outcome.missing).toContain(`interaction: ${target.path}`)
+    expect(outcome.state).not.toBe("completed_verified")
+  }
   expect(
     SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [target], ["build", "test"]),
   ).toMatchObject({ state: "completed_unverified", missing: ["build", "test"] })
