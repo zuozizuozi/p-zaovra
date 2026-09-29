@@ -8,6 +8,8 @@ import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import {
   checkFreshness,
+  checkReferenceProblem,
+  derive,
   executions,
   fingerprint,
   historicalEvidenceProblem,
@@ -49,6 +51,7 @@ const Output = Schema.Struct({
       fresh: Schema.Boolean,
       changedTargets: Schema.Array(Schema.String),
       snapshotBased: Schema.Boolean,
+      supersededBy: Schema.optional(Schema.String),
       targets: Schema.Array(Schema.String),
     }),
   ),
@@ -112,10 +115,12 @@ export const layer = Layer.effectDiscard(
                 checks.flatMap((check) => (check.targets ?? []).map((target) => target.path)),
               )
               const snapshot = checks.some((check) => !check.targets?.length) ? yield* snapshots.capture() : undefined
-              const current = checks.map((check) => ({
+              const retained = derive(messages, false, snapshot, targets, [], undefined, location.directory).checks
+              const current = retained.map((check) => ({
                 callID: check.callID,
                 command: check.command,
                 exit: check.exit,
+                ...(check.supersededBy ? { supersededBy: check.supersededBy } : {}),
                 targets: (check.targets ?? []).map((target) => target.path),
                 ...checkFreshness(check, targets, snapshot),
               }))
@@ -154,11 +159,8 @@ export const layer = Layer.effectDiscard(
                     ),
                   ...(input.items ?? []).flatMap((item) => [
                     ...item.evidence.flatMap((id) => {
-                      const check = current.find((check) => check.callID === id)
-                      if (!check || check.exit !== 0 || check.fresh) return []
-                      return [
-                        `Requirement ${item.requirement}: stale check ${id}; changed dependencies: ${check.changedTargets.join(", ") || "workspace snapshot"}. Rerun this affected check; reuse other fresh checks.`,
-                      ]
+                      const problem = checkReferenceProblem(id, messages, retained, targets, snapshot)
+                      return problem ? [`Requirement ${item.requirement}: ${problem}`] : []
                     }),
                     ...(item.history ?? []).flatMap((reference) => {
                       const problem = historicalEvidenceProblem(reference, observed)
@@ -168,12 +170,6 @@ export const layer = Layer.effectDiscard(
                           ]
                         : []
                     }),
-                    ...item.evidence
-                      .filter((id) => !checks.some((check) => check.callID === id))
-                      .map(
-                        (id) =>
-                          `Requirement ${item.requirement}: ${id} is not a verification check callID. Log/event IDs are not check IDs. Use the callID values returned in checks; keep historical observations in note. This is a reference error, not proof that the requirement failed.`,
-                      ),
                   ]),
                 ],
                 ...(input.items && request.userMessageID

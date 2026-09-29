@@ -294,6 +294,79 @@ export function checkFreshness(
   }
 }
 
+// Only local tool results establish creation. Unknown origins stay protected;
+// observing an existing file before a delete/recreate must not grant an exemption.
+function taskCreatedFiles(messages: readonly SessionMessage.Message[], directory?: string) {
+  const seen = new Set<string>()
+  const created = new Set<string>()
+  const observe = (file: unknown, added = false) => {
+    if (typeof file !== "string" || (!directory && !path.isAbsolute(file))) return
+    const target = path.resolve(directory ?? ".", file)
+    if (!seen.has(target) && added) created.add(target)
+    seen.add(target)
+  }
+  for (const message of acceptanceHistory(messages)) {
+    if (message.type !== "assistant") continue
+    for (const part of message.content) {
+      if (part.type !== "tool" || part.provider?.executed || part.state.status !== "completed") continue
+      const output = part.state.structured
+      if (part.name === "write") observe(output.target, output.existed === false)
+      if (part.name === "edit") observe(output.target)
+      if (part.name === "read") observe(output.resource)
+      if (part.name === "apply_patch" && Array.isArray(output.applied))
+        for (const change of output.applied)
+          if (change && typeof change === "object" && "target" in change)
+            observe(change.target, "type" in change && change.type === "add")
+      for (const check of toolChecks(part))
+        for (const target of [...(check.targets ?? []), ...(check.assertions ?? [])]) observe(target.path)
+    }
+  }
+  return created
+}
+
+/** Share reference diagnostics between the closing review and the final outcome. */
+export function checkReferenceProblem(
+  id: string,
+  messages: readonly SessionMessage.Message[],
+  checks: readonly SessionOutcome.Check[],
+  targets: readonly { path: string; digest: string }[],
+  snapshot?: string,
+) {
+  const current = checks.find((check) => check.callID === id)
+  if (current?.supersededBy)
+    return `check ${id} has been replaced by callID ${current.supersededBy}; reference ${current.supersededBy}`
+  if (current) {
+    const freshness = checkFreshness(current, targets, snapshot)
+    if (current.exit === 0 && !current.execution && !freshness.fresh)
+      return `stale check ${id}; changed dependencies: ${freshness.changedTargets.join(", ") || "workspace snapshot"}; rerun affected checks and update the review`
+    return
+  }
+  const tools = messages.flatMap((message) =>
+    message.type === "assistant"
+      ? message.content.filter((part): part is SessionMessage.AssistantTool => part.type === "tool")
+      : [],
+  )
+  const original = tools.find((tool) => tool.id === id)
+  if (!original) return `unknown check callID ${id}`
+  const input = original.state.input
+  const previous = toolChecks(original)
+  const replacement = checks.find((check) => {
+    const tool = tools.find((tool) => tool.id === check.callID)
+    const next = tool?.state.input
+    return (
+      typeof input !== "string" &&
+      next &&
+      typeof next !== "string" &&
+      previous.some((old) => checkKey(old, input) === checkKey(check, next))
+    )
+  })
+  if (replacement)
+    return `check ${id} has been replaced by callID ${replacement.callID}; reference ${replacement.callID}`
+  return previous.length
+    ? `check ${id} is no longer current; use the current checks returned by verification_review`
+    : `callID ${id} exists but is not an eligible verification check`
+}
+
 export function derive(
   messages: readonly SessionMessage.Message[],
   active: boolean,
@@ -313,6 +386,7 @@ export function derive(
   const last = latest.findLast((message) => message.type === "assistant")
   const checks = new Map<string, SessionOutcome.Check>()
   const failedAssertions = new Map<string, { check: SessionOutcome.Check; digest: string }>()
+  const created = taskCreatedFiles(turn, directory)
   const fresh = (check: SessionOutcome.Check) => checkFreshness(check, targets, snapshot).fresh
   for (const message of turn) {
     if (message.type !== "assistant") continue
@@ -382,8 +456,8 @@ export function derive(
             [])
             if (assertion.digest && !failedAssertions.has(assertion.path))
               failedAssertions.set(assertion.path, { check, digest: assertion.digest })
-        // Release a failed version only after a real rerun passed that exact version.
-        // Freshness here is historical: later additions must not undo a proven repair.
+        // Pre-existing assertions require a passing rerun of the failed version.
+        // Task-created assertions may be corrected, but their rerun must be fresh.
         if (check.exit === 0 && !check.execution)
           for (const [file, original] of failedAssertions) {
             if (
@@ -395,8 +469,13 @@ export function derive(
               original.check.targets?.every((target) =>
                 check.targets?.some((current) => current.path === target.path && !!current.digest),
               ) &&
-              check.assertions?.some((assertion) => assertion.path === file && assertion.digest === original.digest) &&
-              check.targets?.some((target) => target.path === file && target.digest === original.digest)
+              check.assertions?.some(
+                (assertion) =>
+                  assertion.path === file &&
+                  !!assertion.digest &&
+                  check.targets?.some((target) => target.path === file && target.digest === assertion.digest) &&
+                  (assertion.digest === original.digest || (created.has(path.resolve(file)) && fresh(check))),
+              )
             )
               failedAssertions.delete(file)
           }
@@ -418,7 +497,10 @@ export function derive(
                   (assertion) =>
                     assertion.digest &&
                     check.assertions?.some(
-                      (current) => current.path === assertion.path && current.digest === assertion.digest,
+                      (current) =>
+                        current.path === assertion.path &&
+                        !!current.digest &&
+                        (current.digest === assertion.digest || created.has(path.resolve(assertion.path))),
                     ),
                 ))) &&
             previous.kind === check.kind &&
@@ -589,14 +671,8 @@ export function derive(
         if (items.length === 1)
           missing.push(
             ...items[0].evidence.flatMap((id) => {
-              const check = [...checks.values()].find((check) => check.callID === id)
-              if (!check)
-                return [
-                  `requirement ${index + 1}: unknown check callID ${id}; log/event IDs are not verification references`,
-                ]
-              if (check.exit === 0 && !check.execution && !fresh(check))
-                return [`requirement ${index + 1}: stale check ${id}; rerun affected checks and update the review`]
-              return []
+              const problem = checkReferenceProblem(id, turn, [...checks.values()], targets, snapshot)
+              return problem ? [`requirement ${index + 1}: ${problem}`] : []
             }),
           )
         for (const reference of items[0]?.history ?? []) {

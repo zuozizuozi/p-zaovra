@@ -17,6 +17,192 @@ const assistant: SessionMessage.Assistant = {
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
 
+test("only host-observed task-created assertions can be corrected after failure", () => {
+  const file = path.resolve("workspace/tests/new.test.js")
+  const creation = {
+    type: "tool",
+    id: "create",
+    name: "write",
+    time: assistant.time,
+    state: { status: "completed", input: { path: file }, content: [], structured: { target: file, existed: false } },
+  } satisfies SessionMessage.AssistantTool
+  const run = (id: string, exit: number, digest: string): SessionMessage.AssistantTool => ({
+    type: "tool",
+    id,
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { command: "node test.js" },
+      content: [],
+      structured: {
+        verification: {
+          kind: "test",
+          command: "node test.js",
+          callID: id,
+          exit,
+          cwd: path.dirname(file),
+          targets: [{ path: file, digest }],
+          assertions: [{ path: file, digest }],
+        },
+      },
+    },
+  })
+  const evaluate = (
+    prefix: SessionMessage.AssistantTool[],
+    current = "fixed",
+    suffix: SessionMessage.AssistantTool[] = [],
+  ) =>
+    SessionOutcome.derive(
+      [{ ...assistant, content: [...prefix, run("fail", 1, "broken"), ...suffix, run("pass", 0, "fixed")] }],
+      false,
+      undefined,
+      [{ path: file, digest: current }],
+      [],
+    )
+  expect(evaluate([creation]).state).toBe("completed_verified")
+  expect(evaluate([creation], "changed-again").missing.join(" ")).toContain("Failed assertion")
+  expect(evaluate([]).missing.join(" ")).toContain("Failed assertion changed")
+  expect(
+    evaluate([{ ...creation, state: { ...creation.state, structured: { target: file, existed: true } } }]).missing.join(
+      " ",
+    ),
+  ).toContain("Failed assertion changed")
+  expect(evaluate([{ ...creation, provider: { executed: true } }]).missing.join(" ")).toContain(
+    "Failed assertion changed",
+  )
+  expect(evaluate([], "fixed", [creation]).missing.join(" ")).toContain("Failed assertion changed")
+  const patch = {
+    ...creation,
+    name: "apply_patch",
+    state: { ...creation.state, structured: { applied: [{ type: "add", target: file }] } },
+  }
+  expect(evaluate([patch]).state).toBe("completed_verified")
+  const deleted = { ...patch, state: { ...patch.state, structured: { applied: [{ type: "delete", target: file }] } } }
+  expect(evaluate([deleted, patch]).missing.join(" ")).toContain("Failed assertion changed")
+  const user: SessionMessage.User = {
+    type: "user",
+    id: SessionMessage.ID.make("msg_new_task"),
+    text: "New independent task",
+    time: assistant.time,
+  }
+  const scoped = SessionOutcome.derive(
+    [
+      { ...assistant, content: [creation] },
+      user,
+      { ...assistant, content: [run("fail", 1, "broken"), run("pass", 0, "fixed")] },
+    ],
+    false,
+    undefined,
+    [{ path: file, digest: "fixed" }],
+    [],
+  )
+  expect(scoped.missing.join(" ")).toContain("Failed assertion changed")
+})
+
+test("review references distinguish replaced, stale, non-check and unknown IDs", () => {
+  const targets = [{ path: path.resolve("workspace/src.js"), digest: "current" }]
+  const run = (id: string): SessionMessage.AssistantTool => ({
+    type: "tool",
+    id,
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { command: "npm test" },
+      content: [],
+      structured: {
+        verification: {
+          kind: "test",
+          command: "npm test",
+          callID: id,
+          exit: 0,
+          targets,
+          requirements: ["Deliver tested code"],
+        },
+      },
+    },
+  })
+  const messages = [
+    {
+      ...assistant,
+      content: [
+        run("old"),
+        run("new"),
+        { ...run("not-check"), name: "read" },
+        { ...run("provider-check"), provider: { executed: true } },
+      ],
+    },
+  ]
+  const result = SessionOutcome.derive(messages, false, undefined, targets, [])
+  expect(result.checks.map((check) => check.callID)).toEqual(["new"])
+  expect(SessionOutcome.checkReferenceProblem("old", messages, result.checks, targets)).toContain(
+    "replaced by callID new",
+  )
+  expect(SessionOutcome.checkReferenceProblem("new", messages, result.checks, targets)).toBeUndefined()
+  expect(SessionOutcome.checkReferenceProblem("new", messages, result.checks, [])).toContain("stale check new")
+  expect(SessionOutcome.checkReferenceProblem("invented", messages, result.checks, targets)).toBe(
+    "unknown check callID invented",
+  )
+  expect(SessionOutcome.checkReferenceProblem("not-check", messages, result.checks, targets)).toContain(
+    "exists but is not",
+  )
+  expect(SessionOutcome.checkReferenceProblem("provider-check", messages, result.checks, targets)).toContain(
+    "exists but is not",
+  )
+  const user: SessionMessage.User = {
+    type: "user",
+    id: SessionMessage.ID.make("msg_reference_user"),
+    text: "Deliver tested code",
+    time: assistant.time,
+  }
+  const marker: SessionMessage.Synthetic = {
+    type: "synthetic",
+    id: SessionMessage.ID.make("msg_reference_marker"),
+    sessionID: SessionSchema.ID.make("ses_reference"),
+    text: "Verification closing review: {}",
+    time: assistant.time,
+  }
+  const evaluate = (id: string) =>
+    SessionOutcome.derive(
+      [
+        user,
+        marker,
+        {
+          ...assistant,
+          content: [
+            ...messages[0].content,
+            {
+              type: "tool",
+              id: "review",
+              name: "verification_review",
+              time: assistant.time,
+              state: {
+                status: "completed",
+                input: {},
+                content: [],
+                structured: {
+                  review: {
+                    userMessageID: user.id,
+                    items: [{ requirement: 1, status: "verified", evidence: [id], note: "checked" }],
+                    unverified: [],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+      false,
+      undefined,
+      targets,
+      [],
+    )
+  expect(evaluate("old").state).toBe("completed_unverified")
+  expect(evaluate("old").missing.join(" ")).toContain("replaced by callID new")
+  expect(evaluate("new").state).toBe("completed_verified")
+})
+
 test("execution diagnosis is restricted to inline parse failures", () => {
   expect(
     SessionOutcome.executionIssue(

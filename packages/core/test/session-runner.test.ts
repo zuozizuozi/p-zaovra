@@ -3900,7 +3900,7 @@ describe("SessionRunnerLLM", () => {
       expect(submit).toMatchObject({
         state: {
           status: "completed",
-          structured: { problems: [expect.stringContaining("ev_not_a_check is not a verification check callID")] },
+          structured: { problems: [expect.stringContaining("unknown check callID ev_not_a_check")] },
         },
       })
     }).pipe(
