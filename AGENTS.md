@@ -4,6 +4,13 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## R&D records, communication and progress
+
+- Outside this source repository, all Zaovra test, fix, experiment, review, screenshot, log and artifact files belong only in `C:\Users\Administrator\Desktop\Zaovra-研发记录\`. Do not create Zaovra folders on the Desktop, on `D:`, or anywhere else; put temporary workspaces inside the current `逐次记录/YYYYMMDD-HHMM-事项/` folder.
+- The only communication channel with the auditor is the root file `沟通记录.md` in that folder. Insert new entries (`回复 N` from the executor, `修订 N` from the auditor) at the top, directly under the "最新" marker, citing the user's words or the entry being answered plus evidence paths.
+- Progress is tracked only in the root file `任务清单.md`. Update the "现在在做" line when starting a step; mark finished items ✅ with a one-line result and evidence link; add newly discovered fix items with ➕. Gate items (G1, experiment 2, etc.) are ticked ✅ only after the auditor verifies them.
+- Never copy credentials into the records folder.
+
 ## Desktop interactions
 - For desktop interaction changes, use Codex as the primary UX reference. Keep controls aligned with implemented capabilities and avoid duplicate navigation or unsupported placeholder actions.
 - Use development mode and ordinary builds for routine desktop tests. Generate packages only for a requested release or a specific packaging regression; reuse an ignored output directory instead of retaining a new full package for each test.
