@@ -7,6 +7,10 @@ const t = (key: string) => key
 test("discovery and saving share address normalization and rejection reasons", () => {
   for (const [input, output] of [
     ["api.example.com", "https://api.example.com/v1"],
+    ["localhost:11434", "http://localhost:11434/v1"],
+    ["127.0.0.1:8080", "http://127.0.0.1:8080/v1"],
+    ["[::1]:1234", "http://[::1]:1234/v1"],
+    ["https://localhost:11434", "https://localhost:11434/v1"],
     ["url: https://api.example.com/openai", "https://api.example.com/openai"],
     ["baseURL=api.example.com/v1/chat/completions", "https://api.example.com/v1"],
     ["http://localhost:4096/v1", "http://localhost:4096/v1"],
@@ -37,6 +41,7 @@ test("discovery and saving share address normalization and rejection reasons", (
     ["ftp://api.example.com", "protocol"],
     ["file:///tmp/key", "protocol"],
     ["https://user:password@api.example.com", "credentials"],
+    ["user:pw@host.com", "credentials"],
     ["https://api.example.com?key=test", "query"],
     ["https://api.example.com?", "query"],
     ["https://api.example.com#fragment", "fragment"],

@@ -33,8 +33,10 @@ export function providerBaseURL(value: string, kind: ProviderDiscoveryInput["kin
     .replace(/^(?:url|baseURL)\s*[:=]\s*/i, "")
     .trim()
   if (!input) throw new Error("required")
+  if (!input.includes("://") && /^[^/?#]*@/.test(input)) throw new Error("credentials")
   const bare = /^(?:localhost|[\w-]+(?:\.[\w-]+)+|\[[\da-f:]+\])(?::\d+)?(?:[/?#]|$)/i.test(input)
-  const normalized = bare ? `https://${input}` : input
+  const local = /^(?:localhost|127\.\d+\.\d+\.\d+|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(input)
+  const normalized = bare ? `${local ? "http" : "https"}://${input}` : input
   if (/^[a-z][a-z\d+.-]*:/i.test(normalized) && !/^https?:/i.test(normalized)) throw new Error("protocol")
   if (!URL.canParse(normalized) || /\s|\\/.test(normalized)) throw new Error("format")
   const url = new URL(normalized)
