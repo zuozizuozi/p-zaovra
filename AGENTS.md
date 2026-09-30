@@ -10,6 +10,7 @@
 - The only communication channel with the auditor is the root file `沟通记录.md` in that folder. Insert new entries (`回复 N` from the executor, `修订 N` from the auditor) at the top, directly under the "最新" marker, citing the user's words or the entry being answered plus evidence paths.
 - Progress is tracked only in the root file `任务清单.md`. Update the "现在在做" line when starting a step; mark finished items ✅ with a one-line result and evidence link; add newly discovered fix items with ➕. Gate items (G1, experiment 2, etc.) are ticked ✅ only after the auditor verifies them.
 - Never copy credentials into the records folder.
+- After an acceptance run, close or reset every test instance you started (clients or backends with injected temporary config, fixed-response providers, or redirected TEMP) and state that in the record. Never leave such an instance running as if it were the user's normal client. Test and normal instances use different data profiles; record which one was used.
 
 ## Desktop interactions
 - For desktop interaction changes, use Codex as the primary UX reference. Keep controls aligned with implemented capabilities and avoid duplicate navigation or unsupported placeholder actions.
