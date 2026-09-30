@@ -79,14 +79,19 @@ export function SessionOutcomeDock() {
         >
           <span>{language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`)}</span>
           <Show when={outcome()?.outcomeUnknown && !abandoned()}>
-            <span>{language.t("session.outcome.unknown")}</span>
+            <span role="alert" class="text-icon-critical-base font-medium">
+              {language.t("session.outcome.unknown")}
+            </span>
           </Show>
           <Show when={outcome()?.checks.length || outcome()?.missing.length}>
-            <details>
+            <details open={!!outcome()?.missing.length}>
               <summary>{language.t("session.outcome.checks")}</summary>
               <For each={outcome()?.checks}>
                 {(check) => (
-                  <div class="break-all">
+                  <div
+                    class="break-all"
+                    classList={{ "text-icon-critical-base": check.exit !== 0 && !check.supersededBy }}
+                  >
                     {check.kind}: {check.command} · exit {check.exit}
                     <Show when={check.execution}>
                       <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
@@ -109,7 +114,7 @@ export function SessionOutcomeDock() {
                 )}
               </For>
               <Show when={outcome()?.missing.length}>
-                <div>
+                <div role="alert" class="text-icon-critical-base font-medium">
                   {language.t("session.outcome.missing")}{" "}
                   {outcome()
                     ?.missing.map((item) =>

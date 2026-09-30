@@ -388,7 +388,7 @@ const setup = Effect.gen(function* () {
   response = []
   sessionTokenBudget = undefined
   sessionOutput = undefined
-  verificationEnabled = undefined
+  verificationEnabled = true
   systemBaseline = "Initial context"
   systemRemoved = false
   systemUnavailable = false
@@ -3768,6 +3768,8 @@ describe("SessionRunnerLLM", () => {
         yield* session.resume(sessionID)
         expect(requests).toHaveLength(3)
         expect(JSON.stringify(requests[0].messages)).toContain("Host requirement index")
+        expect(JSON.stringify(requests[0].system)).toContain("Verification rules:")
+        expect(requests[0].tools.some((tool) => tool.name === "verification_review")).toBe(true)
         expect(JSON.stringify(requests[0].messages)).toContain('\\"id\\":2')
         expect(JSON.stringify(requests[1].messages)).toContain("Verification closing review:")
         expect(JSON.stringify(requests[1].messages)).toContain("交付 README.md")
@@ -4664,48 +4666,51 @@ describe("SessionRunnerLLM", () => {
     )
   }
 
-  it.effect("verification off removes active interventions without granting verified", () =>
-    Effect.gen(function* () {
-      yield* setup
-      verificationEnabled = false
-      yield* Layer.build(VerificationReviewTool.layer.pipe(Layer.provide(permission)))
-      const session = yield* SessionV2.Service
-      const registry = yield* ToolRegistry.Service
-      yield* registry.register({
-        bash: Tool.make({
-          description: "check",
-          input: Schema.Struct({}),
-          output: Schema.Struct({ exit: Schema.Number }),
-          execute: () => Effect.succeed({ exit: 0 }),
-        }),
-      })
-      yield* session.prompt({
-        sessionID,
-        prompt: Prompt.make({ text: "Implement and test CSV parsing" }),
-        resume: false,
-      })
-      requests.length = 0
-      responses = [
-        [
-          LLMEvent.stepStart({ index: 0 }),
-          LLMEvent.toolCall({ id: "check", name: "bash", input: {} }),
-          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
-          LLMEvent.finish({ reason: "tool-calls" }),
-        ],
-        fragmentFixture("text", "done", ["Done."]).completeEvents,
-      ]
-      yield* session.resume(sessionID)
-      expect(requests).toHaveLength(2)
-      expect(JSON.stringify(requests)).not.toContain("Verification rules:")
-      expect(JSON.stringify(requests)).not.toContain("Host requirement index")
-      expect(JSON.stringify(requests)).not.toContain("Verification closing review:")
-      expect(requests.every((request) => !request.tools.some((tool) => tool.name === "verification_review"))).toBe(true)
-      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
-      verificationEnabled = true
-      yield* replaySessionProjection(sessionID)
-      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
-    }).pipe(Effect.scoped),
-  )
+  for (const enabled of [undefined, false])
+    it.effect(`verification ${enabled ?? "default"} removes active interventions without granting verified`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = enabled
+        yield* Layer.build(VerificationReviewTool.layer.pipe(Layer.provide(permission)))
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        yield* registry.register({
+          bash: Tool.make({
+            description: "check",
+            input: Schema.Struct({}),
+            output: Schema.Struct({ exit: Schema.Number }),
+            execute: () => Effect.succeed({ exit: 0 }),
+          }),
+        })
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Implement and test CSV parsing" }),
+          resume: false,
+        })
+        requests.length = 0
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "check", name: "bash", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "done", ["Done."]).completeEvents,
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(2)
+        expect(JSON.stringify(requests)).not.toContain("Verification rules:")
+        expect(JSON.stringify(requests)).not.toContain("Host requirement index")
+        expect(JSON.stringify(requests)).not.toContain("Verification closing review:")
+        expect(requests.every((request) => !request.tools.some((tool) => tool.name === "verification_review"))).toBe(
+          true,
+        )
+        expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
+        verificationEnabled = true
+        yield* replaySessionProjection(sessionID)
+        expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
+      }).pipe(Effect.scoped),
+    )
 
   it.effect("respects explicit output ceilings even when a soft policy permits more", () =>
     Effect.gen(function* () {

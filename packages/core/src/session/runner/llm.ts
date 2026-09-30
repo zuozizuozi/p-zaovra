@@ -377,7 +377,7 @@ const layer = Layer.effect(
       const previous = context.at(-1)
       const outputState = yield* SessionOutputRecovery.read(db, session.id)
       const configuration = yield* config.entries()
-      const verificationEnabled = Config.latest(configuration, "experimental")?.verification !== false
+      const verificationEnabled = Config.latest(configuration, "experimental")?.verification === true
       const outputPolicy = configuration
         .filter((entry): entry is Config.Document => entry.type === "document")
         .flatMap((entry) => entry.info.session_output?.[model.provider]?.[model.id] ?? [])

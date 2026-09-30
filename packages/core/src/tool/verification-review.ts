@@ -74,7 +74,7 @@ const Output = Schema.Struct({
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const config = yield* Config.Service
-    if (Config.latest(yield* config.entries(), "experimental")?.verification === false) return
+    if (Config.latest(yield* config.entries(), "experimental")?.verification !== true) return
     const tools = yield* Tools.Service
     const database = yield* Database.Service
     const permission = yield* PermissionV2.Service

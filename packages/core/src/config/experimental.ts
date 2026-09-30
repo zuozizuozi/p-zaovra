@@ -16,7 +16,7 @@ export class Policy extends Schema.Class<Policy>("ConfigV2.Experimental.Policy")
 export class Experimental extends Schema.Class<Experimental>("ConfigV2.Experimental")({
   verification: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
-      "Enable host verification prompts, review tool and closing review (default true). Disabling does not certify completion or suppress execution failures. Restart the backend after changing this experiment.",
+      "Opt into strict host verification prompts, review tool and closing review (default false). By default, checks are advisory and do not determine run completion. Execution failures remain failures. Restart the backend after changing this experiment.",
   }),
   policies: Policy.pipe(Schema.Array, Schema.optional),
 }) {}

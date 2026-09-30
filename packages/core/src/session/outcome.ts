@@ -377,8 +377,8 @@ export function derive(
   directory?: string,
   artifacts: readonly DeliveryAudit.Observation[] = [],
   observationsComplete = true,
-  verificationEnabled = messages.findLast((message) => message.type === "assistant")?.metadata?.verificationEnabled !==
-    false,
+  verificationEnabled = messages.findLast((message) => message.type === "assistant")?.metadata?.verificationEnabled ===
+    true,
 ): SessionOutcome.Info {
   const turn = acceptanceHistory(messages)
   const start = turn.findLastIndex((message) => message.type === "user")
@@ -712,8 +712,12 @@ export function derive(
     // observation. Absence of that observation is not evidence of a stale file.
     missing: !verificationEnabled
       ? [...checks.values()]
-          .filter((check) => check.execution && !check.supersededBy && check.exit !== 0)
-          .map((check) => `${check.execution}: ${check.kind} (${check.callID})`)
+          .filter((check) => !check.supersededBy)
+          .flatMap((check) => {
+            if (check.exit !== 0) return [`${check.execution ?? "failed"}: ${check.kind} (${check.callID})`]
+            if (!active && observationsComplete && !fresh(check)) return [`stale: ${check.kind} (${check.callID})`]
+            return []
+          })
       : active || !observationsComplete
         ? ["verification pending: current workspace has not been inspected"]
         : missing,
@@ -724,9 +728,10 @@ export function derive(
   if (unknown || last?.finish === "interrupted") return { ...base, state: "interrupted" }
   if (!last) return { ...base, state: start >= 0 ? "interrupted" : "idle" }
   if (last.error || last.finish !== "stop") return { ...base, state: "failed" }
+  // Advisory checks describe the workspace, not whether the runner finished.
+  if (!verificationEnabled) return { ...base, state: "completed" }
   if ([...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution))
     return { ...base, state: "failed" }
-  if (!verificationEnabled) return { ...base, state: base.missing.length ? "completed_unverified" : "completed" }
   return { ...base, state: base.missing.length ? "completed_unverified" : "completed_verified" }
 }
 

@@ -271,6 +271,7 @@ describe("BashTool", () => {
                     agent: "build",
                     model: { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") },
                     finish: "stop",
+                    metadata: { verificationEnabled: true },
                     time,
                     content: [...history],
                   }),
@@ -409,6 +410,7 @@ describe("BashTool", () => {
               agent: "build",
               model: { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") },
               finish: "stop",
+              metadata: { verificationEnabled: true },
               time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
               content: [
                 SessionMessage.AssistantTool.make({

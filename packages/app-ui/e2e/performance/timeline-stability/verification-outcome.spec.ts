@@ -39,7 +39,7 @@ test("keeps host verification incomplete even when the assistant claims all test
   await timeline.send(status("idle"))
   await expect(page.getByText("All tests passed. The game is complete.", { exact: true })).toBeVisible()
   await expect(page.getByText("Finished — verification incomplete", { exact: true })).toBeVisible()
-  await page.locator("summary").filter({ hasText: "Recorded checks" }).click()
+  await expect(page.locator("summary").filter({ hasText: "Verification information" })).toBeVisible()
   await expect(page.getByText("ev_test_evidence", { exact: true })).toBeVisible()
   await expect(page.getByText("Check did not run successfully", { exact: true })).toBeVisible()
   await expect(page.getByText("Reported assertion coverage: Empty input is accepted", { exact: true })).toBeVisible()
@@ -47,3 +47,38 @@ test("keeps host verification incomplete even when the assistant claims all test
   await expect(page.getByText(/Requirement coverage has not been recorded/)).toBeVisible()
   await expect(page.getByText(/interaction: C:\/desktop\/game.html/)).toBeVisible()
 })
+
+for (const warning of ["not-run", "stale", "failed"]) {
+  test(`advisory ${warning} stays visible without downgrading run completion`, async ({ page }) => {
+    const timeline = await setupTimeline(page, {
+      messages: [userMessage(), assistantMessage([textPart("prt_done", "Task finished; check details below.")])],
+    })
+    await page.route("**/session/*/outcome*", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            state: "completed",
+            outcomeUnknown: false,
+            checks: [
+              {
+                kind: "interaction",
+                command: "node browser.cjs",
+                exit: warning === "stale" ? 0 : 1,
+                callID: "browser",
+                ...(warning === "not-run" ? { execution: "not-run" } : {}),
+                targets: [{ path: "product.js", digest: "v1" }],
+              },
+            ],
+            missing: [`${warning}: interaction (browser)`],
+          },
+        }),
+      }),
+    )
+    await timeline.send(status("idle"))
+    await expect(page.getByText("Finished", { exact: true })).toBeVisible()
+    await expect(page.getByText("Finished — verification incomplete", { exact: true })).toHaveCount(0)
+    await expect(page.getByRole("alert").filter({ hasText: `${warning}: interaction (browser)` })).toBeVisible()
+    await expect(page.getByText("product.js", { exact: true })).toBeVisible()
+  })
+}

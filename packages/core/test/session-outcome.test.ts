@@ -14,6 +14,7 @@ const assistant: SessionMessage.Assistant = {
   model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
   content: [],
   finish: "stop",
+  metadata: { verificationEnabled: true },
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
 
@@ -1327,7 +1328,7 @@ test("changed shell arguments do not reset failed recovery; inspection does", ()
   expect(SessionOutcome.recoveryFailures([{ ...assistant, content: [...content, inspect] }])).toBe(0)
 })
 
-test("verification disabled preserves failures, unknown effects and permission rejection", () => {
+test("advisory checks preserve warnings separately from execution failures and unknown effects", () => {
   const off = { ...assistant, metadata: { verificationEnabled: false } }
   expect(SessionOutcome.derive([off], false)).toMatchObject({ state: "completed", missing: [] })
   expect(
@@ -1352,8 +1353,9 @@ test("verification disabled preserves failures, unknown effects and permission r
     },
   }
   expect(SessionOutcome.derive([{ ...off, content: [failed] }], false)).toMatchObject({
-    state: "failed",
+    state: "completed",
     checks: [{ exit: 1 }],
+    missing: ["failed: test (check)"],
   })
   const denied: SessionMessage.AssistantTool = {
     ...failed,
@@ -1366,4 +1368,68 @@ test("verification disabled preserves failures, unknown effects and permission r
     },
   }
   expect(SessionOutcome.derive([{ ...off, content: [denied] }], false).state).not.toBe("completed_verified")
+})
+
+test("default advisory mode retains not-run and stale checks without downgrading completion", () => {
+  const target = { path: path.resolve("product.js"), digest: "before" }
+  const tool: SessionMessage.AssistantTool = {
+    type: "tool",
+    id: "browser",
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { command: "node browser.cjs" },
+      content: [],
+      structured: {
+        verification: {
+          kind: "interaction",
+          command: "node browser.cjs",
+          callID: "browser",
+          exit: 1,
+          execution: "not-run",
+          targets: [target],
+        },
+      },
+    },
+  }
+  const run = { ...assistant, metadata: undefined, content: [tool] }
+  expect(SessionOutcome.derive([run], false, undefined, [target])).toMatchObject({
+    state: "completed",
+    checks: [{ exit: 1, execution: "not-run" }],
+    missing: ["not-run: interaction (browser)"],
+  })
+  const passed = {
+    ...run,
+    content: [
+      {
+        ...tool,
+        state: {
+          ...tool.state,
+          structured: {
+            verification: {
+              kind: "interaction",
+              command: "node browser.cjs",
+              callID: "browser",
+              exit: 0,
+              targets: [target],
+            },
+          },
+        },
+      },
+    ],
+  }
+  expect(SessionOutcome.derive([passed], false, undefined, [{ ...target, digest: "after" }])).toMatchObject({
+    state: "completed",
+    checks: [{ exit: 0 }],
+    missing: ["stale: interaction (browser)"],
+  })
+  expect(SessionOutcome.derive([passed], false, undefined, [target])).toMatchObject({
+    state: "completed",
+    missing: [],
+  })
+  expect(SessionOutcome.derive([passed], true, undefined, [])).toMatchObject({ state: "running", missing: [] })
+  expect(
+    SessionOutcome.derive([{ ...run, metadata: { verificationEnabled: true } }], false, undefined, [target]).state,
+  ).toBe("completed_unverified")
 })

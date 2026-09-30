@@ -24,6 +24,7 @@ const assistant: SessionMessage.Assistant = {
   id: SessionMessage.ID.make("msg_answer"),
   time,
   finish: "stop",
+  metadata: { verificationEnabled: true },
   agent: "build",
   model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
   content: [],
