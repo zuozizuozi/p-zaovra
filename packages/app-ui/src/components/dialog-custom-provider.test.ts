@@ -1,7 +1,66 @@
 import { describe, expect, test } from "bun:test"
-import { validateCustomProvider } from "./dialog-custom-provider-form"
+import { validateCustomProvider, validateProviderURL } from "./dialog-custom-provider-form"
+import { providerBaseURL } from "../provider-discovery"
 
 const t = (key: string) => key
+
+test("discovery and saving share address normalization and rejection reasons", () => {
+  for (const [input, output] of [
+    ["api.example.com", "https://api.example.com/v1"],
+    ["url: https://api.example.com/openai", "https://api.example.com/openai"],
+    ["baseURL=api.example.com/v1/chat/completions", "https://api.example.com/v1"],
+    ["http://localhost:4096/v1", "http://localhost:4096/v1"],
+  ]) {
+    expect(providerBaseURL(input)).toBe(output)
+    expect(validateProviderURL(input, "openai", t).baseURL).toBe(output)
+    expect(
+      validateCustomProvider({
+        form: {
+          providerID: "test",
+          name: "Test",
+          baseURL: input,
+          apiKey: "",
+          models: [{ row: "0", id: "test", name: "Test", err: {} }],
+          headers: [],
+          err: {},
+        },
+        t,
+        disabledProviders: [],
+        existingProviderIDs: new Set<string>(),
+      }).result?.config.options.baseURL,
+    ).toBe(output)
+  }
+  for (const [input, reason] of [
+    [" ", "required"],
+    ["url:", "required"],
+    ["bad address", "format"],
+    ["ftp://api.example.com", "protocol"],
+    ["file:///tmp/key", "protocol"],
+    ["https://user:password@api.example.com", "credentials"],
+    ["https://api.example.com?key=test", "query"],
+    ["https://api.example.com?", "query"],
+    ["https://api.example.com#fragment", "fragment"],
+  ]) {
+    expect(() => providerBaseURL(input)).toThrow(reason)
+    expect(validateProviderURL(input, "openai", t).error).toBe(`provider.custom.error.baseURL.${reason}`)
+    const result = validateCustomProvider({
+      form: {
+        providerID: "test",
+        name: "Test",
+        baseURL: input,
+        apiKey: "",
+        models: [{ row: "0", id: "test", name: "Test", err: {} }],
+        headers: [],
+        err: {},
+      },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set<string>(),
+    })
+    expect(result.result).toBeUndefined()
+    expect(result.err.baseURL).toBe(`provider.custom.error.baseURL.${reason}`)
+  }
+})
 
 describe("validateCustomProvider", () => {
   test("defaults an omitted display name to the model ID but still requires the ID", () => {

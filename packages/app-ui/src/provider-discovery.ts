@@ -28,9 +28,20 @@ export const providerDiscoveryPresets: Record<string, { baseURL: string; kind?: 
 }
 
 export function providerBaseURL(value: string, kind: ProviderDiscoveryInput["kind"] = "openai") {
-  const url = new URL(value.trim())
-  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
-    throw new Error("invalidURL")
+  const input = value
+    .trim()
+    .replace(/^(?:url|baseURL)\s*[:=]\s*/i, "")
+    .trim()
+  if (!input) throw new Error("required")
+  const bare = /^(?:localhost|[\w-]+(?:\.[\w-]+)+|\[[\da-f:]+\])(?::\d+)?(?:[/?#]|$)/i.test(input)
+  const normalized = bare ? `https://${input}` : input
+  if (/^[a-z][a-z\d+.-]*:/i.test(normalized) && !/^https?:/i.test(normalized)) throw new Error("protocol")
+  if (!URL.canParse(normalized) || /\s|\\/.test(normalized)) throw new Error("format")
+  const url = new URL(normalized)
+  if (!["https:", "http:"].includes(url.protocol)) throw new Error("protocol")
+  if (url.username || url.password) throw new Error("credentials")
+  if (normalized.includes("?")) throw new Error("query")
+  if (normalized.includes("#")) throw new Error("fragment")
   url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/(?:chat\/completions|responses|messages|models)$/, "")
   if (!url.pathname || url.pathname === "/") url.pathname = kind === "google" ? "/v1beta" : "/v1"
   return url.href.replace(/\/$/, "")

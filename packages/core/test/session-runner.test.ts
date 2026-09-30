@@ -711,6 +711,40 @@ describe("SessionRunnerLLM", () => {
       expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
     }),
   )
+  for (const status of [401, 402, 403]) {
+    it.effect(`persists safe HTTP ${status} provider reasons in session history`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Offline provider rejection" }), resume: false })
+        requests.length = 0
+        responseStream = LLMClient.stream(
+          LLM.request({
+            model: OpenAIChat.route.with({ auth: Auth.bearer("fixture-private-key") }).model({ id: "offline" }),
+            prompt: "fixture",
+          }),
+        ).pipe(
+          Stream.provide(
+            fixedResponse(
+              JSON.stringify({
+                padding: "x".repeat(20_000),
+                error: { message: "Service order expired: fixture-private-key", remedy_hint: "Renew service order" },
+              }),
+              { status },
+            ),
+          ),
+        )
+        yield* session.resume(sessionID).pipe(Effect.exit)
+        const history = JSON.stringify(yield* session.context(sessionID))
+        expect(history).toContain(`HTTP ${status}`)
+        expect(history).toContain("Service order expired")
+        expect(history).toContain("Renew service order")
+        expect(history).not.toContain("fixture-private-key")
+        expect(requests).toHaveLength(1)
+      }),
+    )
+  }
+
   it.effect("recovers a raw protocol rejection through durable history without replaying a valid sibling", () =>
     Effect.gen(function* () {
       yield* setup

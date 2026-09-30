@@ -20,7 +20,13 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { resolveProviderIntegration } from "@/utils/provider-integration"
-import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
+import {
+  type FormState,
+  headerRow,
+  modelRow,
+  validateCustomProvider,
+  validateProviderURL,
+} from "./dialog-custom-provider-form"
 
 type Props = {
   onBack: () => void
@@ -96,10 +102,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
   }
   const discover = async () => {
     if (discovery.pending || saveMutation.isPending) return
+    const url = validateProviderURL(form.baseURL, form.protocol, language.t)
+    setForm("err", "baseURL", url.error)
+    if (!url.baseURL) return
     setDiscovery({ pending: true, error: "" })
     try {
       const input = {
-        baseURL: providerBaseURL(form.baseURL, form.protocol),
+        baseURL: url.baseURL,
         apiKey: form.apiKey,
         kind: form.protocol,
         headers: Object.fromEntries(
@@ -282,10 +291,9 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       setDiscovery({ manual: true, error: language.t("provider.custom.discovery.choose") })
       return
     }
-    if (!URL.canParse(form.baseURL.trim())) {
-      setForm("err", "baseURL", language.t("provider.custom.error.baseURL.format"))
-      return
-    }
+    const url = validateProviderURL(form.baseURL, form.protocol, language.t)
+    setForm("err", "baseURL", url.error)
+    if (!url.baseURL) return
     const result = (() => {
       try {
         return validate()

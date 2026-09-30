@@ -362,7 +362,11 @@ export const dict = {
   "provider.custom.error.providerID.exists": "该提供商 ID 已存在",
   "provider.custom.error.name.required": "显示名称为必填项",
   "provider.custom.error.baseURL.required": "基础 URL 为必填项",
-  "provider.custom.error.baseURL.format": "必须以 http:// 或 https:// 开头",
+  "provider.custom.error.baseURL.format": "请输入有效的服务商地址，例如 https://api.example.com/v1",
+  "provider.custom.error.baseURL.protocol": "仅支持 HTTP 或 HTTPS 地址",
+  "provider.custom.error.baseURL.credentials": "地址中不能包含用户名或密码，请使用 API Key 输入框",
+  "provider.custom.error.baseURL.query": "服务商地址不能包含查询参数（?）",
+  "provider.custom.error.baseURL.fragment": "服务商地址不能包含锚点（#）",
   "provider.custom.error.required": "必填",
   "provider.custom.error.duplicate": "重复",
 

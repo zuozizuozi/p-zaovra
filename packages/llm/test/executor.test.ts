@@ -72,6 +72,66 @@ const expectLLMError = (error: unknown) => {
 
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
 
+for (const [status, message] of [
+  [401, "Invalid API key"],
+  [402, "Insufficient balance"],
+  [403, "Service order expired"],
+] as const) {
+  it.effect(`retains bounded redacted provider reasons for HTTP ${status} without retrying`, () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const error = yield* Effect.gen(function* () {
+        const executor = yield* RequestExecutor.Service
+        return yield* executor.execute(secretRequest).pipe(Effect.flip)
+      }).pipe(
+        Effect.provide(
+          countedResponsesLayer(attempts, [
+            new Response(
+              JSON.stringify({
+                padding: "x".repeat(20_000),
+                error: { message: `${message}: header-secret-456`, remedy_hint: "Renew the service order" },
+                message: "Contact your provider",
+              }),
+              { status },
+            ),
+          ]),
+        ),
+      )
+      expect(error.reason.message).toContain(message)
+      expect(error.reason.message).toContain("Renew the service order")
+      expect(error.reason.message).toContain("Contact your provider")
+      expect(error.reason.message).toContain("<redacted>")
+      expect(error.reason.message).not.toContain("header-secret-456")
+      expect(error.reason.message.length).toBeLessThan(1024)
+      expect(errorHttp(error)?.bodyTruncated).toBe(true)
+      expect(yield* Ref.get(attempts)).toBe(1)
+    }),
+  )
+}
+
+it.effect("bounds decoded error fields and removes escaped request secrets", () =>
+  Effect.gen(function* () {
+    const executor = yield* RequestExecutor.Service
+    const error = yield* executor.execute(secretRequest).pipe(Effect.flip)
+    expect(error.reason.message).not.toContain("header-secret-456")
+    expect(error.reason.message).toContain("<redacted>")
+    expect(error.reason.message).toContain("Renew subscription")
+    expect(error.reason.message.length).toBeLessThan(1024)
+  }).pipe(
+    Effect.provide(
+      responsesLayer([
+        new Response(
+          JSON.stringify({
+            error: { message: "header-secret-456 " + "x".repeat(2000) },
+            remedy_hint: "Renew subscription",
+          }).replace("header-secret-456", "header-\\u0073ecret-456"),
+          { status: 402 },
+        ),
+      ]),
+    ),
+  ),
+)
+
 it.effect("retains safe transport cause identifiers after bounded retries", () =>
   Effect.gen(function* () {
     const layer = RequestExecutor.layer.pipe(

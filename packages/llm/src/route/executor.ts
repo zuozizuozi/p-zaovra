@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Random, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Random, Schema, Stream } from "effect"
 import {
   FetchHttpClient,
   Headers,
@@ -208,8 +208,27 @@ const responseBody = (body: string | void, request: HttpClientRequest.HttpClient
   return { body: redacted.slice(0, BODY_LIMIT), bodyTruncated: true }
 }
 
-const providerMessage = (status: number, body: { readonly body?: string }) => {
-  if (body.body && body.body.length <= 500) return `Provider request failed with HTTP ${status}: ${body.body}`
+const providerMessage = (status: number, body: string | void, request: HttpClientRequest.HttpClientRequest) => {
+  const parsed = body
+    ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body))
+    : undefined
+  const record = (value: unknown): Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const root = record(parsed)
+  const error = record(root.error)
+  // Extract before the diagnostic body is truncated, then redact decoded strings
+  // before limiting them so an escaped/partially clipped credential cannot leak.
+  const detail = [
+    ...new Set(
+      [error.message, root.message, error.remedy_hint, root.remedy_hint]
+        .filter((value): value is string => typeof value === "string" && !!value.trim())
+        .map((value) => redactBody(value, request).trim().slice(0, 240)),
+    ),
+  ]
+    .join("; ")
+    .slice(0, 960)
+  if (detail) return `Provider request failed with HTTP ${status}: ${detail}`
+  if (body && body.length <= 500) return `Provider request failed with HTTP ${status}: ${redactBody(body, request)}`
   return `Provider request failed with HTTP ${status}`
 }
 
@@ -299,7 +318,7 @@ const statusError =
         method: "execute",
         reason: statusReason({
           status: response.status,
-          message: providerMessage(response.status, details),
+          message: providerMessage(response.status, body, request),
           retryAfterMs: retryAfter,
           rateLimit,
           http: responseHttp({

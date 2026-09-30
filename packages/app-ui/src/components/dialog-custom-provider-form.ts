@@ -49,10 +49,23 @@ type ValidateArgs = {
   existingProviderIDs: Set<string>
 }
 
+export function validateProviderURL(value: string, protocol: FormState["protocol"], t: Translator) {
+  try {
+    return { baseURL: providerBaseURL(value, protocol), error: undefined }
+  } catch (error) {
+    const reason =
+      error instanceof Error &&
+      ["required", "format", "protocol", "credentials", "query", "fragment"].includes(error.message)
+        ? error.message
+        : "format"
+    return { baseURL: undefined, error: t(`provider.custom.error.baseURL.${reason}`) }
+  }
+}
+
 export function validateCustomProvider(input: ValidateArgs) {
   const providerID = input.form.providerID.trim()
   const name = input.form.name.trim()
-  const baseURL = input.form.baseURL.trim()
+  const url = validateProviderURL(input.form.baseURL, input.form.protocol, input.t)
   const apiKey = input.form.apiKey.trim()
 
   const env = apiKey.match(/^\{env:([^}]+)\}$/)?.[1]?.trim()
@@ -65,11 +78,7 @@ export function validateCustomProvider(input: ValidateArgs) {
       : undefined
 
   const nameError = !name ? input.t("provider.custom.error.name.required") : undefined
-  const urlError = !baseURL
-    ? input.t("provider.custom.error.baseURL.required")
-    : !/^https?:\/\//.test(baseURL)
-      ? input.t("provider.custom.error.baseURL.format")
-      : undefined
+  const urlError = url.error
 
   const disabled = input.disabledProviders.includes(providerID)
   const existsError = idError
@@ -143,7 +152,7 @@ export function validateCustomProvider(input: ValidateArgs) {
         name,
         ...(env ? { env: [env] } : {}),
         options: {
-          baseURL: providerBaseURL(baseURL, input.form.protocol),
+          baseURL: url.baseURL!,
           ...(Object.keys(headerConfig).length ? { headers: headerConfig } : {}),
         },
         models: modelConfig,

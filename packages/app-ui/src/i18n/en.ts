@@ -358,7 +358,12 @@ export const dict = {
   "provider.custom.error.providerID.exists": "That provider ID already exists",
   "provider.custom.error.name.required": "Display name is required",
   "provider.custom.error.baseURL.required": "Base URL is required",
-  "provider.custom.error.baseURL.format": "Must start with http:// or https://",
+  "provider.custom.error.baseURL.format": "Enter a valid provider address, such as https://api.example.com/v1",
+  "provider.custom.error.baseURL.protocol": "Only HTTP and HTTPS addresses are supported",
+  "provider.custom.error.baseURL.credentials":
+    "Remove the username and password from the address; use the API key field",
+  "provider.custom.error.baseURL.query": "The provider address cannot contain query parameters (?)",
+  "provider.custom.error.baseURL.fragment": "The provider address cannot contain a fragment (#)",
   "provider.custom.error.required": "Required",
   "provider.custom.error.duplicate": "Duplicate",
 
