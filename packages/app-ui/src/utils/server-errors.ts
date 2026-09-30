@@ -42,6 +42,16 @@ function unwrapNamedError(error: unknown): unknown {
   return error
 }
 
+export function isDirectoryUnavailableError(error: unknown, directory: string) {
+  const value = unwrapNamedError(error)
+  if (!value || typeof value !== "object" || !("name" in value) || value.name !== "DirectoryUnavailableError")
+    return false
+  if (!("data" in value) || !value.data || typeof value.data !== "object" || !("directory" in value.data)) return false
+  // Windows paths may be normalized by the server, but never match another project.
+  const normalize = (path: string) => path.replace(/\\/g, "/").replace(/\/$/, "")
+  return typeof value.data.directory === "string" && normalize(value.data.directory) === normalize(directory)
+}
+
 // Client-synthesized session not-found errors share one constructor and
 // predicate so the message contract cannot drift between the sync store
 // (server-session.ts), the route lineage (session-lineage.ts), and the

@@ -1,4 +1,5 @@
 import { Database } from "@zaovra-ai/core/database/database"
+import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { httpClient } from "@zaovra-ai/core/effect/app-node-platform"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -36,6 +37,7 @@ import { layer as locationLayer } from "./location"
 import { sessionLocationLayer } from "./middleware/session-location"
 
 const applicationServices = LayerNode.group([
+  FSUtil.node,
   Database.node,
   EventV2.node,
   httpClient,

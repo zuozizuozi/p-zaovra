@@ -12,8 +12,54 @@ import { Schema } from "effect"
 import type { ServerConnection } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { useServerSync } from "@/context/server-sync"
+import { useServerSDK } from "@/context/server-sdk"
+import { isDirectoryUnavailableError } from "@/utils/server-errors"
+import { Button } from "@zaovra-ai/ui/button"
 
-export function DirectoryDataProvider(
+type DirectoryProps = ParentProps<{
+  directory: string | Accessor<string>
+  draftID?: string
+  server?: Accessor<ServerConnection.Key | undefined>
+}>
+
+export function DirectoryDataProvider(props: DirectoryProps) {
+  const sdk = useServerSDK()
+  const language = useLanguage()
+  const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
+  const [available, { refetch }] = createResource(
+    () => ({ client: sdk().client, directory: directory() }),
+    async (target) => {
+      try {
+        await target.client.v2.location.get({ location: { directory: target.directory } }, { throwOnError: true })
+        return true
+      } catch (error) {
+        if (isDirectoryUnavailableError(error, target.directory)) return false
+        throw error
+      }
+    },
+  )
+  return (
+    <Show when={!available.loading}>
+      <Show
+        when={available()}
+        fallback={
+          <div role="status" class="flex min-h-64 flex-col items-center justify-center gap-4 p-6">
+            <p>{language.t("directory.unavailable.title")}</p>
+            <p class="break-all text-text-weak">{directory()}</p>
+            <p>{language.t("directory.unavailable.description")}</p>
+            <Button variant="secondary" onClick={() => void refetch()}>
+              {language.t("directory.unavailable.retry")}
+            </Button>
+          </div>
+        }
+      >
+        <AvailableDirectoryDataProvider {...props} />
+      </Show>
+    </Show>
+  )
+}
+
+function AvailableDirectoryDataProvider(
   props: ParentProps<{
     directory: string | Accessor<string>
     draftID?: string

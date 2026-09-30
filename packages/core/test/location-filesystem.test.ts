@@ -27,6 +27,22 @@ const withTmp = <A, E, R>(f: (directory: string) => Effect.Effect<A, E, R>) =>
   ).pipe(Effect.flatMap((tmp) => f(tmp.path)))
 
 describe("FileSystem", () => {
+  it.live("keeps a missing directory recoverable without rebuilding its service", () =>
+    withTmp((directory) => {
+      const target = path.join(directory, "restorable")
+      return Effect.gen(function* () {
+        const service = yield* FileSystem.Service
+        expect(Exit.isFailure(yield* service.list().pipe(Effect.exit))).toBe(true)
+        yield* Effect.promise(() => fs.mkdir(target))
+        yield* Effect.promise(() => fs.writeFile(path.join(target, "kept.txt"), "kept"))
+        expect((yield* service.list()).map((entry) => entry.path)).toEqual([RelativePath.make("kept.txt")])
+        yield* Effect.promise(() => fs.rename(target, `${target}-moved`))
+        expect(Exit.isFailure(yield* service.list().pipe(Effect.exit))).toBe(true)
+        yield* Effect.promise(() => fs.rename(`${target}-moved`, target))
+        expect(new TextDecoder().decode((yield* service.read({ path: RelativePath.make("kept.txt") })).content)).toBe("kept")
+      }).pipe(provide(target))
+    }),
+  )
   it.live("reads text and binary files", () =>
     withTmp((directory) =>
       Effect.gen(function* () {

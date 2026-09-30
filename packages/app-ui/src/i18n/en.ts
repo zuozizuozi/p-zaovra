@@ -1,4 +1,7 @@
 export const dict = {
+  "directory.unavailable.title": "Directory unavailable",
+  "directory.unavailable.description": "This project directory no longer exists. Restore it and retry, or open another project.",
+  "directory.unavailable.retry": "Retry",
   "session.compact.running": "Compacting conversation…",
   "session.compact.done": "Conversation compacted",
   "session.compact.skipped": "Conversation was not compacted",

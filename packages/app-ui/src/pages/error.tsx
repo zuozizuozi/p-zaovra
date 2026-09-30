@@ -296,9 +296,11 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           hideLabel
         />
         <div class="flex flex-row items-center justify-center gap-3 flex-wrap max-w-64">
-          <Button size="large" onClick={platform.restart}>
-            {language.t("error.page.action.restart")}
-          </Button>
+          <Show when={platform.canRestart !== false}>
+            <Button size="large" onClick={platform.restart}>
+              {language.t("error.page.action.restart")}
+            </Button>
+          </Show>
           <Show when={platform.platform === "desktop" && platform.exportDebugLogs}>
             <Button size="large" variant="ghost" onClick={exportDebugLogs}>
               {language.t("error.page.action.exportLogs")}

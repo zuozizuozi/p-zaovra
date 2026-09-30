@@ -45,6 +45,8 @@ type PlatformBase = {
 
   /** Restart the app  */
   restart(): Promise<void>
+  /** False when this host cannot relaunch itself (for example Electron dev). */
+  canRestart?: boolean
 
   /** Navigate back in history */
   back(): void

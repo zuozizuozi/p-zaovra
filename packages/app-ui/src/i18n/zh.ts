@@ -3,6 +3,9 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "directory.unavailable.title": "目录不可用",
+  "directory.unavailable.description": "项目目录已不存在。恢复目录后重试，或打开其他项目。",
+  "directory.unavailable.retry": "重新打开",
   "session.compact.running": "正在压缩会话…",
   "session.compact.done": "会话已压缩",
   "session.compact.skipped": "本次未执行压缩",

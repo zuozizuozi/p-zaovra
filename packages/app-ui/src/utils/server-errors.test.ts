@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionNotFoundError } from "@zaovra-ai/sdk/v2/client"
 import type { ConfigInvalidError, ProviderModelNotFoundError } from "./server-errors"
-import { formatServerError, isSessionNotFoundError, parseReadableConfigInvalidError } from "./server-errors"
+import { formatServerError, isDirectoryUnavailableError, isSessionNotFoundError, parseReadableConfigInvalidError } from "./server-errors"
 
 function fill(text: string, vars?: Record<string, string | number>) {
   if (!vars) return text
@@ -172,4 +172,19 @@ describe("isSessionNotFoundError", () => {
       ),
     ).toBe(false)
   })
+})
+
+test("directory missing matches only an explicit error for the same project", () => {
+  const error = { name: "DirectoryUnavailableError", data: { directory: "C:\\work\\project" } }
+  expect(isDirectoryUnavailableError(error, "C:/work/project")).toBe(true)
+  expect(isDirectoryUnavailableError(new Error("request", { cause: { body: error } }), "C:/work/project")).toBe(true)
+  expect(isDirectoryUnavailableError(error, "C:/work/other")).toBe(false)
+  for (const error of [
+    new Error("ENOENT"),
+    new Error("Failed to fetch"),
+    { name: "ConfigInvalidError" },
+    { name: "PermissionDeniedError" },
+    null,
+  ])
+    expect(isDirectoryUnavailableError(error, "C:/work/project")).toBe(false)
 })

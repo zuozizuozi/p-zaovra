@@ -62,8 +62,10 @@ const baseLayer = Layer.effect(
     const fs = yield* FSUtil.Service
     const location = yield* Location.Service
     const search = yield* FileSystemSearch.Service
-    const root = yield* fs.realPath(location.directory).pipe(Effect.orDie)
     const resolve = Effect.fnUntraced(function* (input?: RelativePath) {
+      // Missing workspaces must not cache a failed Location service graph.
+      // Resolve at use time so a restored directory works with the same service.
+      const root = yield* fs.realPath(location.directory).pipe(Effect.orDie)
       const absolute = path.resolve(location.directory, input ?? ".")
       if (!FSUtil.contains(location.directory, absolute))
         return yield* Effect.die(new Error("Path escapes the location"))

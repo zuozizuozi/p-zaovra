@@ -5,12 +5,14 @@ import { Context, Schema } from "effect"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+import fs from "node:fs/promises"
+import path from "node:path"
 
 const context = Context.empty() as Context.Context<unknown>
 
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  headers.set("x-zaovra-directory", directory)
+  headers.set("x-zaovra-directory", encodeURIComponent(directory))
   return HttpApiApp.webHandler().handler(
     new Request(`http://localhost${route}`, {
       ...init,
@@ -78,6 +80,46 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("isolates missing directories and reopens restored projects without restarting", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const directory = path.join(tmp.path, "missing-project")
+    const route = `/api/location?location[directory]=${encodeURIComponent(directory)}`
+    const missing = await request(route, tmp.path)
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toEqual({ name: "DirectoryUnavailableError", data: { directory } })
+    expect(await fs.stat(directory).catch(() => undefined)).toBeUndefined()
+    expect((await request("/api/agent", tmp.path)).status).toBe(200)
+    // Legacy bootstrap requests bypass the V2 directory gate; they must not
+    // poison the shared service graph while the directory is still missing.
+    await request(`/lsp`, directory)
+
+    await fs.mkdir(directory)
+    expect((await request(route, tmp.path)).status).toBe(200)
+    const created = await request("/api/session", directory, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: { directory } }),
+    })
+    expect(created.status).toBe(200)
+    const session = (await created.json()).data
+    await fs.rename(directory, `${directory}-moved`)
+    expect((await request(route, tmp.path)).status).toBe(404)
+    expect((await request("/api/agent", tmp.path)).status).toBe(200)
+    await fs.rename(`${directory}-moved`, directory)
+    expect((await request(route, tmp.path)).status).toBe(200)
+    const restored = await request(`/api/session/${session.id}`, directory)
+    expect(restored.status).toBe(200)
+    expect((await restored.json()).data.id).toBe(session.id)
+  }, 30000)
+
+  test("does not label configuration errors as missing directories", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Bun.write(path.join(tmp.path, "zaovra.json"), "{ invalid json")
+    const response = await request("/api/location", tmp.path)
+    expect(response.status).toBe(400)
+    expect((await response.json()).name).not.toBe("DirectoryUnavailableError")
+  }, 30000)
+
   test("lists only configured models supported by the V2 runner", async () => {
     await using tmp = await tmpdir({
       git: true,

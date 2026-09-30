@@ -1,11 +1,12 @@
 import { Location } from "@zaovra-ai/core/location"
+import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { WorkspaceV2 } from "@zaovra-ai/core/workspace"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { PluginInternal } from "@zaovra-ai/core/plugin/internal"
 import { Effect, Layer } from "effect"
-import { HttpServerRequest } from "effect/unstable/http"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 
 export type LocationServices = Layer.Success<ReturnType<(typeof LocationServiceMap.Service)["get"]>>
@@ -58,10 +59,24 @@ export const layer = Layer.effect(
   LocationMiddleware,
   Effect.gen(function* () {
     const locations = yield* LocationServiceMap.Service
+    const fs = yield* FSUtil.Service
     return LocationMiddleware.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
-        return yield* effect.pipe(Effect.provide(locations.get(ref(request))))
+        const location = ref(request)
+        // Check before constructing/caching the Location layer. A moved project
+        // must not poison its service entry or prevent reopening after restore.
+        const exists = yield* fs.stat(location.directory).pipe(
+          Effect.as(true),
+          Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
+          Effect.orDie,
+        )
+        if (!exists)
+          return HttpServerResponse.jsonUnsafe(
+            { name: "DirectoryUnavailableError", data: { directory: location.directory } },
+            { status: 404 },
+          )
+        return yield* effect.pipe(Effect.provide(locations.get(location)))
       }),
     )
   }),

@@ -17,7 +17,7 @@ import type { State, VcsCache } from "./types"
 import type { ServerSession } from "../server-session"
 import { adaptAgent, adaptCommand, adaptPermissionRequest, cmp, directoryKey } from "./utils"
 import { adaptProviderCatalog } from "./provider-catalog"
-import { formatServerError } from "@/utils/server-errors"
+import { formatServerError, isDirectoryUnavailableError } from "@/utils/server-errors"
 import { QueryClient, queryOptions } from "@tanstack/solid-query"
 import { loadMcpQuery, loadMcpResourcesQuery } from "../server-sync"
 import { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
@@ -392,13 +392,14 @@ export async function bootstrapDirectory(input: {
 
     await waitForPaint()
     const slowErrs = errors(await runAll(slow))
-    if (slowErrs.length > 0) {
-      console.error("Failed to finish bootstrap instance", slowErrs[0])
+    const reportable = slowErrs.filter((error) => !isDirectoryUnavailableError(error, input.directory))
+    if (reportable.length > 0) {
+      console.error("Failed to finish bootstrap instance", reportable[0])
       const project = getFilename(input.directory)
       showToast({
         variant: "error",
         title: input.translate("toast.project.reloadFailed.title", { project }),
-        description: formatServerError(slowErrs[0], input.translate),
+        description: formatServerError(reportable[0], input.translate),
       })
     }
 
