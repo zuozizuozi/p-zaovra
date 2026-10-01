@@ -5,6 +5,8 @@ import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileSystem } from "../filesystem"
 import { Image } from "../image"
+import { Catalog } from "../catalog"
+import { SessionStore } from "../session/store"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
 import { AbsolutePath } from "../schema"
@@ -34,6 +36,8 @@ const layer = Layer.effectDiscard(
     const mutation = yield* LocationMutation.Service
     const image = yield* Image.Service
     const permission = yield* PermissionV2.Service
+    const sessions = yield* SessionStore.Service
+    const catalog = yield* Catalog.Service
 
     yield* tools
       .register({
@@ -79,9 +83,15 @@ const layer = Layer.effectDiscard(
               })
               if (type === "directory")
                 return yield* reader.list(absolute, { offset: input.offset, limit: input.limit })
+              const message = yield* sessions.message(context.assistantMessageID)
+              const model =
+                message?.message.type === "assistant"
+                  ? yield* catalog.model.get(message.message.model.providerID, message.message.model.id)
+                  : undefined
               const content = yield* reader.read(absolute, resource, {
                 offset: input.offset,
                 limit: input.limit,
+                images: model?.capabilities.input.includes("image") === true,
               })
               if ("encoding" in content && content.encoding === "base64" && SUPPORTED_IMAGE_MIMES.has(content.mime)) {
                 return yield* image
@@ -113,5 +123,13 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/read",
   layer,
-  deps: [ToolRegistry.node, ReadToolFileSystem.node, LocationMutation.node, Image.node, PermissionV2.node],
+  deps: [
+    ToolRegistry.node,
+    ReadToolFileSystem.node,
+    LocationMutation.node,
+    Image.node,
+    PermissionV2.node,
+    SessionStore.node,
+    Catalog.node,
+  ],
 })

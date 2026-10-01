@@ -100,19 +100,36 @@ describe("ReadToolFileSystem", () => {
     }),
   )
 
-  it.effect("preserves the media ingestion limit message", () =>
+  it.effect("returns metadata without ingesting oversized images", () =>
     Effect.gen(function* () {
       const { fs, files, directory } = yield* fixture
       const file = path.join(directory, "oversized.png")
       yield* files.writeFile(file, Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
       yield* files.truncate(file, ReadToolFileSystem.MAX_MEDIA_INGEST_BYTES + 1)
 
-      const error = yield* ReadToolFileSystem.read(fs, file, "oversized.png").pipe(Effect.flip)
-
-      expect(error).toBeInstanceOf(ReadToolFileSystem.MediaIngestLimitError)
-      expect(error.message).toBe(
-        `Media exceeds ${ReadToolFileSystem.MAX_MEDIA_INGEST_BYTES} byte ingestion limit: oversized.png`,
-      )
+      const result = yield* ReadToolFileSystem.read(fs, file, "oversized.png")
+      expect(result).toMatchObject({ type: "text-page", mime: "text/plain" })
+      expect(result.content).toContain("exceeds the media ingestion limit")
+      expect(result.content.length).toBeLessThan(600)
+    }),
+  )
+  it.effect("reads only metadata for a non-visual model and leaves text reads usable", () =>
+    Effect.gen(function* () {
+      const { fs, files, directory } = yield* fixture
+      const image = path.join(directory, "large.png")
+      const header = Buffer.alloc(24)
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header)
+      header.writeUInt32BE(2592, 16)
+      header.writeUInt32BE(1632, 20)
+      yield* files.writeFile(image, header)
+      yield* files.truncate(image, 6 * 1024 * 1024)
+      const result = yield* ReadToolFileSystem.read(fs, image, "large.png", { images: false })
+      expect(result.content).toContain("2592×1632")
+      expect(result.content).toContain("NOT sent")
+      expect(result.content.length).toBeLessThan(600)
+      yield* files.writeFileString(path.join(directory, "next.txt"), "continue")
+      const next = yield* ReadToolFileSystem.read(fs, path.join(directory, "next.txt"), "next.txt")
+      expect(next.content).toBe("continue")
     }),
   )
 })

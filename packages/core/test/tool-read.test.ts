@@ -27,7 +27,7 @@ const missingPath = "__missing_read_target__.txt"
 const missingAbsolutePath = path.join(process.cwd(), missingPath)
 const readCalls: {
   input: AbsolutePath
-  page: ReadToolFileSystem.PageInput
+  page: ReadToolFileSystem.PageInput & { images?: boolean }
 }[] = []
 const listCalls: ReadToolFileSystem.PageInput[] = []
 let resolvedType: "file" | "directory" = "file"
@@ -129,9 +129,9 @@ const unavailableImage = Layer.succeed(
   Image.Service,
   Image.Service.of({ normalize: () => Effect.fail(new Image.ResizerUnavailableError()) }),
 )
-const readLayer = (imageLayer: Layer.Layer<Image.Service>) =>
-  AppNodeBuilder.build(LayerNode.group([ToolRegistry.node, ToolRegistry.toolsNode, ReadTool.node]), [
-    [ReadToolFileSystem.node, reader],
+const readLayer = (imageLayer: Layer.Layer<Image.Service>, realFiles = false) =>
+  AppNodeBuilder.build(LayerNode.group([ToolRegistry.node, ToolRegistry.toolsNode, ReadTool.node, FSUtil.node]), [
+    ...(!realFiles ? [[ReadToolFileSystem.node, reader] as const] : []),
     [PermissionV2.node, permission],
     [Config.node, config],
     [Image.node, imageLayer],
@@ -143,9 +143,38 @@ const readLayer = (imageLayer: Layer.Layer<Image.Service>) =>
   ])
 const it = testEffect(readLayer(imageLayer))
 const itWithoutResizer = testEffect(readLayer(unavailableImage))
+const itWithFiles = testEffect(readLayer(unavailableImage, true))
 const sessionID = SessionV2.ID.make("ses_read_tool_test")
 
 describe("ReadTool", () => {
+  itWithFiles.effect("keeps unrecognized-model image reads out of durable media and permits the next tool", () =>
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const directory = yield* fs.makeTempDirectoryScoped()
+      const file = path.join(directory, "large.png")
+      yield* fs.writeFile(file, Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+      yield* fs.truncate(file, 6 * 1024 * 1024)
+      const registry = yield* ToolRegistry.Service
+      const settled = yield* settleTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "metadata", name: "read", input: { path: file } },
+      })
+      expect(settled.result.type).not.toBe("error")
+      expect(JSON.stringify(settled)).toContain("NOT sent")
+      expect(JSON.stringify(settled)).not.toContain("base64")
+      expect(settled.output?.content?.some((part) => part.type === "file")).toBe(false)
+      const text = path.join(directory, "next.txt")
+      yield* fs.writeFileString(text, "continue")
+      const next = yield* executeTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "next", name: "read", input: { path: text } },
+      })
+      expect(next.type).not.toBe("error")
+      expect(JSON.stringify(next)).toContain("continue")
+    }),
+  )
   beforeEach(() => {
     assertions.length = 0
     readCalls.length = 0
@@ -190,7 +219,7 @@ describe("ReadTool", () => {
       expect(readCalls).toEqual([
         {
           input: AbsolutePath.make(path.join(process.cwd(), "README.md")),
-          page: { offset: undefined, limit: undefined },
+          page: { offset: undefined, limit: undefined, images: false },
         },
       ])
     }),
@@ -216,7 +245,9 @@ describe("ReadTool", () => {
         },
         { sessionID, action: "read", resources: [external.replaceAll("\\", "/")], save: ["*"] },
       ])
-      expect(readCalls).toEqual([{ input: AbsolutePath.make(external), page: { offset: undefined, limit: undefined } }])
+      expect(readCalls).toEqual([
+        { input: AbsolutePath.make(external), page: { offset: undefined, limit: undefined, images: false } },
+      ])
     }),
   )
 
@@ -248,7 +279,7 @@ describe("ReadTool", () => {
       expect(readCalls).toEqual([
         {
           input: AbsolutePath.make(path.join(process.cwd(), "pixel.png")),
-          page: { offset: undefined, limit: undefined },
+          page: { offset: undefined, limit: undefined, images: false },
         },
       ])
 
@@ -506,7 +537,10 @@ describe("ReadTool", () => {
         }),
       ).toEqual({ type: "error", value: "Cannot read binary file: archive.dat" })
       expect(readCalls).toEqual([
-        { input: AbsolutePath.make(path.join(process.cwd(), "archive.dat")), page: { offset: 2, limit: 1 } },
+        {
+          input: AbsolutePath.make(path.join(process.cwd(), "archive.dat")),
+          page: { offset: 2, limit: 1, images: false },
+        },
       ])
     }),
   )
@@ -646,7 +680,10 @@ describe("ReadTool", () => {
         value: { type: "text-page", content: "hello", mime: "text/plain", offset: 2, truncated: true, next: 3 },
       })
       expect(readCalls).toEqual([
-        { input: AbsolutePath.make(path.join(process.cwd(), "large.txt")), page: { offset: 2, limit: 1 } },
+        {
+          input: AbsolutePath.make(path.join(process.cwd(), "large.txt")),
+          page: { offset: 2, limit: 1, images: false },
+        },
       ])
     }),
   )

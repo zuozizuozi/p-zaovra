@@ -95,7 +95,7 @@ export interface Interface {
   readonly read: (
     path: AbsolutePath,
     resource: string,
-    page?: PageInput,
+    page?: PageInput & { images?: boolean },
   ) => Effect.Effect<FileSystem.Content | TextPage, ReadError>
   readonly list: (path: AbsolutePath, page?: PageInput) => Effect.Effect<ListPage, FSUtil.Error>
 }
@@ -172,7 +172,7 @@ export const read = Effect.fn("ReadTool.read")(function* (
   fs: FSUtil.Interface,
   input: string,
   resource: string,
-  page: PageInput = {},
+  page: PageInput & { images?: boolean } = {},
 ) {
   const real = yield* fs.realPath(input)
   return yield* Effect.scoped(
@@ -186,8 +186,22 @@ export const read = Effect.fn("ReadTool.read")(function* (
       )
       const mime = imageMime(first)
       if (mime) {
-        if (info.size > MAX_MEDIA_INGEST_BYTES)
-          return yield* Effect.fail(new MediaIngestLimitError({ resource, maximumBytes: MAX_MEDIA_INGEST_BYTES }))
+        if (page.images === false || info.size > MAX_MEDIA_INGEST_BYTES) {
+          const header = Buffer.from(first)
+          const dimensions =
+            mime === "image/png" && first.length >= 24
+              ? `${header.readUInt32BE(16)}×${header.readUInt32BE(20)}`
+              : mime === "image/gif" && first.length >= 10
+                ? `${header.readUInt16LE(6)}×${header.readUInt16LE(8)}`
+                : "unavailable from bounded header"
+          return new TextPage({
+            type: "text-page",
+            content: `Image: ${resource}\nFormat: ${mime}\nSize: ${info.size} bytes\nDimensions: ${dimensions}\nImage pixels were NOT sent to the model: ${page.images === false ? "the selected model does not declare image input support" : "the image exceeds the media ingestion limit"}. The original file remains available to the user.`,
+            mime: "text/plain",
+            offset: 1,
+            truncated: false,
+          })
+        }
         const chunks = [first]
         let total = first.length
         while (total <= MAX_MEDIA_INGEST_BYTES) {

@@ -15,6 +15,24 @@ const session: SessionV2Info = {
 }
 
 describe("V2 session timeline adapter", () => {
+  test("preserves durable execution failure reasons and references on reload", () => {
+    const message = "输入或媒体处理超过运行时限制（RangeError）。ref=err_test"
+    const result = adaptSessionMessages(session, [
+      { id: "user", type: "user", text: "continue", time: { created: 0 } },
+      {
+        id: "assistant_failed",
+        type: "assistant",
+        agent: "build",
+        model: session.model!,
+        time: { created: 1, completed: 2 },
+        content: [],
+        error: { type: "unknown", message },
+      },
+    ])
+    expect(result[1]?.message).toMatchObject({
+      error: { name: "UnknownError", data: { message } },
+    })
+  })
   test("only reports shell history without a completion record, including after reload", () => {
     const pending: SessionMessage = {
       id: "shell_pending",

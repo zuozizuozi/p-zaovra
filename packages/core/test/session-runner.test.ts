@@ -41,6 +41,7 @@ import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { SessionExecutionLocal } from "@zaovra-ai/core/session/execution/local"
 import { SessionRunCoordinator } from "@zaovra-ai/core/session/run-coordinator"
 import { SessionRunner } from "@zaovra-ai/core/session/runner"
 import * as SessionRunnerLLM from "@zaovra-ai/core/session/runner/llm"
@@ -436,6 +437,37 @@ const setupOverflowRecovery = Effect.gen(function* () {
   requests.length = 0
   return session
 })
+
+it.effect("persists unexpected drain failures once with a safe reason and replayable reference", () =>
+  Effect.gen(function* () {
+    yield* setup
+    const store = yield* SessionStore.Service
+    const events = yield* EventV2.Service
+    const info = yield* store.get(sessionID)
+    const started = yield* DateTime.now
+    const before = yield* store.context(sessionID)
+    const interrupted = yield* Effect.exit(Effect.interrupt)
+    if (Exit.isFailure(interrupted))
+      yield* SessionExecutionLocal.reportFailure(store, events, info!, started, interrupted.cause)
+    expect(yield* store.context(sessionID)).toEqual(before)
+    const session = {
+      ...info!,
+      model: { providerID: ProviderV2.ID.make("fake"), id: ModelV2.ID.make("fake-model") },
+    }
+    const cause = Cause.die(new RangeError("secret=never-show-this; data:image/png;base64,AAAA"))
+    yield* SessionExecutionLocal.reportFailure(store, events, session, started, cause)
+    const messages = yield* store.context(sessionID)
+    const failed = messages.flatMap((message) => (message.type === "assistant" ? [message] : []))
+    expect(failed).toHaveLength(1)
+    expect(failed[0]?.error?.message).toContain("RangeError")
+    expect(failed[0]?.error?.message).toContain("ref=err_")
+    expect(JSON.stringify(failed)).not.toContain("never-show-this")
+    yield* SessionExecutionLocal.reportFailure(store, events, session, started, cause)
+    expect(yield* store.context(sessionID)).toHaveLength(messages.length)
+    yield* replaySessionProjection(sessionID)
+    expect(yield* store.context(sessionID)).toEqual(messages)
+  }),
+)
 
 const messageTexts = (request: LLMRequest, role: "user" | "system") =>
   request.messages.flatMap((message) =>
