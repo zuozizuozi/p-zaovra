@@ -35,14 +35,15 @@ import { SessionExecution } from "../src/session/execution"
 import { LocationServiceMap } from "../src/location-service-map"
 import { ProjectV2 } from "../src/project"
 
-function browserProcesses() {
+function browserProcesses(rootsOnly = true) {
   if (process.platform !== "win32") return []
   const output = execFileSync(
     "powershell.exe",
     [
       "-NoProfile",
       "-Command",
-      "$items=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('chrome.exe','headless_shell.exe','chrome-headless-shell.exe','msedge.exe') -and $_.CommandLine -like '*--remote-debugging-pipe*' -and $_.CommandLine.Replace([char]92,[char]47) -like ('*'+$env:TEMP.Replace([char]92,[char]47)+'*') } | Select-Object ProcessId); ConvertTo-Json -Compress -InputObject $items",
+      (rootsOnly ? "" : "$rootsOnly=$false; ") +
+        "$items=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('chrome.exe','headless_shell.exe','chrome-headless-shell.exe','msedge.exe') -and ($rootsOnly -eq $false -or $_.CommandLine -like '*--remote-debugging-pipe*') -and $_.CommandLine.Replace([char]92,[char]47) -like ('*'+$env:TEMP.Replace([char]92,[char]47)+'*') } | Select-Object ProcessId); ConvertTo-Json -Compress -InputObject $items",
     ],
     { encoding: "utf8" },
   )
@@ -311,6 +312,7 @@ test("real Session Stop, archive, Location disposal and browser process loss", {
   const second = path.join(root, "other")
   await mkdir(second)
   const initial = browserProcesses()
+  const initialTree = browserProcesses(false)
   const server = createServer((_request, response) => response.end("<title>Lifecycle</title><p>alive</p>"))
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()
@@ -378,7 +380,7 @@ test("real Session Stop, archive, Location disposal and browser process loss", {
         ),
       ),
     )
-    assert.deepEqual(browserProcesses(), initial, "scope release leaves no owned browser process")
+    assert.deepEqual(browserProcesses(false), initialTree, "scope release leaves no owned browser or child process")
   } finally {
     server.closeAllConnections()
     server.close()
