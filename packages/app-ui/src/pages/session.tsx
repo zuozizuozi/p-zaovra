@@ -385,8 +385,8 @@ export default function Page() {
   const { params, sessionKey, workspaceKey, tabs, view } = useSessionLayout()
   const [artifactTarget, setArtifactTarget] = createSignal<{ path: string }>()
   createEffect(on(sessionKey, () => setArtifactTarget(undefined)))
-  const openResultFile = (input: string) => {
-    const target = artifactPath(input, sdk().directory)
+  const openResultFile = (input: string, encoded = false) => {
+    const target = artifactPath(input, sdk().directory, encoded)
     if (!target) {
       showToast({ variant: "error", title: "无法打开文件", description: "请选择当前项目内的有效文件路径。" })
       return

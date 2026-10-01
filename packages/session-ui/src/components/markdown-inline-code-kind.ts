@@ -1891,6 +1891,14 @@ const pathFileNamePrefixes = new Set([
 export function inlineCodeKind(text: string): "path" | "url" | undefined {
   if (/^https?:\/\//i.test(text)) return "url"
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return
+  // Inline code is ambiguous. Commands stay code; explicit Markdown links can name unusual files.
+  if (/[\r\n<>|;&]/.test(text) || /\s-[a-z-]/i.test(text)) return
+  if (
+    /^(?:bun|bunx|npm|npx|pnpm|yarn|node|python\d*|py|git|cp|copy|mv|rm|convert|magick|ffmpeg|bash|sh|pwsh|powershell|curl|wget)\s/i.test(
+      text,
+    )
+  )
+    return
   if (
     /\.(?:png|jpe?g|gif|webp|svg|ico|pdf|docx?|xlsx?|pptx?|mp4|webm|mp3|wav)(?::\d+|#L\d+)?$/i.test(text) &&
     !/[\r\n<>|]/.test(text)

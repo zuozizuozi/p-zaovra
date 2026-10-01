@@ -26,3 +26,12 @@ test("rejects outside paths, traversal and dangerous schemes", () => {
   expect(artifactPreviewable("report.pdf")).toBe(true)
   expect(artifactPreviewable("report.docx")).toBe(false)
 })
+
+test("distinguishes literal percent file names from encoded links", () => {
+  expect(artifactPath("100%.png", "/work")?.path).toBe("100%.png")
+  expect(artifactPath("report%20one.pdf", "/work")?.path).toBe("report%20one.pdf")
+  expect(artifactPath("100%25.png", "/work", true)?.path).toBe("100%.png")
+  expect(artifactPath("report%20one.pdf", "/work", true)?.path).toBe("report one.pdf")
+  expect(artifactPath("%2e%2e/secret.png", "/work", true)).toBeUndefined()
+  expect(artifactPath("%ZZ.png", "/work", true)).toBeUndefined()
+})

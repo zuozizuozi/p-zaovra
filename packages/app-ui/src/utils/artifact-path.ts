@@ -1,7 +1,13 @@
-export function artifactPath(input: string, directory: string) {
+export function artifactPath(input: string, directory: string, encoded = false) {
+  const valueIsURL = encoded || /^file:\/\//i.test(input.trim())
+  // File-list entries and inline paths are literal file names, not URL-encoded strings.
+  // Keep encoded traversal rejected even when it arrives through a literal-path entry point.
+  if (!valueIsURL && /%(?:2e|2f|5c|00)/i.test(input)) return
   const decoded = (() => {
+    const value = input.trim().replace(/^file:\/\//i, "")
+    if (!valueIsURL) return value
     try {
-      return decodeURIComponent(input.trim().replace(/^file:\/\//i, ""))
+      return decodeURIComponent(value)
     } catch {
       return ""
     }

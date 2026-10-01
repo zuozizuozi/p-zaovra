@@ -528,7 +528,7 @@ export function Markdown(
         if (!value || /^(?:https?:|mailto:|#)/i.test(value)) return
         event.preventDefault()
         event.stopPropagation()
-        openFile(value)
+        openFile(value, target instanceof HTMLAnchorElement)
       }}
       onKeyDown={(event) => {
         if (!openFile || !["Enter", " "].includes(event.key) || !(event.target instanceof HTMLElement)) return

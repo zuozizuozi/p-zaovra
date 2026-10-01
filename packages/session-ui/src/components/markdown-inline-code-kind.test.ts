@@ -2,6 +2,19 @@ import { describe, expect, test } from "bun:test"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 
 describe("inlineCodeKind", () => {
+  test("keeps commands ending in file names as code", () => {
+    for (const command of [
+      "bun test foo.ts",
+      "python make_poster.py",
+      "git add README.md",
+      "cp a.png b.png",
+      "npm i && node build.js",
+      "convert in.jpg -resize 50% out.png",
+      "tool -x out.png",
+      "echo ok; out.png",
+    ])
+      expect(inlineCodeKind(command)).toBeUndefined()
+  })
   test("recognizes image and document paths including spaces", () => {
     for (const path of ["结果.png", "报告 final.pdf", "image.JPEG", "table.xlsx", "src/my file.ts:12", "slides.pptx"])
       expect(inlineCodeKind(path)).toBe("path")
