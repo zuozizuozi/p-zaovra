@@ -1,7 +1,7 @@
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
-import { DateTime, Effect, Layer, Schema, Context, Stream, Cause, Exit, Deferred } from "effect"
+import { DateTime, Effect, Layer, Schema, Context, Stream, Cause, Exit, Deferred, RcMap } from "effect"
 import { SessionOutcome } from "./session/outcome"
 import type { Info } from "@zaovra-ai/schema/session-outcome"
 import { Config } from "./config"
@@ -28,6 +28,7 @@ import path from "path"
 import { AppProcess } from "./process"
 import { BackgroundJob } from "./background-job"
 import { ToolOutputStore } from "./tool-output-store"
+import { BrowserSession } from "./tool/browser-session"
 import { Global } from "./global"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { fromRow } from "./session/info"
@@ -817,6 +818,14 @@ const layer = Layer.effect(
               Effect.all(
                 [
                   interruptShells(sessionID),
+                  Effect.gen(function* () {
+                    const session = yield* store.get(sessionID)
+                    if (!session || !(yield* RcMap.has(locations.rcMap, session.location))) return
+                    yield* BrowserSession.Service.pipe(
+                      Effect.flatMap((browser) => browser.close(sessionID)),
+                      Effect.provide(locations.get(session.location)),
+                    )
+                  }).pipe(Effect.orDie),
                   jobs.list().pipe(
                     Effect.flatMap((items) =>
                       Effect.forEach(

@@ -45,6 +45,27 @@ const withStore = <A, E, R>(
 const it = testEffect(Layer.empty)
 
 describe("ToolOutputStore", () => {
+  it.live("retains session PNG bytes in managed storage and expires them", () =>
+    withStore(({ root, store, fs }) =>
+      Effect.gen(function* () {
+        const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+        const first = yield* store.image(sessionID, bytes)
+        const second = yield* store.image(SessionV2.ID.make("ses_other_image"), bytes)
+        expect(path.dirname(first)).toBe(path.join(root, "tool-output"))
+        expect(first.endsWith(".png")).toBe(true)
+        expect(first).not.toBe(second)
+        expect(Array.from(yield* fs.readFile(first))).toEqual(Array.from(bytes))
+        const rejected = yield* store.image(sessionID, new Uint8Array(4 * 1024 * 1024 + 1)).pipe(Effect.exit)
+        expect(Exit.isFailure(rejected)).toBe(true)
+        const expired = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000)
+        yield* fs.utimes(first, expired, expired)
+        yield* store.cleanup()
+        expect(yield* fs.exists(first)).toBe(false)
+        expect(yield* fs.exists(second)).toBe(true)
+      }),
+    ),
+  )
+
   it.live("bounds the provider-facing text channel with one managed file", () =>
     withStore(({ store, fs }) =>
       Effect.gen(function* () {

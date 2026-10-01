@@ -32,7 +32,7 @@ const result = await Bun.build({
   target: "node",
   format: "esm",
   splitting: true,
-  external: ["node-gyp"],
+  external: ["node-gyp", "playwright-core"],
   naming: {
     entry: "node.js",
     chunk: "[name]-[hash].[ext]",

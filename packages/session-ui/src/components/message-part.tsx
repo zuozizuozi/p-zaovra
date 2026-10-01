@@ -1808,6 +1808,46 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
 }
 
 ToolRegistry.register({
+  name: "browser",
+  render(props) {
+    const dialog = useDialog()
+    const screenshot = createMemo(() => {
+      const value = props.metadata?.screenshot
+      if (
+        props.status !== "completed" ||
+        value?.mime !== "image/png" ||
+        typeof value.data !== "string" ||
+        value.data.length > 6 * 1024 * 1024
+      )
+        return undefined
+      return `data:image/png;base64,${value.data}`
+    })
+    return (
+      <>
+        <BasicTool {...props} icon="glasses" trigger={{ title: "Browser", subtitle: String(props.input.action ?? "") }}>
+          <pre class="whitespace-pre-wrap break-words">{props.metadata?.text ?? props.output}</pre>
+        </BasicTool>
+        <Show when={screenshot()}>
+          {(src) => (
+            <button
+              type="button"
+              aria-label="Preview browser screenshot"
+              onClick={() => dialog.show(() => <ImagePreview src={src()} alt="Browser screenshot" />)}
+            >
+              <img
+                src={src()}
+                alt="Browser screenshot"
+                style={{ "max-width": "320px", "max-height": "180px", "object-fit": "contain" }}
+              />
+            </button>
+          )}
+        </Show>
+      </>
+    )
+  },
+})
+
+ToolRegistry.register({
   name: "read",
   render(props) {
     const data = useData()

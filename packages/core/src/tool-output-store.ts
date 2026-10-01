@@ -40,6 +40,7 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()("ToolO
 export type Error = StorageError
 
 export interface Interface {
+  readonly image: (sessionID: SessionSchema.ID, data: Uint8Array) => Effect.Effect<string, Error>
   readonly capture: () => CaptureHandle
   readonly limits: () => Effect.Effect<{ readonly maxLines: number; readonly maxBytes: number }>
   readonly bound: (input: BoundInput) => Effect.Effect<BoundResult, Error>
@@ -211,7 +212,21 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ limits, bound, cleanup, capture: () => makeCapture(fs, directory) })
+    const image = (sessionID: SessionSchema.ID, data: Uint8Array) =>
+      Effect.gen(function* () {
+        if (data.length > 4 * 1024 * 1024)
+          return yield* new StorageError({ operation: "write", cause: "Screenshot exceeds 4 MiB" })
+        const file = path.join(
+          directory,
+          `tool_${Buffer.from(sessionID).toString("hex")}_${Identifier.ascending()}.png`,
+        )
+        yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
+        yield* fs
+          .writeFile(file, data, { flag: "wx", mode: 0o600 })
+          .pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
+        return file
+      })
+    return Service.of({ limits, bound, cleanup, image, capture: () => makeCapture(fs, directory) })
   }),
 )
 
