@@ -64,6 +64,7 @@ function renderDiff(value: SnapshotFileDiff | VcsFileDiff): value is RenderDiff 
 }
 
 export function SessionSidePanel(props: {
+  artifactTarget?: { path: string }
   canReview: () => boolean
   diffs: () => (SnapshotFileDiff | VcsFileDiff)[]
   diffsReady: () => boolean
@@ -471,7 +472,9 @@ export function SessionSidePanel(props: {
                               classList={{ hidden: activeTab() !== "artifacts" }}
                             >
                               <Show when={sessionKey()} keyed>
-                                {(_key) => <ArtifactsPanel active={activeTab() === "artifacts"} />}
+                                {(_key) => (
+                                  <ArtifactsPanel active={activeTab() === "artifacts"} target={props.artifactTarget} />
+                                )}
                               </Show>
                             </div>
                           </Show>
@@ -712,7 +715,9 @@ export function SessionSidePanel(props: {
                             classList={{ hidden: activeTab() !== "artifacts" }}
                           >
                             <Show when={sessionKey()} keyed>
-                              {(_key) => <ArtifactsPanel active={activeTab() === "artifacts"} />}
+                              {(_key) => (
+                                <ArtifactsPanel active={activeTab() === "artifacts"} target={props.artifactTarget} />
+                              )}
                             </Show>
                           </div>
                         </Show>

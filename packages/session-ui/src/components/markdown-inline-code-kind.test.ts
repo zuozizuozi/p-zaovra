@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { inlineCodeKind } from "./markdown-inline-code-kind"
 
 describe("inlineCodeKind", () => {
+  test("recognizes image and document paths including spaces", () => {
+    for (const path of ["结果.png", "报告 final.pdf", "image.JPEG", "table.xlsx", "src/my file.ts:12", "slides.pptx"])
+      expect(inlineCodeKind(path)).toBe("path")
+  })
   test("leaves code expressions as normal inline code", () => {
     expect(
       inlineCodeKind(

@@ -1,5 +1,6 @@
 import { useMarked } from "@zaovra-ai/ui/context/marked"
 import { useI18n } from "@zaovra-ai/ui/context/i18n"
+import { useFileLink } from "../context/file-link"
 import morphdom from "morphdom"
 import { checksum } from "@zaovra-ai/core/util/encode"
 import {
@@ -361,6 +362,7 @@ export function Markdown(
     classList?: Record<string, boolean>
   },
 ) {
+  const openFile = useFileLink()
   const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList"])
   const marked = useMarked()
   const i18n = useI18n()
@@ -479,6 +481,15 @@ export function Markdown(
     activeCodeKeys.clear()
     nextCodeKeys.forEach((key) => activeCodeKeys.add(key))
     content.forEach((block, index) => updateBlock(container, index, block, labels))
+    if (openFile) {
+      markInlineCode(container)
+      container.querySelectorAll<HTMLElement>('code[data-inline-code-kind="path"]').forEach((code) => {
+        if (code.closest("a")) return
+        code.tabIndex = 0
+        code.setAttribute("role", "link")
+        code.style.cursor = "pointer"
+      })
+    }
     while (container.children.length > content.length) {
       const child = container.lastElementChild
       if (!child) break
@@ -509,6 +520,22 @@ export function Markdown(
         [local.class ?? ""]: !!local.class,
       }}
       ref={setRoot}
+      onClick={(event) => {
+        if (!openFile || !(event.target instanceof Element)) return
+        const target = event.target.closest('a, code[data-inline-code-kind="path"]')
+        if (!target || !event.currentTarget.contains(target)) return
+        const value = target instanceof HTMLAnchorElement ? target.getAttribute("href") : target.textContent
+        if (!value || /^(?:https?:|mailto:|#)/i.test(value)) return
+        event.preventDefault()
+        event.stopPropagation()
+        openFile(value)
+      }}
+      onKeyDown={(event) => {
+        if (!openFile || !["Enter", " "].includes(event.key) || !(event.target instanceof HTMLElement)) return
+        if (!event.target.matches('code[data-inline-code-kind="path"]')) return
+        event.preventDefault()
+        openFile(event.target.textContent ?? "")
+      }}
       {...others}
     />
   )

@@ -1891,6 +1891,12 @@ const pathFileNamePrefixes = new Set([
 export function inlineCodeKind(text: string): "path" | "url" | undefined {
   if (/^https?:\/\//i.test(text)) return "url"
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return
+  if (
+    /\.(?:png|jpe?g|gif|webp|svg|ico|pdf|docx?|xlsx?|pptx?|mp4|webm|mp3|wav)(?::\d+|#L\d+)?$/i.test(text) &&
+    !/[\r\n<>|]/.test(text)
+  )
+    return "path"
+  if (/\s/.test(text) && !/[\r\n]/.test(text) && hasPathExtension(text.replace(/(?::\d+|#L\d+)$/, ""))) return "path"
   if (text === "/") return
   if (/^\/[a-z][a-z0-9-]*$/i.test(text)) return
   if (/\s/.test(text)) return
