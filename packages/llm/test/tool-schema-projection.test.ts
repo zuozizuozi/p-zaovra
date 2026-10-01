@@ -7,6 +7,62 @@ import { Auth, LLMClient } from "../src/route"
 import { it } from "./lib/effect"
 
 describe("tool schema projections", () => {
+  test("openai merges branch enums and keeps only shared required fields without mutating the input", () => {
+    const input = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["open"] },
+            value: { type: "string" },
+            common: { type: "boolean" },
+          },
+          required: ["action", "value"],
+        },
+        {
+          type: "object",
+          properties: { action: { const: "press" }, value: { type: "number" }, common: { type: "boolean" } },
+          required: ["action"],
+        },
+        { type: "object", properties: { action: { type: "string", enum: ["press", "close"] } }, required: ["action"] },
+      ],
+    }
+    const before = JSON.stringify(input)
+    expect(ToolSchemaProjection.openAI(input)).toEqual({
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["open", "press", "close"] },
+        value: { anyOf: [{ type: "string" }, { type: "number" }] },
+        common: { type: "boolean" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    })
+    expect(JSON.stringify(input)).toBe(before)
+  })
+
+  test("openai does not invent required fields or discard constraints on overlapping properties", () => {
+    expect(
+      ToolSchemaProjection.openAI({
+        anyOf: [
+          { type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] },
+          { type: "object", properties: { value: { type: "string", pattern: "^x" } } },
+        ],
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        value: {
+          anyOf: [
+            { type: "string", minLength: 2 },
+            { type: "string", pattern: "^x" },
+          ],
+        },
+      },
+      additionalProperties: false,
+    })
+  })
+
   test("moonshot strips $ref siblings and converts tuple arrays to a schema object", () => {
     expect(
       ToolSchemaProjection.moonshot({

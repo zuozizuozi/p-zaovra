@@ -12,6 +12,9 @@ const expect = (value: unknown) => ({
   not: { toContain: (other: string) => assert.ok(!String(value).includes(other), String(value)) },
 })
 import { DateTime, Effect, Fiber, Layer } from "effect"
+import { LLM } from "@zaovra-ai/llm"
+import { OpenAIChat, OpenAIResponses } from "@zaovra-ai/llm/protocols"
+import { Auth, LLMClient } from "@zaovra-ai/llm/route"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
 import { SessionMessage } from "../src/session/message"
@@ -190,6 +193,44 @@ test(
       await Effect.runPromise(
         Effect.gen(function* () {
           const registry = yield* ToolRegistry.Service
+          const definitions = (yield* registry.materialize()).definitions
+          const actions = [
+            "open",
+            "click",
+            "click_position",
+            "type",
+            "press",
+            "scroll",
+            "snapshot",
+            "screenshot",
+            "console",
+            "close",
+          ]
+          const responses = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+            LLM.request({
+              model: OpenAIResponses.route
+                .with({ endpoint: { baseURL: "https://example.test/v1" }, auth: Auth.bearer("test") })
+                .model({ id: "test" }),
+              prompt: "test",
+              tools: definitions,
+            }),
+          )
+          const chat = yield* LLMClient.prepare<OpenAIChat.OpenAIChatBody>(
+            LLM.request({
+              model: OpenAIChat.route
+                .with({ endpoint: { baseURL: "https://example.test/v1" }, auth: Auth.bearer("test") })
+                .model({ id: "test" }),
+              prompt: "test",
+              tools: definitions,
+            }),
+          )
+          for (const schema of [
+            JSON.parse(JSON.stringify(responses.body)).tools[0].parameters,
+            JSON.parse(JSON.stringify(chat.body)).tools[0].function.parameters,
+          ]) {
+            expect(schema.properties.action.enum).toEqual(actions)
+            expect(schema.required).toEqual(["action"])
+          }
           const browser = yield* BrowserTool.Service
           let calls = 0
           const call = (input: unknown, session = "ses_browser_a") =>

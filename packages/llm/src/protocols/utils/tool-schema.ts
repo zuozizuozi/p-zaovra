@@ -53,14 +53,67 @@ const openAI = (schema: JsonSchema): JsonSchema => {
       : {
           ...Object.fromEntries(Object.entries(schema).filter(([key]) => key !== "anyOf")),
           type: "object",
-          properties: variants.reduce(
-            (properties, variant) => ({ ...(isRecord(variant.properties) ? variant.properties : {}), ...properties }),
-            {},
+          properties: Object.fromEntries(
+            [
+              ...new Set(
+                variants.flatMap((variant) => Object.keys(isRecord(variant.properties) ? variant.properties : {})),
+              ),
+            ].map((key) => [
+              key,
+              mergePropertySchemas(
+                variants.flatMap((variant) =>
+                  isRecord(variant.properties) && key in variant.properties ? [variant.properties[key]] : [],
+                ),
+              ),
+            ]),
           ),
+          ...commonRequired(variants),
           additionalProperties: false,
         }
   const normalized = removeNullSchemas(flattened)
   return isRecord(normalized) ? normalized : { type: "object" }
+}
+
+function mergePropertySchemas(schemas: unknown[]) {
+  const unique = [...new Map(schemas.map((schema) => [JSON.stringify(schema), schema])).values()]
+  if (unique.length === 1) return unique[0]
+  // Only collapse plain string literals/enums; retain annotated or constrained alternatives intact.
+  if (
+    unique.every(
+      (schema) =>
+        isRecord(schema) &&
+        Object.keys(schema).every((key) => ["type", "enum", "const"].includes(key)) &&
+        (schema.type === undefined || schema.type === "string") &&
+        (typeof schema.const === "string" ||
+          (Array.isArray(schema.enum) &&
+            schema.enum.length > 0 &&
+            schema.enum.every((value) => typeof value === "string"))),
+    )
+  ) {
+    return {
+      type: "string",
+      enum: [
+        ...new Set(
+          unique.flatMap((schema) =>
+            isRecord(schema) ? (typeof schema.const === "string" ? [schema.const] : (schema.enum as string[])) : [],
+          ),
+        ),
+      ],
+    }
+  }
+  return { anyOf: unique }
+}
+
+function commonRequired(variants: Record<string, unknown>[]) {
+  const required = Array.isArray(variants[0]?.required)
+    ? variants[0].required.filter(
+        (key) =>
+          typeof key === "string" &&
+          variants.every((variant) => Array.isArray(variant.required) && variant.required.includes(key)),
+      )
+    : []
+  // Branch-specific requirements remain enforced by the original host schema.
+  return required.length > 0 ? { required } : {}
 }
 
 const gemini = (schema: JsonSchema): JsonSchema => GeminiToolSchema.convert(schema) ?? {}

@@ -122,7 +122,12 @@ describe("OpenAI Responses route", () => {
             properties: {
               path: { type: "string" },
               reference: { type: "string" },
-              limit: { type: "integer", maximum: 2000 },
+              limit: {
+                anyOf: [
+                  { type: "integer", maximum: 2000 },
+                  { type: "integer", maximum: 51200 },
+                ],
+              },
               resource: { type: "string" },
             },
             additionalProperties: false,
