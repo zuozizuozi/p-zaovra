@@ -351,6 +351,9 @@ describe("SessionRunnerModel", () => {
 
       const resolved = yield* SessionRunnerModel.resolve(session, catalog)
 
+      expect(resolved.inputModalities).toEqual(catalog.capabilities.input)
+      expect(String(resolved.id)).toBe(String(catalog.api.id))
+
       expect(resolved.route.defaults.headers).toMatchObject({ "x-test": "header", "x-variant": "high" })
       expect(resolved.route.defaults.http?.body).toEqual({
         custom_extension: { enabled: true },

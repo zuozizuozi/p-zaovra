@@ -11,9 +11,62 @@ import { DateTime } from "effect"
 
 const created = DateTime.makeUnsafe(0)
 const id = (value: string) => SessionMessage.ID.make(`msg_${value}`)
-const model = Model.make({ id: "model", provider: "provider", route: OpenAIChat.route })
+const model = Object.assign(Model.make({ id: "model", provider: "provider", route: OpenAIChat.route }), {
+  inputModalities: ["text", "image"],
+})
 
 describe("toLLMMessages", () => {
+  test("filters both attachment paths per modality without changing history, and restores images after a switch", () => {
+    const history: SessionMessage.Message[] = [
+      {
+        id: id("user"),
+        type: "user",
+        text: "Inspect attachments",
+        time: { created },
+        files: [
+          { mime: "image/png", uri: "data:image/png;base64,aGVsbG8=", name: "photo.png" },
+          { mime: "text/plain", uri: "data:text/plain;base64,aGVsbG8=", name: "notes.txt" },
+          { mime: "application/pdf", uri: "data:application/pdf;base64,aGVsbG8=", name: "notes.pdf" },
+        ],
+      },
+      {
+        id: id("tool"),
+        type: "assistant",
+        agent: "build",
+        model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+        time: { created, completed: created },
+        content: [
+          {
+            type: "tool",
+            id: "read-photo",
+            name: "read",
+            time: { created, completed: created },
+            state: {
+              status: "completed",
+              input: {},
+              structured: {},
+              content: [{ type: "file", mime: "image/png", uri: "data:image/png;base64,aGVsbG8=", name: "result.png" }],
+            },
+          },
+        ],
+      },
+    ]
+    const original = JSON.stringify(history)
+    const textOnly = Object.assign(Model.make({ ...Model.input(model) }), { inputModalities: ["text"] })
+    const request = JSON.stringify(toLLMMessages(history, textOnly))
+    expect(request).not.toContain("base64")
+    expect(request).toContain("photo.png")
+    expect(request).toContain("result.png")
+    expect(request).toContain("not sent")
+    expect(request).toContain("hello")
+    expect(JSON.stringify(history)).toBe(original)
+    const visual = JSON.stringify(toLLMMessages(history, model))
+    expect(visual).toContain("data:image/png;base64,aGVsbG8=")
+    expect(visual).not.toContain("data:application/pdf")
+    expect(JSON.stringify(history)).toBe(original)
+    const unknown = JSON.stringify(toLLMMessages(history, Model.make(Model.input(model))))
+    expect(unknown).not.toContain("base64")
+  })
   test("keeps verification evidence in stable tool history without losing failures or mutating stored output", () => {
     const check = (callID: string, exit: number) =>
       SessionMessage.Assistant.make({

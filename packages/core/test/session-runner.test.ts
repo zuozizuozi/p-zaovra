@@ -11,7 +11,7 @@ import {
   type LLMRequest,
 } from "@zaovra-ai/llm"
 import { Auth, RequestExecutor } from "@zaovra-ai/llm/route"
-import { fixedResponse } from "../../llm/test/lib/http"
+import { dynamicResponse, fixedResponse } from "../../llm/test/lib/http"
 import { sseEvents } from "../../llm/test/lib/sse"
 import { deltaChunk, usageChunk } from "../../llm/test/lib/openai-chunks"
 import * as OpenAIChat from "@zaovra-ai/llm/protocols/openai-chat"
@@ -100,6 +100,8 @@ const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
 let responses: (LLMEvent[] | LLMError)[] | undefined
 let responseStream: Stream.Stream<LLMEvent, LLMError> | undefined
+let replayProvider = false
+const replayBodies: string[] = []
 let streamGate: Deferred.Deferred<void> | undefined
 let streamStarted: Deferred.Deferred<void> | undefined
 let streamFailure: LLMError | undefined
@@ -114,6 +116,20 @@ const client = Layer.succeed(
     prepare: () => Effect.die("unused"),
     stream: ((request: LLMRequest) => {
       requests.push(request)
+      if (replayProvider)
+        return LLMClient.stream(request).pipe(
+          Stream.provide(
+            dynamicResponse((input) => {
+              replayBodies.push(input.text)
+              return Effect.succeed(
+                input.respond(
+                  sseEvents(deltaChunk({ content: "Offline continuation complete." }), deltaChunk({}, "stop")),
+                  { headers: { "content-type": "text/event-stream" } },
+                ),
+              )
+            }),
+          ),
+        )
       if (responseStream) {
         const stream = responseStream
         responseStream = undefined
@@ -387,6 +403,9 @@ const insertSession = (id: SessionV2.ID) =>
 const setup = Effect.gen(function* () {
   const { db } = yield* Database.Service
   response = []
+  requests.length = 0
+  replayProvider = false
+  replayBodies.length = 0
   sessionTokenBudget = undefined
   sessionOutput = undefined
   verificationEnabled = true
@@ -475,6 +494,139 @@ const messageTexts = (request: LLMRequest, role: "user" | "system") =>
   )
 const userTexts = (request: LLMRequest) => messageTexts(request, "user")
 const systemTexts = (request: LLMRequest) => messageTexts(request, "system")
+
+it.effect("continues persisted image history through a fixed HTTP provider without replaying tools", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    replayProvider = true
+    const fixture = process.env.ZAOVRA_MEDIA_SESSION_REPLAY
+      ? Schema.decodeUnknownSync(
+          Schema.Struct({ sessionID: SessionV2.ID, messages: Schema.Array(SessionMessage.Message) }),
+        )(yield* Effect.promise(() => Bun.file(process.env.ZAOVRA_MEDIA_SESSION_REPLAY!).json()))
+      : {
+          sessionID,
+          messages: [
+            SessionMessage.Assistant.make({
+              id: SessionMessage.ID.create(),
+              type: "assistant",
+              agent: "build",
+              model: { id: ModelV2.ID.make("old"), providerID: ProviderV2.ID.make("old") },
+              time: { created: DateTime.makeUnsafe(0), completed: DateTime.makeUnsafe(1) },
+              content: [
+                {
+                  type: "tool",
+                  id: "historical-read",
+                  name: "read",
+                  time: { created: DateTime.makeUnsafe(0), completed: DateTime.makeUnsafe(1) },
+                  state: {
+                    status: "completed",
+                    input: {},
+                    structured: {},
+                    content: [
+                      {
+                        type: "file",
+                        mime: "image/png",
+                        uri: "data:image/png;base64,aGVsbG8=",
+                        name: "old.png",
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          ],
+        }
+    yield* insertSession(fixture.sessionID)
+    const database = yield* Database.Service
+    yield* Effect.forEach(fixture.messages, (message, index) =>
+      database.db
+        .insert(SessionMessageTable)
+        .values({
+          id: message.id,
+          session_id: fixture.sessionID,
+          type: message.type,
+          seq: index - fixture.messages.length,
+          data: Schema.encodeSync(SessionMessage.Message)(message),
+        })
+        .run()
+        .pipe(Effect.orDie),
+    )
+    const session = yield* SessionV2.Service
+    const info = yield* session.get(fixture.sessionID)
+    currentModel = yield* SessionRunnerModel.resolve(
+      info!,
+      ModelV2.Info.make({
+        id: ModelV2.ID.make("catalog-text-alias"),
+        providerID: ProviderV2.ID.make("offline"),
+        name: "Offline text model",
+        api: {
+          id: ModelV2.ID.make("wire-model"),
+          type: "aisdk",
+          package: "@ai-sdk/openai-compatible",
+          url: "https://offline.invalid/v1",
+        },
+        capabilities: { input: ["text"], output: ["text"], tools: true },
+        request: { headers: {}, body: {} },
+        variants: [],
+        time: { released: 0 },
+        cost: [],
+        status: "active",
+        enabled: true,
+        limit: { context: 1000000, output: 1000 },
+      }),
+    )
+    const before = JSON.stringify(yield* session.context(fixture.sessionID))
+    requests.length = 0
+    executions.length = 0
+    yield* session.prompt({
+      sessionID: fixture.sessionID,
+      prompt: Prompt.make({ text: "Continue with a short text acknowledgement. Do not execute tools." }),
+      resume: false,
+    })
+    yield* session.resume(fixture.sessionID)
+    expect(requests).toHaveLength(1)
+    expect(replayBodies).toHaveLength(1)
+    expect(replayBodies[0]).toContain("not sent")
+    expect(replayBodies[0]).not.toContain("base64")
+    expect(replayBodies[0]).not.toContain("image_url")
+    expect(executions).toEqual([])
+    const after = yield* session.context(fixture.sessionID)
+    expect(after.at(-1)).toMatchObject({
+      type: "assistant",
+      finish: "stop",
+      content: [{ type: "text", text: "Offline continuation complete." }],
+    })
+    expect(JSON.stringify(after.filter((message) => fixture.messages.some((old) => old.id === message.id)))).toBe(
+      before,
+    )
+    if (process.env.ZAOVRA_MEDIA_REPLAY_REPORT)
+      yield* Effect.promise(() =>
+        Bun.write(
+          process.env.ZAOVRA_MEDIA_REPLAY_REPORT!,
+          JSON.stringify(
+            {
+              sourceSessionID: fixture.sessionID,
+              historicalMessages: fixture.messages.length,
+              providerTurns: replayBodies.length,
+              protocol: "OpenAI-compatible Chat, fixed HTTP response, no network",
+              request: JSON.parse(replayBodies[0]!),
+              result: "Offline continuation complete.",
+              historicalToolsReexecuted: executions.length,
+              beforeSHA256: new Bun.CryptoHasher("sha256").update(before).digest("hex"),
+              afterSHA256: new Bun.CryptoHasher("sha256")
+                .update(
+                  JSON.stringify(after.filter((message) => fixture.messages.some((old) => old.id === message.id))),
+                )
+                .digest("hex"),
+            },
+            null,
+            2,
+          ),
+        ),
+      )
+  }),
+)
 
 // Reproduces the finish/usage shape of both Pixel Courier empty-directory failures.
 const reasoningLimitResponse = (): LLMEvent[] => [

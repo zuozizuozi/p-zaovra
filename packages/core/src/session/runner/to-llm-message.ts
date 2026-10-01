@@ -11,6 +11,7 @@ import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
 import { Buffer } from "node:buffer"
 import { SessionOutcome } from "../outcome"
+import type { ResolvedModel } from "./model"
 
 const media = (file: FileAttachment): ContentPart => {
   const data = file.uri.match(/^data:([^;,]+)(;base64)?,(.*)$/s)
@@ -209,5 +210,45 @@ ${message.recent}
 }
 
 /** Translate projected V2 Session history into canonical @zaovra-ai/llm context. */
-export const toLLMMessages = (messages: readonly SessionMessage.Message[], model: Model, originalRequests?: string) =>
-  messages.flatMap((message) => toLLMMessage(message, model, originalRequests))
+export const toLLMMessages = (
+  messages: readonly SessionMessage.Message[],
+  model: ResolvedModel,
+  originalRequests?: string,
+) =>
+  messages
+    .flatMap((message) => toLLMMessage(message, model, originalRequests))
+    .map((message) =>
+      Message.make({
+        ...message,
+        content: message.content.map((part): ContentPart => {
+          if (part.type === "media") return omittedMedia(part.mediaType, part.filename, model.inputModalities) ?? part
+          if (part.type !== "tool-result" || part.result.type !== "content") return part
+          return {
+            ...part,
+            result: {
+              type: "content",
+              value: part.result.value.map((item) =>
+                item.type === "file" ? (omittedMedia(item.mime, item.name, model.inputModalities) ?? item) : item,
+              ),
+            },
+          }
+        }),
+      }),
+    )
+
+function omittedMedia(mime: string, name: string | undefined, supported: readonly string[] = []) {
+  const modality = mime.startsWith("image/")
+    ? "image"
+    : mime.startsWith("audio/")
+      ? "audio"
+      : mime.startsWith("video/")
+        ? "video"
+        : mime === "application/pdf"
+          ? "pdf"
+          : undefined
+  if (!modality || supported.includes(modality)) return
+  return {
+    type: "text" as const,
+    text: `[Attachment ${JSON.stringify(name ?? mime)} not sent: the current model does not declare ${modality} input support. The original remains in session history; its contents have not been viewed.]`,
+  }
+}

@@ -80,8 +80,10 @@ export class InvalidOutputLimitError extends Schema.TaggedErrorClass<InvalidOutp
   { message: Schema.String },
 ) {}
 
+export type ResolvedModel = Model & { readonly inputModalities?: readonly string[] }
+
 export interface Interface {
-  readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Model, Error>
+  readonly resolve: (session: SessionSchema.Info) => Effect.Effect<ResolvedModel, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/SessionRunnerModel") {}
@@ -257,7 +259,15 @@ export const fromCatalogModel = (
 }
 
 export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, credential?: Credential.Value) =>
-  withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
+  withVariant(model, session.model?.variant).pipe(
+    Effect.flatMap((configured) =>
+      fromCatalogModel(configured, credential).pipe(
+        // Carry capabilities from the selected Catalog entry, not an API model-ID lookup:
+        // custom aliases may share the same API ID with different settings.
+        Effect.map((resolved) => Object.assign(resolved, { inputModalities: configured.capabilities.input })),
+      ),
+    ),
+  )
 
 export const supported = (model: ModelV2.Info) =>
   model.api.type === "aisdk" &&
