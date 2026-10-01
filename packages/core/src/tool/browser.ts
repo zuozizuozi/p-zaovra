@@ -77,6 +77,7 @@ function origin(value: string) {
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    if (process.platform === "win32" && process.versions.bun) return Service.of({ close: () => Effect.void })
     const tools = yield* Tools.Service
     const permissions = yield* PermissionV2.Service
     const catalog = yield* Catalog.Service

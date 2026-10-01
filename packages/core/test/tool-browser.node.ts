@@ -1,7 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createServer } from "node:http"
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { execFileSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
 const expect = (value: unknown) => ({
@@ -29,23 +30,65 @@ import { ToolOutputStore } from "../src/tool-output-store"
 import { toolIdentity, settleTool } from "./lib/tool"
 
 import { AbsolutePath } from "../src/schema"
+import { SessionV2 } from "../src/session"
+import { SessionExecution } from "../src/session/execution"
+import { LocationServiceMap } from "../src/location-service-map"
+import { ProjectV2 } from "../src/project"
+
+function browserProcesses() {
+  if (process.platform !== "win32") return []
+  const output = execFileSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      "$items=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('chrome.exe','headless_shell.exe','chrome-headless-shell.exe','msedge.exe') -and $_.CommandLine -like '*--remote-debugging-pipe*' -and $_.CommandLine.Replace([char]92,[char]47) -like ('*'+$env:TEMP.Replace([char]92,[char]47)+'*') } | Select-Object ProcessId); ConvertTo-Json -Compress -InputObject $items",
+    ],
+    { encoding: "utf8" },
+  )
+  return (JSON.parse(output) as { ProcessId: number }[]).map((item) => item.ProcessId)
+}
 
 test(
   "browser observes, operates, retains screenshots, isolates sessions and closes on idle",
-  { timeout: 30000 },
+  { timeout: 60000 },
   async () => {
     const tmp = { path: await mkdtemp(path.join(os.tmpdir(), "browser-test-")) }
     let outsideHits = 0
     let uncertainHits = 0
+    let effectHits = 0
+    let webSocketHits = 0
     const outside = createServer((_request, response) => {
       outsideHits++
       response.end("outside")
+    })
+    outside.on("upgrade", (_request, socket) => {
+      webSocketHits++
+      socket.destroy()
     })
     await new Promise<void>((resolve) => outside.listen(0, "127.0.0.1", resolve))
     const outsideAddress = outside.address()
     if (!outsideAddress || typeof outsideAddress === "string") throw Error("No outside server")
     const outsideURL = `http://127.0.0.1:${outsideAddress.port}`
     const server = createServer((request, response) => {
+      if (request.url === "/effect") {
+        effectHits++
+        response.end("ok")
+        return
+      }
+      if (request.url === "/stall") return
+      if (request.url === "/file") {
+        response.setHeader("Content-Disposition", 'attachment; filename="denied.txt"')
+        response.end("must not be downloaded")
+        return
+      }
+      if (request.url === "/behaviors") {
+        response.setHeader("Content-Type", "text/html")
+        response.end(
+          `<!doctype html><title>Boundaries</title><button onclick="window.open('${outsideURL}/popup')">Popup</button><a href="/file" download>Download</a><button onclick="new WebSocket('${outsideURL.replace("http:", "ws:")}/socket')">Socket</button><button onclick="fetch('/effect');location.href='/stall'">Timeout</button><button onclick="for(let i=0;i<150;i++)console.log('entry'+i+':'+ 'x'.repeat(2000));document.querySelector('p').textContent='z'.repeat(40000)">Flood</button><p>ready</p>`,
+        )
+        return
+      }
       if (request.url === "/uncertain") {
         uncertainHits++
         response.destroy()
@@ -218,6 +261,34 @@ test(
           expect(JSON.stringify(yield* call({ action: "snapshot" }, "ses_browser_b"))).toContain("Browser fixture")
           yield* Effect.sleep("600 millis")
           expect(JSON.stringify(yield* call({ action: "snapshot" }, "ses_browser_b"))).toContain("no active browser")
+          yield* call({ action: "open", url: new URL("behaviors", url).href })
+          const popped = yield* call({ action: "click", target: { role: "button", name: "Popup" } })
+          yield* Effect.sleep("100 millis")
+          const popup = yield* call({ action: "console" })
+          expect(JSON.stringify(popped) + JSON.stringify(popup)).toContain("Popup blocked")
+          // Events can arrive in the action observation or the following console read.
+          expect(outsideHits).toBe(0)
+          const download = yield* call({ action: "click", target: { role: "link", name: "Download" } })
+          yield* Effect.sleep("100 millis")
+          expect(JSON.stringify(download) + JSON.stringify(yield* call({ action: "console" }))).toContain(
+            "Download blocked",
+          )
+          const socket = yield* call({ action: "click", target: { role: "button", name: "Socket" } })
+          yield* Effect.sleep("100 millis")
+          expect(JSON.stringify(socket) + JSON.stringify(yield* call({ action: "console" }))).toContain(
+            "Blocked WebSocket origin",
+          )
+          expect(webSocketHits).toBe(0)
+          const flood = yield* call({ action: "click", target: { role: "button", name: "Flood" } })
+          expect(JSON.stringify(flood)).toContain("Observation truncated")
+          expect(JSON.stringify(flood)).toContain("Earlier logs dropped")
+          assert.ok((flood.outputPaths?.length ?? 0) > 0)
+          assert.ok(Buffer.byteLength(JSON.stringify(flood.output?.content)) < 52000)
+          expect(
+            JSON.stringify(yield* call({ action: "click", target: { role: "button", name: "Timeout" } })),
+          ).toContain("Outcome may have occurred")
+          expect(effectHits).toBe(1)
+          yield* call({ action: "close" })
           yield* call({ action: "open", url: url.href })
           const pressing = yield* call({ action: "press", key: "ArrowRight", holdMs: 3000 }).pipe(Effect.forkChild)
           yield* Effect.sleep("100 millis")
@@ -234,3 +305,83 @@ test(
     }
   },
 )
+
+test("real Session Stop, archive, Location disposal and browser process loss", { timeout: 60000 }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "browser-lifecycle-"))
+  const second = path.join(root, "other")
+  await mkdir(second)
+  const initial = browserProcesses()
+  const server = createServer((_request, response) => response.end("<title>Lifecycle</title><p>alive</p>"))
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw Error("No server")
+  const url = `http://127.0.0.1:${address.port}`
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sessions = yield* SessionV2.Service
+        const locations = yield* LocationServiceMap.Service
+        const a = yield* sessions.create({ location: Location.Ref.make({ directory: AbsolutePath.make(root) }) })
+        const b = yield* sessions.create({ location: a.location })
+        const c = yield* sessions.create({ location: Location.Ref.make({ directory: AbsolutePath.make(second) }) })
+        let sequence = 0
+        const call = (session: SessionSchema.Info, input: unknown) =>
+          ToolRegistry.Service.pipe(
+            Effect.flatMap((registry) =>
+              settleTool(registry, {
+                ...toolIdentity,
+                sessionID: session.id,
+                call: { type: "tool-call", id: `life_${++sequence}`, name: "browser", input },
+              }),
+            ),
+            Effect.provide(locations.get(session.location)),
+          )
+        const observe = (session: SessionSchema.Info) =>
+          call(session, { action: "snapshot" }).pipe(Effect.map((value) => JSON.stringify(value)))
+        for (const session of [a, b, c])
+          expect(JSON.stringify(yield* call(session, { action: "open", url }))).toContain("Lifecycle")
+        yield* sessions.interrupt(a.id)
+        expect(yield* observe(a)).toContain("no active browser")
+        expect(yield* observe(b)).toContain("Lifecycle")
+        expect(yield* observe(c)).toContain("Lifecycle")
+        yield* sessions.update({ sessionID: b.id, archived: true })
+        expect(yield* observe(b)).toContain("no active browser")
+        expect(yield* observe(c)).toContain("Lifecycle")
+        yield* call(a, { action: "open", url })
+        yield* locations.invalidate(a.location)
+        expect(yield* observe(a)).toContain("no active browser")
+        expect(yield* observe(c)).toContain("Lifecycle")
+        if (process.platform === "win32") {
+          const owned = browserProcesses().filter((pid) => !initial.includes(pid))
+          assert.equal(owned.length, 1, "only the isolated survivor's browser is running")
+          process.kill(owned[0]!)
+          yield* Effect.sleep("300 millis")
+          expect(yield* observe(c)).toContain("no active browser")
+          expect(browserProcesses().filter((pid) => !initial.includes(pid)).length).toBe(0)
+        }
+      }).pipe(
+        Effect.provide(
+          AppNodeBuilder.build(LayerNode.group([SessionV2.node, LocationServiceMap.node]), [
+            [SessionExecution.node, SessionExecution.noopLayer],
+            [Global.node, Global.layerWith({ data: root })],
+            [PermissionV2.node, Layer.mock(PermissionV2.Service, { assert: () => Effect.void })],
+            [Config.node, Layer.mock(Config.Service, { entries: () => Effect.succeed([]) })],
+            [
+              ProjectV2.node,
+              Layer.mock(ProjectV2.Service, {
+                resolve: (directory) => Effect.succeed({ id: ProjectV2.ID.global, directory }),
+                directories: () => Effect.succeed([]),
+                commit: () => Effect.void,
+              }),
+            ],
+          ]),
+        ),
+      ),
+    )
+    assert.deepEqual(browserProcesses(), initial, "scope release leaves no owned browser process")
+  } finally {
+    server.closeAllConnections()
+    server.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

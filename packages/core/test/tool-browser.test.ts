@@ -1,7 +1,42 @@
-import { test } from "bun:test"
+import { expect, test } from "bun:test"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { tmpdir } from "node:os"
+import { Effect, Layer } from "effect"
+import { AppNodeBuilder } from "../src/effect/app-node-builder"
+import { BrowserTool } from "../src/tool/browser"
+import { Tools } from "../src/tool/tools"
+import { ToolRegistry } from "../src/tool/registry"
+import { PermissionV2 } from "../src/permission"
+import { Catalog } from "../src/catalog"
+import { SessionStore } from "../src/session/store"
+import { ToolOutputStore } from "../src/tool-output-store"
+
+test.skipIf(process.platform !== "win32")("does not register browser in Windows Bun", async () => {
+  let registered = false
+  await Effect.runPromise(
+    BrowserTool.Service.pipe(
+      Effect.provide(
+        AppNodeBuilder.build(BrowserTool.node, [
+          [
+            ToolRegistry.node,
+            Layer.mock(Tools.Service, {
+              register: () =>
+                Effect.sync(() => {
+                  registered = true
+                }),
+            }),
+          ],
+          [PermissionV2.node, Layer.empty],
+          [Catalog.node, Layer.empty],
+          [SessionStore.node, Layer.empty],
+          [ToolOutputStore.node, Layer.empty],
+        ]),
+      ),
+    ),
+  )
+  expect(registered).toBe(false)
+})
 
 test("browser integration on the Desktop Node runtime", async () => {
   const output = path.join(tmpdir(), `browser-integration-${process.pid}.mjs`)
