@@ -673,6 +673,96 @@ describe("WorkRunner", () => {
     }),
   )
 
+  it.live("blocks self-committed isolated work without applying a partial diff", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(async () => {
+        await $`git init`.cwd(root.path).quiet()
+        await $`git config core.fsmonitor false`.cwd(root.path).quiet()
+        await $`git config commit.gpgsign false`.cwd(root.path).quiet()
+        await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
+        await $`git config user.name Test`.cwd(root.path).quiet()
+        await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
+        await $`git add .`.cwd(root.path).quiet()
+        await $`git commit -m initial`.cwd(root.path).quiet()
+      })
+      const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
+      const isolated = AbsolutePath.make(`${root.path}-work-runner-isolated`)
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const git = yield* Git.Service
+      const repository = yield* git.repo
+        .discover(destination)
+        .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
+      const isolatedRepository = yield* git.worktree.create({ repository, directory: isolated })
+      const content = "isolated change\n".repeat(6_000)
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(isolated, "committed.txt"), "committed work\n")
+        await $`git add .`.cwd(isolated).quiet()
+        await $`git commit -m feature`.cwd(isolated).quiet()
+        await fs.writeFile(path.join(isolated, "feature.txt"), content)
+      })
+      yield* Effect.addFinalizer(() =>
+        git.worktree.remove({ repository: isolatedRepository, directory: isolated, force: true }).pipe(Effect.ignore),
+      )
+      const work = yield* Work.Service
+      const runner = yield* WorkRunner.Service
+      const created = yield* work.create({
+        id: goalID,
+        location: { directory: destination },
+        objective: "Merge isolated work",
+        acceptanceCriteria: [],
+        tasks: [
+          {
+            title: "Implement in isolation",
+            instructions: "Create the feature",
+            location: { directory: isolated },
+          },
+        ],
+      })
+
+      yield* runner.run({ goalID, force: true })
+
+      expect(yield* work.get(goalID)).toMatchObject({ status: "blocked" })
+      expect(yield* work.tasks(goalID)).toMatchObject([{ id: created.tasks[0]?.id, status: "blocked" }])
+      const database = yield* Database.Service
+      const history = yield* EventV2.readAggregate(database.db, {
+        aggregateID: goalID,
+        limit: 100,
+        manifest: DurableEventManifest.WorkDurable,
+      })
+      const conflict = history.events.find((event) => event.type === Work.Event.TaskMergeConflicted.type)
+      if (!conflict || conflict.type !== Work.Event.TaskMergeConflicted.type) throw new Error("Missing conflict")
+      expect(conflict.data.reason).toContain("1 个提交")
+      const ref = conflict.data.reason.match(/refs\/zaovra\/snapshots\/[^；]+/)?.[0]
+      expect(ref).toBeDefined()
+      expect(yield* Effect.promise(() => $`git show ${`${ref}:committed.txt`}`.cwd(root.path).text())).toBe(
+        "committed work\n",
+      )
+      expect(yield* Effect.promise(() => fs.stat(isolated).then(() => true))).toBe(true)
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(path.join(destination, "feature.txt")).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(path.join(destination, "committed.txt")).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
+    }),
+  )
+
   it.live("archives cancelled isolated work before removing its worktree", () =>
     Effect.gen(function* () {
       const root = yield* Effect.acquireRelease(

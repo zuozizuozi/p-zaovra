@@ -1,12 +1,14 @@
 export * as WorkIsolation from "./isolation"
 
 import { Work } from "@zaovra-ai/schema/work"
+import { randomUUID } from "crypto"
 import { Context, Effect, Layer } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { Git } from "../git"
 import { WorkArtifact } from "./artifact"
 
 export interface Interface {
+  readonly mergeBlocker: (goal: Work.GoalInfo, task: Work.TaskInfo) => Effect.Effect<string | undefined>
   readonly archive: (goal: Work.GoalInfo, task: Work.TaskInfo) => Effect.Effect<Work.ArtifactReference | undefined>
   readonly release: (goal: Work.GoalInfo, task: Work.TaskInfo) => Effect.Effect<boolean>
 }
@@ -52,10 +54,10 @@ const layer = Layer.effect(
       return yield* Effect.gen(function* () {
         const repository = yield* linked(task.location)
         if (!repository) return false
-        yield* git.worktree.remove({
+        yield* git.worktree.snapshot({
           repository,
-          directory: task.location!.directory,
-          force: true,
+          ref: `refs/zaovra/snapshots/${goal.id}/${task.id}/${randomUUID()}`,
+          remove: true,
         })
         return true
       }).pipe(
@@ -68,7 +70,32 @@ const layer = Layer.effect(
       )
     })
 
-    return Service.of({ archive, release })
+    const mergeBlocker = Effect.fn("WorkIsolation.mergeBlocker")(function* (goal: Work.GoalInfo, task: Work.TaskInfo) {
+      if (!task.location || task.location.directory === goal.location.directory) return undefined
+      return yield* Effect.gen(function* () {
+        const repository = yield* git.repo.discover(task.location!.directory)
+        const destination = yield* git.repo.discover(goal.location.directory)
+        if (!repository || !destination || repository.commonDirectory !== destination.commonDirectory)
+          return "Cannot verify isolated commit history; workspace retained for manual handling"
+        const head = yield* git.history.head(destination)
+        if (!head) return "Goal HEAD is unavailable; workspace retained for manual handling"
+        const count = yield* git.history.ahead(repository, head)
+        if (count === 0) return undefined
+        const snapshot = yield* git.worktree.snapshot({
+          repository,
+          ref: `refs/zaovra/snapshots/${goal.id}/${task.id}/${randomUUID()}`,
+        })
+        return `任务在隔离目录中自行提交了 ${count} 个提交；已保存快照 ${snapshot.ref}；需人工合并。目录已保留，未自动合并。`
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("WorkGraph merge safety check failed", cause).pipe(
+            Effect.as("Commit history or snapshot could not be verified; workspace retained for manual handling"),
+          ),
+        ),
+      )
+    })
+
+    return Service.of({ archive, release, mergeBlocker })
   }),
 )
 

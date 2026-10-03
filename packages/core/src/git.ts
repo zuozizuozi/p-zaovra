@@ -35,6 +35,7 @@ export class OperationError extends Schema.TaggedErrorClass<OperationError>()("G
     "list_files",
     "diff",
     "restore",
+    "snapshot",
   ]),
   message: Schema.String,
   directory: Schema.optional(AbsolutePath),
@@ -80,6 +81,7 @@ export interface Interface {
     readonly get: (repository: Repository, name?: string) => Effect.Effect<string | undefined>
   }
   readonly history: {
+    readonly ahead: (repository: Repository, revision: string) => Effect.Effect<number, OperationError>
     readonly head: (repository: Repository) => Effect.Effect<string | undefined>
     readonly branch: (repository: Repository) => Effect.Effect<string | undefined>
     readonly defaultRemoteBranch: (repository: Repository, remote?: string) => Effect.Effect<string | undefined>
@@ -118,6 +120,11 @@ export interface Interface {
     }) => Effect.Effect<void, PatchError>
   }
   readonly worktree: {
+    readonly snapshot: (input: {
+      repository: Repository
+      ref: string
+      remove?: boolean
+    }) => Effect.Effect<{ ref: string; head: string; tree: string; commit: string }, OperationError | WorktreeError>
     readonly create: (input: {
       repository: Repository
       directory: AbsolutePath
@@ -944,6 +951,124 @@ const layer = Layer.effect(
       )
     })
 
+    const ahead = Effect.fn("Git.history.ahead")(function* (repository: Repository, revision: string) {
+      const result = yield* repositoryOperation("snapshot", repository, ["rev-list", "--count", `${revision}..HEAD`])
+      const count = Number(result.text.trim())
+      if (!Number.isSafeInteger(count) || count < 0)
+        return yield* new OperationError({ operation: "snapshot", message: "Invalid commit count" })
+      return count
+    })
+
+    const snapshot = Effect.fn("Git.worktree.snapshot")(
+      (input: { repository: Repository; ref: string; remove?: boolean }) =>
+        locked(
+          input.repository,
+          Effect.gen(function* () {
+            const repository = input.repository
+            const index = path.join(repository.gitDirectory, `snapshot-${randomUUID()}.index`)
+            const env = {
+              GIT_INDEX_FILE: index,
+              GIT_AUTHOR_NAME: "Zaovra Snapshot",
+              GIT_AUTHOR_EMAIL: "snapshot@zaovra.local",
+              GIT_COMMITTER_NAME: "Zaovra Snapshot",
+              GIT_COMMITTER_EMAIL: "snapshot@zaovra.local",
+            }
+            const run = (args: string[]) => repositoryOperation("snapshot", repository, args, { env })
+            // Use a separate index: snapshotting must not stage or discard the user's changes.
+            const capture = Effect.fnUntraced(function* () {
+              const original = path.join(repository.gitDirectory, "index")
+              if (yield* fs.exists(original)) yield* fs.copyFile(original, index)
+              else yield* run(["read-tree", "HEAD"])
+              const staged = (yield* run(["write-tree"])).text.trim()
+              const files = (yield* run(["ls-files", "-z"])).text
+              // Index hints must not hide modified files from a recovery snapshot.
+              for (const flag of ["--no-assume-unchanged", "--no-skip-worktree"]) {
+                yield* repositoryOperation("snapshot", repository, ["update-index", flag, "-z", "--stdin"], {
+                  env,
+                  stdin: files,
+                })
+              }
+              yield* run(["add", "--all", "--", "."])
+              const tree = (yield* run(["write-tree"])).text.trim()
+              if ((yield* run(["ls-tree", "-r", tree])).text.split("\n").some((line) => line.startsWith("160000 ")))
+                return yield* new OperationError({
+                  operation: "snapshot",
+                  message: "Nested repositories require manual preservation",
+                  directory: repository.worktree,
+                })
+              return { tree, staged }
+            })
+            return yield* Effect.gen(function* () {
+              const head = (yield* run(["rev-parse", "--verify", "HEAD"])).text.trim()
+              const captured = yield* capture()
+              const tree = captured.tree
+              // A second parent preserves staged content even when the working file differs.
+              const staged = (yield* run([
+                "commit-tree",
+                captured.staged,
+                "-p",
+                head,
+                "-m",
+                "Zaovra snapshot index",
+              ])).text.trim()
+              const commit = (yield* run([
+                "commit-tree",
+                tree,
+                "-p",
+                head,
+                "-p",
+                staged,
+                "-m",
+                `Zaovra recovery snapshot\nHEAD: ${head}\nTree: ${tree}`,
+              ])).text.trim()
+              // Empty old value requires creation; an existing recovery point is never overwritten.
+              yield* run(["update-ref", input.ref, commit, ""])
+              const current = yield* capture()
+              if (
+                (yield* run(["rev-parse", "--verify", input.ref])).text.trim() !== commit ||
+                (yield* run(["rev-parse", "--verify", "HEAD"])).text.trim() !== head ||
+                current.tree !== tree ||
+                current.staged !== captured.staged
+              )
+                return yield* new OperationError({
+                  operation: "snapshot",
+                  message: "Workspace changed during snapshot; directory retained",
+                  directory: repository.worktree,
+                })
+              yield* Effect.logInfo("Worktree recovery snapshot saved", {
+                ref: input.ref,
+                head,
+                tree,
+                commit,
+                directory: repository.worktree,
+              })
+              if (input.remove) {
+                const entry = (yield* worktreeList(repository)).find((item) => item.directory === repository.worktree)
+                if (entry?.kind !== "linked")
+                  return yield* new OperationError({
+                    operation: "snapshot",
+                    message: "Only linked worktrees can be removed",
+                    directory: repository.worktree,
+                  })
+                yield* worktreeRemove({ repository, directory: repository.worktree, force: true })
+              }
+              return { ref: input.ref, head, tree, commit }
+            }).pipe(Effect.ensuring(fs.remove(index).pipe(Effect.catch(() => Effect.void))))
+          }).pipe(
+            Effect.mapError((cause) =>
+              cause instanceof OperationError || cause instanceof WorktreeError
+                ? cause
+                : new OperationError({
+                    operation: "snapshot",
+                    message: "Snapshot filesystem operation failed",
+                    directory: input.repository.worktree,
+                    cause,
+                  }),
+            ),
+          ),
+        ),
+    )
+
     const worktreeList = Effect.fn("Git.worktree.list")(function* (repository: Repository) {
       return (yield* worktreeRun("list", repository, ["worktree", "list", "--porcelain"]))
         .split("\n")
@@ -960,10 +1085,10 @@ const layer = Layer.effect(
     return Service.of({
       repo: { discover, clone, create },
       remote: { get: remote },
-      history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
+      history: { ahead, head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
       sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
       change: { capture, check: checkPatch, apply, discard },
-      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList },
+      worktree: { snapshot, create: worktreeCreate, remove: worktreeRemove, list: worktreeList },
       index: { refresh, ignored },
       tree: {
         capture: captureTree,

@@ -1,3 +1,8 @@
+import { $ } from "bun"
+import fs from "fs/promises"
+import path from "path"
+import { Git } from "@zaovra-ai/core/git"
+import { tmpdir } from "./fixture/tmpdir"
 import { describe, expect } from "bun:test"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -19,7 +24,15 @@ import { testEffect } from "./lib/effect"
 
 const it = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([Database.node, EventV2.node, WorkProjector.node, WorkStore.node, Work.node, WorkRecovery.node]),
+    LayerNode.group([
+      Git.node,
+      Database.node,
+      EventV2.node,
+      WorkProjector.node,
+      WorkStore.node,
+      Work.node,
+      WorkRecovery.node,
+    ]),
     [[WorkExecution.node, WorkExecution.noopLayer]],
   ),
 )
@@ -379,3 +392,80 @@ describe("WorkRecovery", () => {
     }),
   )
 })
+
+it.live(
+  "recovery retains completed work when snapshot fails and snapshots it before later cleanup",
+  () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(async () => {
+        await $`git init`.cwd(root.path).quiet()
+        await $`git config user.name Test`.cwd(root.path).quiet()
+        await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
+        await $`git -c commit.gpgsign=false commit --allow-empty -m root`.cwd(root.path).quiet()
+      })
+      const git = yield* Git.Service
+      const repo = yield* git.repo.discover(AbsolutePath.make(root.path))
+      if (!repo) throw new Error("Missing repository")
+      const directory = AbsolutePath.make(path.join(root.path, "isolated"))
+      yield* git.worktree.create({ repository: repo, directory })
+      yield* Effect.promise(() => fs.writeFile(path.join(directory, "result.txt"), "recover this"))
+      const work = yield* Work.Service
+      const created = yield* work.create({
+        location: { directory: AbsolutePath.make(root.path) },
+        objective: "Recover completed isolation",
+        acceptanceCriteria: [],
+        tasks: [{ title: "Saved task", instructions: "Keep output", location: { directory } }],
+      })
+      const events = yield* EventV2.Service
+      const timestamp = yield* DateTime.now
+      yield* events.publish(Work.Event.TaskReadied, {
+        goalID: created.goal.id,
+        taskID: created.tasks[0].id,
+        status: "ready",
+        timestamp,
+      })
+      yield* events.publish(Work.Event.TaskStarted, {
+        goalID: created.goal.id,
+        taskID: created.tasks[0].id,
+        status: "running",
+        timestamp,
+      })
+      yield* events.publish(Work.Event.TaskVerificationStarted, {
+        goalID: created.goal.id,
+        taskID: created.tasks[0].id,
+        status: "verifying",
+        timestamp,
+      })
+      yield* events.publish(Work.Event.TaskCompleted, {
+        goalID: created.goal.id,
+        taskID: created.tasks[0].id,
+        status: "completed",
+        timestamp,
+      })
+      const recovery = yield* WorkRecovery.Service
+      const obstruction = path.join(repo.commonDirectory, "refs", "zaovra")
+      yield* Effect.promise(() => fs.writeFile(obstruction, "block ref creation"))
+      yield* recovery.recover(created.goal.id)
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "result.txt"), "utf8"))).toBe("recover this")
+      yield* Effect.promise(() => fs.unlink(obstruction))
+      yield* recovery.recover(created.goal.id)
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(directory).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
+      const ref = (yield* Effect.promise(() =>
+        $`git for-each-ref '--format=%(refname)' refs/zaovra/snapshots/`.cwd(root.path).text(),
+      )).trim()
+      expect(ref).toContain(created.tasks[0].id)
+      expect(yield* Effect.promise(() => $`git show ${`${ref}:result.txt`}`.cwd(root.path).text())).toBe("recover this")
+    }),
+  15_000,
+)

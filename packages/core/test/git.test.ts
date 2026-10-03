@@ -207,3 +207,112 @@ describe("Git trees", () => {
     }),
   )
 })
+
+describe("Worktree recovery snapshots", () => {
+  for (const mode of ["committed", "mixed"] as const) {
+    it.live(
+      `restores ${mode} work after deleting the isolated directory`,
+      () =>
+        Effect.gen(function* () {
+          const root = yield* Effect.acquireRelease(
+            Effect.promise(() => tmpdir()),
+            (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+          )
+          yield* Effect.promise(() => initRepo(root.path))
+          const git = yield* Git.Service
+          const repo = yield* git.repo.discover(AbsolutePath.make(root.path))
+          if (!repo) throw new Error("Missing repository")
+          const directory = AbsolutePath.make(path.join(root.path, "isolated"))
+          const linked = yield* git.worktree.create({ repository: repo, directory })
+          yield* Effect.promise(async () => {
+            await fs.writeFile(path.join(directory, ".gitignore"), "ignored.txt\n")
+            await fs.writeFile(path.join(directory, "tracked.txt"), "first\n")
+            await $`git add .`.cwd(directory).quiet()
+            await $`git commit -m first`.cwd(directory).quiet()
+            if (mode === "mixed") {
+              await fs.writeFile(path.join(directory, "second.txt"), "second\n")
+              await $`git add .`.cwd(directory).quiet()
+              await $`git commit -m second`.cwd(directory).quiet()
+              await fs.writeFile(path.join(directory, "tracked.txt"), "staged version\n")
+              await $`git add tracked.txt`.cwd(directory).quiet()
+              await $`git update-index --assume-unchanged tracked.txt`.cwd(directory).quiet()
+              await $`git update-index --skip-worktree second.txt`.cwd(directory).quiet()
+              await fs.writeFile(path.join(directory, "second.txt"), "second changed\n")
+              await fs.writeFile(path.join(directory, "tracked.txt"), "changed\n")
+              await fs.writeFile(path.join(directory, "binary.bin"), Buffer.from([0, 255, 17, 128]))
+              await fs.writeFile(path.join(directory, "ignored.txt"), "not in snapshot")
+            }
+          })
+          const head = yield* git.history.head(linked)
+          const before = yield* Effect.promise(() => fs.readFile(path.join(linked.gitDirectory, "index")))
+          const first = yield* git.worktree.snapshot({ repository: linked, ref: "refs/zaovra/snapshots/test/first" })
+          expect(yield* Effect.promise(() => fs.readFile(path.join(linked.gitDirectory, "index")))).toEqual(before)
+          const saved = yield* git.worktree.snapshot({
+            repository: linked,
+            ref: "refs/zaovra/snapshots/test/second",
+            remove: true,
+          })
+          expect(saved.head).toBe(head!)
+          expect(
+            yield* Effect.promise(() =>
+              fs.stat(directory).then(
+                () => true,
+                () => false,
+              ),
+            ),
+          ).toBe(false)
+          yield* Effect.promise(async () => {
+            expect((await $`git rev-parse ${first.ref}`.cwd(root.path).text()).trim()).toBe(first.commit)
+            expect((await $`git rev-parse ${`${saved.ref}^`}`.cwd(root.path).text()).trim()).toBe(head!)
+            await $`git worktree add --detach ${directory} ${saved.ref}`.cwd(root.path).quiet()
+            expect((await fs.readFile(path.join(directory, "tracked.txt"), "utf8")).replaceAll("\r\n", "\n")).toBe(
+              mode === "mixed" ? "changed\n" : "first\n",
+            )
+            if (mode === "mixed") {
+              expect(
+                (await $`git show ${`${saved.ref}^2:tracked.txt`}`.cwd(root.path).text()).replaceAll("\r\n", "\n"),
+              ).toBe("staged version\n")
+              expect(await fs.readFile(path.join(directory, "binary.bin"))).toEqual(Buffer.from([0, 255, 17, 128]))
+              expect(await fs.readFile(path.join(directory, "second.txt"), "utf8")).toContain("second changed")
+              expect(
+                await fs.stat(path.join(directory, "ignored.txt")).then(
+                  () => true,
+                  () => false,
+                ),
+              ).toBe(false)
+            }
+          })
+        }),
+      15_000,
+    )
+  }
+
+  it.live(
+    "keeps the directory and old ref when a new snapshot cannot be persisted",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+        )
+        yield* Effect.promise(() => initRepo(root.path))
+        const git = yield* Git.Service
+        const repo = yield* git.repo.discover(AbsolutePath.make(root.path))
+        if (!repo) throw new Error("Missing repository")
+        const directory = AbsolutePath.make(path.join(root.path, "isolated"))
+        const linked = yield* git.worktree.create({ repository: repo, directory })
+        const ref = "refs/zaovra/snapshots/test/old"
+        const saved = yield* git.worktree.snapshot({ repository: linked, ref })
+        yield* Effect.promise(() => fs.writeFile(path.join(directory, "new.txt"), "new work"))
+        expect(
+          yield* git.worktree.snapshot({ repository: linked, ref, remove: true }).pipe(
+            Effect.flip,
+            Effect.map((e) => e._tag),
+          ),
+        ).toBe("Git.OperationError")
+        expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "new.txt"), "utf8"))).toBe("new work")
+        expect((yield* Effect.promise(() => $`git rev-parse ${ref}`.cwd(root.path).text())).trim()).toBe(saved.commit)
+      }),
+    10_000,
+  )
+})

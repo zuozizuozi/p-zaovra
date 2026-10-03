@@ -493,6 +493,8 @@ export const layer = Layer.effect(
         return yield* mergeConflict(goal, task, prepared.data.digest, errorText(Cause.squash(resolved.cause)))
       if (hash(resolved.value) !== prepared.data.digest)
         return yield* mergeConflict(goal, task, prepared.data.digest, "Durable merge input digest does not match")
+      const blocker = yield* isolation.mergeBlocker(goal, task)
+      if (blocker) return yield* mergeConflict(goal, task, prepared.data.digest, blocker)
       const changes = Git.ChangeSet.make(resolved.value)
       if (changes.length > 0) {
         const applied = yield* Effect.gen(function* () {
