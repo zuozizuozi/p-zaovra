@@ -33,6 +33,13 @@ export const dict = {
   "session.outcome.unknown":
     "Some operations have no recorded result. Inspect the logs and workspace before repeating them.",
   "session.outcome.checks": "Verification information",
+  "session.outcome.noChecks": "No current checks",
+  "session.outcome.passedCount": "{{count}} current checks passed",
+  "session.outcome.failedCount": "{{count}} checks failed",
+  "session.outcome.incompleteCount": "{{count}} checks did not produce a valid result",
+  "session.outcome.current": "Current checks",
+  "session.outcome.history": "Replaced checks (history)",
+  "session.outcome.expandCheck": "Expand check details and full command",
   "session.outcome.execution.not-run": "Check did not run successfully",
   "session.outcome.execution.invalid-report": "Check produced no usable report",
   "session.outcome.execution.timeout": "Check timed out",

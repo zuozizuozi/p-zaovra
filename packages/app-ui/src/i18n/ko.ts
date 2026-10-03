@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "현재 검사 없음",
+  "session.outcome.passedCount": "현재 검사 {{count}}개 통과",
+  "session.outcome.failedCount": "검사 {{count}}개 실패",
+  "session.outcome.incompleteCount": "검사 {{count}}개에 유효한 결과 없음",
+  "session.outcome.current": "현재 검사",
+  "session.outcome.history": "대체된 검사 (기록)",
+  "session.outcome.expandCheck": "검사 세부 정보 및 전체 명령 표시",
   "home.welcome.title": "오늘은 무엇을 만들까요?",
   "home.welcome.description": "아이디어를 적고 프로젝트를 선택해 Zaovra와 시작하세요.",
   "home.welcome.continue": "세션으로 계속",

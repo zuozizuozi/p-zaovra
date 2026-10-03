@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "Nenhuma verificação atual",
+  "session.outcome.passedCount": "{{count}} verificações atuais passaram",
+  "session.outcome.failedCount": "{{count}} verificações falharam",
+  "session.outcome.incompleteCount": "{{count}} verificações sem resultado válido",
+  "session.outcome.current": "Verificações atuais",
+  "session.outcome.history": "Verificações substituídas (histórico)",
+  "session.outcome.expandCheck": "Expandir detalhes e comando completo",
   "home.welcome.title": "O que vamos criar hoje?",
   "home.welcome.description": "Descreva sua ideia, escolha um projeto e comece com Zaovra.",
   "home.welcome.continue": "Continuar para a sessão",

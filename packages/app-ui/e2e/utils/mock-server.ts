@@ -110,6 +110,7 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
     const path = url.pathname
     if (path === "/global/event" || path === "/event") return sse(route, config.events?.(), config.eventRetry)
     if (path === "/global/health") return json(route, { healthy: true })
+    if (path === "/api/location") return json(route, { data: [] })
     if (path === "/api/session/active") return json(route, { data: config.sessionStatus ?? {} })
     if (path === "/api/session")
       return json(route, {

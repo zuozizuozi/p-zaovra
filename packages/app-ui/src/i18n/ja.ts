@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "現在のチェックはありません",
+  "session.outcome.passedCount": "現在 {{count}} 件のチェックが成功",
+  "session.outcome.failedCount": "{{count}} 件のチェックが失敗",
+  "session.outcome.incompleteCount": "{{count}} 件のチェックで有効な結果なし",
+  "session.outcome.current": "現在のチェック",
+  "session.outcome.history": "置き換え済みのチェック（履歴）",
+  "session.outcome.expandCheck": "チェックの詳細とコマンド全文を表示",
   "home.welcome.title": "今日は何を作りましょうか？",
   "home.welcome.description": "アイデアを書き、プロジェクトを選んで Zaovra と始めましょう。",
   "home.welcome.continue": "セッションへ進む",

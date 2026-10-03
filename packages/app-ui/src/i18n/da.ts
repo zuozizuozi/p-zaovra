@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "Ingen aktuelle kontroller",
+  "session.outcome.passedCount": "{{count}} aktuelle kontroller bestået",
+  "session.outcome.failedCount": "{{count}} kontroller mislykkedes",
+  "session.outcome.incompleteCount": "{{count}} kontroller uden gyldigt resultat",
+  "session.outcome.current": "Aktuelle kontroller",
+  "session.outcome.history": "Erstattede kontroller (historik)",
+  "session.outcome.expandCheck": "Vis kontroldetaljer og hele kommandoen",
   "home.welcome.title": "Hvad skal vi skabe i dag?",
   "home.welcome.description": "Beskriv din idé, vælg et projekt, og kom i gang med Zaovra.",
   "home.welcome.continue": "Fortsæt til session",

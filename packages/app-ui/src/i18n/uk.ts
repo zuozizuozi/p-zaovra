@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "Немає поточних перевірок",
+  "session.outcome.passedCount": "Поточних перевірок пройдено: {{count}}",
+  "session.outcome.failedCount": "Перевірок не пройдено: {{count}}",
+  "session.outcome.incompleteCount": "Перевірок без достовірного результату: {{count}}",
+  "session.outcome.current": "Поточні перевірки",
+  "session.outcome.history": "Замінені перевірки (історія)",
+  "session.outcome.expandCheck": "Показати подробиці та повну команду",
   "home.welcome.title": "Що створимо сьогодні?",
   "home.welcome.description": "Опишіть ідею, виберіть проєкт і почніть із Zaovra.",
   "home.welcome.continue": "Перейти до сеансу",

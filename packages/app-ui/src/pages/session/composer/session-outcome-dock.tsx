@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js"
+import { For, Show, createMemo } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { createQuery, useMutation } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
@@ -39,6 +39,12 @@ export function SessionOutcomeDock() {
     }
   })
   const outcome = () => (query.isFetched ? query.data : undefined)
+  // Coverage is owned by the host; never infer replacement from command text here.
+  const currentChecks = createMemo(() => outcome()?.checks.filter((check) => !check.supersededBy) ?? [])
+  const historicalChecks = createMemo(() => outcome()?.checks.filter((check) => !!check.supersededBy) ?? [])
+  const passedChecks = createMemo(() => currentChecks().filter((check) => check.exit === 0 && !check.execution).length)
+  const failedChecks = createMemo(() => currentChecks().filter((check) => check.exit !== 0 && !check.execution).length)
+  const incompleteChecks = createMemo(() => currentChecks().filter((check) => !!check.execution).length)
   const recover = useMutation(() => ({
     mutationFn: (input: { sessionID: string; messageID: string; action: "continue" | "retry" | "abandon" }) =>
       sdk().client.v2.session.recover(input, { throwOnError: true }),
@@ -83,47 +89,100 @@ export function SessionOutcomeDock() {
               {language.t("session.outcome.unknown")}
             </span>
           </Show>
+          <div class="font-medium" data-component="verification-summary">
+            {language.t("session.outcome.checks")} ·{" "}
+            <Show when={currentChecks().length} fallback={language.t("session.outcome.noChecks")}>
+              {language.t("session.outcome.passedCount", { count: passedChecks() })}
+              <Show when={failedChecks()}>
+                <span class="text-icon-critical-base">
+                  {" · "}
+                  {language.t("session.outcome.failedCount", { count: failedChecks() })}
+                </span>
+              </Show>
+              <Show when={incompleteChecks()}>
+                <span class="text-icon-critical-base">
+                  {" · "}
+                  {language.t("session.outcome.incompleteCount", { count: incompleteChecks() })}
+                </span>
+              </Show>
+            </Show>
+          </div>
           <Show when={outcome()?.checks.length || outcome()?.missing.length}>
-            <details open={!!outcome()?.missing.length}>
-              <summary>{language.t("session.outcome.checks")}</summary>
-              <For each={outcome()?.checks}>
-                {(check) => (
-                  <div
-                    class="break-all"
-                    classList={{ "text-icon-critical-base": check.exit !== 0 && !check.supersededBy }}
+            <For
+              each={[
+                { history: false, checks: currentChecks() },
+                { history: true, checks: historicalChecks() },
+              ]}
+            >
+              {(group) => (
+                <Show when={group.checks.length}>
+                  <details
+                    open={!group.history}
+                    classList={{ "text-text-weak": group.history }}
+                    data-component={group.history ? "verification-history" : "verification-current"}
                   >
-                    {check.kind}: {check.command} · exit {check.exit}
-                    <Show when={check.execution}>
-                      <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
-                    </Show>
-                    <Show when={check.supersededBy}>
-                      <div>
-                        {language.t("session.outcome.superseded")} {check.supersededBy}
-                      </div>
-                    </Show>
-                    <For each={check.requirements}>
-                      {(requirement) => (
-                        <div>
-                          {language.t("session.outcome.coverage")} {requirement}
-                        </div>
+                    <summary>
+                      {language.t(group.history ? "session.outcome.history" : "session.outcome.current")}
+                      {" · "}
+                      {group.checks.length}
+                    </summary>
+                    <For each={group.checks}>
+                      {(check) => (
+                        <details
+                          class="group/check min-w-0 break-all"
+                          classList={{
+                            "text-icon-critical-base": !group.history && (check.exit !== 0 || !!check.execution),
+                          }}
+                        >
+                          <summary
+                            class="flex min-w-0 items-baseline gap-2 cursor-pointer"
+                            title={language.t("session.outcome.expandCheck")}
+                          >
+                            <span aria-hidden="true" class="shrink-0 group-open/check:rotate-90">
+                              ›
+                            </span>
+                            <span class="shrink-0">{check.kind}</span>
+                            <span class="min-w-0 flex-1 truncate">{check.command}</span>
+                            <span class="shrink-0">
+                              {check.execution
+                                ? language.t(`session.outcome.execution.${check.execution}`)
+                                : `exit ${check.exit}`}
+                            </span>
+                          </summary>
+                          <pre class="whitespace-pre-wrap break-all font-inherit">{check.command}</pre>
+                          <div>{check.callID}</div>
+                          <Show when={check.execution}>
+                            <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
+                          </Show>
+                          <Show when={check.supersededBy}>
+                            <div>
+                              {language.t("session.outcome.superseded")} {check.supersededBy}
+                            </div>
+                          </Show>
+                          <For each={check.requirements}>
+                            {(requirement) => (
+                              <div>
+                                {language.t("session.outcome.coverage")} {requirement}
+                              </div>
+                            )}
+                          </For>
+                          <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
+                          <For each={check.logs}>{(log) => <div>{log}</div>}</For>
+                        </details>
                       )}
                     </For>
-                    <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
-                    <For each={check.logs}>{(log) => <div>{log}</div>}</For>
-                  </div>
-                )}
-              </For>
-              <Show when={outcome()?.missing.length}>
-                <div role="alert" class="text-icon-critical-base font-medium">
-                  {language.t("session.outcome.missing")}{" "}
-                  {outcome()
-                    ?.missing.map((item) =>
-                      item === "requirements" ? language.t("session.outcome.requirements") : item,
-                    )
-                    .join(", ")}
-                </div>
-              </Show>
-            </details>
+                  </details>
+                </Show>
+              )}
+            </For>
+            <Show when={outcome()?.missing.length}>
+              <div role="alert" class="text-icon-critical-base font-medium">
+                {language.t("session.outcome.missing")}{" "}
+                {outcome()
+                  ?.missing.map((item) => (item === "requirements" ? language.t("session.outcome.requirements") : item))
+                  .join(", ")}
+              </div>
+            </Show>
           </Show>
           <Show when={!abandoned()}>
             <div class="flex flex-wrap gap-1">

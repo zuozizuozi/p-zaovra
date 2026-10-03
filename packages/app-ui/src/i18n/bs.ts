@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "Nema trenutnih provjera",
+  "session.outcome.passedCount": "{{count}} trenutnih provjera je prošlo",
+  "session.outcome.failedCount": "{{count}} provjera nije prošlo",
+  "session.outcome.incompleteCount": "{{count}} provjera nema važeći rezultat",
+  "session.outcome.current": "Trenutne provjere",
+  "session.outcome.history": "Zamijenjene provjere (historija)",
+  "session.outcome.expandCheck": "Proširi detalje provjere i cijelu naredbu",
   "home.welcome.title": "Šta ćemo danas stvoriti?",
   "home.welcome.description": "Opišite ideju, odaberite projekt i počnite uz Zaovra.",
   "home.welcome.continue": "Nastavi na sesiju",

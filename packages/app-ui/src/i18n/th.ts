@@ -1,4 +1,11 @@
 export const dict = {
+  "session.outcome.noChecks": "ไม่มีการตรวจสอบปัจจุบัน",
+  "session.outcome.passedCount": "การตรวจสอบปัจจุบันผ่าน {{count}} รายการ",
+  "session.outcome.failedCount": "การตรวจสอบไม่ผ่าน {{count}} รายการ",
+  "session.outcome.incompleteCount": "การตรวจสอบไม่มีผลที่ใช้ได้ {{count}} รายการ",
+  "session.outcome.current": "การตรวจสอบปัจจุบัน",
+  "session.outcome.history": "การตรวจสอบที่ถูกแทนที่ (ประวัติ)",
+  "session.outcome.expandCheck": "แสดงรายละเอียดการตรวจสอบและคำสั่งทั้งหมด",
   "home.welcome.title": "วันนี้เราจะสร้างอะไรดี?",
   "home.welcome.description": "เขียนไอเดีย เลือกโปรเจกต์ แล้วเริ่มต้นกับ Zaovra",
   "home.welcome.continue": "ไปยังเซสชัน",

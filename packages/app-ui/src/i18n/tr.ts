@@ -3,6 +3,13 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.outcome.noChecks": "Güncel kontrol yok",
+  "session.outcome.passedCount": "{{count}} güncel kontrol geçti",
+  "session.outcome.failedCount": "{{count}} kontrol başarısız",
+  "session.outcome.incompleteCount": "{{count}} kontrol geçerli sonuç vermedi",
+  "session.outcome.current": "Güncel kontroller",
+  "session.outcome.history": "Yerine yenisi geçen kontroller (geçmiş)",
+  "session.outcome.expandCheck": "Kontrol ayrıntılarını ve tam komutu göster",
   "home.welcome.title": "Bugün ne oluşturalım?",
   "home.welcome.description": "Fikrinizi yazın, bir proje seçin ve Zaovra ile başlayın.",
   "home.welcome.continue": "Oturuma devam et",

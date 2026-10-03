@@ -3,6 +3,13 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.outcome.noChecks": "暫無有效檢查",
+  "session.outcome.passedCount": "目前 {{count}} 項檢查通過",
+  "session.outcome.failedCount": "{{count}} 項檢查未通過",
+  "session.outcome.incompleteCount": "{{count}} 項檢查未取得有效結果",
+  "session.outcome.current": "目前檢查",
+  "session.outcome.history": "已覆蓋的歷史檢查",
+  "session.outcome.expandCheck": "展開檢查詳情與完整命令",
   "home.welcome.title": "今天，我們造點什麼？",
   "home.welcome.description": "寫下你的想法，選擇專案，和造物一起開始。",
   "home.welcome.continue": "繼續到對話",
