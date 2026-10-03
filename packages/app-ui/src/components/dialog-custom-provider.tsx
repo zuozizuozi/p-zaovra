@@ -480,7 +480,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
               {(model, index) => (
                 <label class="flex flex-col gap-2 text-14-regular">
                   <span>
-                    {model.id || language.t("provider.custom.models.id.label")} �{" "}
+                    {model.id || language.t("provider.custom.models.id.label")} ·{" "}
                     {language.t("provider.custom.protocol.label")}
                   </span>
                   <select

@@ -70,13 +70,13 @@ export function DialogProviderProtocol(props: { providerID: string }) {
             {([id, model]) => (
               <label class="flex flex-col gap-2">
                 <span class="break-all">
-                  {model.name ?? id} � {id}
+                  {model.name && model.name !== id ? `${model.name} · ${id}` : id}
                 </span>
                 <Show
                   when={!model.provider?.npm || protocolChoice(model.provider.npm)}
                   fallback={
                     <span class="text-text-weak">
-                      {language.t("provider.protocol.custom")} � {model.provider?.npm}
+                      {language.t("provider.protocol.custom")} · {model.provider?.npm}
                     </span>
                   }
                 >
