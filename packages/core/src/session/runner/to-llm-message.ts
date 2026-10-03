@@ -227,7 +227,7 @@ export const toLLMMessages = (
             ...part,
             result: {
               type: "content",
-              value: part.result.value.map((item) =>
+              value: part.result.value.map((item: ToolOutput["content"][number]) =>
                 item.type === "file" ? (omittedMedia(item.mime, item.name, model.inputModalities) ?? item) : item,
               ),
             },

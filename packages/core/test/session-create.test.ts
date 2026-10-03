@@ -21,7 +21,7 @@ import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { SessionInput } from "@zaovra-ai/core/session/input"
 import { SessionEvent } from "@zaovra-ai/core/session/event"
-import { SessionTable } from "@zaovra-ai/core/session/sql"
+import { SessionTable, TodoTable } from "@zaovra-ai/core/session/sql"
 import { SessionStore } from "@zaovra-ai/core/session/store"
 import { WorkspaceV2 } from "@zaovra-ai/core/workspace"
 import { testEffect } from "./lib/effect"
@@ -508,17 +508,35 @@ describe("SessionV2.create", () => {
       const session = yield* SessionV2.Service
       const created = yield* session.create({ location })
 
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: created.id,
+          content: "Remove with this session",
+          status: "pending",
+          priority: "medium",
+          position: 0,
+        })
+        .pipe(Effect.orDie)
+      expect(
+        yield* db.select().from(TodoTable).where(eq(TodoTable.session_id, created.id)).all().pipe(Effect.orDie),
+      ).toHaveLength(1)
+
       yield* session.remove(created.id)
 
-      const { db } = yield* Database.Service
+      expect(
+        yield* db.select().from(TodoTable).where(eq(TodoTable.session_id, created.id)).all().pipe(Effect.orDie),
+      ).toEqual([])
       expect(
         (yield* db
           .select()
           .from(EventTable)
           .where(eq(EventTable.aggregate_id, created.id))
+          .orderBy(asc(EventTable.seq))
           .all()
           .pipe(Effect.orDie)).map((event) => event.type),
-      ).toEqual(["session.next.created.1", "session.next.deleted.1"])
+      ).toEqual(["session.next.created.1", "session.next.updated.1", "session.next.deleted.1"])
       expect(
         yield* session.get(created.id).pipe(
           Effect.flip,
