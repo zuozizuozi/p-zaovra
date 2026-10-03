@@ -43,6 +43,8 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
 
 server.setRequestHandler(CallToolRequestSchema, (request) => {
   const text = typeof request.params.arguments?.text === "string" ? request.params.arguments.text : ""
+  if (text.startsWith("error:"))
+    return Promise.resolve({ isError: true, content: [{ type: "text", text: text.slice(6) }] })
   return Promise.resolve({
     content: [{ type: "text", text: `echo:${text}` }],
     structuredContent: { echo: text },

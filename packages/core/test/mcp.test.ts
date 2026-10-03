@@ -1,6 +1,7 @@
 import path from "path"
 import { describe, expect } from "bun:test"
 import { Config } from "@zaovra-ai/core/config"
+import { Evidence } from "@zaovra-ai/core/evidence"
 import { ConfigMCP } from "@zaovra-ai/core/config/mcp"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -14,7 +15,7 @@ import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
 import { ApplicationTools } from "@zaovra-ai/core/tool/application-tools"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { Effect, Layer } from "effect"
-import { executeTool, toolDefinitions, toolIdentity } from "./lib/tool"
+import { executeTool, settleTool, toolDefinitions, toolIdentity } from "./lib/tool"
 import { testEffect } from "./lib/effect"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SystemContext } from "@zaovra-ai/core/system-context"
@@ -56,7 +57,14 @@ const permission = Layer.mock(PermissionV2.Service, {
   assert: (input) => Effect.sync(() => permissions.push(input)),
 })
 const layer = AppNodeBuilder.build(
-  LayerNode.group([ApplicationTools.node, Integration.node, SystemContextRegistry.node, ToolRegistry.node, MCP.node]),
+  LayerNode.group([
+    ApplicationTools.node,
+    Integration.node,
+    SystemContextRegistry.node,
+    ToolRegistry.node,
+    MCP.node,
+    Evidence.node,
+  ]),
   [
     [Config.node, config],
     [Location.node, location],
@@ -68,6 +76,32 @@ const it = testEffect(layer)
 const sessionID = SessionV2.ID.make("ses_mcp")
 
 describe("MCP canonical tools", () => {
+  it.live("retains oversized MCP isError output as error evidence", () =>
+    Effect.gen(function* () {
+      const mcp = yield* MCP.Service
+      yield* mcp.status()
+      const registry = yield* ToolRegistry.Service
+      const evidence = yield* Evidence.Service
+      const message = "MCP failure: " + "x".repeat(60_000)
+      const result = yield* settleTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "mcp-error", name: "mcp_fixture_echo", input: { text: `error:${message}` } },
+      })
+      expect(result.inputRejected).toBe(false)
+      expect(result.output).toBeUndefined()
+      expect(result.outputPaths).toHaveLength(1)
+      expect(result.result.type).toBe("error")
+      if (result.result.type !== "error") throw new Error("expected MCP error")
+      expect(Buffer.byteLength(result.result.value)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
+      const id = Evidence.reference(sessionID, result.outputPaths![0])
+      expect(result.result.value).toContain(id)
+      const first = yield* evidence.read(sessionID, id, 0, 32768)
+      const second = yield* evidence.read(sessionID, id, first.nextOffset!, 32768)
+      expect(first.text + second.text).toBe(message)
+    }),
+  )
+
   it.live("registers Location-scoped tools and executes through the canonical registry", () =>
     Effect.gen(function* () {
       permissions.length = 0

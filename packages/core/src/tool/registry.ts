@@ -75,8 +75,24 @@ const registryLayer = Layer.effect(
         ),
       )
       if ("result" in pending) {
+        const bounded = yield* resources.bound({
+          sessionID: input.sessionID,
+          toolCallID: input.call.id,
+          output: {
+            structured: null,
+            content: [
+              {
+                type: "text",
+                text:
+                  pending.result.value +
+                  (capture.paths().length === 0 ? "" : `\nCommand log: ${capture.paths().join(", ")}`),
+              },
+            ],
+          },
+        })
+        const outputPaths = [...capture.paths(), ...bounded.outputPaths]
         const ids = yield* evidence
-          .retain(input.sessionID, input.call.id, capture.paths())
+          .retain(input.sessionID, input.call.id, outputPaths)
           .pipe(Effect.mapError((cause) => new ToolOutputStore.StorageError({ operation: "write", cause })))
         return ids.length === 0
           ? pending
@@ -84,9 +100,17 @@ const registryLayer = Layer.effect(
               ...pending,
               result: {
                 ...pending.result,
-                value: `${pending.result.value}\nEvidence: ${ids.join(", ")} (use evidence_read or evidence_search)`,
+                value: bounded.output.content
+                  .filter((part) => part.type === "text")
+                  .map((part) =>
+                    outputPaths.reduce(
+                      (text, file, index) => text.replaceAll(file, `${ids[index]} (evidence_read / evidence_search)`),
+                      part.text,
+                    ),
+                  )
+                  .join(""),
               },
-              outputPaths: capture.paths(),
+              outputPaths,
             }
       }
       const output =
