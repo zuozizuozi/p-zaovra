@@ -227,8 +227,24 @@ const providerMessage = (status: number, body: string | void, request: HttpClien
   ]
     .join("; ")
     .slice(0, 960)
-  if (detail) return `Provider request failed with HTTP ${status}: ${detail}`
-  if (body && body.length <= 500) return `Provider request failed with HTTP ${status}: ${redactBody(body, request)}`
+  const message = detail || (body && body.length <= 500 ? redactBody(body, request) : "")
+  const chat = URL.canParse(request.url) && new URL(request.url).pathname.endsWith("/chat/completions")
+  const responsesRequired =
+    /\b(?:use|requires?|switch to)\s+(?:the\s+)?(?:\/(?:[\w-]+\/)*responses\b|responses\s+(?:api|endpoint|protocol)\b)/i.test(
+      message,
+    ) &&
+    !/\b(?:not|never|don't|cannot|can't)\s+(?:use|requires?|switch to)\s+(?:the\s+)?(?:\/(?:[\w-]+\/)*responses|responses)/i.test(
+      message,
+    )
+  const incompatible =
+    /\b(?:function\s+)?tools?\s+with\s+reasoning(?:_effort)?\s+(?:are|is)\s+not\s+supported\b/i.test(message) ||
+    responsesRequired
+  const context = /context.{0,40}(?:length|limit|exceed|window)|(?:too many|maximum).{0,20}tokens/i.test(message)
+  const hint =
+    status === 400 && chat && incompatible && !context
+      ? " If this model supports Responses, select Responses in Settings > Providers > Protocol settings, then continue."
+      : ""
+  if (message) return `Provider request failed with HTTP ${status}: ${message}${hint}`
   return `Provider request failed with HTTP ${status}`
 }
 

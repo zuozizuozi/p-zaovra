@@ -712,3 +712,49 @@ describe("RequestExecutor", () => {
     }),
   )
 })
+
+// Original Gravitex Luna error from the 2026-10-01 commercial task, no credentials.
+const lunaProtocolError =
+  "Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'."
+for (const test of [
+  { path: "/gateway/openai/chat/completions", status: 400, message: lunaProtocolError, hint: true },
+  { path: "/chat/completions", status: 400, message: "This model requires the Responses API.", hint: true },
+  { path: "/chat/completions", status: 400, message: "Invalid tool schema for reasoning tool.", hint: false },
+  { path: "/chat/completions", status: 400, message: "Context length exceeded. Use Responses API.", hint: false },
+  { path: "/responses", status: 400, message: lunaProtocolError, hint: false },
+  { path: "/chat/completions", status: 401, message: lunaProtocolError, hint: false },
+  { path: "/chat/completions", status: 400, message: "Responses are not supported.", hint: false },
+  { path: "/chat/completions", status: 400, message: "Do not use Responses API with this model.", hint: false },
+  { path: "/chat/completions", status: 400, message: "This model does not require Responses API.", hint: false },
+  { path: "/chat/completions", status: 400, message: "Use responses field to specify your schema.", hint: false },
+]) {
+  it.effect(
+    `adds protocol guidance only for explicit Chat incompatibility: ${test.path} ${test.status} ${test.message}`,
+    () =>
+      Effect.gen(function* () {
+        const attempts = yield* Ref.make(0)
+        const error = yield* Effect.gen(function* () {
+          const executor = yield* RequestExecutor.Service
+          return yield* executor
+            .execute(
+              HttpClientRequest.post(`https://fixture.test${test.path}`).pipe(
+                HttpClientRequest.setHeader("authorization", "Bearer fixture-secret"),
+              ),
+            )
+            .pipe(Effect.flip)
+        }).pipe(
+          Effect.provide(
+            countedResponsesLayer(attempts, [
+              new Response(JSON.stringify({ error: { message: test.message + " fixture-secret" } }), {
+                status: test.status,
+              }),
+            ]),
+          ),
+        )
+        expect(error.reason.message.includes("Protocol settings")).toBe(test.hint)
+        expect(error.reason.message).not.toContain("fixture-secret")
+        expect(error.reason.message).toContain("<redacted>")
+        expect(yield* Ref.get(attempts)).toBe(1)
+      }),
+  )
+}

@@ -570,3 +570,24 @@ describe("SessionRunnerModel", () => {
     }),
   )
 })
+
+it.effect("retains the official OpenAI default endpoint only for the canonical provider", () =>
+  Effect.gen(function* () {
+    const official = yield* SessionRunnerModel.fromCatalogModel(
+      ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/openai" }),
+        providerID: ProviderV2.ID.make("openai"),
+      }),
+    )
+    const prepared = yield* LLMClient.prepare(LLM.request({ model: official, prompt: "test" }))
+    expect(prepared.model.route.endpoint).toMatchObject({ baseURL: "https://api.openai.com/v1", path: "/responses" })
+    const error = yield* SessionRunnerModel.fromCatalogModel(
+      model({
+        type: "aisdk",
+        package: "@ai-sdk/openai",
+        url: " ",
+      }),
+    ).pipe(Effect.flip)
+    expect(error).toBeInstanceOf(SessionRunnerModel.MissingEndpointError)
+  }),
+)

@@ -1,3 +1,5 @@
+import { DialogProviderProtocol } from "../dialog-provider-protocol"
+import { protocolEditable, protocolChoice } from "../provider-protocol"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { Tag } from "@zaovra-ai/ui/v2/badge-v2"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -44,9 +46,7 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   }
 
   const connected = createMemo(() => {
-    return providers
-      .connected()
-      .filter((p) => p.id !== "zaovra" || Object.values(p.models).find((m) => m.cost?.input))
+    return providers.connected().filter((p) => p.id !== "zaovra" || Object.values(p.models).find((m) => m.cost?.input))
   })
 
   const popular = createMemo(() => {
@@ -85,7 +85,7 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   const isConfigCustom = (providerID: string) => {
     const provider = serverSync().data.config.provider?.[providerID]
     if (!provider) return false
-    if (provider.npm !== "@ai-sdk/openai-compatible") return false
+    if (!protocolChoice(provider.npm)) return false
     if (!provider.models || Object.keys(provider.models).length === 0) return false
     return true
   }
@@ -165,6 +165,14 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
                         <Tag>{type(item)}</Tag>
                       </div>
                     </div>
+                    <Show when={protocolEditable(serverSync().data.config.provider?.[item.id])}>
+                      <ButtonV2
+                        variant="ghost-muted"
+                        onClick={() => dialog.show(() => <DialogProviderProtocol providerID={item.id} />)}
+                      >
+                        {language.t("provider.protocol.title")}
+                      </ButtonV2>
+                    </Show>
                     <Show
                       when={canDisconnect(item)}
                       fallback={

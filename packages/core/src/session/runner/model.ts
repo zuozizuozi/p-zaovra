@@ -73,10 +73,16 @@ export type Error =
   | VariantUnavailableError
   | UnsupportedApiError
   | InvalidOutputLimitError
+  | MissingEndpointError
   | Integration.AuthorizationError
 
 export class InvalidOutputLimitError extends Schema.TaggedErrorClass<InvalidOutputLimitError>()(
   "SessionRunnerModel.InvalidOutputLimitError",
+  { message: Schema.String },
+) {}
+
+export class MissingEndpointError extends Schema.TaggedErrorClass<MissingEndpointError>()(
+  "SessionRunnerModel.MissingEndpointError",
   { message: Schema.String },
 ) {}
 
@@ -190,7 +196,7 @@ const apiName = (model: ModelV2.Info) =>
 export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
-): Effect.Effect<Model, UnsupportedApiError | InvalidOutputLimitError> => {
+): Effect.Effect<Model, UnsupportedApiError | InvalidOutputLimitError | MissingEndpointError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
       ? model
@@ -212,6 +218,17 @@ export const fromCatalogModel = (
       }),
     )
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
+    // Only the canonical OpenAI provider owns the route's official default URL.
+    // A gateway selecting the same SDK must supply its own endpoint.
+    if (
+      !resolved.api.url?.trim() &&
+      (resolved.api.url !== undefined || resolved.providerID !== String(OpenAIResponses.route.provider))
+    )
+      return Effect.fail(
+        new MissingEndpointError({
+          message: "Responses provider requires an explicit baseURL. Configure the provider address before continuing.",
+        }),
+      )
     return Effect.succeed(
       withDefaults(resolved, OpenAIResponses.route)
         .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })

@@ -1,3 +1,4 @@
+import { createOpenAI } from "@ai-sdk/openai"
 import { test, expect } from "bun:test"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createAnthropic } from "@ai-sdk/anthropic"
@@ -61,6 +62,7 @@ for (const protocol of ["openai", "anthropic", "google"] as const) {
       expect(migrated.api?.package).toBe(result.config.npm)
       const factory = {
         "@ai-sdk/openai-compatible": createOpenAICompatible,
+        "@ai-sdk/openai": createOpenAI,
         "@ai-sdk/anthropic": createAnthropic,
         "@ai-sdk/google": createGoogleGenerativeAI,
       }[result.config.npm]

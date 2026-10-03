@@ -229,17 +229,18 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: st
   return {
     family: info.family,
     name: info.name,
-    api: info.provider?.npm
-      ? {
-          ...(info.id === undefined ? {} : { id: info.id }),
-          type: "aisdk" as const,
-          package: info.provider.npm,
-          ...(info.provider.api === undefined ? {} : { url: info.provider.api }),
-          settings: {},
-        }
-      : info.id === undefined
-        ? undefined
-        : { id: info.id },
+    api:
+      info.provider?.npm || (info.provider?.api !== undefined && packageName)
+        ? {
+            ...(info.id === undefined ? {} : { id: info.id }),
+            type: "aisdk" as const,
+            package: packageID!,
+            ...(info.provider?.api === undefined ? {} : { url: info.provider.api }),
+            settings: {},
+          }
+        : info.id === undefined
+          ? undefined
+          : { id: info.id },
     capabilities,
     request: (info.headers || request) && {
       headers: info.headers,

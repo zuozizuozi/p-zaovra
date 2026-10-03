@@ -5,7 +5,10 @@ export type ProviderDiscoveryInput = {
   kind?: "openai" | "anthropic" | "google"
 }
 
+export type ProviderProtocol = keyof typeof providerProtocols
+
 export const providerProtocols = {
+  responses: { label: "OpenAI / Responses", npm: "@ai-sdk/openai", baseURL: "https://api.openai.com/v1" },
   openai: {
     label: "OpenAI / Chat Completions",
     npm: "@ai-sdk/openai-compatible",
@@ -27,7 +30,7 @@ export const providerDiscoveryPresets: Record<string, { baseURL: string; kind?: 
   google: { baseURL: "https://generativelanguage.googleapis.com/v1beta", kind: "google" },
 }
 
-export function providerBaseURL(value: string, kind: ProviderDiscoveryInput["kind"] = "openai") {
+export function providerBaseURL(value: string, kind: ProviderProtocol = "openai") {
   const input = value
     .trim()
     .replace(/^(?:url|baseURL)\s*[:=]\s*/i, "")

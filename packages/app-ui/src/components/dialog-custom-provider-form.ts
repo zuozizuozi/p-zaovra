@@ -1,5 +1,5 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
-import { providerBaseURL, providerProtocols, type ProviderDiscoveryInput } from "../provider-discovery"
+import { providerBaseURL, providerProtocols, type ProviderProtocol } from "../provider-discovery"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -17,6 +17,7 @@ export type ModelRow = {
   row: string
   id: string
   name: string
+  protocol?: "openai" | "responses"
   err: ModelErr
 }
 
@@ -28,7 +29,7 @@ export type HeaderRow = {
 }
 
 export type FormState = {
-  protocol?: ProviderDiscoveryInput["kind"]
+  protocol?: ProviderProtocol
   providerID: string
   name: string
   baseURL: string
@@ -102,7 +103,18 @@ export function validateCustomProvider(input: ValidateArgs) {
   })
   const modelsValid = models.length > 0 && models.every((m) => !m.id && !m.name)
   const modelConfig = Object.fromEntries(
-    input.form.models.map((m) => [m.id.trim(), { name: m.name.trim() || m.id.trim() }]),
+    input.form.models.map((m) => [
+      m.id.trim(),
+      {
+        name: m.name.trim() || m.id.trim(),
+        ...((input.form.protocol === undefined ||
+          input.form.protocol === "openai" ||
+          input.form.protocol === "responses") &&
+        m.protocol
+          ? { provider: { npm: providerProtocols[m.protocol].npm } }
+          : {}),
+      },
+    ]),
   )
 
   const seenHeaders = new Set<string>()

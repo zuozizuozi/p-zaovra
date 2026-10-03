@@ -1,10 +1,11 @@
+import { ConfigParse } from "../../src/config/parse"
 import { afterEach, describe, expect } from "bun:test"
 import path from "path"
 import { Server } from "../../src/server/server"
 import { Effect, Fiber } from "effect"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
-import { it } from "../lib/effect"
+import { it, pollWithTimeout } from "../lib/effect"
 import { waitGlobalBusEvent } from "./global-bus"
 import { Global } from "@zaovra-ai/core/global"
 
@@ -483,3 +484,233 @@ describe("config HttpApi", () => {
     }),
   )
 })
+
+it.live(
+  "clears only the model npm override when desktop restores provider inheritance",
+  Effect.gen(function* () {
+    const file = Bun.file(path.join(Global.Path.config, "zaovra.jsonc"))
+    const before = yield* Effect.promise(async () => ((await file.exists()) ? await file.text() : undefined))
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        await (before === undefined ? file.delete() : Bun.write(file, before))
+        await app().request("/global/dispose", { method: "POST" })
+      }),
+    )
+    const provider = {
+      npm: "@ai-sdk/openai-compatible",
+      name: "Fixture",
+      options: { baseURL: "http://127.0.0.1:1/gateway/v1", headers: { "x-local": "retained" } },
+      whitelist: ["one"],
+      models: {
+        one: {
+          provider: { npm: "@ai-sdk/openai", api: "http://127.0.0.1:1/model" },
+          options: { reasoningEffort: "low" },
+          variants: { high: { reasoningEffort: "high" } },
+        },
+      },
+    }
+    yield* Effect.promise(() => Bun.write(file, JSON.stringify({ provider: { fixture: provider } })))
+    const update = yield* Effect.promise(() =>
+      Promise.resolve(
+        app().request("/global/config", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ provider: { fixture: { models: { one: { provider: { npm: "" } } } } } }),
+        }),
+      ),
+    )
+    expect(update.status).toBe(200)
+    const stored = yield* Effect.promise(async () =>
+      JSON.parse(JSON.stringify(ConfigParse.jsonc(await Bun.file(file.name!).text(), file.name!))),
+    )
+    expect(stored.provider.fixture.models.one.provider).toEqual({ api: "http://127.0.0.1:1/model" })
+    expect(stored.provider.fixture.options).toEqual(provider.options)
+    expect(stored.provider.fixture.models.one.options).toEqual(provider.models.one.options)
+    expect(stored.provider.fixture.models.one.variants).toEqual(provider.models.one.variants)
+    expect(stored.provider.fixture.whitelist).toEqual(provider.whitelist)
+    const read = yield* Effect.promise(() => Promise.resolve(app().request("/global/config")))
+    expect(read.status).toBe(200)
+    const result = yield* Effect.promise(() => read.json())
+    expect(result.provider.fixture.models.one.provider).not.toHaveProperty("npm")
+  }),
+)
+
+it.live(
+  "saved model protocol changes the next drain without interrupting the active drain",
+  Effect.gen(function* () {
+    const tmp = yield* tmpdirEffect({ git: true })
+    yield* Effect.promise(() => Bun.write(path.join(tmp.path, "fixture.txt"), "protocol fixture content"))
+    const file = Bun.file(path.join(Global.Path.config, "zaovra.jsonc"))
+    const before = yield* Effect.promise(async () => ((await file.exists()) ? await file.text() : undefined))
+    const gate = Promise.withResolvers<void>()
+    const urls: string[] = []
+    const bodies: Record<string, unknown>[] = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        urls.push(request.url)
+        bodies.push((await request.json()) as Record<string, unknown>)
+        if (urls.length === 1) await gate.promise
+        const response = request.url.endsWith("/responses")
+        const call = {
+          type: "function_call",
+          id: "fc1",
+          call_id: "call1",
+          name: "read",
+          arguments: JSON.stringify({ path: "fixture.txt" }),
+        }
+        const events = !response
+          ? [
+              {
+                id: "chat1",
+                object: "chat.completion.chunk",
+                created: 1,
+                model: "fixture",
+                choices: [{ index: 0, delta: { content: "First drain done." }, finish_reason: "stop" }],
+              },
+            ]
+          : urls.length === 2
+            ? [
+                { type: "response.output_item.added", output_index: 0, item: { ...call, arguments: "" } },
+                {
+                  type: "response.function_call_arguments.delta",
+                  item_id: "fc1",
+                  output_index: 0,
+                  delta: call.arguments,
+                },
+                { type: "response.output_item.done", output_index: 0, item: call },
+                {
+                  type: "response.completed",
+                  response: {
+                    id: "r1",
+                    status: "completed",
+                    output: [call],
+                    usage: { input_tokens: 1, output_tokens: 1 },
+                  },
+                },
+              ]
+            : [
+                {
+                  type: "response.output_text.delta",
+                  item_id: "m1",
+                  output_index: 0,
+                  content_index: 0,
+                  delta: "Responses drain done.",
+                },
+                {
+                  type: "response.completed",
+                  response: { id: "r2", status: "completed", output: [], usage: { input_tokens: 1, output_tokens: 1 } },
+                },
+              ]
+        return new Response(events.map((event) => "data: " + JSON.stringify(event) + "\n\n").join(""), {
+          headers: { "content-type": "text/event-stream" },
+        })
+      },
+    })
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        gate.resolve()
+        server.stop(true)
+        await (before === undefined ? file.delete() : Bun.write(file, before))
+        await app().request("/global/dispose", { method: "POST" })
+      }),
+    )
+    const baseURL = `http://127.0.0.1:${server.port}/tenant/openai/v1`
+    const api = async (url: string, payload?: unknown, method = "POST") => {
+      const response = await app().request(
+        url,
+        payload === undefined
+          ? undefined
+          : {
+              method,
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+      )
+      const text = await response.text()
+      if (!response.ok) throw new Error(`${url}: ${response.status}: ${text}`)
+      return text ? JSON.parse(text) : undefined
+    }
+    yield* Effect.promise(() =>
+      api(
+        "/global/config",
+        {
+          provider: {
+            protocolfixture: {
+              npm: "@ai-sdk/openai-compatible",
+              options: { baseURL, apiKey: "local-fixture" },
+              models: {
+                fixture: {
+                  tool_call: true,
+                  limit: { context: 200000, output: 4000 },
+                  options: { reasoningEffort: "low" },
+                },
+              },
+            },
+          },
+          permission: { "*": "allow" },
+          snapshot: false,
+          lsp: false,
+          formatter: false,
+        },
+        "PATCH",
+      ),
+    )
+    const created = yield* Effect.promise(() =>
+      api("/api/session", {
+        location: { directory: tmp.path },
+        model: { providerID: "protocolfixture", id: "fixture" },
+        agent: "build",
+      }),
+    )
+    const id: string = created.data.id
+    yield* Effect.promise(() => api(`/api/session/${id}/prompt`, { prompt: { text: "Reply briefly." } }))
+    yield* pollWithTimeout(
+      Effect.sync(() => (urls.length === 1 ? true : undefined)),
+      "first Chat request did not start",
+      "20 seconds",
+    )
+    yield* Effect.promise(() =>
+      api(
+        "/global/config",
+        {
+          provider: {
+            protocolfixture: {
+              models: { fixture: { provider: { npm: "@ai-sdk/openai" } } },
+            },
+          },
+        },
+        "PATCH",
+      ),
+    )
+    expect(urls).toEqual([`${baseURL}/chat/completions`])
+    const active = yield* Effect.promise(() => api("/api/session/active"))
+    expect(active.data[id]).toEqual({ type: "running" })
+    gate.resolve()
+    const idle = () =>
+      pollWithTimeout(
+        Effect.promise(async () => {
+          const active = await api("/api/session/active")
+          return active.data[id] === undefined ? true : undefined
+        }),
+        "drain did not finish",
+        "20 seconds",
+      )
+    yield* idle()
+    yield* Effect.promise(() => api(`/api/session/${id}/prompt`, { prompt: { text: "Read fixture.txt, then reply." } }))
+    yield* pollWithTimeout(
+      Effect.sync(() => (urls.length >= 3 ? true : undefined)),
+      "Responses tool continuation did not happen",
+      "20 seconds",
+    )
+    yield* idle()
+    expect(urls).toEqual([`${baseURL}/chat/completions`, `${baseURL}/responses`, `${baseURL}/responses`])
+    expect(bodies[1].reasoning).toMatchObject({ effort: "low" })
+    expect(bodies[1].tools).toBeArray()
+    expect(JSON.stringify(bodies[2].input)).toContain("protocol fixture content")
+    const history = yield* Effect.promise(() => api(`/api/session/${id}/message`))
+    expect(JSON.stringify(history)).toContain("Responses drain done.")
+  }),
+  60000,
+)

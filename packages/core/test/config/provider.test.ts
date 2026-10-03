@@ -1,5 +1,9 @@
+import { LLM, ToolDefinition } from "@zaovra-ai/llm"
+import { LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
+import { FetchHttpClient } from "effect/unstable/http"
+import { SessionRunnerModel } from "@zaovra-ai/core/session/runner/model"
 import { describe, expect } from "bun:test"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Layer } from "effect"
 import { Catalog } from "@zaovra-ai/core/catalog"
 import { Config } from "@zaovra-ai/core/config"
 import { ConfigProviderPlugin } from "@zaovra-ai/core/config/plugin/provider"
@@ -391,3 +395,167 @@ describe("ConfigProviderPlugin.Plugin", () => {
     ),
   )
 })
+
+for (const protocol of ["@ai-sdk/openai-compatible", "@ai-sdk/openai"]) {
+  it.effect(`routes migrated model overrides through the complete configured gateway URL: ${protocol}`, () =>
+    Effect.gen(function* () {
+      const urls: string[] = []
+      const bodies: Record<string, unknown>[] = []
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        async fetch(request) {
+          urls.push(request.url)
+          bodies.push((await request.json()) as Record<string, unknown>)
+          const event = request.url.endsWith("/responses")
+            ? {
+                type: "response.completed",
+                response: {
+                  id: "r1",
+                  status: "completed",
+                  output: [
+                    {
+                      type: "message",
+                      id: "m1",
+                      role: "assistant",
+                      content: [{ type: "output_text", text: "done", annotations: [] }],
+                    },
+                  ],
+                  usage: { input_tokens: 1, output_tokens: 1 },
+                },
+              }
+            : {
+                id: "c1",
+                object: "chat.completion.chunk",
+                created: 1,
+                model: "fixture",
+                choices: [{ index: 0, delta: { content: "done" }, finish_reason: "stop" }],
+              }
+          return new Response("data: " + JSON.stringify(event) + "\n\n", {
+            headers: { "content-type": "text/event-stream" },
+          })
+        },
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(() => server.stop(true)))
+      const baseURL = `http://127.0.0.1:${server.port}/tenant/openai/v1`
+      yield* addPlugin(
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({
+                type: "document",
+                info: decode(
+                  ConfigMigrateV1.migrate({
+                    provider: {
+                      gateway: {
+                        npm: "@ai-sdk/openai-compatible",
+                        options: { baseURL },
+                        models: {
+                          inherited: { tool_call: true },
+                          override: {
+                            provider: { npm: protocol },
+                            tool_call: true,
+                            options: { reasoningEffort: "low" },
+                          },
+                        },
+                      },
+                    },
+                  }),
+                ),
+              }),
+            ]),
+        }),
+      )
+      const catalog = yield* Catalog.Service
+      for (const id of ["inherited", "override"]) {
+        const entry = required(yield* catalog.model.get(ProviderV2.ID.make("gateway"), ModelV2.ID.make(id)))
+        const model = yield* SessionRunnerModel.fromCatalogModel(entry, { type: "key", key: "local-fixture" })
+        yield* LLMClient.generate(
+          LLM.request({
+            model,
+            prompt: "test",
+            tools: [
+              ToolDefinition.make({
+                name: "lookup",
+                description: "lookup",
+                inputSchema: { type: "object", properties: {} },
+              }),
+            ],
+          }),
+        ).pipe(
+          Effect.provide(LLMClient.layer),
+          Effect.provide(RequestExecutor.layer),
+          Effect.provide(FetchHttpClient.layer),
+        )
+      }
+      expect(urls).toEqual([
+        `${baseURL}/chat/completions`,
+        `${baseURL}/${protocol === "@ai-sdk/openai" ? "responses" : "chat/completions"}`,
+      ])
+      expect(bodies[1].tools).toBeArray()
+      if (protocol === "@ai-sdk/openai") expect(bodies[1].reasoning).toMatchObject({ effort: "low" })
+    }),
+  )
+}
+
+it.effect("rejects a migrated custom Responses provider without a base URL before transport", () =>
+  Effect.gen(function* () {
+    yield* addPlugin(
+      Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: decode(
+                ConfigMigrateV1.migrate({
+                  provider: {
+                    gateway: {
+                      npm: "@ai-sdk/openai-compatible",
+                      models: {
+                        override: { provider: { npm: "@ai-sdk/openai" } },
+                      },
+                    },
+                  },
+                }),
+              ),
+            }),
+          ]),
+      }),
+    )
+    const catalog = yield* Catalog.Service
+    const entry = required(yield* catalog.model.get(ProviderV2.ID.make("gateway"), ModelV2.ID.make("override")))
+    const error = yield* SessionRunnerModel.fromCatalogModel(entry, { type: "key", key: "local-fixture" }).pipe(
+      Effect.flip,
+    )
+    expect(error).toBeInstanceOf(SessionRunnerModel.MissingEndpointError)
+  }),
+)
+
+it.effect("retains an explicit model endpoint after its protocol override is removed", () =>
+  Effect.gen(function* () {
+    yield* addPlugin(
+      Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: decode(
+                ConfigMigrateV1.migrate({
+                  provider: {
+                    gateway: {
+                      npm: "@ai-sdk/openai-compatible",
+                      options: { baseURL: "https://gateway.test/v1" },
+                      models: { specific: { provider: { api: "https://gateway.test/model-api" } } },
+                    },
+                  },
+                }),
+              ),
+            }),
+          ]),
+      }),
+    )
+    const catalog = yield* Catalog.Service
+    const entry = required(yield* catalog.model.get(ProviderV2.ID.make("gateway"), ModelV2.ID.make("specific")))
+    expect(entry.api).toMatchObject({ package: "@ai-sdk/openai-compatible", url: "https://gateway.test/model-api" })
+  }),
+)

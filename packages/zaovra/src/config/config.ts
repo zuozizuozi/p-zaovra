@@ -106,7 +106,17 @@ function globalConfigFile() {
 
 function patchJsonc(input: string, patch: unknown, path: string[] = []): string {
   if (!isRecord(patch)) {
-    const edits = modify(input, path, patch, {
+    // JSON cannot carry undefined. An empty model SDK override explicitly restores inheritance.
+    const value =
+      path.length === 6 &&
+      path[0] === "provider" &&
+      path[2] === "models" &&
+      path[4] === "provider" &&
+      path[5] === "npm" &&
+      patch === ""
+        ? undefined
+        : patch
+    const edits = modify(input, path, value, {
       formattingOptions: {
         insertSpaces: true,
         tabSize: 2,

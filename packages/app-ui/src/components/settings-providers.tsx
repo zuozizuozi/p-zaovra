@@ -1,3 +1,5 @@
+import { DialogProviderProtocol } from "./dialog-provider-protocol"
+import { protocolEditable, protocolChoice } from "./provider-protocol"
 import { Button } from "@zaovra-ai/ui/button"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
@@ -50,9 +52,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   }
 
   const connected = createMemo(() => {
-    return providers
-      .connected()
-      .filter((p) => p.id !== "zaovra" || Object.values(p.models).find((m) => m.cost?.input))
+    return providers.connected().filter((p) => p.id !== "zaovra" || Object.values(p.models).find((m) => m.cost?.input))
   })
 
   const popular = createMemo(() => {
@@ -91,7 +91,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   const isConfigCustom = (providerID: string) => {
     const provider = serverSync().data.config.provider?.[providerID]
     if (!provider) return false
-    if (provider.npm !== "@ai-sdk/openai-compatible") return false
+    if (!protocolChoice(provider.npm)) return false
     if (!provider.models || Object.keys(provider.models).length === 0) return false
     return true
   }
@@ -169,6 +169,14 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
                       <span class="text-14-medium text-text-strong truncate">{item.name}</span>
                       <Tag>{type(item)}</Tag>
                     </div>
+                    <Show when={protocolEditable(serverSync().data.config.provider?.[item.id])}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => dialog.show(() => <DialogProviderProtocol providerID={item.id} />)}
+                      >
+                        {language.t("provider.protocol.title")}
+                      </Button>
+                    </Show>
                     <Show
                       when={canDisconnect(item)}
                       fallback={

@@ -1,4 +1,12 @@
 export const dict = {
+  "provider.protocol.title": "Protocol settings",
+  "provider.protocol.inherit": "Follow provider",
+  "provider.protocol.default": "Provider default",
+  "provider.protocol.custom": "Current custom implementation (unchanged)",
+  "provider.protocol.effect":
+    "Applies to new executions after saving. Active tasks keep their current configuration; wait for them to finish before continuing. No task is restarted automatically.",
+  "provider.protocol.saved": "Protocol settings saved",
+  "provider.protocol.changed": "Protocol configuration changed elsewhere. Close and reopen this dialog before saving.",
   "directory.unavailable.title": "Directory unavailable",
   "directory.unavailable.description": "This project directory no longer exists. Restore it and retry, or open another project.",
   "directory.unavailable.retry": "Retry",

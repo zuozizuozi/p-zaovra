@@ -101,6 +101,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     return { baseURL, name: form.name.trim() || host, providerID: form.providerID.trim() || saved.providerID || id }
   }
   const discover = async () => {
+    const protocol = form.protocol
     if (discovery.pending || saveMutation.isPending) return
     const url = validateProviderURL(form.baseURL, form.protocol, language.t)
     setForm("err", "baseURL", url.error)
@@ -110,13 +111,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       const input = {
         baseURL: url.baseURL,
         apiKey: form.apiKey,
-        kind: form.protocol,
+        kind: form.protocol === "responses" ? ("openai" as const) : form.protocol,
         headers: Object.fromEntries(
           form.headers.filter((h) => h.key.trim()).map((h) => [h.key.trim(), h.value.trim()]),
         ),
       }
       const models = await (platform.discoverProviderModels ?? discoverProviderModels)(input)
-      if (!alive.value || input.kind !== form.protocol || input.apiKey !== form.apiKey) return
+      if (!alive.value || protocol !== form.protocol || input.apiKey !== form.apiKey) return
       batch(() => {
         setDiscovery({ models, manual: false, query: "" })
         setForm("baseURL", input.baseURL)
@@ -468,6 +469,41 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
                 {language.t("provider.custom.models.add")}
               </Button>
             </div>
+          </Show>
+          <Show
+            when={
+              (form.protocol === "openai" || form.protocol === "responses") &&
+              (discovery.manual || discovery.models.length > 0)
+            }
+          >
+            <For each={form.models}>
+              {(model, index) => (
+                <label class="flex flex-col gap-2 text-14-regular">
+                  <span>
+                    {model.id || language.t("provider.custom.models.id.label")} �{" "}
+                    {language.t("provider.custom.protocol.label")}
+                  </span>
+                  <select
+                    class="h-10 rounded-md border border-border-base bg-surface-base px-3"
+                    value={model.protocol ?? ""}
+                    onChange={(event) =>
+                      setForm(
+                        "models",
+                        index(),
+                        "protocol",
+                        event.currentTarget.value === ""
+                          ? undefined
+                          : (event.currentTarget.value as "openai" | "responses"),
+                      )
+                    }
+                  >
+                    <option value="">{language.t("provider.protocol.inherit")}</option>
+                    <option value="openai">Chat Completions</option>
+                    <option value="responses">Responses</option>
+                  </select>
+                </label>
+              )}
+            </For>
           </Show>
           <details open={discovery.advanced} onToggle={(event) => setDiscovery("advanced", event.currentTarget.open)}>
             <summary class="cursor-pointer text-14-medium">{language.t("provider.custom.discovery.advanced")}</summary>

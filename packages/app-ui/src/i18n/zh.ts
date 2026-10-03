@@ -3,6 +3,13 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "provider.protocol.title": "协议设置",
+  "provider.protocol.inherit": "跟随提供方",
+  "provider.protocol.default": "提供方默认协议",
+  "provider.protocol.custom": "当前自定义实现（保持不变）",
+  "provider.protocol.effect": "保存后用于新执行。正在运行的任务保留当前配置，请等待结束后再继续；不会自动重启任务。",
+  "provider.protocol.saved": "协议设置已保存",
+  "provider.protocol.changed": "协议配置已在其他位置变更，请关闭并重新打开此窗口后保存。",
   "directory.unavailable.title": "目录不可用",
   "directory.unavailable.description": "项目目录已不存在。恢复目录后重试，或打开其他项目。",
   "directory.unavailable.retry": "重新打开",
