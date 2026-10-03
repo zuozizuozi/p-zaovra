@@ -83,15 +83,16 @@ const layer = Layer.effectDiscard(
               })
               if (type === "directory")
                 return yield* reader.list(absolute, { offset: input.offset, limit: input.limit })
-              const message = yield* sessions.message(context.assistantMessageID)
+              const message =
+                context.inputModalities === undefined ? yield* sessions.message(context.assistantMessageID) : undefined
               const model =
-                message?.message.type === "assistant"
+                context.inputModalities === undefined && message?.message.type === "assistant"
                   ? yield* catalog.model.get(message.message.model.providerID, message.message.model.id)
                   : undefined
               const content = yield* reader.read(absolute, resource, {
                 offset: input.offset,
                 limit: input.limit,
-                images: model?.capabilities.input.includes("image") === true,
+                images: (context.inputModalities ?? model?.capabilities.input)?.includes("image") === true,
               })
               if ("encoding" in content && content.encoding === "base64" && SUPPORTED_IMAGE_MIMES.has(content.mime)) {
                 return yield* image

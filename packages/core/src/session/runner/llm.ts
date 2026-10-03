@@ -671,6 +671,7 @@ const layer = Layer.effect(
                           agent: agent.id,
                           assistantMessageID,
                           call: event,
+                          inputModalities: model.inputModalities,
                         }),
                       ).pipe(
                         Effect.flatMap((settlement) =>

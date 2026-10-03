@@ -3,21 +3,16 @@ export * as ToolRegistry from "./registry"
 import { ToolOutput, type ToolCall, type ToolDefinition, type ToolResultValue } from "@zaovra-ai/llm"
 import { Context, Effect, Layer, Scope } from "effect"
 import { Evidence } from "../evidence"
-import { AgentV2 } from "../agent"
 import { PermissionV2 } from "../permission"
-import { SessionMessage } from "../session/message"
-import { SessionSchema } from "../session/schema"
 import { ToolOutputStore } from "../tool-output-store"
 import { Wildcard } from "../util/wildcard"
 import { ApplicationTools } from "./application-tools"
 import { definition, permission, settle, validateName, type AnyTool, type RegistrationError } from "./tool"
+import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { makeLocationNode } from "../effect/app-node"
 
-export type ExecuteInput = {
-  readonly sessionID: SessionSchema.ID
-  readonly agent: AgentV2.ID
-  readonly assistantMessageID: SessionMessage.ID
+export type ExecuteInput = Omit<Tool.Context, "toolCallID"> & {
   readonly call: ToolCall
 }
 
@@ -68,6 +63,7 @@ const registryLayer = Layer.effect(
         agent: input.agent,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
+        ...(input.inputModalities === undefined ? {} : { inputModalities: input.inputModalities }),
       }).pipe(
         Effect.provideService(ToolOutputStore.Capture, capture),
         Effect.map((output) => ({ output })),

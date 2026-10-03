@@ -1433,3 +1433,54 @@ test("default advisory mode retains not-run and stale checks without downgrading
     SessionOutcome.derive([{ ...run, metadata: { verificationEnabled: true } }], false, undefined, [target]).state,
   ).toBe("completed_unverified")
 })
+
+test("successful reruns inherit explicit replacement chains without weakening their scope", () => {
+  const targets = [
+    { path: "/src.js", digest: "fixed" },
+    { path: "/test.js", digest: "original" },
+  ]
+  const check = (
+    id: string,
+    command: string,
+    exit: number,
+    extra: Record<string, unknown> = {},
+    replaces: string[] = [],
+  ): SessionMessage.AssistantTool => ({
+    id,
+    type: "tool",
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { command, verification_replaces: replaces },
+      content: [],
+      structured: {
+        verification: {
+          kind: "test",
+          callID: id,
+          command,
+          cwd: "/",
+          exit,
+          targets,
+          assertions: [targets[1]],
+          ...extra,
+        },
+      },
+    },
+  })
+  const a = check("a", "original", 1)
+  const b = check("b", "replacement", 0, {}, ["a"])
+  const derive = (c: SessionMessage.AssistantTool) =>
+    SessionOutcome.derive([{ ...assistant, content: [a, b, c] }], false, undefined, targets, [])
+  expect(derive(check("c", "replacement", 0)).checks.find((c) => c.callID === "a")?.supersededBy).toBe("c")
+  for (const extra of [
+    { targets: [targets[1]] },
+    { assertions: [{ ...targets[1], digest: "changed" }] },
+    { targets: [{ ...targets[0], digest: "stale" }, targets[1]] },
+  ]) {
+    expect(
+      derive(check("c", "replacement", 0, extra)).checks.find((c) => c.callID === "a")?.supersededBy,
+    ).toBeUndefined()
+  }
+  expect(derive(check("c", "replacement", 1)).checks.find((c) => c.callID === "a")?.supersededBy).toBeUndefined()
+})

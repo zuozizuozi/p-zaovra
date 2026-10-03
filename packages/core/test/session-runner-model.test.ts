@@ -262,6 +262,28 @@ describe("SessionRunnerModel", () => {
     )
   }
 
+  it.effect("retains catalog visual capabilities when the API model name is an alias", () =>
+    Effect.gen(function* () {
+      const configured = ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+        capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+      })
+      const session = SessionV2.Info.make({
+        id: SessionV2.ID.make("ses_alias"),
+        projectID: ProjectV2.ID.global,
+        title: "alias",
+        model: { id: configured.id, providerID: configured.providerID },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/project") },
+      })
+      const resolved = yield* SessionRunnerModel.resolve(session, configured)
+      expect(configured.id).not.toBe(resolved.id)
+      expect(resolved.inputModalities).toEqual(["text", "image"])
+    }),
+  )
+
   it.effect("maps catalog OpenAI AI SDK models into native Responses routes", () =>
     Effect.gen(function* () {
       const resolved = yield* SessionRunnerModel.fromCatalogModel(

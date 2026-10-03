@@ -515,6 +515,32 @@ export function derive(
         }
         const key = checkKey(check, part.state.input)
         const previous = checks.get(key)
+        // Preserve explicit replacement chains when the replacing command is rerun.
+        // A weaker, stale or failed rerun must not inherit the previous success.
+        if (
+          previous &&
+          previous.exit === 0 &&
+          check.exit === 0 &&
+          !check.execution &&
+          fresh(check) &&
+          previous.kind === check.kind &&
+          previous.cwd === check.cwd &&
+          previous.targets?.length &&
+          previous.targets.every((target) =>
+            check.targets?.some((current) => current.path === target.path && !!current.digest),
+          ) &&
+          (previous.assertions ?? []).every(
+            (assertion) =>
+              assertion.digest &&
+              check.assertions?.some(
+                (current) => current.path === assertion.path && current.digest === assertion.digest,
+              ),
+          )
+        ) {
+          for (const [oldKey, old] of checks) {
+            if (old.supersededBy === previous.callID) checks.set(oldKey, { ...old, supersededBy: check.callID })
+          }
+        }
         checks.set(
           previous && previous.exit !== 0 && !previous.execution && check.execution ? `${key}:${part.id}` : key,
           { ...check, logs: check.logs ?? part.state.outputPaths ?? [] },

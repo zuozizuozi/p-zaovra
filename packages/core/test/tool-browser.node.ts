@@ -146,9 +146,9 @@ test(
         Catalog.node,
         Layer.mock(Catalog.Service, {
           model: {
-            get: () =>
+            get: (_provider, id) =>
               Effect.succeed(
-                known
+                known && id === model.id
                   ? ModelV2.Info.make({
                       ...model,
                       capabilities: { ...model.capabilities, input: vision ? ["text", "image"] : ["text"] },
@@ -177,7 +177,7 @@ test(
                 id: toolIdentity.assistantMessageID,
                 type: "assistant",
                 agent: "build",
-                model: { providerID: model.providerID, id: model.id },
+                model: { providerID: model.providerID, id: ModelV2.ID.make("api-alias") },
                 content: [],
                 time: { created: DateTime.nowUnsafe() },
               }),
@@ -237,6 +237,7 @@ test(
             settleTool(registry, {
               ...toolIdentity,
               sessionID: SessionSchema.ID.make(session),
+              inputModalities: known ? (vision ? ["text", "image"] : ["text"]) : undefined,
               call: { type: "tool-call", id: `call_${++calls}`, name: "browser", input },
             })
           const missing = yield* call({ action: "snapshot" })

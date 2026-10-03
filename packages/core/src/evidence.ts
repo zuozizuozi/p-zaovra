@@ -118,6 +118,10 @@ const layer = Layer.effect(
                 return { producer, id, offset, nextOffset, snapshotBytes: stat.size, text: value }
               if (!query.length || Buffer.byteLength(query) > 1024)
                 throw new Error({ message: "Search requires a nonempty literal up to 1024 bytes" })
+              if (Buffer.from(query).toString("utf8") !== query)
+                throw new Error({ message: "Search query must contain complete Unicode characters" })
+              if (nextOffset !== undefined && consumed < Buffer.byteLength(query))
+                throw new Error({ message: "Increase the range to include the full search query" })
               const matches: { offset: number; text: string }[] = []
               let cursor = 0
               while (matches.length < 30) {
@@ -129,12 +133,24 @@ const layer = Layer.effect(
                 })
                 cursor = found + query.length
               }
+              // Overlap whole code points, but never rescan a match already returned.
+              const characters = Array.from(value)
               const resume =
                 matches.length === 30
                   ? offset + Buffer.byteLength(value.slice(0, cursor))
                   : nextOffset === undefined
                     ? undefined
-                    : offset + Buffer.byteLength(value.slice(0, Math.max(1, value.length - query.length + 1)))
+                    : offset +
+                      Buffer.byteLength(
+                        value.slice(
+                          0,
+                          Math.max(
+                            cursor,
+                            characters.slice(0, Math.max(1, characters.length - Array.from(query).length + 1)).join("")
+                              .length,
+                          ),
+                        ),
+                      )
               return {
                 producer,
                 id,

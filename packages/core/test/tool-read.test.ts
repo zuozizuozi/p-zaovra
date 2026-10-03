@@ -301,6 +301,30 @@ describe("ReadTool", () => {
     }),
   )
 
+  it.effect("uses resolved input capabilities even without a catalog lookup for the API model ID", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+      readResult = { uri: "file:///pixel.png", name: "pixel.png", content: png, encoding: "base64", mime: "image/png" }
+      for (const inputModalities of [["text", "image"], ["text"], []]) {
+        const settled = yield* settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          inputModalities,
+          call: {
+            type: "tool-call",
+            id: `capability-${inputModalities.length}`,
+            name: "read",
+            input: { path: "pixel.png" },
+          },
+        })
+        expect(readCalls.at(-1)?.page.images).toBe(inputModalities.includes("image"))
+        if (inputModalities.includes("image"))
+          expect(settled.output?.content.some((part) => part.type === "file")).toBe(true)
+      }
+    }),
+  )
+
   it.effect("preserves a PNG above the generic text limit as native media", () =>
     Effect.gen(function* () {
       const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))

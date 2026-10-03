@@ -1384,6 +1384,9 @@ describe("SessionRunnerLLM", () => {
   it.effect("advertises and executes a globally attached application tool", () =>
     Effect.gen(function* () {
       yield* setup
+      currentModel = Object.assign(Model.make({ id: "api-vision", provider: "fake", route: OpenAIChat.route }), {
+        inputModalities: ["text", "image"],
+      })
       const applicationTools = yield* ApplicationTools.Service
       const session = yield* SessionV2.Service
       const contexts: Tool.Context[] = []
@@ -1419,6 +1422,7 @@ describe("SessionRunnerLLM", () => {
           agent: AgentV2.ID.make("build"),
           assistantMessageID: expect.stringMatching(/^msg_/),
           toolCallID: "call-application",
+          inputModalities: ["text", "image"],
         },
       ])
       expect(yield* session.context(sessionID)).toMatchObject([

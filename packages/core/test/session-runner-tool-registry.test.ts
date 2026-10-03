@@ -82,10 +82,11 @@ describe("ToolRegistry", () => {
           description: name,
           input: Schema.Struct({ text: Schema.String }),
           output: Schema.Struct({ text: Schema.String }),
-          execute: () => Effect.sync(() => {
-            executed.push(name)
-            return { text: name }
-          }),
+          execute: () =>
+            Effect.sync(() => {
+              executed.push(name)
+              return { text: name }
+            }),
         })
       yield* registry.register({
         read: tool("read"),
@@ -306,9 +307,12 @@ describe("ToolRegistry", () => {
       yield* executeTool(service, {
         sessionID,
         ...identity,
+        inputModalities: ["text", "image"],
         call: { type: "tool-call", id: "call-context", name: "context", input: {} },
       })
-      expect(contexts).toEqual([{ sessionID, ...identity, toolCallID: "call-context" }])
+      expect(contexts).toEqual([
+        { sessionID, ...identity, toolCallID: "call-context", inputModalities: ["text", "image"] },
+      ])
     }),
   )
 

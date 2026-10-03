@@ -39,3 +39,38 @@ test("evidence is stable, session-owned, paginated and searchable without rerunn
     ),
   )
 })
+
+test("literal search pages preserve Unicode byte boundaries and do not duplicate overlap matches", async () => {
+  await using root = await tmpdir()
+  const directory = path.join(root.path, "tool-output")
+  await fs.mkdir(directory)
+  const file = path.join(directory, "tool_unicode")
+  const text = "🙂中文🙂中文abc🙂xyz".repeat(45)
+  await fs.writeFile(file, text)
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const evidence = yield* Evidence.Service
+      const session = SessionV2.ID.make("ses_unicode")
+      const [id] = yield* evidence.retain(session, "unicode", [file])
+      for (const query of ["🙂", "中文", "文🙂中", "abc🙂x", "missing"]) {
+        const expected: number[] = []
+        for (let at = text.indexOf(query); at >= 0; at = text.indexOf(query, at + query.length))
+          expected.push(Buffer.byteLength(text.slice(0, at)))
+        for (const length of [13, 27, 1024]) {
+          const matches: number[] = []
+          let offset = 0
+          for (let page = 0; page < 500; page++) {
+            const result = yield* evidence.read(session, id, offset, length, query)
+            matches.push(...(result.matches ?? []).map((match) => match.offset))
+            if (result.nextOffset === undefined) break
+            expect(result.nextOffset).toBeGreaterThan(offset)
+            offset = result.nextOffset
+          }
+          expect(matches).toEqual(expected)
+        }
+      }
+    }).pipe(
+      Effect.provide(AppNodeBuilder.build(Evidence.node, [[Global.node, Global.layerWith({ data: root.path })]])),
+    ),
+  )
+})

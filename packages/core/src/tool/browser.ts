@@ -376,12 +376,15 @@ const layer = Layer.effect(
                 const name = yield* outputs
                   .image(context.sessionID, result.screenshot)
                   .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
-                const message = yield* sessions.message(context.assistantMessageID)
+                const message =
+                  context.inputModalities === undefined
+                    ? yield* sessions.message(context.assistantMessageID)
+                    : undefined
                 const model =
-                  message?.message.type === "assistant"
+                  context.inputModalities === undefined && message?.message.type === "assistant"
                     ? yield* catalog.model.get(message.message.model.providerID, message.message.model.id)
                     : undefined
-                const modelVisible = model?.capabilities.input.includes("image") === true
+                const modelVisible = (context.inputModalities ?? model?.capabilities.input)?.includes("image") === true
                 return {
                   text: `${result.text}\n${modelVisible ? "Screenshot attached to model input." : "Screenshot saved for the user; model has not viewed the image."}`,
                   screenshot: {
