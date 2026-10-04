@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "985d706a-4167-4339-bb90-5bbcb42c0f5d",
+  "id": "b06b1a15-e548-47a7-8963-fbccd38db449",
   "prevIds": [
-    "4a552d83-0a31-46a5-b657-902f8ec4cf23"
+    "985d706a-4167-4339-bb90-5bbcb42c0f5d"
   ],
   "ddl": [
     {
@@ -2777,6 +2777,16 @@
       "default": null,
       "generated": null,
       "name": "criteria",
+      "entityType": "columns",
+      "table": "work_task"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "acceptance",
       "entityType": "columns",
       "table": "work_task"
     },

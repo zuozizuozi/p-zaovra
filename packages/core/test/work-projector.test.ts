@@ -801,3 +801,105 @@ describe("WorkProjector", () => {
     }),
   )
 })
+
+it.effect("persisted local acceptance cannot certify a Goal criterion or complete the Goal", () =>
+  Effect.gen(function* () {
+    const events = yield* EventV2.Service
+    const store = yield* WorkStore.Service
+    const local = {
+      ...goalInfo().acceptanceCriteria[0]!,
+      id: Work.CriterionID.make("criterion_local_projection"),
+      evidence: "review" as const,
+    }
+    yield* events.publish(Work.Event.GoalCreated, { goalID, timestamp: timestamp(1), info: goalInfo() })
+    yield* events.publish(Work.Event.TaskCreated, {
+      goalID,
+      timestamp: timestamp(2),
+      info: { ...taskInfo(), criteria: [local.id], acceptance: { scope: "local", criteria: [local] } },
+    })
+    expect((yield* store.getTask(taskID))?.acceptance).toEqual({ scope: "local", criteria: [local] })
+    yield* events.publish(Work.Event.GoalActivated, { goalID, timestamp: timestamp(3) })
+    yield* events.publish(Work.Event.TaskReadied, { goalID, taskID, status: "ready", timestamp: timestamp(4) })
+    yield* events.publish(Work.Event.TaskStarted, { goalID, taskID, status: "running", timestamp: timestamp(5) })
+    const task = (yield* store.getTask(taskID))!
+    yield* events.publish(Work.Event.AttemptAdmitted, {
+      goalID,
+      timestamp: timestamp(6),
+      info: {
+        id: attemptID,
+        taskID,
+        goalID,
+        kind: "review",
+        number: 1,
+        status: "admitted",
+        inputRevision: task.revision,
+        time: { created: timestamp(6) },
+      },
+    })
+    yield* events.publish(Work.Event.AttemptStarted, {
+      goalID,
+      attemptID,
+      ownerID: "test",
+      fence: 1,
+      timestamp: timestamp(7),
+    })
+    const evidence = {
+      id: Work.EvidenceID.make("evidence_local"),
+      goalID,
+      taskID,
+      attemptID,
+      criterionIDs: [local.id],
+      kind: "review" as const,
+      producer: "test",
+      payload: {},
+      createdAt: timestamp(8),
+    }
+    const stolen = yield* events
+      .publish(Work.Event.EvidenceRecorded, {
+        goalID,
+        timestamp: timestamp(8),
+        info: { ...evidence, criterionIDs: [criterionID] },
+      })
+      .pipe(Effect.exit)
+    expect(Exit.isFailure(stolen)).toBe(true)
+    yield* events.publish(Work.Event.EvidenceRecorded, { goalID, timestamp: timestamp(8), info: evidence })
+    yield* events.publish(Work.Event.EvaluationRecorded, {
+      goalID,
+      timestamp: timestamp(9),
+      info: {
+        id: Work.EvaluationID.make("evaluation_local"),
+        goalID,
+        taskID,
+        attemptID,
+        criterionID: local.id,
+        evidenceIDs: [evidence.id],
+        verdict: "pass",
+        evaluator: "test",
+        evaluatorVersion: "1",
+        findings: [],
+        allowsRepair: false,
+        createdAt: timestamp(9),
+      },
+    })
+    yield* events.publish(Work.Event.AttemptSettled, {
+      goalID,
+      attemptID,
+      ownerID: "test",
+      fence: 1,
+      status: "succeeded",
+      timestamp: timestamp(10),
+    })
+    yield* events.publish(Work.Event.TaskVerificationStarted, {
+      goalID,
+      taskID,
+      status: "verifying",
+      timestamp: timestamp(11),
+    })
+    yield* events.publish(Work.Event.TaskCompleted, { goalID, taskID, status: "completed", timestamp: timestamp(12) })
+    const completed = yield* events
+      .publish(Work.Event.GoalCompleted, { goalID, timestamp: timestamp(13) })
+      .pipe(Effect.exit)
+    expect(Exit.isFailure(completed)).toBe(true)
+    expect((yield* store.getGoal(goalID))?.status).toBe("active")
+  }),
+)

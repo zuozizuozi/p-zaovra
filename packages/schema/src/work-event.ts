@@ -15,7 +15,7 @@ import {
   MemoryResolutionInfo,
   TaskInfo,
 } from "./work-contract"
-import { AttemptID, GoalID, HandoffID, TaskID, WorkerID } from "./work-id"
+import { AttemptID, EvaluationID, GoalID, HandoffID, TaskID, WorkerID } from "./work-id"
 
 const options = {
   durable: {
@@ -182,6 +182,18 @@ export const TaskReworkRequested = Event.define({
   ...options,
   schema: { ...Base, taskID: TaskID, status: Schema.Literal("rework"), reason: Schema.String },
 })
+export const FinalAcceptanceRepairRequested = Event.define({
+  type: "work.task.final-acceptance-repair-requested",
+  ...options,
+  schema: {
+    ...Base,
+    taskID: TaskID,
+    sourceTaskID: TaskID,
+    evaluationID: EvaluationID,
+    repair: TaskInfo,
+    reason: Schema.String,
+  },
+})
 export const TaskCompleted = taskTransition("work.task.completed", Schema.Literal("completed"))
 export const TaskBlocked = Event.define({
   type: "work.task.blocked",
@@ -288,6 +300,7 @@ export const DurableDefinitions = Event.inventory(
   TaskMergeConflicted,
   TaskIsolationArchived,
   TaskReworkRequested,
+  FinalAcceptanceRepairRequested,
   TaskCompleted,
   TaskBlocked,
   TaskCancelled,

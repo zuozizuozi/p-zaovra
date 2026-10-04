@@ -93,3 +93,35 @@ function planTask(input: { dependsOn?: ReadonlyArray<string>; criteria?: Readonl
     criteria: input.criteria ?? [criterionID],
   }
 }
+
+it.effect("replanning preserves local contracts and leaves global acceptance with its final owner", () =>
+  Effect.gen(function* () {
+    const criterion = {
+      ...goal.acceptanceCriteria[0]!,
+      id: Work.CriterionID.make("criterion_local_recovery"),
+      description: "Implement just the page",
+    }
+    const local = {
+      ...blocked,
+      criteria: [criterion.id],
+      acceptance: { scope: "local" as const, criteria: [criterion] },
+    }
+    const final = {
+      ...task("task_final", "pending", "qa", [criterionID]),
+      dependsOn: [local.id],
+      acceptance: { scope: "final" as const, criteria: goal.acceptanceCriteria },
+    }
+    const output = { supersedes: [local.id], tasks: [planTask({ criteria: [criterion.id] })] }
+    const result = yield* WorkArchitect.validate(goal, architect, [local, final, architect], output)
+    expect(result.tasks[0]!.acceptance).toEqual(local.acceptance)
+    expect(result.tasks[0]!.criteria).not.toContain(criterionID)
+    expect(
+      Exit.isFailure(
+        yield* WorkArchitect.validate(goal, architect, [local, final, architect], {
+          ...output,
+          tasks: [planTask({ criteria: [criterionID] })],
+        }).pipe(Effect.exit),
+      ),
+    ).toBe(true)
+  }),
+)

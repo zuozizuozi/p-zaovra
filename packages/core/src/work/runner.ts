@@ -1,3 +1,4 @@
+import { WorkAcceptance } from "./acceptance"
 export * as WorkRunner from "./runner"
 
 import { Work } from "@zaovra-ai/schema/work"
@@ -19,6 +20,9 @@ import { AbsolutePath } from "../schema"
 import { Hash } from "../util/hash"
 import { SessionV2 } from "../session"
 import { SessionMessage } from "../session/message"
+import { SessionOutcome } from "../session/outcome"
+import { Snapshot } from "../snapshot"
+import { FSUtil } from "../fs-util"
 import { WorkArtifact } from "./artifact"
 import { WorkAccessFailure } from "./access-failure"
 import { WorkArchitect } from "./architect"
@@ -45,6 +49,7 @@ const DEFAULT_MAX_REPAIR_ATTEMPTS = 3
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const fs = yield* FSUtil.Service
     const events = yield* EventV2.Service
     const sessions = yield* SessionV2.Service
     const store = yield* WorkStore.Service
@@ -419,9 +424,40 @@ export const layer = Layer.effect(
     const finishGoal = Effect.fn("WorkRunner.finishGoal")(function* (goal: Work.GoalInfo, timestamp: DateTime.Utc) {
       const tasks = yield* store.tasks(goal.id)
       if (!tasks.every((task) => task.status === "completed" || task.status === "superseded")) return false
+      const final = tasks.find((task) => task.acceptance?.scope === "final")
+      if (final) {
+        const last = (yield* store.attempts(final.id)).at(-1)
+        const receipt = (yield* store.evidence(final.id)).find(
+          (item) => item.attemptID === last?.id && item.producer === "work-reviewer/1",
+        )
+        const payload = receipt?.payload
+        const expected =
+          payload && typeof payload === "object" && "artifactDigest" in payload ? payload.artifactDigest : undefined
+        if (
+          typeof expected !== "string" ||
+          expected !== (yield* WorkAcceptance.fingerprint(fs, goal.location.directory))
+        ) {
+          yield* blockGoal(
+            goal.id,
+            "Final acceptance receipt is missing or stale; current artifacts require acceptance",
+            timestamp,
+          )
+          return true
+        }
+      }
       const evaluations = (yield* Effect.forEach(
-        tasks.filter((task) => task.status === "completed"),
-        (task) => store.evaluations(task.id),
+        tasks.filter(
+          (task) =>
+            task.status === "completed" &&
+            (!tasks.some((candidate) => candidate.acceptance) || task.acceptance?.scope === "final"),
+        ),
+        (task) =>
+          Effect.gen(function* () {
+            const evaluations = yield* store.evaluations(task.id)
+            if (!task.acceptance) return evaluations
+            const attempt = (yield* store.attempts(task.id)).at(-1)
+            return evaluations.filter((evaluation) => evaluation.attemptID === attempt?.id)
+          }),
       )).flat()
       const latest = new Map(
         evaluations
@@ -666,6 +702,8 @@ export const layer = Layer.effect(
       reason: string,
     ) {
       if (goal.budget?.maxReplans === undefined) return false
+      // Final ownership stays fixed; its failures route to attributed business repairs.
+      if (task.acceptance?.scope === "final") return false
       const tasks = yield* store.tasks(goal.id)
       if (tasks.length > 126) return false
       const architects = tasks.filter((candidate) => candidate.role === "work-architect")
@@ -694,13 +732,84 @@ export const layer = Layer.effect(
       return true
     })
 
+    const repairFinal = Effect.fn("WorkRunner.repairFinal")(function* (
+      goal: Work.GoalInfo,
+      task: Work.TaskInfo,
+      evaluation: Work.EvaluationInfo,
+    ) {
+      const tasks = yield* store.tasks(goal.id)
+      const candidates = tasks.filter(
+        (item) =>
+          task.dependsOn.includes(item.id) &&
+          item.status === "completed" &&
+          item.acceptance?.scope === "local" &&
+          WorkRole.get(item.role, goal.roleContracts ?? WorkRole.contracts)?.workspaceAccess === "write",
+      )
+      const attributed = new Set(evaluation.findings.flatMap((finding) => (finding.taskID ? [finding.taskID] : [])))
+      const source =
+        attributed.size === 1
+          ? candidates.find((item) => attributed.has(item.id))
+          : attributed.size === 0 && candidates.length === 1
+            ? candidates[0]
+            : undefined
+      if (
+        !source ||
+        !evaluation.allowsRepair ||
+        !evaluation.findings.length ||
+        !repairAvailable(goal, task) ||
+        tasks.length >= 128 ||
+        (yield* noProgress(task.id, evaluation.criterionID))
+      ) {
+        const reason =
+          "Final acceptance failed; business repair attribution or budget requires attention. No implementation is permitted in final acceptance."
+        yield* events.publish(Work.Event.TaskBlocked, {
+          goalID: goal.id,
+          taskID: task.id,
+          status: "blocked",
+          reason,
+          timestamp: yield* DateTime.now,
+        })
+        yield* blockGoal(goal.id, reason, yield* DateTime.now)
+        return false
+      }
+      const id = Work.TaskID.make(`task_${hash(`${task.id}:${evaluation.id}:repair`).slice(0, 24)}`)
+      const local = source.acceptance!.criteria.map((criterion, index) => ({
+        ...criterion,
+        id: Work.CriterionID.make(`criterion_local_${hash(`${id}:${index}`).slice(0, 24)}`),
+      }))
+      const timestamp = yield* DateTime.now
+      yield* events.publish(Work.Event.FinalAcceptanceRepairRequested, {
+        goalID: goal.id,
+        taskID: task.id,
+        sourceTaskID: source.id,
+        evaluationID: evaluation.id,
+        reason: `Final acceptance failed ${evaluation.criterionID}`,
+        timestamp,
+        repair: Work.TaskInfo.make({
+          id,
+          goalID: goal.id,
+          title: `Repair: ${source.title}`,
+          instructions: `${source.instructions}\n\nRepair findings from final acceptance:\n${evaluation.findings.map((finding) => finding.message).join("\n")}`,
+          dependsOn: [source.id],
+          role: source.role,
+          status: "pending",
+          criteria: local.map((criterion) => criterion.id),
+          acceptance: { scope: "local", criteria: local },
+          attemptCount: 0,
+          time: { created: timestamp, updated: timestamp },
+          revision: 0,
+        }),
+      })
+      return true
+    })
+
     const verify = Effect.fn("WorkRunner.verify")(function* (
       goal: Work.GoalInfo,
       task: Work.TaskInfo,
       attempt: Work.AttemptInfo,
       claim: WorkLease.Claim,
     ) {
-      const criteria = goal.acceptanceCriteria.filter((criterion) => task.criteria.includes(criterion.id))
+      const criteria = WorkAcceptance.criteria(goal, task)
       for (const criterion of criteria.filter((criterion) => criterion.verifier !== undefined)) {
         const current = yield* store.evaluations(task.id)
         if (
@@ -710,12 +819,32 @@ export const layer = Layer.effect(
         const input = { goal, task, attempt, criterion }
         const recorded = (yield* store.evidence(task.id)).find((evidence) => evidence.id === WorkVerifier.id(input))
         const result = recorded
-          ? { evidence: recorded, evaluation: yield* verifier.evaluateEvidence(input, recorded) }
+          ? {
+              evidence: recorded,
+              evaluation: yield* verifier.evaluateEvidence(
+                input,
+                task.acceptance?.scope === "final" &&
+                  recorded.payload &&
+                  typeof recorded.payload === "object" &&
+                  "result" in recorded.payload
+                  ? { ...recorded, payload: recorded.payload.result }
+                  : recorded,
+              ),
+            }
           : yield* verifier.evaluate(input)
         if (!recorded)
           yield* events.publish(Work.Event.EvidenceRecorded, {
             goalID: goal.id,
-            info: result.evidence,
+            info:
+              task.acceptance?.scope === "final"
+                ? {
+                    ...result.evidence,
+                    payload: {
+                      result: result.evidence.payload,
+                      artifactDigest: (yield* WorkAcceptance.fingerprint(fs, goal.location.directory)) ?? null,
+                    },
+                  }
+                : result.evidence,
             timestamp: result.evidence.createdAt,
           })
         if (!(yield* store.evaluations(task.id)).some((evaluation) => evaluation.id === result.evaluation.id))
@@ -749,6 +878,7 @@ export const layer = Layer.effect(
       const failed = required.find((criterion) => latest.get(criterion.id)?.verdict === "fail")
       if (failed) {
         const evaluation = latest.get(failed.id)!
+        if (task.acceptance?.scope === "final") return yield* repairFinal(goal, task, evaluation)
         if (!evaluation.allowsRepair || evaluation.findings.length === 0) {
           const timestamp = yield* DateTime.now
           const reason = `Verifier failure for ${failed.id} is not eligible for automatic repair`
@@ -790,7 +920,7 @@ export const layer = Layer.effect(
         return true
       }
 
-      if (required.length > 0) {
+      if (required.length > 0 || task.acceptance?.scope === "final") {
         yield* events.publish(Work.Event.TaskReviewStarted, {
           goalID: goal.id,
           taskID: task.id,
@@ -831,6 +961,7 @@ export const layer = Layer.effect(
       const failed = criteria.find((criterion) => latest.get(criterion.id)?.verdict === "fail")
       if (failed) {
         const evaluation = latest.get(failed.id)!
+        if (task.acceptance?.scope === "final") return yield* repairFinal(goal, task, evaluation)
         if (!evaluation.allowsRepair || evaluation.findings.length === 0) {
           const timestamp = yield* DateTime.now
           const reason = `Reviewer failure for ${failed.id} is not eligible for automatic repair`
@@ -892,7 +1023,80 @@ export const layer = Layer.effect(
         fence,
         timestamp: yield* DateTime.now,
       })
-      const evidence = yield* store.evidence(task.id)
+      const source = (yield* store.attempts(task.id)).findLast(
+        (item) => item.status === "succeeded" && (item.kind === "execute" || item.kind === "repair"),
+      )
+      const messages = source?.sessionID ? yield* SessionOutcome.history(db, source.sessionID) : []
+      const checks = SessionOutcome.derive(messages, false).checks
+      const targets = yield* SessionOutcome.fingerprint(
+        fs,
+        checks.flatMap((check) => [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path)),
+      )
+      const artifactDigest =
+        task.acceptance?.scope === "final" ? yield* WorkAcceptance.fingerprint(fs, goal.location.directory) : undefined
+      const snapshot = yield* Snapshot.Service.use((service) => service.capture()).pipe(
+        Effect.provide(locations.get(task.location ?? goal.location)),
+      )
+      const hostEvidenceID = Work.EvidenceID.make(`evidence_${hash(`${attempt.id}:session-checks`)}`)
+      const prior = yield* store.evidence(task.id)
+      const hostEvidence = WorkReviewer.sessionEvidence({
+        goal,
+        task,
+        attempt,
+        source,
+        messages,
+        targets,
+        snapshot,
+        timestamp: yield* DateTime.now,
+      })
+      if (hostEvidence && !prior.some((item) => item.id === hostEvidenceID))
+        yield* events.publish(Work.Event.EvidenceRecorded, {
+          goalID: goal.id,
+          info: hostEvidence,
+          timestamp: hostEvidence.createdAt,
+        })
+      // Reconstruct freshness for every dispatch; an earlier persisted pass is not a current observation.
+      const deterministic = prior.filter(
+        (item) => item.attemptID === source?.id && item.producer.startsWith("work-verifier/"),
+      )
+      if (
+        task.acceptance?.scope === "final" &&
+        criteria.some(
+          (criterion) =>
+            criterion.verifier &&
+            !deterministic.some(
+              (item) =>
+                item.criterionIDs.includes(criterion.id) &&
+                item.payload &&
+                typeof item.payload === "object" &&
+                "artifactDigest" in item.payload &&
+                item.payload.artifactDigest === artifactDigest &&
+                !!artifactDigest,
+            ),
+        )
+      ) {
+        const timestamp = yield* DateTime.now
+        const reason = "Final verifier evidence is stale or missing; rerun acceptance against current artifacts"
+        yield* events.publish(Work.Event.AttemptSettled, {
+          goalID: goal.id,
+          attemptID: attempt.id,
+          status: "failed",
+          ownerID,
+          fence,
+          failure: { kind: "error", message: reason, retryable: false },
+          timestamp,
+        })
+        yield* events.publish(Work.Event.TaskBlocked, {
+          goalID: goal.id,
+          taskID: task.id,
+          status: "blocked",
+          reason,
+          timestamp,
+        })
+        yield* blockGoal(goal.id, reason, timestamp)
+        return false
+      }
+      const evidence = [...deterministic, ...(hostEvidence ? [hostEvidence] : [])]
       const handoffs = yield* store.mailbox(task.id)
       const input = { goal, task, attempt, criteria, evidence, handoffs }
       const exit = yield* Effect.uninterruptibleMask((restore) =>
@@ -933,6 +1137,31 @@ export const layer = Layer.effect(
       }
 
       const output = exit.value
+      if (
+        task.acceptance?.scope === "final" &&
+        (!artifactDigest || artifactDigest !== (yield* WorkAcceptance.fingerprint(fs, goal.location.directory)))
+      ) {
+        const reason =
+          "Final acceptance artifacts changed during review or could not be fingerprinted; rerun acceptance against the current workspace."
+        yield* events.publish(Work.Event.AttemptSettled, {
+          goalID: goal.id,
+          attemptID: attempt.id,
+          status: "failed",
+          ownerID,
+          fence,
+          failure: { kind: "error", message: reason, retryable: false },
+          timestamp,
+        })
+        yield* events.publish(Work.Event.TaskBlocked, {
+          goalID: goal.id,
+          taskID: task.id,
+          status: "blocked",
+          reason,
+          timestamp,
+        })
+        yield* blockGoal(goal.id, reason, timestamp)
+        return false
+      }
       const requested = new Set(criteria.map((criterion) => criterion.id))
       if (
         output.criteria.length !== requested.size ||
@@ -972,7 +1201,7 @@ export const layer = Layer.effect(
             criterionIDs: criteria.map((criterion) => criterion.id),
             kind: "review",
             producer: "work-reviewer/1",
-            payload: output,
+            payload: artifactDigest ? { ...output, artifactDigest } : output,
             digest: hash(JSON.stringify(output)),
             createdAt: timestamp,
           }),
@@ -1017,10 +1246,8 @@ export const layer = Layer.effect(
       task: Work.TaskInfo,
       claim: WorkLease.Claim,
     ) {
-      const criteria = goal.acceptanceCriteria.filter(
-        (criterion) => criterion.required && task.criteria.includes(criterion.id),
-      )
-      if (criteria.length === 0) {
+      const criteria = WorkAcceptance.criteria(goal, task).filter((criterion) => criterion.required)
+      if (criteria.length === 0 && task.acceptance?.scope !== "final") {
         return yield* completeTask(goal, task, claim)
       }
 
@@ -1128,7 +1355,7 @@ export const layer = Layer.effect(
       )
       const output = yield* text === undefined ? planner.run(input) : WorkPlanner.parse(text)
       const validated = yield* WorkPlanner.validate(goal, output)
-      const planned = yield* provisionGraph(goal, validated)
+      const planned = yield* provisionGraph(goal, WorkAcceptance.plan(goal, validated))
       const timestamp = yield* DateTime.now
       return planned.map((item) =>
         Work.TaskInfo.make({
@@ -1141,6 +1368,7 @@ export const layer = Layer.effect(
           location: item.location,
           status: "pending",
           criteria: item.criteria,
+          acceptance: item.acceptance,
           attemptCount: 0,
           time: { created: timestamp, updated: timestamp },
           revision: 0,
@@ -1355,6 +1583,7 @@ export const layer = Layer.effect(
             location: item.location,
             status: "pending",
             criteria: item.criteria,
+            acceptance: item.acceptance,
             attemptCount: 0,
             time: { created: timestamp, updated: timestamp },
             revision: 0,
@@ -1570,7 +1799,11 @@ export const layer = Layer.effect(
         yield* execute(goal, task, latest, claim)
         return true
       }
-      if (latest?.status === "succeeded" && !startingRepair) {
+      if (
+        latest?.status === "succeeded" &&
+        !startingRepair &&
+        !(task.acceptance?.scope === "final" && (candidate.status === "ready" || latest.kind === "review"))
+      ) {
         yield* events.publish(Work.Event.TaskVerificationStarted, {
           goalID: goal.id,
           taskID: task.id,
@@ -1584,6 +1817,7 @@ export const layer = Layer.effect(
         return false
       }
       if (
+        task.acceptance?.scope !== "final" &&
         task.attemptCount > 0 &&
         goal.usage.repairs >= (goal.budget?.maxRepairAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS)
       ) {
@@ -1893,8 +2127,7 @@ function instructions(
   dependencies: string,
 ) {
   const contract = WorkRole.get(task.role, goal.roleContracts ?? WorkRole.contracts)
-  const criteria = goal.acceptanceCriteria
-    .filter((criterion) => task.criteria.includes(criterion.id))
+  const criteria = WorkAcceptance.criteria(goal, task)
     .map((criterion) => `- [${criterion.id}] ${criterion.description}`)
     .join("\n")
   return [
@@ -1949,6 +2182,7 @@ export const node = makeGlobalNode({
   service: Service,
   layer,
   deps: [
+    FSUtil.node,
     Database.node,
     EventV2.node,
     Git.node,

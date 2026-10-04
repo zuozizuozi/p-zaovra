@@ -1,3 +1,4 @@
+import { WorkAcceptance } from "./work/acceptance"
 export * as Work from "./work"
 
 import {
@@ -592,15 +593,21 @@ const layer = Layer.effect(
             goalID: input.goalID,
             message: "A graph expansion must contain between 1 and 24 Tasks",
           })
-        const desired = input.tasks.map((task) => ({
-          id: task.id,
-          title: task.title,
-          instructions: task.instructions,
-          dependsOn: Array.from(task.dependsOn ?? []),
-          role: task.role ?? "build",
-          location: task.location,
-          criteria: Array.from(task.criteria ?? []),
-        }))
+        const stored = yield* store.tasks(input.goalID)
+        const final = stored.find((task) => task.acceptance?.scope === "final")
+        const desired = input.tasks.map((task) => {
+          const acceptance = final ? WorkAcceptance.local(task) : undefined
+          return {
+            id: task.id,
+            title: task.title,
+            instructions: task.instructions,
+            dependsOn: Array.from(task.dependsOn ?? []),
+            role: task.role ?? "build",
+            location: task.location,
+            criteria: Array.from(acceptance?.criteria.map((criterion) => criterion.id) ?? task.criteria ?? []),
+            acceptance,
+          }
+        })
         if (new Set(desired.map((task) => task.id)).size !== desired.length)
           return yield* new ExpandConflictError({ goalID: input.goalID, message: "Expansion Task IDs must be unique" })
         if (desired.some((task) => internalRole(task.role)))
@@ -608,7 +615,11 @@ const layer = Layer.effect(
             goalID: input.goalID,
             message: "WorkGraph runtime roles cannot be injected through graph expansion",
           })
-        const stored = yield* store.tasks(input.goalID)
+        if (final && (final.status !== "pending" || desired.some((task) => task.dependsOn.includes(final.id))))
+          return yield* new ExpandConflictError({
+            goalID: input.goalID,
+            message: "Append business Tasks before final acceptance starts; do not depend on final acceptance",
+          })
         const existing = new Map(stored.map((task) => [task.id, task]))
         const reused = desired.filter((task) => existing.has(task.id))
         if (reused.length > 0) {
@@ -641,7 +652,15 @@ const layer = Layer.effect(
           })),
           ...desired,
         ]
-        const validated = validateTaskGraph(goal.acceptanceCriteria, combined, goal.roleContracts ?? WorkRole.contracts)
+        const validated = validateTaskGraph(
+          [
+            ...goal.acceptanceCriteria,
+            ...stored.flatMap((task) => (task.acceptance?.scope === "local" ? task.acceptance.criteria : [])),
+            ...desired.flatMap((task) => task.acceptance?.criteria ?? []),
+          ],
+          combined,
+          goal.roleContracts ?? WorkRole.contracts,
+        )
         if ("message" in validated)
           return yield* new ExpandConflictError({ goalID: input.goalID, message: validated.message })
         const timestamp = yield* DateTime.now

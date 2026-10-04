@@ -24,6 +24,8 @@ export type ValidatedTask = {
   readonly role: Work.PlanRole
   readonly isolation: Work.PlanIsolation
   readonly criteria: ReadonlyArray<Work.CriterionID>
+  readonly acceptance?: Work.TaskAcceptance
+  readonly localAcceptance?: ReadonlyArray<string>
   readonly location?: Location.Ref
 }
 
@@ -98,6 +100,7 @@ export const validate = Effect.fn("WorkPlanner.validate")(function* (goal: Work.
         role: task.role,
         isolation: task.isolation,
         criteria: task.criteria,
+        localAcceptance: task.localAcceptance,
       },
     ]),
   )
@@ -157,7 +160,8 @@ export function prompt(input: Input) {
       .join("\n")}`,
     `Available Role Contracts:\n${WorkRole.guidance(input.goal.roleContracts ?? WorkRole.contracts)}`,
     "Inspect the project and decompose the Goal into a small dependency DAG. Prefer the organization roles pm, architect, developer, qa, and security when their independent responsibility materially improves the result; do not create ceremonial roles. Use explore for narrow read-only research and retain build/general only for backward-compatible general execution. Request worktree isolation only for independent write Tasks; the runtime may conservatively fall back to shared execution when the project is dirty or not backed by Git.",
-    'Return JSON with this exact shape: {"tasks":[{"key":"stable-local-key","title":"...","instructions":"...","dependsOn":["other-key"],"role":"one ID from the supplied Role Contracts","isolation":"shared|worktree","criteria":["criterion_..."]}]}',
+    'Return JSON with this exact shape: {"tasks":[{"key":"stable-local-key","title":"...","instructions":"...","dependsOn":["other-key"],"role":"one ID from the supplied Role Contracts","isolation":"shared|worktree","criteria":["criterion_..."],"localAcceptance":["observable result of ONLY this task"]}]}',
+    "Give each business Task localAcceptance describing its own observable result. Do not assign the overall plan, delivery summary, or other Tasks’ deliverables to an implementation Task. The host assigns global criteria to a final read-only acceptance Task.",
     "Use 1-12 Tasks in normal cases, reference only the supplied criterion IDs, cover every required criterion, and do not wrap JSON in markdown.",
   ].join("\n\n")
 }

@@ -27,6 +27,7 @@ export type ValidatedTask = {
   readonly role: Work.PlanRole
   readonly isolation: Work.PlanIsolation
   readonly criteria: ReadonlyArray<Work.CriterionID>
+  readonly acceptance?: Work.TaskAcceptance
   readonly location?: Location.Ref
 }
 
@@ -100,7 +101,19 @@ export const validate = Effect.fn("WorkArchitect.validate")(function* (
       }),
   )
   if (invalidDependency) return yield* invalid(`Architect Task ${invalidDependency.key} has invalid dependencies`)
-  const knownCriteria = new Set(goal.acceptanceCriteria.map((criterion) => criterion.id))
+  const scoped = existing.some((task) => task.acceptance)
+  if (scoped && blocked.some((task) => task.acceptance?.scope !== "local"))
+    return yield* invalid(
+      "Final acceptance ownership cannot be reassigned by replanning; resolve its business repair attribution instead",
+    )
+  const local = existing.filter((task) => superseded.has(task.id)).flatMap((task) => task.acceptance?.criteria ?? [])
+  const knownCriteria = new Set((scoped ? local : goal.acceptanceCriteria).map((criterion) => criterion.id))
+  if (
+    scoped &&
+    new Set(output.tasks.flatMap((task) => task.criteria)).size !==
+      output.tasks.reduce((count, task) => count + task.criteria.length, 0)
+  )
+    return yield* invalid("A local criterion must have one replacement owner")
   const invalidCriterion = output.tasks.find(
     (task) =>
       new Set(task.criteria).size !== task.criteria.length ||
@@ -144,6 +157,25 @@ export const validate = Effect.fn("WorkArchitect.validate")(function* (
         role: task.role,
         isolation: task.isolation,
         criteria: task.criteria,
+        ...(scoped
+          ? {
+              acceptance: {
+                scope: "local" as const,
+                criteria: task.criteria.length
+                  ? task.criteria.map((id) => local.find((criterion) => criterion.id === id)!)
+                  : [
+                      {
+                        id: Work.CriterionID.make(
+                          `criterion_local_${hash(`${goal.id}:${architectTask.id}:${task.key}`).slice(0, 24)}`,
+                        ),
+                        description: task.instructions,
+                        required: true,
+                        evidence: "review" as const,
+                      },
+                    ],
+              },
+            }
+          : {}),
       },
     ]),
   )
@@ -155,6 +187,7 @@ export const validate = Effect.fn("WorkArchitect.validate")(function* (
       const item = byKey.get(task.key)!
       return {
         ...item,
+        criteria: item.acceptance?.criteria.map((criterion) => criterion.id) ?? item.criteria,
         dependsOn: item.dependsOn.map((dependency) => byKey.get(dependency)?.id ?? Work.TaskID.make(dependency)),
       } satisfies ValidatedTask
     }),
@@ -212,6 +245,7 @@ export function prompt(input: Input) {
           `- ${task.id} [${task.status}] role=${task.role} dependsOn=${task.dependsOn.join(",") || "none"} criteria=${task.criteria.join(",") || "none"}\n  ${task.title}: ${task.instructions}`,
       )
       .join("\n")}`,
+    `Local acceptance contracts (preserve these IDs and descriptions on replacement Tasks):\n${JSON.stringify(input.tasks.filter((task) => task.status === "blocked").flatMap((task) => task.acceptance?.criteria ?? []))}`,
     `Latest failure evaluations:\n${JSON.stringify(
       input.evaluations.slice(-30).map((evaluation) => ({
         taskID: evaluation.taskID,

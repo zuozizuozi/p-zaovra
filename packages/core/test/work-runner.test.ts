@@ -101,12 +101,16 @@ const recoveryReviewers = Layer.succeed(
         Work.ReviewOutput.make({
           criteria: input.criteria.map((criterion) => ({
             criterionID: criterion.id,
-            verdict: input.task.title === "Implement the recovery plan" ? "pass" : "fail",
+            verdict:
+              input.task.acceptance?.scope === "final" || input.task.title === "Implement the recovery plan"
+                ? "pass"
+                : "fail",
             findings:
-              input.task.title === "Implement the recovery plan"
+              input.task.acceptance?.scope === "final" || input.task.title === "Implement the recovery plan"
                 ? []
                 : [{ code: "stalled", message: "The original approach is still stalled", severity: "error" }],
-            allowsRepair: input.task.title !== "Implement the recovery plan",
+            allowsRepair:
+              input.task.acceptance?.scope !== "final" && input.task.title !== "Implement the recovery plan",
           })),
         }),
       ),
@@ -189,6 +193,66 @@ const runnerLayer = (
     [WorkReviewer.node, reviewerLayer],
   ])
 const it = testEffect(runnerLayer(reviewers))
+const finalRepairIt = testEffect(
+  runnerLayer(
+    Layer.succeed(
+      WorkReviewer.Service,
+      WorkReviewer.Service.of({
+        run: (input) =>
+          Effect.gen(function* () {
+            const failed = input.task.acceptance?.scope === "final" && input.attempt.number === 2
+            if (input.task.acceptance?.scope === "local") {
+              expect(
+                input.criteria.every(
+                  (criterion) => !input.goal.acceptanceCriteria.some((global) => global.id === criterion.id),
+                ),
+              ).toBe(true)
+            }
+            return {
+              criteria: input.criteria.map((criterion) => ({
+                criterionID: criterion.id,
+                verdict: failed ? ("fail" as const) : ("pass" as const),
+                findings: failed
+                  ? [
+                      {
+                        message: "Fix the mobile contrast",
+                        severity: "error" as const,
+                        taskID: input.task.dependsOn[0]!,
+                      },
+                    ]
+                  : [],
+                allowsRepair: failed,
+              })),
+            }
+          }),
+      }),
+    ),
+  ),
+)
+const changedFinalIt = testEffect(
+  runnerLayer(
+    Layer.succeed(
+      WorkReviewer.Service,
+      WorkReviewer.Service.of({
+        run: (input) =>
+          Effect.gen(function* () {
+            if (input.task.acceptance?.scope === "final")
+              yield* Effect.promise(() =>
+                Bun.write(path.join(input.goal.location.directory, "changed.txt"), "external edit"),
+              )
+            return {
+              criteria: input.criteria.map((criterion) => ({
+                criterionID: criterion.id,
+                verdict: "pass" as const,
+                findings: [],
+                allowsRepair: false,
+              })),
+            }
+          }),
+      }),
+    ),
+  ),
+)
 const reviewIt = testEffect(runnerLayer(failingReviewers))
 const nonRepairIt = testEffect(runnerLayer(nonRepairingReviewers))
 const replanIt = testEffect(runnerLayer(recoveryReviewers))
@@ -283,12 +347,14 @@ describe("WorkRunner", () => {
   )
   it.effect("runs a durable Planner Attempt before executing its validated graph", () =>
     Effect.gen(function* () {
+      const directory = yield* Effect.promise(() => tmpdir())
+      yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
       const work = yield* Work.Service
       const runner = yield* WorkRunner.Service
       const store = yield* WorkStore.Service
       const created = yield* work.create({
         id: goalID,
-        location: { directory: AbsolutePath.make("/project") },
+        location: { directory: AbsolutePath.make(directory.path) },
         objective: "Implement the planned feature",
         planning: true,
         acceptanceCriteria: [{ description: "Feature is complete", required: true, evidence: "review" }],
@@ -297,8 +363,16 @@ describe("WorkRunner", () => {
       yield* runner.run({ goalID, force: true })
 
       const tasks = yield* work.tasks(goalID)
-      expect(yield* work.get(goalID)).toMatchObject({ status: "completed", usage: { attempts: 3 } })
-      expect(tasks).toHaveLength(2)
+      expect(yield* work.get(goalID)).toMatchObject({ status: "completed", usage: { attempts: 5 } })
+      expect(tasks).toHaveLength(3)
+      expect(tasks.find((task) => task.acceptance?.scope === "final")).toMatchObject({
+        status: "completed",
+        role: "qa",
+        criteria: created.goal.acceptanceCriteria.map((criterion) => criterion.id),
+      })
+      expect(tasks.find((task) => task.role === "build")?.criteria).not.toContain(
+        created.goal.acceptanceCriteria[0]!.id,
+      )
       expect(tasks.find((task) => task.role === "work-planner")).toMatchObject({
         id: created.tasks[0]?.id,
         status: "completed",
@@ -1539,3 +1613,79 @@ describe("WorkRunner", () => {
     }),
   )
 })
+
+finalRepairIt.effect("routes final rejection to a business repair Task and executes final acceptance again", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const work = yield* Work.Service
+    const runner = yield* WorkRunner.Service
+    const store = yield* WorkStore.Service
+    yield* work.create({
+      id: goalID,
+      location: { directory: AbsolutePath.make(directory.path) },
+      objective: "Build coffee page",
+      planning: true,
+      acceptanceCriteria: [{ description: "Whole product, plan and summary", required: true, evidence: "review" }],
+    })
+    yield* runner.run({ goalID, force: true })
+    expect(yield* work.get(goalID)).toMatchObject({ status: "completed", usage: { repairs: 1 } })
+    const tasks = yield* work.tasks(goalID)
+    const final = tasks.find((task) => task.acceptance?.scope === "final")!
+    const repair = tasks.find((task) => task.title.startsWith("Repair:"))!
+    expect(repair).toMatchObject({ role: "build", status: "completed", acceptance: { scope: "local" } })
+    expect(final.dependsOn).toContain(repair.id)
+    expect((yield* store.attempts(final.id)).map((attempt) => attempt.kind)).toEqual([
+      "execute",
+      "review",
+      "execute",
+      "review",
+    ])
+  }),
+)
+
+changedFinalIt.effect("does not complete when artifacts change during a passing final review", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const work = yield* Work.Service
+    const runner = yield* WorkRunner.Service
+    yield* work.create({
+      id: goalID,
+      location: { directory: AbsolutePath.make(directory.path) },
+      objective: "Check current files",
+      planning: true,
+      acceptanceCriteria: [{ description: "Current product is correct", required: true, evidence: "review" }],
+    })
+    yield* runner.run({ goalID, force: true })
+    expect(yield* work.get(goalID)).toMatchObject({ status: "blocked" })
+    expect((yield* work.tasks(goalID)).find((task) => task.acceptance?.scope === "final")).toMatchObject({
+      status: "blocked",
+    })
+  }),
+)
+
+replanIt.effect("local automatic replanning retains final ownership and waits for the replacement", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const work = yield* Work.Service
+    const runner = yield* WorkRunner.Service
+    yield* work.create({
+      id: goalID,
+      location: { directory: AbsolutePath.make(directory.path) },
+      objective: "Repair local implementation",
+      planning: true,
+      budget: { maxReplans: 1 },
+      acceptanceCriteria: [{ description: "Whole product correct", required: true, evidence: "review" }],
+    })
+    yield* runner.run({ goalID, force: true })
+    expect(yield* work.get(goalID)).toMatchObject({ status: "completed" })
+    const tasks = yield* work.tasks(goalID)
+    const recovered = tasks.find((task) => task.title === "Implement the recovery plan")!
+    const final = tasks.find((task) => task.acceptance?.scope === "final")!
+    expect(recovered).toMatchObject({ status: "completed", acceptance: { scope: "local" } })
+    expect(final.dependsOn).toContain(recovered.id)
+    expect(tasks.filter((task) => task.acceptance?.scope === "final")).toHaveLength(1)
+  }),
+)

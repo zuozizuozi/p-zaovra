@@ -61,6 +61,7 @@ export {
   RoleCapability,
   RoleContract,
   RoleID,
+  TaskAcceptance,
   TaskInfo,
   TaskStatus,
   TaskTime,

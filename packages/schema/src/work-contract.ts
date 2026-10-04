@@ -198,6 +198,12 @@ export const TaskTime = Schema.Struct({
 }).annotate({ identifier: "Work.TaskTime" })
 export interface TaskTime extends Schema.Schema.Type<typeof TaskTime> {}
 
+export const TaskAcceptance = Schema.Struct({
+  scope: Schema.Literals(["local", "final"]),
+  criteria: Schema.Array(Criterion),
+}).annotate({ identifier: "Work.TaskAcceptance" })
+export interface TaskAcceptance extends Schema.Schema.Type<typeof TaskAcceptance> {}
+
 export const TaskInfo = Schema.Struct({
   id: TaskID,
   goalID: GoalID,
@@ -208,6 +214,7 @@ export const TaskInfo = Schema.Struct({
   location: Location.Ref.pipe(optional),
   status: TaskStatus,
   criteria: Schema.Array(CriterionID),
+  acceptance: TaskAcceptance.pipe(optional),
   attemptCount: NonNegativeInt,
   time: TaskTime,
   revision: NonNegativeInt,
@@ -261,6 +268,7 @@ export const EvidenceInfo = Schema.Struct({
 export interface EvidenceInfo extends Schema.Schema.Type<typeof EvidenceInfo> {}
 
 export const Finding = Schema.Struct({
+  taskID: TaskID.pipe(optional),
   code: Schema.String.pipe(optional),
   message: Schema.String,
   severity: Schema.Literals(["info", "warning", "error"]),
@@ -761,6 +769,7 @@ export const PlanTask = Schema.Struct({
   dependsOn: Schema.Array(Schema.String),
   role: PlanRole,
   isolation: PlanIsolation,
+  localAcceptance: Schema.Array(Schema.Trim.pipe(Schema.check(Schema.isNonEmpty()))).pipe(optional),
   criteria: Schema.Array(CriterionID),
 }).annotate({ identifier: "Work.PlanTask" })
 export interface PlanTask extends Schema.Schema.Type<typeof PlanTask> {}

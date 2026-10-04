@@ -1,3 +1,4 @@
+import { WorkAcceptance } from "./acceptance"
 export * as WorkProjector from "./projector"
 
 import type { EffectDrizzleSqlite } from "@zaovra-ai/effect-drizzle-sqlite"
@@ -255,11 +256,7 @@ const layer = Layer.effectDiscard(
           new Set(event.data.info.criteria).size === event.data.info.criteria.length,
           "Task criteria must be unique",
         )
-        const criteria = new Set(goal.acceptance_criteria.map((criterion) => criterion.id))
-        invariant(
-          event.data.info.criteria.every((criterionID) => criteria.has(criterionID)),
-          "Task criterion is unknown",
-        )
+        invariant(WorkAcceptance.valid(goal.acceptance_criteria, event.data.info), "Task criterion is unknown")
         if (event.data.info.dependsOn.length > 0) {
           const dependencies = yield* db
             .select({ id: WorkTaskTable.id, goalID: WorkTaskTable.goal_id })
@@ -287,6 +284,7 @@ const layer = Layer.effectDiscard(
             workspace_id: event.data.info.location?.workspaceID,
             status: "pending",
             criteria: Array.from(event.data.info.criteria),
+            acceptance: event.data.info.acceptance,
             attempt_count: 0,
             revision: revision(event),
             time_created: time,
@@ -316,12 +314,18 @@ const layer = Layer.effectDiscard(
           .all()
           .pipe(Effect.orDie)
         invariant(existing.length === 1 && existing[0]?.id === planner.id, "Goal already has an execution Task graph")
-        const criteria = new Set(goal.acceptance_criteria.map((criterion) => criterion.id))
         for (const info of event.data.tasks) {
           invariant(
             WorkRole.get(info.role, roleContracts(goal)) !== undefined,
             `Unknown planned Work role ${info.role}`,
           )
+          if (info.acceptance?.scope === "final")
+            invariant(
+              !info.location &&
+                WorkRole.get(info.role, roleContracts(goal))?.agentID === "work-qa" &&
+                WorkRole.get(info.role, roleContracts(goal))?.workspaceAccess === "read_only",
+              "Final acceptance requires the built-in read-only QA in the Goal workspace",
+            )
           invariant(info.goalID === event.data.goalID, "Planned Task payload Goal ID does not match aggregate")
           invariant(info.status === "pending", "A planned Task must start pending")
           invariant(info.attemptCount === 0 && info.revision === 0, "A planned Task cannot contain runtime state")
@@ -332,11 +336,15 @@ const layer = Layer.effectDiscard(
           )
           invariant(
             new Set(info.criteria).size === info.criteria.length &&
-              info.criteria.every((criterionID) => criteria.has(criterionID)),
+              WorkAcceptance.valid(goal.acceptance_criteria, info),
             `Planned Task ${info.id} has invalid criteria`,
           )
         }
         invariant(acyclic(event.data.tasks), "Planned Task graph contains a dependency cycle")
+        invariant(
+          WorkAcceptance.validGraph(goal.acceptance_criteria, event.data.tasks),
+          "Invalid final acceptance ownership",
+        )
         const assigned = new Set(event.data.tasks.flatMap((task) => task.criteria))
         invariant(
           goal.acceptance_criteria.every((criterion) => !criterion.required || assigned.has(criterion.id)),
@@ -357,6 +365,7 @@ const layer = Layer.effectDiscard(
               workspace_id: info.location?.workspaceID,
               status: "pending" as const,
               criteria: Array.from(info.criteria),
+              acceptance: info.acceptance,
               attempt_count: 0,
               revision: revision(event),
               time_created: time,
@@ -378,7 +387,12 @@ const layer = Layer.effectDiscard(
         )
         invariant(event.data.tasks.length > 0 && event.data.tasks.length <= 24, "Expanded Task count is invalid")
         const existing = yield* db
-          .select({ id: WorkTaskTable.id, dependsOn: WorkTaskTable.depends_on })
+          .select({
+            id: WorkTaskTable.id,
+            dependsOn: WorkTaskTable.depends_on,
+            acceptance: WorkTaskTable.acceptance,
+            status: WorkTaskTable.status,
+          })
           .from(WorkTaskTable)
           .where(eq(WorkTaskTable.goal_id, event.data.goalID))
           .all()
@@ -393,7 +407,6 @@ const layer = Layer.effectDiscard(
           "Expanded Task ID already exists",
         )
         const knownIDs = new Set([...existingIDs, ...addedIDs])
-        const criteria = new Set(goal.acceptance_criteria.map((criterion) => criterion.id))
         for (const info of event.data.tasks) {
           invariant(
             WorkRole.get(info.role, roleContracts(goal)) !== undefined,
@@ -409,11 +422,19 @@ const layer = Layer.effectDiscard(
           )
           invariant(
             new Set(info.criteria).size === info.criteria.length &&
-              info.criteria.every((criterionID) => criteria.has(criterionID)),
+              WorkAcceptance.valid(goal.acceptance_criteria, info),
             `Expanded Task ${info.id} has invalid criteria`,
           )
         }
         invariant(acyclic([...existing, ...event.data.tasks]), "Expanded Task graph contains a dependency cycle")
+        const final = existing.find((task) => task.acceptance?.scope === "final")
+        if (final) {
+          invariant(final.status === "pending", "Expansion must precede final acceptance")
+          invariant(
+            event.data.tasks.every((task) => task.acceptance?.scope === "local" && !task.dependsOn.includes(final.id)),
+            "Expanded Tasks must have local acceptance and cannot depend on final acceptance",
+          )
+        }
         const time = DateTime.toEpochMillis(event.data.timestamp)
         yield* db
           .insert(WorkTaskTable)
@@ -429,6 +450,7 @@ const layer = Layer.effectDiscard(
               workspace_id: info.location?.workspaceID,
               status: "pending" as const,
               criteria: Array.from(info.criteria),
+              acceptance: info.acceptance,
               attempt_count: 0,
               revision: revision(event),
               time_created: time,
@@ -437,6 +459,17 @@ const layer = Layer.effectDiscard(
           )
           .run()
           .pipe(Effect.orDie)
+        if (final)
+          yield* db
+            .update(WorkTaskTable)
+            .set({
+              depends_on: [...final.dependsOn, ...event.data.tasks.map((task) => task.id)],
+              revision: revision(event),
+              time_updated: time,
+            })
+            .where(eq(WorkTaskTable.id, final.id))
+            .run()
+            .pipe(Effect.orDie)
         yield* touchGoal(db, event)
       }),
     )
@@ -455,6 +488,7 @@ const layer = Layer.effectDiscard(
             dependsOn: WorkTaskTable.depends_on,
             status: WorkTaskTable.status,
             criteria: WorkTaskTable.criteria,
+            acceptance: WorkTaskTable.acceptance,
             role: WorkTaskTable.role,
           })
           .from(WorkTaskTable)
@@ -485,7 +519,6 @@ const layer = Layer.effectDiscard(
           "Replanned Task ID already exists",
         )
         const knownIDs = new Set([...existingByID.keys(), ...addedIDs])
-        const criteria = new Set(goal.acceptance_criteria.map((criterion) => criterion.id))
         for (const info of event.data.tasks) {
           invariant(
             WorkRole.get(info.role, roleContracts(goal)) !== undefined,
@@ -505,11 +538,22 @@ const layer = Layer.effectDiscard(
           )
           invariant(
             new Set(info.criteria).size === info.criteria.length &&
-              info.criteria.every((criterionID) => criteria.has(criterionID)),
+              WorkAcceptance.valid(goal.acceptance_criteria, info),
             `Replanned Task ${info.id} has invalid criteria`,
           )
         }
         invariant(acyclic([...existing, ...event.data.tasks]), "Replanned Task graph contains a dependency cycle")
+        const final = existing.find((task) => task.acceptance?.scope === "final")
+        if (final) {
+          invariant(
+            final.status === "pending" && !supersededIDs.has(final.id),
+            "Replanning cannot replace or invalidate an active final acceptance",
+          )
+          invariant(
+            event.data.tasks.every((task) => task.acceptance?.scope === "local" && !task.dependsOn.includes(final.id)),
+            "Replacement Tasks must preserve local acceptance ownership",
+          )
+        }
         const reassigned = new Set(event.data.tasks.flatMap((task) => task.criteria))
         invariant(
           event.data.supersededTaskIDs
@@ -547,6 +591,7 @@ const layer = Layer.effectDiscard(
               workspace_id: info.location?.workspaceID,
               status: "pending" as const,
               criteria: Array.from(info.criteria),
+              acceptance: info.acceptance,
               attempt_count: 0,
               revision: revision(event),
               time_created: time,
@@ -555,6 +600,17 @@ const layer = Layer.effectDiscard(
           )
           .run()
           .pipe(Effect.orDie)
+        if (final)
+          yield* db
+            .update(WorkTaskTable)
+            .set({
+              depends_on: [...final.dependsOn, ...event.data.tasks.map((task) => task.id)],
+              revision: revision(event),
+              time_updated: time,
+            })
+            .where(eq(WorkTaskTable.id, final.id))
+            .run()
+            .pipe(Effect.orDie)
         yield* touchGoal(db, event)
       }),
     )
@@ -631,6 +687,96 @@ const layer = Layer.effectDiscard(
           "Isolation archival does not match the Goal and Task state",
         )
         invariant(event.data.artifact.digest.length === 64, "Isolation archive digest is invalid")
+        yield* touchGoal(db, event)
+      }),
+    )
+    yield* events.project(Work.Event.FinalAcceptanceRepairRequested, (event) =>
+      Effect.gen(function* () {
+        const goal = yield* requireGoal(db, event.data.goalID)
+        const final = yield* requireTask(db, event.data.goalID, event.data.taskID)
+        const source = yield* requireTask(db, event.data.goalID, event.data.sourceTaskID)
+        const info = event.data.repair
+        invariant(
+          goal.status === "active" &&
+            final.acceptance?.scope === "final" &&
+            ["verifying", "reviewing"].includes(final.status),
+          "Final acceptance is not awaiting repair",
+        )
+        invariant(
+          final.depends_on.includes(source.id) && source.status === "completed" && source.acceptance?.scope === "local",
+          "Repair source must be a completed business dependency",
+        )
+        invariant(
+          WorkRole.get(source.role, roleContracts(goal))?.workspaceAccess === "write",
+          "Repair source must own implementation",
+        )
+        invariant(
+          info.goalID === goal.id &&
+            info.acceptance?.scope === "local" &&
+            WorkAcceptance.valid(goal.acceptance_criteria, info),
+          "Invalid repair acceptance",
+        )
+        invariant(
+          info.role === source.role &&
+            info.status === "pending" &&
+            info.attemptCount === 0 &&
+            info.revision === 0 &&
+            info.dependsOn.length === 1 &&
+            info.dependsOn[0] === source.id &&
+            !info.location,
+          "Repair must start as a shared business Task",
+        )
+        const failures = yield* db
+          .select()
+          .from(WorkEvaluationTable)
+          .where(and(eq(WorkEvaluationTable.task_id, final.id), eq(WorkEvaluationTable.verdict, "fail")))
+          .all()
+          .pipe(Effect.orDie)
+        invariant(
+          failures.some(
+            (evaluation) =>
+              evaluation.id === event.data.evaluationID && evaluation.allows_repair && evaluation.findings.length > 0,
+          ),
+          "Repair requires a failed evaluation",
+        )
+        const time = DateTime.toEpochMillis(event.data.timestamp)
+        yield* db
+          .insert(WorkTaskTable)
+          .values({
+            id: info.id,
+            goal_id: goal.id,
+            title: info.title,
+            instructions: info.instructions,
+            depends_on: Array.from(info.dependsOn),
+            role: info.role,
+            status: "pending",
+            criteria: Array.from(info.criteria),
+            acceptance: info.acceptance,
+            attempt_count: 0,
+            revision: revision(event),
+            time_created: time,
+            time_updated: time,
+          })
+          .run()
+          .pipe(Effect.orDie)
+        yield* db
+          .update(WorkTaskTable)
+          .set({
+            status: "pending",
+            depends_on: [...final.depends_on, info.id],
+            revision: revision(event),
+            time_updated: time,
+            time_completed: null,
+          })
+          .where(eq(WorkTaskTable.id, final.id))
+          .run()
+          .pipe(Effect.orDie)
+        yield* db
+          .update(WorkGoalTable)
+          .set({ usage: { ...goal.usage, repairs: goal.usage.repairs + 1 } })
+          .where(eq(WorkGoalTable.id, goal.id))
+          .run()
+          .pipe(Effect.orDie)
         yield* touchGoal(db, event)
       }),
     )
@@ -743,7 +889,9 @@ const layer = Layer.effectDiscard(
           const turns = yield* db
             .select({ value: count(SessionMessageTable.id) })
             .from(SessionMessageTable)
-            .where(and(eq(SessionMessageTable.session_id, attempt.session_id), eq(SessionMessageTable.type, "assistant")))
+            .where(
+              and(eq(SessionMessageTable.session_id, attempt.session_id), eq(SessionMessageTable.type, "assistant")),
+            )
             .get()
             .pipe(Effect.orDie)
           const goal = yield* requireGoal(db, event.data.goalID)
@@ -1007,7 +1155,10 @@ const layer = Layer.effectDiscard(
           invariant(info.value.memory === "project", "Memory replacement must retain project scope")
           invariant(info.value.key === info.key, "Memory replacement key does not match")
           invariant(info.value.kind !== "next_action", "Memory replacement cannot be a next action")
-          invariant(info.value.text.trim().length > 0 && info.value.text.length <= 12_000, "Memory replacement is invalid")
+          invariant(
+            info.value.text.trim().length > 0 && info.value.text.length <= 12_000,
+            "Memory replacement is invalid",
+          )
         }
         invariant(
           DateTime.toEpochMillis(info.createdAt) === DateTime.toEpochMillis(event.data.timestamp),
@@ -1140,6 +1291,33 @@ function projectTaskStatus(db: DatabaseClient, event: TaskTransition) {
   return Effect.gen(function* () {
     const row = yield* requireTask(db, event.data.goalID, event.data.taskID)
     WorkStateMachine.task(row.status, event.data.status)
+    if (event.data.status === "completed" && row.acceptance) {
+      const attempts = yield* db
+        .select()
+        .from(WorkAttemptTable)
+        .where(eq(WorkAttemptTable.task_id, row.id))
+        .all()
+        .pipe(Effect.orDie)
+      const latest = attempts.toSorted((a, b) => a.number - b.number).at(-1)
+      invariant(
+        latest?.kind === "review" && latest.status === "succeeded",
+        "Scoped Task requires its latest successful review",
+      )
+      const evaluations = yield* db
+        .select()
+        .from(WorkEvaluationTable)
+        .where(eq(WorkEvaluationTable.attempt_id, latest!.id))
+        .all()
+        .pipe(Effect.orDie)
+      invariant(
+        row.acceptance.criteria
+          .filter((criterion) => criterion.required)
+          .every((criterion) =>
+            evaluations.some((evaluation) => evaluation.criterion_id === criterion.id && evaluation.verdict === "pass"),
+          ),
+        "Scoped Task has unmet criteria",
+      )
+    }
     const time = DateTime.toEpochMillis(event.data.timestamp)
     yield* db
       .update(WorkTaskTable)
@@ -1197,7 +1375,7 @@ function assertCompletable(db: DatabaseClient, goalID: Work.GoalID) {
   return Effect.gen(function* () {
     const goal = yield* requireGoal(db, goalID)
     const tasks = yield* db
-      .select({ id: WorkTaskTable.id, status: WorkTaskTable.status })
+      .select({ id: WorkTaskTable.id, status: WorkTaskTable.status, acceptance: WorkTaskTable.acceptance })
       .from(WorkTaskTable)
       .where(eq(WorkTaskTable.goal_id, goalID))
       .all()
@@ -1210,16 +1388,41 @@ function assertCompletable(db: DatabaseClient, goalID: Work.GoalID) {
 
     const required = goal.acceptance_criteria.filter((criterion) => criterion.required)
     if (required.length === 0) return
-    const completedTaskIDs = tasks.filter((task) => task.status === "completed").map((task) => task.id)
+    const scoped = tasks.some((task) => task.acceptance)
+    const completedTaskIDs = tasks
+      .filter((task) => task.status === "completed" && (!scoped || task.acceptance?.scope === "final"))
+      .map((task) => task.id)
+    invariant(!scoped || completedTaskIDs.length === 1, "Goal requires exactly one completed final acceptance Task")
     invariant(completedTaskIDs.length > 0, "Goal criteria require a completed Task")
+    const attempts = scoped
+      ? yield* db
+          .select()
+          .from(WorkAttemptTable)
+          .where(inArray(WorkAttemptTable.task_id, completedTaskIDs))
+          .all()
+          .pipe(Effect.orDie)
+      : []
+    const last = attempts.toSorted((a, b) => a.number - b.number).at(-1)
+    invariant(
+      !scoped || (last?.kind === "review" && last.status === "succeeded"),
+      "Final acceptance requires its latest successful review",
+    )
     const evaluations = yield* db
-      .select({ criterionID: WorkEvaluationTable.criterion_id, verdict: WorkEvaluationTable.verdict })
+      .select({
+        criterionID: WorkEvaluationTable.criterion_id,
+        verdict: WorkEvaluationTable.verdict,
+        attemptID: WorkEvaluationTable.attempt_id,
+      })
       .from(WorkEvaluationTable)
       .where(and(eq(WorkEvaluationTable.goal_id, goalID), inArray(WorkEvaluationTable.task_id, completedTaskIDs)))
       .orderBy(asc(WorkEvaluationTable.time_created), asc(WorkEvaluationTable.id))
       .all()
       .pipe(Effect.orDie)
-    const latest = new Map(evaluations.map((evaluation) => [evaluation.criterionID, evaluation.verdict]))
+    const latest = new Map(
+      evaluations
+        .filter((evaluation) => !scoped || evaluation.attemptID === last?.id)
+        .map((evaluation) => [evaluation.criterionID, evaluation.verdict]),
+    )
     invariant(
       required.every((criterion) => latest.get(criterion.id) === "pass"),
       "Goal has unmet criteria",

@@ -2887,6 +2887,23 @@ export type WorkCreateOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -2934,6 +2951,7 @@ export type WorkCreateOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"
@@ -3204,6 +3222,23 @@ export type WorkGetOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -3251,6 +3286,7 @@ export type WorkGetOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"
@@ -3483,6 +3519,23 @@ export type WorkExpandOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -3530,6 +3583,7 @@ export type WorkExpandOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"
@@ -3753,6 +3807,23 @@ export type WorkReplanOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -3800,6 +3871,7 @@ export type WorkReplanOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"
@@ -4069,6 +4141,23 @@ export type WorkResolveMemoryOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -4116,6 +4205,7 @@ export type WorkResolveMemoryOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"
@@ -4362,6 +4452,23 @@ export type WorkUpdateMemoryOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -4409,6 +4516,7 @@ export type WorkUpdateMemoryOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"
@@ -4631,6 +4739,23 @@ export type WorkDeleteMemoryOutput = {
         | "blocked"
         | "cancelled"
       readonly criteria: ReadonlyArray<string>
+      readonly acceptance?: {
+        readonly scope: "local" | "final"
+        readonly criteria: ReadonlyArray<{
+          readonly id: string
+          readonly description: string
+          readonly required: boolean
+          readonly evidence: "command" | "test" | "diff" | "artifact" | "review" | "manual" | "external"
+          readonly verifier?:
+            | {
+                readonly type: "command"
+                readonly command: string
+                readonly timeoutMs?: number
+                readonly successExitCodes?: ReadonlyArray<number>
+              }
+            | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
+        }>
+      }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -4678,6 +4803,7 @@ export type WorkDeleteMemoryOutput = {
       readonly evaluator: string
       readonly evaluatorVersion: string
       readonly findings: ReadonlyArray<{
+        readonly taskID?: string
         readonly code?: string
         readonly message: string
         readonly severity: "info" | "warning" | "error"

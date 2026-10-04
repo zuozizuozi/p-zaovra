@@ -1,3 +1,4 @@
+import { WorkAcceptance } from "@zaovra-ai/core/work/acceptance"
 import { describe, expect } from "bun:test"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { WorkPlanner } from "@zaovra-ai/core/work/planner"
@@ -151,3 +152,69 @@ describe("WorkPlanner", () => {
     }),
   )
 })
+
+it.effect("R1 C equivalent separates implementation acceptance from overall plan and summary", () =>
+  Effect.gen(function* () {
+    const global = {
+      ...goal,
+      acceptanceCriteria: [
+        { ...goal.acceptanceCriteria[0]!, description: "Deliver complete product, overall plan and final summary" },
+      ],
+    }
+    const output = Work.PlanOutput.make({
+      tasks: [
+        {
+          key: "implementation",
+          title: "Build coffee page",
+          instructions: "Implement responsive coffee page",
+          localAcceptance: ["Coffee page works on mobile and desktop"],
+          role: "developer",
+          isolation: "shared",
+          dependsOn: [],
+          criteria: [goal.acceptanceCriteria[0]!.id],
+        },
+        {
+          key: "qa",
+          title: "QA",
+          instructions: "Check product",
+          role: "qa",
+          isolation: "shared",
+          dependsOn: ["implementation"],
+          criteria: [goal.acceptanceCriteria[0]!.id],
+        },
+      ],
+    })
+    const validated = yield* WorkPlanner.validate(global, output)
+    const tasks = WorkAcceptance.plan(global, validated)
+    expect(tasks).toHaveLength(2)
+    expect(tasks[0]!.acceptance?.criteria[0]!.description).toBe("Coffee page works on mobile and desktop")
+    expect(tasks[0]!.criteria).not.toContain(global.acceptanceCriteria[0]!.id)
+    expect(tasks[1]!.id).toBe(validated[1]!.id)
+    expect(tasks[1]!.dependsOn).toEqual([tasks[0]!.id])
+    expect(tasks[1]!.acceptance?.criteria).toEqual(global.acceptanceCriteria)
+    expect(tasks).toEqual(WorkAcceptance.plan(global, validated))
+    const infos = tasks.map((task) =>
+      Work.TaskInfo.make({
+        ...task,
+        goalID: goal.id,
+        status: "pending",
+        attemptCount: 0,
+        time: goal.time,
+        revision: 0,
+      }),
+    )
+    expect(WorkAcceptance.validGraph(global.acceptanceCriteria, infos)).toBe(true)
+    expect(
+      WorkAcceptance.validGraph(
+        global.acceptanceCriteria,
+        infos.map((task) => ({ ...task, criteria: global.acceptanceCriteria.map((criterion) => criterion.id) })),
+      ),
+    ).toBe(false)
+    expect(
+      WorkAcceptance.validGraph(
+        global.acceptanceCriteria,
+        infos.map((task) => ({ ...task, dependsOn: [] })),
+      ),
+    ).toBe(false)
+  }),
+)

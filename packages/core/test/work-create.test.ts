@@ -1,3 +1,4 @@
+import { WorkAcceptance } from "@zaovra-ai/core/work/acceptance"
 import { describe, expect } from "bun:test"
 import { Work } from "@zaovra-ai/core/work"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -392,3 +393,47 @@ describe("Work.create", () => {
     }),
   )
 })
+
+it.effect("expansion keeps local criteria distinct and adds dependencies to the final owner", () =>
+  Effect.gen(function* () {
+    const work = yield* Work.Service
+    const events = yield* EventV2.Service
+    const created = yield* work.create({ ...input, planning: true })
+    yield* events.publish(Work.Event.GoalActivated, { goalID, timestamp: DateTime.makeUnsafe(2) })
+    const planned = WorkAcceptance.plan(created.goal, [
+      {
+        id: Work.TaskID.make("task_business"),
+        title: "Page",
+        instructions: "Implement page",
+        role: "build",
+        isolation: "shared",
+        dependsOn: [],
+        criteria: [],
+      },
+    ]).map((task) => ({
+      ...task,
+      goalID,
+      status: "pending" as const,
+      attemptCount: 0,
+      revision: 0,
+      time: created.goal.time,
+    }))
+    yield* events.publish(Work.Event.TaskGraphPlanned, {
+      goalID,
+      plannerTaskID: created.tasks[0]!.id,
+      tasks: planned,
+      timestamp: DateTime.makeUnsafe(3),
+    })
+    const expansion = {
+      goalID,
+      tasks: [{ id: Work.TaskID.make("task_more"), title: "Add mobile support", instructions: "Fix mobile layout" }],
+    }
+    const added = yield* work.expand(expansion)
+    expect(added[0]!.acceptance?.scope).toBe("local")
+    expect(added[0]!.criteria).not.toContain(created.goal.acceptanceCriteria[0]!.id)
+    expect((yield* work.tasks(goalID)).find((task) => task.acceptance?.scope === "final")!.dependsOn).toContain(
+      added[0]!.id,
+    )
+    expect(yield* work.expand(expansion)).toEqual(added)
+  }),
+)
