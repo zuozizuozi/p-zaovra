@@ -156,12 +156,13 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
-  it.live("rejects nonexistent assertion paths and directories before process execution or check creation", () =>
+  it.live("runs commands while ignoring nonexistent assertion paths and directories", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) =>
         Effect.gen(function* () {
           reset()
+          yield* Effect.promise(() => Bun.write(path.join(tmp.path, "source.js"), "export const value = 1"))
           for (const file of ["the product should work", "missing.test.js", "."]) {
             const settled = yield* withTool(tmp.path, (registry) =>
               settleTool(
@@ -174,14 +175,75 @@ describe("BashTool", () => {
                 }),
               ),
             )
-            expect(settled.inputRejected).toBe(true)
-            expect(settled.output).toBeUndefined()
-            expect(settled.result).toMatchObject({
-              type: "error",
-              value: expect.stringContaining("Invalid tool input: verification_assertions"),
-            })
+            expect(settled.inputRejected).not.toBe(true)
+            const output = settled.output?.structured as { exit: number; verification: { assertions?: unknown } }
+            expect(output.exit).toBe(0)
+            expect(output.verification.assertions).toBeUndefined()
+            expect(JSON.stringify(settled.output?.content)).toContain("Ignored invalid verification_assertions")
           }
-          expect(runs).toHaveLength(0)
+          expect(runs).toHaveLength(3)
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+  it.live("ignores invalid coverage combinations without blocking the command", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          for (const input of [
+            { command: "echo ok", verification: "test" as const, verification_requirements: ["works"] },
+            { command: "echo ok", verification_targets: ["source.js"], verification_requirements: ["works"] },
+            { command: "echo ok", verification_report: true },
+            {
+              command: "echo ok",
+              verification: "test" as const,
+              verification_report: true,
+              verification_requirements: ["works"],
+            },
+          ]) {
+            const settled = yield* withTool(tmp.path, (registry) => settleTool(registry, call(input)))
+            expect(settled.inputRejected).not.toBe(true)
+            const output = settled.output?.structured as { exit: number; verification?: { requirements?: unknown } }
+            expect(output.exit).toBe(0)
+            expect(output.verification?.requirements).toBeUndefined()
+            expect(JSON.stringify(settled.output?.content)).toContain("Ignored verification_")
+          }
+          expect(runs).toHaveLength(4)
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+  it.live("executes a real command once despite descriptive assertion metadata", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const script = path.join(tmp.path, "job.mjs")
+          yield* Effect.promise(() =>
+            Bun.write(script, 'import fs from "node:fs"; fs.appendFileSync("executed.txt", "once");'),
+          )
+          const settled = yield* withTool(
+            tmp.path,
+            (registry) =>
+              settleTool(
+                registry,
+                call({
+                  command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+                  verification: "test",
+                  verification_targets: [script],
+                  verification_assertions: ["the page and navigation work"],
+                }),
+              ),
+            LayerNode.compile(AppProcess.node),
+          )
+          expect(settled.output?.structured).toMatchObject({ exit: 0 })
+          expect(
+            (settled.output?.structured as { verification: { assertions?: unknown } }).verification.assertions,
+          ).toBeUndefined()
+          expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "executed.txt")).text())).toBe("once")
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
@@ -290,7 +352,7 @@ describe("BashTool", () => {
       ),
   )
 
-  it.live("rejects compound verification before execution and keeps its scope for a corrected check", () =>
+  it.live("runs compound commands without certifying verification", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) =>
@@ -304,15 +366,15 @@ describe("BashTool", () => {
               call({ command: "npm test; echo success", verification: "test", verification_targets: [target] }),
             ),
           )
-          expect(runs).toHaveLength(0)
-          expect(settled.output?.structured).toMatchObject({
-            verification: { execution: "not-run", cwd: realpathSync(tmp.path), targets: [{ path: target }] },
-          })
+          expect(runs).toHaveLength(1)
+          expect(settled.output?.structured).toMatchObject({ exit: 0 })
+          expect(settled.output?.structured).not.toHaveProperty("verification")
+          expect(JSON.stringify(settled.output?.content)).toContain("Verification metadata ignored")
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
   )
-  it.live("retains canonical scope when a missing target prevents execution", () =>
+  it.live("runs commands with missing verification targets without certifying checks", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) =>
@@ -321,16 +383,10 @@ describe("BashTool", () => {
           const settled = yield* withTool(tmp.path, (registry) =>
             settleTool(registry, call({ command: "npm run build", verification_targets: ["missing.js"] })),
           )
-          expect(runs).toHaveLength(0)
-          expect(settled.output?.structured).toMatchObject({
-            exit: -1,
-            verification: {
-              kind: "build",
-              execution: "not-run",
-              cwd: realpathSync(tmp.path),
-              targets: [{ path: path.join(realpathSync(tmp.path), "missing.js"), digest: "" }],
-            },
-          })
+          expect(runs).toHaveLength(1)
+          expect(settled.output?.structured).toMatchObject({ exit: 0 })
+          expect(settled.output?.structured).not.toHaveProperty("verification")
+          expect(JSON.stringify(settled.output?.content)).toContain("target is missing")
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),

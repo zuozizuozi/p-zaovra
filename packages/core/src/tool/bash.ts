@@ -48,7 +48,7 @@ export const Input = Schema.Struct({
   }),
   verification_assertions: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
-      "Files defining assertions, fixtures and test configuration for this check, relative to workdir or absolute. Include these in verification_targets. The host retains their fingerprints on failures; changing a failed test does not prove the original requirement was fixed.",
+      "File paths, not descriptive text. Existing files defining assertions, fixtures and test configuration for this check, relative to workdir or absolute. Invalid entries are ignored with a warning. Include these in verification_targets. The host retains their fingerprints on failures; changing a failed test does not prove the original requirement was fixed.",
   }),
   verification_replaces: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
@@ -91,7 +91,7 @@ const modelOutput = (output: Output) => {
     ? `\n\nWarnings:\n${output.warnings.map((warning) => `- ${warning}`).join("\n")}`
     : ""
   if (output.job_id)
-    return `Background command started: ${output.job_id}. Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
+    return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Background command started: ${output.job_id}. Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
   if (output.timeout) return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command timed out before completion.`
   if (output.verification?.execution === "not-run")
     return "Verification did not run successfully; inspect the diagnostic and correct its setup."
@@ -148,7 +148,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. Uses the configured shell when set; otherwise uses /bin/sh on POSIX and available Windows PowerShell on Windows (cmd fallback). The environment context names the effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
@@ -164,8 +164,9 @@ const layer = Layer.effectDiscard(
             { type: "text", text: output.output },
             { type: "text", text: modelOutput(output) },
           ],
-          execute: (input, context) =>
+          execute: (rawInput, context) =>
             Effect.gen(function* () {
+              let input = rawInput
               const source = {
                 type: "tool" as const,
                 messageID: context.assistantMessageID,
@@ -209,9 +210,24 @@ const layer = Layer.effectDiscard(
               const inferred = input.command.match(
                 /^(?:bun|npm|pnpm|yarn)(?: run)? (build|test|lint|typecheck)(?:\s+[^;&|<>]*)?$/,
               )?.[1]
-              const verification = input.verification_report
+              const reportValid =
+                !input.verification_report || (!input.verification && !!input.verification_targets?.length)
+              if (!reportValid) {
+                warnings.push(
+                  "Ignored verification_report: requires targets and cannot be combined with verification. Command execution is unchanged.",
+                )
+                input = { ...input, verification_report: false }
+              }
+              const declaredVerification = input.verification_report
                 ? "test"
                 : (input.verification ?? (inferred as "build" | "test" | "lint" | "typecheck" | undefined))
+              const verificationAllowed = !input.run_in_background && singleCommand(input.command)
+              const verification = verificationAllowed ? declaredVerification : undefined
+              if (declaredVerification && !verificationAllowed)
+                warnings.push(
+                  "Verification metadata ignored: background or compound commands cannot certify a check. Command execution is unchanged.",
+                )
+              const assertionFiles: string[] = []
               for (const file of input.verification_assertions ?? []) {
                 const resolved = yield* mutation.resolve({ path: path.resolve(target.canonical, file), kind: "file" })
                 if (resolved.externalDirectory)
@@ -225,26 +241,23 @@ const layer = Layer.effectDiscard(
                   Effect.map((stat) => stat.type === "File"),
                   Effect.catch(() => Effect.succeed(false)),
                 )
-                if (!valid)
-                  return yield* new ToolFailure({
-                    metadata: { phase: "input" },
-                    message:
-                      "Invalid tool input: verification_assertions must contain existing assertion file paths relative to workdir or absolute, e.g. tests/game.test.js; not descriptions or directories. Put requirement descriptions in verification_requirements. No command was executed and no verification check was recorded.",
-                  })
+                if (valid) assertionFiles.push(file)
               }
-              if (
-                input.verification_requirements?.length &&
-                (!verification || input.verification_report || !input.verification_targets?.length)
-              )
-                return yield* new ToolFailure({
-                  message:
-                    "Coverage requires verification and verification_targets. Test assertions are discovered in standard test directories; declare verification_assertions for custom locations. Omit verification_report; run the ordinary test command. No command was executed.",
-                })
-              if (input.verification_report && (input.verification || !input.verification_targets?.length))
-                return yield* new ToolFailure({
-                  message:
-                    "A suite report requires explicit verification_targets and cannot be combined with verification. No command was executed.",
-                })
+              if (assertionFiles.length !== (input.verification_assertions?.length ?? 0))
+                warnings.push(
+                  "Ignored invalid verification_assertions entries: use existing file paths, not descriptions or directories. They do not count as assertion evidence.",
+                )
+              const requirementsValid =
+                !!verification && !input.verification_report && !!input.verification_targets?.length
+              if (input.verification_requirements?.length && !requirementsValid)
+                warnings.push(
+                  "Ignored verification_requirements: coverage needs verification and targets, without verification_report. No coverage claim was recorded.",
+                )
+              input = {
+                ...input,
+                verification_assertions: assertionFiles,
+                verification_requirements: requirementsValid ? input.verification_requirements : undefined,
+              }
               const discovered =
                 verification && ["test", "smoke", "interaction"].includes(verification)
                   ? yield* fs.glob("{test,tests,__tests__,fixtures}/**/*", {
@@ -279,8 +292,6 @@ const layer = Layer.effectDiscard(
                       }),
                   )
                 : []
-              if (verification && input.run_in_background)
-                return yield* Effect.fail(new Error("Verification must run in the foreground to record its result"))
               const run = Effect.gen(function* () {
                 const before = verification ? yield* snapshots.capture() : undefined
                 const filesBefore = yield* fingerprint(fs, targets)
@@ -289,40 +300,11 @@ const layer = Layer.effectDiscard(
                     assertionPath(file.path) ||
                     input.verification_assertions?.some((value) => path.resolve(target.canonical, value) === file.path),
                 )
-                if (verification && !singleCommand(input.command))
-                  return {
-                    output:
-                      "Verification needs one executable command with its own exit status. Run build and tests separately, without pipes, redirects, chained commands or report JSON as a command. Use a script file for complex assertions. No command was executed.",
-                    exit: -1,
-                    truncated: false,
-                    verification: {
-                      kind: verification,
-                      command: input.command,
-                      exit: -1,
-                      execution: "not-run" as const,
-                      callID: context.toolCallID,
-                      cwd: target.canonical,
-                      targets: filesBefore,
-                    },
-                  }
-                if (verification && filesBefore.some((file) => !file.digest))
-                  return {
-                    output:
-                      "Verification target is missing or unreadable. No command was executed. For a build, target existing source inputs; check generated outputs after building.",
-                    exit: -1,
-                    truncated: false,
-                    verification: {
-                      kind: verification,
-                      command: input.command,
-                      exit: -1,
-                      execution: "not-run" as const,
-                      callID: context.toolCallID,
-                      cwd: target.canonical,
-                      ...(assertions.length ? { assertions } : {}),
-                      ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),
-                      targets: filesBefore,
-                    },
-                  }
+                const targetsValid = filesBefore.every((file) => !!file.digest)
+                if (verification && !targetsValid)
+                  warnings.push(
+                    "Verification metadata ignored: a target is missing or unreadable. No check was certified; command execution is unchanged.",
+                  )
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
@@ -360,7 +342,7 @@ const layer = Layer.effectDiscard(
                     output: `${result.output || "(no output)"}${result.outputTruncated ? "\n[in-memory preview truncated; consult the command log for captured bytes]" : ""}\nCommand exceeded timeout of ${timeout} ms. Inspect the output before deciding whether to change the command or allow more time.`,
                     truncated: result.outputTruncated === true,
                     timeout: true,
-                    ...(verification
+                    ...(verification && targetsValid
                       ? {
                           verification: {
                             kind: verification,
@@ -377,7 +359,11 @@ const layer = Layer.effectDiscard(
 
                 const output =
                   (result.output?.toString("utf8") || "(no output)") +
-                  (verification && !input.verification_report && result.exitCode !== 0 && assertions.length
+                  (verification &&
+                  targetsValid &&
+                  !input.verification_report &&
+                  result.exitCode !== 0 &&
+                  assertions.length
                     ? `\nFailed assertion files are protected: ${assertions.map((file) => file.path).join(", ")}. Fix implementation and rerun this check with these files UNCHANGED first. Once that exact version passes, new tests can be added normally. Until then put additional tests in separate files. Changing expectations cannot prove a repair.`
                     : "")
                 const filesAfter = yield* fingerprint(fs, targets)
@@ -390,33 +376,34 @@ const layer = Layer.effectDiscard(
                 const notice = result.outputTruncated
                   ? "[in-memory preview truncated; consult the command log for captured bytes]"
                   : undefined
-                const record = verification
-                  ? {
-                      kind: verification,
-                      command: input.command,
-                      exit: result.exitCode,
-                      ...(assertions.length ? { assertions } : {}),
-                      ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),
-                      ...(result.exitCode !== 0 && executionIssue(input.command, output)
-                        ? { execution: "not-run" as const }
-                        : {}),
-                      callID: context.toolCallID,
-                      cwd: target.canonical,
-                      ...(targets.length
-                        ? {
-                            targets: filesBefore.map((file) => ({
-                              ...file,
-                              digest: filesAfter.some(
-                                (after) => after.path === file.path && after.digest === file.digest,
-                              )
-                                ? file.digest
-                                : "",
-                            })),
-                          }
-                        : {}),
-                      snapshot: !external && before && before === (yield* snapshots.capture()) ? before : undefined,
-                    }
-                  : undefined
+                const record =
+                  verification && targetsValid
+                    ? {
+                        kind: verification,
+                        command: input.command,
+                        exit: result.exitCode,
+                        ...(assertions.length ? { assertions } : {}),
+                        ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),
+                        ...(result.exitCode !== 0 && executionIssue(input.command, output)
+                          ? { execution: "not-run" as const }
+                          : {}),
+                        callID: context.toolCallID,
+                        cwd: target.canonical,
+                        ...(targets.length
+                          ? {
+                              targets: filesBefore.map((file) => ({
+                                ...file,
+                                digest: filesAfter.some(
+                                  (after) => after.path === file.path && after.digest === file.digest,
+                                )
+                                  ? file.digest
+                                  : "",
+                              })),
+                            }
+                          : {}),
+                        snapshot: !external && before && before === (yield* snapshots.capture()) ? before : undefined,
+                      }
+                    : undefined
                 if (input.verification_report && record) {
                   const report = result.outputTruncated
                     ? Option.none()
@@ -501,13 +488,18 @@ const layer = Layer.effectDiscard(
                 capture ? capture.append(new Uint8Array()) : Effect.void,
                 { kind: input.background_kind ?? "task", workdir: target.canonical },
               )
-              return { job_id, output: "Command log is retained while the job runs.", truncated: false }
+              return {
+                job_id,
+                output: "Command log is retained while the job runs.",
+                truncated: false,
+                ...(warnings.length ? { warnings } : {}),
+              }
             }).pipe(
               Effect.mapError((error) =>
                 error instanceof ToolFailure && error.metadata?.phase === "input"
                   ? error
                   : new ToolFailure({
-                      message: `Unable to execute command: ${input.command}\n${error instanceof Error ? error.message : String(error)}`,
+                      message: `Unable to execute command: ${rawInput.command}\n${error instanceof Error ? error.message : String(error)}`,
                     }),
               ),
             ),
