@@ -20,6 +20,9 @@ export interface BoundInput {
   readonly sessionID: SessionSchema.ID
   readonly toolCallID: string
   readonly output: ToolOutput
+  /** Render retained paths before budgeting the provider-facing text. */
+  readonly reference?: (file: string) => string
+  readonly capturedPaths?: ReadonlyArray<string>
 }
 
 export interface BoundResult {
@@ -170,17 +173,25 @@ const layer = Layer.effect(
               catch: (cause) => new StorageError({ operation: "encode", cause }),
             })
           : text.map((item) => item.text).join("")
+      const project = (text: string) =>
+        (input.capturedPaths ?? []).reduce((text, file) => text.replaceAll(file, input.reference?.(file) ?? file), text)
+      const projected = project(contextual)
       if (
-        lineCount(contextual) <= outputLimits.maxLines &&
-        Buffer.byteLength(contextual, "utf-8") <= outputLimits.maxBytes
+        lineCount(projected) <= outputLimits.maxLines &&
+        Buffer.byteLength(projected, "utf-8") <= outputLimits.maxBytes
       )
         return {
-          output: input.output,
+          output: {
+            ...input.output,
+            content: input.output.content.map((part) =>
+              part.type === "text" ? { ...part, text: project(part.text) } : part,
+            ),
+          },
           outputPaths: [],
         }
 
       const outputPath = yield* write(contextual)
-      const marker = `... output truncated; full content saved to ${outputPath} ...`
+      const marker = `... output truncated; full content saved to ${input.reference?.(outputPath) ?? outputPath} ...`
 
       return {
         output: {
@@ -188,7 +199,7 @@ const layer = Layer.effect(
           content: [
             {
               type: "text" as const,
-              text: boundedPreview(contextual, marker, outputLimits.maxLines, outputLimits.maxBytes),
+              text: boundedPreview(projected, marker, outputLimits.maxLines, outputLimits.maxBytes),
             },
             ...media,
           ],

@@ -194,3 +194,81 @@ test("failed command keeps both captured log and full error available", async ()
     ),
   )
 })
+
+for (const long of [false, true]) {
+  for (const failed of [false, true]) {
+    for (const captured of [false, true]) {
+      test(`final ${failed ? "error" : "success"} text fits with ${long ? "long Unicode" : "short ASCII"} data path, capture=${captured}`, async () => {
+        // Short fixture stays inside the source workspace; all files are removed in finally.
+        const root = await fs.mkdtemp(path.resolve(import.meta.dirname, "../../..", ".15c-"))
+        const data = long ? path.join(root, "较长的中文隔离数据目录".repeat(5)) : root
+        try {
+          await fs.mkdir(data, { recursive: true })
+          console.info(`15c data path bytes=${Buffer.byteLength(data)}; ${long ? "long" : "short"}`)
+          const message = captured ? "x".repeat(51_100) : "🙂中文".repeat(10_000)
+          const executions: number[] = []
+          await Effect.runPromise(
+            Effect.gen(function* () {
+              const registry = yield* ToolRegistry.Service
+              const evidence = yield* Evidence.Service
+              yield* registry.register({
+                failed: Tool.make({
+                  description: "Path independent output",
+                  input: Schema.Struct({}),
+                  output: Schema.String,
+                  toModelOutput: ({ output }) => [{ type: "text", text: output }],
+                  execute: () =>
+                    Effect.gen(function* () {
+                      executions.push(1)
+                      if (captured) {
+                        const capture = Option.getOrThrow(yield* Effect.serviceOption(ToolOutputStore.Capture))
+                        yield* capture.append(new TextEncoder().encode("captured log")).pipe(Effect.orDie)
+                      }
+                      if (failed) return yield* Effect.fail(new Tool.Failure({ message }))
+                      return message
+                    }),
+                }),
+              })
+              const result = yield* settleTool(registry, call)
+              expect(result.result.type === "error").toBe(failed)
+              const preview =
+                failed && result.result.type === "error"
+                  ? result.result.value
+                  : result
+                      .output!.content.filter((part) => part.type === "text")
+                      .map((part) => part.text)
+                      .join("")
+              expect(Buffer.byteLength(preview)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
+              expect(preview.isWellFormed()).toBe(true)
+              expect(result.outputPaths).toHaveLength(captured ? 2 : 1)
+              const full = result.outputPaths!.at(-1)!
+              const id = Evidence.reference(sessionID, full)
+              expect(preview).toContain(id)
+              expect(preview).not.toContain(data)
+              const pages: string[] = []
+              let offset = 0
+              for (;;) {
+                const page = yield* evidence.read(sessionID, id, offset, 32768)
+                pages.push(page.text)
+                if (page.nextOffset === undefined) break
+                offset = page.nextOffset
+              }
+              expect(pages.join("")).toBe(message + (captured ? `\nCommand log: ${result.outputPaths![0]}` : ""))
+              expect(executions).toEqual([1])
+            }).pipe(
+              Effect.scoped,
+              Effect.provide(
+                AppNodeBuilder.build(LayerNode.group([ToolRegistry.node, Evidence.node]), [
+                  [Global.node, Global.layerWith({ data })],
+                  [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
+                ]),
+              ),
+            ),
+          )
+        } finally {
+          await fs.rm(root, { recursive: true, force: true })
+        }
+      })
+    }
+  }
+}

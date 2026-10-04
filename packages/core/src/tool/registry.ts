@@ -78,6 +78,8 @@ const registryLayer = Layer.effect(
         const bounded = yield* resources.bound({
           sessionID: input.sessionID,
           toolCallID: input.call.id,
+          reference: (file) => `${Evidence.reference(input.sessionID, file)} (evidence_read / evidence_search)`,
+          capturedPaths: capture.paths(),
           output: {
             structured: null,
             content: [
@@ -102,12 +104,7 @@ const registryLayer = Layer.effect(
                 ...pending.result,
                 value: bounded.output.content
                   .filter((part) => part.type === "text")
-                  .map((part) =>
-                    outputPaths.reduce(
-                      (text, file, index) => text.replaceAll(file, `${ids[index]} (evidence_read / evidence_search)`),
-                      part.text,
-                    ),
-                  )
+                  .map((part) => part.text)
                   .join(""),
               },
               outputPaths,
@@ -123,9 +120,15 @@ const registryLayer = Layer.effect(
                 { type: "text" as const, text: `\nCommand log: ${capture.paths().join(", ")}` },
               ],
             }
-      const bounded = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
+      const bounded = yield* resources.bound({
+        sessionID: input.sessionID,
+        toolCallID: input.call.id,
+        output,
+        reference: (file) => `${Evidence.reference(input.sessionID, file)} (evidence_read / evidence_search)`,
+        capturedPaths: capture.paths(),
+      })
       const outputPaths = [...capture.paths(), ...bounded.outputPaths]
-      const ids = yield* evidence
+      yield* evidence
         .retain(
           input.sessionID,
           input.call.id,
@@ -138,20 +141,7 @@ const registryLayer = Layer.effect(
             : undefined,
         )
         .pipe(Effect.mapError((cause) => new ToolOutputStore.StorageError({ operation: "write", cause })))
-      const retained = {
-        ...bounded.output,
-        content: bounded.output.content.map((part) =>
-          part.type !== "text"
-            ? part
-            : {
-                ...part,
-                text: outputPaths.reduce(
-                  (text, file, index) => text.replaceAll(file, `${ids[index]} (evidence_read / evidence_search)`),
-                  part.text,
-                ),
-              },
-        ),
-      }
+      const retained = bounded.output
       const result = ToolOutput.toResultValue(retained)
       if (result.type === "error") return outputPaths.length > 0 ? { result, outputPaths } : { result }
       return outputPaths.length > 0 ? { result, output: retained, outputPaths } : { result, output: retained }
