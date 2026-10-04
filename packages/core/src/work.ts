@@ -1,6 +1,6 @@
-import { WorkAcceptance } from "./work/acceptance"
 export * as Work from "./work"
 
+import { WorkAcceptance } from "./work/acceptance"
 import {
   ArtifactDigest,
   ArtifactCollectionReport,

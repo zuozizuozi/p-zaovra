@@ -1,6 +1,6 @@
-import { WorkAcceptance } from "./acceptance"
 export * as WorkRunner from "./runner"
 
+import { WorkAcceptance } from "./acceptance"
 import { Work } from "@zaovra-ai/schema/work"
 import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
 import { Cause, Context, DateTime, Effect, Exit, Layer } from "effect"

@@ -53,6 +53,7 @@ for (const sample of [
         expect(result.output).toBeUndefined()
         if (result.result.type !== "error") throw new Error("expected error")
         const preview = result.result.value
+        if (typeof preview !== "string") throw new Error("expected textual error preview")
         expect(preview.isWellFormed()).toBe(true)
         expect(Buffer.byteLength(preview)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
         expect(preview.split("\n").length).toBeLessThanOrEqual(ToolOutputStore.MAX_LINES)
@@ -176,6 +177,7 @@ test("failed command keeps both captured log and full error available", async ()
       expect(result.result.type).toBe("error")
       expect(result.outputPaths).toHaveLength(2)
       if (result.result.type !== "error") throw new Error("expected error")
+      if (typeof result.result.value !== "string") throw new Error("expected textual error preview")
       expect(Buffer.byteLength(result.result.value)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
       for (const file of result.outputPaths!) {
         expect(result.result.value).toContain(Evidence.reference(sessionID, file))
@@ -238,6 +240,7 @@ for (const long of [false, true]) {
                       .output!.content.filter((part) => part.type === "text")
                       .map((part) => part.text)
                       .join("")
+              if (typeof preview !== "string") throw new Error("expected textual output preview")
               expect(Buffer.byteLength(preview)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
               expect(preview.isWellFormed()).toBe(true)
               expect(result.outputPaths).toHaveLength(captured ? 2 : 1)
