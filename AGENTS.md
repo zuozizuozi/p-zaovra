@@ -4,6 +4,12 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## Audit approvals and execution
+
+- Before acting on an audit reply, read the latest root `沟通记录.md` and check its scope against the current code and the user's instructions. If the direction is sound, proceed within the approved scope without redundant confirmation.
+- If there is a substantive disagreement, conflicting requirement, or evidence that the approved approach would be incorrect, first explain the specific issue, evidence, and proposed alternative in the audit communication record and to the user. Pause the disputed work until it is confirmed; do not silently implement a different plan or expand the scope. Independent, already-authorized work may continue.
+- Follow this rule for every subsequent audit round. Each round's handoff must state the branch currently checked out at `F:\p-zaovra`, its HEAD, whether main was merged, and the actual running client/backend version (or explicitly say it has not been verified). Do not equate a branch ref with the code loaded by a running process.
+
 ## R&D records, communication and progress
 
 - Outside this source repository, all Zaovra test, fix, experiment, review, screenshot, log and artifact files belong only in `C:\Users\Administrator\Desktop\Zaovra-研发记录\`. Do not create Zaovra folders on the Desktop, on `D:`, or anywhere else; put temporary workspaces inside the current `逐次记录/YYYYMMDD-HHMM-事项/` folder.
