@@ -717,6 +717,26 @@ describe("RequestExecutor", () => {
 const lunaProtocolError =
   "Function tools with reasoning_effort are not supported for gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'."
 for (const test of [
+  {
+    path: "/responses",
+    status: 500,
+    code: "convert_request_failed",
+    message: "status_code=500, not implemented",
+    hint: true,
+  },
+  { path: "/responses", status: 501, code: "convert_request_failed", message: "not implemented", hint: true },
+  { path: "/chat/completions", status: 500, code: "convert_request_failed", message: "not implemented", hint: false },
+  {
+    path: "/responses",
+    status: 500,
+    code: "convert_request_failed",
+    message: "Context length exceeded, not implemented",
+    hint: false,
+  },
+  { path: "/responses", status: 401, code: "convert_request_failed", message: "not implemented", hint: false },
+  { path: "/responses", status: 500, code: "internal_error", message: "not implemented", hint: false },
+  { path: "/responses", status: 500, code: "convert_request_failed", message: "invalid tool schema", hint: false },
+
   { path: "/gateway/openai/chat/completions", status: 400, message: lunaProtocolError, hint: true },
   { path: "/chat/completions", status: 400, message: "This model requires the Responses API.", hint: true },
   { path: "/chat/completions", status: 400, message: "Invalid tool schema for reasoning tool.", hint: false },
@@ -733,7 +753,7 @@ for (const test of [
     () =>
       Effect.gen(function* () {
         const attempts = yield* Ref.make(0)
-        const error = yield* Effect.gen(function* () {
+        const run = yield* Effect.gen(function* () {
           const executor = yield* RequestExecutor.Service
           return yield* executor
             .execute(
@@ -744,17 +764,33 @@ for (const test of [
             .pipe(Effect.flip)
         }).pipe(
           Effect.provide(
-            countedResponsesLayer(attempts, [
-              new Response(JSON.stringify({ error: { message: test.message + " fixture-secret" } }), {
-                status: test.status,
-              }),
-            ]),
+            countedResponsesLayer(
+              attempts,
+              Array.from(
+                { length: 6 },
+                () =>
+                  new Response(
+                    JSON.stringify({
+                      error: {
+                        message: test.message + " fixture-secret",
+                        code: "code" in test ? test.code : undefined,
+                      },
+                    }),
+                    {
+                      status: test.status,
+                    },
+                  ),
+              ),
+            ),
           ),
+          Effect.forkChild,
         )
+        yield* TestClock.adjust(180_000)
+        const error = yield* Fiber.join(run)
         expect(error.reason.message.includes("Protocol settings")).toBe(test.hint)
         expect(error.reason.message).not.toContain("fixture-secret")
         expect(error.reason.message).toContain("<redacted>")
-        expect(yield* Ref.get(attempts)).toBe(1)
+        expect(yield* Ref.get(attempts)).toBe(test.status >= 500 ? 6 : 1)
       }),
   )
 }

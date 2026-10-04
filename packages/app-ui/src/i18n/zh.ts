@@ -3,6 +3,7 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "provider.protocol.imageInput": "支持图片输入",
   "provider.protocol.title": "协议设置",
   "provider.protocol.inherit": "跟随提供方",
   "provider.protocol.default": "提供方默认协议",

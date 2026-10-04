@@ -1,4 +1,5 @@
 export const dict = {
+  "provider.protocol.imageInput": "Supports image input",
   "provider.protocol.title": "Protocol settings",
   "provider.protocol.inherit": "Follow provider",
   "provider.protocol.default": "Provider default",

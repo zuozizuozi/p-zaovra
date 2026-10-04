@@ -229,6 +229,12 @@ const providerMessage = (status: number, body: string | void, request: HttpClien
     .slice(0, 960)
   const message = detail || (body && body.length <= 500 ? redactBody(body, request) : "")
   const chat = URL.canParse(request.url) && new URL(request.url).pathname.endsWith("/chat/completions")
+  const responses = URL.canParse(request.url) && new URL(request.url).pathname.endsWith("/responses")
+  const responsesUnavailable =
+    [400, 500, 501].includes(status) &&
+    responses &&
+    (error.code === "convert_request_failed" || error.type === "convert_request_failed") &&
+    /\bnot implemented\b/i.test(message)
   const responsesRequired =
     /\b(?:use|requires?|switch to)\s+(?:the\s+)?(?:\/(?:[\w-]+\/)*responses\b|responses\s+(?:api|endpoint|protocol)\b)/i.test(
       message,
@@ -243,7 +249,9 @@ const providerMessage = (status: number, body: string | void, request: HttpClien
   const hint =
     status === 400 && chat && incompatible && !context
       ? " If this model supports Responses, select Responses in Settings > Providers > Protocol settings, then continue."
-      : ""
+      : responsesUnavailable && !context
+        ? " This model may require Chat Completions. Select Chat Completions in Settings > Providers > Protocol settings, then continue."
+        : ""
   if (message) return `Provider request failed with HTTP ${status}: ${message}${hint}`
   return `Provider request failed with HTTP ${status}`
 }

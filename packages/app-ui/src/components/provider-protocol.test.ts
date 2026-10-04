@@ -49,3 +49,32 @@ test("protocol edits patch only changed fields and leave unknown SDKs untouched"
   expect(protocolPatch(provider, "openai", { a: "responses", b: "", c: "" })).toEqual({})
   expect(JSON.stringify(provider)).toBe(before)
 })
+
+test("image capability edits patch only input modalities and preserve other capabilities", () => {
+  const provider = {
+    npm: "@ai-sdk/openai",
+    models: {
+      a: {
+        modalities: { input: ["text", "audio"] as ("text" | "audio" | "image")[], output: ["text"] as "text"[] },
+        tool_call: true,
+      },
+      b: { modalities: { input: ["text", "image", "pdf"] as ("text" | "image" | "pdf")[] } },
+      c: {},
+    },
+  }
+  const before = JSON.stringify(provider)
+  expect(protocolPatch(provider, "responses", {}, { a: true, b: false, c: true })).toEqual({
+    models: {
+      a: { modalities: { input: ["text", "audio", "image"] } },
+      b: { modalities: { input: ["text", "pdf"] } },
+      c: { modalities: { input: ["text", "image"] } },
+    },
+  })
+  expect(protocolPatch(provider, "responses", {}, { a: false, b: true, c: false })).toEqual({})
+  expect(protocolPatch(provider, "responses", { a: "openai" }, { a: true })).toEqual({
+    models: {
+      a: { provider: { npm: "@ai-sdk/openai-compatible" }, modalities: { input: ["text", "audio", "image"] } },
+    },
+  })
+  expect(JSON.stringify(provider)).toBe(before)
+})

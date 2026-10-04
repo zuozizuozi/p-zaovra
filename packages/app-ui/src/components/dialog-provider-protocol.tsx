@@ -20,6 +20,12 @@ export function DialogProviderProtocol(props: { providerID: string }) {
     models: Object.fromEntries(
       Object.entries(initial.models ?? {}).map(([id, model]) => [id, protocolChoice(model.provider?.npm) ?? ""]),
     ),
+    images: Object.fromEntries(
+      Object.entries(initial.models ?? {}).map(([id, model]) => [
+        id,
+        model.modalities?.input?.includes("image") ?? false,
+      ]),
+    ),
     pending: false,
     error: "",
   })
@@ -34,12 +40,15 @@ export function DialogProviderProtocol(props: { providerID: string }) {
         !current ||
         current.npm !== initial.npm ||
         Object.entries(initial.models ?? {}).some(
-          ([id, model]) => current.models?.[id]?.provider?.npm !== model.provider?.npm,
+          ([id, model]) =>
+            !current.models?.[id] ||
+            current.models[id].provider?.npm !== model.provider?.npm ||
+            JSON.stringify(current.models[id].modalities?.input) !== JSON.stringify(model.modalities?.input),
         )
       )
         throw new Error(language.t("provider.protocol.changed"))
       await sync().updateConfig({
-        provider: { [props.providerID]: protocolPatch(current, state.choice, state.models) },
+        provider: { [props.providerID]: protocolPatch(current, state.choice, state.models, state.images) },
       })
       showToast({ title: language.t("provider.protocol.saved"), description: language.t("provider.protocol.effect") })
       dialog.close()
@@ -68,10 +77,8 @@ export function DialogProviderProtocol(props: { providerID: string }) {
           </label>
           <For each={Object.entries(initial.models ?? {})}>
             {([id, model]) => (
-              <label class="flex flex-col gap-2">
-                <span class="break-all">
-                  {model.name && model.name !== id ? `${model.name} · ${id}` : id}
-                </span>
+              <div class="flex flex-col gap-2">
+                <span class="break-all">{model.name && model.name !== id ? `${model.name} · ${id}` : id}</span>
                 <Show
                   when={!model.provider?.npm || protocolChoice(model.provider.npm)}
                   fallback={
@@ -81,6 +88,7 @@ export function DialogProviderProtocol(props: { providerID: string }) {
                   }
                 >
                   <select
+                    aria-label={model.name ?? id}
                     class="h-10 rounded-md border border-border-base bg-surface-base px-3"
                     value={state.models[id]}
                     onChange={(event) => setState("models", id, event.currentTarget.value)}
@@ -90,7 +98,15 @@ export function DialogProviderProtocol(props: { providerID: string }) {
                     <option value="responses">Responses</option>
                   </select>
                 </Show>
-              </label>
+                <label class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={state.images[id]}
+                    onChange={(event) => setState("images", id, event.currentTarget.checked)}
+                  />
+                  <span>{language.t("provider.protocol.imageInput")}</span>
+                </label>
+              </div>
             )}
           </For>
           <Show when={state.error}>
