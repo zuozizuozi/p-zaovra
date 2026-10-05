@@ -7,6 +7,7 @@ import { ProjectAvatar } from "@zaovra-ai/ui/v2/project-avatar-v2"
 import { SessionProgressIndicatorV2 } from "@zaovra-ai/session-ui/v2/session-progress-indicator-v2"
 import { Show } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { Icon } from "@zaovra-ai/ui/icon"
 
 export function SessionTabAvatar(props: {
   project?: LocalProject
@@ -14,6 +15,7 @@ export function SessionTabAvatar(props: {
   sessionId: string
   server: ServerConnection.Key
   revealProjectOnHover?: boolean
+  conversationIcon?: boolean
 }) {
   const language = useLanguage()
   const state = useSessionTabAvatarState(
@@ -22,12 +24,27 @@ export function SessionTabAvatar(props: {
     () => props.sessionId,
   )
   const projectAvatar = () => (
-    <ProjectAvatar
-      fallback={displayName(props.project ?? { worktree: props.directory })}
-      src={getProjectAvatarSource(props.project?.id, props.project?.icon)}
-      variant={getProjectAvatarVariant(props.project?.icon?.color)}
-      unread={state.unread()}
-    />
+    <Show
+      when={props.conversationIcon}
+      fallback={
+        <ProjectAvatar
+          fallback={displayName(props.project ?? { worktree: props.directory })}
+          src={getProjectAvatarSource(props.project?.id, props.project?.icon)}
+          variant={getProjectAvatarVariant(props.project?.icon?.color)}
+          unread={state.unread()}
+        />
+      }
+    >
+      <span data-slot="session-conversation-icon" class="relative inline-flex size-4 items-center justify-center">
+        <Icon name="speech-bubble" size="small" />
+        <Show when={state.unread()}>
+          <span
+            data-slot="session-unread-dot"
+            class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-v2-icon-icon-accent"
+          />
+        </Show>
+      </span>
+    </Show>
   )
   return (
     <span

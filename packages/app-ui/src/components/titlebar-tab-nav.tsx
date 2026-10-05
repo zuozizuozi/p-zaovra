@@ -29,6 +29,7 @@ export function TabNavItem(props: {
   onNavigate: () => void
   active?: boolean
   forceTruncate?: boolean
+  conversationIcon?: boolean
   suppressNavigation?: () => boolean
   dragging?: boolean
   pressed?: boolean
@@ -259,6 +260,8 @@ export function TabNavItem(props: {
                   directory={session().directory}
                   sessionId={session().id}
                   server={props.server}
+                  conversationIcon={props.conversationIcon}
+                  revealProjectOnHover={props.conversationIcon ? false : undefined}
                 />
               )}
             </Show>

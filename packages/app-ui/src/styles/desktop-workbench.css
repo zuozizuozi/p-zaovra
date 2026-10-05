@@ -125,6 +125,22 @@ html[data-theme="oc-2"] body[data-new-layout] {
     font-weight: 550;
   }
 
+  [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"] [data-slot="tab-close"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-component="desktop-sidebar-v2"]
+    [data-slot="titlebar-tab-item"]:is(:hover, :focus-within)
+    [data-slot="tab-close"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"]:focus-within [data-slot="tab-close"] button {
+    opacity: 1;
+  }
+
   [data-component="desktop-sidebar-v2"] > div:last-child {
     padding: 10px 12px;
     gap: 2px;
@@ -283,10 +299,26 @@ html[data-theme="oc-2"] body[data-new-layout] {
     color: var(--zaovra-accent);
   }
 
-  [data-slot="brand-placeholder"][data-placement="assistant"] {
-    width: 24px;
-    height: 24px;
-    margin-bottom: 4px;
+  [data-slot="assistant-heading"] {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    line-height: 24px;
+  }
+
+  [data-slot="assistant-brand"] {
+    color: var(--zaovra-ink);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  [data-slot="assistant-model"] {
+    color: var(--zaovra-secondary);
+    font-size: 12px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   [data-slot="brand-placeholder"][data-placement="thinking"] {

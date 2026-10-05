@@ -19,7 +19,8 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { createStore, produce } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
-import { Logo, Mark } from "@zaovra-ai/ui/logo"
+import { Logo } from "@zaovra-ai/ui/logo"
+import { BrandMark } from "@/components/brand-mark"
 import "./home-welcome.css"
 import { Spinner } from "@zaovra-ai/ui/spinner"
 import { ScrollView } from "@zaovra-ai/ui/scroll-view"
@@ -659,7 +660,7 @@ export function NewHome() {
         <Show when={searchParams.view !== "projects"}>
           <section class="home-welcome" aria-labelledby="home-welcome-title">
             <div class="home-welcome-brand" role="img" aria-label="Zaovra">
-              <Mark class="home-welcome-logo" />
+              <BrandMark class="home-welcome-logo" />
               <span>Zaovra</span>
             </div>
             <h1 id="home-welcome-title">{language.t("home.welcome.title")}</h1>

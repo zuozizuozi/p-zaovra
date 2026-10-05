@@ -2,12 +2,13 @@
   var key = "zaovra-theme-id"
   var themeId = localStorage.getItem(key) || "oc-2"
 
-  if (themeId === "oc-1") {
+  if (themeId !== "oc-2") {
     themeId = "oc-2"
     localStorage.setItem(key, themeId)
-    localStorage.removeItem("zaovra-theme-css-light")
-    localStorage.removeItem("zaovra-theme-css-dark")
   }
+  // App offers one theme in light/dark; never flash cached legacy colors.
+  localStorage.removeItem("zaovra-theme-css-light")
+  localStorage.removeItem("zaovra-theme-css-dark")
 
   var scheme = localStorage.getItem("zaovra-color-scheme") || "light"
   var isDark = scheme === "dark" || (scheme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
@@ -21,21 +22,4 @@
   // Update theme-color meta tag to match app color scheme
   var metas = document.querySelectorAll("meta[name='theme-color']")
   if (metas.length > 0) metas[0].setAttribute("content", isDark ? "#080808" : "#fafafa")
-
-  if (themeId === "oc-2") return
-
-  var css = localStorage.getItem("zaovra-theme-css-" + mode)
-  if (css) {
-    var style = document.createElement("style")
-    style.id = "oc-theme-preload"
-    style.textContent =
-      ":root{color-scheme:" +
-      mode +
-      ";--text-mix-blend-mode:" +
-      (isDark ? "plus-lighter" : "multiply") +
-      ";" +
-      css +
-      "}"
-    document.head.appendChild(style)
-  }
 })()

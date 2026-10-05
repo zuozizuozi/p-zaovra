@@ -1,7 +1,7 @@
 import type { JSX } from "solid-js"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { useLanguage } from "@/context/language"
-import mascot from "@/assets/zaovra-idle.png"
+import { BrandMark } from "@/components/brand-mark"
 
 export function NewSessionDesignView(props: { children: JSX.Element }) {
   const language = useLanguage()
@@ -17,7 +17,7 @@ export function NewSessionDesignView(props: { children: JSX.Element }) {
               role="img"
               aria-label="Zaovra"
             >
-              <img src={mascot} class="size-14 object-contain" alt="" />
+              <BrandMark class="size-14 object-contain" />
             </div>
             <h1 class="text-20-medium text-v2-text-text-base">{language.t("session.new.title")}</h1>
           </header>

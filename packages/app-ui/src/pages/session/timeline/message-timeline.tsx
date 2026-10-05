@@ -31,8 +31,8 @@ import {
 import { DiffChanges } from "@zaovra-ai/ui/diff-changes"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
-import { Mark } from "@zaovra-ai/ui/logo"
-import mascot from "@/assets/zaovra-idle.png"
+import { BrandMark } from "@/components/brand-mark"
+import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
@@ -141,7 +141,7 @@ function TimelineThinkingRow(props: {
   return (
     <div data-slot="session-turn-thinking">
       <span data-slot="brand-placeholder" data-placement="thinking" aria-hidden="true">
-        <Mark class="size-5" />
+        <BrandMark class="size-5" />
       </span>
       <TextShimmer text={language.t(props.reviewing ? "session.status.verifying" : "ui.sessionTurn.status.thinking")} />
       <Show when={!props.showReasoningSummaries}>
@@ -274,6 +274,7 @@ export function MessageTimeline(props: {
   const serverSDK = useServerSDK()
   const sdk = useSDK()
   const sync = useSync()
+  const serverSync = useServerSync()
   const settings = useSettings()
   const tabs = useTabs()
   const dialog = useDialog()
@@ -1199,6 +1200,15 @@ export function MessageTimeline(props: {
       }
       case "AssistantPart": {
         const assistantPartRow = row as Accessor<TimelineRowByTag<"AssistantPart">>
+        const modelName = createMemo(() => {
+          const group = assistantPartRow().group
+          const ref = group.type === "part" ? group.ref : group.refs[0]
+          const message = ref && messageByID().get(ref.messageID)
+          if (!message || message.role !== "assistant") return
+          return (
+            serverSync().data.provider.all.get(message.providerID)?.models[message.modelID]?.name ?? message.modelID
+          )
+        })
         return (
           <TimelineRowFrame row={assistantPartRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
@@ -1207,9 +1217,13 @@ export function MessageTimeline(props: {
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
                 <Show when={!assistantPartRow().previousAssistantPart}>
-                  <span data-slot="brand-placeholder" data-placement="assistant" aria-hidden="true">
-                    <img src={mascot} class="size-6 object-contain" alt="" />
-                  </span>
+                  <div data-slot="assistant-heading">
+                    <BrandMark class="size-6 shrink-0" />
+                    <span data-slot="assistant-brand">Zaovra</span>
+                    <Show when={modelName()}>
+                      <span data-slot="assistant-model">{modelName()}</span>
+                    </Show>
+                  </div>
                 </Show>
                 {renderAssistantPartGroup(assistantPartRow, onSizeChange)}
               </div>

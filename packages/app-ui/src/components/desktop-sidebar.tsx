@@ -14,7 +14,7 @@ import { WindowsAppMenu } from "@/components/windows-app-menu"
 import { useSettingsDialog } from "@/components/settings-dialog"
 import { displayName } from "@/pages/layout/helpers"
 import { ProjectGlyph } from "@/components/project-glyph"
-import { Mark } from "@zaovra-ai/ui/logo"
+import { BrandMark } from "@/components/brand-mark"
 
 type ProjectGroup = {
   server: ServerConnection.Key
@@ -65,6 +65,7 @@ function DesktopSessionTab(props: {
         onNavigate={props.onNavigate}
         active={props.active()}
         forceTruncate
+        conversationIcon
       />
     </Show>
   )
@@ -138,7 +139,7 @@ export function DesktopSidebar() {
           <WindowsAppMenu command={command} platform={platform} variant="v2" />
         </Show>
         <div class="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm font-semibold text-v2-text-text-base">
-          <Mark class="size-5 shrink-0" />
+          <BrandMark class="size-6 shrink-0" />
           <span>Zaovra</span>
         </div>
       </div>
