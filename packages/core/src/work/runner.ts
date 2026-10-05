@@ -11,6 +11,7 @@ import { EventV2 } from "../event"
 import { makeGlobalNode } from "../effect/app-node"
 import { KeyedMutex } from "../effect/keyed-mutex"
 import { Git } from "../git"
+import { AppProcess } from "../process"
 import { Global } from "../global"
 import { Location } from "../location"
 import { LocationServiceMap } from "../location-service-map"
@@ -50,6 +51,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
+    const proc = yield* AppProcess.Service
     const events = yield* EventV2.Service
     const sessions = yield* SessionV2.Service
     const store = yield* WorkStore.Service
@@ -435,7 +437,7 @@ export const layer = Layer.effect(
           payload && typeof payload === "object" && "artifactDigest" in payload ? payload.artifactDigest : undefined
         if (
           typeof expected !== "string" ||
-          expected !== (yield* WorkAcceptance.fingerprint(fs, goal.location.directory))
+          expected !== (yield* WorkAcceptance.fingerprint(fs, proc, goal.location.directory))
         ) {
           yield* blockGoal(
             goal.id,
@@ -841,7 +843,7 @@ export const layer = Layer.effect(
                     ...result.evidence,
                     payload: {
                       result: result.evidence.payload,
-                      artifactDigest: (yield* WorkAcceptance.fingerprint(fs, goal.location.directory)) ?? null,
+                      artifactDigest: (yield* WorkAcceptance.fingerprint(fs, proc, goal.location.directory)) ?? null,
                     },
                   }
                 : result.evidence,
@@ -1033,7 +1035,9 @@ export const layer = Layer.effect(
         checks.flatMap((check) => [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path)),
       )
       const artifactDigest =
-        task.acceptance?.scope === "final" ? yield* WorkAcceptance.fingerprint(fs, goal.location.directory) : undefined
+        task.acceptance?.scope === "final"
+          ? yield* WorkAcceptance.fingerprint(fs, proc, goal.location.directory)
+          : undefined
       const snapshot = yield* Snapshot.Service.use((service) => service.capture()).pipe(
         Effect.provide(locations.get(task.location ?? goal.location)),
       )
@@ -1139,7 +1143,7 @@ export const layer = Layer.effect(
       const output = exit.value
       if (
         task.acceptance?.scope === "final" &&
-        (!artifactDigest || artifactDigest !== (yield* WorkAcceptance.fingerprint(fs, goal.location.directory)))
+        (!artifactDigest || artifactDigest !== (yield* WorkAcceptance.fingerprint(fs, proc, goal.location.directory)))
       ) {
         const reason =
           "Final acceptance artifacts changed during review or could not be fingerprinted; rerun acceptance against the current workspace."
@@ -2183,6 +2187,7 @@ export const node = makeGlobalNode({
   layer,
   deps: [
     FSUtil.node,
+    AppProcess.node,
     Database.node,
     EventV2.node,
     Git.node,

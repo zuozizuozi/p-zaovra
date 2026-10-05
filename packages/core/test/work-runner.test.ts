@@ -10,6 +10,8 @@ import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Git } from "@zaovra-ai/core/git"
+import { AppProcess } from "@zaovra-ai/core/process"
+import { WorkAcceptance } from "@zaovra-ai/core/work/acceptance"
 import { Global } from "@zaovra-ai/core/global"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { ProjectV2 } from "@zaovra-ai/core/project"
@@ -167,6 +169,7 @@ const runnerNodes = LayerNode.group([
   Database.node,
   EventV2.node,
   FSUtil.node,
+  AppProcess.node,
   Git.node,
   SessionProjector.node,
   SessionStore.node,
@@ -229,30 +232,31 @@ const finalRepairIt = testEffect(
     ),
   ),
 )
-const changedFinalIt = testEffect(
-  runnerLayer(
-    Layer.succeed(
-      WorkReviewer.Service,
-      WorkReviewer.Service.of({
-        run: (input) =>
-          Effect.gen(function* () {
-            if (input.task.acceptance?.scope === "final")
-              yield* Effect.promise(() =>
-                Bun.write(path.join(input.goal.location.directory, "changed.txt"), "external edit"),
-              )
-            return {
-              criteria: input.criteria.map((criterion) => ({
-                criterionID: criterion.id,
-                verdict: "pass" as const,
-                findings: [],
-                allowsRepair: false,
-              })),
-            }
-          }),
-      }),
+const changedFinal = (file: string) =>
+  testEffect(
+    runnerLayer(
+      Layer.succeed(
+        WorkReviewer.Service,
+        WorkReviewer.Service.of({
+          run: (input) =>
+            Effect.gen(function* () {
+              if (input.task.acceptance?.scope === "final")
+                yield* Effect.promise(() => Bun.write(path.join(input.goal.location.directory, file), "external edit"))
+              return {
+                criteria: input.criteria.map((criterion) => ({
+                  criterionID: criterion.id,
+                  verdict: "pass" as const,
+                  findings: [],
+                  allowsRepair: false,
+                })),
+              }
+            }),
+        }),
+      ),
     ),
-  ),
-)
+  )
+const changedFinalIt = changedFinal("changed.txt")
+const cachedFinalIt = changedFinal(".pytest_cache/result.txt")
 const reviewIt = testEffect(runnerLayer(failingReviewers))
 const nonRepairIt = testEffect(runnerLayer(nonRepairingReviewers))
 const replanIt = testEffect(runnerLayer(recoveryReviewers))
@@ -1644,10 +1648,15 @@ finalRepairIt.effect("routes final rejection to a business repair Task and execu
   }),
 )
 
-changedFinalIt.effect("does not complete when artifacts change during a passing final review", () =>
+changedFinalIt.effect("does not complete when a tracked file changes during a passing final review", () =>
   Effect.gen(function* () {
     const directory = yield* Effect.promise(() => tmpdir())
     yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    yield* Effect.promise(async () => {
+      await $`git init`.cwd(directory.path).quiet()
+      await Bun.write(path.join(directory.path, "changed.txt"), "original")
+      await $`git add changed.txt`.cwd(directory.path).quiet()
+    })
     const work = yield* Work.Service
     const runner = yield* WorkRunner.Service
     yield* work.create({
@@ -1687,5 +1696,99 @@ replanIt.effect("local automatic replanning retains final ownership and waits fo
     expect(recovered).toMatchObject({ status: "completed", acceptance: { scope: "local" } })
     expect(final.dependsOn).toContain(recovered.id)
     expect(tasks.filter((task) => task.acceptance?.scope === "final")).toHaveLength(1)
+  }),
+)
+
+for (const git of [true, false]) {
+  cachedFinalIt.effect(`completes when ${git ? "Git-ignored" : "non-Git"} cache appears during final review`, () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.promise(() => tmpdir())
+      yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+      if (git)
+        yield* Effect.promise(async () => {
+          await $`git init`.cwd(directory.path).quiet()
+          await Bun.write(path.join(directory.path, ".gitignore"), ".pytest_cache/\n")
+          await $`git add .gitignore`.cwd(directory.path).quiet()
+        })
+      const work = yield* Work.Service
+      const runner = yield* WorkRunner.Service
+      yield* work.create({
+        id: goalID,
+        location: { directory: AbsolutePath.make(directory.path) },
+        objective: "Review the completed product",
+        planning: true,
+        acceptanceCriteria: [{ description: "Product is correct", required: true, evidence: "review" }],
+      })
+      yield* runner.run({ goalID, force: true })
+      expect(yield* work.get(goalID)).toMatchObject({ status: "completed" })
+      expect(
+        yield* Effect.promise(() => Bun.file(path.join(directory.path, ".pytest_cache/result.txt")).exists()),
+      ).toBe(true)
+    }),
+  )
+}
+
+it.effect("completes final acceptance with an oversized asset and invalidates changed asset metadata", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const asset = path.join(directory.path, "video.bin")
+    yield* Effect.promise(async () => {
+      await $`git init`.cwd(directory.path).quiet()
+      const file = await fs.open(asset, "w")
+      try {
+        await file.truncate(65 * 1024 * 1024)
+      } finally {
+        await file.close()
+      }
+    })
+    const files = yield* FSUtil.Service
+    const proc = yield* AppProcess.Service
+    const before = yield* WorkAcceptance.fingerprint(files, proc, directory.path)
+    expect(before).toBeString()
+    const work = yield* Work.Service
+    const runner = yield* WorkRunner.Service
+    yield* work.create({
+      id: goalID,
+      location: { directory: AbsolutePath.make(directory.path) },
+      objective: "Review the video product",
+      planning: true,
+      acceptanceCriteria: [{ description: "Product is correct", required: true, evidence: "review" }],
+    })
+    yield* runner.run({ goalID, force: true })
+    expect(yield* work.get(goalID)).toMatchObject({ status: "completed" })
+    yield* Effect.promise(() => fs.utimes(asset, new Date(1000), new Date(1000)))
+    const modified = yield* WorkAcceptance.fingerprint(files, proc, directory.path)
+    expect(modified).toBeString()
+    expect(modified).not.toBe(before)
+    yield* Effect.promise(() => fs.truncate(asset, 66 * 1024 * 1024))
+    yield* Effect.promise(() => fs.utimes(asset, new Date(1000), new Date(1000)))
+    expect(yield* WorkAcceptance.fingerprint(files, proc, directory.path)).not.toBe(modified)
+  }),
+)
+
+it.effect("fingerprints unignored new files within the project scope and keeps ignored tracked files", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const project = path.join(directory.path, "project")
+    yield* Effect.promise(async () => {
+      await $`git init`.cwd(directory.path).quiet()
+      await Bun.write(path.join(project, ".gitignore"), "tracked.txt\n")
+      await Bun.write(path.join(project, "tracked.txt"), "original")
+      await $`git add -f project/tracked.txt`.cwd(directory.path).quiet()
+    })
+    const files = yield* FSUtil.Service
+    const proc = yield* AppProcess.Service
+    const before = yield* WorkAcceptance.fingerprint(files, proc, project)
+    expect(before).toBeString()
+    yield* Effect.promise(() => Bun.write(path.join(directory.path, "outside.txt"), "outside scope"))
+    expect(yield* WorkAcceptance.fingerprint(files, proc, project)).toBe(before)
+    yield* Effect.promise(() => Bun.write(path.join(project, "新 文件.txt"), "new deliverable"))
+    const added = yield* WorkAcceptance.fingerprint(files, proc, project)
+    expect(added).toBeString()
+    expect(added).not.toBe(before)
+    yield* Effect.promise(() => Bun.write(path.join(project, "tracked.txt"), "edited"))
+    expect(yield* WorkAcceptance.fingerprint(files, proc, project)).not.toBe(added)
   }),
 )

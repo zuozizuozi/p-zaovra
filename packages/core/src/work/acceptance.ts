@@ -1,10 +1,11 @@
 export * as WorkAcceptance from "./acceptance"
 
 import { Work } from "@zaovra-ai/schema/work"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
+import { ChildProcess } from "effect/unstable/process"
 import path from "path"
 import { FSUtil } from "../fs-util"
-import { SessionOutcome } from "../session/outcome"
+import { AppProcess } from "../process"
 import { Hash } from "../util/hash"
 import type { WorkPlanner } from "./planner"
 import { WorkRole } from "./role"
@@ -108,24 +109,70 @@ export function validGraph(goal: ReadonlyArray<Work.Criterion>, tasks: ReadonlyA
   )
 }
 
-/** A review receipt covers the deliverable tree, including untracked and generated files.
- * Dependency stores and VCS internals are not deliverables. Unreadable files fail closed.
+/** Git receipts cover tracked and non-ignored untracked files. Non-Git workspaces only
+ * exclude known cache directories; they cannot infer project-specific ignore rules.
+ * Large assets use metadata (not content proof); unchanged size/mtime cannot detect an edit.
  */
-export const fingerprint = Effect.fn("WorkAcceptance.fingerprint")(function* (fs: FSUtil.Interface, directory: string) {
+export const fingerprint = Effect.fn("WorkAcceptance.fingerprint")(function* (
+  fs: FSUtil.Interface,
+  proc: AppProcess.Interface,
+  directory: string,
+) {
   const walk = (directory: string): Effect.Effect<string[], FSUtil.Error> =>
     Effect.gen(function* () {
       const entries = yield* fs.readDirectoryEntries(directory)
       return (yield* Effect.forEach(
-        entries.filter((entry) => ![".git", "node_modules"].includes(entry.name)),
+        entries.filter(
+          (entry) =>
+            !(
+              entry.type === "directory" &&
+              [".git", "node_modules", "__pycache__", ".pytest_cache", ".cache"].includes(entry.name)
+            ),
+        ),
         (entry) =>
           entry.type === "directory"
             ? walk(path.join(directory, entry.name))
             : Effect.succeed([path.join(directory, entry.name)]),
       )).flat()
     })
-  return yield* walk(directory).pipe(
-    Effect.flatMap((files) => SessionOutcome.fingerprint(fs, files.toSorted())),
-    Effect.map((files) => (files.some((file) => !file.digest) ? undefined : Hash.sha256(JSON.stringify(files)))),
-    Effect.catch(() => Effect.succeed(undefined)),
-  )
+  return yield* Effect.gen(function* () {
+    // A broken Git invocation must not silently fall back to different receipt semantics.
+    const git = yield* fs.up({ targets: [".git"], start: directory })
+    const files = git.length
+      ? yield* proc
+          .run(
+            ChildProcess.make("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+              cwd: directory,
+              stdin: "ignore",
+              extendEnv: true,
+            }),
+          )
+          .pipe(
+            Effect.flatMap(AppProcess.requireSuccess),
+            Effect.map((result) =>
+              result.stdout
+                .toString("utf8")
+                .split("\0")
+                .filter(Boolean)
+                .map((file) => path.resolve(directory, file)),
+            ),
+          )
+      : yield* walk(directory)
+    const receipts = yield* Effect.forEach([...new Set(files)].toSorted(), (file) =>
+      Effect.gen(function* () {
+        const info = yield* fs.stat(file)
+        if (info.type !== "File") return { path: file, digest: undefined }
+        if (info.size > 64 * 1024 * 1024) {
+          const mtime = Option.getOrUndefined(info.mtime)?.getTime()
+          return {
+            path: file,
+            digest: mtime !== undefined && Number.isFinite(mtime) ? `metadata:${info.size}:${mtime}` : undefined,
+          }
+        }
+        const bytes = yield* fs.readFile(file)
+        return { path: file, digest: Hash.sha256(Buffer.from(bytes)) }
+      }),
+    )
+    return receipts.some((file) => !file.digest) ? undefined : Hash.sha256(JSON.stringify(receipts))
+  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
 })
