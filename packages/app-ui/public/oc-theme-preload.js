@@ -9,12 +9,13 @@
     localStorage.removeItem("zaovra-theme-css-dark")
   }
 
-  var scheme = localStorage.getItem("zaovra-color-scheme") || "system"
+  var scheme = localStorage.getItem("zaovra-color-scheme") || "light"
   var isDark = scheme === "dark" || (scheme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   var mode = isDark ? "dark" : "light"
 
   document.documentElement.dataset.theme = themeId
   document.documentElement.dataset.colorScheme = mode
+  document.documentElement.style.colorScheme = mode
   document.documentElement.style.backgroundColor = isDark ? "#080808" : "#fafafa"
 
   // Update theme-color meta tag to match app color scheme

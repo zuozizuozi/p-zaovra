@@ -1,18 +1,24 @@
 /* Presence of the desktop rail scopes portals as well as the workspace. The
  * existing color-scheme and font preferences remain the source of truth. */
+body[data-new-layout] {
+  --font-family-text: var(--font-family-sans);
+  --v2-font-family-sans: var(--font-family-sans);
+}
+
 html[data-theme="oc-2"] body[data-new-layout] {
-  --zaovra-canvas: light-dark(#f8f9fb, #171a20);
-  --zaovra-rail: light-dark(#edf0f4, #12151a);
-  --zaovra-surface: light-dark(#fdfdfe, #1c2027);
-  --zaovra-hover: light-dark(#e4e8ee, #282e38);
-  --zaovra-ink: light-dark(#242c38, #e4e8ef);
-  --zaovra-secondary: light-dark(#596475, #a8b1bf);
-  --zaovra-muted: light-dark(#626e7f, #97a3b5);
-  --zaovra-accent: light-dark(#245bc4, #8aafff);
-  --zaovra-selection: light-dark(#dde7f8, #233452);
-  --zaovra-line: light-dark(#dce1e8, #303743);
-  --zaovra-focus: light-dark(#356bd0, #8aafff);
-  --zaovra-radius-control: 5px;
+  --zaovra-canvas: light-dark(#f8fafc, #0f0f17);
+  --zaovra-rail: light-dark(#f4f4f6, #15151e);
+  --zaovra-surface: light-dark(#ffffff, #1b1b26);
+  --zaovra-hover: light-dark(#eae9ef, #292835);
+  --zaovra-ink: light-dark(#24232b, #eeeef4);
+  --zaovra-secondary: light-dark(#5f5c6a, #b9b6c8);
+  --zaovra-muted: light-dark(#6d687a, #aba5bc);
+  --zaovra-accent: light-dark(#7c3aed, #c4b5fd);
+  --zaovra-on-accent: light-dark(#ffffff, #0f0f17);
+  --zaovra-selection: light-dark(#ede9fe, #302440);
+  --zaovra-line: light-dark(#e3e1e9, #34303f);
+  --zaovra-focus: light-dark(#7c3aed, #c4b5fd);
+  --zaovra-radius-control: 6px;
   --zaovra-radius-panel: 8px;
   --zaovra-shadow: 0 2px 5px light-dark(#2535520a, #070b122b);
   --zaovra-shadow-float: 0 16px 48px light-dark(#25355229, #070b1266);
@@ -25,12 +31,14 @@ html[data-theme="oc-2"] body[data-new-layout] {
   --v2-background-bg-layer-04: light-dark(#bdc6d3, #515f72);
   --v2-background-bg-inverse: var(--zaovra-ink);
   --v2-background-bg-button-neutral: var(--zaovra-surface);
-  --v2-background-bg-accent: light-dark(#245bc4, #457ade);
+  --v2-background-bg-accent: var(--zaovra-accent);
+  --v2-background-bg-contrast: var(--zaovra-accent);
+  --v2-text-text-contrast: var(--zaovra-on-accent);
   --v2-text-text-base: var(--zaovra-ink);
   --v2-text-text-muted: var(--zaovra-secondary);
   --v2-text-text-faint: var(--zaovra-muted);
   --v2-text-text-accent: var(--zaovra-accent);
-  --v2-text-text-accent-hover: light-dark(#174ba9, #b1c8ff);
+  --v2-text-text-accent-hover: light-dark(#6d28d9, #ddd6fe);
   --v2-icon-icon-base: var(--zaovra-secondary);
   --v2-icon-icon-muted: var(--zaovra-muted);
   --v2-icon-icon-accent: var(--zaovra-accent);
@@ -44,12 +52,26 @@ html[data-theme="oc-2"] body[data-new-layout] {
   --v2-elevation-elements: 0 1px 2px light-dark(#25355212, #070b1240);
   --v2-elevation-floating: inset 0 0 0 1px var(--zaovra-line), var(--zaovra-shadow-float);
 
+  /* Timeline/markdown still use the original semantic tokens. Keep those in
+   * the same palette without changing success, warning or error meanings. */
+  --background-base: var(--zaovra-canvas);
+  --background-stronger: var(--zaovra-surface);
+  --surface-base: var(--zaovra-surface);
+  --surface-raised-base: var(--zaovra-surface);
+  --text-base: var(--zaovra-ink);
+  --text-strong: var(--zaovra-ink);
+  --text-weak: var(--zaovra-secondary);
+  --text-weaker: var(--zaovra-muted);
+  --text-interactive-base: var(--zaovra-accent);
+  --icon-interactive-base: var(--zaovra-accent);
+  --border-interactive-base: var(--zaovra-focus);
+
   color: var(--zaovra-ink);
   background: var(--zaovra-canvas);
 
   /* A navigation surface, not a second welcome screen. */
   [data-component="desktop-sidebar-v2"] {
-    width: 248px;
+    width: 276px;
     background: var(--zaovra-rail);
     border-color: var(--zaovra-line);
   }
@@ -85,7 +107,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="desktop-sidebar-v2"] nav section {
-    gap: 5px;
+    gap: 6px;
   }
 
   [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"] {
@@ -201,10 +223,80 @@ html[data-theme="oc-2"] body[data-new-layout] {
       var(--zaovra-shadow);
   }
 
+  [data-component="artifacts-panel"] {
+    background: var(--zaovra-surface);
+  }
+
+  [data-component="artifacts-panel"] form input {
+    background: var(--zaovra-canvas);
+    border-color: var(--zaovra-line);
+  }
+
+  [data-component="text-input-v2"] {
+    background: var(--zaovra-canvas);
+    box-shadow: inset 0 0 0 1px var(--zaovra-line);
+  }
+
+  [data-component="text-input-v2"]:focus-within {
+    box-shadow: none;
+  }
+
+  [data-component="artifacts-panel"] form button {
+    background: var(--zaovra-accent);
+    color: var(--zaovra-on-accent);
+  }
+
+  [data-component="artifacts-panel"] [role="tab"][aria-selected="true"] {
+    background: var(--zaovra-selection);
+    color: var(--zaovra-accent);
+  }
+
   [data-component="prompt-input-v2"]:focus-within {
     box-shadow:
       inset 0 0 0 1px var(--zaovra-focus),
-      0 0 0 3px light-dark(#245bc410, #8aafff12);
+      0 0 0 3px light-dark(#7c3aed18, #c4b5fd20);
+  }
+
+  /* Primary actions stay flat: the shared gradient lightens purple enough
+   * to reduce white-label contrast below the intended AA pairing. */
+  :is([data-component="button-v2"], [data-component="icon-button-v2"])[data-variant="contrast"] {
+    background: var(--zaovra-accent);
+    color: var(--zaovra-on-accent);
+    box-shadow: none;
+  }
+
+  :is([data-component="button-v2"], [data-component="icon-button-v2"])[data-variant="contrast"]:is(:hover, :active):not(
+      :disabled
+    ) {
+    background: light-dark(#6d28d9, #ddd6fe);
+  }
+
+  [data-slot="session-turn-message-container"] {
+    padding-inline: 32px;
+  }
+
+  [data-slot="brand-placeholder"] {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: var(--zaovra-accent);
+  }
+
+  [data-slot="brand-placeholder"][data-placement="assistant"] {
+    width: 24px;
+    height: 24px;
+    margin-bottom: 4px;
+  }
+
+  [data-slot="brand-placeholder"][data-placement="thinking"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  [data-slot="new-session-heading"] [data-slot="brand-placeholder"] {
+    display: flex;
+    justify-content: flex-start;
   }
 
   [data-component="prompt-input-v2"] > div:last-child {
@@ -364,6 +456,10 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
     [data-slot="new-session-position"] {
       padding-inline: 24px;
+    }
+
+    [data-slot="session-turn-message-container"] {
+      padding-inline: 20px;
     }
   }
 

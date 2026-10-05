@@ -54,7 +54,7 @@ export interface Settings {
 }
 
 export const monoDefault = "System Mono"
-export const sansDefault = "System Sans"
+export const sansDefault = "Inter"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
 const legacyNewLayoutDesignsDefault = import.meta.env.VITE_ZAOVRA_CHANNEL !== "prod"
 export const newLayoutDesignsDefault = true
@@ -128,7 +128,7 @@ const terminalFallback =
   '"JetBrainsMono Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
 
 const monoBase = monoFallback
-const sansBase = sansFallback
+const sansBase = `Inter, ${sansFallback}`
 const terminalBase = terminalFallback
 
 function input(font: string | undefined) {

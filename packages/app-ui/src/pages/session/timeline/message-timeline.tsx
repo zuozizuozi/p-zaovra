@@ -31,6 +31,8 @@ import {
 import { DiffChanges } from "@zaovra-ai/ui/diff-changes"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
+import { Mark } from "@zaovra-ai/ui/logo"
+import mascot from "@/assets/zaovra-idle.png"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
@@ -138,6 +140,9 @@ function TimelineThinkingRow(props: {
 
   return (
     <div data-slot="session-turn-thinking">
+      <span data-slot="brand-placeholder" data-placement="thinking" aria-hidden="true">
+        <Mark class="size-5" />
+      </span>
       <TextShimmer text={language.t(props.reviewing ? "session.status.verifying" : "ui.sessionTurn.status.thinking")} />
       <Show when={!props.showReasoningSummaries}>
         <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
@@ -1201,6 +1206,11 @@ export function MessageTimeline(props: {
                 data-slot="session-turn-assistant-content"
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
+                <Show when={!assistantPartRow().previousAssistantPart}>
+                  <span data-slot="brand-placeholder" data-placement="assistant" aria-hidden="true">
+                    <img src={mascot} class="size-6 object-contain" alt="" />
+                  </span>
+                </Show>
                 {renderAssistantPartGroup(assistantPartRow, onSizeChange)}
               </div>
             </div>

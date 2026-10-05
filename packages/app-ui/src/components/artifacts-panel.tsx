@@ -103,7 +103,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
     setState("active", target)
   })
   return (
-    <div class="flex h-full min-h-0 flex-col bg-background-base" aria-label="成果面板">
+    <div data-component="artifacts-panel" class="flex h-full min-h-0 flex-col bg-background-base" aria-label="成果面板">
       <form
         class="flex shrink-0 gap-2 border-b border-border-weak-base p-3"
         onSubmit={(event) => {
