@@ -3,6 +3,15 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "error.execution.auth": "服务商拒绝了认证或访问权限，请检查 API Key、账号状态和模型权限。",
+  "error.execution.billing": "服务商报告额度或账户问题，请核对服务商后台的余额和有效期。",
+  "error.execution.rateLimit": "请求受到服务商限流，请稍后继续或检查并发限制。",
+  "error.execution.protocol": "服务商可能不支持当前接口或模型，请核对地址、模型名和协议配置。",
+  "error.execution.context": "服务商报告上下文超出限制，请检查模型容量配置和当前会话上下文。",
+  "error.execution.timeout": "请求等待超时，请先检查任务和工具状态，再决定是否继续。",
+  "error.execution.network": "连接服务商失败或中断，请检查网络和接口地址，再继续任务。",
+  "error.execution.provider": "服务商返回内部错误，请保留下面的详情并检查服务商状态。",
+
   "provider.protocol.imageInput": "支持图片输入",
   "provider.protocol.title": "协议设置",
   "provider.protocol.inherit": "跟随提供方",

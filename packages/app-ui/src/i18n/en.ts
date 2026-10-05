@@ -1,4 +1,19 @@
 export const dict = {
+  "error.execution.auth":
+    "The provider rejected authentication or access. Check the API key, account status, and model permissions.",
+  "error.execution.billing":
+    "The provider reported an account or credit issue. Check the balance and expiration in its dashboard.",
+  "error.execution.rateLimit": "The provider rate-limited the request. Continue later or check concurrency limits.",
+  "error.execution.protocol":
+    "The provider may not support this endpoint or model. Check the URL, model name, and protocol settings.",
+  "error.execution.context":
+    "The provider reported a context limit. Check the model capacity settings and current conversation context.",
+  "error.execution.timeout": "The request timed out. Check task and tool status before continuing.",
+  "error.execution.network":
+    "The provider connection failed or was interrupted. Check the network and endpoint before continuing.",
+  "error.execution.provider":
+    "The provider returned an internal error. Keep the details below and check its service status.",
+
   "provider.protocol.imageInput": "Supports image input",
   "provider.protocol.title": "Protocol settings",
   "provider.protocol.inherit": "Follow provider",

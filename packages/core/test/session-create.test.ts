@@ -212,11 +212,12 @@ describe("SessionV2.create", () => {
       yield* SessionInput.promoteSteers(db, events, created.id, Number.MAX_SAFE_INTEGER)
 
       expect(
-        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(3), Stream.runCollect)),
+        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(4), Stream.runCollect)),
       ).toMatchObject([
         { durable: { seq: 0 }, type: "session.next.created" },
         { durable: { seq: 1 }, type: "session.next.prompt.admitted", data: { prompt: { text: "Hello" } } },
-        { durable: { seq: 2 }, type: "session.next.prompted" },
+        { durable: { seq: 2 }, type: "session.next.updated", data: { title: "Hello" } },
+        { durable: { seq: 3 }, type: "session.next.prompted" },
       ])
     }),
   )
@@ -285,8 +286,9 @@ describe("SessionV2.create", () => {
           prompt: { text: "Replay lifecycle" },
           delivery: "steer",
           admittedSeq: 1,
-          promotedSeq: 2,
+          promotedSeq: 3,
         })
+        expect((yield* store.get(created.id))?.title).toBe("Replay lifecycle")
         expect(yield* store.context(created.id)).toMatchObject([
           { id: admitted.id, type: "user", text: "Replay lifecycle" },
         ])
@@ -301,7 +303,8 @@ describe("SessionV2.create", () => {
         ).toEqual([
           [0, EventV2.versionedType(SessionEvent.Created.type, 1)],
           [1, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
-          [2, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
+          [2, EventV2.versionedType(SessionEvent.Updated.type, 1)],
+          [3, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
         ])
       }).pipe(Effect.provide(Layer.fresh(targetLayer)))
     }),

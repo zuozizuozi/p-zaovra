@@ -16,9 +16,10 @@ import { SessionMessage } from "./session/message"
 import { Prompt } from "./session/prompt"
 import { PromptInput } from "@zaovra-ai/schema/prompt-input"
 import { EventV2 } from "./event"
+import { EventTable } from "./event/sql"
 import { Database } from "./database/database"
 import { SessionProjector } from "./session/projector"
-import { SessionMessageTable, SessionTable } from "./session/sql"
+import { SessionInputTable, SessionMessageTable, SessionTable } from "./session/sql"
 import { SessionSchema } from "./session/schema"
 import { AbsolutePath, PositiveInt, RelativePath } from "./schema"
 import { AgentV2 } from "./agent"
@@ -243,6 +244,7 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const shellLocks = KeyedMutex.makeUnsafe<string>()
+    const titleLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
     const shells = new Map<SessionSchema.ID, Set<{ controller: AbortController; done: Deferred.Deferred<void> }>>()
     const interruptShells = (sessionID: SessionSchema.ID) =>
       Effect.suspend(() =>
@@ -479,16 +481,18 @@ const layer = Layer.effect(
       }),
       update: Effect.fn("V2Session.update")(function* (input) {
         const session = yield* result.get(input.sessionID)
-        yield* events.publish(
-          SessionEvent.Updated,
-          {
-            sessionID: input.sessionID,
-            timestamp: yield* DateTime.now,
-            title: input.title,
-            archived: input.archived,
-          },
-          { location: session.location },
-        )
+        yield* events
+          .publish(
+            SessionEvent.Updated,
+            {
+              sessionID: input.sessionID,
+              timestamp: yield* DateTime.now,
+              title: input.title,
+              archived: input.archived,
+            },
+            { location: session.location },
+          )
+          .pipe(titleLocks.withLock(input.sessionID))
         if (input.archived) {
           yield* result.interrupt(input.sessionID)
           yield* Effect.forEach(
@@ -630,6 +634,56 @@ const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+            yield* titleLocks.withLock(input.sessionID)(
+              Effect.gen(function* () {
+                const session = yield* result.get(input.sessionID)
+                if (!/^New session - \d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(session.title)) return
+                const first = yield* db
+                  .select()
+                  .from(SessionInputTable)
+                  .where(eq(SessionInputTable.session_id, input.sessionID))
+                  .orderBy(asc(SessionInputTable.admitted_seq))
+                  .limit(1)
+                  .get()
+                  .pipe(Effect.orDie)
+                if (first?.id !== admitted.id || admitted.cancelledSeq !== undefined) return
+                // Older imported sessions may have visible prompts without inbox rows.
+                const visible = yield* db
+                  .select({ id: SessionMessageTable.id })
+                  .from(SessionMessageTable)
+                  .where(and(eq(SessionMessageTable.session_id, input.sessionID), eq(SessionMessageTable.type, "user")))
+                  .orderBy(asc(SessionMessageTable.seq))
+                  .limit(1)
+                  .get()
+                  .pipe(Effect.orDie)
+                if (visible && visible.id !== admitted.id) return
+                // Explicit renames win, even when the user chooses the default-looking title.
+                const updates = yield* db
+                  .select({ data: EventTable.data })
+                  .from(EventTable)
+                  .where(
+                    and(
+                      eq(EventTable.aggregate_id, input.sessionID),
+                      eq(EventTable.type, EventV2.versionedType(SessionEvent.Updated.type, 1)),
+                    ),
+                  )
+                  .all()
+                  .pipe(Effect.orDie)
+                if (updates.some((event) => typeof event.data.title === "string")) return
+                const text = (prompt.invocation ?? prompt.text).replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim()
+                if (!text) return
+                const characters = Array.from(text)
+                yield* events.publish(
+                  SessionEvent.Updated,
+                  {
+                    sessionID: input.sessionID,
+                    timestamp: yield* DateTime.now,
+                    title: characters.length > 64 ? characters.slice(0, 63).join("") + "…" : text,
+                  },
+                  { location: session.location },
+                )
+              }),
+            )
             if (input.resume !== false && admitted.cancelledSeq === undefined) yield* execution.wake(admitted.sessionID)
             return admitted
           }),

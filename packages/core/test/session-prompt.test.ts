@@ -104,6 +104,122 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  it.effect("titles the first admitted requirement once without running a model", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const session = yield* SessionV2.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ title: "New session - 2026-10-05T00:00:00.000Z" })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      const prompt = Prompt.make({ text: "  修复\n图片处理器  " })
+      const input = yield* session.prompt({ sessionID, prompt, resume: false })
+      expect((yield* session.get(sessionID)).title).toBe("修复 图片处理器")
+      yield* session.prompt({ sessionID, id: input.id, prompt, resume: false })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "第二条需求" }), resume: false })
+      expect((yield* session.get(sessionID)).title).toBe("修复 图片处理器")
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.Updated.type, 1))).toBe(1)
+    }),
+  )
+  it.effect("respects explicit renames even when they look like a default title", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const title = "New session - 2026-10-05T00:00:00.000Z"
+      yield* session.update({ sessionID, title })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "不要覆盖标题" }), resume: false })
+      expect((yield* session.get(sessionID)).title).toBe(title)
+    }),
+  )
+  it.effect("keeps a concurrent manual rename over automatic naming", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const session = yield* SessionV2.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ title: "New session - 2026-10-05T00:00:00.000Z" })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.all(
+        [
+          session.prompt({ sessionID, prompt: Prompt.make({ text: "自动名称" }), resume: false }),
+          session.update({ sessionID, title: "我的名称" }),
+        ],
+        { concurrency: "unbounded" },
+      )
+      expect((yield* session.get(sessionID)).title).toBe("我的名称")
+    }),
+  )
+
+  it.effect("does not name imported history after a later requirement", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const title = "New session - 2026-10-05T00:00:00.000Z"
+      yield* database.db
+        .update(SessionTable)
+        .set({ title })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* events.publish(SessionEvent.Prompted, {
+        sessionID,
+        messageID: SessionMessage.ID.create(),
+        timestamp: yield* DateTime.now,
+        prompt: Prompt.make({ text: "Original imported requirement" }),
+        delivery: "steer",
+      })
+      yield* database.db
+        .delete(SessionInputTable)
+        .where(eq(SessionInputTable.session_id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Later requirement" }), resume: false })
+      expect((yield* session.get(sessionID)).title).toBe(title)
+    }),
+  )
+
+  for (const scenario of [
+    {
+      name: "uses the original command invocation",
+      prompt: Prompt.make({ text: "expanded system instructions", invocation: "/review src" }),
+      title: "/review src",
+    },
+    {
+      name: "bounds Unicode titles without splitting characters",
+      prompt: Prompt.make({ text: "😀".repeat(80) }),
+      title: "😀".repeat(63) + "…",
+    },
+    {
+      name: "leaves attachment-only prompts unnamed",
+      prompt: Prompt.make({ text: "  " }),
+      title: "New session - 2026-10-05T00:00:00.000Z",
+    },
+  ]) {
+    it.effect(scenario.name, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const database = yield* Database.Service
+        const session = yield* SessionV2.Service
+        yield* database.db
+          .update(SessionTable)
+          .set({ title: "New session - 2026-10-05T00:00:00.000Z" })
+          .where(eq(SessionTable.id, sessionID))
+          .run()
+          .pipe(Effect.orDie)
+        yield* session.prompt({ sessionID, prompt: scenario.prompt, resume: false })
+        expect((yield* session.get(sessionID)).title).toBe(scenario.title)
+      }),
+    )
+  }
+
   it.effect("applies a queued input's model and agent only when it is promoted", () =>
     Effect.gen(function* () {
       yield* setup
