@@ -5,6 +5,33 @@ const source = (file: string) => Bun.file(path.join(import.meta.dir, "../../src"
 const workspace = (file: string) => Bun.file(path.join(import.meta.dir, "../../../..", file)).text()
 
 describe("Session V2 production wiring", () => {
+  test("starts the desktop backend with Work merge approval services", async () => {
+    const { Server } = await import("../../src/server/server")
+    const { Work } = await import("@zaovra-ai/schema/work")
+    const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+    try {
+      const health = await fetch(new URL("/global/health", listener.url))
+      expect(health.status).toBe(200)
+      expect(await health.json()).toMatchObject({ healthy: true })
+      const list = await fetch(new URL("/api/work", listener.url))
+      expect(list.status).toBe(200)
+      const url = new URL(`/api/work/${Work.GoalID.create()}/merge/${Work.TaskID.create()}`, listener.url)
+      for (const method of ["GET", "POST"]) {
+        const response = await fetch(url, {
+          method,
+          ...(method === "POST"
+            ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: "stale", approved: true }) }
+            : {}),
+        })
+        // A domain conflict proves the approval service resolved; a missing service fails startup.
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({ message: "Task is not awaiting a merge in an active Goal" })
+      }
+    } finally {
+      await listener.stop(true)
+    }
+  }, 30_000)
+
   test("does not assemble the legacy Session HttpApi or loop runtime", async () => {
     const [api, server, runtime] = await Promise.all([
       source("server/routes/instance/httpapi/api.ts"),

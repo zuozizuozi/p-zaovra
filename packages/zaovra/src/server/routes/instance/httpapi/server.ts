@@ -47,6 +47,7 @@ import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import * as SessionExecutionLocal from "@zaovra-ai/core/session/execution/local"
 import { Work } from "@zaovra-ai/core/work"
 import { WorkArtifact } from "@zaovra-ai/core/work/artifact"
+import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { WorkController } from "@zaovra-ai/core/work/controller"
 import { WorkExecution } from "@zaovra-ai/core/work/execution"
 import { WorkExecutionLocal } from "@zaovra-ai/core/work/execution-local"
@@ -248,6 +249,7 @@ export function createRoutes(
       TaskRecovery.startupNode,
       Work.node,
       WorkArtifact.node,
+      WorkMergeReview.node,
       WorkController.node,
       WorkStore.node,
       WorkWorker.node,
