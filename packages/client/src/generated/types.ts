@@ -2443,6 +2443,30 @@ export type SessionsRemoveInput = { readonly sessionID: { readonly sessionID: st
 
 export type SessionsRemoveOutput = void
 
+export type WorkMergeReviewInput = {
+  readonly goalID: { readonly goalID: string; readonly taskID: string }["goalID"]
+  readonly taskID: { readonly goalID: string; readonly taskID: string }["taskID"]
+}
+
+export type WorkMergeReviewOutput = {
+  readonly taskID: string
+  readonly token: string
+  readonly baseline: string
+  readonly digest: string
+  readonly diff: string
+  readonly approved: boolean
+  readonly reason?: string | undefined
+}
+
+export type WorkMergeDecideInput = {
+  readonly goalID: { readonly goalID: string; readonly taskID: string }["goalID"]
+  readonly taskID: { readonly goalID: string; readonly taskID: string }["taskID"]
+  readonly token: { readonly token: string; readonly approved: boolean }["token"]
+  readonly approved: { readonly token: string; readonly approved: boolean }["approved"]
+}
+
+export type WorkMergeDecideOutput = void
+
 export type WorkListOutput = {
   readonly data: ReadonlyArray<{
     readonly id: string

@@ -1,3 +1,4 @@
+import { SessionOwnership } from "./ownership"
 export * as SessionCompaction from "./compaction"
 
 import { LLM, LLMError, LLMEvent, Message, SystemPart, type LLMRequest, type Model, type Usage } from "@zaovra-ai/llm"
@@ -334,6 +335,7 @@ export const make = (dependencies: Dependencies) => {
     let usage: Usage | undefined
     let failure: string | undefined
     let finished = false
+    yield* SessionOwnership.check
     const summarized = yield* dependencies.llm
       .stream(
         summaryRequest({

@@ -78,7 +78,39 @@ export const WorkDetail = Schema.Struct({
 
 const WorkActive = Schema.Struct({ type: Schema.Literal("running") }).annotate({ identifier: "WorkActive" })
 
+export const WorkMergeReview = Schema.Struct({
+  taskID: Work.TaskID,
+  token: Schema.String,
+  baseline: Schema.String,
+  digest: Schema.String,
+  diff: Schema.String,
+  approved: Schema.Boolean,
+  reason: Schema.optional(Schema.String),
+}).annotate({ identifier: "WorkMergeReview" })
+export const WorkMergeDecision = Schema.Struct({ token: Schema.String, approved: Schema.Boolean }).annotate({
+  identifier: "WorkMergeDecision",
+})
+
 export const WorkGroup = HttpApiGroup.make("server.work")
+  .add(
+    HttpApiEndpoint.get("work.mergeReview", "/api/work/:goalID/merge/:taskID", {
+      params: { goalID: Work.GoalID, taskID: Work.TaskID },
+      success: WorkMergeReview,
+      error: ConflictError,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.work.mergeReview", summary: "Inspect an exact pending merge" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("work.mergeDecide", "/api/work/:goalID/merge/:taskID", {
+      params: { goalID: Work.GoalID, taskID: Work.TaskID },
+      payload: WorkMergeDecision,
+      success: Schema.Void,
+      error: ConflictError,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.work.mergeDecide", summary: "Approve or decline an exact pending merge" }),
+    ),
+  )
   .add(
     HttpApiEndpoint.get("work.list", "/api/work", {
       success: Schema.Struct({ data: Schema.Array(Work.GoalInfo) }),

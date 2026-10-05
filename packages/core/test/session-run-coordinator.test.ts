@@ -515,3 +515,50 @@ describe("SessionRunCoordinator", () => {
     ),
   )
 })
+
+it.effect("cancelling an execution owner stops its drain, while observers cannot stop it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const stopped = yield* Deferred.make<void>()
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({
+        drain: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(stopped, undefined)),
+          ),
+      })
+      const owner = yield* coordinator.owned("session", { id: "worker:1", check: Effect.void }).pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      const observer = yield* coordinator.run("session").pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(observer)
+      expect((yield* coordinator.active).has("session")).toBe(true)
+      // A different claimant cannot adopt this execution or cancel it on failure.
+      const stale = yield* coordinator.owned("session", { id: "worker:0", check: Effect.void }).pipe(Effect.exit)
+      expect(Exit.isFailure(stale)).toBe(true)
+      expect((yield* coordinator.active).has("session")).toBe(true)
+      yield* coordinator.wake("session")
+      yield* Fiber.interrupt(owner)
+      yield* Deferred.await(stopped)
+      expect((yield* coordinator.active).size).toBe(0)
+    }),
+  ),
+)
+
+it.effect("an invalid owner cannot start a drain", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const calls: string[] = []
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({
+        drain: () =>
+          Effect.sync(() => {
+            calls.push("provider")
+          }),
+      })
+      const result = yield* coordinator.owned("session", { id: "worker:0", check: Effect.interrupt }).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(calls).toEqual([])
+    }),
+  ),
+)

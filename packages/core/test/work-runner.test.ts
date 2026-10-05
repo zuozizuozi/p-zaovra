@@ -1,3 +1,4 @@
+import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { $ } from "bun"
 import { afterAll, describe, expect } from "bun:test"
 import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
@@ -179,6 +180,7 @@ const runnerNodes = LayerNode.group([
   WorkStore.node,
   Work.node,
   WorkRunner.node,
+  WorkMergeReview.node,
 ])
 const artifactRoot = path.join(os.tmpdir(), `zaovra-work-runner-${process.pid}-${Date.now()}`)
 afterAll(() => fs.rm(artifactRoot, { recursive: true, force: true }))
@@ -674,81 +676,112 @@ describe("WorkRunner", () => {
     }),
   )
 
-  it.live("merges an isolated Task change set into the Goal workspace", () =>
-    Effect.gen(function* () {
-      const root = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
-      yield* Effect.promise(async () => {
-        await $`git init`.cwd(root.path).quiet()
-        await $`git config core.fsmonitor false`.cwd(root.path).quiet()
-        await $`git config commit.gpgsign false`.cwd(root.path).quiet()
-        await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
-        await $`git config user.name Test`.cwd(root.path).quiet()
-        await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
-        await $`git add .`.cwd(root.path).quiet()
-        await $`git commit -m initial`.cwd(root.path).quiet()
-      })
-      const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
-      const isolated = AbsolutePath.make(`${root.path}-work-runner-isolated`)
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
-      )
-      const git = yield* Git.Service
-      const repository = yield* git.repo
-        .discover(destination)
-        .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
-      const isolatedRepository = yield* git.worktree.create({ repository, directory: isolated })
-      const content = "isolated change\n".repeat(6_000)
-      yield* Effect.promise(() => fs.writeFile(path.join(isolated, "feature.txt"), content))
-      yield* Effect.addFinalizer(() =>
-        git.worktree.remove({ repository: isolatedRepository, directory: isolated, force: true }).pipe(Effect.ignore),
-      )
-      const work = yield* Work.Service
-      const runner = yield* WorkRunner.Service
-      const created = yield* work.create({
-        id: goalID,
-        location: { directory: destination },
-        objective: "Merge isolated work",
-        acceptanceCriteria: [],
-        tasks: [
-          {
-            title: "Implement in isolation",
-            instructions: "Create the feature",
-            location: { directory: isolated },
-          },
-        ],
-      })
+  it.live(
+    "merges an isolated Task change set into the Goal workspace",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+        )
+        yield* Effect.promise(async () => {
+          await $`git init`.cwd(root.path).quiet()
+          await $`git config core.fsmonitor false`.cwd(root.path).quiet()
+          await $`git config commit.gpgsign false`.cwd(root.path).quiet()
+          await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
+          await $`git config user.name Test`.cwd(root.path).quiet()
+          await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
+          await $`git add .`.cwd(root.path).quiet()
+          await $`git commit -m initial`.cwd(root.path).quiet()
+        })
+        const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
+        const isolated = AbsolutePath.make(`${root.path}-work-runner-isolated`)
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
+        )
+        const git = yield* Git.Service
+        const repository = yield* git.repo
+          .discover(destination)
+          .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
+        const isolatedRepository = yield* git.worktree.create({ repository, directory: isolated })
+        const content = "isolated change\n".repeat(6_000)
+        yield* Effect.promise(() => fs.writeFile(path.join(isolated, "feature.txt"), content))
+        yield* Effect.addFinalizer(() =>
+          git.worktree.remove({ repository: isolatedRepository, directory: isolated, force: true }).pipe(Effect.ignore),
+        )
+        const work = yield* Work.Service
+        const runner = yield* WorkRunner.Service
+        const created = yield* work.create({
+          id: goalID,
+          location: { directory: destination },
+          objective: "Merge isolated work",
+          acceptanceCriteria: [],
+          tasks: [
+            {
+              title: "Implement in isolation",
+              instructions: "Create the feature",
+              location: { directory: isolated },
+            },
+          ],
+        })
 
-      yield* runner.run({ goalID, force: true })
+        yield* runner.run({ goalID, force: true })
 
-      expect(yield* work.get(goalID)).toMatchObject({ status: "completed" })
-      expect(yield* work.tasks(goalID)).toMatchObject([{ id: created.tasks[0]?.id, status: "completed" }])
-      const history = yield* EventV2.readAggregate((yield* Database.Service).db, {
-        aggregateID: goalID,
-        limit: 100,
-        manifest: DurableEventManifest.WorkDurable,
-      })
-      const prepared = history.events.find((event) => event.type === Work.Event.TaskMergeStarted.type)
-      if (!prepared || prepared.type !== Work.Event.TaskMergeStarted.type) throw new Error("Merge input event missing")
-      expect(prepared.data.changes).toBeUndefined()
-      expect(prepared.data.artifact).toMatchObject({ digest: prepared.data.digest, mediaType: "text/x-diff" })
-      expect(
-        (yield* Effect.promise(() => fs.readFile(path.join(destination, "feature.txt"), "utf8"))).replaceAll(
-          "\r\n",
-          "\n",
-        ),
-      ).toBe(content)
-      expect(
-        yield* Effect.promise(() =>
-          fs.stat(isolated).then(
-            () => true,
-            () => false,
+        const reviews = yield* WorkMergeReview.Service
+        const taskID = created.tasks[0]!.id
+        expect(yield* work.tasks(goalID)).toMatchObject([{ status: "merging" }])
+        expect(yield* Effect.promise(() => Bun.file(path.join(destination, "feature.txt")).exists())).toBe(false)
+        const pending = yield* reviews.read(goalID, taskID)
+        expect(pending.approved).toBe(false)
+        expect(pending.diff).toContain("isolated change")
+        yield* reviews.decide(goalID, taskID, pending.token, false)
+        yield* runner.run({ goalID, force: true })
+        expect(yield* work.tasks(goalID)).toMatchObject([{ status: "merging" }])
+        yield* reviews.decide(goalID, taskID, pending.token, true)
+        yield* Effect.promise(() => Bun.write(path.join(destination, "base.txt"), "user change\n"))
+        expect((yield* reviews.read(goalID, taskID)).approved).toBe(false)
+        expect((yield* reviews.decide(goalID, taskID, pending.token, true).pipe(Effect.exit))._tag).toBe("Failure")
+        yield* runner.run({ goalID, force: true })
+        expect(yield* work.tasks(goalID)).toMatchObject([{ status: "merging" }])
+        const refreshed = yield* reviews.read(goalID, taskID)
+        yield* reviews.decide(goalID, taskID, refreshed.token, true)
+        yield* Effect.promise(() => Bun.write(path.join(isolated, "feature.txt"), "changed candidate\n"))
+        expect((yield* reviews.read(goalID, taskID)).approved).toBe(false)
+        yield* runner.run({ goalID, force: true })
+        expect(yield* Effect.promise(() => Bun.file(path.join(destination, "feature.txt")).exists())).toBe(false)
+        yield* Effect.promise(() => Bun.write(path.join(isolated, "feature.txt"), content))
+        const restored = yield* reviews.read(goalID, taskID)
+        yield* reviews.decide(goalID, taskID, restored.token, true)
+        yield* runner.run({ goalID, force: true })
+
+        expect(yield* work.get(goalID)).toMatchObject({ status: "completed" })
+        expect(yield* work.tasks(goalID)).toMatchObject([{ id: created.tasks[0]?.id, status: "completed" }])
+        const history = yield* EventV2.readAggregate((yield* Database.Service).db, {
+          aggregateID: goalID,
+          limit: 100,
+          manifest: DurableEventManifest.WorkDurable,
+        })
+        const prepared = history.events.find((event) => event.type === Work.Event.TaskMergeStarted.type)
+        if (!prepared || prepared.type !== Work.Event.TaskMergeStarted.type)
+          throw new Error("Merge input event missing")
+        expect(prepared.data.changes).toBeUndefined()
+        expect(prepared.data.artifact).toMatchObject({ digest: prepared.data.digest, mediaType: "text/x-diff" })
+        expect(
+          (yield* Effect.promise(() => fs.readFile(path.join(destination, "feature.txt"), "utf8"))).replaceAll(
+            "\r\n",
+            "\n",
           ),
-        ),
-      ).toBe(false)
-    }),
+        ).toBe(content)
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(isolated).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(false)
+      }),
+    20_000,
   )
 
   it.live("blocks self-committed isolated work without applying a partial diff", () =>
@@ -1792,3 +1825,38 @@ it.effect("fingerprints unignored new files within the project scope and keeps i
     expect(yield* WorkAcceptance.fingerprint(files, proc, project)).not.toBe(added)
   }),
 )
+
+for (const restore of [false, true]) {
+  const test = restore ? changedFinalIt : it
+  test.effect(
+    `deleted tracked file ${restore ? "restored during review requires reacceptance" : "allows final acceptance"}`,
+    () =>
+      Effect.gen(function* () {
+        const directory = yield* Effect.promise(() => tmpdir())
+        yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+        yield* Effect.promise(async () => {
+          await $`git init`.cwd(directory.path).quiet()
+          await Bun.write(path.join(directory.path, "changed.txt"), "obsolete")
+          await $`git add changed.txt`.cwd(directory.path).quiet()
+          await fs.unlink(path.join(directory.path, "changed.txt"))
+        })
+        const files = yield* FSUtil.Service
+        const proc = yield* AppProcess.Service
+        const deleted = yield* WorkAcceptance.fingerprint(files, proc, directory.path)
+        expect(deleted).toBeString()
+        const work = yield* Work.Service
+        const runner = yield* WorkRunner.Service
+        yield* work.create({
+          id: goalID,
+          location: { directory: AbsolutePath.make(directory.path) },
+          objective: "Remove obsolete code",
+          planning: true,
+          acceptanceCriteria: [{ description: "Refactor complete", required: true, evidence: "review" }],
+        })
+        yield* runner.run({ goalID, force: true })
+        expect(yield* work.get(goalID)).toMatchObject({ status: restore ? "blocked" : "completed" })
+        yield* Effect.promise(() => Bun.write(path.join(directory.path, "changed.txt"), "restored"))
+        expect(yield* WorkAcceptance.fingerprint(files, proc, directory.path)).not.toBe(deleted)
+      }),
+  )
+}

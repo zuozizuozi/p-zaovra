@@ -74,10 +74,12 @@ export type Event =
   | EventWorkTaskVerificationStarted
   | EventWorkTaskReviewStarted
   | EventWorkTaskMergeStarted
+  | EventWorkTaskMergeReviewed
   | EventWorkTaskMerged
   | EventWorkTaskMergeConflicted
   | EventWorkTaskIsolationArchived
   | EventWorkTaskReworkRequested
+  | EventWorkTaskFinalAcceptanceRepairRequested
   | EventWorkTaskCompleted
   | EventWorkTaskBlocked
   | EventWorkTaskCancelled
@@ -974,6 +976,7 @@ export type GlobalEvent = {
           model: ModelRef
           inputSequence?: number
           contextEpoch?: number
+          verificationEnabled?: boolean
           snapshot?: string
         }
       }
@@ -1490,6 +1493,17 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "work.task.merge-reviewed"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          token: string
+          approved: boolean
+        }
+      }
+    | {
+        id: string
         type: "work.task.merged"
         properties: {
           goalID: string
@@ -1530,6 +1544,19 @@ export type GlobalEvent = {
           timestamp: number
           taskID: string
           status: "rework"
+          reason: string
+        }
+      }
+    | {
+        id: string
+        type: "work.task.final-acceptance-repair-requested"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          sourceTaskID: string
+          evaluationID: string
+          repair: WorkTaskInfo
           reason: string
         }
       }
@@ -2116,10 +2143,12 @@ export type GlobalEvent = {
     | SyncEventWorkTaskVerificationStarted
     | SyncEventWorkTaskReviewStarted
     | SyncEventWorkTaskMergeStarted
+    | SyncEventWorkTaskMergeReviewed
     | SyncEventWorkTaskMerged
     | SyncEventWorkTaskMergeConflicted
     | SyncEventWorkTaskIsolationArchived
     | SyncEventWorkTaskReworkRequested
+    | SyncEventWorkTaskFinalAcceptanceRepairRequested
     | SyncEventWorkTaskCompleted
     | SyncEventWorkTaskBlocked
     | SyncEventWorkTaskCancelled
@@ -2999,6 +3028,21 @@ export type SessionHistory = {
 
 export type SessionDurableEventStream = string
 
+export type WorkMergeReview = {
+  taskID: string
+  token: string
+  baseline: string
+  digest: string
+  diff: string
+  approved: boolean
+  reason?: string
+}
+
+export type WorkMergeDecision = {
+  token: string
+  approved: boolean
+}
+
 export type WorkCriterionInput = {
   id?: string
   description: string
@@ -3199,10 +3243,12 @@ export type V2Event =
   | WorkTaskVerificationStarted
   | WorkTaskReviewStarted
   | WorkTaskMergeStarted
+  | WorkTaskMergeReviewed
   | WorkTaskMerged
   | WorkTaskMergeConflicted
   | WorkTaskIsolationArchived
   | WorkTaskReworkRequested
+  | WorkTaskFinalAcceptanceRepairRequested
   | WorkTaskCompleted
   | WorkTaskBlocked
   | WorkTaskCancelled
@@ -3403,6 +3449,9 @@ export type PromptSubtask = {
 export type SessionErrorUnknown = {
   type: "unknown"
   message: string
+  metadata?: {
+    [key: string]: string
+  }
 }
 
 export type LlmProviderMetadata = {
@@ -3570,6 +3619,11 @@ export type WorkTaskStatus =
   | "blocked"
   | "cancelled"
 
+export type WorkTaskAcceptance = {
+  scope: "local" | "final"
+  criteria: Array<WorkCriterion>
+}
+
 export type WorkTaskTime = {
   created: number
   updated: number
@@ -3586,6 +3640,7 @@ export type WorkTaskInfo = {
   location?: LocationRef
   status: WorkTaskStatus
   criteria: Array<string>
+  acceptance?: WorkTaskAcceptance
   attemptCount: number
   time: WorkTaskTime
   revision: number
@@ -3658,6 +3713,7 @@ export type WorkEvidenceInfo = {
 export type WorkVerdict = "pass" | "fail" | "blocked"
 
 export type WorkFinding = {
+  taskID?: string
   code?: string
   message: string
   severity: "info" | "warning" | "error"
@@ -4142,6 +4198,7 @@ export type SyncEventSessionNextStepStarted = {
       model: ModelRef
       inputSequence?: number
       contextEpoch?: number
+      verificationEnabled?: boolean
       snapshot?: string
     }
   }
@@ -4893,6 +4950,24 @@ export type SyncEventWorkTaskMergeStarted = {
   }
 }
 
+export type SyncEventWorkTaskMergeReviewed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.merge-reviewed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      token: string
+      approved: boolean
+    }
+  }
+}
+
 export type SyncEventWorkTaskMerged = {
   type: "sync"
   id: string
@@ -4961,6 +5036,26 @@ export type SyncEventWorkTaskReworkRequested = {
       timestamp: number
       taskID: string
       status: "rework"
+      reason: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskFinalAcceptanceRepairRequested = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.final-acceptance-repair-requested.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      sourceTaskID: string
+      evaluationID: string
+      repair: WorkTaskInfo
       reason: string
     }
   }
@@ -5786,6 +5881,7 @@ export type SessionNextStepStarted = {
     model: ModelRef
     inputSequence?: number
     contextEpoch?: number
+    verificationEnabled?: boolean
     snapshot?: string
   }
 }
@@ -6289,7 +6385,7 @@ export type SessionOutcomeReview = {
 }
 
 export type SessionOutcomeInfo = {
-  state: "idle" | "running" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
+  state: "idle" | "running" | "completed" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
   outcomeUnknown: boolean
   checks: Array<SessionOutcomeCheck>
   missing: Array<string>
@@ -7280,6 +7376,27 @@ export type WorkTaskMergeStarted = {
   }
 }
 
+export type WorkTaskMergeReviewed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.merge-reviewed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    token: string
+    approved: boolean
+  }
+}
+
 export type WorkTaskMerged = {
   id: string
   metadata?: {
@@ -7361,6 +7478,29 @@ export type WorkTaskReworkRequested = {
     timestamp: number
     taskID: string
     status: "rework"
+    reason: string
+  }
+}
+
+export type WorkTaskFinalAcceptanceRepairRequested = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.final-acceptance-repair-requested"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    sourceTaskID: string
+    evaluationID: string
+    repair: WorkTaskInfo
     reason: string
   }
 }
@@ -8732,6 +8872,7 @@ export type EventSessionNextStepStarted = {
     model: ModelRef
     inputSequence?: number
     contextEpoch?: number
+    verificationEnabled?: boolean
     snapshot?: string
   }
 }
@@ -9291,6 +9432,18 @@ export type EventWorkTaskMergeStarted = {
   }
 }
 
+export type EventWorkTaskMergeReviewed = {
+  id: string
+  type: "work.task.merge-reviewed"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    token: string
+    approved: boolean
+  }
+}
+
 export type EventWorkTaskMerged = {
   id: string
   type: "work.task.merged"
@@ -9336,6 +9489,20 @@ export type EventWorkTaskReworkRequested = {
     timestamp: number
     taskID: string
     status: "rework"
+    reason: string
+  }
+}
+
+export type EventWorkTaskFinalAcceptanceRepairRequested = {
+  id: string
+  type: "work.task.final-acceptance-repair-requested"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    sourceTaskID: string
+    evaluationID: string
+    repair: WorkTaskInfo
     reason: string
   }
 }
@@ -13473,6 +13640,76 @@ export type V2SessionMessageResponses = {
 }
 
 export type V2SessionMessageResponse = V2SessionMessageResponses[keyof V2SessionMessageResponses]
+
+export type V2WorkMergeReviewData = {
+  body?: never
+  path: {
+    goalID: string
+    taskID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/merge/{taskID}"
+}
+
+export type V2WorkMergeReviewErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkMergeReviewError = V2WorkMergeReviewErrors[keyof V2WorkMergeReviewErrors]
+
+export type V2WorkMergeReviewResponses = {
+  /**
+   * WorkMergeReview
+   */
+  200: WorkMergeReview
+}
+
+export type V2WorkMergeReviewResponse = V2WorkMergeReviewResponses[keyof V2WorkMergeReviewResponses]
+
+export type V2WorkMergeDecideData = {
+  body: WorkMergeDecision
+  path: {
+    goalID: string
+    taskID: string
+  }
+  query?: never
+  url: "/api/work/{goalID}/merge/{taskID}"
+}
+
+export type V2WorkMergeDecideErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type V2WorkMergeDecideError = V2WorkMergeDecideErrors[keyof V2WorkMergeDecideErrors]
+
+export type V2WorkMergeDecideResponses = {
+  /**
+   * <No Content>
+   */
+  200: unknown
+}
 
 export type V2WorkListData = {
   body?: never

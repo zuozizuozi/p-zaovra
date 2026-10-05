@@ -1,3 +1,5 @@
+import { WorkMergeReview } from "./merge-review"
+import { SessionOwnership } from "../session/ownership"
 export * as WorkRunner from "./runner"
 
 import { WorkAcceptance } from "./acceptance"
@@ -50,6 +52,7 @@ const DEFAULT_MAX_REPAIR_ATTEMPTS = 3
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const mergeReview = yield* WorkMergeReview.Service
     const fs = yield* FSUtil.Service
     const proc = yield* AppProcess.Service
     const events = yield* EventV2.Service
@@ -533,6 +536,9 @@ export const layer = Layer.effect(
         return yield* mergeConflict(goal, task, prepared.data.digest, "Durable merge input digest does not match")
       const blocker = yield* isolation.mergeBlocker(goal, task)
       if (blocker) return yield* mergeConflict(goal, task, prepared.data.digest, blocker)
+      const approval = yield* mergeReview.read(goal.id, task.id).pipe(Effect.exit)
+      if (Exit.isFailure(approval) || !approval.value.approved) return false
+      yield* leases.assert(claim)
       const changes = Git.ChangeSet.make(resolved.value)
       if (changes.length > 0) {
         const applied = yield* Effect.gen(function* () {
@@ -544,6 +550,9 @@ export const layer = Layer.effect(
               message: "Goal workspace is not a Git repository",
             })
           if (yield* git.change.check({ repository, path: goal.location.directory, changes })) {
+            const current = yield* mergeReview.read(goal.id, task.id)
+            if (!current.approved || current.token !== approval.value.token) return false
+            yield* leases.assert(claim)
             yield* git.change.apply({ repository, path: goal.location.directory, changes })
             return undefined
           }
@@ -555,8 +564,8 @@ export const layer = Layer.effect(
             message: "Isolated Task changes conflict with the Goal workspace",
           })
         }).pipe(Effect.exit)
+        if (Exit.isSuccess(applied) && applied.value === false) return false
         if (Exit.isFailure(applied)) {
-          yield* isolation.release(goal, task)
           return yield* mergeConflict(goal, task, prepared.data.digest, errorText(Cause.squash(applied.cause)))
         }
       }
@@ -2076,7 +2085,12 @@ export const layer = Layer.effect(
               }
 
               while (yield* step(input.goalID, claim)) {}
-            }),
+            }).pipe(
+              Effect.provideService(SessionOwnership.Current, {
+                id: `${claim.ownerID}:${claim.fence}`,
+                check: leases.assert(claim).pipe(Effect.catchTag("WorkLease.Lost", () => Effect.interrupt)),
+              }),
+            ),
           )
           .pipe(
             Effect.catchTag("WorkLease.Lost", (error) =>
@@ -2195,6 +2209,7 @@ export const node = makeGlobalNode({
     ProjectDirectories.node,
     SessionV2.node,
     WorkStore.node,
+    WorkMergeReview.node,
     WorkArtifact.node,
     WorkRemoteJob.node,
     WorkArchitect.node,

@@ -319,6 +319,10 @@ import type {
   V2WorkGetResponses,
   V2WorkListErrors,
   V2WorkListResponses,
+  V2WorkMergeDecideErrors,
+  V2WorkMergeDecideResponses,
+  V2WorkMergeReviewErrors,
+  V2WorkMergeReviewResponses,
   V2WorkPauseErrors,
   V2WorkPauseResponses,
   V2WorkReplanErrors,
@@ -343,6 +347,7 @@ import type {
   VcsStatusResponses,
   WorkCreateInput,
   WorkExpandInput,
+  WorkMergeDecision,
   WorkReplanInput,
   WorkResolveMemoryInput,
   WorktreeCreateErrors,
@@ -4181,6 +4186,69 @@ export class Session extends HeyApiClient {
 }
 
 export class Work extends HeyApiClient {
+  /**
+   * Inspect an exact pending merge
+   */
+  public mergeReview<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      taskID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { in: "path", key: "taskID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2WorkMergeReviewResponses, V2WorkMergeReviewErrors, ThrowOnError>({
+      url: "/api/work/{goalID}/merge/{taskID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Approve or decline an exact pending merge
+   */
+  public mergeDecide<ThrowOnError extends boolean = false>(
+    parameters: {
+      goalID: string
+      taskID: string
+      workMergeDecision: WorkMergeDecision
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "goalID" },
+            { in: "path", key: "taskID" },
+            { key: "workMergeDecision", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2WorkMergeDecideResponses, V2WorkMergeDecideErrors, ThrowOnError>({
+      url: "/api/work/{goalID}/merge/{taskID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   /**
    * List durable work
    */

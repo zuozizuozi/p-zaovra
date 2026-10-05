@@ -1,3 +1,4 @@
+import { SessionOwnership } from "@zaovra-ai/core/session/ownership"
 import { describe, expect } from "bun:test"
 import {
   LLM,
@@ -6099,3 +6100,45 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 })
+
+it.effect("lost execution authority prevents a provider request", () =>
+  Effect.gen(function* () {
+    yield* setup
+    const session = yield* SessionV2.Service
+    const runner = yield* SessionRunner.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Do work" }), resume: false })
+    const exit = yield* runner
+      .run({ sessionID, force: true })
+      .pipe(Effect.provideService(SessionOwnership.Current, { id: "owner:1", check: Effect.interrupt }), Effect.exit)
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    expect(requests).toHaveLength(0)
+  }),
+)
+
+it.effect("authority lost after provider output prevents tool execution and the next provider turn", () =>
+  Effect.gen(function* () {
+    yield* setup
+    executions.length = 0
+    const session = yield* SessionV2.Service
+    const runner = yield* SessionRunner.Service
+    const authority = { valid: true }
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Use echo" }), resume: false })
+    responseStream = Stream.fromEffect(
+      Effect.sync(() => {
+        authority.valid = false
+        return LLMEvent.toolCall({ id: "lost-call", name: "echo", input: { text: "must not execute" } })
+      }),
+    )
+    yield* runner
+      .run({ sessionID, force: true })
+      .pipe(
+        Effect.provideService(SessionOwnership.Current, {
+          id: "owner:1",
+          check: Effect.suspend(() => (authority.valid ? Effect.void : Effect.interrupt)),
+        }),
+        Effect.exit,
+      )
+    expect(requests).toHaveLength(1)
+    expect(executions).toHaveLength(0)
+  }),
+)

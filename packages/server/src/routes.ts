@@ -1,3 +1,4 @@
+import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { Database } from "@zaovra-ai/core/database/database"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -47,6 +48,7 @@ const applicationServices = LayerNode.group([
   TaskRecovery.startupNode,
   Work.node,
   WorkArtifact.node,
+  WorkMergeReview.node,
   WorkController.node,
   WorkStore.node,
   WorkWorker.node,

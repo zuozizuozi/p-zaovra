@@ -151,6 +151,12 @@ export const TaskMergeStarted = Event.define({
     digest: Schema.String,
   },
 })
+/** Human decision over one exact baseline and candidate; never a model verdict. */
+export const TaskMergeReviewed = Event.define({
+  type: "work.task.merge-reviewed",
+  ...options,
+  schema: { ...Base, taskID: TaskID, token: Schema.String, approved: Schema.Boolean },
+})
 export const TaskMerged = Event.define({
   type: "work.task.merged",
   ...options,
@@ -296,6 +302,7 @@ export const DurableDefinitions = Event.inventory(
   TaskVerificationStarted,
   TaskReviewStarted,
   TaskMergeStarted,
+  TaskMergeReviewed,
   TaskMerged,
   TaskMergeConflicted,
   TaskIsolationArchived,

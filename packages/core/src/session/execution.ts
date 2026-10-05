@@ -1,5 +1,6 @@
 export * as SessionExecution from "./execution"
 
+import { SessionOwnership } from "./ownership"
 import { Context, Effect, Layer } from "effect"
 import { LayerNode } from "../effect/layer-node"
 import { Node } from "../effect/app-node"
@@ -13,8 +14,11 @@ export interface Interface {
     operation: Effect.Effect<void>,
   ) => Effect.Effect<void, SessionRunner.RunError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
-  /** Starts execution while idle or joins the active execution. */
-  readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
+  /** Without a claim, starts or observes execution. A claim starts an exclusively owned drain whose caller must await cleanup. */
+  readonly resume: (
+    sessionID: SessionSchema.ID,
+    claim?: SessionOwnership.Claim,
+  ) => Effect.Effect<void, SessionRunner.RunError>
   /** Waits for current work without starting a provider turn. */
   readonly wait?: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
   /** Serializes one manual compaction with the Session drain. */
@@ -35,7 +39,7 @@ export const noopLayer = Layer.succeed(
   Service,
   Service.of({
     active: Effect.succeed(new Set()),
-    resume: () => Effect.void,
+    resume: (_sessionID, claim) => claim?.check ?? Effect.void,
     wait: () => Effect.void,
     compact: () => Effect.succeed(false),
     wake: () => Effect.void,

@@ -1,3 +1,4 @@
+import { SessionOwnership } from "../ownership"
 import {
   LLM,
   LLMClient,
@@ -551,6 +552,7 @@ const layer = Layer.effect(
       let rejectedInput = false
       // Explicit command delegation uses the same durable tool settlement path,
       // without asking a provider to decide whether to create the child.
+      yield* SessionOwnership.check
       const providerStream = (
         subtask?.type === "user" && subtask.subtask
           ? Stream.fromIterable([
@@ -666,13 +668,17 @@ const layer = Layer.effect(
                     )
                   : Effect.uninterruptibleMask((restore) =>
                       restore(
-                        toolMaterialization.settle({
-                          sessionID: session.id,
-                          agent: agent.id,
-                          assistantMessageID,
-                          call: event,
-                          inputModalities: model.inputModalities,
-                        }),
+                        SessionOwnership.check.pipe(
+                          Effect.andThen(
+                            toolMaterialization.settle({
+                              sessionID: session.id,
+                              agent: agent.id,
+                              assistantMessageID,
+                              call: event,
+                              inputModalities: model.inputModalities,
+                            }),
+                          ),
+                        ),
                       ).pipe(
                         Effect.flatMap((settlement) =>
                           publish(

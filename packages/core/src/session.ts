@@ -1,3 +1,4 @@
+import { SessionOwnership } from "./session/ownership"
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
@@ -809,7 +810,8 @@ const layer = Layer.effect(
       active: execution.active,
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {
         yield* result.get(sessionID)
-        yield* execution.resume(sessionID)
+        const claim = yield* SessionOwnership.Current
+        yield* execution.resume(sessionID, claim)
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
         Effect.uninterruptible(

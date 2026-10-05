@@ -1,3 +1,4 @@
+import { SessionOwnership } from "../ownership"
 import { Cause, DateTime, Effect, Layer } from "effect"
 import { randomUUID } from "node:crypto"
 import { EventV2 } from "../../event"
@@ -19,13 +20,14 @@ const layer = Layer.effect(
     const locations = yield* LocationServiceMap.Service
     const events = yield* EventV2.Service
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError>({
-      drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
+      drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force, claim) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
         if (session.time.archived) return
         const started = yield* DateTime.now
         return yield* SessionRunner.Service.use((runner) => runner.run({ sessionID, force })).pipe(
           Effect.provide(locations.get(session.location)),
+          Effect.provideService(SessionOwnership.Current, claim),
           Effect.tapCause((cause) => reportFailure(store, events, session, started, cause)),
         )
       }),
@@ -35,7 +37,7 @@ const layer = Layer.effect(
       active: coordinator.active,
       exclusive: coordinator.exclusive,
       interrupt: coordinator.interrupt,
-      resume: coordinator.run,
+      resume: (sessionID, claim) => (claim ? coordinator.owned(sessionID, claim) : coordinator.run(sessionID)),
       wait: coordinator.wait,
       compact: Effect.fn("SessionExecution.compact")(function* (sessionID) {
         let compacted = false

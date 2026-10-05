@@ -160,7 +160,10 @@ export const fingerprint = Effect.fn("WorkAcceptance.fingerprint")(function* (
       : yield* walk(directory)
     const receipts = yield* Effect.forEach([...new Set(files)].toSorted(), (file) =>
       Effect.gen(function* () {
-        const info = yield* fs.stat(file)
+        const info = yield* fs
+          .stat(file)
+          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+        if (!info) return { path: file, digest: "deleted" }
         if (info.type !== "File") return { path: file, digest: undefined }
         if (info.size > 64 * 1024 * 1024) {
           const mtime = Option.getOrUndefined(info.mtime)?.getTime()

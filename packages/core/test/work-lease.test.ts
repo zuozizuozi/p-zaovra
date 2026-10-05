@@ -7,7 +7,9 @@ import { WorkLease } from "@zaovra-ai/core/work/lease"
 import { WorkGoalTable, WorkLeaseTable, WorkWorkerTable } from "@zaovra-ai/core/work/sql"
 import { WorkWorker } from "@zaovra-ai/core/work/worker"
 import { eq } from "drizzle-orm"
-import { Effect } from "effect"
+import { Deferred, Effect, Fiber, Exit } from "effect"
+import { adjust } from "effect/testing/TestClock"
+import { SessionRunCoordinator } from "@zaovra-ai/core/session/run-coordinator"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(AppNodeBuilder.build(Database.node))
@@ -162,3 +164,48 @@ function insertGoal(db: Database.Interface["db"]) {
       .pipe(Effect.orDie)
   })
 }
+
+it.effect("lease heartbeat loss stops the owned Session drain without targeting a replacement generation", () =>
+  Effect.gen(function* () {
+    const db = (yield* Database.Service).db
+    yield* insertGoal(db)
+    const started = yield* Deferred.make<void>()
+    const stopped = yield* Deferred.make<void>()
+    const coordinator = yield* SessionRunCoordinator.make<string, never>({
+      drain: () =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Deferred.succeed(stopped, undefined)),
+        ),
+    })
+    const running = yield* WorkLease.Service.use((lease) =>
+      lease.run(goalID, (claim) =>
+        coordinator.owned("session", {
+          id: `${claim.ownerID}:${claim.fence}`,
+          check: lease.assert(claim).pipe(Effect.catchTag("WorkLease.Lost", () => Effect.interrupt)),
+        }),
+      ),
+    ).pipe(
+      Effect.provide(WorkLease.makeLayer({ ownerID: "old-owner", durationMs: 1_000, heartbeatMs: 100 })),
+      Effect.forkChild,
+    )
+    yield* Deferred.await(started)
+    yield* db
+      .update(WorkLeaseTable)
+      .set({ owner_id: "new-owner", fence: 2, expires_at: 10_000 })
+      .where(eq(WorkLeaseTable.goal_id, goalID))
+      .run()
+      .pipe(Effect.orDie)
+    yield* adjust("100 millis")
+    expect(Exit.isFailure(yield* Fiber.await(running))).toBe(true)
+    yield* Deferred.await(stopped)
+    expect((yield* coordinator.active).size).toBe(0)
+    const row = yield* db
+      .select()
+      .from(WorkLeaseTable)
+      .where(eq(WorkLeaseTable.goal_id, goalID))
+      .get()
+      .pipe(Effect.orDie)
+    expect(row).toMatchObject({ owner_id: "new-owner", fence: 2 })
+  }),
+)

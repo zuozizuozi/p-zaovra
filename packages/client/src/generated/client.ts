@@ -57,6 +57,10 @@ import type {
   SessionsUpdateOutput,
   SessionsRemoveInput,
   SessionsRemoveOutput,
+  WorkMergeReviewInput,
+  WorkMergeReviewOutput,
+  WorkMergeDecideInput,
+  WorkMergeDecideOutput,
   WorkListOutput,
   WorkCreateInput,
   WorkCreateOutput,
@@ -664,6 +668,29 @@ export function make(options: ClientOptions) {
         ),
     },
     work: {
+      mergeReview: (input: WorkMergeReviewInput, requestOptions?: RequestOptions) =>
+        request<WorkMergeReviewOutput>(
+          {
+            method: "GET",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/merge/${encodeURIComponent(input.taskID)}`,
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      mergeDecide: (input: WorkMergeDecideInput, requestOptions?: RequestOptions) =>
+        request<WorkMergeDecideOutput>(
+          {
+            method: "POST",
+            path: `/api/work/${encodeURIComponent(input.goalID)}/merge/${encodeURIComponent(input.taskID)}`,
+            body: { token: input["token"], approved: input["approved"] },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
       list: (requestOptions?: RequestOptions) =>
         request<{ readonly data: WorkListOutput }>(
           { method: "GET", path: `/api/work`, successStatus: 200, declaredStatuses: [401, 400], empty: false },

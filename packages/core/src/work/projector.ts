@@ -675,6 +675,12 @@ const layer = Layer.effectDiscard(
       )
       return projectTaskStatus(db, event)
     })
+    yield* events.project(Work.Event.TaskMergeReviewed, (event) =>
+      Effect.gen(function* () {
+        const task = yield* requireTask(db, event.data.goalID, event.data.taskID)
+        invariant(task.status === "merging", "Only a pending merge can be reviewed")
+      }),
+    )
     yield* events.project(Work.Event.TaskMerged, (event) => projectTaskStatus(db, event))
     yield* events.project(Work.Event.TaskMergeConflicted, (event) => projectTaskStatus(db, event))
     yield* events.project(Work.Event.TaskIsolationArchived, (event) =>

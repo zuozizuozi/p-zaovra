@@ -1,3 +1,4 @@
+import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
@@ -17,6 +18,7 @@ import { Api } from "../api"
 
 export const WorkHandler = HttpApiBuilder.group(Api, "server.work", (handlers) =>
   Effect.gen(function* () {
+    const mergeReview = yield* WorkMergeReview.Service
     const work = yield* Work.Service
     const artifacts = yield* WorkArtifact.Service
     const locations = yield* LocationServiceMap.Service
@@ -76,6 +78,26 @@ export const WorkHandler = HttpApiBuilder.group(Api, "server.work", (handlers) =
       )
 
     return handlers
+      .handle("work.mergeReview", (ctx) =>
+        mergeReview
+          .read(ctx.params.goalID, ctx.params.taskID)
+          .pipe(
+            Effect.catchTag(
+              "WorkMergeReview.Conflict",
+              (error) => new ConflictError({ resource: ctx.params.taskID, message: error.message }),
+            ),
+          ),
+      )
+      .handle("work.mergeDecide", (ctx) =>
+        mergeReview
+          .decide(ctx.params.goalID, ctx.params.taskID, ctx.payload.token, ctx.payload.approved)
+          .pipe(
+            Effect.catchTag(
+              "WorkMergeReview.Conflict",
+              (error) => new ConflictError({ resource: ctx.params.taskID, message: error.message }),
+            ),
+          ),
+      )
       .handle(
         "work.list",
         Effect.fn(function* () {

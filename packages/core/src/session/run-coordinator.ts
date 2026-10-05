@@ -1,5 +1,6 @@
 export * as SessionRunCoordinator from "./run-coordinator"
 
+import { SessionOwnership } from "./ownership"
 import { Cause, Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
 
 /** Serializes execution for each key while allowing different keys to run concurrently. */
@@ -8,6 +9,8 @@ export interface Coordinator<Key, E> {
   readonly active: Effect.Effect<ReadonlySet<Key>>
   /** Starts execution while idle or joins the active execution. */
   readonly run: (key: Key) => Effect.Effect<void, E>
+  /** Starts an exclusive drain; cancellation stops only this concrete entry, never a replacement. */
+  readonly owned: (key: Key, claim: SessionOwnership.Claim) => Effect.Effect<void, E>
   /** Waits for current execution without starting new work. */
   readonly wait: (key: Key) => Effect.Effect<void, E>
   /** Runs one serialized operation after current execution becomes idle. */
@@ -22,12 +25,13 @@ type Entry<E> = {
   readonly done: Deferred.Deferred<void, E>
   readonly observed: Deferred.Deferred<Exit.Exit<void, E>>
   owner?: Fiber.Fiber<void, never>
+  claim?: SessionOwnership.Claim
   pendingWake: boolean
   stopping: boolean
 }
 
 export const make = <Key, E>(options: {
-  readonly drain: (key: Key, force: boolean) => Effect.Effect<void, E>
+  readonly drain: (key: Key, force: boolean, claim?: SessionOwnership.Claim) => Effect.Effect<void, E>
 }): Effect.Effect<Coordinator<Key, E>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const active = new Map<Key, Entry<E>>()
@@ -50,7 +54,7 @@ export const make = <Key, E>(options: {
       const ready = Deferred.makeUnsafe<void>()
       const owner = fork(
         (successor ? Effect.yieldNow : Deferred.await(ready)).pipe(
-          Effect.andThen(operation ?? Effect.suspend(() => options.drain(key, force))),
+          Effect.andThen(operation ?? Effect.suspend(() => options.drain(key, force, entry.claim))),
           Effect.onExit((exit) => Effect.sync(() => settle(key, entry, exit))),
           Effect.exit,
           Effect.asVoid,
@@ -67,7 +71,7 @@ export const make = <Key, E>(options: {
         return
       }
 
-      const successor = entry.pendingWake ? makeEntry() : undefined
+      const successor = entry.pendingWake && !entry.claim ? makeEntry() : undefined
       if (successor === undefined) active.delete(key)
       else {
         active.set(key, successor)
@@ -90,6 +94,29 @@ export const make = <Key, E>(options: {
         start(key, next, true)
         return restore(Deferred.await(next.done))
       })
+
+    const owned = (key: Key, claim: SessionOwnership.Claim): Effect.Effect<void, E> =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          yield* restore(claim.check)
+          // Never adopt a different drain by Session ID, even if its owner label matches.
+          if (active.has(key)) return yield* Effect.die("Session already has an active execution owner")
+          const entry = makeEntry()
+          entry.claim = claim
+          active.set(key, entry)
+          start(key, entry, true)
+          return yield* restore(Deferred.await(entry.done)).pipe(
+            Effect.onInterrupt(() =>
+              Effect.suspend(() => {
+                if (active.get(key) !== entry || !entry.owner) return Effect.void
+                entry.stopping = true
+                entry.pendingWake = false
+                return Fiber.interrupt(entry.owner)
+              }),
+            ),
+          )
+        }),
+      )
 
     const wait = (key: Key): Effect.Effect<void, E> =>
       Effect.suspend(() => {
@@ -139,5 +166,5 @@ export const make = <Key, E>(options: {
         return Fiber.interrupt(entry.owner)
       })
 
-    return { active: Effect.sync(() => new Set(active.keys())), run, wait, exclusive, wake, interrupt }
+    return { active: Effect.sync(() => new Set(active.keys())), run, owned, wait, exclusive, wake, interrupt }
   })

@@ -475,7 +475,8 @@ export default function WorkPage() {
                                             candidate.itemDigest === entry.resolution?.itemDigest,
                                         )
                                       : undefined
-                                    const value = entry.resolution?.value ?? selected?.item ?? entry.candidates.at(-1)?.item
+                                    const value =
+                                      entry.resolution?.value ?? selected?.item ?? entry.candidates.at(-1)?.item
                                     if (!value) return
                                     setState("memoryEdit", {
                                       key: entry.key,
@@ -570,7 +571,19 @@ export default function WorkPage() {
                                     )
                                   }
                                 >
-                                  <For each={["fact", "decision", "constraint", "risk", "lesson", "result", "artifact"] as const}>
+                                  <For
+                                    each={
+                                      [
+                                        "fact",
+                                        "decision",
+                                        "constraint",
+                                        "risk",
+                                        "lesson",
+                                        "result",
+                                        "artifact",
+                                      ] as const
+                                    }
+                                  >
                                     {(kind) => <option value={kind}>{kind}</option>}
                                   </For>
                                 </select>
@@ -669,6 +682,10 @@ export default function WorkPage() {
                     </div>
                   </Show>
                 </Section>
+
+                <For each={current().tasks.filter((task) => task.status === "merging")}>
+                  {(task) => <MergeApproval goalID={current().goal.id} taskID={task.id} refresh={refresh} />}
+                </For>
 
                 <Section
                   title="Agent mailbox"
@@ -1038,4 +1055,69 @@ function Status(props: { value: string }) {
 
 function completedTasks(detail: WorkDetail) {
   return detail.tasks.filter((task) => task.status === "completed" || task.status === "superseded").length
+}
+
+function MergeApproval(props: { goalID: string; taskID: string; refresh: () => Promise<unknown> }) {
+  const sdk = useServerSDK()
+  const [state, setState] = createStore({ busy: false, error: "" })
+  const [review, actions] = createResource(
+    () => [sdk().scope, props.goalID, props.taskID] as const,
+    async () => {
+      const result = await sdk().client.v2.work.mergeReview({ goalID: props.goalID, taskID: props.taskID })
+      if (!result.data) throw new Error("无法读取待合并改动")
+      return result.data
+    },
+  )
+  const decide = async (approved: boolean) => {
+    const current = review()
+    if (!current || state.busy) return
+    setState({ busy: true, error: "" })
+    try {
+      const result = await sdk().client.v2.work.mergeDecide({
+        goalID: props.goalID,
+        taskID: props.taskID,
+        workMergeDecision: { token: current.token, approved },
+      })
+      if (result.error) throw new Error("审批已失效或保存失败，请刷新改动后重试")
+      if (approved) await sdk().client.v2.work.resume({ goalID: props.goalID })
+      await actions.refetch()
+      await props.refresh()
+    } catch (error) {
+      setState("error", error instanceof Error ? error.message : String(error))
+    } finally {
+      setState("busy", false)
+    }
+  }
+  return (
+    <Section title="审阅后应用改动" subtitle="隔离任务已完成，等待你确认；不会自动提交或推送。">
+      <Show when={review.error}>
+        <p role="alert">{String(review.error)}</p>
+      </Show>
+      <Show when={state.error}>
+        <p role="alert">{state.error}</p>
+      </Show>
+      <Show when={review()}>
+        {(current) => (
+          <>
+            <p class="text-xs">目标基线：{current().baseline.slice(0, 12)}</p>
+            <Show when={current().reason}>
+              <p role="alert">{current().reason}</p>
+            </Show>
+            <pre class="max-h-96 overflow-auto whitespace-pre text-xs p-3">{current().diff || "没有文件差异"}</pre>
+            <div class="flex gap-2">
+              <ButtonV2 disabled={state.busy || review.loading || !!current().reason} onClick={() => void decide(true)}>
+                批准并应用
+              </ButtonV2>
+              <ButtonV2 disabled={state.busy || review.loading} onClick={() => void decide(false)}>
+                暂不应用
+              </ButtonV2>
+              <ButtonV2 disabled={state.busy} onClick={() => void actions.refetch()}>
+                刷新改动
+              </ButtonV2>
+            </div>
+          </>
+        )}
+      </Show>
+    </Section>
+  )
 }
