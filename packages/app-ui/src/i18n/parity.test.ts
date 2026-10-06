@@ -1,25 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-const appLocales = [
-  "ar",
-  "br",
-  "bs",
-  "da",
-  "de",
-  "es",
-  "fr",
-  "ja",
-  "ko",
-  "no",
-  "pl",
-  "ru",
-  "uk",
-  "th",
-  "tr",
-  "zh",
-  "zht",
-] as const
-const desktopLocales = appLocales.filter((locale) => locale !== "th" && locale !== "tr")
+// Audit revision 77/89: the supported product languages are zh/en.
+// Keep strict key and placeholder parity against the English source in every domain.
+const appLocales = ["zh"] as const
+const desktopLocales = appLocales
 
 const domains = [
   {

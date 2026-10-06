@@ -141,6 +141,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
   return {
     platform: "desktop",
+    remoteServers: import.meta.env.VITE_ZAOVRA_CHANNEL === "dev",
     os,
     version: pkg.version,
     windowID: windowState.id,
@@ -382,7 +383,9 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     })
   })
 
-  const [defaultServer] = createResource(() => platform.getDefaultServer?.())
+  const [defaultServer] = createResource(() =>
+    platform.remoteServers === false ? null : platform.getDefaultServer?.(),
+  )
   const [locale] = createResource(loadLocale)
   const router = (props: BaseRouterProps) => (
     <DesktopMemoryRouter {...props} windowID={platform.windowID ?? "browser"} />
@@ -436,12 +439,13 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
           },
         })
       }
-      list.push(...readyWslConnections(wslServers.data))
+      if (platform.remoteServers !== false) list.push(...readyWslConnections(wslServers.data))
       return list
     })
     const effectiveDefaultServer = createStartupServer({
       ready,
-      defaultServer: () => defaultServer.latest,
+      defaultServer: () =>
+        platform.remoteServers === false ? ServerConnection.Key.make("sidecar") : defaultServer.latest,
       wsl: () => wslServers.data,
     })
     return (

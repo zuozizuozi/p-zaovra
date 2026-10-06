@@ -12,6 +12,19 @@ import {
 } from "./server"
 import { ServerScope } from "@/utils/server-scope"
 
+test("release desktop ignores stored remotes and retains the authenticated sidecar; dev retains remotes", () => {
+  const local: ServerConnection.Sidecar = {
+    type: "sidecar",
+    variant: "base",
+    http: { url: "http://127.0.0.1:4096", password: "ephemeral" },
+  }
+  const remote: ServerConnection.Http = { type: "http", http: { url: "https://remote.example" } }
+  const stored = [remote]
+  expect(resolveServerList({ props: [local], stored, localOnly: true })).toEqual([local])
+  expect(resolveServerList({ props: [local], stored, localOnly: false })).toEqual([local, remote])
+  expect(stored).toEqual([remote])
+})
+
 test("an explicit unavailable route target does not use the active server", () => {
   const local: ServerConnection.Sidecar = { type: "sidecar", variant: "base", http: { url: "http://127.0.0.1:4096" } }
   let fallbackReads = 0

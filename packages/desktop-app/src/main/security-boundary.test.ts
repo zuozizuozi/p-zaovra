@@ -20,6 +20,8 @@ mock.module("electron", () => {
   const electron = {
     app,
     BrowserWindow: class {},
+    WebContentsView: class {},
+    session: {},
     Notification: class {},
     clipboard: {},
     crashReporter: { start: () => undefined },
@@ -68,8 +70,12 @@ describe("desktop renderer trust boundary", () => {
       check?: Parameters<Session["setPermissionCheckHandler"]>[0]
     } = {}
     const session = {
-      setPermissionRequestHandler: (handler: typeof handlers.request) => { handlers.request = handler },
-      setPermissionCheckHandler: (handler: typeof handlers.check) => { handlers.check = handler },
+      setPermissionRequestHandler: (handler: typeof handlers.request) => {
+        handlers.request = handler
+      },
+      setPermissionCheckHandler: (handler: typeof handlers.check) => {
+        handlers.check = handler
+      },
     }
     const closed = new Set<number>()
     const first = { id: 1, session, isDestroyed: () => closed.has(1) } as unknown as WebContents
@@ -89,7 +95,10 @@ describe("desktop renderer trust boundary", () => {
     expect(handlers.check!(null, "notifications", "oc://renderer", details)).toBe(false)
     const replies: boolean[] = []
     handlers.request!(first, "notifications", (allowed) => replies.push(allowed), details)
-    handlers.request!(first, "notifications", (allowed) => replies.push(allowed), { ...details, requestingUrl: "https://example.com" })
+    handlers.request!(first, "notifications", (allowed) => replies.push(allowed), {
+      ...details,
+      requestingUrl: "https://example.com",
+    })
     expect(replies).toEqual([true, false])
   })
 

@@ -1,4 +1,4 @@
-import { Component, createSignal, startTransition } from "solid-js"
+import { Component, Show, createSignal, startTransition } from "solid-js"
 import { Dialog } from "@zaovra-ai/ui/dialog"
 import { Tabs } from "@zaovra-ai/ui/tabs"
 import { Icon } from "@zaovra-ai/ui/icon"
@@ -45,15 +45,19 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
                       <Icon name="keyboard" />
                       {language.t("settings.tab.shortcuts")}
                     </Tabs.Trigger>
-                    <Tabs.Trigger value="servers">
-                      <Icon name="server" />
-                      {language.t("status.popover.tab.servers")}
-                    </Tabs.Trigger>
+                    <Show when={platform.remoteServers !== false}>
+                      <Tabs.Trigger value="servers">
+                        <Icon name="server" />
+                        {language.t("status.popover.tab.servers")}
+                      </Tabs.Trigger>
+                    </Show>
                   </div>
                 </div>
 
                 <div class="flex flex-col gap-1.5">
-                  <Tabs.SectionTitle>{language.t("settings.section.server")}</Tabs.SectionTitle>
+                  <Tabs.SectionTitle>
+                    {language.t(platform.remoteServers === false ? "settings.models.title" : "settings.section.server")}
+                  </Tabs.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
                     <Tabs.Trigger value="providers">
                       <Icon name="providers" />
@@ -79,9 +83,11 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
         <Tabs.Content value="shortcuts" class="no-scrollbar">
           <SettingsKeybinds />
         </Tabs.Content>
-        <Tabs.Content value="servers" class="no-scrollbar">
-          <SettingsServers />
-        </Tabs.Content>
+        <Show when={platform.remoteServers !== false}>
+          <Tabs.Content value="servers" class="no-scrollbar">
+            <SettingsServers />
+          </Tabs.Content>
+        </Show>
         <Tabs.Content value="providers" class="no-scrollbar">
           <SettingsProviders onBack={showProviders} />
         </Tabs.Content>

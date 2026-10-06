@@ -30,6 +30,8 @@ export type FatalRendererErrorLog = {
 }
 
 type PlatformBase = {
+  /** Release desktop builds connect only to their authenticated local sidecar. */
+  remoteServers?: boolean
   artifactPreview?: ArtifactPreviewAPI
   /** App version */
   version?: string

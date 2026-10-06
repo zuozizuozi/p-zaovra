@@ -1,3 +1,4 @@
+import { usePlatform } from "@/context/platform"
 import { Button } from "@zaovra-ai/ui/button"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
@@ -73,7 +74,12 @@ export function StatusPopover() {
 }
 
 export function StatusPopoverV2(props: { scope?: "server" }) {
-  if (props.scope === "server") return <ServerStatusPopover />
+  if (props.scope === "server")
+    return (
+      <Show when={usePlatform().remoteServers !== false}>
+        <ServerStatusPopover />
+      </Show>
+    )
   return <DirectoryStatusPopover />
 }
 

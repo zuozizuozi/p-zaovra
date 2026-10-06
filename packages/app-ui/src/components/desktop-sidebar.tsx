@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createResource, For, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, Show, on } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
@@ -15,6 +16,8 @@ import { useSettingsDialog } from "@/components/settings-dialog"
 import { displayName } from "@/pages/layout/helpers"
 import { ProjectGlyph } from "@/components/project-glyph"
 import { BrandMark } from "@/components/brand-mark"
+import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
+import { useDialog } from "@zaovra-ai/ui/context/dialog"
 
 type ProjectGroup = {
   server: ServerConnection.Key
@@ -80,6 +83,9 @@ export function DesktopSidebar() {
   const platform = usePlatform()
   const tabs = useTabs()
   const openSettings = useSettingsDialog()
+  const dialog = useDialog()
+  const [view, setView] = createStore({ expanded: "" })
+  const groupKey = (group: ProjectGroup) => `${group.server}:${group.project.worktree}`
 
   const groups = createMemo(() =>
     global.servers.list().flatMap((connection) => {
@@ -120,8 +126,23 @@ export function DesktopSidebar() {
   }
   const selectProject = (group: ProjectGroup) => {
     layout.home.setSelection({ server: group.server, directory: group.project.worktree })
-    navigate("/?view=projects")
+    setView("expanded", view.expanded === groupKey(group) ? "" : groupKey(group))
+    if (!currentTab()) navigate("/")
   }
+  const activeGroup = createMemo(() => {
+    const tab = currentTab()
+    if (tab) return groupForTab(tab)
+    const selection = layout.home.selection()
+    return groups().find((group) => group.server === selection.server && group.project.worktree === selection.directory)
+  })
+  createEffect(
+    on(
+      () => activeGroup() && groupKey(activeGroup()!),
+      (key) => {
+        if (key) setView("expanded", key)
+      },
+    ),
+  )
 
   return (
     <aside
@@ -163,37 +184,81 @@ export function DesktopSidebar() {
         <nav class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-4 no-scrollbar">
           <For each={groups()}>
             {(group) => (
-              <section class="flex min-w-0 flex-col gap-1">
+              <section
+                data-slot="sidebar-project"
+                data-current={activeGroup() && groupKey(activeGroup()!) === groupKey(group)}
+                class="flex min-w-0 flex-col gap-1"
+              >
                 <div class="group/project flex h-8 min-w-0 items-center gap-1 rounded-md hover:bg-v2-background-bg-layer-02">
                   <button
                     type="button"
                     class="flex min-w-0 flex-1 items-center gap-2 px-2 text-left"
                     onClick={() => selectProject(group)}
+                    title={group.project.worktree}
                   >
                     <span class="size-5 shrink-0">
                       <ProjectGlyph project={group.project} />
                     </span>
-                    <span class="min-w-0 flex-1 truncate text-[13px] font-medium text-v2-text-text-base">
+                    <span class="min-w-0 flex-1 truncate text-[13px] font-normal text-v2-text-text-base">
                       {displayName(group.project)}
                     </span>
                   </button>
                   <button
                     type="button"
+                    data-slot="project-action"
+                    aria-label={language.t("command.session.new")}
+                    class="flex size-6 items-center justify-center"
+                    onClick={() => {
+                      layout.home.setSelection({ server: group.server, directory: group.project.worktree })
+                      void tabs.newDraft({ server: group.server, directory: group.project.worktree })
+                    }}
+                  >
+                    <IconV2 name="plus" size="small" />
+                  </button>
+                  <button
+                    type="button"
+                    data-slot="project-action"
                     class="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-v2-icon-icon-muted hover:bg-v2-background-bg-layer-03"
                     aria-label={
-                      group.project.expanded ? language.t("home.server.collapse") : language.t("home.server.expand")
+                      view.expanded === groupKey(group)
+                        ? language.t("home.server.collapse")
+                        : language.t("home.server.expand")
                     }
-                    onClick={() =>
-                      group.project.expanded
-                        ? group.ctx.projects.collapse(group.project.worktree)
-                        : group.ctx.projects.expand(group.project.worktree)
-                    }
+                    onClick={() => selectProject(group)}
                   >
-                    <IconV2 name={group.project.expanded ? "chevron-down" : "chevron-right"} size="small" />
+                    <IconV2 name={view.expanded === groupKey(group) ? "chevron-down" : "chevron-right"} size="small" />
                   </button>
+                  <MenuV2 modal={false} placement="bottom-end">
+                    <MenuV2.Trigger
+                      data-slot="project-action"
+                      class="flex size-6 shrink-0 items-center justify-center"
+                      aria-label={language.t("common.moreOptions")}
+                    >
+                      <IconV2 name="outline-dots" size="small" />
+                    </MenuV2.Trigger>
+                    <MenuV2.Portal>
+                      <MenuV2.Content>
+                        <MenuV2.Item
+                          onSelect={async () => {
+                            const connection = global.servers
+                              .list()
+                              .find((item) => ServerConnection.key(item) === group.server)
+                            if (!connection) return
+                            const { DialogEditProjectV2 } = await import("@/components/dialog-edit-project-v2")
+                            void dialog.show(() => <DialogEditProjectV2 project={group.project} server={connection} />)
+                          }}
+                        >
+                          {language.t("dialog.project.edit.title")}
+                        </MenuV2.Item>
+                        <MenuV2.Item onSelect={() => group.ctx.projects.close(group.project.worktree)}>
+                          {language.t("common.close")}
+                        </MenuV2.Item>
+                      </MenuV2.Content>
+                    </MenuV2.Portal>
+                  </MenuV2>
                 </div>
 
-                <Show when={group.project.expanded}>
+                <Show when={view.expanded === groupKey(group)}>
                   <div class="ml-3 flex min-w-0 flex-col gap-0.5 border-l border-v2-border-border-muted pl-2">
                     <For each={tabsForGroup(group)}>
                       {(tab) => {

@@ -657,13 +657,13 @@ export function NewHome() {
           containHomeWheel(event, sessionViewport)
         }}
       >
-        <Show when={searchParams.view !== "projects"}>
+        <Show when={platform.platform === "desktop" || searchParams.view !== "projects"}>
           <section class="home-welcome" aria-labelledby="home-welcome-title">
             <div class="home-welcome-brand" role="img" aria-label="Zaovra">
               <BrandMark class="home-welcome-logo" />
               <span>Zaovra</span>
             </div>
-            <h1 id="home-welcome-title">{language.t("home.welcome.title")}</h1>
+            <h1 id="home-welcome-title">{language.t("session.new.title")}</h1>
             <p>{language.t("home.welcome.description")}</p>
             <form
               class="home-welcome-composer"
@@ -724,9 +724,6 @@ export function NewHome() {
               </div>
             </form>
             <div class="mt-6 flex items-center gap-4">
-              <ButtonV2 variant="ghost-muted" onClick={() => navigate("/?view=projects")}>
-                {language.t("home.projects")}
-              </ButtonV2>
               <HomeUtilityNav
                 class="flex"
                 openSettings={openSettings}
@@ -736,7 +733,7 @@ export function NewHome() {
             </div>
           </section>
         </Show>
-        <Show when={searchParams.view === "projects"}>
+        <Show when={platform.platform !== "desktop" && searchParams.view === "projects"}>
           <header class="mx-auto w-full max-w-[1080px] px-6 pt-8">
             <h1 class="text-20-medium text-v2-text-text-base">{language.t("home.projects")}</h1>
           </header>
@@ -1845,20 +1842,22 @@ export function LegacyHome() {
   return (
     <div class="mx-auto mt-55 w-full md:w-auto px-4">
       <Logo class="md:w-xl opacity-12" />
-      <Button
-        size="large"
-        variant="ghost"
-        class="mt-4 mx-auto text-14-regular text-text-weak"
-        onClick={() => dialog.show(() => <DialogSelectServer />)}
-      >
-        <div
-          classList={{
-            "size-2 rounded-full": true,
-            [serverDotClass()]: true,
-          }}
-        />
-        {server.name}
-      </Button>
+      <Show when={platform.remoteServers !== false}>
+        <Button
+          size="large"
+          variant="ghost"
+          class="mt-4 mx-auto text-14-regular text-text-weak"
+          onClick={() => dialog.show(() => <DialogSelectServer />)}
+        >
+          <div
+            classList={{
+              "size-2 rounded-full": true,
+              [serverDotClass()]: true,
+            }}
+          />
+          {server.name}
+        </Button>
+      </Show>
       <Switch>
         <Match when={sync().data.project.length > 0}>
           <div class="mt-20 w-full flex flex-col gap-4">

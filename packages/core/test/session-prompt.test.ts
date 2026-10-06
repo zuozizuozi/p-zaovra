@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { DateTime, Effect, Fiber, Layer, Stream } from "effect"
-import { eq } from "drizzle-orm"
+import { asc, eq } from "drizzle-orm"
 import { Database } from "@zaovra-ai/core/database/database"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -156,7 +156,7 @@ describe("SessionV2.prompt", () => {
     }),
   )
 
-  it.effect("does not name imported history after a later requirement", () =>
+  it.effect("backfills imported history from its first requirement once and replays the title", () =>
     Effect.gen(function* () {
       yield* setup
       const database = yield* Database.Service
@@ -182,7 +182,43 @@ describe("SessionV2.prompt", () => {
         .run()
         .pipe(Effect.orDie)
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Later requirement" }), resume: false })
-      expect((yield* session.get(sessionID)).title).toBe(title)
+      expect((yield* session.get(sessionID)).title).toBe("Original imported requirement")
+      expect((yield* session.list()).find((item) => item.id === sessionID)?.title).toBe("Original imported requirement")
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.Updated.type, 1))).toBe(1)
+      const recorded = yield* database.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, sessionID))
+        .orderBy(asc(EventTable.seq))
+        .all()
+        .pipe(Effect.orDie)
+      yield* events.remove(sessionID)
+      yield* database.db
+        .delete(SessionInputTable)
+        .where(eq(SessionInputTable.session_id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* database.db
+        .delete(SessionMessageTable)
+        .where(eq(SessionMessageTable.session_id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* database.db
+        .update(SessionTable)
+        .set({ title })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* events.replayAll(
+        recorded.map((event) => ({
+          id: event.id,
+          aggregateID: event.aggregate_id,
+          seq: event.seq,
+          type: event.type,
+          data: event.data,
+        })),
+      )
+      expect((yield* session.get(sessionID)).title).toBe("Original imported requirement")
     }),
   )
 

@@ -80,7 +80,9 @@ export default function NewSessionPage() {
   const [store, setStore] = createStore<{ worktree?: string }>({})
   const rightMount = useTitlebarRightMount()
 
-  const showWorkspaceBar = createMemo(() => workspaceBarEnabled && sync().project?.vcs === "git")
+  const showWorkspaceBar = createMemo(
+    () => workspaceBarEnabled && sync().project?.vcs === "git" && (sync().project?.sandboxes?.length ?? 0) > 0,
+  )
   const newSessionWorktree = createMemo(() => {
     if (!showWorkspaceBar()) return "main"
     if (store.worktree) return store.worktree

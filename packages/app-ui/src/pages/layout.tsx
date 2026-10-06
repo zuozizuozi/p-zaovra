@@ -932,6 +932,8 @@ export default function LegacyLayout(props: ParentProps) {
       },
       {
         id: "server.switch",
+        hidden: platform.remoteServers === false,
+        disabled: platform.remoteServers === false,
         title: language.t("command.server.switch"),
         category: language.t("command.category.server"),
         onSelect: () => openServer(),
@@ -1102,6 +1104,7 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   function openServer() {
+    if (platform.remoteServers === false) return
     const run = ++dialogRun
     void import("@/components/dialog-select-server").then((x) => {
       if (dialogDead || dialogRun !== run) return

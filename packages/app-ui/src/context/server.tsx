@@ -4,6 +4,7 @@ import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { pathKey } from "@/utils/path-key"
 import { ServerScope } from "@/utils/server-scope"
+import { usePlatform } from "./platform"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
@@ -146,9 +147,11 @@ export function createServerProjects<T extends ServerProjectState>(input: {
 }
 
 export function resolveServerList(input: {
+  localOnly?: boolean
   props?: Array<ServerConnection.Any>
   stored: StoredServer[]
 }): Array<ServerConnection.Any> {
+  if (input.localOnly) return input.props?.filter(ServerConnection.builtin) ?? []
   const deduped = new Map<ServerConnection.Key, ServerConnection.Any>(
     input.props?.map((v) => [ServerConnection.key(v), v]) ?? [],
   )
@@ -271,6 +274,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     canonicalLocalServer?: ServerConnection.Key
     servers?: Array<ServerConnection.Any>
   }) => {
+    const platform = usePlatform()
     const [store, setStore, _, ready] = persisted(
       {
         ...Persist.global("server", ["server.v3"]),
@@ -288,14 +292,19 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
-      return resolveServerList({ stored: store.list, props: props.servers })
+      return resolveServerList({
+        stored: store.list,
+        props: props.servers,
+        localOnly: platform.remoteServers === false,
+      })
     })
 
     const [state, setState] = createStore({
-      active: props.defaultServer,
+      active: platform.remoteServers === false ? ServerConnection.Key.make("sidecar") : props.defaultServer,
     })
 
     function setActive(input: ServerConnection.Key) {
+      if (platform.remoteServers === false && input !== "sidecar") return
       if (state.active !== input) setState("active", input)
     }
 

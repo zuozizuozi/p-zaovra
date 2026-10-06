@@ -1,4 +1,4 @@
-import { Component, createSignal, startTransition } from "solid-js"
+import { Component, Show, createSignal, startTransition } from "solid-js"
 import { Dialog, DialogHeader, DialogTitle } from "@zaovra-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@zaovra-ai/ui/v2/tabs-v2"
 import { Icon } from "@zaovra-ai/ui/icon"
@@ -61,12 +61,16 @@ export const DialogSettings: Component<{
                 </div>
 
                 <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>{language.t("settings.section.server")}</TabsV2.SectionTitle>
+                  <TabsV2.SectionTitle>
+                    {language.t(platform.remoteServers === false ? "settings.models.title" : "settings.section.server")}
+                  </TabsV2.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="servers">
-                      <Icon name="server" />
-                      {language.t("status.popover.tab.servers")}
-                    </TabsV2.Trigger>
+                    <Show when={platform.remoteServers !== false}>
+                      <TabsV2.Trigger value="servers">
+                        <Icon name="server" />
+                        {language.t("status.popover.tab.servers")}
+                      </TabsV2.Trigger>
+                    </Show>
                     <TabsV2.Trigger value="providers">
                       <Icon name="providers" />
                       {language.t("settings.providers.title")}
@@ -94,9 +98,11 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="usage" class="settings-v2-panel">
           <UsageDashboard />
         </TabsV2.Content>
-        <TabsV2.Content value="servers" class="settings-v2-panel">
-          <SettingsServersV2 />
-        </TabsV2.Content>
+        <Show when={platform.remoteServers !== false}>
+          <TabsV2.Content value="servers" class="settings-v2-panel">
+            <SettingsServersV2 />
+          </TabsV2.Content>
+        </Show>
         <TabsV2.Content value="providers" class="settings-v2-panel">
           <SettingsProvidersV2 onBack={showProviders} />
         </TabsV2.Content>

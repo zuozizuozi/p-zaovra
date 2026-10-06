@@ -270,6 +270,46 @@ const layer = Layer.effect(
         ),
       )
 
+    const backfillTitle = Effect.fn("V2Session.backfillTitle")(function* (session: SessionSchema.Info) {
+      if (!/^New session - \d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(session.title)) return session
+      return yield* titleLocks.withLock(session.id)(
+        Effect.gen(function* () {
+          const current = yield* store.get(session.id)
+          if (!current || current.title !== session.title) return current ?? session
+          const updates = yield* db
+            .select({ data: EventTable.data })
+            .from(EventTable)
+            .where(
+              and(
+                eq(EventTable.aggregate_id, session.id),
+                eq(EventTable.type, EventV2.versionedType(SessionEvent.Updated.type, 1)),
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
+          if (updates.some((event) => typeof event.data.title === "string")) return current
+          const row = yield* db
+            .select()
+            .from(SessionMessageTable)
+            .where(and(eq(SessionMessageTable.session_id, session.id), eq(SessionMessageTable.type, "user")))
+            .orderBy(asc(SessionMessageTable.seq))
+            .limit(1)
+            .get()
+            .pipe(Effect.orDie)
+          if (!row) return current
+          const message = yield* decode(row).pipe(Effect.orDie)
+          if (message.type !== "user") return current
+          const title = requirementTitle(message.invocation ?? message.text)
+          if (!title) return current
+          yield* events.publish(
+            SessionEvent.Updated,
+            { sessionID: session.id, timestamp: yield* DateTime.now, title },
+            { location: current.location },
+          )
+          return { ...current, title }
+        }),
+      )
+    })
     const result = Service.of({
       usage: (sessionID) => SessionUsageQuery.read(sessionID).pipe(Effect.provideService(Database.Service, database)),
       create: Effect.fn("V2Session.create")(function* (input) {
@@ -477,7 +517,7 @@ const layer = Layer.effect(
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
-        return session
+        return yield* backfillTitle(session)
       }),
       update: Effect.fn("V2Session.update")(function* (input) {
         const session = yield* result.get(input.sessionID)
@@ -553,7 +593,9 @@ const layer = Layer.effect(
         const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
           Effect.orDie,
         )
-        return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
+        return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, (row) =>
+          backfillTitle(fromRow(row)),
+        )
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
         const restore = live.capture()
@@ -636,7 +678,8 @@ const layer = Layer.effect(
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
             yield* titleLocks.withLock(input.sessionID)(
               Effect.gen(function* () {
-                const session = yield* result.get(input.sessionID)
+                const session = yield* store.get(input.sessionID)
+                if (!session) return
                 if (!/^New session - \d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(session.title)) return
                 const first = yield* db
                   .select()
@@ -670,15 +713,14 @@ const layer = Layer.effect(
                   .all()
                   .pipe(Effect.orDie)
                 if (updates.some((event) => typeof event.data.title === "string")) return
-                const text = (prompt.invocation ?? prompt.text).replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim()
-                if (!text) return
-                const characters = Array.from(text)
+                const title = requirementTitle(prompt.invocation ?? prompt.text)
+                if (!title) return
                 yield* events.publish(
                   SessionEvent.Updated,
                   {
                     sessionID: input.sessionID,
                     timestamp: yield* DateTime.now,
-                    title: characters.length > 64 ? characters.slice(0, 63).join("") + "…" : text,
+                    title,
                   },
                   { location: session.location },
                 )
@@ -976,3 +1018,9 @@ export const node = makeGlobalNode({
     SessionProjector.node,
   ],
 })
+
+function requirementTitle(input: string) {
+  const text = input.replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim()
+  const characters = Array.from(text)
+  return characters.length > 64 ? characters.slice(0, 63).join("") + "…" : text
+}

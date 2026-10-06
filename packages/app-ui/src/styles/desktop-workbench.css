@@ -505,3 +505,14 @@ html[data-theme="oc-2"] body[data-new-layout] {
     }
   }
 }
+
+[data-component="desktop-sidebar-v2"] [data-slot="project-action"] {
+  opacity: 0;
+  pointer-events: none;
+}
+[data-component="desktop-sidebar-v2"]
+  [data-slot="sidebar-project"]:is(:hover, :focus-within, [data-current="true"])
+  [data-slot="project-action"] {
+  opacity: 1;
+  pointer-events: auto;
+}
