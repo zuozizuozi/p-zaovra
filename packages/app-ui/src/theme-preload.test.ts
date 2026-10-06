@@ -34,13 +34,20 @@ describe("theme preload", () => {
     expect(document.getElementById("oc-theme-preload")).toBeNull()
   })
 
-  test("keeps cached css for non-default themes", () => {
+  test.each(["light", "dark", "system"])("falls back from legacy themes while preserving %s preference", (scheme) => {
     localStorage.setItem("zaovra-theme-id", "nightowl")
     localStorage.setItem("zaovra-theme-css-light", "--background-base:#fff;")
+    localStorage.setItem("zaovra-theme-css-dark", "--background-base:#000;")
+    localStorage.setItem("zaovra-color-scheme", scheme)
 
     run()
 
-    expect(document.documentElement.dataset.theme).toBe("nightowl")
-    expect(document.getElementById("oc-theme-preload")?.textContent).toContain("--background-base:#fff;")
+    expect(document.documentElement.dataset.theme).toBe("oc-2")
+    expect(localStorage.getItem("zaovra-theme-id")).toBe("oc-2")
+    expect(localStorage.getItem("zaovra-color-scheme")).toBe(scheme)
+    expect(document.documentElement.dataset.colorScheme).toBe(scheme === "dark" ? "dark" : "light")
+    expect(localStorage.getItem("zaovra-theme-css-light")).toBeNull()
+    expect(localStorage.getItem("zaovra-theme-css-dark")).toBeNull()
+    expect(document.getElementById("oc-theme-preload")).toBeNull()
   })
 })
