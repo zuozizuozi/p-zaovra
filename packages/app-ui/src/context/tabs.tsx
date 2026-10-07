@@ -3,7 +3,7 @@ import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { createStore, produce } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
-import { batch, createEffect, getOwner, onCleanup, startTransition } from "solid-js"
+import { batch, createEffect, getOwner, onCleanup, onMount, startTransition } from "solid-js"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
@@ -15,6 +15,7 @@ import { createDraftPromptSession, type PromptModel, type PromptSession } from "
 import { useGlobal } from "./global"
 import { resolveDraftDirectory } from "./draft-directory"
 import { pathKey } from "@/utils/path-key"
+import { cleanupEmptyDrafts } from "./empty-drafts"
 
 export type SessionTab = {
   type: "session"
@@ -123,6 +124,44 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
     }
 
     onCleanup(memory.dispose)
+
+    const cleanup = { disposed: false }
+    onCleanup(() => {
+      cleanup.disposed = true
+    })
+    onMount(() => {
+      if (platform.platform !== "desktop" || !platform.storage) return
+      // Background work: never hold the initial route behind historical drafts.
+      void Promise.resolve(ready.promise)
+        .then(() =>
+          cleanupEmptyDrafts({
+            ids: store.flatMap((tab) => (tab.type === "draft" ? [tab.draftID] : [])),
+            read: async (id) => {
+              const target = Persist.draft(id, "prompt")
+              const storage = platform.storage?.(target.storage)
+              if (!storage) throw new Error("Draft storage unavailable")
+              return storage.getItem(target.key)
+            },
+            canRemove: (id) => {
+              if (cleanup.disposed || location.query.draftId === id) return false
+              if (!store.some((tab) => tab.type === "draft" && tab.draftID === id)) return false
+              const state = memory.get<PromptSession>(`draft:${id}`, "prompt")
+              return !state || (state.ready() && !state.dirty() && state.context.items().length === 0)
+            },
+            remove: (id) => {
+              const key = `draft:${id}`
+              batch(() => {
+                setStore((tabs) => tabs.filter((tab) => tab.type !== "draft" || tab.draftID !== id))
+                if (recentKey() === key) setRecentKey(undefined)
+                removeInfo(key)
+              })
+              memory.remove(key)
+              // Remove only this window's tab. Keep persisted draft data intact.
+            },
+          }),
+        )
+        .catch(() => undefined)
+    })
 
     createEffect(() => {
       if (!ready() || !recentReady()) return

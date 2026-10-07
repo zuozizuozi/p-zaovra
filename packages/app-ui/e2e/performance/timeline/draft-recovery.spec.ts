@@ -7,6 +7,22 @@ import {
   stressDraftHref,
 } from "./timeline-test-helpers"
 
+test("a slow directory check renders a draft loading state instead of a blank pane", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installTimelineSettings(page)
+  await installStressSessionTabs(page, { draftID: "slow_directory_draft" })
+  const waiting = Promise.withResolvers<void>()
+  await page.route("**/api/location*", async (route) => {
+    await waiting.promise
+    await route.fallback()
+  })
+  await page.goto(stressDraftHref("slow_directory_draft"))
+  await expect(page.locator('[data-component="draft-loading"]')).toBeVisible()
+  waiting.resolve()
+  await expect(page.locator('[contenteditable="true"]').first()).toBeVisible()
+  await expect(page.locator('[data-component="draft-loading"]')).toHaveCount(0)
+})
+
 test("new conversation reuses an empty draft without creating a session and preserves typed drafts", async ({
   page,
 }) => {

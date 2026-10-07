@@ -19,6 +19,7 @@ import { useTabs } from "@/context/tabs"
 import { useGlobal } from "@/context/global"
 import { useLayout } from "@/context/layout"
 import { pathKey } from "@/utils/path-key"
+import { DraftLoading } from "@/components/draft-loading"
 
 type DirectoryProps = ParentProps<{
   directory: string | Accessor<string>
@@ -55,7 +56,7 @@ export function DirectoryDataProvider(props: DirectoryProps) {
     navigate("/?view=projects")
   }
   return (
-    <Show when={!available.loading}>
+    <Show when={!available.loading} fallback={props.draftID ? <DraftLoading /> : undefined}>
       <Show
         when={available()}
         fallback={

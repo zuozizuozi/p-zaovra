@@ -38,6 +38,7 @@ import {
   onCleanup,
   type ParentProps,
   Show,
+  Suspense,
   useContext,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
@@ -71,6 +72,7 @@ import { createSessionLineage } from "@/pages/session/session-lineage"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome, LegacyHome } from "@/pages/home"
+import { DraftLoading } from "./components/draft-loading"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
 const WorkPage = lazy(() => import("@/pages/work"))
@@ -210,26 +212,30 @@ function DraftRoute() {
   const settings = useSettings()
   const tabs = useTabs()
   return (
-    <Show when={tabs.ready()}>
-      <Show
-        when={tabs.store.find((tab): tab is DraftTab => tab.type === "draft" && tab.draftID === search.draftId)}
-        keyed
-        fallback={<Navigate href="/" />}
-      >
-        {(draft) => (
-          <Show
-            when={settings.general.newLayoutDesigns()}
-            fallback={<Navigate href={`/${base64Encode(draft.directory)}/session`} />}
-          >
-            <ResolvedDraftRoute draft={draft} />
-          </Show>
-        )}
+    <Suspense fallback={<DraftLoading />}>
+      <Show when={tabs.ready()} fallback={<DraftLoading />}>
+        <Show
+          when={tabs.store.find((tab): tab is DraftTab => tab.type === "draft" && tab.draftID === search.draftId)}
+          keyed
+          fallback={<Navigate href="/" />}
+        >
+          {(draft) => (
+            <Show
+              when={settings.general.newLayoutDesigns()}
+              fallback={<Navigate href={`/${base64Encode(draft.directory)}/session`} />}
+            >
+              <ResolvedDraftRoute draft={draft} />
+            </Show>
+          )}
+        </Show>
       </Show>
-    </Show>
+    </Suspense>
   )
 }
 
 function ResolvedDraftRoute(props: { draft: DraftTab }) {
+  // Load the composer while the directory and provider data are resolving.
+  void NewSession.preload().catch(() => undefined)
   const global = useGlobal()
   const conn = createMemo(() => global.servers.list().find((item) => ServerConnection.key(item) === props.draft.server))
   const directory = () => props.draft.directory

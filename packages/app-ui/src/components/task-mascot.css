@@ -25,17 +25,22 @@
 }
 [data-slot="mascot-dots"] {
   display: flex;
-  gap: 2px;
+  gap: 2%;
   position: absolute;
-  bottom: -2px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 18%;
+  left: 30%;
+  width: 27%;
+  height: 9%;
+}
+[data-component="task-mascot"][data-state="thinking"] > img {
+  /* Hide only the baked-in dots; preserve the ear to their right. */
+  clip-path: polygon(0 0, 28% 0, 28% 30%, 58% 30%, 58% 0, 100% 0, 100% 100%, 0 100%);
 }
 [data-slot="mascot-dots"] i {
-  width: 2px;
-  height: 2px;
+  flex: 1;
+  height: 100%;
   border-radius: 50%;
-  background: var(--v2-text-text-base);
+  background: #8738ef;
   animation: mascot-dot 2.4s ease-in-out infinite;
 }
 [data-slot="mascot-dots"] i:nth-child(2) {
