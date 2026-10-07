@@ -15,6 +15,7 @@ import { useLayout } from "@/context/layout"
 import { ServerConnection, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { homeProjectDirectories } from "@/pages/layout/helpers"
+import { DraftLoading } from "@/components/draft-loading"
 
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
@@ -148,7 +149,7 @@ export default function NewLayout(props: ParentProps) {
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <Titlebar update={update} contained={desktop()} minimal={desktop()} />
         <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
-          <Suspense>{props.children}</Suspense>
+          <Suspense fallback={<DraftLoading />}>{props.children}</Suspense>
         </main>
         {import.meta.env.DEV && import.meta.env.VITE_ZAOVRA_DEBUG_OVERLAY === "1" && <DebugBar inline />}
         <TabsInfoPopup />

@@ -1,0 +1,48 @@
+[data-component="idle-mascot"] {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+[data-slot="mascot-eyelid"] {
+  position: absolute;
+  top: 48%;
+  width: 12%;
+  height: 20%;
+  border-radius: 45%;
+  background: #1c142a;
+  transform: scaleY(0);
+  transform-origin: center;
+  animation: mascot-idle-blink 7.6s linear infinite;
+}
+[data-slot="mascot-eyelid"][data-eye="left"] {
+  left: 23%;
+}
+[data-slot="mascot-eyelid"][data-eye="right"] {
+  left: 41%;
+}
+[data-slot="mascot-eyelid"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 15%;
+  width: 70%;
+  height: 1px;
+  border-radius: 50%;
+  background: #dec3ee;
+}
+@keyframes mascot-idle-blink {
+  0%,
+  45%,
+  49%,
+  100% {
+    transform: scaleY(0);
+  }
+  47% {
+    transform: scaleY(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="mascot-eyelid"] {
+    animation: none;
+  }
+}

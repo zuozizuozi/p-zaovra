@@ -20,7 +20,7 @@ import { createStore, produce } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
 import { Logo } from "@zaovra-ai/ui/logo"
-import { BrandMark } from "@/components/brand-mark"
+import { IdleMascot } from "@/components/idle-mascot"
 import { resolveDraftDirectory } from "@/context/draft-directory"
 import "./home-welcome.css"
 import { Spinner } from "@zaovra-ai/ui/spinner"
@@ -683,7 +683,7 @@ export function NewHome() {
         <Show when={platform.platform === "desktop" || searchParams.view !== "projects"}>
           <section class="home-welcome" aria-labelledby="home-welcome-title">
             <div class="home-welcome-brand" role="img" aria-label="Zaovra">
-              <BrandMark class="home-welcome-logo" />
+              <IdleMascot class="home-welcome-logo" />
               <span>Zaovra</span>
             </div>
             <h1 id="home-welcome-title">{language.t("session.new.title")}</h1>

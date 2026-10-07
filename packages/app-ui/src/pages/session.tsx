@@ -115,6 +115,7 @@ import { useUsageExceededDialogs } from "./session/usage-exceeded-dialogs"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { adaptSessionInput } from "@/context/v2-session-adapter"
+import { DraftLoading } from "@/components/draft-loading"
 
 type FollowupItem = FollowupDraft & { id: string; admitted?: boolean; cancelID?: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context" | "agent" | "model" | "variant">
@@ -281,7 +282,7 @@ function ResolvedTargetSessionRoute() {
     // lineage mid-resolution), which tears down the workspace subtree including
     // the terminal. Same-workspace tab switches keep it open because warm
     // targets resolve synchronously from the sync cache.
-    <Show when={directory()}>
+    <Show when={directory()} fallback={<DraftLoading />}>
       <SDKProvider directory={targetDirectory}>
         <DirectoryDataProvider directory={targetDirectory} server={serverKey}>
           <TargetSessionPage />

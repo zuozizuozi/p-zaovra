@@ -56,7 +56,7 @@ export function DirectoryDataProvider(props: DirectoryProps) {
     navigate("/?view=projects")
   }
   return (
-    <Show when={!available.loading} fallback={props.draftID ? <DraftLoading /> : undefined}>
+    <Show when={!available.loading} fallback={<DraftLoading />}>
       <Show
         when={available()}
         fallback={

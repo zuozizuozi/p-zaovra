@@ -5,7 +5,30 @@ import {
   installTimelineSettings,
   mockStressTimeline,
   stressDraftHref,
+  stressSessionHref,
 } from "./timeline-test-helpers"
+
+for (const boundary of ["lineage", "location"] as const) {
+  test(`a real session route stays visible while ${boundary} loads`, async ({ page }) => {
+    await mockStressTimeline(page)
+    await installTimelineSettings(page)
+    await installStressSessionTabs(page)
+    const response = Promise.withResolvers<void>()
+    const url = boundary === "lineage" ? `**/api/session/${fixture.sourceID}` : "**/api/location*"
+    await page.route(url, async (route) => {
+      await response.promise
+      await route.fallback()
+    })
+    try {
+      await page.goto(stressSessionHref(fixture.sourceID))
+      await expect(page.locator('[data-component="draft-loading"]')).toBeVisible()
+    } finally {
+      response.resolve()
+    }
+    await expect(page.locator('[data-component="prompt-input"]').first()).toBeVisible()
+    await expect(page.locator('[data-component="draft-loading"]')).toHaveCount(0)
+  })
+}
 
 test("a slow directory check renders a draft loading state instead of a blank pane", async ({ page }) => {
   await mockStressTimeline(page)
