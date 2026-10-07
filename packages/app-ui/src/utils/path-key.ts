@@ -22,3 +22,12 @@ export const pathKey = (path: string) => {
   if (isDrive(trimmed)) return `${trimmed}/` as PathKey
   return trimmed as PathKey
 }
+
+// Comparison only: keep persisted path keys unchanged. A Windows desktop may
+// also display POSIX paths from WSL or remote servers, which remain case-sensitive.
+export const pathsEqual = (left: string, right: string) => {
+  const a = pathKey(left)
+  const b = pathKey(right)
+  const windows = isWindowsPath(left) || isWindowsPath(right) || left.startsWith("//") || right.startsWith("//")
+  return windows ? a.toLowerCase() === b.toLowerCase() : a === b
+}

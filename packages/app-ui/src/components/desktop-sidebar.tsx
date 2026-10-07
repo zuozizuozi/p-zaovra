@@ -18,6 +18,7 @@ import { ProjectGlyph } from "@/components/project-glyph"
 import { BrandMark } from "@/components/brand-mark"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
+import { desktopProjectGroup } from "./desktop-project-group"
 
 type ProjectGroup = {
   server: ServerConnection.Key
@@ -100,15 +101,7 @@ export function DesktopSidebar() {
     const ctx = connection ? global.ensureServerCtx(connection) : undefined
     return ctx?.sync.session.peek(tab.sessionId)?.directory ?? tabs.info[tabKey(tab)]?.directory
   }
-  const groupForTab = (tab: Tab) => {
-    const value = directory(tab)
-    const candidates = groups().filter((group) => group.server === tab.server)
-    if (!value) return candidates[0]
-    return (
-      candidates.find((group) => group.project.worktree === value || group.project.sandboxes?.includes(value)) ??
-      candidates[0]
-    )
-  }
+  const groupForTab = (tab: Tab) => desktopProjectGroup(groups(), tab.server, directory(tab))
   const tabsForGroup = (group: ProjectGroup) =>
     tabs.store.filter((tab) => {
       const owner = groupForTab(tab)
