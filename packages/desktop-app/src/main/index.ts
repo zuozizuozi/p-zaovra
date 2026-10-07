@@ -213,7 +213,8 @@ const main = Effect.gen(function* () {
     app.commandLine.appendSwitch("ozone-platform", "wayland")
     app.commandLine.appendSwitch("enable-wayland-ime", "true")
   }
-  if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
+  if (!app.isPackaged && !app.commandLine.hasSwitch("remote-debugging-port"))
+    app.commandLine.appendSwitch("remote-debugging-port", "9222")
 
   if (!app.requestSingleInstanceLock()) {
     app.quit()

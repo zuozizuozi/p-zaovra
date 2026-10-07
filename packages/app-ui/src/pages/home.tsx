@@ -21,6 +21,7 @@ import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
 import { Logo } from "@zaovra-ai/ui/logo"
 import { BrandMark } from "@/components/brand-mark"
+import { resolveDraftDirectory } from "@/context/draft-directory"
 import "./home-welcome.css"
 import { Spinner } from "@zaovra-ai/ui/spinner"
 import { ScrollView } from "@zaovra-ai/ui/scroll-view"
@@ -333,11 +334,33 @@ export function NewHome() {
   )
   const homedir = createMemo(() => focusedSync().data.path.home ?? "")
   const selectedProject = createMemo(() => projects().find((project) => project.worktree === selection().directory))
-  const newSessionProject = createMemo(
+  const preferredProject = createMemo(
     () =>
       selectedProject() ??
       projects().find((project) => project.worktree === focusedServerCtx()?.projects.last()) ??
       projects()[0],
+  )
+  const [availableProject] = createResource(
+    () =>
+      platform.platform === "desktop" &&
+      focusedServerCtx() && {
+        ctx: focusedServerCtx()!,
+        directory: preferredProject()?.worktree ?? "",
+        alternatives: projects().map((project) => project.worktree),
+      },
+    (target) =>
+      resolveDraftDirectory({
+        ...target,
+        check: (directory) =>
+          target.ctx.sdk.client.v2.location.get({ location: { directory } }, { throwOnError: true }),
+      }),
+  )
+  const newSessionProject = createMemo(() =>
+    platform.platform !== "desktop"
+      ? preferredProject()
+      : availableProject.loading
+        ? undefined
+        : projects().find((project) => project.worktree === availableProject()),
   )
   const directories = (project: LocalProject) => [project.worktree, ...(project.sandboxes ?? [])]
   const projectDirectories = createMemo(() => {
@@ -686,21 +709,7 @@ export function NewHome() {
                 rows={3}
               />
               <div class="home-welcome-actions">
-                <Show
-                  when={newSessionProject()}
-                  fallback={
-                    <ButtonV2
-                      type="button"
-                      variant="ghost-muted"
-                      onClick={() => {
-                        const conn = focusedServer()
-                        if (conn) chooseProject(conn)
-                      }}
-                    >
-                      {language.t("command.project.open")}
-                    </ButtonV2>
-                  }
-                >
+                <Show when={newSessionProject()}>
                   <label class="home-welcome-project">
                     <IconV2 name="folder" />
                     <select
@@ -718,6 +727,16 @@ export function NewHome() {
                     </select>
                   </label>
                 </Show>
+                <ButtonV2
+                  type="button"
+                  variant="ghost-muted"
+                  onClick={() => {
+                    const conn = focusedServer()
+                    if (conn) chooseProject(conn)
+                  }}
+                >
+                  {language.t("command.project.open")}
+                </ButtonV2>
                 <ButtonV2 type="submit" variant="neutral" disabled={!newSessionProject() || state.starting}>
                   {language.t("home.welcome.continue")}
                 </ButtonV2>

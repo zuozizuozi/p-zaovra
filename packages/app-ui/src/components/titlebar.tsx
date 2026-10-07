@@ -320,22 +320,29 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                 const project = global.ensureServerCtx(conn).projects.list()[0]
                 return project ? [{ server: ServerConnection.key(conn), project }] : []
               })[0]
-              if (!fallback) return
+              if (!fallback) {
+                navigate("/?view=projects")
+                return
+              }
 
               tabs.newDraft({ server: fallback.server, directory: fallback.project.worktree }, "")
             }
             const toggleHome = () => tabs.toggleHome({ home: layout.route().type === "home", current: currentTab() })
 
-            command.register("titlebar-home", () => props.minimal ? [] : [
-              {
-                id: "home.toggle",
-                title: language.t("home.title"),
-                category: language.t("command.category.view"),
-                keybind: "mod+b",
-                hidden: true,
-                onSelect: toggleHome,
-              },
-            ])
+            command.register("titlebar-home", () =>
+              props.minimal
+                ? []
+                : [
+                    {
+                      id: "home.toggle",
+                      title: language.t("home.title"),
+                      category: language.t("command.category.view"),
+                      keybind: "mod+b",
+                      hidden: true,
+                      onSelect: toggleHome,
+                    },
+                  ],
+            )
 
             command.register("tabs", () => {
               const current = currentTab()

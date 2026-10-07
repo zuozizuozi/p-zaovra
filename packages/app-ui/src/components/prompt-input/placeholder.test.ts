@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { promptPlaceholder } from "./placeholder"
+import { promptDesignPlaceholder, promptPlaceholder } from "./placeholder"
+
+test("design placeholder uses the supplied translation and preserves shell guidance", () => {
+  expect(promptDesignPlaceholder("normal", "普通提示", "输入任务，/ 使用命令，@ 添加上下文…")).toBe(
+    "输入任务，/ 使用命令，@ 添加上下文…",
+  )
+  expect(promptDesignPlaceholder("shell", "运行命令", "输入任务")).toBe("运行命令")
+})
 
 describe("promptPlaceholder", () => {
   const t = (key: string, params?: Record<string, string>) => `${key}${params?.example ? `:${params.example}` : ""}`

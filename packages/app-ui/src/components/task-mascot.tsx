@@ -18,11 +18,11 @@ const pictures = {
   awaiting: [awaiting, awaiting2x],
 }
 
-export function TaskMascot(props: { state: MascotState }) {
+export function TaskMascot(props: { state: MascotState; size?: "large" }) {
   const picture = () => (props.state === "idle" || props.state === "working" ? undefined : pictures[props.state])
   return (
-    <span data-component="task-mascot" data-state={props.state} aria-hidden="true">
-      <Show when={picture()} fallback={<BrandMark class="size-6" />}>
+    <span data-component="task-mascot" data-state={props.state} data-size={props.size} aria-hidden="true">
+      <Show when={picture()} fallback={<BrandMark class="size-full" />}>
         {(image) => <img src={image()[0]} srcset={`${image()[0]} 1x, ${image()[1]} 2x`} alt="" />}
       </Show>
       <Show when={props.state === "working"}>

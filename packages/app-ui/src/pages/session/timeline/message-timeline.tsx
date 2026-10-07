@@ -142,7 +142,7 @@ function TimelineThinkingRow(props: {
   return (
     <div data-slot="session-turn-thinking">
       <span data-slot="brand-placeholder" data-placement="thinking" aria-hidden="true">
-        <TaskMascot state={props.state} />
+        <TaskMascot state={props.state} size="large" />
       </span>
       <TextShimmer
         text={language.t(

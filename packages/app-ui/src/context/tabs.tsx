@@ -3,7 +3,7 @@ import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { createStore, produce } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
-import { createEffect, getOwner, onCleanup, startTransition } from "solid-js"
+import { batch, createEffect, getOwner, onCleanup, startTransition } from "solid-js"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
@@ -11,7 +11,10 @@ import { SessionTabsRemovedDetail } from "@/components/titlebar-session-events"
 import { sessionHref } from "@/utils/session-route"
 import { createTabMemory } from "./tab-memory"
 import { nextTabAfterClose, pushClosedTab, removeClosedTabs, takeClosedTab, type ClosedTab } from "./closed-tabs"
-import { createDraftPromptSession, type PromptModel } from "./prompt-state"
+import { createDraftPromptSession, type PromptModel, type PromptSession } from "./prompt-state"
+import { useGlobal } from "./global"
+import { resolveDraftDirectory } from "./draft-directory"
+import { pathKey } from "@/utils/path-key"
 
 export type SessionTab = {
   type: "session"
@@ -54,6 +57,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
   gate: false,
   init: () => {
     const server = useServer()
+    const global = useGlobal()
     const platform = usePlatform()
     const fallback = server.key
     const [store, setStore, _, ready] = persisted(
@@ -161,6 +165,17 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       if (draftID) removeDraftPersisted(draftID)
     }
 
+    const resolveDirectory = async (draft: Pick<DraftTab, "server" | "directory">) => {
+      const conn = global.servers.list().find((item) => ServerConnection.key(item) === draft.server)
+      if (!conn) return draft.directory
+      const ctx = global.ensureServerCtx(conn)
+      return resolveDraftDirectory({
+        directory: draft.directory,
+        alternatives: ctx.projects.list().map((project) => project.worktree),
+        check: (directory) => ctx.sdk.client.v2.location.get({ location: { directory } }, { throwOnError: true }),
+      })
+    }
+
     const actions = {
       addSessionTab: (tab: Omit<SessionTab, "type">) => {
         const next = { type: "session" as const, ...tab }
@@ -192,10 +207,43 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         return tab
       },
       async newDraft(draft: Omit<DraftTab, "type" | "draftID">, prompt?: string, model?: PromptModel) {
+        await ready.promise
+        const directory = await resolveDirectory(draft)
+        if (!directory) {
+          navigate("/?view=projects")
+          return
+        }
+        await Promise.all(
+          store
+            .filter((tab) => tab.type === "draft")
+            .map(
+              (tab) => memory.ensure(tabKey(tab), "prompt", () => createDraftPromptSession(tab.draftID)).ready.promise,
+            ),
+        )
+        // Re-read after hydration so rapid clicks reuse the draft created by the
+        // preceding call. Never replace text, attachments or selected context.
+        const existing =
+          !prompt &&
+          store.find((tab) => {
+            if (
+              tab.type !== "draft" ||
+              tab.server !== draft.server ||
+              pathKey(tab.directory) !== pathKey(directory) ||
+              tab.worktree !== draft.worktree
+            )
+              return false
+            const state = memory.get<PromptSession>(tabKey(tab), "prompt")
+            return state?.ready() && !state.dirty() && state.context.items().length === 0
+          })
+        if (existing) {
+          if (model) memory.get<PromptSession>(tabKey(existing), "prompt")?.model.set(model)
+          navigateTab(existing)
+          return existing
+        }
         const draftID = uuid()
-        const tab = { type: "draft" as const, draftID, ...draft }
+        const tab = { type: "draft" as const, draftID, ...draft, directory }
         memory.ensure(tabKey(tab), "prompt", () => createDraftPromptSession(draftID, { prompt, model }))
-        await startTransition(() => {
+        batch(() => {
           setStore(
             produce((tabs) => {
               tabs.push(tab)
@@ -204,6 +252,17 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           navigate(draftHref(draftID))
         })
         return tab
+      },
+      async recoverDraft(draftID: string) {
+        const draft = actions.draft(draftID)
+        const directory = await resolveDirectory(draft)
+        // Recovery must not redirect a user who has navigated away meanwhile.
+        if (location.query.draftId !== draftID) return
+        if (!directory) {
+          navigate("/?view=projects")
+          return
+        }
+        actions.updateDraft(draftID, { directory, worktree: undefined })
       },
       updateDraft(draftID: string, draft: Partial<Omit<DraftTab, "type" | "draftID">>) {
         void startTransition(() => {

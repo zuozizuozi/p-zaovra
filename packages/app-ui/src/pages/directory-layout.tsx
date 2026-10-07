@@ -9,12 +9,16 @@ import { SDKProvider } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { decode64 } from "@/utils/base64"
 import { Schema } from "effect"
-import type { ServerConnection } from "@/context/server"
+import { ServerConnection, useServer } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { isDirectoryUnavailableError } from "@/utils/server-errors"
 import { Button } from "@zaovra-ai/ui/button"
+import { useTabs } from "@/context/tabs"
+import { useGlobal } from "@/context/global"
+import { useLayout } from "@/context/layout"
+import { pathKey } from "@/utils/path-key"
 
 type DirectoryProps = ParentProps<{
   directory: string | Accessor<string>
@@ -25,6 +29,11 @@ type DirectoryProps = ParentProps<{
 export function DirectoryDataProvider(props: DirectoryProps) {
   const sdk = useServerSDK()
   const language = useLanguage()
+  const tabs = useTabs()
+  const global = useGlobal()
+  const server = useServer()
+  const layout = useLayout()
+  const navigate = useNavigate()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const [available, { refetch }] = createResource(
     () => ({ client: sdk().client, directory: directory() }),
@@ -38,6 +47,13 @@ export function DirectoryDataProvider(props: DirectoryProps) {
       }
     },
   )
+  createEffect(() => {
+    if (!available.loading && available() === false && props.draftID) void tabs.recoverDraft(props.draftID)
+  })
+  const chooseProject = () => {
+    layout.home.setSelection({ server: props.server?.() ?? server.key, directory: undefined })
+    navigate("/?view=projects")
+  }
   return (
     <Show when={!available.loading}>
       <Show
@@ -49,6 +65,24 @@ export function DirectoryDataProvider(props: DirectoryProps) {
             <p>{language.t("directory.unavailable.description")}</p>
             <Button variant="secondary" onClick={() => void refetch()}>
               {language.t("directory.unavailable.retry")}
+            </Button>
+            <Button variant="secondary" onClick={chooseProject}>
+              {language.t("directory.unavailable.choose")}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                const key = props.server?.() ?? server.key
+                const conn = global.servers.list().find((item) => ServerConnection.key(item) === key)
+                if (conn) {
+                  const projects = global.ensureServerCtx(conn).projects
+                  const project = projects.list().find((item) => pathKey(item.worktree) === pathKey(directory()))
+                  if (project) projects.close(project.worktree)
+                }
+                chooseProject()
+              }}
+            >
+              {language.t("directory.unavailable.remove")}
             </Button>
           </div>
         }

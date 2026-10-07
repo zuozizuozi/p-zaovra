@@ -184,13 +184,10 @@ export default function NewSessionPage() {
                       class="flex min-h-7 min-w-0 items-center gap-0 text-v2-text-text-faint"
                       classList={{
                         "flex-col justify-center sm:flex-row": showWorkspaceBar(),
-                        "justify-start": !showWorkspaceBar(),
+                        "justify-center": !showWorkspaceBar(),
                       }}
                     >
-                      <PromptProjectSelector
-                        controller={projectController}
-                        placement={showWorkspaceBar() ? "bottom" : "bottom-start"}
-                      />
+                      <PromptProjectSelector controller={projectController} placement="bottom" />
                       <Show when={showWorkspaceBar()}>
                         <PromptWorkspaceSelector
                           value={newSessionWorktree()}

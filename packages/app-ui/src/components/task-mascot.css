@@ -6,9 +6,13 @@
   flex-shrink: 0;
 }
 [data-component="task-mascot"] > img {
-  width: 24px;
-  height: 24px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+[data-component="task-mascot"][data-size="large"] {
+  width: 36px;
+  height: 36px;
 }
 [data-slot="mascot-cursor"] {
   position: absolute;
@@ -24,7 +28,8 @@
   gap: 2px;
   position: absolute;
   bottom: -2px;
-  left: 7px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 [data-slot="mascot-dots"] i {
   width: 2px;

@@ -24,8 +24,12 @@ export const dict = {
   "provider.protocol.saved": "Protocol settings saved",
   "provider.protocol.changed": "Protocol configuration changed elsewhere. Close and reopen this dialog before saving.",
   "directory.unavailable.title": "Directory unavailable",
-  "directory.unavailable.description": "This project directory no longer exists. Restore it and retry, or open another project.",
+  "directory.unavailable.description":
+    "This project directory no longer exists. Restore it and retry, or open another project.",
   "directory.unavailable.retry": "Retry",
+  "prompt.placeholder.design": "Ask anything, / for commands, @ for context...",
+  "directory.unavailable.choose": "Choose another project",
+  "directory.unavailable.remove": "Remove from list",
   "session.compact.running": "Compacting conversation…",
   "session.compact.done": "Conversation compacted",
   "session.compact.skipped": "Conversation was not compacted",

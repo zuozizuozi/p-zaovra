@@ -243,7 +243,7 @@ function ResolvedDraftRoute(props: { draft: DraftTab }) {
             <ServerSyncProvider server={conn}>
               <ModelsProvider directory={directory}>
                 <SDKProvider directory={directory}>
-                  <DirectoryDataProvider directory={directory} server={serverKey}>
+                  <DirectoryDataProvider directory={directory} server={serverKey} draftID={props.draft.draftID}>
                     <DraftProviders>
                       <NewSession />
                     </DraftProviders>
