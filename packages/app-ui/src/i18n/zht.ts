@@ -3,6 +3,10 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.detailsUnavailable":
+    "伺服器未提供這些已記錄呼叫的模型明細，暫時無法估算費用。請更新並重新啟動所連接的後端，再開啟此面板。",
+  "usage.modelMissing": "{{count}} 次呼叫缺少服務商或模型識別，無法估算其費用；其他模型的估算另行顯示。",
+  "usage.noSettlements": "尚無已結算呼叫；記錄用量後會顯示費用估算。",
   "usage.pricedPart": "Priced portion (not the full cost)",
   "usage.missingPrice": "Missing {{field}} price: {{count}} tokens unpriced",
   "usage.modelUnavailable": "Historical model or its current catalog is unavailable; prices cannot be resolved.",

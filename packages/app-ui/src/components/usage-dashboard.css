@@ -4,7 +4,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 4px 14px;
-  padding: 0 8px 4px;
+  padding: 4px 8px;
   font-size: 11px;
   line-height: 18px;
   color: var(--v2-text-text-muted);
@@ -15,6 +15,36 @@
 .session-usage-bar:hover {
   color: var(--v2-text-text-base);
 }
+.session-usage-bar[aria-expanded="true"] {
+  background: var(--v2-overlay-simple-overlay-hover);
+  color: var(--v2-text-text-base);
+}
+.session-usage-bar[aria-expanded="true"] [data-component="icon"] {
+  transform: rotate(180deg);
+}
+.session-usage-details {
+  z-index: 60;
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(600px, var(--kb-popper-content-available-height, 80vh));
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 12px;
+  color: var(--v2-text-text-base);
+  background: var(--v2-background-bg-layer-01);
+  box-shadow: var(--v2-elevation-floating);
+}
+.usage-panel-heading {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  background: var(--v2-background-bg-layer-01);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 4px;
+  font-size: 13px;
+}
 .session-usage-bar:focus-visible {
   outline: 2px solid var(--v2-border-border-base);
   outline-offset: 2px;
@@ -24,8 +54,6 @@
   font-variant-numeric: tabular-nums;
 }
 .session-usage-details > .usage-card {
-  max-height: 280px;
-  overflow: auto;
   margin: 4px 8px;
   padding: 12px;
 }
@@ -106,6 +134,9 @@
 .usage-billing strong {
   font-weight: 400;
   text-align: end;
+}
+.usage-billing > .usage-estimate-reasons {
+  display: block;
 }
 .usage-updated {
   font-size: 11px !important;

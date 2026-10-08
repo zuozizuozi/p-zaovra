@@ -5,6 +5,9 @@ import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useSettingsDialog } from "./settings-dialog"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
+import { Popover } from "@kobalte/core/popover"
+import { Icon } from "@zaovra-ai/ui/icon"
+import { IconButton } from "@zaovra-ai/ui/icon-button"
 import type { V2SessionUsageResponses } from "@zaovra-ai/sdk/v2/client"
 import { usageDisplay } from "@/utils/usage-display"
 import "./usage-dashboard.css"
@@ -79,6 +82,7 @@ function useUsage(sessionID: () => string | undefined, enabled: () => boolean = 
 }
 
 export function SessionUsageBar() {
+  let trigger!: HTMLButtonElement
   const params = useParams<{ id?: string }>()
   const language = useLanguage()
   const open = useSettingsDialog("usage")
@@ -88,9 +92,10 @@ export function SessionUsageBar() {
   )
   const value = () => (!params.id || usage.loading || usage.error ? undefined : usage())
   return (
-    <details class="session-usage-details">
-      <summary class="session-usage-bar" title={language.t("usage.sessionScope")}>
+    <Popover placement="top-end" gutter={8} modal={false}>
+      <Popover.Trigger ref={trigger} class="session-usage-bar" title={language.t("usage.sessionScope")}>
         <span>{language.t("usage.details")}</span>
+        <Icon name="chevron-down" size="small" />
         <Show when={!usage.error} fallback={<span>{language.t("usage.error")}</span>}>
           <span>
             {language.t("usage.conversation")}{" "}
@@ -119,19 +124,37 @@ export function SessionUsageBar() {
             <span>{language.t("usage.incomplete")}</span>
           </Show>
         </Show>
-      </summary>
-      <Show when={value()}>
-        {(data) => (
-          <>
-            <UsageCard label={language.t("usage.conversation")} totals={data().total} />
-            <UsageEstimates models={data().models ?? []} />
-          </>
-        )}
-      </Show>
-      <button type="button" class="text-12-regular underline p-2" onClick={open}>
-        {language.t("usage.title")}
-      </button>
-    </details>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          class="session-usage-details"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            trigger.focus({ preventScroll: true })
+          }}
+        >
+          <div class="usage-panel-heading">
+            <Popover.Title>{language.t("usage.details")}</Popover.Title>
+            <Popover.CloseButton as={IconButton} icon="close" variant="ghost" aria-label={language.t("common.close")} />
+          </div>
+          <Show when={value()}>
+            {(data) => (
+              <>
+                <UsageCard label={language.t("usage.conversation")} totals={data().total} />
+                <UsageEstimates models={data().models} total={data().total} />
+              </>
+            )}
+          </Show>
+          <Popover.CloseButton
+            class="text-12-regular underline p-2"
+            aria-label={language.t("usage.title")}
+            onClick={open}
+          >
+            {language.t("usage.title")}
+          </Popover.CloseButton>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover>
   )
 }
 
@@ -198,7 +221,7 @@ export function UsageDashboard() {
               <UsageCard label={language.t("usage.unknownSource")} totals={data().unknown} />
             </Show>
             <p>{language.t("usage.billingNote")}</p>
-            <UsageEstimates models={data().models ?? []} />
+            <UsageEstimates models={data().models} total={data().total} />
             <Show when={recent()?.length}>
               <h3>{language.t("usage.recent")}</h3>
               <For each={recent()}>
@@ -268,13 +291,25 @@ function UsageCard(props: { label: string; totals: Totals }) {
   )
 }
 
-function UsageEstimates(props: { models: Summary["models"] }) {
+function UsageEstimates(props: { models: Summary["models"] | undefined; total: Totals }) {
   const language = useLanguage()
+  const hasPricedTokens = (model: Summary["models"][number]) =>
+    model.priceConfigured ||
+    (!!model.unpriced &&
+      (["input", "output", "cacheRead", "cacheWrite"] as const).some(
+        (key) => model.tokens[key] + (key === "output" ? model.tokens.reasoning : 0) > model.unpriced[key],
+      ))
   return (
     <section class="usage-card" aria-label={language.t("usage.estimate")}>
       <h3>{language.t("usage.estimate")}</h3>
       <p>{language.t("usage.estimateNote")}</p>
-      <Show when={props.models.length} fallback={<p>{language.t("usage.unknown")}</p>}>
+      <Show when={props.total.unreported > 0}>
+        <p>{language.t("usage.unreportedReason", { count: props.total.unreported })}</p>
+      </Show>
+      <Show
+        when={props.models?.length}
+        fallback={<p>{language.t(props.total.calls > 0 ? "usage.detailsUnavailable" : "usage.noSettlements")}</p>}
+      >
         <For each={props.models}>
           {(model) => (
             <div class="usage-billing flex flex-wrap justify-between gap-2">
@@ -285,27 +320,22 @@ function UsageEstimates(props: { models: Summary["models"] }) {
                 {!model.modelID
                   ? language.t("usage.unknown")
                   : !model.priceConfigured
-                    ? language.t(
-                        model.unpriced &&
-                          (["input", "output", "cacheRead", "cacheWrite"] as const).some(
-                            (key) =>
-                              model.tokens[key] + (key === "output" ? model.tokens.reasoning : 0) > model.unpriced[key],
-                          )
-                          ? "usage.partialPrice"
-                          : "usage.noPrice",
-                      )
+                    ? language.t(hasPricedTokens(model) ? "usage.partialPrice" : "usage.noPrice")
                     : model.estimate === null
                       ? language.t("usage.incomplete")
                       : `USD ${model.estimate.toFixed(6)}`}
               </strong>
               <Show when={model.estimate === null}>
-                <div class="w-full text-12-regular">
-                  <Show when={model.pricedAmount !== undefined}>
+                <div class="usage-estimate-reasons w-full text-12-regular">
+                  <Show when={model.pricedAmount !== undefined && hasPricedTokens(model)}>
                     <p>
                       {language.t("usage.pricedPart")}: USD {model.pricedAmount.toFixed(6)}
                     </p>
                   </Show>
-                  <Show when={model.modelUnavailable || !model.modelID}>
+                  <Show when={!model.modelID || !model.providerID}>
+                    <p>{language.t("usage.modelMissing", { count: model.tokens.calls })}</p>
+                  </Show>
+                  <Show when={model.modelUnavailable && model.modelID && model.providerID}>
                     <p>{language.t("usage.modelUnavailable")}</p>
                   </Show>
                   <For each={["input", "output", "cacheRead", "cacheWrite"] as const}>

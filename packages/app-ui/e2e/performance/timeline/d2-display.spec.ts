@@ -94,6 +94,7 @@ test("cost estimates show mixed models, missing price and unknown history separa
   await expect(card).toContainText("Partially priced")
   await expect(card).toContainText("Unknown / Unknown")
   await expect(card).toContainText("not a bill")
+  await expect(card.locator(".usage-estimate-reasons").first()).toHaveCSS("display", "block")
 })
 
 for (const unreported of [0, 1]) {
@@ -204,3 +205,90 @@ test("unreadable merge baseline stays local and cannot approve; refresh can reco
   await expect(page.getByRole("button", { name: "批准并应用", exact: true })).toBeDisabled()
   expect(decisions).toEqual([])
 })
+
+for (const state of ["missing-details", "empty", "missing-model", "new"]) {
+  test(`usage explains ${state} and dismisses accessibly`, async ({ page }) => {
+    await mockStressTimeline(page)
+    await installTimelineSettings(page)
+    await installStressSessionTabs(page)
+    const total = {
+      input: 10,
+      output: 2,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: state === "empty" ? 0 : 12,
+      calls: state === "empty" ? 0 : 1,
+      unreported: state === "missing-details" ? 1 : 0,
+    }
+    await page.route("**/api/usage*", (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            total,
+            own: total,
+            official: total,
+            unknown: total,
+            lastTurn: null,
+            updatedAt: 1,
+            billing: "unavailable",
+            ...(state === "missing-details"
+              ? {}
+              : {
+                  models:
+                    state === "empty"
+                      ? []
+                      : [
+                          {
+                            providerID: state === "missing-model" ? null : "fixture",
+                            modelID: state === "missing-model" ? null : "priced",
+                            tokens: total,
+                            priceConfigured: state === "new",
+                            estimate: state === "new" ? 0.123456 : null,
+                          },
+                        ],
+                }),
+          },
+        },
+      }),
+    )
+    await page.goto(stressSessionHref(fixture.sourceID))
+    const trigger = page.locator(".session-usage-bar")
+    const panel = page.locator(".session-usage-details")
+    await trigger.focus()
+    await page.keyboard.press("Enter")
+    await expect(trigger).toHaveAttribute("aria-expanded", "true")
+    await expect(panel).toContainText(
+      state === "missing-details"
+        ? "server did not provide per-model"
+        : state === "empty"
+          ? "No settled calls yet"
+          : state === "missing-model"
+            ? "1 calls have no recorded"
+            : "USD 0.123456",
+    )
+    if (state === "missing-details") await expect(panel).toContainText("1 calls did not report complete usage")
+    await panel.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(panel).toBeHidden()
+    await expect(trigger).toBeFocused()
+    await trigger.press("Space")
+    await expect(panel).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(panel).toBeHidden()
+    await expect(trigger).toBeFocused()
+    await trigger.click()
+    await trigger.click()
+    await expect(panel).toBeHidden()
+    await expect(trigger).toBeFocused()
+    await trigger.click()
+    await page.locator('[data-slot="titlebar-tabs"]').click({ position: { x: 3, y: 3 } })
+    await expect(panel).toBeHidden()
+    await expect(trigger).toBeFocused()
+    if (state === "new") {
+      await trigger.click()
+      await panel.getByRole("button", { name: "Usage dashboard", exact: true }).click()
+      await expect(page.locator(".usage-dashboard")).toBeVisible()
+      await expect(page.locator('[role="dialog"]').last()).toContainText("Estimated cost by model")
+    }
+  })
+}

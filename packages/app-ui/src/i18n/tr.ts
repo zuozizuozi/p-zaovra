@@ -3,6 +3,11 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.detailsUnavailable":
+    "The server did not provide per-model usage details for these recorded calls. Cost cannot be estimated. Update and restart the connected backend, then reopen this panel.",
+  "usage.modelMissing":
+    "{{count}} calls have no recorded provider or model identity; their cost cannot be estimated. Other model estimates are shown separately.",
+  "usage.noSettlements": "No settled calls yet. Cost estimates will appear after usage is recorded.",
   "usage.pricedPart": "Priced portion (not the full cost)",
   "usage.missingPrice": "Missing {{field}} price: {{count}} tokens unpriced",
   "usage.modelUnavailable": "Historical model or its current catalog is unavailable; prices cannot be resolved.",
