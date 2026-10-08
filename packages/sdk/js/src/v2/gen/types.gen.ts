@@ -12663,6 +12663,14 @@ export type V2SessionUsageResponses = {
           unreported: number
         }
         priceConfigured: boolean
+        pricedAmount: number
+        unpriced: {
+          input: number
+          output: number
+          cacheRead: number
+          cacheWrite: number
+        }
+        modelUnavailable: boolean
         estimate: number
       }>
       total: {

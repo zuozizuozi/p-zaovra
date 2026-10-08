@@ -476,7 +476,9 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   const updateConfigMutation = useMutation(() => ({
     mutationFn: (config: Config) => serverSDK.client.global.config.update({ config }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // Publish the acknowledged values before dialogs close or reopen.
+      if (result.data) setGlobalStore("config", reconcile(result.data, { merge: false }))
       bootstrap.refetch()
       // A model selector filters against the resolved project config as well as
       // the catalog. The refresh queue is paused inside this mutation callback.

@@ -178,6 +178,9 @@ export function summarize(
       tokens: MutableTotals
       priceConfigured: boolean
       estimate: number | null
+      pricedAmount: number
+      unpriced: { input: number; output: number; cacheRead: number; cacheWrite: number }
+      modelUnavailable: boolean
     }
   >()
   const add = (target: MutableTotals, value: SessionUsage.Totals) => {
@@ -200,11 +203,18 @@ export function summarize(
       tokens: empty(),
       priceConfigured: true,
       estimate: 0,
+      pricedAmount: 0,
+      unpriced: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      modelUnavailable: false,
     }
     const model = catalogs
       .get(settlement.session)
       ?.find((model) => model.providerID === provider && model.id === modelID)
     const estimate = estimateRequest(settlement.tokens, model?.cost ?? [])
+    bucket.modelUnavailable ||= !model
+    bucket.pricedAmount += estimate.pricedAmount
+    for (const field of ["input", "output", "cacheRead", "cacheWrite"] as const)
+      bucket.unpriced[field] += estimate.unpriced[field]
     add(bucket.tokens, settlement.tokens)
     bucket.priceConfigured &&= estimate.priceConfigured
     bucket.estimate = bucket.estimate === null || estimate.amount === null ? null : bucket.estimate + estimate.amount
@@ -225,17 +235,26 @@ export function estimateRequest(tokens: SessionUsage.Totals, costs: readonly Mod
   const price = costs
     .filter((cost) => !cost.tier || context > cost.tier.size)
     .toSorted((a, b) => (b.tier?.size ?? 0) - (a.tier?.size ?? 0))[0]
-  if (!price) return { priceConfigured: false, amount: null }
   const fields = [
-    { count: tokens.input, rate: price.input, known: price.configured?.input },
-    { count: tokens.output + tokens.reasoning, rate: price.output, known: price.configured?.output },
-    { count: tokens.cacheRead, rate: price.cache.read, known: price.configured?.cacheRead },
-    { count: tokens.cacheWrite, rate: price.cache.write, known: price.configured?.cacheWrite },
+    { key: "input", count: tokens.input, rate: price?.input, known: price?.configured?.input },
+    { key: "output", count: tokens.output + tokens.reasoning, rate: price?.output, known: price?.configured?.output },
+    { key: "cacheRead", count: tokens.cacheRead, rate: price?.cache.read, known: price?.configured?.cacheRead },
+    { key: "cacheWrite", count: tokens.cacheWrite, rate: price?.cache.write, known: price?.configured?.cacheWrite },
   ]
+  const known = (field: (typeof fields)[number]) =>
+    field.rate !== undefined && Number.isFinite(field.rate) && field.rate >= 0 && (field.known ?? field.rate > 0)
+  const unpriced = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+  for (const field of fields) if (!known(field)) unpriced[field.key as keyof typeof unpriced] += field.count
+  const pricedAmount = fields.reduce(
+    (sum, field) => sum + (known(field) ? (field.count * field.rate!) / 1_000_000 : 0),
+    0,
+  )
   const priceConfigured =
-    fields.every((field) => field.count === 0 || ((field.known ?? field.rate > 0) && field.rate >= 0)) &&
-    (price.configured?.input ?? price.input > 0) &&
-    (price.configured?.output ?? price.output > 0)
-  const amount = fields.reduce((sum, field) => sum + (field.count * field.rate) / 1_000_000, 0)
-  return { priceConfigured, amount: priceConfigured && !tokens.unreported && Number.isFinite(amount) ? amount : null }
+    fields.every((field) => field.count === 0 || known(field)) && known(fields[0]) && known(fields[1])
+  return {
+    priceConfigured,
+    pricedAmount,
+    unpriced,
+    amount: priceConfigured && !tokens.unreported && Number.isFinite(pricedAmount) ? pricedAmount : null,
+  }
 }

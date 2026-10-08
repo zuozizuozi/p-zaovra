@@ -1,6 +1,21 @@
 import { expect, test } from "bun:test"
-import { protocolChoice, protocolEditable, protocolPatch } from "./provider-protocol"
+import { protocolChoice, protocolEditable, protocolPatch, priceErrors } from "./provider-protocol"
 import { validateCustomProvider } from "./dialog-custom-provider-form"
+
+test("price validation names the failing field and leaves unused optional models alone", () => {
+  const provider = { models: { saved: { cost: { input: 1, output: 2 } } } }
+  expect(
+    priceErrors(provider, {
+      empty: { input: "", output: "", cache_read: "", cache_write: "" },
+      partial: { input: "2", output: "", cache_read: "-1", cache_write: "Infinity" },
+      saved: { input: "", output: "2", cache_read: "", cache_write: "" },
+    }),
+  ).toEqual({
+    empty: {},
+    partial: { output: "required", cache_read: "invalid", cache_write: "invalid" },
+    saved: { input: "required" },
+  })
+})
 
 test("optional custom prices preserve zero, reject partial/negative input, and keep tiers", () => {
   const provider = {

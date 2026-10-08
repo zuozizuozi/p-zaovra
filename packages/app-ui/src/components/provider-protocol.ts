@@ -3,6 +3,24 @@ import { providerProtocols } from "../provider-discovery"
 
 export type ProtocolProvider = NonNullable<Config["provider"]>[string]
 export type ProtocolChoice = "openai" | "responses"
+export type ModelPrices = Record<string, Record<"input" | "output" | "cache_read" | "cache_write", string>>
+
+export function priceErrors(provider: ProtocolProvider, prices: ModelPrices) {
+  return Object.fromEntries(
+    Object.entries(prices).map(([id, fields]) => {
+      const required = !!provider.models?.[id]?.cost || Object.values(fields).some((value) => value.trim() !== "")
+      return [
+        id,
+        Object.fromEntries(
+          Object.entries(fields).flatMap<[string, "required" | "invalid"]>(([key, value]) => {
+            if (!value.trim()) return required && (key === "input" || key === "output") ? [[key, "required"]] : []
+            return !Number.isFinite(Number(value)) || Number(value) < 0 ? [[key, "invalid"]] : []
+          }),
+        ),
+      ]
+    }),
+  ) as Record<string, Partial<Record<keyof ModelPrices[string], "required" | "invalid">>>
+}
 export const protocolChoice = (npm?: string): ProtocolChoice | undefined =>
   npm === "@ai-sdk/openai-compatible" ? "openai" : npm === "@ai-sdk/openai" ? "responses" : undefined
 
@@ -17,8 +35,10 @@ export function protocolPatch(
   choice: ProtocolChoice,
   models: Record<string, string>,
   images: Record<string, boolean> = {},
-  prices: Record<string, Record<"input" | "output" | "cache_read" | "cache_write", string>> = {},
+  prices: ModelPrices = {},
 ) {
+  if (Object.values(priceErrors(provider, prices)).some((fields) => Object.keys(fields).length))
+    throw new Error("price-invalid")
   const overrides: NonNullable<ProtocolProvider["models"]> = Object.fromEntries(
     Object.entries(models).flatMap(([id, value]) => {
       const before = provider.models?.[id]?.provider?.npm

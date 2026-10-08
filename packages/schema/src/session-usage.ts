@@ -14,11 +14,21 @@ export const Totals = Schema.Struct({
 })
 export type Totals = typeof Totals.Type
 
+export const Unpriced = Schema.Struct({
+  input: Schema.Finite,
+  output: Schema.Finite,
+  cacheRead: Schema.Finite,
+  cacheWrite: Schema.Finite,
+})
+
 export const Bucket = Schema.Struct({
   providerID: Schema.NullOr(Schema.String),
   modelID: Schema.NullOr(Schema.String),
   tokens: Totals,
   priceConfigured: Schema.Boolean,
+  pricedAmount: Schema.Finite,
+  unpriced: Unpriced,
+  modelUnavailable: Schema.Boolean,
   // USD, calculated per request with current location-specific catalog prices.
   estimate: Schema.NullOr(Schema.Finite),
 })

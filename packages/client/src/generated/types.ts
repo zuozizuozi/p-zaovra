@@ -372,6 +372,14 @@ export type SessionsUsageOutput = {
         readonly unreported: number
       }
       readonly priceConfigured: boolean
+      readonly pricedAmount: number
+      readonly unpriced: {
+        readonly input: number
+        readonly output: number
+        readonly cacheRead: number
+        readonly cacheWrite: number
+      }
+      readonly modelUnavailable: boolean
       readonly estimate: number | null
     }>
     readonly total: {

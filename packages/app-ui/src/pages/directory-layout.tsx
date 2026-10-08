@@ -15,6 +15,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { isDirectoryUnavailableError } from "@/utils/server-errors"
 import { Button } from "@zaovra-ai/ui/button"
+import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useTabs } from "@/context/tabs"
 import { useGlobal } from "@/context/global"
 import { useLayout } from "@/context/layout"
@@ -70,21 +71,33 @@ export function DirectoryDataProvider(props: DirectoryProps) {
             <Button variant="secondary" onClick={chooseProject}>
               {language.t("directory.unavailable.choose")}
             </Button>
-            <Button
-              variant="ghost"
+            <ButtonV2
+              variant="outline"
               onClick={() => {
                 const key = props.server?.() ?? server.key
+                const route = layout.route()
+                const index =
+                  route.type === "session"
+                    ? tabs.store.findIndex(
+                        (tab) => tab.type === "session" && tab.server === key && tab.sessionId === route.sessionId,
+                      )
+                    : -1
                 const conn = global.servers.list().find((item) => ServerConnection.key(item) === key)
                 if (conn) {
                   const projects = global.ensureServerCtx(conn).projects
                   const project = projects.list().find((item) => pathKey(item.worktree) === pathKey(directory()))
                   if (project) projects.close(project.worktree)
                 }
+                showToast({ title: language.t("directory.unavailable.removed") })
+                if (index >= 0) {
+                  tabs.closeTab(index)
+                  return
+                }
                 chooseProject()
               }}
             >
               {language.t("directory.unavailable.remove")}
-            </Button>
+            </ButtonV2>
           </div>
         }
       >

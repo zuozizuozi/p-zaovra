@@ -3,6 +3,17 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.pricedPart": "Priced portion (not the full cost)",
+  "usage.missingPrice": "Missing {{field}} price: {{count}} tokens unpriced",
+  "usage.modelUnavailable": "Historical model or its current catalog is unavailable; prices cannot be resolved.",
+  "usage.unreportedReason": "{{count}} calls did not report complete usage; full cost is unknown.",
+  "usage.priceRequired": "Enter this price together with the other base price.",
+  "usage.priceNonnegative": "Enter a finite number greater than or equal to 0.",
+  "usage.priceSaved":
+    "Model settings saved. Cost estimates refresh using these prices; existing tasks are not restarted.",
+  "usage.priceClear":
+    "To remove an existing custom price, edit the active server config in {{directory}} (zaovra.jsonc, zaovra.json, or config.json) and remove provider[{{provider}}].models[{{model}}].cost. Catalog prices apply again if available.",
+  "directory.unavailable.removed": "Removed from the current list. Session data and files were kept.",
   "usage.estimate": "Estimated cost by model",
   "usage.estimateNote":
     "Estimate in USD at current configured prices, not a bill. Changing prices recalculates historical estimates. Missing usage or model data stays unknown.",

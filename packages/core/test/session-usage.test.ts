@@ -120,6 +120,37 @@ test("normalized inclusive usage counts cache and reasoning only once", () => {
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node])))
 
+test("missing cache price retains the known portion and repricing fills exactly that gap", () => {
+  const usage = {
+    input: 4599,
+    output: 20,
+    reasoning: 5,
+    cacheRead: 4501,
+    cacheWrite: 0,
+    total: 9125,
+    calls: 1,
+    unreported: 0,
+  }
+  const base = {
+    input: 2,
+    output: 4,
+    cache: { read: 0, write: 0 },
+    configured: { input: true, output: true, cacheRead: false, cacheWrite: false },
+  }
+  const partial = SessionUsageQuery.estimateRequest(usage, [base])
+  expect(partial.amount).toBeNull()
+  expect(partial.pricedAmount).toBeCloseTo(0.009298)
+  expect(partial.unpriced).toEqual({ input: 0, output: 0, cacheRead: 4501, cacheWrite: 0 })
+  const complete = SessionUsageQuery.estimateRequest(usage, [
+    { ...base, cache: { read: 0.2, write: 0 }, configured: { ...base.configured, cacheRead: true } },
+  ])
+  expect(complete.amount).toBeCloseTo(0.0101982)
+  expect(complete.unpriced.cacheRead).toBe(0)
+  expect(SessionUsageQuery.estimateRequest({ ...usage, unreported: 1 }, [base]).pricedAmount).toBeCloseTo(
+    partial.pricedAmount,
+  )
+})
+
 test("estimates preserve missing prices, explicit free rates, cache prices and per-request tiers", () => {
   const usage = {
     input: 100,
@@ -149,7 +180,7 @@ test("estimates preserve missing prices, explicit free rates, cache prices and p
     SessionUsageQuery.estimateRequest(usage, [{ ...price, configured: { ...price.configured, cacheWrite: false } }])
       .amount,
   ).toBeNull()
-  expect(SessionUsageQuery.estimateRequest({ ...usage, unreported: 1 }, [price])).toEqual({
+  expect(SessionUsageQuery.estimateRequest({ ...usage, unreported: 1 }, [price])).toMatchObject({
     priceConfigured: true,
     amount: null,
   })

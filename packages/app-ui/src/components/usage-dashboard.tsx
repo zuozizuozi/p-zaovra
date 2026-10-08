@@ -17,7 +17,17 @@ function useUsage(sessionID: () => string | undefined, enabled: () => boolean = 
   const sdk = useServerSDK()
   const sync = useServerSync()
   const [usage, { refetch }] = createResource(
-    () => enabled() && { sdk: sdk(), sessionID: sessionID() },
+    () =>
+      enabled() && {
+        sdk: sdk(),
+        sessionID: sessionID(),
+        prices: JSON.stringify(
+          Object.entries(sync().data.config.provider ?? {}).map(([id, provider]) => [
+            id,
+            Object.entries(provider.models ?? {}).map(([id, model]) => [id, model.cost]),
+          ]),
+        ),
+      },
     async (input) => {
       const response = await input.sdk.client.v2.session.usage({ sessionID: input.sessionID }, { throwOnError: true })
       if (!response.data?.data) throw new Error("Usage response is missing")
@@ -280,6 +290,33 @@ function UsageEstimates(props: { models: Summary["models"] }) {
                       ? language.t("usage.incomplete")
                       : `USD ${model.estimate.toFixed(6)}`}
               </strong>
+              <Show when={model.estimate === null}>
+                <div class="w-full text-12-regular">
+                  <Show when={model.pricedAmount !== undefined}>
+                    <p>
+                      {language.t("usage.pricedPart")}: USD {model.pricedAmount.toFixed(6)}
+                    </p>
+                  </Show>
+                  <Show when={model.modelUnavailable || !model.modelID}>
+                    <p>{language.t("usage.modelUnavailable")}</p>
+                  </Show>
+                  <For each={["input", "output", "cacheRead", "cacheWrite"] as const}>
+                    {(key) => (
+                      <Show when={model.unpriced?.[key]}>
+                        <p>
+                          {language.t("usage.missingPrice", {
+                            field: language.t(key === "output" ? "usage.outputIncludingReasoning" : `usage.${key}`),
+                            count: model.unpriced[key].toLocaleString(),
+                          })}
+                        </p>
+                      </Show>
+                    )}
+                  </For>
+                  <Show when={model.tokens.unreported}>
+                    <p>{language.t("usage.unreportedReason", { count: model.tokens.unreported })}</p>
+                  </Show>
+                </div>
+              </Show>
             </div>
           )}
         </For>

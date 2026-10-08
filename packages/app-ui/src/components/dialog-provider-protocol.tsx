@@ -6,7 +6,7 @@ import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
-import { protocolChoice, protocolPatch, type ProtocolChoice } from "./provider-protocol"
+import { protocolChoice, protocolPatch, priceErrors, type ProtocolChoice } from "./provider-protocol"
 
 export function DialogProviderProtocol(props: { providerID: string }) {
   const language = useLanguage()
@@ -39,10 +39,17 @@ export function DialogProviderProtocol(props: { providerID: string }) {
       ]),
     ),
     error: "",
+    fieldErrors: {} as ReturnType<typeof priceErrors>,
   })
   const save = async (event: SubmitEvent) => {
     event.preventDefault()
     if (state.pending) return
+    const errors = priceErrors(initial, state.prices)
+    setState("fieldErrors", errors)
+    if (Object.values(errors).some((fields) => Object.keys(fields).length)) {
+      setState("error", language.t("usage.priceInvalid"))
+      return
+    }
     setState({ pending: true, error: "" })
     try {
       // Read the latest configuration, preserving unrelated edits and credentials.
@@ -64,7 +71,7 @@ export function DialogProviderProtocol(props: { providerID: string }) {
           [props.providerID]: protocolPatch(current, state.choice, state.models, state.images, state.prices),
         },
       })
-      showToast({ title: language.t("provider.protocol.saved"), description: language.t("provider.protocol.effect") })
+      showToast({ title: language.t("provider.protocol.saved"), description: language.t("usage.priceSaved") })
       dialog.close()
     } catch (error) {
       setState(
@@ -81,7 +88,7 @@ export function DialogProviderProtocol(props: { providerID: string }) {
   }
   return (
     <Dialog title={language.t("provider.protocol.title")}>
-      <form onSubmit={save} class="flex flex-col gap-4 p-6 max-h-[70vh] overflow-auto">
+      <form noValidate onSubmit={save} class="flex flex-col gap-4 p-6 max-h-[70vh] overflow-auto">
         <p class="text-14-medium">{initial.name ?? props.providerID}</p>
         <p class="text-12-regular text-text-weak">{language.t("provider.protocol.effect")}</p>
         <fieldset disabled={state.pending} class="flex flex-col gap-4">
@@ -127,9 +134,16 @@ export function DialogProviderProtocol(props: { providerID: string }) {
                   />
                   <span>{language.t("provider.protocol.imageInput")}</span>
                 </label>
-                <details>
+                <details open={Object.keys(state.fieldErrors[id] ?? {}).length > 0 ? true : undefined}>
                   <summary>{language.t("usage.priceSettings")}</summary>
                   <p class="text-12-regular text-text-weak">{language.t("usage.priceHint")}</p>
+                  <p class="text-12-regular text-text-weak break-all">
+                    {language.t("usage.priceClear", {
+                      directory: sync().data.path.config,
+                      provider: props.providerID,
+                      model: id,
+                    })}
+                  </p>
                   <For each={["input", "output", "cache_read", "cache_write"] as const}>
                     {(key) => (
                       <label class="flex justify-between gap-2 py-1">
@@ -144,14 +158,23 @@ export function DialogProviderProtocol(props: { providerID: string }) {
                                   : "usage.input",
                           )}
                         </span>
-                        <input
-                          class="w-28 border rounded px-2"
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={state.prices[id][key]}
-                          onInput={(event) => setState("prices", id, key, event.currentTarget.value)}
-                        />
+                        <div>
+                          <input
+                            class="w-28 border rounded px-2"
+                            type="text"
+                            inputmode="decimal"
+                            aria-invalid={!!state.fieldErrors[id]?.[key]}
+                            value={state.prices[id][key]}
+                            onInput={(event) => setState("prices", id, key, event.currentTarget.value)}
+                          />
+                          <Show when={state.fieldErrors[id]?.[key]}>
+                            {(error) => (
+                              <p role="alert" class="text-text-danger text-12-regular">
+                                {language.t(error() === "required" ? "usage.priceRequired" : "usage.priceNonnegative")}
+                              </p>
+                            )}
+                          </Show>
+                        </div>
                       </label>
                     )}
                   </For>

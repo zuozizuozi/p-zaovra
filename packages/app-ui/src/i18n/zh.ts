@@ -3,6 +3,16 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.pricedPart": "已定价部分（不是完整费用）",
+  "usage.missingPrice": "缺少{{field}}单价：另有 {{count}} Token 未定价",
+  "usage.modelUnavailable": "历史模型或其当前模型目录不可用，无法确定单价。",
+  "usage.unreportedReason": "另有 {{count}} 次调用未完整报告用量，完整费用未知。",
+  "usage.priceRequired": "请同时填写输入和输出单价，此项不能为空。",
+  "usage.priceNonnegative": "请输入大于或等于 0 的有限数字。",
+  "usage.priceSaved": "模型设置已保存，费用估算会按新单价刷新；不会重启正在执行的任务。",
+  "usage.priceClear":
+    "如需清除自定义价格，请打开服务器配置目录 {{directory}} 中实际使用的 zaovra.jsonc、zaovra.json 或 config.json，删除 provider[{{provider}}].models[{{model}}].cost 项；模型目录有价格时将恢复目录价。",
+  "directory.unavailable.removed": "已从当前列表移除，会话数据和文件均已保留。",
   "usage.estimate": "按模型估算费用",
   "usage.estimateNote":
     "估算（USD），按当前配置单价计算，不是账单。修改单价会重算历史估算；缺报或缺模型信息仍显示未知。",
