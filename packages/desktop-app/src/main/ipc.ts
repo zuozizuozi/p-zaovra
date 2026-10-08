@@ -15,6 +15,7 @@ import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { writeStore } from "./store-write"
+import { queueStoreWrite } from "./store-write-queue"
 import {
   getPinchZoomEnabled,
   getWindowID,
@@ -220,7 +221,7 @@ export function registerIpcHandlers(deps: Deps) {
     }
   })
   handle("store-set", (event: IpcMainInvokeEvent, name: string, key: string, value: string) => {
-    writeStore(
+    return writeStore(
       name,
       key,
       value,
@@ -231,12 +232,16 @@ export function registerIpcHandlers(deps: Deps) {
     )
   })
   handle("store-delete", (_event: IpcMainInvokeEvent, name: string, key: string) => {
-    getStore(name).delete(key)
-    void removeStoreFileIfEmpty(name)
+    return queueStoreWrite(name, async () => {
+      getStore(name).delete(key)
+      await removeStoreFileIfEmpty(name)
+    })
   })
   handle("store-clear", (_event: IpcMainInvokeEvent, name: string) => {
-    getStore(name).clear()
-    void removeStoreFileIfEmpty(name)
+    return queueStoreWrite(name, async () => {
+      getStore(name).clear()
+      await removeStoreFileIfEmpty(name)
+    })
   })
   handle("store-keys", (_event: IpcMainInvokeEvent, name: string) => {
     const store = getStore(name)

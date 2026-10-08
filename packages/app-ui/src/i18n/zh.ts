@@ -16,6 +16,7 @@ export const dict = {
   "usage.estimate": "按模型估算费用",
   "usage.estimateNote":
     "估算（USD），按当前配置单价计算，不是账单。修改单价会重算历史估算；缺报或缺模型信息仍显示未知。",
+  "usage.partialPrice": "部分定价",
   "usage.noPrice": "未配置单价",
   "usage.priceSettings": "可选单价（USD / 百万 Token）",
   "usage.priceHint":

@@ -69,6 +69,15 @@ test("cost estimates show mixed models, missing price and unknown history separa
           models: [
             { providerID: "fixture", modelID: "priced", tokens: total, priceConfigured: true, estimate: 0.123456 },
             { providerID: "fixture", modelID: "free", tokens: total, priceConfigured: true, estimate: 0 },
+            {
+              providerID: "fixture",
+              modelID: "partial-free",
+              tokens: total,
+              priceConfigured: false,
+              estimate: null,
+              pricedAmount: 0,
+              unpriced: { input: 0, output: 0, cacheRead: 20, cacheWrite: 0 },
+            },
             { providerID: "fixture", modelID: "no-price", tokens: total, priceConfigured: false, estimate: null },
             { providerID: null, modelID: null, tokens: total, priceConfigured: false, estimate: null },
           ],
@@ -82,6 +91,7 @@ test("cost estimates show mixed models, missing price and unknown history separa
   await expect(card).toContainText("USD 0.123456")
   await expect(card).toContainText("USD 0.000000")
   await expect(card).toContainText("Price not configured")
+  await expect(card).toContainText("Partially priced")
   await expect(card).toContainText("Unknown / Unknown")
   await expect(card).toContainText("not a bill")
 })

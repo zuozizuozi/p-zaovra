@@ -198,6 +198,16 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     const assistantMessageID = yield* startAssistant()
     assistantActive = false
     assistantFailed = true
+    if (stepSettlement?.usageReported)
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID: input.sessionID,
+        timestamp: yield* timestamp,
+        assistantMessageID,
+        finish: "error",
+        cost: 0,
+        tokens: stepSettlement.tokens,
+        usageReported: true,
+      })
     yield* events.publish(SessionEvent.Step.Failed, {
       sessionID: input.sessionID,
       timestamp: yield* timestamp,

@@ -240,7 +240,9 @@ const layer = Layer.effect(
     )
 
     const getGlobal = Effect.fn("Config.getGlobal")(function* () {
-      return yield* cachedGlobal
+      // The cache also retains interrupted exits. A disposed request must not
+      // make every later config read replay that interruption indefinitely.
+      return yield* cachedGlobal.pipe(Effect.onInterrupt(() => invalidateGlobal))
     })
 
     const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {

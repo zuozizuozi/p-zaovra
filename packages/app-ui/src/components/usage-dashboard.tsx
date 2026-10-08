@@ -285,7 +285,15 @@ function UsageEstimates(props: { models: Summary["models"] }) {
                 {!model.modelID
                   ? language.t("usage.unknown")
                   : !model.priceConfigured
-                    ? language.t("usage.noPrice")
+                    ? language.t(
+                        model.unpriced &&
+                          (["input", "output", "cacheRead", "cacheWrite"] as const).some(
+                            (key) =>
+                              model.tokens[key] + (key === "output" ? model.tokens.reasoning : 0) > model.unpriced[key],
+                          )
+                          ? "usage.partialPrice"
+                          : "usage.noPrice",
+                      )
                     : model.estimate === null
                       ? language.t("usage.incomplete")
                       : `USD ${model.estimate.toFixed(6)}`}

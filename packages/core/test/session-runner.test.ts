@@ -838,6 +838,7 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
     const fiber = yield* runner.run({ sessionID, force: true }).pipe(Effect.forkChild)
     yield* Deferred.await(streamed)
     yield* Fiber.interrupt(fiber)
+    expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 1 })
     expect(yield* session.context(sessionID)).toMatchObject([
       { type: "user", text: prompt },
       {
@@ -853,6 +854,41 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("records a defective provider stream as unreported exactly once", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fail inside provider stream" }), resume: false })
+      responseStream = Stream.concat(
+        Stream.fromIterable(fragmentFixture("reasoning", "defective-stream", ["Partial reasoning"]).partialEvents),
+        Stream.die(new Error("Unexpected stream termination")),
+      )
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 1 })
+      yield* replaySessionProjection(sessionID)
+      expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 1 })
+    }),
+  )
+  it.effect("keeps reported usage when a stream later defects", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Usage before failure" }), resume: false })
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "stop",
+            usage: { inputTokens: 100, nonCachedInputTokens: 100, outputTokens: 20 },
+          }),
+        ]),
+        Stream.die(new Error("Failure after usage")),
+      )
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 0, total: 120 })
+    }),
+  )
   it.effect("archive cancels queued input and cannot be restarted by a stale resume", () =>
     Effect.gen(function* () {
       yield* setup
@@ -6129,15 +6165,13 @@ it.effect("authority lost after provider output prevents tool execution and the 
         return LLMEvent.toolCall({ id: "lost-call", name: "echo", input: { text: "must not execute" } })
       }),
     )
-    yield* runner
-      .run({ sessionID, force: true })
-      .pipe(
-        Effect.provideService(SessionOwnership.Current, {
-          id: "owner:1",
-          check: Effect.suspend(() => (authority.valid ? Effect.void : Effect.interrupt)),
-        }),
-        Effect.exit,
-      )
+    yield* runner.run({ sessionID, force: true }).pipe(
+      Effect.provideService(SessionOwnership.Current, {
+        id: "owner:1",
+        check: Effect.suspend(() => (authority.valid ? Effect.void : Effect.interrupt)),
+      }),
+      Effect.exit,
+    )
     expect(requests).toHaveLength(1)
     expect(executions).toHaveLength(0)
   }),

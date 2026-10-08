@@ -800,6 +800,19 @@ const layer = Layer.effect(
             )
           }
           if (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) yield* FiberSet.clear(toolFibers)
+          // Defects from stream adapters can bypass the typed LLMError branch.
+          // Only settle an existing provider step; setup failures are not calls.
+          if (
+            stream._tag === "Failure" &&
+            !Cause.hasInterrupts(stream.cause) &&
+            !llmFailure &&
+            (publisher.hasAssistantStarted() || publisher.stepSettlement()) &&
+            !publisher.hasProviderError()
+          ) {
+            // Unexpected exceptions may contain payloads or credentials. The
+            // original cause still propagates to the existing drain logger.
+            yield* withPublication(publisher.failAssistant("Provider stream failed unexpectedly before completion"))
+          }
           const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
           // A protocol parse failure can leave local input-start records even
           // when no tool fiber was ever launched. Settle them after live tools.
@@ -842,7 +855,7 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
           }
           const stepSettlement = publisher.stepSettlement()
-          if (stepSettlement && !publisher.hasProviderError()) {
+          if (stepSettlement && !publisher.hasProviderError() && !publisher.failureMessage()) {
             const endSnapshot = yield* snapshots.capture()
             const files =
               startSnapshot && endSnapshot

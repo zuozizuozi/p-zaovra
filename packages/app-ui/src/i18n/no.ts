@@ -16,6 +16,7 @@ export const dict = {
   "usage.estimate": "Estimated cost by model",
   "usage.estimateNote":
     "Estimate in USD at current configured prices, not a bill. Changing prices recalculates historical estimates. Missing usage or model data stays unknown.",
+  "usage.partialPrice": "Partially priced",
   "usage.noPrice": "Price not configured",
   "usage.priceSettings": "Optional prices (USD per million tokens)",
   "usage.priceHint":

@@ -136,7 +136,7 @@ describe("config HttpApi", () => {
           }),
         ),
       )
-      const headers = { "x-zaovra-directory": tmp.path, "content-type": "application/json" }
+      const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path), "content-type": "application/json" }
       const invalid = yield* Effect.promise(() => Promise.resolve(app().request("/config", { headers })))
       expect(invalid.status).toBe(400)
       const invalidRuntime = yield* Effect.promise(() => Promise.resolve(app().request("/api/provider", { headers })))
@@ -175,7 +175,7 @@ describe("config HttpApi", () => {
       const response = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/config", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -206,7 +206,7 @@ describe("config HttpApi", () => {
       const response = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/config", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -249,7 +249,7 @@ describe("config HttpApi", () => {
       const response = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/api/provider", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -263,7 +263,7 @@ describe("config HttpApi", () => {
       const preferences = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/config", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -278,7 +278,7 @@ describe("config HttpApi", () => {
         Promise.resolve(
           app().request("/config", {
             method: "PATCH",
-            headers: { "x-zaovra-directory": tmp.path, "content-type": "application/json" },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path), "content-type": "application/json" },
             body: JSON.stringify({ username: "mixed-saved", disabled_providers: ["mixed"] }),
           }),
         ),
@@ -294,7 +294,7 @@ describe("config HttpApi", () => {
       const after = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/api/provider", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -322,7 +322,7 @@ describe("config HttpApi", () => {
           },
         },
       })
-      const headers = { "content-type": "application/json", "x-zaovra-directory": tmp.path }
+      const headers = { "content-type": "application/json", "x-zaovra-directory": encodeURIComponent(tmp.path) }
       const before = yield* Effect.promise(() => Promise.resolve(app().request("/api/provider", { headers })))
       expect(before.status).toBe(200)
       expect(yield* Effect.promise(() => before.json())).toMatchObject({
@@ -363,7 +363,7 @@ describe("config HttpApi", () => {
         Promise.resolve(
           app().request("/config", {
             method: "PATCH",
-            headers: { "content-type": "application/json", "x-zaovra-directory": tmp.path },
+            headers: { "content-type": "application/json", "x-zaovra-directory": encodeURIComponent(tmp.path) },
             body: JSON.stringify({ username: "updated-user" }),
           }),
         ),
@@ -377,7 +377,7 @@ describe("config HttpApi", () => {
         username: "json-user",
       })
       const reloaded = yield* Effect.promise(() =>
-        Promise.resolve(app().request("/config", { headers: { "x-zaovra-directory": tmp.path } })),
+        Promise.resolve(app().request("/config", { headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) } })),
       )
       expect(reloaded.status).toBe(200)
       expect(yield* Effect.promise(() => reloaded.json())).toMatchObject({
@@ -396,7 +396,7 @@ describe("config HttpApi", () => {
       const opened = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/config", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -409,7 +409,7 @@ describe("config HttpApi", () => {
             method: "PATCH",
             headers: {
               "content-type": "application/json",
-              "x-zaovra-directory": tmp.path,
+              "x-zaovra-directory": encodeURIComponent(tmp.path),
             },
             body: JSON.stringify({ username: "patched-user", formatter: false, lsp: false }),
           }),
@@ -431,7 +431,7 @@ describe("config HttpApi", () => {
       const reloaded = yield* Effect.promise(() =>
         Promise.resolve(
           app().request("/config", {
-            headers: { "x-zaovra-directory": tmp.path },
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
           }),
         ),
       )
@@ -463,7 +463,7 @@ describe("config HttpApi", () => {
         Promise.resolve(
           app().request("/config", {
             headers: {
-              "x-zaovra-directory": tmp.path,
+              "x-zaovra-directory": encodeURIComponent(tmp.path),
             },
           }),
         ),
