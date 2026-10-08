@@ -1,7 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionNotFoundError } from "@zaovra-ai/sdk/v2/client"
 import type { ConfigInvalidError, ProviderModelNotFoundError } from "./server-errors"
-import { formatServerError, isDirectoryUnavailableError, isSessionNotFoundError, parseReadableConfigInvalidError } from "./server-errors"
+import {
+  formatServerError,
+  isDirectoryUnavailableError,
+  isSessionNotFoundError,
+  parseReadableConfigInvalidError,
+  serverErrorDetails,
+} from "./server-errors"
+
+test("only confirmed abort is silent, raw 499 remains visible with decoded path", () => {
+  expect(serverErrorDetails(new DOMException("cancelled", "AbortError"))).toBeUndefined()
+  expect(
+    serverErrorDetails(new Error("GET /config?directory=C%3A%2Fproject → 499 unknown (empty response body)")),
+  ).toContain("C:/project → 499")
+  expect(serverErrorDetails(new Error("broken %E4 path 503"))).toBe("broken %E4 path 503")
+})
 
 function fill(text: string, vars?: Record<string, string | number>) {
   if (!vars) return text

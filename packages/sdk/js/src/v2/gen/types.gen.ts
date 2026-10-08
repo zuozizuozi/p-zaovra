@@ -6460,6 +6460,12 @@ export type ModelCapabilities = {
 }
 
 export type ModelCost = {
+  configured?: {
+    input: boolean
+    output: boolean
+    cacheRead: boolean
+    cacheWrite: boolean
+  }
   tier?: {
     type: "context"
     size: number
@@ -12643,6 +12649,22 @@ export type V2SessionUsageResponses = {
    */
   200: {
     data: {
+      models: Array<{
+        providerID: string
+        modelID: string
+        tokens: {
+          input: number
+          output: number
+          reasoning: number
+          cacheRead: number
+          cacheWrite: number
+          total: number
+          calls: number
+          unreported: number
+        }
+        priceConfigured: boolean
+        estimate: number
+      }>
       total: {
         input: number
         output: number

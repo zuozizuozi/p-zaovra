@@ -2,6 +2,22 @@ import { expect, test } from "bun:test"
 import { protocolChoice, protocolEditable, protocolPatch } from "./provider-protocol"
 import { validateCustomProvider } from "./dialog-custom-provider-form"
 
+test("optional custom prices preserve zero, reject partial/negative input, and keep tiers", () => {
+  const provider = {
+    npm: "@ai-sdk/openai",
+    models: { a: { cost: { input: 1, output: 2, context_over_200k: { input: 3, output: 4 } } } },
+  }
+  const fields = { input: "0", output: "0", cache_read: "", cache_write: "" }
+  expect(protocolPatch(provider, "responses", {}, {}, { a: fields }).models?.a?.cost).toEqual({
+    input: 0,
+    output: 0,
+    context_over_200k: { input: 3, output: 4 },
+  })
+  expect(() => protocolPatch(provider, "responses", {}, {}, { a: { ...fields, input: "" } })).toThrow()
+  expect(() => protocolPatch(provider, "responses", {}, {}, { a: { ...fields, input: "-1" } })).toThrow()
+  expect(provider.models.a.cost.input).toBe(1)
+})
+
 test("new Responses providers and mixed models use the existing npm fields", () => {
   const result = validateCustomProvider({
     t: (key) => key,

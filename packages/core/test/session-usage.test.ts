@@ -119,6 +119,69 @@ test("normalized inclusive usage counts cache and reasoning only once", () => {
 })
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node])))
+
+test("estimates preserve missing prices, explicit free rates, cache prices and per-request tiers", () => {
+  const usage = {
+    input: 100,
+    output: 20,
+    reasoning: 5,
+    cacheRead: 30,
+    cacheWrite: 10,
+    total: 165,
+    calls: 1,
+    unreported: 0,
+  }
+  const price = {
+    input: 2,
+    output: 4,
+    cache: { read: 1, write: 3 },
+    configured: { input: true, output: true, cacheRead: true, cacheWrite: true },
+  }
+  expect(SessionUsageQuery.estimateRequest(usage, [price]).amount).toBeCloseTo(0.00036)
+  expect(SessionUsageQuery.estimateRequest(usage, []).amount).toBeNull()
+  expect(
+    SessionUsageQuery.estimateRequest(usage, [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]).priceConfigured,
+  ).toBe(false)
+  expect(
+    SessionUsageQuery.estimateRequest(usage, [{ ...price, input: 0, output: 0, cache: { read: 0, write: 0 } }]).amount,
+  ).toBe(0)
+  expect(
+    SessionUsageQuery.estimateRequest(usage, [{ ...price, configured: { ...price.configured, cacheWrite: false } }])
+      .amount,
+  ).toBeNull()
+  expect(SessionUsageQuery.estimateRequest({ ...usage, unreported: 1 }, [price])).toEqual({
+    priceConfigured: true,
+    amount: null,
+  })
+  const tiers = [price, { ...price, tier: { type: "context" as const, size: 150 }, input: 10 }]
+  expect(SessionUsageQuery.estimateRequest(usage, tiers).amount).toBeCloseTo(0.00036)
+  expect(SessionUsageQuery.estimateRequest({ ...usage, input: 111 }, tiers).amount).toBeCloseTo(0.00127)
+})
+
+test("mixed models, unknown historical models and price changes use the same deduplicated ledger", () => {
+  const price = { input: 2, output: 4, cache: { read: 1, write: 3 } }
+  const model = { ...Model.Info.empty(Provider.ID.make("openai"), Model.ID.make("test")), cost: [price] }
+  const rows = [
+    start(1, "msg_one"),
+    end(2, "msg_one"),
+    end(2, "msg_one"),
+    start(3, "msg_two", "other"),
+    end(4, "msg_two"),
+    end(5, "msg_old"),
+  ]
+  const result = SessionUsageQuery.summarize(rows, new Map([["ses_usage", [model]]]))
+  expect(result.models).toHaveLength(3)
+  expect(result.models[0].tokens.calls).toBe(1)
+  expect(result.models[0].estimate).toBeCloseTo(0.00036)
+  expect(result.models[1].estimate).toBeNull()
+  expect(result.models[2].modelID).toBeNull()
+  const repriced = SessionUsageQuery.summarize(
+    rows,
+    new Map([["ses_usage", [{ ...model, cost: [{ ...price, input: 4 }] }]]]),
+  )
+  expect(repriced.total).toEqual(result.total)
+  expect(repriced.models[0].estimate).toBeCloseTo(0.00056)
+})
 it.effect("queries durable SQLite settlements across conversations and retains deleted-session usage", () =>
   Effect.gen(function* () {
     const events = yield* EventV2.Service

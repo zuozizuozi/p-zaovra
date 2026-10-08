@@ -12,6 +12,12 @@ function released(date: string) {
 
 function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
   const base = {
+    configured: {
+      input: input?.input !== undefined,
+      output: input?.output !== undefined,
+      cacheRead: input?.cache_read !== undefined,
+      cacheWrite: input?.cache_write !== undefined,
+    },
     input: input?.input ?? 0,
     output: input?.output ?? 0,
     cache: {
@@ -22,6 +28,12 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
   return [
     base,
     ...(input?.tiers?.map((item) => ({
+      configured: {
+        input: true,
+        output: true,
+        cacheRead: item.cache_read !== undefined,
+        cacheWrite: item.cache_write !== undefined,
+      },
       tier: item.tier,
       input: item.input,
       output: item.output,
@@ -33,6 +45,12 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
     ...(input?.context_over_200k
       ? [
           {
+            configured: {
+              input: true,
+              output: true,
+              cacheRead: input.context_over_200k.cache_read !== undefined,
+              cacheWrite: input.context_over_200k.cache_write !== undefined,
+            },
             tier: {
               type: "context" as const,
               size: 200_000,

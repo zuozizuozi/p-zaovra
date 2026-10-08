@@ -24,6 +24,7 @@ import { trimSessions } from "./global-sync/session-trim"
 import type { ProjectMeta } from "./global-sync/types"
 import { SESSION_RECENT_LIMIT } from "./global-sync/types"
 import { formatServerError } from "@/utils/server-errors"
+import { showServerError } from "@/utils/server-error-toast"
 import { queryOptions, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/solid-query"
 import { createRefreshQueue } from "./global-sync/queue"
 import { adaptCommand, directoryKey } from "./global-sync/utils"
@@ -235,11 +236,11 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
           .v2.command.list({ location: { directory } }, { throwOnError: true })
           .then((x) => setStore("command", x.data.data.map(adaptCommand))),
       ).catch((err) => {
-        showToast({
-          variant: "error",
-          title: language.t("toast.project.reloadFailed.title", { project: getFilename(directory) }),
-          description: formatServerError(err, language.t),
-        })
+        showServerError(
+          err,
+          language.t("toast.project.reloadFailed.title", { project: getFilename(directory) }),
+          language.t,
+        )
       })
     },
     onDispose: (directory) => {

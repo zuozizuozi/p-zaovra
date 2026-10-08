@@ -27,6 +27,17 @@ export function DialogProviderProtocol(props: { providerID: string }) {
       ]),
     ),
     pending: false,
+    prices: Object.fromEntries(
+      Object.entries(initial.models ?? {}).map(([id, model]) => [
+        id,
+        {
+          input: String(model.cost?.input ?? ""),
+          output: String(model.cost?.output ?? ""),
+          cache_read: String(model.cost?.cache_read ?? ""),
+          cache_write: String(model.cost?.cache_write ?? ""),
+        },
+      ]),
+    ),
     error: "",
   })
   const save = async (event: SubmitEvent) => {
@@ -43,17 +54,27 @@ export function DialogProviderProtocol(props: { providerID: string }) {
           ([id, model]) =>
             !current.models?.[id] ||
             current.models[id].provider?.npm !== model.provider?.npm ||
+            JSON.stringify(current.models[id].cost) !== JSON.stringify(model.cost) ||
             JSON.stringify(current.models[id].modalities?.input) !== JSON.stringify(model.modalities?.input),
         )
       )
         throw new Error(language.t("provider.protocol.changed"))
       await sync().updateConfig({
-        provider: { [props.providerID]: protocolPatch(current, state.choice, state.models, state.images) },
+        provider: {
+          [props.providerID]: protocolPatch(current, state.choice, state.models, state.images, state.prices),
+        },
       })
       showToast({ title: language.t("provider.protocol.saved"), description: language.t("provider.protocol.effect") })
       dialog.close()
     } catch (error) {
-      setState("error", error instanceof Error ? error.message : String(error))
+      setState(
+        "error",
+        error instanceof Error && error.message.startsWith("price-")
+          ? language.t("usage.priceInvalid")
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      )
     } finally {
       setState("pending", false)
     }
@@ -106,6 +127,35 @@ export function DialogProviderProtocol(props: { providerID: string }) {
                   />
                   <span>{language.t("provider.protocol.imageInput")}</span>
                 </label>
+                <details>
+                  <summary>{language.t("usage.priceSettings")}</summary>
+                  <p class="text-12-regular text-text-weak">{language.t("usage.priceHint")}</p>
+                  <For each={["input", "output", "cache_read", "cache_write"] as const}>
+                    {(key) => (
+                      <label class="flex justify-between gap-2 py-1">
+                        <span>
+                          {language.t(
+                            key === "cache_read"
+                              ? "usage.cacheRead"
+                              : key === "cache_write"
+                                ? "usage.cacheWrite"
+                                : key === "output"
+                                  ? "usage.outputIncludingReasoning"
+                                  : "usage.input",
+                          )}
+                        </span>
+                        <input
+                          class="w-28 border rounded px-2"
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={state.prices[id][key]}
+                          onInput={(event) => setState("prices", id, key, event.currentTarget.value)}
+                        />
+                      </label>
+                    )}
+                  </For>
+                </details>
               </div>
             )}
           </For>

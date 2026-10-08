@@ -3,6 +3,20 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.estimate": "Estimated cost by model",
+  "usage.estimateNote":
+    "Estimate in USD at current configured prices, not a bill. Changing prices recalculates historical estimates. Missing usage or model data stays unknown.",
+  "usage.noPrice": "Price not configured",
+  "usage.priceSettings": "Optional prices (USD per million tokens)",
+  "usage.priceHint":
+    "Enter input and output together. Blank cache fields retain existing values; for a new price they mean unknown. Explicit 0 means free. Context tier prices, if configured, remain unchanged.",
+  "usage.priceInvalid":
+    "Enter non-negative prices for input and output together; existing prices cannot be cleared here.",
+  "session.permission.sameScope":
+    "This item is also included in remembered permissions for future requests in this project.",
+  "server.requestFailed":
+    "The server request did not complete. Please try again. If it persists, check the server connection.",
+  "server.errorDetails": "Details",
   "usage.details": "用量明细",
   "usage.unknown": "未知",
   "usage.outputIncludingReasoning": "输出（含推理）",

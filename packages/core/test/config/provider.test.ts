@@ -382,7 +382,15 @@ describe("ConfigProviderPlugin.Plugin", () => {
         expect(model.capabilities).toEqual({ tools: true, input: ["text"], output: ["text"] })
         expect(model.enabled).toBe(false)
         expect(model.limit).toEqual({ context: 100, output: 75 })
-        expect(model.cost).toEqual([{ input: 1, output: 2, cache: { read: 0, write: 0 }, tier: undefined }])
+        expect(model.cost).toEqual([
+          {
+            input: 1,
+            output: 2,
+            cache: { read: 0, write: 0 },
+            tier: undefined,
+            configured: { input: true, output: true, cacheRead: false, cacheWrite: false },
+          },
+        ])
         expect(model.request.headers).toEqual({ first: "first", shared: "last", last: "last" })
         expect(model.request.variant).toBe("retained")
         expect(model.variants.map((variant) => variant.id)).toEqual([

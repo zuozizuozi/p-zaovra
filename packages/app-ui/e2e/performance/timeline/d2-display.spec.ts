@@ -7,6 +7,85 @@ import {
   stressSessionHref,
 } from "./timeline-test-helpers"
 
+test("permission deduplicates shared rules while preserving distinct current and remembered scopes", async ({
+  page,
+}) => {
+  await mockStressTimeline(page)
+  await installTimelineSettings(page)
+  await installStressSessionTabs(page)
+  await page.route("**/api/permission/request*", (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: "per_d2",
+            sessionID: fixture.sourceID,
+            action: "bash",
+            resources: ["echo D2", "echo D2", "pwd"],
+            save: ["echo D2", "echo future *"],
+          },
+        ],
+      },
+    }),
+  )
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await page.locator('[data-slot="permission-row"] summary').click()
+  await expect(page.locator('[data-slot="permission-row"] code').filter({ hasText: /^echo D2$/ })).toHaveCount(1)
+  await expect(page.locator('[data-slot="permission-row"]')).toContainText(["bash"])
+  await expect(page.getByText("echo future *", { exact: true })).toBeVisible()
+  await expect(page.getByText("pwd", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("This item is also included in remembered permissions for future requests in this project.", {
+      exact: true,
+    }),
+  ).toBeVisible()
+})
+
+test("cost estimates show mixed models, missing price and unknown history separately", async ({ page }) => {
+  await mockStressTimeline(page)
+  await installTimelineSettings(page)
+  await installStressSessionTabs(page)
+  const total = {
+    input: 100,
+    output: 10,
+    reasoning: 5,
+    cacheRead: 20,
+    cacheWrite: 0,
+    total: 135,
+    calls: 1,
+    unreported: 0,
+  }
+  await page.route("**/api/usage*", (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          total,
+          own: total,
+          official: total,
+          unknown: total,
+          lastTurn: total,
+          updatedAt: 1,
+          billing: "unavailable",
+          models: [
+            { providerID: "fixture", modelID: "priced", tokens: total, priceConfigured: true, estimate: 0.123456 },
+            { providerID: "fixture", modelID: "free", tokens: total, priceConfigured: true, estimate: 0 },
+            { providerID: "fixture", modelID: "no-price", tokens: total, priceConfigured: false, estimate: null },
+            { providerID: null, modelID: null, tokens: total, priceConfigured: false, estimate: null },
+          ],
+        },
+      },
+    }),
+  )
+  await page.goto(stressSessionHref(fixture.sourceID))
+  await page.locator(".session-usage-bar").click()
+  const card = page.getByRole("region", { name: "Estimated cost by model" })
+  await expect(card).toContainText("USD 0.123456")
+  await expect(card).toContainText("USD 0.000000")
+  await expect(card).toContainText("Price not configured")
+  await expect(card).toContainText("Unknown / Unknown")
+  await expect(card).toContainText("not a bill")
+})
+
 for (const unreported of [0, 1]) {
   test(`session usage is explicit with ${unreported} unreported calls`, async ({ page }) => {
     await mockStressTimeline(page)
@@ -39,11 +118,11 @@ for (const unreported of [0, 1]) {
     )
     await page.goto(stressSessionHref(fixture.sourceID))
     await page.locator(".session-usage-bar").click()
-    const card = page.locator(".session-usage-details .usage-card")
+    const card = page.locator(".session-usage-details .usage-card").first()
     await expect(card).toBeVisible()
     await expect(card).toContainText(unreported ? "Unknown" : "60.0%")
     await expect(card.locator("dl")).toContainText(unreported ? "≥ 10" : "10")
-    await expect(card).toContainText("Cost estimate unavailable")
+    await expect(page.locator(".session-usage-details")).toContainText("Estimated cost by model")
   })
 }
 

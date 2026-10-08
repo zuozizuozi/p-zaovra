@@ -358,6 +358,22 @@ export type SessionsUsageInput = { readonly sessionID?: { readonly sessionID?: s
 
 export type SessionsUsageOutput = {
   readonly data: {
+    readonly models: ReadonlyArray<{
+      readonly providerID: string | null
+      readonly modelID: string | null
+      readonly tokens: {
+        readonly input: number
+        readonly output: number
+        readonly reasoning: number
+        readonly cacheRead: number
+        readonly cacheWrite: number
+        readonly total: number
+        readonly calls: number
+        readonly unreported: number
+      }
+      readonly priceConfigured: boolean
+      readonly estimate: number | null
+    }>
     readonly total: {
       readonly input: number
       readonly output: number
@@ -5200,6 +5216,12 @@ export type ModelsListOutput = {
     }>
     readonly time: { readonly released: number }
     readonly cost: ReadonlyArray<{
+      readonly configured?: {
+        readonly input: boolean
+        readonly output: boolean
+        readonly cacheRead: boolean
+        readonly cacheWrite: boolean
+      }
       readonly tier?: { readonly type: "context"; readonly size: number }
       readonly input: number
       readonly output: number

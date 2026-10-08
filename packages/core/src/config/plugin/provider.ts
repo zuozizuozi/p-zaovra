@@ -90,6 +90,12 @@ export const Plugin = define({
                 }
                 if (config.cost !== undefined) {
                   model.cost = (Array.isArray(config.cost) ? config.cost : [config.cost]).map((cost) => ({
+                    configured: {
+                      input: true,
+                      output: true,
+                      cacheRead: cost.cache?.read !== undefined,
+                      cacheWrite: cost.cache?.write !== undefined,
+                    },
                     tier: cost.tier && { ...cost.tier },
                     input: cost.input,
                     output: cost.output,

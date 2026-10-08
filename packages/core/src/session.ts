@@ -53,6 +53,7 @@ import { SessionDurable } from "@zaovra-ai/schema/durable-event-manifest"
 import { SessionTodo } from "./session/todo"
 import { SessionUsage } from "@zaovra-ai/schema/session-usage"
 import { SessionUsageQuery } from "./session/usage"
+import { Catalog } from "./catalog"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -311,7 +312,31 @@ const layer = Layer.effect(
       )
     })
     const result = Service.of({
-      usage: (sessionID) => SessionUsageQuery.read(sessionID).pipe(Effect.provideService(Database.Service, database)),
+      usage: (sessionID) =>
+        SessionUsageQuery.read(sessionID, (ids) =>
+          Effect.gen(function* () {
+            const catalogs = new Map<string, readonly ModelV2.Info[]>()
+            const entries = yield* Effect.forEach(ids, (id) =>
+              Effect.gen(function* () {
+                const session = yield* store.get(SessionSchema.ID.make(id))
+                if (!session) return [id, []] as const
+                const key = JSON.stringify(session.location)
+                const cached = catalogs.get(key)
+                if (cached) return [id, cached] as const
+                const models = yield* Effect.gen(function* () {
+                  const catalog = yield* Catalog.Service
+                  return yield* catalog.model.all()
+                }).pipe(
+                  Effect.provide(locations.get(session.location)),
+                  Effect.catch(() => Effect.succeed([])),
+                )
+                catalogs.set(key, models)
+                return [id, models] as const
+              }),
+            )
+            return new Map<string, readonly ModelV2.Info[]>(entries)
+          }),
+        ).pipe(Effect.provideService(Database.Service, database)),
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)

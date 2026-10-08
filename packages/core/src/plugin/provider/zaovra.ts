@@ -228,6 +228,12 @@ function withoutCredentials(body: Readonly<Record<string, unknown>> | undefined)
 function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cost"]>) {
   const base = {
     input: input.input,
+    configured: {
+      input: true,
+      output: true,
+      cacheRead: input.cache_read !== undefined,
+      cacheWrite: input.cache_write !== undefined,
+    },
     output: input.output,
     cache: { read: input.cache_read ?? 0, write: input.cache_write ?? 0 },
   }
@@ -236,6 +242,12 @@ function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cos
     base,
     {
       tier: { type: "context" as const, size: 200_000 },
+      configured: {
+        input: true,
+        output: true,
+        cacheRead: input.context_over_200k.cache_read !== undefined,
+        cacheWrite: input.context_over_200k.cache_write !== undefined,
+      },
       input: input.context_over_200k.input,
       output: input.context_over_200k.output,
       cache: {

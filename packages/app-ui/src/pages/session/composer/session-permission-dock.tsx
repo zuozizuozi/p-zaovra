@@ -52,6 +52,8 @@ export function SessionPermissionDock(props: {
     if (value === key) return ""
     return value
   }
+  const patterns = () => [...new Set(props.request.patterns)]
+  const remembered = () => [...new Set(props.request.always)].filter((pattern) => !patterns().includes(pattern))
 
   return (
     <DockPrompt
@@ -116,7 +118,7 @@ export function SessionPermissionDock(props: {
           <details class="min-w-0 text-12-regular text-text-base">
             <summary class="cursor-pointer">{language.t("session.permission.rememberScope")}</summary>
             <p class="py-1 text-text-weak">{language.t("session.permission.rememberHint")}</p>
-            <For each={props.request.always}>{(pattern) => <code class="block break-all">{pattern}</code>}</For>
+            <For each={remembered()}>{(pattern) => <code class="block break-all">{pattern}</code>}</For>
           </details>
         </div>
       </Show>
@@ -125,8 +127,15 @@ export function SessionPermissionDock(props: {
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-patterns">
-            <For each={props.request.patterns}>
-              {(pattern) => <code class="text-12-regular text-text-base break-all">{pattern}</code>}
+            <For each={patterns()}>
+              {(pattern) => (
+                <div>
+                  <code class="text-12-regular text-text-base break-all">{pattern}</code>
+                  <Show when={props.request.always.includes(pattern)}>
+                    <p class="text-12-regular text-text-weak">{language.t("session.permission.sameScope")}</p>
+                  </Show>
+                </div>
+              )}
             </For>
           </div>
         </div>

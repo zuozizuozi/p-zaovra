@@ -17,6 +17,7 @@ export function protocolPatch(
   choice: ProtocolChoice,
   models: Record<string, string>,
   images: Record<string, boolean> = {},
+  prices: Record<string, Record<"input" | "output" | "cache_read" | "cache_write", string>> = {},
 ) {
   const overrides: NonNullable<ProtocolProvider["models"]> = Object.fromEntries(
     Object.entries(models).flatMap(([id, value]) => {
@@ -36,6 +37,25 @@ export function protocolPatch(
     overrides[id] = {
       ...overrides[id],
       modalities: { input: enabled ? [...input, "image"] : input.filter((value) => value !== "image") },
+    }
+  }
+  for (const [id, fields] of Object.entries(prices)) {
+    const previous = provider.models?.[id]?.cost
+    if (Object.entries(fields).every(([key, value]) => value === String(previous?.[key as keyof typeof fields] ?? "")))
+      continue
+    // Blank is unknown, never a free rate. Base input/output must be supplied together.
+    if (!fields.input.trim() || !fields.output.trim()) throw new Error("price-required")
+    const entries = Object.entries(fields).filter(([, value]) => value.trim() !== "")
+    if (entries.some(([, value]) => !Number.isFinite(Number(value)) || Number(value) < 0))
+      throw new Error("price-invalid")
+    overrides[id] = {
+      ...overrides[id],
+      cost: {
+        ...previous,
+        ...Object.fromEntries(entries.map(([key, value]) => [key, Number(value)])),
+        input: Number(fields.input),
+        output: Number(fields.output),
+      },
     }
   }
   return {

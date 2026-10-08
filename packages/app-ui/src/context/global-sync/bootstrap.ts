@@ -8,7 +8,6 @@ import type {
   ReferenceInfo,
   Session,
 } from "@zaovra-ai/sdk/v2/client"
-import { showToast } from "@/utils/toast"
 import { getFilename } from "@zaovra-ai/core/util/path"
 import { retry } from "@zaovra-ai/core/util/retry"
 import { batch } from "solid-js"
@@ -17,7 +16,8 @@ import type { State, VcsCache } from "./types"
 import type { ServerSession } from "../server-session"
 import { adaptAgent, adaptCommand, adaptPermissionRequest, cmp, directoryKey } from "./utils"
 import { adaptProviderCatalog } from "./provider-catalog"
-import { formatServerError, isDirectoryUnavailableError } from "@/utils/server-errors"
+import { isDirectoryUnavailableError } from "@/utils/server-errors"
+import { showServerError } from "@/utils/server-error-toast"
 import { QueryClient, queryOptions } from "@tanstack/solid-query"
 import { loadMcpQuery, loadMcpResourcesQuery } from "../server-sync"
 import { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
@@ -72,14 +72,10 @@ function showErrors(input: {
   translate: (key: string, vars?: Record<string, string | number>) => string
   formatMoreCount: (count: number) => string
 }) {
-  if (input.errors.length === 0) return
-  const message = formatServerError(input.errors[0], input.translate)
-  const more = input.errors.length > 1 ? input.formatMoreCount(input.errors.length - 1) : ""
-  showToast({
-    variant: "error",
-    title: input.title,
-    description: message + more,
-  })
+  const errors = input.errors.filter((error) => !(error instanceof Error && error.name === "AbortError"))
+  if (errors.length === 0) return
+  const more = errors.length > 1 ? input.formatMoreCount(errors.length - 1) : ""
+  showServerError(errors[0], input.title + more, input.translate)
 }
 
 export const loadGlobalConfigQuery = (scope: ServerScope, sdk: ZaovraClient) =>
@@ -392,15 +388,15 @@ export async function bootstrapDirectory(input: {
 
     await waitForPaint()
     const slowErrs = errors(await runAll(slow))
-    const reportable = slowErrs.filter((error) => !isDirectoryUnavailableError(error, input.directory))
+    const reportable = slowErrs.filter(
+      (error) =>
+        !isDirectoryUnavailableError(error, input.directory) &&
+        !(error instanceof Error && error.name === "AbortError"),
+    )
     if (reportable.length > 0) {
       console.error("Failed to finish bootstrap instance", reportable[0])
       const project = getFilename(input.directory)
-      showToast({
-        variant: "error",
-        title: input.translate("toast.project.reloadFailed.title", { project }),
-        description: formatServerError(reportable[0], input.translate),
-      })
+      showServerError(reportable[0], input.translate("toast.project.reloadFailed.title", { project }), input.translate)
     }
 
     if (loading && slowErrs.length === 0) input.setStore("status", "complete")

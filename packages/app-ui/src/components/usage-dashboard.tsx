@@ -111,7 +111,12 @@ export function SessionUsageBar() {
         </Show>
       </summary>
       <Show when={value()}>
-        {(data) => <UsageCard label={language.t("usage.conversation")} totals={data().total} />}
+        {(data) => (
+          <>
+            <UsageCard label={language.t("usage.conversation")} totals={data().total} />
+            <UsageEstimates models={data().models ?? []} />
+          </>
+        )}
       </Show>
       <button type="button" class="text-12-regular underline p-2" onClick={open}>
         {language.t("usage.title")}
@@ -183,6 +188,7 @@ export function UsageDashboard() {
               <UsageCard label={language.t("usage.unknownSource")} totals={data().unknown} />
             </Show>
             <p>{language.t("usage.billingNote")}</p>
+            <UsageEstimates models={data().models ?? []} />
             <Show when={recent()?.length}>
               <h3>{language.t("usage.recent")}</h3>
               <For each={recent()}>
@@ -243,11 +249,40 @@ function UsageCard(props: { label: string; totals: Totals }) {
         </div>
       </dl>
       <p>{language.t("usage.hitRateHint")}</p>
-      <p>{language.t("usage.estimateUnavailable")}</p>
       <Show when={props.totals.unreported > 0}>
         <p>
           {language.t("usage.incomplete")} · {props.totals.unreported} {language.t("usage.unreported")}
         </p>
+      </Show>
+    </section>
+  )
+}
+
+function UsageEstimates(props: { models: Summary["models"] }) {
+  const language = useLanguage()
+  return (
+    <section class="usage-card" aria-label={language.t("usage.estimate")}>
+      <h3>{language.t("usage.estimate")}</h3>
+      <p>{language.t("usage.estimateNote")}</p>
+      <Show when={props.models.length} fallback={<p>{language.t("usage.unknown")}</p>}>
+        <For each={props.models}>
+          {(model) => (
+            <div class="usage-billing flex flex-wrap justify-between gap-2">
+              <span class="break-all">
+                {model.providerID ?? language.t("usage.unknown")} / {model.modelID ?? language.t("usage.unknown")}
+              </span>
+              <strong>
+                {!model.modelID
+                  ? language.t("usage.unknown")
+                  : !model.priceConfigured
+                    ? language.t("usage.noPrice")
+                    : model.estimate === null
+                      ? language.t("usage.incomplete")
+                      : `USD ${model.estimate.toFixed(6)}`}
+              </strong>
+            </div>
+          )}
+        </For>
       </Show>
     </section>
   )

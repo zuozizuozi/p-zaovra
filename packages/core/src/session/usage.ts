@@ -7,6 +7,7 @@ import { SessionEvent } from "@zaovra-ai/schema/session-event"
 import { Event } from "@zaovra-ai/schema/event"
 import { Database } from "../database/database"
 import { EventTable } from "../event/sql"
+import { Model } from "@zaovra-ai/schema/model"
 
 const definitions = [
   SessionEvent.Step.Started,
@@ -18,7 +19,10 @@ const definitions = [
 ]
 const types = definitions.map((item) => Event.versionedType(item.type, item.durable?.version ?? 1))
 
-export const read = Effect.fn("SessionUsage.read")(function* (sessionID?: string) {
+export const read = Effect.fn("SessionUsage.read")(function* (
+  sessionID?: string,
+  catalogs?: (sessions: string[]) => Effect.Effect<ReadonlyMap<string, readonly Model.Info[]>>,
+) {
   const database = yield* Database.Service
   // Read settlements, not projected messages: copied fork history is not another request,
   // and reverting or deleting a conversation must not refund its recorded usage.
@@ -34,7 +38,8 @@ export const read = Effect.fn("SessionUsage.read")(function* (sessionID?: string
     .where(and(inArray(EventTable.type, types), sessionID ? eq(EventTable.aggregate_id, sessionID) : undefined))
     .all()
     .pipe(Effect.orDie)
-  const summary = summarize(rows)
+  const prices = catalogs ? yield* catalogs([...new Set(rows.map((row) => row.aggregate_id))]) : undefined
+  const summary = summarize(rows, prices)
   return { ...summary, lastTurn: sessionID ? summary.lastTurn : null }
 })
 
@@ -52,6 +57,7 @@ const empty = (): MutableTotals => ({
 
 export function summarize(
   rows: ReadonlyArray<{ aggregate_id: string; seq: number; type: string; data: Record<string, unknown> }>,
+  catalogs: ReadonlyMap<string, readonly Model.Info[]> = new Map(),
 ): SessionUsage.Summary {
   const starts = new Map<string, typeof SessionEvent.Step.Started.data.Type>()
   const prompts = new Map<string, number>()
@@ -164,6 +170,16 @@ export function summarize(
     billing: "unavailable" as const,
   }
   const rounds = new Map<string, { seq: number; tokens: MutableTotals }>()
+  const buckets = new Map<
+    string,
+    {
+      providerID: string | null
+      modelID: string | null
+      tokens: MutableTotals
+      priceConfigured: boolean
+      estimate: number | null
+    }
+  >()
   const add = (target: MutableTotals, value: SessionUsage.Totals) => {
     Object.keys(value).forEach((key) => {
       target[key as keyof SessionUsage.Totals] += value[key as keyof SessionUsage.Totals]
@@ -175,6 +191,24 @@ export function summarize(
     const source = !provider ? "unknown" : provider === "zaovra" || provider.startsWith("zaovra-") ? "official" : "own"
     add(result.total, settlement.tokens)
     add(result[source], settlement.tokens)
+    // Compaction events do not record the model ID; never price a guessed model.
+    const modelID = key.includes(":compaction:") ? null : (start?.model.id ?? null)
+    const bucketKey = JSON.stringify([provider ?? null, modelID])
+    const bucket = buckets.get(bucketKey) ?? {
+      providerID: provider ?? null,
+      modelID,
+      tokens: empty(),
+      priceConfigured: true,
+      estimate: 0,
+    }
+    const model = catalogs
+      .get(settlement.session)
+      ?.find((model) => model.providerID === provider && model.id === modelID)
+    const estimate = estimateRequest(settlement.tokens, model?.cost ?? [])
+    add(bucket.tokens, settlement.tokens)
+    bucket.priceConfigured &&= estimate.priceConfigured
+    bucket.estimate = bucket.estimate === null || estimate.amount === null ? null : bucket.estimate + estimate.amount
+    buckets.set(bucketKey, bucket)
     const roundKey = callRounds.get(key) ?? `${settlement.session}:${start?.inputSequence ?? key}`
     const round = rounds.get(roundKey) ?? { seq: settlement.seq, tokens: empty() }
     add(round.tokens, settlement.tokens)
@@ -183,5 +217,25 @@ export function summarize(
   })
   // inputSequence advances after tool calls. The promoted user prompt is the turn boundary.
   const latest = [...rounds.values()].sort((a, b) => b.seq - a.seq)[0]
-  return { ...result, lastTurn: latest?.tokens ?? null }
+  return { ...result, models: [...buckets.values()], lastTurn: latest?.tokens ?? null }
+}
+
+export function estimateRequest(tokens: SessionUsage.Totals, costs: readonly Model.Cost[]) {
+  const context = tokens.input + tokens.cacheRead + tokens.cacheWrite
+  const price = costs
+    .filter((cost) => !cost.tier || context > cost.tier.size)
+    .toSorted((a, b) => (b.tier?.size ?? 0) - (a.tier?.size ?? 0))[0]
+  if (!price) return { priceConfigured: false, amount: null }
+  const fields = [
+    { count: tokens.input, rate: price.input, known: price.configured?.input },
+    { count: tokens.output + tokens.reasoning, rate: price.output, known: price.configured?.output },
+    { count: tokens.cacheRead, rate: price.cache.read, known: price.configured?.cacheRead },
+    { count: tokens.cacheWrite, rate: price.cache.write, known: price.configured?.cacheWrite },
+  ]
+  const priceConfigured =
+    fields.every((field) => field.count === 0 || ((field.known ?? field.rate > 0) && field.rate >= 0)) &&
+    (price.configured?.input ?? price.input > 0) &&
+    (price.configured?.output ?? price.output > 0)
+  const amount = fields.reduce((sum, field) => sum + (field.count * field.rate) / 1_000_000, 0)
+  return { priceConfigured, amount: priceConfigured && !tokens.unreported && Number.isFinite(amount) ? amount : null }
 }

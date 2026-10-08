@@ -30,6 +30,13 @@ export const Capabilities = Schema.Struct({
 
 export interface Cost extends Schema.Schema.Type<typeof Cost> {}
 export const Cost = Schema.Struct({
+  // Absent means the provenance of legacy zero defaults is unknown.
+  configured: Schema.Struct({
+    input: Schema.Boolean,
+    output: Schema.Boolean,
+    cacheRead: Schema.Boolean,
+    cacheWrite: Schema.Boolean,
+  }).pipe(optional),
   tier: Schema.Struct({
     type: Schema.Literal("context"),
     size: Schema.Int,

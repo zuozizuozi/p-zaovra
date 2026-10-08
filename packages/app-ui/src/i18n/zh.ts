@@ -3,6 +3,17 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.estimate": "按模型估算费用",
+  "usage.estimateNote":
+    "估算（USD），按当前配置单价计算，不是账单。修改单价会重算历史估算；缺报或缺模型信息仍显示未知。",
+  "usage.noPrice": "未配置单价",
+  "usage.priceSettings": "可选单价（USD / 百万 Token）",
+  "usage.priceHint":
+    "输入与输出须一起填写。缓存留空保留已有值；首次配置时表示未知，明确填写 0 才是免费。已有上下文阶梯价格保持不变。",
+  "usage.priceInvalid": "输入和输出须一起填写非负单价；此处不能清除已有单价。",
+  "session.permission.sameScope": "此项也在本项目今后会记住的允许范围内。",
+  "server.requestFailed": "服务器请求未完成，请重试。若持续出现，请检查服务器连接。",
+  "server.errorDetails": "详情",
   "usage.details": "用量明细",
   "usage.unknown": "未知",
   "usage.outputIncludingReasoning": "输出（含推理）",

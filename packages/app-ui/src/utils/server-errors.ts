@@ -18,6 +18,17 @@ export type ProviderModelNotFoundError = {
 
 type Translator = (key: string, vars?: Record<string, string | number>) => string
 
+export function serverErrorDetails(error: unknown, translate?: Translator) {
+  if (error instanceof Error && error.name === "AbortError") return undefined
+  return formatServerError(error, translate).replace(/(?:%[0-9a-f]{2})+/gi, (part) => {
+    try {
+      return decodeURIComponent(part)
+    } catch {
+      return part
+    }
+  })
+}
+
 function tr(translator: Translator | undefined, key: string, text: string, vars?: Record<string, string | number>) {
   if (!translator) return text
   const out = translator(key, vars)
