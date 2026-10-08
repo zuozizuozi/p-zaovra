@@ -6,6 +6,7 @@ import { useLanguage } from "@/context/language"
 import { useSettingsDialog } from "./settings-dialog"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import type { V2SessionUsageResponses } from "@zaovra-ai/sdk/v2/client"
+import { usageDisplay } from "@/utils/usage-display"
 import "./usage-dashboard.css"
 
 type Summary = V2SessionUsageResponses[200]["data"]
@@ -77,34 +78,74 @@ export function SessionUsageBar() {
   )
   const value = () => (!params.id || usage.loading || usage.error ? undefined : usage())
   return (
-    <button
-      type="button"
-      class="session-usage-bar"
-      onClick={open}
-      aria-label={language.t("usage.title")}
-      title={language.t("usage.sessionScope")}
-    >
-      <span>{language.t("usage.title")}</span>
-      <Show when={!usage.error} fallback={<span>{language.t("usage.error")}</span>}>
-        <span>
-          {language.t("usage.conversation")} <b>{value() ? tokenLabel(value()!.total) : params.id ? "—" : "0"}</b>{" "}
-          Tokens
-        </span>
-        <span>
-          {language.t("usage.lastTurn")} <b>{value()?.lastTurn ? tokenLabel(value()!.lastTurn!) : "—"}</b>
-        </span>
-        <Show when={value()?.total.unreported}>
-          <span>{language.t("usage.incomplete")}</span>
+    <details class="session-usage-details">
+      <summary class="session-usage-bar" title={language.t("usage.sessionScope")}>
+        <span>{language.t("usage.details")}</span>
+        <Show when={!usage.error} fallback={<span>{language.t("usage.error")}</span>}>
+          <span>
+            {language.t("usage.conversation")}{" "}
+            <b>
+              {value()
+                ? usageDisplay(value()!.total).unknown
+                  ? language.t("usage.unknown")
+                  : tokenLabel(value()!.total)
+                : params.id
+                  ? "—"
+                  : "0"}
+            </b>{" "}
+            Tokens
+          </span>
+          <span>
+            {language.t("usage.lastTurn")}{" "}
+            <b>
+              {value()?.lastTurn
+                ? usageDisplay(value()!.lastTurn!).unknown
+                  ? language.t("usage.unknown")
+                  : tokenLabel(value()!.lastTurn!)
+                : "—"}
+            </b>
+          </span>
+          <Show when={value()?.total.unreported}>
+            <span>{language.t("usage.incomplete")}</span>
+          </Show>
         </Show>
+      </summary>
+      <Show when={value()}>
+        {(data) => <UsageCard label={language.t("usage.conversation")} totals={data().total} />}
       </Show>
-    </button>
+      <button type="button" class="text-12-regular underline p-2" onClick={open}>
+        {language.t("usage.title")}
+      </button>
+    </details>
   )
 }
 
 export function UsageDashboard() {
   const language = useLanguage()
+  const sync = useServerSync()
+  const sdk = useServerSDK()
   const { usage, refetch } = useUsage(() => undefined)
   const value = () => (usage.loading || usage.error ? undefined : usage())
+  const [recent] = createResource(
+    () => ({
+      sdk: sdk(),
+      updatedAt: value()?.updatedAt,
+      sessions: Object.values(sync().session.data.info)
+        .filter((item) => !!item)
+        .sort((a, b) => b.time.updated - a.time.updated)
+        .slice(0, 5),
+    }),
+    (input) =>
+      Promise.all(
+        input.sessions.map(async (session) => ({
+          title: session.title,
+          usage: await input.sdk.client.v2.session
+            .usage({ sessionID: session.id }, { throwOnError: true })
+            .then((result) => result.data.data.total)
+            .catch(() => undefined),
+        })),
+      ),
+  )
   return (
     <section class="usage-dashboard" aria-label={language.t("usage.title")}>
       <div class="usage-dashboard-heading">
@@ -142,6 +183,23 @@ export function UsageDashboard() {
               <UsageCard label={language.t("usage.unknownSource")} totals={data().unknown} />
             </Show>
             <p>{language.t("usage.billingNote")}</p>
+            <Show when={recent()?.length}>
+              <h3>{language.t("usage.recent")}</h3>
+              <For each={recent()}>
+                {(item) => (
+                  <div class="usage-billing">
+                    <span>{item.title}</span>
+                    <strong>
+                      {item.usage
+                        ? usageDisplay(item.usage).unknown
+                          ? language.t("usage.unknown")
+                          : tokenLabel(item.usage)
+                        : language.t("usage.error")}
+                    </strong>
+                  </div>
+                )}
+              </For>
+            </Show>
             <p class="usage-updated">
               {language.t("usage.updated")} {new Date(data().updatedAt).toLocaleString()}
             </p>
@@ -154,23 +212,38 @@ export function UsageDashboard() {
 
 function UsageCard(props: { label: string; totals: Totals }) {
   const language = useLanguage()
-  const fields = ["input", "output", "reasoning", "cacheRead", "cacheWrite", "calls"] as const
+  const fields = ["input", "cacheRead", "cacheWrite", "outputIncludingReasoning", "reasoning", "calls"] as const
   return (
     <section class="usage-card" aria-label={props.label}>
       <h3>{props.label}</h3>
       <div class="usage-total">
-        {tokenLabel(props.totals)} <span>Tokens</span>
+        {usageDisplay(props.totals).unknown ? language.t("usage.unknown") : tokenLabel(props.totals)}{" "}
+        <span>Tokens</span>
       </div>
       <dl>
         <For each={fields}>
           {(key) => (
             <div>
               <dt>{language.t(`usage.${key}`)}</dt>
-              <dd>{props.totals[key].toLocaleString()}</dd>
+              <dd>
+                {key !== "calls" && usageDisplay(props.totals).unknown
+                  ? language.t("usage.unknown")
+                  : `${props.totals.unreported && key !== "calls" ? "≥ " : ""}${(key === "outputIncludingReasoning" ? usageDisplay(props.totals).output : props.totals[key]).toLocaleString()}`}
+              </dd>
             </div>
           )}
         </For>
+        <div>
+          <dt>{language.t("usage.hitRate")}</dt>
+          <dd>
+            {usageDisplay(props.totals).hitRate === undefined
+              ? language.t("usage.unknown")
+              : `${(usageDisplay(props.totals).hitRate! * 100).toFixed(1)}%`}
+          </dd>
+        </div>
       </dl>
+      <p>{language.t("usage.hitRateHint")}</p>
+      <p>{language.t("usage.estimateUnavailable")}</p>
       <Show when={props.totals.unreported > 0}>
         <p>
           {language.t("usage.incomplete")} · {props.totals.unreported} {language.t("usage.unreported")}

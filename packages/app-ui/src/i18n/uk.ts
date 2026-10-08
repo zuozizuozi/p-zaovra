@@ -1,4 +1,22 @@
 export const dict = {
+  "usage.details": "Usage details",
+  "usage.unknown": "Unknown",
+  "usage.outputIncludingReasoning": "Output (including reasoning)",
+  "usage.hitRate": "Input cache hit rate",
+  "usage.hitRateHint":
+    "Cache reads / (uncached input + cache reads + cache writes). Reasoning is included in output, not added again.",
+  "usage.estimateUnavailable":
+    "Cost estimate unavailable: the ledger does not yet expose per-model usage and pricing. Refer to your provider bill.",
+  "usage.recent": "Recently loaded conversations (up to 5)",
+  "verification.modelReview": "Model review",
+  "verification.commandPassed": "Command passed",
+  "verification.commandFailed": "Command failed",
+  "verification.missingEvidence": "Missing valid evidence",
+  "session.permission.bashAuthority":
+    "Commands run with your OS user privileges and may access files, processes and the network. The working directory is not a sandbox.",
+  "session.permission.directory": "Working directory (relative to the project)",
+  "session.permission.decisions":
+    "Allow once approves this request. Always allow saves matching rules for this project. Deny rejects this and other pending requests in this session.",
   "session.outcome.noChecks": "Немає поточних перевірок",
   "session.outcome.passedCount": "Поточних перевірок пройдено: {{count}}",
   "session.outcome.failedCount": "Перевірок не пройдено: {{count}}",

@@ -3,6 +3,22 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "usage.details": "用量明细",
+  "usage.unknown": "未知",
+  "usage.outputIncludingReasoning": "输出（含推理）",
+  "usage.hitRate": "输入缓存命中率",
+  "usage.hitRateHint": "缓存读取 ÷（非缓存输入＋缓存读取＋缓存写入）；推理已包含在输出中，不再累加。",
+  "usage.estimateUnavailable": "费用估算暂不可用：账本尚未提供按模型拆分的用量与计费单价，请以供应商账单为准。",
+  "usage.recent": "最近已加载的对话（最多 5 项）",
+  "verification.modelReview": "模型审阅",
+  "verification.commandPassed": "命令通过",
+  "verification.commandFailed": "命令失败",
+  "verification.missingEvidence": "缺少有效证据",
+  "session.permission.bashAuthority":
+    "命令以本机用户权限执行，可能读取或修改文件、启动进程及访问网络；工作目录并不是安全沙箱。",
+  "session.permission.directory": "工作目录（相对路径以项目目录为基准）",
+  "session.permission.decisions":
+    "允许一次仅放行本次请求；始终允许会保存此项目的匹配规则；拒绝会拒绝本次请求及本会话其他待批准请求。",
   "error.execution.auth": "服务商拒绝了认证或访问权限，请检查 API Key、账号状态和模型权限。",
   "error.execution.billing": "服务商报告额度或账户问题，请核对服务商后台的余额和有效期。",
   "error.execution.rateLimit": "请求受到服务商限流，请稍后继续或检查并发限制。",

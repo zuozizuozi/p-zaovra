@@ -23,6 +23,20 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+.session-usage-details > .usage-card {
+  max-height: 280px;
+  overflow: auto;
+  margin: 4px 8px;
+  padding: 12px;
+}
+.session-usage-details .usage-total {
+  font-size: 18px;
+  margin: 6px 0;
+}
+.session-usage-details .usage-card p {
+  font-size: 11px;
+  color: var(--v2-text-text-muted);
+}
 .usage-dashboard {
   padding: 28px 32px;
   color: var(--v2-text-text-base);

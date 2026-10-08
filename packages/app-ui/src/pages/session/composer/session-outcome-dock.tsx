@@ -8,6 +8,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 import { showToast } from "@/utils/toast"
+import { commandVerification } from "@/utils/verification-label"
 
 export function SessionOutcomeDock() {
   const params = useParams()
@@ -141,7 +142,9 @@ export function SessionOutcomeDock() {
                             <span aria-hidden="true" class="shrink-0 group-open/check:rotate-90">
                               ›
                             </span>
-                            <span class="shrink-0">{check.kind}</span>
+                            <span class="shrink-0">
+                              {language.t(`verification.${commandVerification(check)}`)} · {check.kind}
+                            </span>
                             <span class="min-w-0 flex-1 truncate">{check.command}</span>
                             <span class="shrink-0">
                               {check.execution
@@ -150,14 +153,11 @@ export function SessionOutcomeDock() {
                             </span>
                           </summary>
                           <pre class="whitespace-pre-wrap break-all font-inherit">{check.command}</pre>
-                          <div>{check.callID}</div>
                           <Show when={check.execution}>
                             <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
                           </Show>
                           <Show when={check.supersededBy}>
-                            <div>
-                              {language.t("session.outcome.superseded")} {check.supersededBy}
-                            </div>
+                            <div>{language.t("session.outcome.superseded")}</div>
                           </Show>
                           <For each={check.requirements}>
                             {(requirement) => (

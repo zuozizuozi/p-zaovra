@@ -7,10 +7,13 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useFileLink } from "@zaovra-ai/session-ui/context/file-link"
 import { collectArtifactFiles } from "@/utils/artifact-files"
+import { useFile } from "@/context/file"
+import { artifactLines } from "@/utils/artifact-lines"
 
 export function ArtifactsPanel(props: { active: boolean; target?: { path: string } }) {
   const sdk = useSDK()
   const sync = useSync()
+  const file = useFile()
   const openFile = useFileLink()
   const { sessionKey, params } = useSessionLayout()
   const [inventory, setInventory] = createSignal<Awaited<ReturnType<typeof collectArtifactFiles>>>()
@@ -136,17 +139,45 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
         <div class="mt-2 max-h-40 overflow-auto">
           <For each={inventory()?.files}>
             {(path) => (
-              <button
-                type="button"
-                class="block w-full truncate py-1 text-left text-xs hover:underline"
-                title={path}
-                onClick={() => openFile?.(path)}
-              >
-                {path}
-                <Show when={baseline() && !baseline()!.has(path)}>
-                  <span class="ml-2 text-text-weak">本次观察到新增</span>
-                </Show>
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="block w-full truncate py-1 text-left text-xs hover:underline"
+                  title={path}
+                  onClick={() => openFile?.(path)}
+                >
+                  {path}
+                  <Show when={baseline() && !baseline()!.has(path)}>
+                    <span class="ml-2 text-text-weak">本次观察到新增</span>
+                  </Show>
+                </button>
+                <details
+                  class="shrink-0 text-xs"
+                  onToggle={(event) => {
+                    if (event.currentTarget.open) void file.load(path)
+                  }}
+                >
+                  <summary class="cursor-pointer">详情</summary>
+                  <Show when={file.get(path)?.error}>
+                    <span role="alert">文件无法读取</span>
+                    <button type="button" onClick={() => void file.load(path, { force: true })}>
+                      重试
+                    </button>
+                  </Show>
+                  <Show when={file.get(path)?.loading}>
+                    <span>正在读取…</span>
+                  </Show>
+                  <Show when={!file.get(path)?.error && !file.get(path)?.loading && file.get(path)?.content}>
+                    {(content) => (
+                      <span>
+                        {artifactLines(content()) === undefined
+                          ? "二进制文件，不计行数"
+                          : `${artifactLines(content())} 行`}
+                      </span>
+                    )}
+                  </Show>
+                </details>
+              </div>
             )}
           </For>
           <Show when={inventory() && !inventory()!.files.length}>

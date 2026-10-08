@@ -6,10 +6,13 @@ import { createMemo, createResource, For, onCleanup, onMount, type ParentProps, 
 import { createStore } from "solid-js/store"
 import { useServerSDK } from "@/context/server-sdk"
 import { workGoalControlDisabled, workGoalControls } from "./work-controls"
+import { useLanguage } from "@/context/language"
+import { workVerification } from "@/utils/verification-label"
 
 const defaultRole: WorkDetail["roles"][number]["id"] = "developer"
 
 export default function WorkPage() {
+  const language = useLanguage()
   const params = useParams<{ goalID?: string }>()
   const navigate = useNavigate()
   const serverSDK = useServerSDK()
@@ -759,7 +762,22 @@ export default function WorkPage() {
                           {(item) => (
                             <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
                               <div class="mb-2 flex items-center justify-between text-[11px] text-v2-text-text-muted">
-                                <Status value={item.kind} />
+                                <Show
+                                  when={
+                                    item.kind === "review" ||
+                                    item.kind === "command" ||
+                                    item.producer === "work-verifier/command" ||
+                                    item.producer === "session-host/1"
+                                  }
+                                  fallback={<Status value={item.kind} />}
+                                >
+                                  <span>
+                                    {language.t(
+                                      `verification.${workVerification(item, current().evaluations.find((evaluation) => evaluation.evidenceIDs.includes(item.id))?.verdict)}`,
+                                    )}{" "}
+                                    · {item.kind}
+                                  </span>
+                                </Show>
                                 <span>{item.producer}</span>
                               </div>
                               <pre class="max-h-44 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5">
@@ -1069,7 +1087,7 @@ function MergeApproval(props: { goalID: string; taskID: string; refresh: () => P
     },
   )
   const decide = async (approved: boolean) => {
-    const current = review()
+    const current = review.error ? undefined : review()
     if (!current || state.busy) return
     setState({ busy: true, error: "" })
     try {
@@ -1091,12 +1109,19 @@ function MergeApproval(props: { goalID: string; taskID: string; refresh: () => P
   return (
     <Section title="审阅后应用改动" subtitle="隔离任务已完成，等待你确认；不会自动提交或推送。">
       <Show when={review.error}>
-        <p role="alert">{String(review.error)}</p>
+        <p role="alert">
+          无法读取合并基线或改动，请检查工作目录与 Git 状态后刷新。尚未获得可审阅证据，不会应用改动。
+          <br />
+          {String(review.error)}
+          <ButtonV2 disabled={state.busy || review.loading} onClick={() => void actions.refetch()}>
+            刷新改动
+          </ButtonV2>
+        </p>
       </Show>
       <Show when={state.error}>
         <p role="alert">{state.error}</p>
       </Show>
-      <Show when={review()}>
+      <Show when={!review.error && review()}>
         {(current) => (
           <>
             <p class="text-xs">目标基线：{current().baseline.slice(0, 12)}</p>
