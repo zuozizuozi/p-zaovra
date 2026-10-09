@@ -1,5 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import { once } from "node:events"
 import {
   CallToolRequestSchema,
   GetPromptRequestSchema,
@@ -9,6 +10,12 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js"
+
+// Exceed pipe capacity before initialization; the host must continuously drain stderr.
+if (process.env.MCP_TEST_STDERR === "1") {
+  for (let index = 0; index < 128; index++)
+    if (!process.stderr.write("x".repeat(65_536))) await once(process.stderr, "drain")
+}
 
 const server = new Server(
   { name: "mcp-canonical-fixture", version: "1.0.0" },

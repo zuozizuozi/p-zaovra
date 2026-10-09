@@ -1200,7 +1200,7 @@ export class Global extends HeyApiClient {
   /**
    * Upgrade zaovra
    *
-   * Upgrade zaovra to the specified version or latest if not specified.
+   * Upgrade zaovra to an explicit canonical semantic version. Requires a JSON request body.
    */
   public upgrade<ThrowOnError extends boolean = false>(
     parameters?: {

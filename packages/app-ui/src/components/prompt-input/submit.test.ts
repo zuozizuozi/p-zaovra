@@ -298,6 +298,43 @@ beforeEach(() => {
 })
 
 describe("prompt submit worktree selection", () => {
+  for (const scenario of ["switch", "duplicate", "independent", "retry"] as const) {
+    test(`new draft creation remains scoped: ${scenario}`, async () => {
+      search.draftId = "draft-a"
+      const gate = Promise.withResolvers<void>()
+      createSessionGate = gate.promise
+      const submit = createPromptSubmit({
+        prompt,
+        info: () => undefined,
+        imageAttachments: () => [],
+        commentCount: () => 0,
+        autoAccept: () => false,
+        mode: () => "shell",
+        working: () => false,
+        editor: () => undefined,
+        queueScroll: () => undefined,
+        promptLength: () => 2,
+        addToHistory: () => undefined,
+        resetHistoryNavigation: () => undefined,
+        setMode: () => undefined,
+        setPopover: () => undefined,
+      })
+      const event = { preventDefault: () => undefined } as Event
+      const first = submit.handleSubmit(event)
+      if (scenario === "switch" || scenario === "independent") search.draftId = "draft-b"
+      const second = scenario === "duplicate" || scenario === "independent" ? submit.handleSubmit(event) : undefined
+      if (scenario === "retry") gate.reject(new Error("creation failed"))
+      else gate.resolve()
+      await Promise.all([first, second])
+      if (scenario === "retry") {
+        createSessionGate = undefined
+        await submit.handleSubmit(event)
+      }
+      expect(createdSessions).toHaveLength(scenario === "independent" ? 2 : 1)
+      expect(promotedDrafts[0].draftID).toBe("draft-a")
+      if (scenario === "independent") expect(promotedDrafts[1].draftID).toBe("draft-b")
+    })
+  }
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
       prompt,

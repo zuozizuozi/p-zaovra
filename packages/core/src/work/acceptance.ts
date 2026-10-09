@@ -1,7 +1,8 @@
 export * as WorkAcceptance from "./acceptance"
 
 import { Work } from "@zaovra-ai/schema/work"
-import { Effect, Option } from "effect"
+import { Effect } from "effect"
+import { lstat, readlink } from "node:fs/promises"
 import { ChildProcess } from "effect/unstable/process"
 import path from "path"
 import { FSUtil } from "../fs-util"
@@ -113,7 +114,11 @@ export function validGraph(goal: ReadonlyArray<Work.Criterion>, tasks: ReadonlyA
  * exclude known cache directories; they cannot infer project-specific ignore rules.
  * Large assets use metadata (not content proof); unchanged size/mtime cannot detect an edit.
  */
-export const fingerprint = Effect.fn("WorkAcceptance.fingerprint")(function* (
+export const fingerprint: (
+  fs: FSUtil.Interface,
+  proc: AppProcess.Interface,
+  directory: string,
+) => Effect.Effect<string | undefined> = Effect.fn("WorkAcceptance.fingerprint")(function* (
   fs: FSUtil.Interface,
   proc: AppProcess.Interface,
   directory: string,
@@ -158,24 +163,59 @@ export const fingerprint = Effect.fn("WorkAcceptance.fingerprint")(function* (
             ),
           )
       : yield* walk(directory)
+    const gitlinks = new Set(
+      git.length
+        ? (yield* proc
+            .run(
+              ChildProcess.make("git", ["ls-files", "--stage", "-z"], {
+                cwd: directory,
+                stdin: "ignore",
+                extendEnv: true,
+              }),
+            )
+            .pipe(Effect.flatMap(AppProcess.requireSuccess))).stdout
+            .toString("utf8")
+            .split("\0")
+            .filter((entry) => entry.startsWith("160000 "))
+            .map((entry) => path.resolve(directory, entry.slice(entry.indexOf("\t") + 1)))
+        : [],
+    )
     const receipts = yield* Effect.forEach([...new Set(files)].toSorted(), (file) =>
       Effect.gen(function* () {
-        const info = yield* fs
-          .stat(file)
-          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+        const info = yield* Effect.tryPromise(() =>
+          lstat(file).catch((error: unknown) => {
+            if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+            throw error
+          }),
+        )
+        if (gitlinks.has(file)) {
+          if (!info?.isDirectory() || !(yield* fs.exists(path.join(file, ".git"))))
+            return yield* Effect.fail(new Error(`Uninitialized or unsupported submodule: ${file}`))
+          const head = yield* proc
+            .run(ChildProcess.make("git", ["rev-parse", "HEAD"], { cwd: file, stdin: "ignore", extendEnv: true }))
+            .pipe(Effect.flatMap(AppProcess.requireSuccess))
+          const content = yield* fingerprint(fs, proc, file)
+          if (!content) return yield* Effect.fail(new Error(`Cannot fingerprint submodule contents: ${file}`))
+          return { path: file, digest: `gitlink:${head.stdout.toString("utf8").trim()}:${content}` }
+        }
         if (!info) return { path: file, digest: "deleted" }
-        if (info.type !== "File") return { path: file, digest: undefined }
+        if (info.isSymbolicLink())
+          return { path: file, digest: `symlink:${yield* Effect.tryPromise(() => readlink(file))}` }
+        if (!info.isFile()) return yield* Effect.fail(new Error(`Unsupported acceptance file type: ${file}`))
+        const mode = info.mode & 0o111
         if (info.size > 64 * 1024 * 1024) {
-          const mtime = Option.getOrUndefined(info.mtime)?.getTime()
+          const mtime = info.mtime.getTime()
           return {
             path: file,
-            digest: mtime !== undefined && Number.isFinite(mtime) ? `metadata:${info.size}:${mtime}` : undefined,
+            digest: Number.isFinite(mtime) ? `metadata:${mode}:${info.size}:${mtime}` : undefined,
           }
         }
         const bytes = yield* fs.readFile(file)
-        return { path: file, digest: Hash.sha256(Buffer.from(bytes)) }
+        return { path: file, digest: `file:${mode}:${Hash.sha256(Buffer.from(bytes))}` }
       }),
     )
     return receipts.some((file) => !file.digest) ? undefined : Hash.sha256(JSON.stringify(receipts))
-  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+  }).pipe(
+    Effect.catch((error) => Effect.logWarning("Acceptance fingerprint unavailable", error).pipe(Effect.as(undefined))),
+  )
 })

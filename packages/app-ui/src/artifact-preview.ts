@@ -1,4 +1,8 @@
 export type ArtifactBounds = { x: number; y: number; width: number; height: number }
+
+export function artifactViewer(target: string) {
+  return !/^https?:\/\//i.test(target) && /\.pdf$/i.test(target) ? "pdf" : "browser"
+}
 export type ArtifactState = { title: string; url: string; loading: boolean; error?: string; zoom: number }
 export type ArtifactPreviewAPI = {
   readPDF(input: { target: string; directory: string }): Promise<ArrayBuffer>

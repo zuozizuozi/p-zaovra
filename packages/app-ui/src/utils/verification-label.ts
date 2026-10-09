@@ -18,13 +18,21 @@ export function workVerification(
 ): VerificationLabel {
   if (item.kind === "review") return "modelReview"
   if (!item.payload || typeof item.payload !== "object") return "missingEvidence"
-  const payload = item.payload as Record<string, unknown>
+  const raw = item.payload as Record<string, unknown>
+  const payload =
+    item.producer === "work-verifier/command" && "artifactDigest" in raw && raw.result && typeof raw.result === "object"
+      ? (raw.result as Record<string, unknown>)
+      : raw
   if (item.producer === "session-host/1" && Array.isArray(payload.checks)) {
-    const labels = payload.checks.map((check: unknown) =>
-      check && typeof check === "object" && "eligiblePass" in check && "exit" in check
-        ? commandVerification({ ...check, eligiblePass: check.eligiblePass === true })
-        : "missingEvidence",
-    )
+    const labels = payload.checks
+      .filter(
+        (check: unknown) => !(check && typeof check === "object" && "supersededBy" in check && check.supersededBy),
+      )
+      .map((check: unknown) =>
+        check && typeof check === "object" && "eligiblePass" in check && "exit" in check
+          ? commandVerification({ ...check, eligiblePass: check.eligiblePass === true })
+          : "missingEvidence",
+      )
     if (labels.includes("commandFailed")) return "commandFailed"
     if (
       !labels.length ||

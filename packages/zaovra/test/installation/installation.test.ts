@@ -182,6 +182,25 @@ describe("installation", () => {
   })
 
   describe("upgrade", () => {
+    const commands: string[][] = []
+    testEffect(
+      testLayer(
+        () => jsonResponse({}),
+        (cmd, args) => {
+          commands.push([cmd, ...args])
+          if (cmd === "brew" && args.includes("--formula")) return "zaovra"
+          return ""
+        },
+      ),
+    ).effect("refreshes only Zaovra's own brew tap", () =>
+      Effect.gen(function* () {
+        commands.length = 0
+        yield* Installation.use.upgrade("brew", "1.2.3")
+        expect(commands).toContainEqual(["brew", "tap", "zuozizuozi/tap"])
+        expect(commands).toContainEqual(["brew", "--repo", "zuozizuozi/tap"])
+        expect(commands.flat().join(" ")).not.toContain("anomalyco")
+      }),
+    )
     testEffect(
       testLayer(
         () => jsonResponse({}),

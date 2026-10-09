@@ -14,6 +14,7 @@ import { Hash } from "../util/hash"
 import { WorkAcceptance } from "./acceptance"
 import { WorkArtifact } from "./artifact"
 import { WorkStore } from "./store"
+import { WorkController } from "./controller"
 
 export class Conflict extends Schema.TaggedErrorClass<Conflict>()("WorkMergeReview.Conflict", {
   message: Schema.String,
@@ -26,6 +27,7 @@ const layer = Effect.gen(function* () {
   const git = yield* Git.Service
   const fs = yield* FSUtil.Service
   const proc = yield* AppProcess.Service
+  const controller = yield* WorkController.Service
   const read = Effect.fn("WorkMergeReview.read")(function* (goalID: Work.GoalID, taskID: Work.TaskID) {
     const goal = yield* store.getGoal(goalID)
     const task = yield* store.getTask(taskID)
@@ -113,6 +115,7 @@ const layer = Effect.gen(function* () {
         approved,
         timestamp: yield* DateTime.now,
       })
+      if (approved) yield* controller.signal(goalID, "wake")
     }),
   }
 })
@@ -120,5 +123,14 @@ export class Service extends Context.Service<Service, Effect.Success<typeof laye
 export const node = makeGlobalNode({
   service: Service,
   layer: Layer.effect(Service, layer),
-  deps: [Database.node, EventV2.node, WorkStore.node, WorkArtifact.node, Git.node, FSUtil.node, AppProcess.node],
+  deps: [
+    Database.node,
+    EventV2.node,
+    WorkStore.node,
+    WorkArtifact.node,
+    Git.node,
+    FSUtil.node,
+    AppProcess.node,
+    WorkController.node,
+  ],
 })

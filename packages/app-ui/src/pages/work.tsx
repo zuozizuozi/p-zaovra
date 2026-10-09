@@ -1097,7 +1097,6 @@ function MergeApproval(props: { goalID: string; taskID: string; refresh: () => P
         workMergeDecision: { token: current.token, approved },
       })
       if (result.error) throw new Error("审批已失效或保存失败，请刷新改动后重试")
-      if (approved) await sdk().client.v2.work.resume({ goalID: props.goalID })
       await actions.refetch()
       await props.refresh()
     } catch (error) {

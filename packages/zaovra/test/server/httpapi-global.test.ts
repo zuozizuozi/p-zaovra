@@ -41,12 +41,39 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
-  it.live("upgrades to latest when the request body is omitted", () =>
+  it.live("rejects requests without JSON content type", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.post(GlobalPaths.upgrade)
 
-      expect(response.status).toBe(200)
-      expect(yield* response.json).toEqual({ success: true, version: "9.9.9" })
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toEqual({ success: false, error: "JSON request body required" })
+    }),
+  )
+
+  it.live("accepts only explicit canonical versions", () =>
+    Effect.gen(function* () {
+      for (const target of [
+        undefined,
+        "latest",
+        "v1.2.3",
+        "1.2.3;echo injected",
+        "https://example.com/p.tgz",
+        " 1.2.3",
+      ]) {
+        const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(
+          HttpClientRequest.setBody(HttpBody.text(JSON.stringify({ target }), "application/json")),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(400)
+      }
+      for (const target of ["1.2.3", "1.2.3-beta.1"]) {
+        const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(
+          HttpClientRequest.setBody(HttpBody.text(JSON.stringify({ target }), "application/json")),
+          HttpClient.execute,
+        )
+        expect(response.status).toBe(200)
+        expect(yield* response.json).toEqual({ success: true, version: target })
+      }
     }),
   )
 

@@ -363,7 +363,20 @@ function connectServer(
       env: { ...getDefaultEnvironment(), ...server.environment },
       stderr: "pipe",
     })
-    return connectTransport(location, transport, startup)
+    // Subscribe before start: an unread stderr pipe can block MCP initialization.
+    // Keep only a small tail, never forward arbitrary child logs to the transcript.
+    let stderr = Buffer.alloc(0)
+    transport.stderr?.on("data", (chunk: Buffer) => {
+      stderr = Buffer.from(Buffer.concat([stderr, chunk]).subarray(-16_384))
+    })
+    return connectTransport(location, transport, startup).pipe(
+      Effect.mapError(
+        (error) =>
+          new Error(`${error.message}${stderr.length ? " (MCP stderr captured; capped at 16 KiB)" : ""}`, {
+            cause: error,
+          }),
+      ),
+    )
   }
 
   if (!URL.canParse(server.url)) return Effect.fail(new Error(`Invalid MCP URL: ${server.url}`))

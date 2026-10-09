@@ -1213,6 +1213,7 @@ export type SessionsHistoryOutput = {
           readonly assistantMessageID: string
           readonly agent: string
           readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly catalogModel?: { readonly id: string; readonly providerID: string; readonly variant?: string }
           readonly inputSequence?: number
           readonly contextEpoch?: number
           readonly verificationEnabled?: boolean
@@ -1794,6 +1795,7 @@ export type SessionsEventsOutput =
         readonly assistantMessageID: string
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly catalogModel?: { readonly id: string; readonly providerID: string; readonly variant?: string }
         readonly inputSequence?: number
         readonly contextEpoch?: number
         readonly verificationEnabled?: boolean

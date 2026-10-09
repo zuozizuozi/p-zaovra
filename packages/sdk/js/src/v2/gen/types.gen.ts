@@ -974,6 +974,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           agent: string
           model: ModelRef
+          catalogModel?: ModelRef
           inputSequence?: number
           contextEpoch?: number
           verificationEnabled?: boolean
@@ -4196,6 +4197,7 @@ export type SyncEventSessionNextStepStarted = {
       assistantMessageID: string
       agent: string
       model: ModelRef
+      catalogModel?: ModelRef
       inputSequence?: number
       contextEpoch?: number
       verificationEnabled?: boolean
@@ -5879,6 +5881,7 @@ export type SessionNextStepStarted = {
     assistantMessageID: string
     agent: string
     model: ModelRef
+    catalogModel?: ModelRef
     inputSequence?: number
     contextEpoch?: number
     verificationEnabled?: boolean
@@ -8876,6 +8879,7 @@ export type EventSessionNextStepStarted = {
     assistantMessageID: string
     agent: string
     model: ModelRef
+    catalogModel?: ModelRef
     inputSequence?: number
     contextEpoch?: number
     verificationEnabled?: boolean
@@ -10282,7 +10286,7 @@ export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeRe
 
 export type GlobalUpgradeData = {
   body?: {
-    target?: string
+    target: string
   }
   path?: never
   query?: never

@@ -38,6 +38,26 @@ const end = (seq: number, id: string, data: Record<string, unknown> = {}) =>
     ...data,
   })
 
+test("catalog identity prices wire aliases and leaves ambiguous historical IDs unpriced", () => {
+  const base = Model.Info.empty(Provider.ID.make("openai"), Model.ID.make("catalog-name"))
+  const model = {
+    ...base,
+    api: { ...base.api, id: Model.ID.make("test") },
+    cost: [{ input: 2, output: 4, cache: { read: 1, write: 3 } }],
+  }
+  const collision = { ...model, id: Model.ID.make("test"), api: { ...model.api, id: Model.ID.make("other-wire") } }
+  const rows = [start(1, "msg_one"), end(2, "msg_one")]
+  expect(SessionUsageQuery.summarize(rows, new Map([["ses_usage", [model]]])).models[0].estimate).toBeCloseTo(0.00036)
+  expect(SessionUsageQuery.summarize(rows, new Map([["ses_usage", [model, collision]]])).models[0].estimate).toBeNull()
+  const explicit = [
+    { ...rows[0], data: { ...rows[0].data, catalogModel: { id: model.id, providerID: model.providerID } } },
+    rows[1],
+  ]
+  const result = SessionUsageQuery.summarize(explicit, new Map([["ses_usage", [model, collision]]]))
+  expect(result.models[0].modelID).toBe("catalog-name")
+  expect(result.models[0].estimate).toBeCloseTo(0.00036)
+})
+
 test("one user turn sums tool continuations, separates sources and deduplicates settlements", () => {
   const last = end(6, "msg_three")
   const result = SessionUsageQuery.summarize([

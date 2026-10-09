@@ -15,6 +15,7 @@ import { ConfigRefresh } from "@/server/shared/config-refresh"
 import { ConfigRead } from "@/server/shared/config-read"
 import { Global } from "@zaovra-ai/core/global"
 import { GlobalUpgradeInput } from "../groups/global"
+import semver from "semver"
 
 export function eventData(data: GlobalBusEvent): Sse.Event {
   return {
@@ -145,6 +146,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const upgradeRaw = Effect.fn("GlobalHttpApi.upgradeRaw")(function* (ctx: {
       request: HttpServerRequest.HttpServerRequest
     }) {
+      if (ctx.request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json")
+        return HttpServerResponse.jsonUnsafe({ success: false, error: "JSON request body required" }, { status: 400 })
       const body = yield* Effect.orDie(ctx.request.text)
       const json = parseBody(body)
       if (json === undefined) {
@@ -154,7 +157,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         Effect.map((payload) => ({ valid: true as const, payload })),
         Effect.catch(() => Effect.succeed({ valid: false as const })),
       )
-      if (!payload.valid) {
+      if (
+        !payload.valid ||
+        !payload.payload.target ||
+        semver.valid(payload.payload.target) !== payload.payload.target
+      ) {
         return HttpServerResponse.jsonUnsafe({ success: false, error: "Invalid request body" }, { status: 400 })
       }
       const result = yield* upgrade({ payload: payload.payload })

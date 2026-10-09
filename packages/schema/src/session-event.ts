@@ -199,6 +199,7 @@ export namespace Step {
       assistantMessageID: SessionMessage.ID,
       agent: Schema.String,
       model: Model.Ref,
+      catalogModel: Model.Ref.pipe(optional),
       inputSequence: NonNegativeInt.pipe(optional),
       contextEpoch: NonNegativeInt.pipe(optional),
       verificationEnabled: Schema.Boolean.pipe(optional),

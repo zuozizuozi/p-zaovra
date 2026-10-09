@@ -29,6 +29,7 @@ type PendingPrompt = {
 
 const pending = new Map<string, PendingPrompt>()
 const interruptions = new Map<string, Promise<void>>()
+const creatingDrafts = new Set<string>()
 
 class CancelledFollowupInput extends Error {
   constructor() {
@@ -399,7 +400,21 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
   const handleSubmit = async (event: Event) => {
     event.preventDefault()
+    const draftID = search.draftId
+    const key = params.id ? undefined : JSON.stringify([sdk().scope, sdk().directory, draftID ?? ""])
+    if (key && creatingDrafts.has(key)) return
+    if (key) creatingDrafts.add(key)
+    try {
+      await submit(draftID, draftID ? tabs.draft(draftID).server : undefined)
+    } finally {
+      if (key) creatingDrafts.delete(key)
+    }
+  }
 
+  const submit = async (
+    draftID: string | undefined,
+    draftServer: ReturnType<typeof tabs.draft>["server"] | undefined,
+  ) => {
     const target = prompt.capture()
     const submission = createPromptSubmissionState({
       target,
@@ -457,6 +472,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const projectDirectory = sdk().directory
     const permissionState = permission.currentServerState()
     const isNewSession = !params.id
+    let session = input.info()
     const shouldAutoAccept = isNewSession && input.autoAccept()
     const worktreeSelection = input.newSessionWorktree?.() || "main"
 
@@ -502,7 +518,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       input.onNewSessionWorktreeReset?.()
     }
 
-    let session = input.info()
     if (!session && isNewSession) {
       const created = await client.v2.session
         .create({
@@ -535,9 +550,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             variant: variant ?? null,
           })
           layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
-          const draftID = search.draftId
-          if (draftID) tabs.promoteDraft(draftID, { server: tabs.draft(draftID).server, sessionId: session.id })
-          else navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
+          if (draftID && draftServer) tabs.promoteDraft(draftID, { server: draftServer, sessionId: session.id })
+          else if (!params.id && search.draftId === draftID)
+            navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
           submission.retarget(prompt.capture({ dir: base64Encode(sessionDirectory), id: session.id }))
         })
       }

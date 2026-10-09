@@ -529,6 +529,7 @@ const layer = Layer.effect(
       if (allowCompaction) yield* checkBudget(session, model)
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
+        catalogModel: model.catalogModel,
         verificationEnabled,
         sessionID: session.id,
         agent: agent.id,

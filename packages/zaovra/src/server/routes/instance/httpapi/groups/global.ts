@@ -5,7 +5,7 @@ import { InstanceDisposed } from "@/server/event"
 import "@zaovra-ai/core/account"
 import "@/server/event"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { described } from "./metadata"
 
 const GlobalHealth = Schema.Struct({
@@ -48,7 +48,7 @@ const GlobalEventSchema = Schema.Struct({
 }).annotate({ identifier: "GlobalEvent" })
 
 export const GlobalUpgradeInput = Schema.Struct({
-  target: Schema.optional(Schema.String),
+  target: Schema.String,
 })
 
 const GlobalUpgradeResult = Schema.Union([
@@ -121,14 +121,14 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.post("upgrade", GlobalPaths.upgrade, {
-        payload: [HttpApiSchema.NoContent, GlobalUpgradeInput],
+        payload: GlobalUpgradeInput,
         success: described(GlobalUpgradeResult, "Upgrade result"),
         error: HttpApiError.BadRequest,
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.upgrade",
           summary: "Upgrade zaovra",
-          description: "Upgrade zaovra to the specified version or latest if not specified.",
+          description: "Upgrade zaovra to an explicit canonical semantic version. Requires a JSON request body.",
         }),
       ),
     )

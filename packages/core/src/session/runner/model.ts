@@ -86,7 +86,10 @@ export class MissingEndpointError extends Schema.TaggedErrorClass<MissingEndpoin
   { message: Schema.String },
 ) {}
 
-export type ResolvedModel = Model & { readonly inputModalities?: readonly string[] }
+export type ResolvedModel = Model & {
+  readonly inputModalities?: readonly string[]
+  readonly catalogModel?: ModelV2.Ref
+}
 
 export interface Interface {
   readonly resolve: (session: SessionSchema.Info) => Effect.Effect<ResolvedModel, Error>
@@ -281,7 +284,12 @@ export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, creden
       fromCatalogModel(configured, credential).pipe(
         // Carry capabilities from the selected Catalog entry, not an API model-ID lookup:
         // custom aliases may share the same API ID with different settings.
-        Effect.map((resolved) => Object.assign(resolved, { inputModalities: configured.capabilities.input })),
+        Effect.map((resolved) =>
+          Object.assign(resolved, {
+            inputModalities: configured.capabilities.input,
+            catalogModel: { id: configured.id, providerID: configured.providerID },
+          }),
+        ),
       ),
     ),
   )

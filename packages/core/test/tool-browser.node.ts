@@ -337,6 +337,12 @@ test(
           yield* Effect.sleep("100 millis")
           yield* Fiber.interrupt(pressing)
           expect(JSON.stringify(yield* call({ action: "snapshot" }))).toContain("no active browser")
+          yield* call({ action: "open", url: url.href })
+          // A cancelled operation must not install a timer on this replacement owner.
+          for (let index = 0; index < 6; index++) {
+            yield* Effect.sleep("200 millis")
+            expect(JSON.stringify(yield* call({ action: "snapshot" }))).toContain("Browser fixture")
+          }
         }).pipe(Effect.provide(layer), Effect.provideService(BrowserTool.IdleTimeout, 500)),
       )
     } finally {

@@ -195,7 +195,18 @@ export function summarize(
     add(result.total, settlement.tokens)
     add(result[source], settlement.tokens)
     // Compaction events do not record the model ID; never price a guessed model.
-    const modelID = key.includes(":compaction:") ? null : (start?.model.id ?? null)
+    const candidates = key.includes(":compaction:")
+      ? []
+      : (catalogs.get(settlement.session) ?? []).filter((model) =>
+          start?.catalogModel
+            ? model.providerID === start.catalogModel.providerID && model.id === start.catalogModel.id
+            : model.providerID === provider && (model.id === start?.model.id || model.api.id === start?.model.id),
+        )
+    // Legacy events used the wire ID. Aliases or collisions must remain unpriced.
+    const model = candidates.length === 1 ? candidates[0] : undefined
+    const modelID = key.includes(":compaction:")
+      ? null
+      : (start?.catalogModel?.id ?? model?.id ?? start?.model.id ?? null)
     const bucketKey = JSON.stringify([provider ?? null, modelID])
     const bucket = buckets.get(bucketKey) ?? {
       providerID: provider ?? null,
@@ -207,9 +218,6 @@ export function summarize(
       unpriced: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       modelUnavailable: false,
     }
-    const model = catalogs
-      .get(settlement.session)
-      ?.find((model) => model.providerID === provider && model.id === modelID)
     const estimate = estimateRequest(settlement.tokens, model?.cost ?? [])
     bucket.modelUnavailable ||= !model
     bucket.pricedAmount += estimate.pricedAmount

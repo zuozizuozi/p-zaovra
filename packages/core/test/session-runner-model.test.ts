@@ -281,6 +281,7 @@ describe("SessionRunnerModel", () => {
       const resolved = yield* SessionRunnerModel.resolve(session, configured)
       expect(configured.id).not.toBe(resolved.id)
       expect(resolved.inputModalities).toEqual(["text", "image"])
+      expect(resolved.catalogModel).toEqual({ id: configured.id, providerID: configured.providerID })
     }),
   )
 

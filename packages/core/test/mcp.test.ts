@@ -36,6 +36,7 @@ const config = Layer.succeed(
                 fixture: new ConfigMCP.Local({
                   type: "local",
                   command: [process.execPath, path.join(directory, "mcp-canonical-stdio.ts")],
+                  environment: { MCP_TEST_STDERR: "1" },
                 }),
                 remote: new ConfigMCP.Remote({
                   type: "remote",

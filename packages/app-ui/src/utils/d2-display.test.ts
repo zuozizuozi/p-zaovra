@@ -4,6 +4,27 @@ import { artifactLines } from "./artifact-lines"
 import { commandVerification, workVerification } from "./verification-label"
 
 describe("D2 evidence and usage display", () => {
+  test("final acceptance unwraps host evidence but never trusts arbitrary producers", () => {
+    const payload = { result: { type: "command", exitCode: 0 }, artifactDigest: "snapshot" }
+    expect(workVerification({ kind: "command", producer: "work-verifier/command", payload }, "pass")).toBe(
+      "commandPassed",
+    )
+    expect(workVerification({ kind: "command", producer: "developer", payload }, "pass")).toBe("missingEvidence")
+    expect(
+      workVerification(
+        { kind: "command", producer: "work-verifier/command", payload: { result: payload.result } },
+        "pass",
+      ),
+    ).toBe("missingEvidence")
+  })
+  test("obsolete failures do not poison current checks, but require replacement evidence", () => {
+    const old = { exit: 1, eligiblePass: false, supersededBy: "new" }
+    const label = (checks: unknown[]) =>
+      workVerification({ kind: "command", producer: "session-host/1", payload: { checks, missing: [] } })
+    expect(label([old, { exit: 0, eligiblePass: true }])).toBe("commandPassed")
+    expect(label([old])).toBe("missingEvidence")
+    expect(label([old, { exit: 1, eligiblePass: false }])).toBe("commandFailed")
+  })
   test("disjoint accounting: output includes reasoning once; missing usage has no hit rate", () => {
     const total = {
       input: 30,

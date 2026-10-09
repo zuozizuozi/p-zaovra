@@ -1259,11 +1259,14 @@ describe("WorkRunner", () => {
 
   it.live("completes only after the runtime records passing command evidence", () =>
     Effect.gen(function* () {
-      const fs = yield* FSUtil.Service
       const work = yield* Work.Service
       const runner = yield* WorkRunner.Service
       const store = yield* WorkStore.Service
-      const directory = AbsolutePath.make(yield* fs.makeTempDirectoryScoped())
+      const temp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      const directory = AbsolutePath.make(temp.path)
       const created = yield* work.create({
         id: goalID,
         location: { directory },
@@ -1797,6 +1800,61 @@ it.effect("completes final acceptance with an oversized asset and invalidates ch
     yield* Effect.promise(() => fs.truncate(asset, 66 * 1024 * 1024))
     yield* Effect.promise(() => fs.utimes(asset, new Date(1000), new Date(1000)))
     expect(yield* WorkAcceptance.fingerprint(files, proc, directory.path)).not.toBe(modified)
+  }),
+)
+
+it.effect("fingerprints symlink identity without following its target", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const link = path.join(directory.path, "link")
+    yield* Effect.promise(async () => {
+      await fs.mkdir(path.join(directory.path, "one"))
+      await fs.mkdir(path.join(directory.path, "two"))
+      await fs.symlink(path.join(directory.path, "one"), link, "junction")
+    })
+    const files = yield* FSUtil.Service
+    const proc = yield* AppProcess.Service
+    const first = yield* WorkAcceptance.fingerprint(files, proc, directory.path)
+    expect(first).toBeString()
+    yield* Effect.promise(async () => {
+      await fs.unlink(link)
+      await fs.symlink(path.join(directory.path, "two"), link, "junction")
+    })
+    expect(yield* WorkAcceptance.fingerprint(files, proc, directory.path)).not.toBe(first)
+  }),
+)
+
+it.effect("fingerprints initialized gitlinks and rejects uninitialized submodules", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => tmpdir())
+    yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()))
+    const sub = path.join(directory.path, "sub")
+    yield* Effect.promise(async () => {
+      await $`git init`.cwd(directory.path).quiet()
+      await fs.mkdir(sub)
+      await $`git init`.cwd(sub).quiet()
+      await Bun.write(path.join(sub, "file.txt"), "one")
+      await $`git add .`.cwd(sub).quiet()
+      await $`git -c user.name=Test -c user.email=test@example.test commit -m initial`.cwd(sub).quiet()
+      await $`git add sub`.cwd(directory.path).quiet()
+    })
+    const files = yield* FSUtil.Service
+    const proc = yield* AppProcess.Service
+    const first = yield* WorkAcceptance.fingerprint(files, proc, directory.path)
+    expect(first).toBeString()
+    yield* Effect.promise(() => Bun.write(path.join(sub, "file.txt"), "two"))
+    const dirty = yield* WorkAcceptance.fingerprint(files, proc, directory.path)
+    expect(dirty).toBeString()
+    expect(dirty).not.toBe(first)
+    yield* Effect.promise(() =>
+      $`git -c user.name=Test -c user.email=test@example.test commit -am changed`.cwd(sub).quiet(),
+    )
+    expect(yield* WorkAcceptance.fingerprint(files, proc, directory.path)).not.toBe(dirty)
+    yield* Effect.promise(async () => {
+      await fs.rename(path.join(sub, ".git"), path.join(directory.path, "sub-git-backup"))
+    })
+    expect(yield* WorkAcceptance.fingerprint(files, proc, directory.path)).toBeUndefined()
   }),
 )
 

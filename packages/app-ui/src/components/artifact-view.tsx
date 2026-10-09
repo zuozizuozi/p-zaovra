@@ -2,14 +2,14 @@ import { createEffect, onCleanup, onMount, Show, lazy, Suspense } from "solid-js
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
-import type { ArtifactState } from "@/artifact-preview"
+import { artifactViewer, type ArtifactState } from "@/artifact-preview"
 
 const PDF = lazy(() => import("./artifact-pdf"))
 type Props = { target: string; directory: string; active?: boolean }
 export function ArtifactView(props: Props) {
   const platform = usePlatform()
   return (
-    <Show when={/\.pdf$/i.test(props.target)} fallback={<ArtifactBrowserView {...props} />}>
+    <Show when={artifactViewer(props.target) === "pdf"} fallback={<ArtifactBrowserView {...props} />}>
       <div class="flex h-full min-h-0 flex-col" aria-label="PDF 成果预览">
         <div class="flex h-10 shrink-0 items-center justify-between border-b border-border-weak-base px-3 text-xs">
           <span class="min-w-0 truncate">{props.target}</span>

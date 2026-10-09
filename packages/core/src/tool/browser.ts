@@ -86,15 +86,15 @@ const layer = Layer.effect(
     const idle = yield* IdleTimeout
     const owned = new Map<SessionSchema.ID, Owned>()
     const locks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
-    const close = async (id: SessionSchema.ID) => {
+    const close = async (id: SessionSchema.ID, expected?: Owned) => {
       const current = owned.get(id)
-      if (!current) return
+      if (!current || (expected && current !== expected)) return
       owned.delete(id)
       clearTimeout(current.timer)
       await current.browser.close().catch(() => {})
     }
     yield* Effect.addFinalizer(() =>
-      Effect.promise(() => Promise.all([...owned.keys()].map(close))).pipe(Effect.asVoid),
+      Effect.promise(() => Promise.all([...owned.keys()].map((id) => close(id)))).pipe(Effect.asVoid),
     )
 
     yield* tools
@@ -159,8 +159,9 @@ const layer = Layer.effect(
                 let started = false
                 const result = yield* Effect.tryPromise({
                   try: async (signal) => {
+                    let owner = owned.get(context.sessionID)
                     const abort = () => {
-                      void close(context.sessionID)
+                      if (owner) void close(context.sessionID, owner)
                     }
                     signal.addEventListener("abort", abort, { once: true })
                     try {
@@ -272,11 +273,12 @@ const layer = Layer.effect(
                           page.on("filechooser", () => log("File upload blocked"))
                           page.setDefaultTimeout(8000)
                           page.setDefaultNavigationTimeout(10000)
-                          owned.set(context.sessionID, current)
                           if (signal.aborted) {
-                            await close(context.sessionID)
+                            await browser.close()
                             throw new Error("Cancelled")
                           }
+                          owner = current
+                          owned.set(context.sessionID, current)
                           browser.on("disconnected", () => {
                             if (owned.get(context.sessionID) === state) {
                               clearTimeout(state.timer)
@@ -358,10 +360,11 @@ const layer = Layer.effect(
                       }
                     } finally {
                       signal.removeEventListener("abort", abort)
-                      const current = owned.get(context.sessionID)
-                      if (current) {
+                      const current = owner
+                      if (!signal.aborted && current && owned.get(context.sessionID) === current) {
+                        clearTimeout(current.timer)
                         current.timer = setTimeout(() => {
-                          void close(context.sessionID)
+                          void close(context.sessionID, current)
                         }, idle)
                         current.timer.unref()
                       }
