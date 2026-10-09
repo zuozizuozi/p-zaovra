@@ -400,7 +400,7 @@ export const ControllerInfo = Schema.Struct({
 }).annotate({ identifier: "Work.ControllerInfo" })
 export interface ControllerInfo extends Schema.Schema.Type<typeof ControllerInfo> {}
 
-export const ControllerDispatchSignal = Schema.Literals(["wake", "interrupt"]).annotate({
+export const ControllerDispatchSignal = Schema.Literals(["wake", "interrupt", "continue"]).annotate({
   identifier: "Work.ControllerDispatchSignal",
 })
 export type ControllerDispatchSignal = typeof ControllerDispatchSignal.Type

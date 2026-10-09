@@ -115,7 +115,7 @@ const layer = Effect.gen(function* () {
         approved,
         timestamp: yield* DateTime.now,
       })
-      if (approved) yield* controller.signal(goalID, "wake")
+      if (approved) yield* controller.signal(goalID, "continue")
     }),
   }
 })

@@ -23,6 +23,46 @@ const runtimeA = Work.ControllerRuntimeID.make("controller_runtime_cluster_a")
 const runtimeB = Work.ControllerRuntimeID.make("controller_runtime_cluster_b")
 
 describe("WorkController", () => {
+  it.effect("does not let a late approval overwrite an unprocessed interrupt", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const goalID = Work.GoalID.make("goal_approval_interrupt")
+      yield* insertGoal(db, goalID)
+      yield* WorkController.Service.use((controller) =>
+        Effect.gen(function* () {
+          yield* controller.signal(goalID, "interrupt")
+          const before = yield* controller.dispatches(goalID)
+          yield* controller.signal(goalID, "continue")
+          expect(yield* controller.dispatches(goalID)).toEqual(before)
+          // Explicit user resume retains its existing authority.
+          yield* controller.signal(goalID, "wake")
+          expect(yield* controller.dispatches(goalID)).toMatchObject([{ signal: "wake", revision: 2 }])
+        }),
+      ).pipe(Effect.provide(controllerLayer(controllerA, runtimeA)))
+    }),
+  )
+
+  it.effect("rejects an advisory dispatch written after the Goal has paused", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const goalID = Work.GoalID.make("goal_approval_paused")
+      yield* insertGoal(db, goalID)
+      yield* db
+        .update(WorkGoalTable)
+        .set({ status: "paused" })
+        .where(eq(WorkGoalTable.id, goalID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* WorkController.Service.use((controller) =>
+        Effect.gen(function* () {
+          yield* controller.signal(goalID, "continue")
+          expect(yield* controller.dispatches(goalID)).toEqual([])
+          expect(yield* controller.claim({ goalID })).toEqual([])
+        }),
+      ).pipe(Effect.provide(controllerLayer(controllerA, runtimeA)))
+    }),
+  )
+
   it.effect("lets only one controller lease a durable Goal signal", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

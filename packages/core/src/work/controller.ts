@@ -8,7 +8,7 @@ import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import { NonNegativeInt } from "../schema"
 import { Hash } from "../util/hash"
-import { WorkControllerDispatchTable, WorkControllerTable, WorkLeaseTable } from "./sql"
+import { WorkControllerDispatchTable, WorkControllerTable, WorkGoalTable, WorkLeaseTable } from "./sql"
 
 const DEFAULT_DURATION_MS = 15_000
 const DEFAULT_HEARTBEAT_MS = 5_000
@@ -251,6 +251,18 @@ export function makeLayer(options?: {
                     .where(eq(WorkControllerDispatchTable.goal_id, goalID))
                     .get()
                     .pipe(Effect.orDie)
+                  if (signal === "continue") {
+                    // Approval is advisory: never replace a pending interruption.
+                    if (current && current.revision > current.processed_revision && current.signal === "interrupt")
+                      return
+                    const goal = yield* tx
+                      .select({ status: WorkGoalTable.status })
+                      .from(WorkGoalTable)
+                      .where(eq(WorkGoalTable.id, goalID))
+                      .get()
+                      .pipe(Effect.orDie)
+                    if (goal?.status !== "active") return
+                  }
                   if (!current) {
                     yield* tx
                       .insert(WorkControllerDispatchTable)

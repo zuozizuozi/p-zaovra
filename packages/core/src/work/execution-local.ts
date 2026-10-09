@@ -43,9 +43,20 @@ const layer = Layer.effect(
       yield* controllers
         .run(
           claim,
-          recovery
-            .recover(claim.goalID)
-            .pipe(Effect.andThen(claim.signal === "interrupt" ? Effect.void : coordinator.run(claim.goalID))),
+          claim.signal === "continue"
+            ? coordinator.exclusive(
+                claim.goalID,
+                store.getGoal(claim.goalID).pipe(
+                  // Check at consumption, then retain the runner's non-forcing state
+                  // checks under its lease if a pause lands after this read.
+                  Effect.flatMap((goal) =>
+                    goal?.status === "active" ? runner.run({ goalID: claim.goalID, force: false }) : Effect.void,
+                  ),
+                ),
+              )
+            : recovery
+                .recover(claim.goalID)
+                .pipe(Effect.andThen(claim.signal === "interrupt" ? Effect.void : coordinator.run(claim.goalID))),
         )
         .pipe(
           Effect.catchTag("WorkController.Lost", (error) =>
