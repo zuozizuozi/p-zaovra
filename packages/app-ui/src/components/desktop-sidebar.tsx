@@ -118,8 +118,11 @@ export function DesktopSidebar() {
     )
   }
   const selectProject = (group: ProjectGroup) => {
+    // Changing the selection synchronously expands the active group below.
+    // Decide the user's toggle before that effect runs, not after it.
+    const expanded = view.expanded === groupKey(group) ? "" : groupKey(group)
     layout.home.setSelection({ server: group.server, directory: group.project.worktree })
-    setView("expanded", view.expanded === groupKey(group) ? "" : groupKey(group))
+    setView("expanded", expanded)
     if (!currentTab()) navigate("/")
   }
   const activeGroup = createMemo(() => {

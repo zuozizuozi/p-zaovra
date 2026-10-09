@@ -16,6 +16,7 @@ import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attach
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { writeStore } from "./store-write"
 import { queueStoreWrite } from "./store-write-queue"
+import { writeStoreAtomically } from "./store-atomic"
 import {
   getPinchZoomEnabled,
   getWindowID,
@@ -233,13 +234,16 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("store-delete", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     return queueStoreWrite(name, async () => {
-      getStore(name).delete(key)
+      const store = getStore(name)
+      const value = { ...store.store }
+      delete value[key]
+      await writeStoreAtomically(store.path, value)
       await removeStoreFileIfEmpty(name)
     })
   })
   handle("store-clear", (_event: IpcMainInvokeEvent, name: string) => {
     return queueStoreWrite(name, async () => {
-      getStore(name).clear()
+      await writeStoreAtomically(getStore(name).path, {})
       await removeStoreFileIfEmpty(name)
     })
   })

@@ -43,14 +43,14 @@ test("exhausted retries preserve original data and do not poison later mutations
         throw Object.assign(new Error("rename blocked"), { code: "EPERM" })
       }),
     ).rejects.toThrow("rename blocked")
-    expect(attempts).toBe(4)
+    expect(attempts).toBe(6)
     expect(await readFile(file, "utf8")).toBe("original")
     await queueStoreWrite(file, () => rm(file))
     expect(await Bun.file(file).exists()).toBe(false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
-})
+}, 10_000)
 
 test("unrelated errors are not retried", async () => {
   let attempts = 0

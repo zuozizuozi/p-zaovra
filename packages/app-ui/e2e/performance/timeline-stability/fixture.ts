@@ -97,6 +97,7 @@ export async function setupTimeline(
     locale?: string
     deviceScaleFactor?: number
     seedHistory?: boolean
+    v2ToolUpdates?: boolean
   } = {},
 ) {
   const sessions = input.sessions ?? [session()]
@@ -169,6 +170,47 @@ export async function setupTimeline(
     transport,
     async send(event: TimelineEvent, delay = 0) {
       const valid = validateTimelineEvent(event)
+      if (input.v2ToolUpdates && valid.payload.type === "message.part.updated") {
+        const part = valid.payload.properties.part
+        if (part.type !== "tool") throw new Error("V2 scroll fixtures expect tool updates")
+        if (part.state.status !== "running" && part.state.status !== "completed")
+          throw new Error("V2 scroll fixtures expect running or completed tools")
+        const index = messages.findIndex((message) => message.info.id === part.messageID)
+        if (index < 0) throw new Error("Missing fixture message")
+        const current = messages[index]!
+        const updated = {
+          info: current.info,
+          parts: current.parts.some((item) => item.id === part.id)
+            ? current.parts.map((item) => (item.id === part.id ? part : item))
+            : [...current.parts, part],
+        } as TimelineMessage
+        decodeMessage(updated, decodeOptions)
+        messages[index] = updated
+        // V2 tool events invalidate the persisted message projection. Reusing
+        // legacy part updates here inserts a second, differently keyed tool.
+        await transport.writeRaw(
+          `data: ${JSON.stringify({
+            directory,
+            payload: {
+              id: valid.payload.id,
+              type: part.state.status === "completed" ? "session.next.tool.success" : "session.next.tool.progress",
+              properties: {
+                timestamp: 1700000002000,
+                sessionID,
+                assistantMessageID: part.messageID,
+                callID: part.id,
+                structured: part.state.metadata,
+                content: part.state.status === "completed" ? [{ type: "text", text: part.state.output }] : [],
+                ...(part.state.status === "completed" ? { provider: { executed: false } } : {}),
+              },
+            },
+          })}\n\n`,
+          undefined,
+          describeEvent(valid),
+        )
+        if (delay) await page.waitForTimeout(delay)
+        return
+      }
       await transport.send(valid, { marker: describeEvent(valid) })
       if (delay) await page.waitForTimeout(delay)
     },
