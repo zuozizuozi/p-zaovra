@@ -100,8 +100,8 @@ export function SessionOutcomeDock() {
               {language.t("session.outcome.passedCount", { count: passedChecks() })}
               <Show when={staleChecks()}>
                 <span class="text-icon-critical-base">
-                  {" "}
-                  � {language.t("session.outcome.staleCount", { count: staleChecks() })}
+                  {" · "}
+                  {language.t("session.outcome.staleCount", { count: staleChecks() })}
                 </span>
               </Show>
               <Show when={failedChecks()}>

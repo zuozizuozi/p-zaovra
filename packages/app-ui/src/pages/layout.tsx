@@ -54,6 +54,7 @@ import { useTheme, type ColorScheme } from "@zaovra-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { DebugBar } from "@/components/debug-bar"
+import { UpdaterNotification } from "@/components/updater-notification"
 import { TabsInfoPopup } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
@@ -159,13 +160,6 @@ export default function LegacyLayout(props: ParentProps) {
     peeked: false,
   })
 
-  let notifiedVersion: string | undefined
-  createEffect(() => {
-    const update = platform.updater?.state()
-    if (update?.status !== "available" || notifiedVersion === update.version) return
-    notifiedVersion = update.version
-    showToast({ title: language.t("settings.updates.toast.available", { version: update.version }) })
-  })
   const updateVersion = () => {
     const state = platform.updater?.state()
     if (state?.status !== "ready") return
@@ -2260,9 +2254,7 @@ export default function LegacyLayout(props: ParentProps) {
     <div class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
       {autoselecting() ?? ""}
       <Titlebar update={titlebarUpdate} />
-      <Show when={updateVersion() !== undefined}>
-        <UpdateAvailableToast version={updateVersion() ?? ""} install={installUpdate} language={language} />
-      </Show>
+      <UpdaterNotification />
       <div class="flex-1 min-h-0 min-w-0 flex">
         <div class="flex-1 min-h-0 relative">
           <div class="size-full relative overflow-x-hidden">
@@ -2410,38 +2402,4 @@ export default function LegacyLayout(props: ParentProps) {
       <ToastRegion v2={false} />
     </div>
   )
-}
-
-function UpdateAvailableToast(props: {
-  version: string
-  install: () => void
-  language: ReturnType<typeof useLanguage>
-}) {
-  let toastId: number | undefined
-
-  onMount(() => {
-    toastId = showToast({
-      persistent: true,
-      icon: "download",
-      title: props.language.t("toast.update.title"),
-      description: props.language.t("toast.update.description", { version: props.version }),
-      actions: [
-        {
-          label: props.language.t("toast.update.action.installRestart"),
-          onClick: props.install,
-        },
-        {
-          label: props.language.t("toast.update.action.notYet"),
-          onClick: "dismiss",
-        },
-      ],
-    })
-  })
-
-  onCleanup(() => {
-    if (toastId === undefined) return
-    toaster.dismiss(toastId)
-  })
-
-  return null
 }

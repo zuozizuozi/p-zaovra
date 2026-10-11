@@ -96,7 +96,8 @@ for (const scenario of [
     const summary = page.locator('[data-component="verification-summary"]')
     await expect(summary).toContainText(`${scenario.passed} current checks passed`)
     if (scenario.stale) {
-      await expect(summary).toContainText("1 checks expired")
+      await expect(summary).toContainText("1 current checks passed · 1 checks expired")
+      await expect(summary).not.toContainText("\uFFFD")
       await expect(
         page.getByText("Dependencies changed. Refresh verification status or run the check again.", { exact: true }),
       ).toBeVisible()

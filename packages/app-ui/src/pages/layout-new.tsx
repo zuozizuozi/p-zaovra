@@ -1,6 +1,7 @@
 import { createEffect, Show, Suspense, type ParentProps } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
+import { UpdaterNotification } from "@/components/updater-notification"
 import { TabsInfoPopup } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { usePlatform } from "@/context/platform"
@@ -153,6 +154,7 @@ export default function NewLayout(props: ParentProps) {
         </main>
         {import.meta.env.DEV && import.meta.env.VITE_ZAOVRA_DEBUG_OVERLAY === "1" && <DebugBar inline />}
         <TabsInfoPopup />
+        <UpdaterNotification />
         <ToastRegion v2 />
       </div>
     </div>
