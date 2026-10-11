@@ -187,6 +187,7 @@ afterAll(() => fs.rm(artifactRoot, { recursive: true, force: true }))
 const runnerLayer = (
   reviewerLayer: Layer.Layer<WorkReviewer.Service>,
   executionLayer: Layer.Layer<SessionExecution.Service> = SessionExecution.noopLayer,
+  plannerLayer: Layer.Layer<WorkPlanner.Service> = planners,
 ) =>
   AppNodeBuilder.build(runnerNodes, [
     [ProjectV2.node, projects],
@@ -194,7 +195,7 @@ const runnerLayer = (
     [SessionExecution.node, executionLayer],
     [WorkExecution.node, WorkExecution.noopLayer],
     [WorkArchitect.node, architects],
-    [WorkPlanner.node, planners],
+    [WorkPlanner.node, plannerLayer],
     [WorkReviewer.node, reviewerLayer],
   ])
 const it = testEffect(runnerLayer(reviewers))
@@ -1923,3 +1924,141 @@ for (const restore of [false, true]) {
       }),
   )
 }
+
+const evidenceTransfer = {
+  store: undefined as WorkStore.Interface | undefined,
+  events: undefined as EventV2.Interface | undefined,
+}
+const evidenceTransferIt = testEffect(
+  runnerLayer(
+    Layer.succeed(
+      WorkReviewer.Service,
+      WorkReviewer.Service.of({
+        run: (input) =>
+          Effect.gen(function* () {
+            const events = evidenceTransfer.events!
+            if (input.task.acceptance?.scope === "local") {
+              const store = evidenceTransfer.store!
+              const older = (yield* store.attempts(input.task.id)).find((item) => item.id !== input.attempt.id)!
+              for (const name of ["current", "stale", "older"] as const) {
+                yield* events.publish(Work.Event.EvidenceRecorded, {
+                  goalID: input.goal.id,
+                  timestamp: yield* DateTime.now,
+                  info: Work.EvidenceInfo.make({
+                    id: Work.EvidenceID.make(`evidence_transfer_${name}`),
+                    goalID: input.goal.id,
+                    taskID: input.task.id,
+                    attemptID: name === "older" ? older.id : input.attempt.id,
+                    criterionIDs: input.task.criteria,
+                    kind: "command",
+                    producer: "session-host/1",
+                    payload: {
+                      checks: [{ command: "npm test", eligiblePass: name !== "stale", stale: name === "stale" }],
+                    },
+                    createdAt: DateTime.makeUnsafe(1234),
+                  }),
+                })
+              }
+            }
+            if (input.task.acceptance?.scope === "final") {
+              const commands = input.evidence.filter((item) => item.producer === "session-host/1")
+              expect(commands.map((item) => item.id).sort()).toEqual([
+                Work.EvidenceID.make("evidence_transfer_current"),
+                Work.EvidenceID.make("evidence_transfer_stale"),
+              ])
+              expect(
+                commands.every(
+                  (item) => item.taskID !== input.task.id && DateTime.toEpochMillis(item.createdAt) === 1234,
+                ),
+              ).toBe(true)
+              expect(commands.find((item) => item.id === "evidence_transfer_stale")?.payload).toEqual({
+                checks: [{ command: "npm test", eligiblePass: false, stale: true }],
+              })
+            }
+            return {
+              criteria: input.criteria.map((criterion) => ({
+                criterionID: criterion.id,
+                verdict: "pass" as const,
+                findings: [],
+                allowsRepair: false,
+              })),
+            }
+          }),
+      }),
+    ),
+  ),
+)
+evidenceTransferIt.effect(
+  "transfers only the latest successful review command evidence without refreshing stale checks",
+  () =>
+    Effect.gen(function* () {
+      evidenceTransfer.store = yield* WorkStore.Service
+      evidenceTransfer.events = yield* EventV2.Service
+      const work = yield* Work.Service
+      const runner = yield* WorkRunner.Service
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (value) => Effect.promise(() => value[Symbol.asyncDispose]()),
+      )
+      const created = yield* work.create({
+        location: { directory: AbsolutePath.make(directory.path) },
+        objective: "Check evidence transfer",
+        planning: true,
+        acceptanceCriteria: [{ description: "Test verified", required: true, evidence: "review" }],
+      })
+      yield* runner.run({ goalID: created.goal.id, force: true })
+      expect((yield* work.get(created.goal.id))?.status).toBe("completed")
+    }),
+)
+
+const planningFeedbackIt = testEffect(
+  runnerLayer(
+    reviewers,
+    SessionExecution.noopLayer,
+    Layer.succeed(
+      WorkPlanner.Service,
+      WorkPlanner.Service.of({
+        run: (input) =>
+          Effect.sync(() => {
+            if (input.attempt.number > 1) {
+              expect(input.previousFailure).toContain("is not assigned to any Task")
+              expect(WorkPlanner.prompt(input)).toContain(input.previousFailure!)
+            }
+            return Work.PlanOutput.make({
+              tasks: [
+                {
+                  key: "build",
+                  title: "Build",
+                  instructions: "Check",
+                  role: "build",
+                  isolation: "shared",
+                  dependsOn: [],
+                  criteria: input.attempt.number === 1 ? [] : input.goal.acceptanceCriteria.map((item) => item.id),
+                },
+              ],
+            })
+          }),
+      }),
+    ),
+  ),
+)
+planningFeedbackIt.effect("supplies the prior planning rejection to the next admitted planning request", () =>
+  Effect.gen(function* () {
+    const work = yield* Work.Service
+    const runner = yield* WorkRunner.Service
+    const store = yield* WorkStore.Service
+    const directory = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (value) => Effect.promise(() => value[Symbol.asyncDispose]()),
+    )
+    const created = yield* work.create({
+      location: { directory: AbsolutePath.make(directory.path) },
+      objective: "Fix plan coverage",
+      planning: true,
+      acceptanceCriteria: [{ description: "Covered", required: true, evidence: "review" }],
+    })
+    yield* runner.run({ goalID: created.goal.id, force: true })
+    expect((yield* store.attempts(created.tasks[0].id)).map((item) => item.status)).toEqual(["failed", "succeeded"])
+    expect((yield* work.get(created.goal.id))?.status).toBe("completed")
+  }),
+)

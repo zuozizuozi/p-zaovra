@@ -1128,7 +1128,9 @@ export const layer = Layer.effect(
                   (item) => item.kind === "review" && item.status === "succeeded",
                 )
                 return (yield* store.evidence(id)).filter(
-                  (item) => item.attemptID === latest?.id && ["browser-host/1", "git-host/1"].includes(item.producer),
+                  (item) =>
+                    item.attemptID === latest?.id &&
+                    ["browser-host/1", "git-host/1", "session-host/1"].includes(item.producer),
                 )
               }),
             )).flat()
@@ -1425,7 +1427,10 @@ export const layer = Layer.effect(
       task: Work.TaskInfo,
       attempt: Work.AttemptInfo,
     ) {
-      const input = { goal, task, attempt }
+      const previousFailure = (yield* store.attempts(task.id))
+        .filter((item) => item.id !== attempt.id && item.kind === "plan" && item.status === "failed")
+        .at(-1)?.failure?.message
+      const input = { goal, task, attempt, previousFailure }
       const text = yield* dispatchRemoteAgent(goal, task, attempt, WorkPlanner.prompt(input)).pipe(
         Effect.flatMap(remoteAgentText),
       )

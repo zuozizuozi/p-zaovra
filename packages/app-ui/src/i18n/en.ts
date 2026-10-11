@@ -172,7 +172,13 @@ export const dict = {
   "usage.updated": "Last synchronized",
   "provider.custom.protocol.label": "API protocol",
   "provider.custom.protocol.hint":
-    "Choose the API format documented by your service, not the model brand. Authentication headers are added automatically.",
+    "Chat uses /chat/completions; Responses uses /responses. Check which endpoint your service documents; the model name alone is not enough. Many gateways support only one. Authentication headers are added automatically.",
+  "work.model.missing":
+    "No model is available. Connect a service and enable a model in model service settings, then retry.",
+  "work.model.settings": "Set up model service",
+  "work.model.used": "Latest model record",
+  "work.model.unavailable": "Model record is unavailable",
+  "work.model.unrecorded": "No model response recorded yet",
   "prompt.addFiles": "Add files",
   "model.service.label": "Model service",
   "model.price.free": "Free",

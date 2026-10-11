@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createServer } from "node:http"
-import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { access, mkdtemp, mkdir, rm, writeFile, copyFile } from "node:fs/promises"
 import { execFileSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
@@ -275,15 +275,17 @@ test(
           const shot = yield* call({ action: "screenshot" })
           expect(shot.output?.content.some((part) => part.type === "file")).toBe(false)
           expect(JSON.stringify(shot.output?.content)).toContain("model has not viewed")
-          const structured = shot.output?.structured as { screenshot: { name: string; data: string; mime: string } }
+          const structured = shot.output?.structured as { screenshot: { name: string; mime: string } }
+          assert.equal("data" in structured.screenshot, false)
+          assert.ok(JSON.stringify(structured).length < 10000)
           expect(structured.screenshot.name.endsWith(".png")).toBe(true)
           expect(yield* Effect.promise(() => access(structured.screenshot.name).then(() => true))).toBe(true)
           expect(structured.screenshot.mime).toBe("image/png")
           if (process.env.BROWSER_TEST_ARTIFACTS) {
             yield* Effect.promise(() =>
-              writeFile(
+              copyFile(
+                structured.screenshot.name,
                 path.join(process.env.BROWSER_TEST_ARTIFACTS!, "browser-fixture.png"),
-                Buffer.from(structured.screenshot.data, "base64"),
               ),
             )
           }

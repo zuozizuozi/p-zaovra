@@ -9,6 +9,7 @@ test("explains common execution failures in both languages without replacing red
     "HTTP 402: insufficient balance",
     "HTTP 429: rate limit",
     "500 not implemented",
+    "HTTP 400: This model only supports /responses, not /chat/completions",
     "maximum context length",
     "ETIMEDOUT",
     "fetch failed",
@@ -21,6 +22,10 @@ test("explains common execution failures in both languages without replacing red
       expect(translated).not.toStartWith("error.execution.")
     }
   }
+})
+
+test("does not turn every bad request into a protocol error", () => {
+  expect(explainExecutionError("HTTP 400: invalid temperature", () => "wrong")).toBe("HTTP 400: invalid temperature")
 })
 
 test("leaves unrecognized failures intact", () => {

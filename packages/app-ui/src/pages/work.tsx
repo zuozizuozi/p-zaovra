@@ -8,6 +8,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { workGoalControlDisabled, workGoalControls } from "./work-controls"
 import { useLanguage } from "@/context/language"
 import { workVerification } from "@/utils/verification-label"
+import { useSettingsDialog } from "@/components/settings-dialog"
 
 const defaultRole: WorkDetail["roles"][number]["id"] = "developer"
 
@@ -24,6 +25,7 @@ export default function WorkPage() {
       open: false,
       objective: "",
       directory: "",
+      directoryRevision: 0,
     },
     expansion: {
       open: false,
@@ -84,9 +86,14 @@ export default function WorkPage() {
     setState("error", undefined)
     setState("draft", "open", true)
     if (state.draft.directory) return
+    const revision = state.draft.directoryRevision
+    const scope = serverSDK().scope
     void serverSDK()
       .client.path.get()
-      .then((result) => setState("draft", "directory", result.data?.directory ?? ""))
+      .then((result) => {
+        if (!state.draft.open || scope !== serverSDK().scope || revision !== state.draft.directoryRevision) return
+        setState("draft", "directory", result.data?.directory ?? "")
+      })
       .catch(() => undefined)
   }
   const createGoal = () => {
@@ -247,7 +254,9 @@ export default function WorkPage() {
                 busy={state.action === "create"}
                 error={state.error}
                 onObjective={(value) => setState("draft", "objective", value)}
-                onDirectory={(value) => setState("draft", "directory", value)}
+                onDirectory={(value) =>
+                  setState("draft", { directory: value, directoryRevision: state.draft.directoryRevision + 1 })
+                }
                 onCancel={() => setState("draft", "open", false)}
                 onCreate={createGoal}
               />
@@ -1008,19 +1017,57 @@ function AttemptRow(props: {
   onOpen: () => void
   onRetry: () => Promise<unknown>
 }) {
+  const language = useLanguage()
+  const settings = useSettingsDialog("providers")
+  const missingModel = () => /No model (?:is )?available/i.test(props.attempt.failure?.message ?? "")
+  const serverSDK = useServerSDK()
+  const [modelDetails, setModelDetails] = createStore({ open: false })
+  const [model] = createResource(
+    () =>
+      modelDetails.open && props.attempt.sessionID
+        ? { id: props.attempt.sessionID, status: props.attempt.status, scope: serverSDK().scope }
+        : undefined,
+    async (input) => {
+      const response = await serverSDK().client.v2.session.messages({ sessionID: input.id, limit: 100, order: "desc" })
+      if (!response.data) throw new Error("Session model record unavailable")
+      return response.data.data.find((message) => message.type === "assistant")
+    },
+  )
   return (
-    <div class="flex items-center gap-3 rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 px-3 py-2.5">
+    <div class="flex flex-wrap items-center gap-3 rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 px-3 py-2.5">
       <div class="w-16 shrink-0 font-mono text-[11px] uppercase text-v2-text-text-muted">{props.attempt.kind}</div>
       <div class="min-w-0 flex-1">
         <div class="truncate font-mono text-[11px]">{props.attempt.id}</div>
         <div class="mt-1 text-[10px] text-v2-text-text-muted">
           run #{props.attempt.number}
           <Show when={props.attempt.fence}> · fence {props.attempt.fence}</Show>
-          <Show when={props.attempt.failure}> · {props.attempt.failure?.message}</Show>
+          <Show when={props.attempt.failure}>
+            {" "}
+            · {missingModel() ? language.t("work.model.missing") : props.attempt.failure?.message}
+          </Show>
+          <Show when={missingModel()}>
+            <ButtonV2 size="small" variant="ghost-muted" onClick={settings}>
+              {language.t("work.model.settings")}
+            </ButtonV2>
+          </Show>
         </div>
       </div>
       <Status value={props.attempt.status} />
       <Show when={props.attempt.sessionID}>
+        <ButtonV2 size="small" variant="ghost-muted" onClick={() => setModelDetails("open", !modelDetails.open)}>
+          {language.t("work.model.used")}
+        </ButtonV2>
+        <Show when={modelDetails.open}>
+          <span class="text-[11px] text-v2-text-text-muted">
+            {model.loading
+              ? "…"
+              : model.error
+                ? language.t("work.model.unavailable")
+                : model()?.type === "assistant"
+                  ? `${model()!.model.providerID} / ${model()!.model.id}`
+                  : language.t("work.model.unrecorded")}
+          </span>
+        </Show>
         <ButtonV2 size="small" variant="ghost-muted" onClick={props.onOpen}>
           Open session
         </ButtonV2>

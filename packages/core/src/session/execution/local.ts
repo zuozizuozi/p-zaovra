@@ -11,6 +11,7 @@ import { SessionRunner } from "../runner"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { SessionExecution } from "../execution"
+import { LLMError } from "@zaovra-ai/llm"
 
 /** Current-process routing for implicit-local Locations. Future remote placement belongs here. */
 const layer = Layer.effect(
@@ -77,6 +78,17 @@ export const reportFailure = Effect.fn("SessionExecution.reportFailure")(functio
   yield* Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID: session.id, ref }))
   const messages = yield* store.context(session.id).pipe(Effect.catch(() => Effect.succeed([])))
   const latest = messages.flatMap((message) => (message.type === "assistant" ? [message] : [])).at(-1)
+  const error = Cause.squash(cause)
+  // Budget admission already persisted its normal stop. Only deduplicate that
+  // exact failure; an unrelated defect after an old budget stop must stay visible.
+  if (
+    error instanceof LLMError &&
+    error.module === "SessionRunner" &&
+    error.method === "budget" &&
+    latest?.finish === "budget-exhausted" &&
+    latest.time.completed
+  )
+    return
   // Provider failures already have a durable event. Do not duplicate them.
   if (
     latest?.error &&
@@ -84,7 +96,6 @@ export const reportFailure = Effect.fn("SessionExecution.reportFailure")(functio
     DateTime.toEpochMillis(latest.time.completed) >= DateTime.toEpochMillis(started)
   )
     return
-  const error = Cause.squash(cause)
   // Unanticipated exceptions can contain secrets or complete payloads. Expose a
   // safe category, never arbitrary exception text; the reference locates the log.
   const reason =

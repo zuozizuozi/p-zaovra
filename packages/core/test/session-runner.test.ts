@@ -5487,7 +5487,23 @@ describe("SessionRunnerLLM", () => {
         }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ]
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      const started = yield* DateTime.now
+      const failure = yield* session.resume(sessionID).pipe(Effect.flip)
+      expect(failure).toBeInstanceOf(LLMError)
+      const store = yield* SessionStore.Service
+      const events = yield* EventV2.Service
+      const info = (yield* store.get(sessionID))!
+      const beforeReport = yield* session.context(sessionID)
+      yield* SessionExecutionLocal.reportFailure(store, events, info, started, Cause.fail(failure))
+      expect(yield* session.context(sessionID)).toEqual(beforeReport)
+      yield* SessionExecutionLocal.reportFailure(
+        store,
+        events,
+        info,
+        DateTime.makeUnsafe(Date.now() + 1000),
+        Cause.fail(failure),
+      )
+      expect(yield* session.context(sessionID)).toEqual(beforeReport)
       expect(requests).toHaveLength(1)
       expect(executions).toEqual(["retained"])
       const context = yield* session.context(sessionID)
@@ -5512,6 +5528,10 @@ describe("SessionRunnerLLM", () => {
       ]
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(2)
+      sessionTokenBudget = 100
+      yield* session.resume(sessionID).pipe(Effect.flip)
+      yield* SessionExecutionLocal.reportFailure(store, events, info, started, Cause.die(new RangeError("unrelated")))
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "error", error: { type: "unknown" } })
     }),
   )
 

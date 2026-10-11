@@ -104,6 +104,28 @@ const layer = Layer.effect(
             "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript.",
           input: Input,
           output: Output,
+          structured: Schema.Struct({
+            text: Schema.String,
+            screenshot: Schema.optional(
+              Schema.Struct({
+                mime: Schema.Literal("image/png"),
+                name: Schema.String,
+                modelVisible: Schema.Boolean,
+              }),
+            ),
+          }),
+          toStructuredOutput: ({ output }) => ({
+            text: output.text,
+            ...(output.screenshot
+              ? {
+                  screenshot: {
+                    mime: output.screenshot.mime,
+                    name: output.screenshot.name,
+                    modelVisible: output.screenshot.modelVisible,
+                  },
+                }
+              : {}),
+          }),
           toModelOutput: ({ output }) => [
             { type: "text", text: output.text },
             ...(output.screenshot?.modelVisible

@@ -1,4 +1,5 @@
-import { explainExecutionError } from "@/utils/execution-error"
+import { explainExecutionError, executionErrorKind } from "@/utils/execution-error"
+import { protocolChoice } from "@/components/provider-protocol"
 import {
   createEffect,
   createMemo,
@@ -1319,11 +1320,33 @@ export function MessageTimeline(props: {
       }
       case "Error": {
         const errorRow = row as Accessor<TimelineRowByTag<"Error">>
+        const provider = () => {
+          if (executionErrorKind(errorRow().text) !== "protocol") return
+          const message = assistantMessagesByParent()
+            .get(errorRow().userMessageID)
+            ?.find((item) => item.error && item.error.name !== "MessageAbortedError")
+          if (!message || !protocolChoice(serverSync().data.config.provider?.[message.providerID]?.npm)) return
+          return message.providerID
+        }
         return (
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <Card variant="error" class="error-card">
                 {explainExecutionError(errorRow().text, (key) => language.t(key as Parameters<typeof language.t>[0]))}
+                <Show when={provider()}>
+                  {(id) => (
+                    <Button
+                      variant="ghost"
+                      onClick={async () => {
+                        const providerID = id()
+                        const { DialogProviderProtocol } = await import("@/components/dialog-provider-protocol")
+                        dialog.show(() => <DialogProviderProtocol providerID={providerID} />)
+                      }}
+                    >
+                      {language.t("provider.custom.protocol.label")}
+                    </Button>
+                  )}
+                </Show>
               </Card>
             </div>
           </TimelineRowFrame>
