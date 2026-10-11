@@ -121,6 +121,24 @@ export function SessionOutcomeDock() {
           <Show when={staleChecks()}>
             <span>{language.t("session.outcome.staleHint")}</span>
           </Show>
+          <Show when={!outcome()?.checks.length && outcome()?.recentChecks?.length}>
+            <details data-component="verification-recent" class="text-text-weak">
+              <summary>{language.t("session.outcome.recent")}</summary>
+              <For each={outcome()?.recentChecks}>
+                {(item) => (
+                  <div class="min-w-0 break-words" data-source-message={item.userMessageID}>
+                    {language.t("session.outcome.recentSource", { turn: item.turn })}
+                    {" · "}
+                    {language.t(item.fresh ? "session.outcome.recentFresh" : "session.outcome.recentStale")}
+                    {" · "}
+                    {item.check.kind}
+                    {" · "}
+                    {item.check.command}
+                  </div>
+                )}
+              </For>
+            </details>
+          </Show>
           <Show when={outcome()?.checks.length || outcome()?.missing.length}>
             <For
               each={[

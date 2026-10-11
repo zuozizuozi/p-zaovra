@@ -48,6 +48,14 @@ export const Info = Schema.Struct({
   ]),
   outcomeUnknown: Schema.Boolean,
   checks: Schema.Array(Check),
+  recentChecks: Schema.Array(
+    Schema.Struct({
+      check: Check,
+      userMessageID: Schema.String,
+      turn: Schema.Int,
+      fresh: Schema.Boolean,
+    }),
+  ).pipe(optional),
   missing: Schema.Array(Schema.String),
   review: Review.pipe(optional),
   messageID: Schema.String.pipe(optional),

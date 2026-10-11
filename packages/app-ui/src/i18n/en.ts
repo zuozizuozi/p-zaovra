@@ -177,6 +177,14 @@ export const dict = {
     "No model is available. Connect a service and enable a model in model service settings, then retry.",
   "work.model.settings": "Set up model service",
   "work.model.used": "Latest model record",
+  "error.execution.upstreamInterrupted":
+    "The upstream connection was interrupted. Review completed actions, then use the existing continue or retry action.",
+  "error.execution.overloaded":
+    "The service is overloaded. Try again later using the existing continue or retry action.",
+  "session.outcome.recent": "Most recent successful checks (earlier turn)",
+  "session.outcome.recentSource": "From turn {{turn}}",
+  "session.outcome.recentFresh": "Still valid",
+  "session.outcome.recentStale": "Stale",
   "work.model.unavailable": "Model record is unavailable",
   "work.model.unrecorded": "No model response recorded yet",
   "prompt.addFiles": "Add files",

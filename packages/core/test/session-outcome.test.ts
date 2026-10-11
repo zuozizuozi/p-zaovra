@@ -18,6 +18,59 @@ const assistant: SessionMessage.Assistant = {
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
 
+test("historical checks retain their source without affecting the current verdict and become stale after edits", () => {
+  const target = { path: path.resolve("product.js"), digest: "tested" }
+  const user = (id: string): SessionMessage.User => ({
+    type: "user",
+    id: SessionMessage.ID.make(`msg_${id}`),
+    text: id,
+    time: assistant.time,
+  })
+  const checked = (exit: number): SessionMessage.Assistant => ({
+    ...assistant,
+    content: [
+      {
+        type: "tool",
+        id: "check",
+        name: "bash",
+        time: assistant.time,
+        state: {
+          status: "completed",
+          input: {},
+          content: [],
+          structured: {
+            verification: {
+              callID: "check",
+              kind: "test",
+              command: "node test.js",
+              exit,
+              targets: [target],
+            },
+          },
+        },
+      },
+    ],
+  })
+  const history = [user("original"), checked(0), user("no-checks"), assistant, user("latest"), assistant]
+  const previous = SessionOutcome.previousChecks(history, path.dirname(target.path))
+  expect(previous).toHaveLength(1)
+  expect(previous[0]).toMatchObject({ userMessageID: "msg_original", turn: 1, check: { exit: 0 } })
+  expect(SessionOutcome.checkFreshness(previous[0]!.check, [target], undefined).fresh).toBe(true)
+  expect(SessionOutcome.checkFreshness(previous[0]!.check, [{ ...target, digest: "edited" }], undefined).fresh).toBe(
+    false,
+  )
+  const outcome = SessionOutcome.derive(SessionOutcome.acceptanceHistory(history), false)
+  expect(outcome.checks).toEqual([])
+  expect(outcome.state).not.toBe("completed_verified")
+  expect(SessionOutcome.previousChecks([user("first"), checked(0)], path.dirname(target.path))).toEqual([])
+  expect(
+    SessionOutcome.previousChecks(
+      [user("first"), checked(0), user("failed"), checked(1), user("latest"), assistant],
+      path.dirname(target.path),
+    ),
+  ).toEqual([])
+})
+
 test("same-command fresh target supersets replace failures without hiding different, stale or narrowed checks", () => {
   const source = { path: path.resolve("product.js"), digest: "fixed" }
   const extra = { path: path.resolve("favicon.svg"), digest: "added" }

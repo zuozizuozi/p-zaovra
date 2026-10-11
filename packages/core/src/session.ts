@@ -494,8 +494,8 @@ const layer = Layer.effect(
           session.location.directory,
           SessionOutcome.requested(messages).entries,
         )
-        if (!preliminary.checks.length)
-          return SessionOutcome.derive(
+        if (!preliminary.checks.length) {
+          const outcome = SessionOutcome.derive(
             messages,
             false,
             undefined,
@@ -505,6 +505,49 @@ const layer = Layer.effect(
             session.location.directory,
             artifacts,
           )
+          const history = yield* SessionOutcome.history(db, sessionID, true)
+          if (JSON.stringify(messages) !== JSON.stringify(SessionOutcome.acceptanceHistory(history))) return outcome
+          const previous = SessionOutcome.previousChecks(history, session.location.directory)
+          if (!previous.length) return outcome
+          const targets = yield* SessionOutcome.fingerprint(
+            fs,
+            previous.flatMap(({ check }) =>
+              [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path),
+            ),
+          )
+          const snapshot = previous.some(({ check }) => !check.targets?.length)
+            ? yield* Snapshot.Service.use((service) => service.capture()).pipe(
+                Effect.provide(locations.get(session.location)),
+              )
+            : undefined
+          // A historical pass must not be attributed to a new or concurrently
+          // running turn. These observations are display-only, never verdict inputs.
+          const running =
+            (yield* execution.active).has(sessionID) ||
+            (shells.get(sessionID)?.size ?? 0) > 0 ||
+            (yield* jobs.list()).some(
+              (job) =>
+                job.status === "running" &&
+                job.metadata?.sessionID === sessionID &&
+                (job.type !== "bash" || job.metadata?.kind !== "preview"),
+            )
+          if (running || JSON.stringify(history) !== JSON.stringify(yield* SessionOutcome.history(db, sessionID, true)))
+            return outcome
+          const { Evidence } = yield* Effect.promise(() => import("./evidence"))
+          return {
+            ...outcome,
+            recentChecks: previous.map((item) => ({
+              ...item,
+              fresh: SessionOutcome.checkFreshness(item.check, targets, snapshot).fresh,
+              check: {
+                ...item.check,
+                logs: item.check.logs?.map((file) =>
+                  file.startsWith("ev_") ? file : Evidence.reference(sessionID, file),
+                ),
+              },
+            })),
+          }
+        }
         const targets = yield* SessionOutcome.fingerprint(
           fs,
           preliminary.checks.flatMap((check) =>

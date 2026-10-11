@@ -6429,6 +6429,12 @@ export type SessionOutcomeInfo = {
   state: "idle" | "running" | "completed" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
   outcomeUnknown: boolean
   checks: Array<SessionOutcomeCheck>
+  recentChecks?: Array<{
+    check: SessionOutcomeCheck
+    userMessageID: string
+    turn: number
+    fresh: boolean
+  }>
   missing: Array<string>
   review?: SessionOutcomeReview
   messageID?: string

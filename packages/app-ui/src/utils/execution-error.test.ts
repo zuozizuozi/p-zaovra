@@ -14,6 +14,8 @@ test("explains common execution failures in both languages without replacing red
     "ETIMEDOUT",
     "fetch failed",
     "HTTP 503",
+    "upstream_http2_stream_error: Upstream HTTP/2 stream failed",
+    "server_error: Our servers are currently overloaded. Please try again later.",
   ]) {
     for (const dictionary of [dict, english.dict]) {
       const translated = explainExecutionError(detail, (key) => dictionary[key as keyof typeof dictionary])

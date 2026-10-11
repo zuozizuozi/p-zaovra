@@ -4,27 +4,30 @@ type Translator = (key: string) => string
 // the explanation must not hide a gateway's more specific failure reason.
 export function executionErrorKind(detail: string) {
   const status = detail.match(/(?:^|\b(?:HTTP|status(?:_code| code)?))\s*[:=]?\s*([45]\d{2})\b/i)?.[1]
-  const key =
-    status === "401" || status === "403" || /unauthorized|authentication|invalid.api.key/i.test(detail)
-      ? "auth"
-      : status === "402" || /insufficient.(?:balance|credit)|account.expired/i.test(detail)
-        ? "billing"
-        : status === "429" || /rate.limit|too.many.requests/i.test(detail)
-          ? "rateLimit"
-          : status === "404" ||
-              /not implemented|unsupported.*(?:protocol|endpoint)|(?:use|requires?|only supports?|not supported).*(?:\/responses|\/chat\/completions)|(?:\/responses|\/chat\/completions).*(?:not supported|unsupported|use instead)/i.test(
-                detail,
-              )
-            ? "protocol"
-            : /context.length|context.window|maximum.context/i.test(detail)
-              ? "context"
-              : /timeout|timed.out|ETIMEDOUT/i.test(detail)
-                ? "timeout"
-                : /ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|network error/i.test(detail)
-                  ? "network"
-                  : /^50[0-4]$/.test(status ?? "") || /internal.server.error|service.unavailable/i.test(detail)
-                    ? "provider"
-                    : undefined
+  const key = /upstream_http2_stream_error/i.test(detail)
+    ? "upstreamInterrupted"
+    : /overloaded|service_overloaded/i.test(detail)
+      ? "overloaded"
+      : status === "401" || status === "403" || /unauthorized|authentication|invalid.api.key/i.test(detail)
+        ? "auth"
+        : status === "402" || /insufficient.(?:balance|credit)|account.expired/i.test(detail)
+          ? "billing"
+          : status === "429" || /rate.limit|too.many.requests/i.test(detail)
+            ? "rateLimit"
+            : status === "404" ||
+                /not implemented|unsupported.*(?:protocol|endpoint)|(?:use|requires?|only supports?|not supported).*(?:\/responses|\/chat\/completions)|(?:\/responses|\/chat\/completions).*(?:not supported|unsupported|use instead)/i.test(
+                  detail,
+                )
+              ? "protocol"
+              : /context.length|context.window|maximum.context/i.test(detail)
+                ? "context"
+                : /timeout|timed.out|ETIMEDOUT/i.test(detail)
+                  ? "timeout"
+                  : /ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|network error/i.test(detail)
+                    ? "network"
+                    : /^50[0-4]$/.test(status ?? "") || /internal.server.error|service.unavailable/i.test(detail)
+                      ? "provider"
+                      : undefined
   return key
 }
 

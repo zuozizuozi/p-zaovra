@@ -1475,3 +1475,73 @@ describe("OpenAI Responses route", () => {
     }),
   )
 })
+
+it.effect("accepts the recorded HTTP2 interruption with an explicitly null param", () =>
+  Effect.gen(function* () {
+    const response = yield* LLMClient.generate(request).pipe(
+      Effect.provide(
+        fixedResponse(
+          sseEvents({
+            type: "error",
+            sequence_number: 0,
+            code: "upstream_http2_stream_error",
+            message: "Upstream HTTP/2 stream failed",
+            param: null,
+          }),
+        ),
+      ),
+    )
+    expect(response.events).toEqual([
+      { type: "provider-error", message: "upstream_http2_stream_error: Upstream HTTP/2 stream failed" },
+    ])
+  }),
+)
+
+it.effect("preserves the recorded overloaded response.failed code and message", () =>
+  Effect.gen(function* () {
+    const response = yield* LLMClient.generate(request).pipe(
+      Effect.provide(
+        fixedResponse(
+          sseEvents({
+            type: "response.failed",
+            sequence_number: 3,
+            response: {
+              id: "resp_overloaded",
+              error: {
+                code: "server_error",
+                message: "Our servers are currently overloaded. Please try again later.",
+                param: null,
+              },
+            },
+          }),
+        ),
+      ),
+    )
+    expect(response.events).toEqual([
+      {
+        type: "provider-error",
+        message: "server_error: Our servers are currently overloaded. Please try again later.",
+      },
+    ])
+  }),
+)
+
+if (process.env.ZAOVRA_RESPONSES_REPLAY_DIR) {
+  for (const file of ["1791719910623.sse", "1791723637491.sse"]) {
+    it.effect(
+      `replays archived SSE ${file}`,
+      () =>
+        Effect.gen(function* () {
+          const raw = yield* Effect.promise(() => Bun.file(`${process.env.ZAOVRA_RESPONSES_REPLAY_DIR}/${file}`).text())
+          const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(raw)))
+          const errors = response.events.filter((event) => event.type === "provider-error")
+          expect(errors.length).toBeGreaterThan(0)
+          console.log(JSON.stringify({ archive: file, errors }))
+          if (file === "1791719910623.sse") expect(errors[0]?.message).toContain("upstream_http2_stream_error")
+          if (file === "1791723637491.sse")
+            expect(errors.some((event) => event.message.includes("server_error"))).toBe(true)
+        }),
+      120000,
+    )
+  }
+}

@@ -229,7 +229,7 @@ const OpenAIResponsesEvent = Schema.Struct({
   ),
   code: Schema.optional(Schema.String),
   message: Schema.optional(Schema.String),
-  param: Schema.optional(Schema.String),
+  param: optionalNull(Schema.String),
 })
 type OpenAIResponsesEvent = Schema.Schema.Type<typeof OpenAIResponsesEvent>
 

@@ -2172,6 +2172,25 @@ export type SessionsRecoverOutput = {
       readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
       readonly logs?: ReadonlyArray<string>
     }>
+    readonly recentChecks?: ReadonlyArray<{
+      readonly check: {
+        readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+        readonly command: string
+        readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+        readonly execution?: "not-run" | "invalid-report" | "timeout"
+        readonly requirements?: ReadonlyArray<string>
+        readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+        readonly supersededBy?: string
+        readonly snapshot?: string
+        readonly callID: string
+        readonly cwd?: string
+        readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+        readonly logs?: ReadonlyArray<string>
+      }
+      readonly userMessageID: string
+      readonly turn: number
+      readonly fresh: boolean
+    }>
     readonly missing: ReadonlyArray<string>
     readonly review?: {
       readonly userMessageID: string
@@ -2220,6 +2239,25 @@ export type SessionsOutcomeOutput = {
       readonly cwd?: string
       readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
       readonly logs?: ReadonlyArray<string>
+    }>
+    readonly recentChecks?: ReadonlyArray<{
+      readonly check: {
+        readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+        readonly command: string
+        readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+        readonly execution?: "not-run" | "invalid-report" | "timeout"
+        readonly requirements?: ReadonlyArray<string>
+        readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+        readonly supersededBy?: string
+        readonly snapshot?: string
+        readonly callID: string
+        readonly cwd?: string
+        readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+        readonly logs?: ReadonlyArray<string>
+      }
+      readonly userMessageID: string
+      readonly turn: number
+      readonly fresh: boolean
     }>
     readonly missing: ReadonlyArray<string>
     readonly review?: {

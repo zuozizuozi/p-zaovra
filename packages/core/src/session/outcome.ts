@@ -56,7 +56,7 @@ export function acceptanceHistory(messages: readonly SessionMessage.Message[]) {
 }
 
 /** Load durable acceptance history, independently of generated compaction. */
-export const history = (db: Database.Interface["db"], sessionID: SessionSchema.ID) =>
+export const history = (db: Database.Interface["db"], sessionID: SessionSchema.ID, all = false) =>
   Effect.gen(function* () {
     const users = yield* db
       .select()
@@ -74,16 +74,40 @@ export const history = (db: Database.Interface["db"], sessionID: SessionSchema.I
       .where(
         and(
           eq(SessionMessageTable.session_id, sessionID),
-          gte(SessionMessageTable.seq, users.find((row) => row.id === source?.id)?.seq ?? 0),
+          gte(SessionMessageTable.seq, all ? 0 : (users.find((row) => row.id === source?.id)?.seq ?? 0)),
         ),
       )
       .orderBy(asc(SessionMessageTable.seq))
       .all()
       .pipe(Effect.orDie)
-    return acceptanceHistory(
-      rows.map((row) => Schema.decodeUnknownSync(SessionMessage.Message)({ ...row.data, id: row.id, type: row.type })),
+    const messages = rows.map((row) =>
+      Schema.decodeUnknownSync(SessionMessage.Message)({ ...row.data, id: row.id, type: row.type }),
     )
+    return all ? messages : acceptanceHistory(messages)
   })
+
+/** Display-only history: stop at the nearest older turn with checks, even if
+ * they all failed. Never reach past a newer failed suite to advertise an old pass. */
+export function previousChecks(messages: readonly SessionMessage.Message[], directory: string) {
+  const turns = messages.flatMap((message, index) => (message.type === "user" ? [{ message, index }] : []))
+  for (let index = turns.length - 2; index >= 0; index--) {
+    const source = turns[index]!
+    const checks = derive(
+      messages.slice(source.index, turns[index + 1]!.index),
+      false,
+      undefined,
+      [],
+      [],
+      new Set(),
+      directory,
+    ).checks
+    if (!checks.length) continue
+    return checks
+      .filter((check) => check.exit === 0 && !check.execution && !check.supersededBy)
+      .map((check) => ({ check, userMessageID: source.message.id, turn: index + 1 }))
+  }
+  return []
+}
 
 /** Narrow diagnosis of a local inline script that failed to parse before running. */
 export function executionIssue(command: string, output: string) {
