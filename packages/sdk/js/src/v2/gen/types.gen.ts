@@ -10259,6 +10259,62 @@ export type GlobalConfigUpdateResponses = {
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
 
+export type GlobalModelsNetworkGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/models-network"
+}
+
+export type GlobalModelsNetworkGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModelsNetworkGetError = GlobalModelsNetworkGetErrors[keyof GlobalModelsNetworkGetErrors]
+
+export type GlobalModelsNetworkGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    autoRefresh: boolean
+    locked: boolean
+    source: string
+  }
+}
+
+export type GlobalModelsNetworkGetResponse = GlobalModelsNetworkGetResponses[keyof GlobalModelsNetworkGetResponses]
+
+export type GlobalModelsNetworkSetData = {
+  body?: {
+    autoRefresh: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/models-network"
+}
+
+export type GlobalModelsNetworkSetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalModelsNetworkSetError = GlobalModelsNetworkSetErrors[keyof GlobalModelsNetworkSetErrors]
+
+export type GlobalModelsNetworkSetResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type GlobalModelsNetworkSetResponse = GlobalModelsNetworkSetResponses[keyof GlobalModelsNetworkSetResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

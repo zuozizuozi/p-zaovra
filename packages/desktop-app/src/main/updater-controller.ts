@@ -48,10 +48,7 @@ export function createUpdaterController(input: {
         return transition({ status: "up-to-date" })
       }
 
-      transition({ status: "downloading", version })
-      await input.backend.downloadUpdate()
-      await input.persistence.set({ version })
-      return transition({ status: "ready", version })
+      return transition({ status: "available", version })
     })()
       .catch((error) =>
         transition({ status: "error", message: error instanceof Error ? error.message : String(error) }),
@@ -72,9 +69,26 @@ export function createUpdaterController(input: {
     async start() {
       const ready = await input.persistence.get()
       if (ready?.version === input.currentVersion) await input.persistence.clear()
-      return check()
+      return state
     },
     check,
+    download() {
+      if (pending) return pending
+      if (state.status !== "available") return Promise.resolve(state)
+      const version = state.version
+      transition({ status: "downloading", version })
+      pending = Promise.resolve()
+        .then(() => input.backend.downloadUpdate())
+        .then(() => input.persistence.set({ version }))
+        .then(() => transition({ status: "ready", version }))
+        .catch((error) =>
+          transition({ status: "error", message: error instanceof Error ? error.message : String(error) }),
+        )
+        .finally(() => {
+          pending = undefined
+        })
+      return pending
+    },
     async install() {
       if (state.status !== "ready") throw new Error("Update is not ready to install")
       const version = state.version

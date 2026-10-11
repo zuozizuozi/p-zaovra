@@ -21,6 +21,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { EffectFlock } from "@zaovra-ai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@zaovra-ai/core/v1/config/config"
+import { accountEnabled } from "@zaovra-ai/core/account-enabled"
 import { ConfigPermissionV1 } from "@zaovra-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@zaovra-ai/core/v1/config/plugin"
 import { ConfigAgent } from "./agent"
@@ -385,7 +386,9 @@ const layer = Layer.effect(
         }
 
         const activeAccount = Option.getOrUndefined(
-          yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
+          accountEnabled
+            ? yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none())))
+            : Option.none(),
         )
         if (activeAccount?.active_org_id) {
           const activeOrg = Option.getOrUndefined(

@@ -3,6 +3,20 @@ import { defineConfig } from "electron-vite"
 import appPlugin from "@zaovra-ai/app/vite"
 import * as fs from "node:fs/promises"
 import path from "node:path"
+import type { Plugin } from "vite"
+
+function noticesInputs(): Plugin {
+  return {
+    name: "zaovra:notices-inputs",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "notices-inputs.json",
+        source: JSON.stringify([...this.getModuleIds()].filter((id) => path.isAbsolute(id))),
+      })
+    },
+  }
+}
 
 const ZAOVRA_SERVER_DIST = "../zaovra/dist/node"
 
@@ -16,7 +30,7 @@ const channel = (() => {
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 
 const sentry =
-  process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+  channel !== "prod" && process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
     ? sentryVitePlugin({
         authToken: process.env.SENTRY_AUTH_TOKEN,
         org: process.env.SENTRY_ORG,
@@ -55,6 +69,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
       externalizeDeps: { include: [nodePtyPkg] },
     },
     plugins: [
+      noticesInputs(),
       {
         name: "zaovra:node-pty-narrower",
         enforce: "pre",
@@ -82,6 +97,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     ],
   },
   preload: {
+    plugins: [noticesInputs()],
     build: {
       rollupOptions: {
         input: { index: "src/preload/index.ts" },
@@ -93,7 +109,8 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     },
   },
   renderer: {
-    plugins: [appPlugin, sentry],
+    define: channel === "prod" ? { "import.meta.env.VITE_SENTRY_DSN": '""' } : {},
+    plugins: [appPlugin, sentry, noticesInputs()],
     publicDir: "../../../app-ui/public",
     root: "src/renderer",
     build: {

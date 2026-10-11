@@ -32,6 +32,7 @@ import { XAIPlugin } from "./provider/xai"
 import { ZenmuxPlugin } from "./provider/zenmux"
 import type { PluginInternal } from "./internal"
 import type { Scope } from "effect"
+import { accountEnabled } from "../account-enabled"
 
 export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements | Scope.Scope>[] = [
   AlibabaPlugin,
@@ -55,7 +56,7 @@ export const ProviderPlugins: PluginInternal.Plugin<PluginInternal.Requirements 
   LLMGatewayPlugin,
   MistralPlugin,
   NvidiaPlugin,
-  ZaovraPlugin,
+  ...(accountEnabled ? [ZaovraPlugin] : []),
   SnowflakeCortexPlugin,
   OpenAICompatiblePlugin,
   OpenAIPlugin,

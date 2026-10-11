@@ -60,6 +60,22 @@ export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoU
     await dialog.showMessageBox({ type: "info", message: "You're up to date.", title: "No Updates" })
     return
   }
+  if (state.status === "available") {
+    const response = await dialog.showMessageBox({
+      type: "info",
+      message: `发现新版本 ${state.version}，是否下载？`,
+      title: "更新可用",
+      buttons: ["下载", "稍后"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response.response !== 0) return
+    const downloaded = await controller.download()
+    if (downloaded.status === "ready") return showUpdaterDialog(controller, alertOnFail)
+    if (downloaded.status === "error")
+      await dialog.showMessageBox({ type: "error", message: downloaded.message, title: "下载失败" })
+    return
+  }
   if (state.status !== "ready") return
 
   const response = await dialog.showMessageBox({

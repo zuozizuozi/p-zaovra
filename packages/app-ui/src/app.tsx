@@ -330,9 +330,7 @@ const StartupContext = createContext<Promise<void>>()
 function AccountGate(props: ParentProps) {
   const serverSDK = useServerSDK()
   const platform = usePlatform()
-  // Local desktop development must remain usable while website auth is unfinished.
-  // Vite replaces DEV with false in production builds, including desktop installers.
-  const localDevelopment = import.meta.env.DEV && platform.platform === "desktop"
+  const accountEnabled = import.meta.env.ZAOVRA_ACCOUNT_ENABLED === true
   const startup = useContext(StartupContext)
   const [startupReady] = createResource(async () => {
     await startup?.catch((error) => {
@@ -355,7 +353,7 @@ function AccountGate(props: ParentProps) {
       }
   >({ status: "idle" })
   const [account, { refetch }] = createResource(
-    () => !localDevelopment && serverSDK().scope,
+    () => accountEnabled && serverSDK().scope,
     () =>
       serverSDK()
         .client.experimental.console.get({}, { throwOnError: true })
@@ -412,7 +410,7 @@ function AccountGate(props: ParentProps) {
 
   return (
     <Show
-      when={localDevelopment || account()?.activeOrgName}
+      when={!accountEnabled || account()?.activeOrgName}
       fallback={
         <div class="min-h-screen w-full bg-surface-base flex items-center justify-center p-6">
           <div class="w-full max-w-md border border-border-weak-base rounded-xl bg-surface-raised-base p-8 shadow-xl">

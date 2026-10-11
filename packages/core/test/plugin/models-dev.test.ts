@@ -80,6 +80,8 @@ describe("ModelsDevPlugin", () => {
             },
           } satisfies Record<string, ModelsDev.Provider>),
         refresh: () => Effect.void,
+        network: () => Effect.succeed({ autoRefresh: false, locked: true, source: "https://models.dev" }),
+        setAutoRefresh: () => Effect.void,
       })
 
       yield* ModelsDevPlugin.effect(

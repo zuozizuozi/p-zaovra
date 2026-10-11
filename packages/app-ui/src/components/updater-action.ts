@@ -7,6 +7,8 @@ import { showToast } from "@/utils/toast"
 export function updaterAction(state: UpdaterState | undefined) {
   if (!state) return { label: "settings.updates.action.checkNow" as const }
   switch (state.status) {
+    case "available":
+      return { label: "settings.updates.action.download" as const, run: "download" as const }
     case "checking":
       return { label: "settings.updates.action.checking" as const }
     case "downloading":
@@ -32,9 +34,12 @@ export function useUpdaterAction() {
     async run() {
       const run = action().run
       if (run === "install") return platform.updater?.install()
-      if (run !== "check") return
+      if (run !== "check" && run !== "download") return
 
-      const state = await platform.updater?.check()
+      const state = await platform.updater?.[run]()
+      if (state?.status === "available") {
+        showToast({ title: language.t("settings.updates.toast.available", { version: state.version }) })
+      }
       if (state?.status === "up-to-date") {
         showToast({
           variant: "success",

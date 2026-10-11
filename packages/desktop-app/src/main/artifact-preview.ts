@@ -49,6 +49,7 @@ export function createArtifactPreview(owner: WebContents) {
       }
       const view = new WebContentsView({
         webPreferences: {
+          spellcheck: false,
           sandbox: true,
           backgroundThrottling: false,
           contextIsolation: true,

@@ -35,6 +35,7 @@ export default [
         },
         define: {
           "import.meta.env.VITE_ZAOVRA_CHANNEL": JSON.stringify(channel),
+          "import.meta.env.ZAOVRA_ACCOUNT_ENABLED": JSON.stringify(process.env.ZAOVRA_ACCOUNT_ENABLED === "true"),
         },
         worker: {
           format: "es",

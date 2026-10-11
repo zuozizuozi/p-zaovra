@@ -16,6 +16,8 @@ import { ConfigRead } from "@/server/shared/config-read"
 import { Global } from "@zaovra-ai/core/global"
 import { GlobalUpgradeInput } from "../groups/global"
 import semver from "semver"
+import { ModelsDev } from "@zaovra-ai/core/models-dev"
+import { HttpApiError } from "effect/unstable/httpapi"
 
 export function eventData(data: GlobalBusEvent): Sse.Event {
   return {
@@ -82,6 +84,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
   Effect.gen(function* () {
     const config = yield* Config.Service
     const installation = yield* Installation.Service
+    const models = yield* ModelsDev.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -172,6 +175,13 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("health", health)
       .handleRaw("event", event)
       .handle("configGet", configGet)
+      .handle("modelsNetworkGet", () => models.network())
+      .handle("modelsNetworkSet", (ctx) =>
+        models.setAutoRefresh(ctx.payload.autoRefresh).pipe(
+          Effect.as(true),
+          Effect.mapError(() => new HttpApiError.BadRequest()),
+        ),
+      )
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
       .handleRaw("upgrade", upgradeRaw)

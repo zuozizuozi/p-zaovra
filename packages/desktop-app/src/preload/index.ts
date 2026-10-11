@@ -11,6 +11,7 @@ const updaterHandler = (_: unknown, state: UpdaterState) => {
 }
 
 const api: ElectronAPI = {
+  legalDocument: (document) => ipcRenderer.invoke("legal-document", document),
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
   localServerExit: () => ipcRenderer.invoke("local-server-exit"),
@@ -59,6 +60,7 @@ const api: ElectronAPI = {
       }
     },
     check: () => ipcRenderer.invoke("updater-check"),
+    download: () => ipcRenderer.invoke("updater-download"),
     install: () => ipcRenderer.invoke("updater-install"),
   },
   consumeInitialDeepLinks: () => ipcRenderer.invoke("consume-initial-deep-links"),

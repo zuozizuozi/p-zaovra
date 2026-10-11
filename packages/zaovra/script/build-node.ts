@@ -35,6 +35,7 @@ const result = await Bun.build({
   target: "node",
   format: "esm",
   splitting: true,
+  metafile: true,
   external: ["node-gyp", "playwright-core"],
   naming: {
     entry: "node.js",
@@ -45,6 +46,7 @@ const result = await Bun.build({
     ZAOVRA_MODELS_DEV: modelsSnapshot,
     ZAOVRA_VERSION: JSON.stringify(version),
     ZAOVRA_CHANNEL: JSON.stringify(channel),
+    ZAOVRA_ACCOUNT_ENABLED: JSON.stringify(process.env.ZAOVRA_ACCOUNT_ENABLED === "true"),
   },
   plugins: [
     {
@@ -57,6 +59,14 @@ const result = await Bun.build({
 })
 
 if (result.success) {
+  await Bun.write(
+    path.join(outdir, "notices-inputs.json"),
+    JSON.stringify(
+      [...new Set(Object.values(result.metafile?.outputs ?? {}).flatMap((output) => Object.keys(output.inputs)))].map(
+        (file) => path.resolve(root, file),
+      ),
+    ),
+  )
   await Bun.write(path.join(outdir, "zaovra-web-ui.gen.ts"), "export default null\n")
   process.exit(0)
 }

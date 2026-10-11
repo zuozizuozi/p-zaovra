@@ -1,5 +1,5 @@
 import path from "path"
-import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
+import { Context, Duration, Effect, Fiber, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ModelsDev } from "@zaovra-ai/schema/models-dev"
 import { Global } from "./global"
@@ -132,6 +132,8 @@ declare const ZAOVRA_MODELS_DEV: Record<string, Provider> | undefined
 export interface Interface {
   readonly get: () => Effect.Effect<Record<string, Provider>>
   readonly refresh: (force?: boolean) => Effect.Effect<void>
+  readonly network: () => Effect.Effect<{ autoRefresh: boolean; locked: boolean; source: string }>
+  readonly setAutoRefresh: (enabled: boolean) => Effect.Effect<void, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/ModelsDev") {}
@@ -141,6 +143,24 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const events = yield* EventV2.Service
+    const scope = yield* Effect.scope
+    const preferencesPath = path.join(Global.Path.config, "models-network.json")
+    const preferences = yield* fs
+      .readJson(preferencesPath)
+      .pipe(
+        Effect.catch(() =>
+          fs.existsSafe(preferencesPath).pipe(Effect.map((exists) => (exists ? { autoRefresh: false } : undefined))),
+        ),
+      )
+    let autoRefresh = !(
+      typeof preferences === "object" &&
+      preferences !== null &&
+      "autoRefresh" in preferences &&
+      preferences.autoRefresh === false
+    )
+    const locked = Flag.ZAOVRA_DISABLE_MODELS_FETCH || process.argv.includes("--get-yargs-completions")
+    let background: Fiber.Fiber<void> | undefined
+    const changes = Semaphore.makeUnsafe(1)
     const http = HttpClient.filterStatusOk(
       (yield* HttpClient.HttpClient).pipe(
         HttpClient.retryTransient({
@@ -177,11 +197,7 @@ const layer = Layer.effect(
 
     const loadFromDisk = fs.readJson(Flag.ZAOVRA_MODELS_PATH ?? filepath).pipe(
       Effect.catch((error) => {
-        if (
-          Flag.ZAOVRA_MODELS_PATH === undefined &&
-          error._tag === "FileSystemError" &&
-          error.method === "readJson"
-        ) {
+        if (Flag.ZAOVRA_MODELS_PATH === undefined && error._tag === "FileSystemError" && error.method === "readJson") {
           return fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
         }
         return Effect.succeed(undefined)
@@ -189,9 +205,7 @@ const layer = Layer.effect(
       Effect.map((v) => v as Record<string, Provider> | undefined),
     )
 
-    const loadSnapshot = Effect.sync(() =>
-      typeof ZAOVRA_MODELS_DEV === "undefined" ? undefined : ZAOVRA_MODELS_DEV,
-    )
+    const loadSnapshot = Effect.sync(() => (typeof ZAOVRA_MODELS_DEV === "undefined" ? undefined : ZAOVRA_MODELS_DEV))
 
     const fetchAndWrite = Effect.fn("ModelsDev.fetchAndWrite")(function* () {
       const text = yield* fetchApi()
@@ -224,6 +238,7 @@ const layer = Layer.effect(
     const get = (): Effect.Effect<Record<string, Provider>> => cachedGet
 
     const refresh = Effect.fn("ModelsDev.refresh")(function* (force = false) {
+      if (!autoRefresh) return
       if (!force && (yield* fresh())) return
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -241,12 +256,33 @@ const layer = Layer.effect(
       )
     })
 
-    if (!Flag.ZAOVRA_DISABLE_MODELS_FETCH && !process.argv.includes("--get-yargs-completions")) {
-      // Schedule.spaced runs the effect once, then waits between completions.
-      yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced("60 minutes")), Effect.ignore))
-    }
+    const restart = Effect.gen(function* () {
+      if (background) yield* Fiber.interrupt(background)
+      background = undefined
+      if (locked || !autoRefresh) return
+      background = yield* refresh().pipe(
+        Effect.repeat(Schedule.spaced("60 minutes")),
+        Effect.ignore,
+        Effect.forkIn(scope),
+      )
+    })
+    yield* restart
 
-    return Service.of({ get, refresh })
+    return Service.of({
+      get,
+      refresh,
+      network: () => Effect.succeed({ autoRefresh: !locked && autoRefresh, locked, source }),
+      setAutoRefresh: (enabled) =>
+        changes.withPermit(
+          Effect.gen(function* () {
+            const temporary = `${preferencesPath}.${process.pid}.tmp`
+            yield* fs.writeWithDirs(temporary, JSON.stringify({ autoRefresh: enabled }))
+            yield* fs.rename(temporary, preferencesPath)
+            autoRefresh = enabled
+            yield* restart
+          }),
+        ),
+    })
   }),
 )
 

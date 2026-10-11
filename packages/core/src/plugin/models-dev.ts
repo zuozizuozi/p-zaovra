@@ -4,6 +4,7 @@ import { Effect, Stream } from "effect"
 import { EventV2 } from "../event"
 import { ModelsDev } from "../models-dev"
 import { ProviderV2 } from "../provider"
+import { accountEnabled } from "../account-enabled"
 
 function released(date: string) {
   const time = Date.parse(date)
@@ -143,6 +144,7 @@ export const ModelsDevPlugin = define({
       Effect.fn(function* (integrations) {
         const data = yield* modelsDev.get()
         for (const item of Object.values(data)) {
+          if (!accountEnabled && item.id === "zaovra") continue
           if (item.env.length === 0) continue
           const integrationID = item.id
           integrations.update(integrationID, (integration) => (integration.name = item.name))
@@ -161,6 +163,7 @@ export const ModelsDevPlugin = define({
       Effect.fn(function* (catalog) {
         const data = yield* modelsDev.get()
         for (const item of Object.values(data)) {
+          if (!accountEnabled && item.id === "zaovra") continue
           const providerID = ProviderV2.ID.make(item.id)
           catalog.provider.update(providerID, (provider) => {
             provider.name = item.name

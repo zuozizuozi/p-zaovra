@@ -253,10 +253,12 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     updater: {
       state: updaterState,
       check: () => window.api.updater.check(),
+      download: () => window.api.updater.download(),
       install: () => window.api.updater.install(),
     },
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
+    legalDocument: (document) => window.api.legalDocument(document),
 
     setForceFocus: (enabled) => window.api.setForceFocus(enabled),
 

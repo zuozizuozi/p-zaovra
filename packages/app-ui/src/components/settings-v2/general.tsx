@@ -29,6 +29,7 @@ import { Link } from "../link"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import { LayoutRetirementNotice, LayoutTransitionToggle } from "./interface-transition"
+import { showToast } from "@/utils/toast"
 import "./settings-v2.css"
 
 let demoSoundState = {
@@ -95,6 +96,13 @@ export const SettingsGeneralV2: Component<{
   const mobile = createMediaQuery("(max-width: 767px)")
 
   const updater = useUpdaterAction()
+  const [network, { refetch: reloadNetwork }] = createResource(
+    () => serverSdk().scope,
+    () =>
+      serverSdk()
+        .client.global.modelsNetwork.get({ throwOnError: true })
+        .then((result) => result.data),
+  )
 
   const dir = createMemo(() => {
     if (!props.sessionID) return undefined
@@ -756,6 +764,41 @@ export const SettingsGeneralV2: Component<{
         </Show>
 
         <GeneralSection />
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">隐私与网络</h3>
+          <SettingsListV2>
+            <SettingsRowV2
+              title="自动更新模型目录"
+              description={`访问 ${network()?.source ?? "https://models.dev"}/api.json；仅下载模型目录，不发送对话。`}
+            >
+              <Switch
+                hideLabel
+                checked={network()?.autoRefresh ?? false}
+                disabled={!network() || network()?.locked}
+                onChange={async (autoRefresh) => {
+                  await serverSdk()
+                    .client.global.modelsNetwork.set({ autoRefresh }, { throwOnError: true })
+                    .catch((error) => {
+                      showToast({ title: "网络设置未保存", description: String(error) })
+                    })
+                  await reloadNetwork()
+                }}
+              >
+                自动更新模型目录
+              </Switch>
+            </SettingsRowV2>
+          </SettingsListV2>
+          <p class="text-12-regular text-text-weak">
+            更新检查由你手动发起，访问 github.com；确认后才下载。发布版不启用
+            Sentry，更新说明随包附带。模型服务、工具、MCP、LSP 和 OTLP 仅按你的配置或任务请求访问。
+          </p>
+          <Show when={network.error}>
+            <p class="text-12-regular text-text-weak">无法读取网络设置，请确认服务器连接。</p>
+          </Show>
+          <Show when={network()?.locked}>
+            <p class="text-12-regular text-text-weak">后台刷新已被服务器启动配置关闭。</p>
+          </Show>
+        </div>
 
         <AppearanceSection />
 

@@ -12,6 +12,7 @@ import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { UsageDashboard } from "../usage-dashboard"
+import { SettingsAbout } from "./about"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -56,6 +57,10 @@ export const DialogSettings: Component<{
                     <TabsV2.Trigger value="usage">
                       <Icon name="models" />
                       {language.t("usage.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="about">
+                      <Icon name="help" />
+                      关于 Zaovra
                     </TabsV2.Trigger>
                   </div>
                 </div>
@@ -108,6 +113,9 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="about" class="settings-v2-panel">
+          <SettingsAbout />
         </TabsV2.Content>
       </TabsV2>
     </Dialog>

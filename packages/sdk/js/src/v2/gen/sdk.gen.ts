@@ -74,6 +74,10 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalModelsNetworkGetErrors,
+  GlobalModelsNetworkGetResponses,
+  GlobalModelsNetworkSetErrors,
+  GlobalModelsNetworkSetResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1160,6 +1164,45 @@ export class Config extends HeyApiClient {
   }
 }
 
+export class ModelsNetwork extends HeyApiClient {
+  /**
+   * Get model catalog network preference
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalModelsNetworkGetResponses,
+      GlobalModelsNetworkGetErrors,
+      ThrowOnError
+    >({ url: "/global/models-network", ...options })
+  }
+
+  /**
+   * Set model catalog network preference
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      autoRefresh?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "autoRefresh" }] }])
+    return (options?.client ?? this.client).put<
+      GlobalModelsNetworkSetResponses,
+      GlobalModelsNetworkSetErrors,
+      ThrowOnError
+    >({
+      url: "/global/models-network",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -1224,6 +1267,11 @@ export class Global extends HeyApiClient {
   private _config?: Config
   get config(): Config {
     return (this._config ??= new Config({ client: this.client }))
+  }
+
+  private _modelsNetwork?: ModelsNetwork
+  get modelsNetwork(): ModelsNetwork {
+    return (this._modelsNetwork ??= new ModelsNetwork({ client: this.client }))
   }
 }
 

@@ -39,7 +39,8 @@ import { usePlatform } from "@/context/platform"
 import { DateTime } from "luxon"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { useDirectoryPicker } from "@/components/directory-picker"
-import { useSettingsCommand } from "@/components/settings-dialog"
+import { useSettingsCommand, useSettingsDialog } from "@/components/settings-dialog"
+import { useProviders } from "@/hooks/use-providers"
 import { DialogSelectServer, useServerManagementController } from "@/components/dialog-select-server"
 import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { ServerConnection, serverName, useServer } from "@/context/server"
@@ -305,6 +306,8 @@ export function NewHome() {
   const notification = useNotification()
   const marked = useMarked()
   const openSettings = useSettingsCommand()
+  const openModelSettings = useSettingsDialog("providers")
+  const providers = useProviders()
   let focusSessionSearch: (() => void) | undefined
   let sessionViewport: HTMLDivElement | undefined
   const [sessionThumbTrack, setSessionThumbTrack] = createSignal<HTMLDivElement>()
@@ -688,6 +691,11 @@ export function NewHome() {
             </div>
             <h1 id="home-welcome-title">{language.t("session.new.title")}</h1>
             <p>{language.t("home.welcome.description")}</p>
+            <Show when={!providers.loading() && providers.connected().length === 0}>
+              <ButtonV2 variant="neutral" onClick={openModelSettings}>
+                添加模型服务
+              </ButtonV2>
+            </Show>
             <form
               class="home-welcome-composer"
               onSubmit={(event) => {

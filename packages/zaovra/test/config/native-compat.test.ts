@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test"
 import { ConfigParse } from "../../src/config/parse"
 
+test("unknown future config fields remain rejected across shared dev/prod configs", () => {
+  expect(() => ConfigParse.legacyConfiguration({ future_dev_only_field: true }, "fixture.json")).toThrow()
+})
+
 test("legacy bootstrap accepts validated native settings without mutating authored config", () => {
   const authored = {
     session_token_budget: 160000,

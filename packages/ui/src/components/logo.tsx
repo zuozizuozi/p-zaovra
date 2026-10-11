@@ -1,5 +1,8 @@
 import { type ComponentProps } from "solid-js"
 import brandLogo from "../assets/brand/zaovra-logo.png"
+import lockupLight from "../assets/brand/zaovra-lockup-light.png"
+import lockupDark from "../assets/brand/zaovra-lockup-dark.png"
+import "./logo.css"
 
 export const Mark = (props: { class?: string }) => {
   return (
@@ -32,24 +35,9 @@ export const Splash = (props: Pick<ComponentProps<"svg">, "ref" | "class">) => {
 
 export const Logo = (props: { class?: string }) => {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 560 128"
-      fill="none"
-      classList={{ [props.class ?? ""]: !!props.class }}
-    >
-      <image href={brandLogo} width="112" height="112" y="8" />
-      <text
-        x="140"
-        y="91"
-        fill="var(--icon-strong-base)"
-        font-family="Inter, Segoe UI, sans-serif"
-        font-size="74"
-        font-weight="700"
-        letter-spacing="-3"
-      >
-        zaovra
-      </text>
-    </svg>
+    <span data-component="logo-lockup" class={props.class}>
+      <img data-variant="light" src={lockupLight} alt="Zaovra" />
+      <img data-variant="dark" src={lockupDark} alt="Zaovra" />
+    </span>
   )
 }

@@ -7,7 +7,19 @@ import { useSettings } from "@/context/settings"
 import { persisted } from "@/utils/persist"
 import { DialogReleaseNotes, type Highlight } from "@/components/dialog-release-notes"
 
-const CHANGELOG_URL = "https://zaovra.com/changelog.json"
+const BUNDLED_RELEASES = [
+  {
+    tag: "0.1.0",
+    highlights: [
+      {
+        source: "desktop",
+        items: [
+          { title: "Zaovra 0.1.0", description: "使用自己的模型服务开展编码任务，查看执行状态、验证信息与交付成果。" },
+        ],
+      },
+    ],
+  },
+]
 
 type Store = {
   version?: string
@@ -170,35 +182,17 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
         return
       }
 
-      const fetcher = platform.fetch ?? fetch
-      const controller = new AbortController()
-      onCleanup(() => {
-        controller.abort()
-        clearTimer()
-      })
-
-      fetcher(CHANGELOG_URL, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      })
-        .then((response) => (response.ok ? (response.json() as Promise<unknown>) : undefined))
-        .then((json) => {
-          if (!json) return
-          const highlights = loadReleaseHighlights(json, platform.version, previous)
-          if (controller.signal.aborted) return
-
-          if (highlights.length === 0) {
-            markSeen()
-            return
-          }
-
-          timer = setTimeout(() => {
-            timer = undefined
-            markSeen()
-            dialog.show(() => <DialogReleaseNotes highlights={highlights} />)
-          }, 500)
-        })
-        .catch(() => undefined)
+      onCleanup(clearTimer)
+      const highlights = loadReleaseHighlights(BUNDLED_RELEASES, platform.version, previous)
+      if (highlights.length === 0) {
+        markSeen()
+        return
+      }
+      timer = setTimeout(() => {
+        timer = undefined
+        markSeen()
+        dialog.show(() => <DialogReleaseNotes highlights={highlights} />)
+      }, 500)
     }
 
     createEffect(() => {

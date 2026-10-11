@@ -16,6 +16,7 @@
     "dev": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",
     "build": "electron-vite build",
+    "postbuild": "bun ./scripts/notices.ts",
     "package:check": "bun ./scripts/check-package-readiness.ts",
     "preview": "electron-vite preview",
     "package": "bun run package:check && electron-builder --config electron-builder.config.ts",

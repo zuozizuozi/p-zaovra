@@ -30,6 +30,7 @@ export type FatalRendererErrorLog = {
 }
 
 type PlatformBase = {
+  legalDocument?: (document: "license" | "notices") => Promise<string>
   /** Release desktop builds connect only to their authenticated local sidecar. */
   remoteServers?: boolean
   artifactPreview?: ArtifactPreviewAPI

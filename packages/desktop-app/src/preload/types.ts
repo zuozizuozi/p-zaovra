@@ -26,6 +26,7 @@ export type WslServersAPI = WslServersPlatform
 export type UpdaterAPI = {
   subscribe: (cb: (state: UpdaterState) => void) => Promise<() => void>
   check: () => Promise<UpdaterState>
+  download: () => Promise<UpdaterState>
   install: () => Promise<void>
 }
 
@@ -43,6 +44,7 @@ export type FatalRendererError = {
 }
 
 export type ElectronAPI = {
+  legalDocument: (document: "license" | "notices") => Promise<string>
   killSidecar: () => Promise<void>
   awaitInitialization: () => Promise<ServerReadyData>
   localServerExit: () => Promise<number | null>

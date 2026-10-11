@@ -2,7 +2,7 @@ import { createArtifactPreview } from "./artifact-preview"
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/app/provider-discovery"
-import { stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { convertAttachment } from "./attachment-convert"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
@@ -204,6 +204,18 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("updater-unsubscribe", (event) => updaterSubscriptions.delete(event.sender.id))
   handle("updater-check", () => deps.updater.check())
+  handle("legal-document", (_event, document: unknown) => {
+    if (document !== "license" && document !== "notices") throw new Error("Unknown legal document")
+    return readFile(
+      join(
+        app.getAppPath(),
+        "resources",
+        document === "license" ? "licenses/Zaovra-MIT.txt" : "THIRD_PARTY_NOTICES.txt",
+      ),
+      "utf8",
+    )
+  })
+  handle("updater-download", () => deps.updater.download())
   handle("updater-install", () => deps.updater.install())
   handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   handle("export-debug-logs", () => deps.exportDebugLogs())

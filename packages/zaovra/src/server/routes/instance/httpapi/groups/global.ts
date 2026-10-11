@@ -100,6 +100,24 @@ export const GlobalApi = HttpApi.make("global").add(
           description: "Retrieve the current global Zaovra configuration settings and preferences.",
         }),
       ),
+      HttpApiEndpoint.get("modelsNetworkGet", "/global/models-network", {
+        success: Schema.Struct({ autoRefresh: Schema.Boolean, locked: Schema.Boolean, source: Schema.String }),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.modelsNetwork.get",
+          summary: "Get model catalog network preference",
+        }),
+      ),
+      HttpApiEndpoint.put("modelsNetworkSet", "/global/models-network", {
+        payload: Schema.Struct({ autoRefresh: Schema.Boolean }),
+        success: Schema.Boolean,
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.modelsNetwork.set",
+          summary: "Set model catalog network preference",
+        }),
+      ),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,
         success: described(ConfigV1.Info, "Successfully updated global config"),

@@ -1,3 +1,5 @@
+import { ModelsDev } from "@zaovra-ai/core/models-dev"
+import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, expect } from "bun:test"
 import { Context, Effect, Layer, Option, Ref } from "effect"
@@ -35,6 +37,7 @@ const apiLayer = HttpRouter.serve(
   { disableListenLog: true, disableLogger: true },
 ).pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
+  Layer.provide(AppNodeBuilder.build(ModelsDev.node)),
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(Installation.Service)({})),
   Layer.provide(

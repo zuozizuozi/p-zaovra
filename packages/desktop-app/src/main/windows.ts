@@ -198,6 +198,8 @@ export function createMainWindow(id: string = randomUUID()) {
         }
       : {}),
     webPreferences: {
+      // Disable spell checking in app content; session-level dictionary startup is a separate boundary.
+      spellcheck: false,
       preload: join(root, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -451,9 +453,9 @@ export function rendererNavigationDisposition(value?: string) {
 function restrictRendererNavigation(win: BrowserWindow) {
   const external = (value: string) => {
     if (!isAllowedExternalUrl(value)) return
-    void shell.openExternal(value).catch((error) =>
-      writeLog("window", "failed to open external URL", { url: value, error }, "warn"),
-    )
+    void shell
+      .openExternal(value)
+      .catch((error) => writeLog("window", "failed to open external URL", { url: value, error }, "warn"))
   }
   const block = (event: Electron.Event, value: string, externalize: boolean) => {
     const disposition = rendererNavigationDisposition(value)

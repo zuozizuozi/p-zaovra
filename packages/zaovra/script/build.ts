@@ -193,6 +193,7 @@ for (const item of targets) {
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
       ZAOVRA_WORKER_PATH: workerPath,
       ZAOVRA_CHANNEL: `'${Script.channel}'`,
+      ZAOVRA_ACCOUNT_ENABLED: JSON.stringify(process.env.ZAOVRA_ACCOUNT_ENABLED === "true"),
       ZAOVRA_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
       ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
     },
