@@ -8,7 +8,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 import { showToast } from "@/utils/toast"
-import { commandVerification } from "@/utils/verification-label"
+import { commandVerification, staleVerification } from "@/utils/verification-label"
 
 export function SessionOutcomeDock() {
   const params = useParams()
@@ -43,7 +43,11 @@ export function SessionOutcomeDock() {
   // Coverage is owned by the host; never infer replacement from command text here.
   const currentChecks = createMemo(() => outcome()?.checks.filter((check) => !check.supersededBy) ?? [])
   const historicalChecks = createMemo(() => outcome()?.checks.filter((check) => !!check.supersededBy) ?? [])
-  const passedChecks = createMemo(() => currentChecks().filter((check) => check.exit === 0 && !check.execution).length)
+  const stale = (check: ReturnType<typeof currentChecks>[number]) => staleVerification(check, outcome()?.missing ?? [])
+  const staleChecks = createMemo(() => currentChecks().filter(stale).length)
+  const passedChecks = createMemo(
+    () => currentChecks().filter((check) => check.exit === 0 && !check.execution && !stale(check)).length,
+  )
   const failedChecks = createMemo(() => currentChecks().filter((check) => check.exit !== 0 && !check.execution).length)
   const incompleteChecks = createMemo(() => currentChecks().filter((check) => !!check.execution).length)
   const recover = useMutation(() => ({
@@ -94,6 +98,12 @@ export function SessionOutcomeDock() {
             {language.t("session.outcome.checks")} ·{" "}
             <Show when={currentChecks().length} fallback={language.t("session.outcome.noChecks")}>
               {language.t("session.outcome.passedCount", { count: passedChecks() })}
+              <Show when={staleChecks()}>
+                <span class="text-icon-critical-base">
+                  {" "}
+                  � {language.t("session.outcome.staleCount", { count: staleChecks() })}
+                </span>
+              </Show>
               <Show when={failedChecks()}>
                 <span class="text-icon-critical-base">
                   {" · "}
@@ -108,6 +118,9 @@ export function SessionOutcomeDock() {
               </Show>
             </Show>
           </div>
+          <Show when={staleChecks()}>
+            <span>{language.t("session.outcome.staleHint")}</span>
+          </Show>
           <Show when={outcome()?.checks.length || outcome()?.missing.length}>
             <For
               each={[
@@ -132,7 +145,8 @@ export function SessionOutcomeDock() {
                         <details
                           class="group/check min-w-0 break-all"
                           classList={{
-                            "text-icon-critical-base": !group.history && (check.exit !== 0 || !!check.execution),
+                            "text-icon-critical-base":
+                              !group.history && (check.exit !== 0 || !!check.execution || stale(check)),
                           }}
                         >
                           <summary
@@ -143,7 +157,10 @@ export function SessionOutcomeDock() {
                               ›
                             </span>
                             <span class="shrink-0">
-                              {language.t(`verification.${commandVerification(check)}`)} · {check.kind}
+                              {stale(check)
+                                ? language.t("session.outcome.stale")
+                                : language.t(`verification.${commandVerification(check)}`)}{" "}
+                              · {check.kind}
                             </span>
                             <span class="min-w-0 flex-1 truncate">{check.command}</span>
                             <span class="shrink-0">

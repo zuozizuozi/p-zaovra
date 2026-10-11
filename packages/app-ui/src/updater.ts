@@ -12,6 +12,8 @@ export type UpdaterState =
   | { status: "error"; message: string }
 
 export type UpdaterPlatform = {
+  autoCheck?(): Promise<boolean>
+  setAutoCheck?(enabled: boolean): Promise<boolean>
   state: Accessor<UpdaterState>
   check(): Promise<UpdaterState>
   download(): Promise<UpdaterState>

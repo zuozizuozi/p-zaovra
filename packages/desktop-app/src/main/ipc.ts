@@ -204,6 +204,11 @@ export function registerIpcHandlers(deps: Deps) {
   })
   handle("updater-unsubscribe", (event) => updaterSubscriptions.delete(event.sender.id))
   handle("updater-check", () => deps.updater.check())
+  handle("updater-auto-get", () => deps.updater.autoCheck())
+  handle("updater-auto-set", (_event, enabled: unknown) => {
+    if (typeof enabled !== "boolean") throw new Error("Expected boolean update preference")
+    return deps.updater.setAutoCheck(enabled)
+  })
   handle("legal-document", (_event, document: unknown) => {
     if (document !== "license" && document !== "notices") throw new Error("Unknown legal document")
     return readFile(

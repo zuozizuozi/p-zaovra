@@ -8,6 +8,9 @@ export function createArtifactPreview(owner: WebContents) {
   let requested: string | undefined
   let opening: object | undefined
   const browsing = session.fromPartition(`artifact-${owner.id}`)
+  browsing.setSpellCheckerEnabled(false)
+  browsing.setSpellCheckerLanguages([])
+  browsing.setSpellCheckerDictionaryDownloadURL("http://127.0.0.1:9/dictionaries/")
   browsing.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   browsing.setPermissionCheckHandler(() => false)
   const download = (event: Electron.Event) => {

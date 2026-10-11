@@ -29,6 +29,13 @@ export function setupAutoUpdater() {
   return createUpdaterController({
     enabled: UPDATER_ENABLED,
     currentVersion: app.getVersion(),
+    automatic: {
+      get: () => store.get("autoCheck") !== false,
+      set: (enabled) => store.set("autoCheck", enabled),
+      lastCheck: () => (typeof store.get("lastCheck") === "number" ? (store.get("lastCheck") as number) : 0),
+      recordCheck: (time) => store.set("lastCheck", time),
+    },
+
     backend: {
       checkForUpdates: () => autoUpdater.checkForUpdates(),
       downloadUpdate: () => autoUpdater.downloadUpdate(),

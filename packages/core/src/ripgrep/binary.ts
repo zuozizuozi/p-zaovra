@@ -91,6 +91,12 @@ export namespace RipgrepBinary {
       return Service.of({
         filepath: yield* Effect.cached(
           Effect.gen(function* () {
+            if (process.env.ZAOVRA_RG_PATH) {
+              const bundled = process.env.ZAOVRA_RG_PATH
+              if (!(yield* fs.isFile(bundled).pipe(Effect.orDie)))
+                throw new Error(`Bundled ripgrep missing: ${bundled}`)
+              return bundled
+            }
             const system = yield* Effect.sync(() => which(process.platform === "win32" ? "rg.exe" : "rg"))
             if (system && (yield* fs.isFile(system).pipe(Effect.orDie))) return system
 

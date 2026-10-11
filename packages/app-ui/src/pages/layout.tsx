@@ -159,6 +159,13 @@ export default function LegacyLayout(props: ParentProps) {
     peeked: false,
   })
 
+  let notifiedVersion: string | undefined
+  createEffect(() => {
+    const update = platform.updater?.state()
+    if (update?.status !== "available" || notifiedVersion === update.version) return
+    notifiedVersion = update.version
+    showToast({ title: language.t("settings.updates.toast.available", { version: update.version }) })
+  })
   const updateVersion = () => {
     const state = platform.updater?.state()
     if (state?.status !== "ready") return

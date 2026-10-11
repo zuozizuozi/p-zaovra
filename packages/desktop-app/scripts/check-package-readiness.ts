@@ -4,6 +4,9 @@ import path from "node:path"
 
 const root = path.resolve(import.meta.dir, "..")
 const required = [
+  ...(process.platform === "win32"
+    ? ["resources/bin/rg.exe", "resources/licenses/ripgrep-LICENSE-MIT.txt", "resources/licenses/ripgrep-UNLICENSE.txt"]
+    : []),
   "out/main/index.js",
   "out/main/sidecar.js",
   "out/preload/index.js",

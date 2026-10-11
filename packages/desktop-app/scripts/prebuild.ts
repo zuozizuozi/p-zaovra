@@ -6,5 +6,6 @@ import { resolveChannel } from "./utils"
 const channel = resolveChannel()
 await $`bun ./scripts/copy-icons.ts ${channel}`
 await $`bun ./scripts/copy-metainfo.ts ${channel}`
+await $`bun ./scripts/copy-ripgrep.ts`
 
 await $`bun ../zaovra/script/build-node.ts`

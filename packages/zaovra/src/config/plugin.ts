@@ -1,10 +1,30 @@
 import { Glob } from "@zaovra-ai/core/util/glob"
 import { ConfigPluginV1 } from "@zaovra-ai/core/v1/config/plugin"
-import { pathToFileURL } from "url"
+import { pathToFileURL, fileURLToPath } from "url"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
 import path from "path"
 
 export type Scope = "global" | "local"
+
+export async function hasLocalSource(dir: string, plugins: Origin[] = []) {
+  for (const plugin of plugins) {
+    const spec = pluginSpecifier(plugin.spec)
+    if (!spec.startsWith("file://")) continue
+    const file = fileURLToPath(spec)
+    const relative = path.relative(dir, file)
+    if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) continue
+    if (/\.(?:[cm]?[jt]s)$/.test(file) && (await Bun.file(file).exists())) return true
+  }
+  return (
+    (
+      await Glob.scan("{plugin,plugins,tool,tools}/**/*.{ts,js,mts,mjs,cts,cjs}", {
+        cwd: dir,
+        dot: true,
+        symlink: true,
+      })
+    ).length > 0
+  )
+}
 
 // Origin keeps the original config provenance attached to a spec.
 // After multiple config files are merged, callers still need to know which file declared the plugin

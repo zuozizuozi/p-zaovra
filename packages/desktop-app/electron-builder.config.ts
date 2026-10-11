@@ -54,7 +54,8 @@ const getBase = (appId: string): Configuration => ({
   extraMetadata: {
     desktopName: `${appId}.desktop`,
   },
-  files: ["out/**/*", "!out/**/notices-inputs.json", "resources/**/*"],
+  files: ["out/**/*", "!out/**/notices-inputs.json", "resources/**/*", "!resources/bin/**/*"],
+  extraResources: process.platform === "win32" ? [{ from: "resources/bin", to: "bin" }] : [],
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,

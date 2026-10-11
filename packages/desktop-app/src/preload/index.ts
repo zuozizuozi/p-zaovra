@@ -43,6 +43,8 @@ const api: ElectronAPI = {
     startServer: (id) => ipcRenderer.invoke("wsl-servers-start", id),
   },
   updater: {
+    autoCheck: () => ipcRenderer.invoke("updater-auto-get"),
+    setAutoCheck: (enabled) => ipcRenderer.invoke("updater-auto-set", enabled),
     subscribe: async (cb) => {
       updaterCallbacks.add(cb)
       if (updaterState) cb(updaterState)

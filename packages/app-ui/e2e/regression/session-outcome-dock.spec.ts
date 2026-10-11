@@ -68,3 +68,40 @@ test("does not turn missing evidence or unknown results into task verification",
   ).toHaveCount(2)
   await expect(page.locator('[data-component="verification-history"]')).toHaveCount(0)
 })
+
+for (const scenario of [
+  { name: "QA dependency changed", missing: ["stale: build (build-1)"], exit: 0, passed: 1, stale: 1, failed: 0 },
+  { name: "build failed", missing: [], exit: 1, passed: 1, stale: 0, failed: 1 },
+  { name: "unchanged evidence", missing: [], exit: 0, passed: 2, stale: 0, failed: 0 },
+]) {
+  test(`current check counts: ${scenario.name}`, async ({ page }) => {
+    await setupTimeline(page, { locale: "en", settings: { newLayoutDesigns: true } })
+    await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+    await page.route("**/api/session/*/outcome**", (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            state: "completed",
+            outcomeUnknown: false,
+            missing: scenario.missing,
+            checks: [
+              { kind: "build", command: "npm run build", callID: "build-1", exit: scenario.exit },
+              { kind: "interaction", command: "node qa.mjs", callID: "interaction-1", exit: 0 },
+            ],
+          },
+        },
+      }),
+    )
+    await page.reload()
+    const summary = page.locator('[data-component="verification-summary"]')
+    await expect(summary).toContainText(`${scenario.passed} current checks passed`)
+    if (scenario.stale) {
+      await expect(summary).toContainText("1 checks expired")
+      await expect(
+        page.getByText("Dependencies changed. Refresh verification status or run the check again.", { exact: true }),
+      ).toBeVisible()
+      await expect(page.getByText("stale: build (build-1)", { exact: false })).toBeVisible()
+    } else await expect(summary).not.toContainText("checks expired")
+    if (scenario.failed) await expect(summary).toContainText("1 checks failed")
+  })
+}

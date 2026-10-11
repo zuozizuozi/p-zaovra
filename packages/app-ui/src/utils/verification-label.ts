@@ -55,3 +55,16 @@ export function workVerification(
   if (verdict === "fail") return "commandFailed"
   return "missingEvidence"
 }
+
+export function staleVerification(
+  check: { kind: string; callID?: string; exit?: unknown; execution?: unknown; supersededBy?: unknown },
+  missing: readonly string[],
+) {
+  return (
+    check.exit === 0 &&
+    !check.execution &&
+    !check.supersededBy &&
+    !!check.callID &&
+    missing.includes(`stale: ${check.kind} (${check.callID})`)
+  )
+}

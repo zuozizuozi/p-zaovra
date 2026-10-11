@@ -167,3 +167,54 @@ describe("updater controller", () => {
     expect(failed.getState()).toEqual({ status: "ready", version: "2.0.0" })
   })
 })
+
+test("automatic metadata checks respect opt-out, persisted daily limit and never download", async () => {
+  let enabled = true
+  let timestamp = 0
+  let time = 2 * 86400000
+  const calls: string[] = []
+  const input = {
+    enabled: true,
+    currentVersion: "1.0.0",
+    now: () => time,
+    automatic: {
+      get: () => enabled,
+      set: (value: boolean) => {
+        enabled = value
+      },
+      lastCheck: () => timestamp,
+      recordCheck: (value: number) => {
+        timestamp = value
+      },
+    },
+    persistence: { get: () => undefined, set: () => {}, clear: () => {} },
+    backend: {
+      checkForUpdates: async () => {
+        calls.push("check")
+        return { isUpdateAvailable: true, updateInfo: { version: "2.0.0" } }
+      },
+      downloadUpdate: async () => {
+        calls.push("download")
+      },
+      quitAndInstall: () => {},
+    },
+  }
+  const controller = createUpdaterController(input)
+  await controller.start()
+  expect(calls).toEqual([])
+  await Promise.all([controller.checkAutomatically(), controller.checkAutomatically()])
+  expect(controller.getState()).toEqual({ status: "available", version: "2.0.0" })
+  expect(calls).toEqual(["check"])
+  controller.stop()
+  const restarted = createUpdaterController(input)
+  await restarted.checkAutomatically()
+  expect(calls).toEqual(["check"])
+  restarted.setAutoCheck(false)
+  time += 86400000
+  await restarted.checkAutomatically()
+  expect(calls).toEqual(["check"])
+  restarted.setAutoCheck(true)
+  await restarted.checkAutomatically()
+  expect(calls).toEqual(["check", "check"])
+  restarted.stop()
+})

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { usageDisplay } from "./usage-display"
 import { artifactLines } from "./artifact-lines"
-import { commandVerification, workVerification } from "./verification-label"
+import { commandVerification, workVerification, staleVerification } from "./verification-label"
 
 describe("D2 evidence and usage display", () => {
   test("final acceptance unwraps host evidence but never trusts arbitrary producers", () => {
@@ -88,4 +88,15 @@ describe("D2 evidence and usage display", () => {
       }),
     ).toBe("commandPassed")
   })
+})
+
+test("stale successful evidence is separate from failures, unfinished and historical checks", () => {
+  const check = { kind: "build", callID: "build-1", exit: 0 }
+  const missing = ["stale: build (build-1)"]
+  expect(staleVerification(check, missing)).toBe(true)
+  expect(staleVerification(check, [])).toBe(false)
+  expect(staleVerification({ ...check, callID: "other" }, missing)).toBe(false)
+  expect(staleVerification({ ...check, exit: 1 }, missing)).toBe(false)
+  expect(staleVerification({ ...check, execution: "timeout" }, missing)).toBe(false)
+  expect(staleVerification({ ...check, supersededBy: "new" }, missing)).toBe(false)
 })

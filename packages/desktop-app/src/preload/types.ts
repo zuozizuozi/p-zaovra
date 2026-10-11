@@ -24,6 +24,8 @@ export type ServerReadyData = {
 
 export type WslServersAPI = WslServersPlatform
 export type UpdaterAPI = {
+  autoCheck: () => Promise<boolean>
+  setAutoCheck: (enabled: boolean) => Promise<boolean>
   subscribe: (cb: (state: UpdaterState) => void) => Promise<() => void>
   check: () => Promise<UpdaterState>
   download: () => Promise<UpdaterState>

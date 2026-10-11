@@ -21,11 +21,21 @@ export function createUpdaterController(input: {
   currentVersion: string
   backend: UpdaterBackend
   persistence: UpdaterPersistence
+  automatic?: {
+    get(): boolean
+    set(enabled: boolean): void
+    lastCheck(): number
+    recordCheck(time: number): void
+  }
+  now?: () => number
   log?: (message: string, data?: object) => void
 }) {
   let state: UpdaterState = input.enabled ? { status: "idle" } : { status: "disabled" }
   let pending: Promise<UpdaterState> | undefined
   const listeners = new Set<(state: UpdaterState) => void>()
+  const now = input.now ?? Date.now
+  const day = 24 * 60 * 60 * 1000
+  let timer: ReturnType<typeof setTimeout> | undefined
 
   const transition = (next: UpdaterState) => {
     input.log?.("updater state changed", { from: state.status, to: next.status })
@@ -41,6 +51,7 @@ export function createUpdaterController(input: {
 
     pending = (async () => {
       transition({ status: "checking" })
+      input.automatic?.recordCheck(now())
       const result = await input.backend.checkForUpdates()
       const version = result?.updateInfo?.version
       if (!result?.isUpdateAvailable || !version || version === input.currentVersion) {
@@ -59,6 +70,23 @@ export function createUpdaterController(input: {
     return pending
   }
 
+  const checkAutomatically = () => {
+    if (!input.enabled || !input.automatic?.get() || now() - input.automatic.lastCheck() < day)
+      return Promise.resolve(state)
+    return check()
+  }
+  const schedule = () => {
+    clearTimeout(timer)
+    if (!input.enabled || !input.automatic?.get()) return
+    timer = setTimeout(
+      () => {
+        void checkAutomatically().finally(schedule)
+      },
+      Math.max(30_000, day - (now() - input.automatic.lastCheck())),
+    )
+    timer.unref?.()
+  }
+
   return {
     getState: () => state,
     subscribe(listener: (state: UpdaterState) => void) {
@@ -69,8 +97,17 @@ export function createUpdaterController(input: {
     async start() {
       const ready = await input.persistence.get()
       if (ready?.version === input.currentVersion) await input.persistence.clear()
+      schedule()
       return state
     },
+    autoCheck: () => input.automatic?.get() ?? false,
+    setAutoCheck(enabled: boolean) {
+      input.automatic?.set(enabled)
+      schedule()
+      return input.automatic?.get() ?? false
+    },
+    stop: () => clearTimeout(timer),
+    checkAutomatically,
     check,
     download() {
       if (pending) return pending

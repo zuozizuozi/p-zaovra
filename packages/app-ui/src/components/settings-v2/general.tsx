@@ -96,6 +96,13 @@ export const SettingsGeneralV2: Component<{
   const mobile = createMediaQuery("(max-width: 767px)")
 
   const updater = useUpdaterAction()
+  const [automatic, { refetch: reloadAutomatic }] = createResource(() => platform.updater?.autoCheck?.())
+  const updateDescription = createMemo(() => {
+    const state = platform.updater?.state()
+    return state && "version" in state
+      ? language.t("settings.updates.toast.available", { version: state.version })
+      : language.t("settings.updates.row.check.description")
+  })
   const [network, { refetch: reloadNetwork }] = createResource(
     () => serverSdk().scope,
     () =>
@@ -714,10 +721,7 @@ export const SettingsGeneralV2: Component<{
           </div>
         </SettingsRowV2>
 
-        <SettingsRowV2
-          title={language.t("settings.updates.row.check.title")}
-          description={language.t("settings.updates.row.check.description")}
-        >
+        <SettingsRowV2 title={language.t("settings.updates.row.check.title")} description={updateDescription()}>
           <ButtonV2 size="normal" variant="neutral" disabled={!updater.action().run} onClick={updater.run}>
             {language.t(updater.action().label)}
           </ButtonV2>
@@ -788,8 +792,28 @@ export const SettingsGeneralV2: Component<{
               </Switch>
             </SettingsRowV2>
           </SettingsListV2>
+          <Show when={platform.updater?.autoCheck}>
+            <SettingsRowV2
+              title="自动检查更新"
+              description="默认开启；启动后延迟检查，每天最多一次。仅访问 GitHub 获取版本信息，确认后才下载。"
+            >
+              <Switch
+                hideLabel
+                checked={automatic() ?? true}
+                disabled={automatic.loading}
+                onChange={async (enabled) => {
+                  await platform.updater
+                    ?.setAutoCheck?.(enabled)
+                    .catch((error) => showToast({ title: "网络设置未保存", description: String(error) }))
+                  await reloadAutomatic()
+                }}
+              >
+                自动检查更新
+              </Switch>
+            </SettingsRowV2>
+          </Show>
           <p class="text-12-regular text-text-weak">
-            更新检查由你手动发起，访问 github.com；确认后才下载。发布版不启用
+            关闭自动检查后仍可手动检查更新；下载需要你确认。发布版不启用
             Sentry，更新说明随包附带。模型服务、工具、MCP、LSP 和 OTLP 仅按你的配置或任务请求访问。
           </p>
           <Show when={network.error}>

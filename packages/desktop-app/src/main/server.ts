@@ -64,6 +64,7 @@ export async function spawnLocalServer(
     cwd: process.cwd(),
     env: createSidecarEnv({
       env: process.env,
+      resourcesPath: process.resourcesPath,
       platform: process.platform,
       packaged: app.isPackaged,
       channel: CHANNEL,
