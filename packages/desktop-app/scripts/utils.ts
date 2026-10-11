@@ -4,6 +4,7 @@ export type Channel = "dev" | "beta" | "prod"
 
 export function resolveChannel(): Channel {
   const raw = Bun.env.ZAOVRA_CHANNEL
+  if (raw === "latest") return "prod"
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 }

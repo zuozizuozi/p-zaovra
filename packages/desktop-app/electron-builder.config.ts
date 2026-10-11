@@ -29,6 +29,7 @@ async function signWindows(configuration: { path: string }) {
 
 const channel = (() => {
   const raw = process.env.ZAOVRA_CHANNEL
+  if (raw === "latest") return "prod"
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 })()

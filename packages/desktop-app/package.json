@@ -2,7 +2,7 @@
   "name": "@zaovra-ai/desktop",
   "description": "AI-native desktop agent IDE",
   "private": true,
-  "version": "1.18.3",
+  "version": "0.1.0",
   "type": "module",
   "license": "MIT",
   "homepage": "https://zaovra.com",

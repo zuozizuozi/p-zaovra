@@ -6,6 +6,9 @@ import path from "node:path"
 
 const root = path.resolve(import.meta.dir, "..")
 const outdir = path.join(root, "dist", "node")
+const channel = process.env.ZAOVRA_CHANNEL === "latest" ? "prod" : (process.env.ZAOVRA_CHANNEL ?? "dev")
+if (!["dev", "beta", "prod"].includes(channel)) throw new Error(`Unsupported channel: ${channel}`)
+const version = (await Bun.file(path.join(root, "package.json")).json()).version
 const jsoncParserEsm = fileURLToPath(import.meta.resolve("jsonc-parser")).replace(
   path.join("lib", "umd", "main.js"),
   path.join("lib", "esm", "main.js"),
@@ -40,6 +43,8 @@ const result = await Bun.build({
   },
   define: {
     ZAOVRA_MODELS_DEV: modelsSnapshot,
+    ZAOVRA_VERSION: JSON.stringify(version),
+    ZAOVRA_CHANNEL: JSON.stringify(channel),
   },
   plugins: [
     {
