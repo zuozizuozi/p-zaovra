@@ -204,6 +204,12 @@ export const TaskAcceptance = Schema.Struct({
 }).annotate({ identifier: "Work.TaskAcceptance" })
 export interface TaskAcceptance extends Schema.Schema.Type<typeof TaskAcceptance> {}
 
+export const TaskIsolation = Schema.Struct({
+  status: Schema.Literals(["isolated", "shared", "blocked"]),
+  reason: Schema.String.pipe(optional),
+}).annotate({ identifier: "Work.TaskIsolation" })
+export interface TaskIsolation extends Schema.Schema.Type<typeof TaskIsolation> {}
+
 export const TaskInfo = Schema.Struct({
   id: TaskID,
   goalID: GoalID,
@@ -215,6 +221,7 @@ export const TaskInfo = Schema.Struct({
   status: TaskStatus,
   criteria: Schema.Array(CriterionID),
   acceptance: TaskAcceptance.pipe(optional),
+  isolationState: TaskIsolation.pipe(optional),
   attemptCount: NonNegativeInt,
   time: TaskTime,
   revision: NonNegativeInt,

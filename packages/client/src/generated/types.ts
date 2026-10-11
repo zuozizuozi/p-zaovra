@@ -2954,6 +2954,7 @@ export type WorkCreateOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -3289,6 +3290,7 @@ export type WorkGetOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -3586,6 +3588,7 @@ export type WorkExpandOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -3874,6 +3877,7 @@ export type WorkReplanOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -4208,6 +4212,7 @@ export type WorkResolveMemoryOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -4519,6 +4524,7 @@ export type WorkUpdateMemoryOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number
@@ -4806,6 +4812,7 @@ export type WorkDeleteMemoryOutput = {
             | { readonly type: "file"; readonly path: string; readonly expected: "exists" | "file" | "directory" }
         }>
       }
+      readonly isolationState?: { readonly status: "isolated" | "shared" | "blocked"; readonly reason?: string }
       readonly attemptCount: number
       readonly time: { readonly created: number; readonly updated: number; readonly completed?: number }
       readonly revision: number

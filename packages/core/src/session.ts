@@ -26,6 +26,7 @@ import { AgentV2 } from "./agent"
 import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
+import { ProjectDirectories } from "./project/directories"
 import path from "path"
 import { AppProcess } from "./process"
 import { BackgroundJob } from "./background-job"
@@ -236,6 +237,7 @@ const layer = Layer.effect(
     const db = database.db
     const events = yield* EventV2.Service
     const projects = yield* ProjectV2.Service
+    const projectDirectories = yield* ProjectDirectories.Service
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
     const live = yield* SessionLive.Service
@@ -348,6 +350,12 @@ const layer = Layer.effect(
           .onConflictDoNothing()
           .run()
           .pipe(Effect.orDie)
+        // V2 does not pass through the legacy project-opening registration path.
+        if (project.id !== ProjectV2.ID.global)
+          yield* projectDirectories.create({
+            projectID: project.id,
+            directory: AbsolutePath.make(yield* fs.resolve(project.directory)),
+          })
         const now = Date.now()
         const projected = yield* events
           .publish(
@@ -1036,6 +1044,7 @@ export const node = makeGlobalNode({
     Global.node,
     EventV2.node,
     ProjectV2.node,
+    ProjectDirectories.node,
     SessionExecution.node,
     SessionStore.node,
     SessionLive.node,

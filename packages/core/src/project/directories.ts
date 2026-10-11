@@ -7,6 +7,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { AbsolutePath, optional } from "../schema"
 import { ProjectSchema } from "./schema"
 import { ProjectDirectoryTable } from "./sql"
+import { stat } from "node:fs/promises"
 import type { EffectDrizzleSqlite } from "@zaovra-ai/effect-drizzle-sqlite"
 
 export interface Directory {
@@ -112,7 +113,7 @@ const layer = Layer.effect(
       projectID: ProjectSchema.ID
       directory: AbsolutePath
     }) {
-      return (
+      const found =
         (yield* db
           .select({ directory: ProjectDirectoryTable.directory })
           .from(ProjectDirectoryTable)
@@ -124,6 +125,16 @@ const layer = Layer.effect(
           )
           .get()
           .pipe(Effect.orDie)) !== undefined
+      if (found || process.platform !== "win32") return found
+      // Windows realpath may retain caller casing or an 8.3 alias. Compare filesystem
+      // identities, never lowercase paths: individual Windows directories can be case-sensitive.
+      const identity = (directory: string) =>
+        Effect.tryPromise(() => stat(directory, { bigint: true })).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const source = yield* identity(input.directory)
+      if (!source?.isDirectory() || source.ino === 0n) return false
+      const registered = yield* list(input.projectID)
+      return (yield* Effect.forEach(registered, (item) => identity(item.directory))).some(
+        (item) => item?.isDirectory() && item.ino === source.ino && item.dev === source.dev,
       )
     })
 

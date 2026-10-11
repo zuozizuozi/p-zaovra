@@ -79,6 +79,7 @@ export type Event =
   | EventWorkTaskMergeConflicted
   | EventWorkTaskIsolationArchived
   | EventWorkTaskReworkRequested
+  | EventWorkTaskIsolationResolved
   | EventWorkTaskFinalAcceptanceRepairRequested
   | EventWorkTaskCompleted
   | EventWorkTaskBlocked
@@ -1550,6 +1551,17 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "work.task.isolation-resolved"
+        properties: {
+          goalID: string
+          timestamp: number
+          taskID: string
+          isolation: WorkTaskIsolation
+          location?: LocationRef
+        }
+      }
+    | {
+        id: string
         type: "work.task.final-acceptance-repair-requested"
         properties: {
           goalID: string
@@ -2149,6 +2161,7 @@ export type GlobalEvent = {
     | SyncEventWorkTaskMergeConflicted
     | SyncEventWorkTaskIsolationArchived
     | SyncEventWorkTaskReworkRequested
+    | SyncEventWorkTaskIsolationResolved
     | SyncEventWorkTaskFinalAcceptanceRepairRequested
     | SyncEventWorkTaskCompleted
     | SyncEventWorkTaskBlocked
@@ -3249,6 +3262,7 @@ export type V2Event =
   | WorkTaskMergeConflicted
   | WorkTaskIsolationArchived
   | WorkTaskReworkRequested
+  | WorkTaskIsolationResolved
   | WorkTaskFinalAcceptanceRepairRequested
   | WorkTaskCompleted
   | WorkTaskBlocked
@@ -3625,6 +3639,11 @@ export type WorkTaskAcceptance = {
   criteria: Array<WorkCriterion>
 }
 
+export type WorkTaskIsolation = {
+  status: "isolated" | "shared" | "blocked"
+  reason?: string
+}
+
 export type WorkTaskTime = {
   created: number
   updated: number
@@ -3642,6 +3661,7 @@ export type WorkTaskInfo = {
   status: WorkTaskStatus
   criteria: Array<string>
   acceptance?: WorkTaskAcceptance
+  isolationState?: WorkTaskIsolation
   attemptCount: number
   time: WorkTaskTime
   revision: number
@@ -5039,6 +5059,24 @@ export type SyncEventWorkTaskReworkRequested = {
       taskID: string
       status: "rework"
       reason: string
+    }
+  }
+}
+
+export type SyncEventWorkTaskIsolationResolved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "work.task.isolation-resolved.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      goalID: string
+      timestamp: number
+      taskID: string
+      isolation: WorkTaskIsolation
+      location?: LocationRef
     }
   }
 }
@@ -7491,6 +7529,27 @@ export type WorkTaskReworkRequested = {
   }
 }
 
+export type WorkTaskIsolationResolved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "work.task.isolation-resolved"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    isolation: WorkTaskIsolation
+    location?: LocationRef
+  }
+}
+
 export type WorkTaskFinalAcceptanceRepairRequested = {
   id: string
   metadata?: {
@@ -9500,6 +9559,18 @@ export type EventWorkTaskReworkRequested = {
     taskID: string
     status: "rework"
     reason: string
+  }
+}
+
+export type EventWorkTaskIsolationResolved = {
+  id: string
+  type: "work.task.isolation-resolved"
+  properties: {
+    goalID: string
+    timestamp: number
+    taskID: string
+    isolation: WorkTaskIsolation
+    location?: LocationRef
   }
 }
 

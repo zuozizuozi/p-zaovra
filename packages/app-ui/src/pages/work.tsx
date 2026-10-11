@@ -974,6 +974,12 @@ function TaskCard(props: { task: WorkDetail["tasks"][number]; detail: WorkDetail
               : "shared"}{" "}
             · {attempts().length} attempts · {evaluations().length} evaluations
           </div>
+          <Show when={props.task.isolationState?.reason}>
+            <div class="mt-1 text-xs" role="status">
+              {props.task.isolationState?.status === "blocked" ? "隔离失败，任务已阻塞：" : "未隔离："}
+              {props.task.isolationState?.reason}
+            </div>
+          </Show>
         </div>
         <Status value={props.task.status} />
       </div>

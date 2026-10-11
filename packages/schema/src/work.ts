@@ -63,6 +63,7 @@ export {
   RoleID,
   TaskAcceptance,
   TaskInfo,
+  TaskIsolation,
   TaskStatus,
   TaskTime,
   Usage,

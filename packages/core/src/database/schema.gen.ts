@@ -424,6 +424,7 @@ export default {
           \`status\` text NOT NULL,
           \`criteria\` text NOT NULL,
           \`acceptance\` text,
+          \`isolation\` text,
           \`attempt_count\` integer NOT NULL,
           \`revision\` integer NOT NULL,
           \`time_created\` integer NOT NULL,

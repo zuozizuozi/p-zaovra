@@ -55,6 +55,7 @@ export function task(row: typeof WorkTaskTable.$inferSelect): Work.TaskInfo {
     status: row.status,
     criteria: row.criteria,
     acceptance: row.acceptance ?? undefined,
+    isolationState: row.isolation ?? undefined,
     attemptCount: row.attempt_count,
     revision: row.revision,
     time: {

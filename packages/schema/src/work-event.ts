@@ -14,7 +14,9 @@ import {
   HandoffInfo,
   MemoryResolutionInfo,
   TaskInfo,
+  TaskIsolation,
 } from "./work-contract"
+import { Location } from "./location"
 import { AttemptID, EvaluationID, GoalID, HandoffID, TaskID, WorkerID } from "./work-id"
 
 const options = {
@@ -188,6 +190,16 @@ export const TaskReworkRequested = Event.define({
   ...options,
   schema: { ...Base, taskID: TaskID, status: Schema.Literal("rework"), reason: Schema.String },
 })
+export const TaskIsolationResolved = Event.define({
+  type: "work.task.isolation-resolved",
+  ...options,
+  schema: {
+    ...Base,
+    taskID: TaskID,
+    isolation: TaskIsolation,
+    location: Location.Ref.pipe(optional),
+  },
+})
 export const FinalAcceptanceRepairRequested = Event.define({
   type: "work.task.final-acceptance-repair-requested",
   ...options,
@@ -307,6 +319,7 @@ export const DurableDefinitions = Event.inventory(
   TaskMergeConflicted,
   TaskIsolationArchived,
   TaskReworkRequested,
+  TaskIsolationResolved,
   FinalAcceptanceRepairRequested,
   TaskCompleted,
   TaskBlocked,

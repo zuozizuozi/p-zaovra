@@ -1309,52 +1309,91 @@ export const layer = Layer.effect(
       tasks: ReadonlyArray<WorkPlanner.ValidatedTask>,
     ) {
       if (!tasks.some((task) => task.isolation === "worktree")) return tasks
-      const repository = yield* git.repo.discover(goal.location.directory)
-      if (!repository) {
-        yield* Effect.logWarning("WorkGraph isolation unavailable; using shared workspace", {
-          goalID: goal.id,
-          reason: "not_git",
-        })
-        return tasks
-      }
-      const baseline = yield* git.change.capture({ repository, path: goal.location.directory })
-      if (baseline.length > 0) {
-        yield* Effect.logWarning("WorkGraph isolation deferred for dirty workspace; using shared workspace", {
-          goalID: goal.id,
-        })
-        return tasks
-      }
-      return yield* Effect.forEach(tasks, (task) => {
-        if (task.isolation !== "worktree") return Effect.succeed(task)
-        return Effect.gen(function* () {
-          const location = yield* Location.Service
-          const copies = yield* ProjectCopy.Service
-          const root = AbsolutePath.make(path.join(Global.Path.data, "worktree", location.project.id))
-          const name = `work-${goal.id.slice("goal_".length, "goal_".length + 8)}-${task.id.slice("task_".length, "task_".length + 8)}`
-          const expected = AbsolutePath.make(path.join(root, name))
-          yield* copies.refresh({ projectID: location.project.id })
-          const existing = (yield* projectDirectories.list(location.project.id)).find(
-            (item) => item.directory === expected && item.strategy === "git_worktree",
-          )
-          if (existing) return { ...task, location: { directory: existing.directory } }
-          const created = yield* copies.create({
-            projectID: location.project.id,
-            strategy: ProjectCopy.StrategyID.make("git_worktree"),
-            sourceDirectory: goal.location.directory,
-            directory: root,
-            name,
+      return yield* Effect.gen(function* () {
+        const repository = yield* git.repo.discover(goal.location.directory)
+        if (!repository) {
+          yield* Effect.logWarning("WorkGraph isolation unavailable; using shared workspace", {
+            goalID: goal.id,
+            reason: "not_git",
           })
-          return { ...task, location: { directory: created.directory } }
-        }).pipe(
-          Effect.provide(locations.get(goal.location)),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("WorkGraph Task isolation failed; using shared workspace", cause).pipe(
-              Effect.annotateLogs({ goalID: goal.id, taskID: task.id }),
-              Effect.as(task),
+          return tasks.map((task) =>
+            task.isolation === "worktree"
+              ? { ...task, provisioning: { status: "shared" as const, reason: "当前目录不是 Git 仓库" } }
+              : task,
+          )
+        }
+        const baseline = yield* git.change.capture({ repository, path: goal.location.directory })
+        if (baseline.length > 0) {
+          yield* Effect.logWarning("WorkGraph isolation deferred for dirty workspace; using shared workspace", {
+            goalID: goal.id,
+          })
+          return tasks.map((task) =>
+            task.isolation === "worktree"
+              ? { ...task, provisioning: { status: "shared" as const, reason: "工作区有未提交改动" } }
+              : task,
+          )
+        }
+        return yield* Effect.forEach(tasks, (task) => {
+          if (task.isolation !== "worktree") return Effect.succeed(task)
+          return Effect.gen(function* () {
+            const location = yield* Location.Service
+            const copies = yield* ProjectCopy.Service
+            const root = AbsolutePath.make(path.join(Global.Path.data, "worktree", location.project.id))
+            const name = `work-${goal.id.slice("goal_".length, "goal_".length + 8)}-${task.id.slice("task_".length, "task_".length + 8)}`
+            const expected = AbsolutePath.make(path.join(root, name))
+            yield* copies.refresh({ projectID: location.project.id })
+            const existing = (yield* projectDirectories.list(location.project.id)).find(
+              (item) => item.directory === expected && item.strategy === "git_worktree",
+            )
+            if (existing)
+              return {
+                ...task,
+                location: { directory: existing.directory },
+                provisioning: { status: "isolated" as const },
+              }
+            const created = yield* copies.create({
+              projectID: location.project.id,
+              strategy: ProjectCopy.StrategyID.make("git_worktree"),
+              sourceDirectory: goal.location.directory,
+              directory: root,
+              name,
+            })
+            return {
+              ...task,
+              location: { directory: created.directory },
+              provisioning: { status: "isolated" as const },
+            }
+          }).pipe(
+            Effect.provide(locations.get(goal.location)),
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
+              return Effect.succeed({
+                ...task,
+                location: undefined,
+                provisioning: { status: "blocked" as const, reason: `隔离创建失败：${errorText(Cause.squash(cause))}` },
+              })
+            }),
+          )
+        })
+      }).pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterrupts(cause)) return Effect.interrupt
+          return Effect.succeed(
+            tasks.map((task) =>
+              task.isolation === "worktree"
+                ? {
+                    ...task,
+                    location: undefined,
+                    provisioning: {
+                      status: "blocked" as const,
+                      reason: `隔离检查失败：${errorText(Cause.squash(cause))}`,
+                    },
+                  }
+                : task,
             ),
-          ),
-        )
-      })
+          )
+        }),
+      )
     })
 
     const preparePlan = Effect.fn("WorkRunner.preparePlan")(function* (
@@ -1379,6 +1418,7 @@ export const layer = Layer.effect(
           dependsOn: item.dependsOn,
           role: item.role,
           location: item.location,
+          isolationState: item.provisioning,
           status: "pending",
           criteria: item.criteria,
           acceptance: item.acceptance,
@@ -1594,6 +1634,7 @@ export const layer = Layer.effect(
             dependsOn: item.dependsOn,
             role: item.role,
             location: item.location,
+            isolationState: item.provisioning,
             status: "pending",
             criteria: item.criteria,
             acceptance: item.acceptance,
@@ -1885,6 +1926,26 @@ export const layer = Layer.effect(
       const goal = yield* store.getGoal(goalID)
       if (!goal || goal.status !== "active") return false
       const tasks = yield* store.tasks(goal.id)
+      const unavailable = tasks.filter(
+        (task) => task.isolationState?.status === "blocked" && task.status !== "superseded",
+      )
+      if (unavailable.length > 0) {
+        const timestamp = yield* DateTime.now
+        yield* Effect.forEach(
+          unavailable.filter((task) => task.status !== "blocked"),
+          (task) =>
+            events.publish(Work.Event.TaskBlocked, {
+              goalID: goal.id,
+              taskID: task.id,
+              status: "blocked",
+              reason: task.isolationState!.reason ?? "隔离创建失败",
+              timestamp,
+            }),
+          { concurrency: 1, discard: true },
+        )
+        yield* blockGoal(goal.id, unavailable[0].isolationState!.reason ?? "隔离创建失败", timestamp)
+        return false
+      }
       yield* Effect.forEach(
         tasks.filter((task) => task.status === "completed" || task.status === "superseded"),
         (task) => isolation.release(goal, task),
@@ -2009,7 +2070,8 @@ export const layer = Layer.effect(
       )
     })
 
-    const resumableBlockedTasks = Effect.fn("WorkRunner.resumableBlockedTasks")(function* (goalID: Work.GoalID) {
+    const resumableBlockedTasks = Effect.fn("WorkRunner.resumableBlockedTasks")(function* (goal: Work.GoalInfo) {
+      const goalID = goal.id
       const blocked = (yield* store.tasks(goalID)).filter((task) => task.status === "blocked")
       if (blocked.length === 0) return []
 
@@ -2032,18 +2094,34 @@ export const layer = Layer.effect(
       }
 
       const candidates = yield* Effect.forEach(blocked, (task) =>
-        store
-          .attempts(task.id)
-          .pipe(
-            Effect.map((attempts) =>
-              [
-                reasons.get(task.id),
-                attempts.findLast((attempt) => attempt.failure !== undefined)?.failure?.message,
-              ].some((reason) => reason !== undefined && WorkAccessFailure.recoverable(reason))
-                ? task
-                : undefined,
-            ),
-          ),
+        task.isolationState?.status === "blocked"
+          ? Effect.gen(function* () {
+              const [prepared] = yield* provisionGraph(goal, [{ ...task, isolation: "worktree" }])
+              const isolation = prepared.provisioning
+              if (!isolation) return undefined
+              yield* events.publish(Work.Event.TaskIsolationResolved, {
+                goalID,
+                taskID: task.id,
+                isolation,
+                location: prepared.location,
+                timestamp: yield* DateTime.now,
+              })
+              return isolation.status === "blocked" ? undefined : task
+            })
+          : task.attemptCount === 0 && reasons.get(task.id)?.startsWith("隔离") && task.isolationState
+            ? Effect.succeed(task)
+            : store
+                .attempts(task.id)
+                .pipe(
+                  Effect.map((attempts) =>
+                    [
+                      reasons.get(task.id),
+                      attempts.findLast((attempt) => attempt.failure !== undefined)?.failure?.message,
+                    ].some((reason) => reason !== undefined && WorkAccessFailure.recoverable(reason))
+                      ? task
+                      : undefined,
+                  ),
+                ),
       )
       return candidates.filter((task): task is Work.TaskInfo => task !== undefined)
     })
@@ -2061,8 +2139,15 @@ export const layer = Layer.effect(
                   ),
                 )
               const resumable =
-                input.force && initial.status === "blocked" ? yield* resumableBlockedTasks(input.goalID) : []
-              if (input.force && (initial.status === "draft" || initial.status === "paused" || resumable.length > 0)) {
+                input.force && (initial.status === "blocked" || initial.status === "active")
+                  ? yield* resumableBlockedTasks(initial)
+                  : []
+              if (
+                input.force &&
+                (initial.status === "draft" ||
+                  initial.status === "paused" ||
+                  (initial.status === "blocked" && resumable.length > 0))
+              ) {
                 yield* events.publish(Work.Event.GoalActivated, {
                   goalID: input.goalID,
                   timestamp: yield* DateTime.now,
@@ -2077,7 +2162,10 @@ export const layer = Layer.effect(
                       goalID: input.goalID,
                       taskID: task.id,
                       status: "rework",
-                      reason: "Access repaired after user intervention",
+                      reason:
+                        task.isolationState?.status === "blocked"
+                          ? "Isolation repaired after user intervention"
+                          : "Access repaired after user intervention",
                       timestamp,
                     }),
                   { concurrency: 1, discard: true },

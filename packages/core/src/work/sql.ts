@@ -49,6 +49,7 @@ export const WorkTaskTable = sqliteTable(
     status: text().$type<Work.TaskStatus>().notNull(),
     criteria: text({ mode: "json" }).$type<Work.CriterionID[]>().notNull(),
     acceptance: text({ mode: "json" }).$type<Work.TaskAcceptance>(),
+    isolation: text({ mode: "json" }).$type<Work.TaskIsolation>(),
     attempt_count: integer().notNull(),
     revision: integer().notNull(),
     time_created: integer().notNull(),

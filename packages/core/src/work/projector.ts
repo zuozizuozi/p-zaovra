@@ -285,6 +285,7 @@ const layer = Layer.effectDiscard(
             status: "pending",
             criteria: Array.from(event.data.info.criteria),
             acceptance: event.data.info.acceptance,
+            isolation: event.data.info.isolationState,
             attempt_count: 0,
             revision: revision(event),
             time_created: time,
@@ -366,6 +367,7 @@ const layer = Layer.effectDiscard(
               status: "pending" as const,
               criteria: Array.from(info.criteria),
               acceptance: info.acceptance,
+              isolation: info.isolationState,
               attempt_count: 0,
               revision: revision(event),
               time_created: time,
@@ -451,6 +453,7 @@ const layer = Layer.effectDiscard(
               status: "pending" as const,
               criteria: Array.from(info.criteria),
               acceptance: info.acceptance,
+              isolation: info.isolationState,
               attempt_count: 0,
               revision: revision(event),
               time_created: time,
@@ -592,6 +595,7 @@ const layer = Layer.effectDiscard(
               status: "pending" as const,
               criteria: Array.from(info.criteria),
               acceptance: info.acceptance,
+              isolation: info.isolationState,
               attempt_count: 0,
               revision: revision(event),
               time_created: time,
@@ -758,6 +762,7 @@ const layer = Layer.effectDiscard(
             status: "pending",
             criteria: Array.from(info.criteria),
             acceptance: info.acceptance,
+            isolation: info.isolationState,
             attempt_count: 0,
             revision: revision(event),
             time_created: time,
@@ -781,6 +786,33 @@ const layer = Layer.effectDiscard(
           .update(WorkGoalTable)
           .set({ usage: { ...goal.usage, repairs: goal.usage.repairs + 1 } })
           .where(eq(WorkGoalTable.id, goal.id))
+          .run()
+          .pipe(Effect.orDie)
+        yield* touchGoal(db, event)
+      }),
+    )
+    yield* events.project(Work.Event.TaskIsolationResolved, (event) =>
+      Effect.gen(function* () {
+        const task = yield* requireTask(db, event.data.goalID, event.data.taskID)
+        invariant(
+          task.status === "blocked" && task.isolation?.status === "blocked",
+          "Only isolation-blocked Tasks can reprovision",
+        )
+        invariant(task.attempt_count === 0, "Cannot relocate a Task after execution")
+        invariant(
+          event.data.isolation.status !== "isolated" || !!event.data.location,
+          "Isolated Task requires a location",
+        )
+        yield* db
+          .update(WorkTaskTable)
+          .set({
+            isolation: event.data.isolation,
+            directory: event.data.location?.directory ?? null,
+            workspace_id: event.data.location?.workspaceID ?? null,
+            revision: revision(event),
+            time_updated: DateTime.toEpochMillis(event.data.timestamp),
+          })
+          .where(eq(WorkTaskTable.id, task.id))
           .run()
           .pipe(Effect.orDie)
         yield* touchGoal(db, event)

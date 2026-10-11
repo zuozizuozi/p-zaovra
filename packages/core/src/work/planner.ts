@@ -22,6 +22,7 @@ export type ValidatedTask = {
   readonly instructions: string
   readonly dependsOn: ReadonlyArray<Work.TaskID>
   readonly role: Work.PlanRole
+  readonly provisioning?: Work.TaskIsolation
   readonly isolation: Work.PlanIsolation
   readonly criteria: ReadonlyArray<Work.CriterionID>
   readonly acceptance?: Work.TaskAcceptance
