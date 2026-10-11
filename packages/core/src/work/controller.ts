@@ -280,7 +280,14 @@ export function makeLayer(options?: {
                   yield* tx
                     .update(WorkControllerDispatchTable)
                     .set({
-                      signal,
+                      // Preserve pending recovery, but still notify a leased drain
+                      // that may already have read the old approval state.
+                      signal:
+                        signal === "continue" &&
+                        current.signal === "wake" &&
+                        current.revision > current.processed_revision
+                          ? "wake"
+                          : signal,
                       revision: current.revision + 1,
                       time_requested: now,
                       time_updated: now,

@@ -14,10 +14,10 @@ import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
 import { Work } from "@zaovra-ai/schema/work"
 import { DateTime, Effect, ManagedRuntime } from "effect"
 
-test.each(["idle", "queued-pause", "approval-race"])(
+test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake", "leased-continue", "wake-paused"])(
   "merge approval dispatch: %s",
   async (mode) => {
-    const pause = mode !== "idle"
+    const pause = mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused"
     await using tmp = await tmpdir({ git: true })
     const isolated = path.join(tmp.path, "isolated")
     let calls = 0
@@ -122,15 +122,67 @@ test.each(["idle", "queued-pause", "approval-race"])(
         await runtime.dispose()
       },
     }
-    if (pause) await runtime.runPromise(WorkController.Service.use((controller) => controller.setDraining(true)))
+    const goalID = Work.GoalID.make(id)
+    const leased = mode === "leased-wake" || mode === "leased-continue"
+    const prior = mode === "leased-continue" ? "continue" : "wake"
+    if (mode !== "idle")
+      await runtime.runPromise(WorkController.Service.use((controller) => controller.setDraining(true)))
+    const held = leased
+      ? await runtime.runPromise(
+          WorkController.Service.use((controller) =>
+            Effect.gen(function* () {
+              yield* controller.signal(goalID, prior)
+              yield* controller.setDraining(false)
+              const claim = (yield* controller.claim({ goalID }))[0]
+              yield* controller.setDraining(true)
+              return claim
+            }),
+          ),
+        )
+      : undefined
+    if (leased) {
+      expect(held).toBeDefined()
+      // Real review read under a held dispatch; retain its pre-approval result.
+      expect((await (await request(`/api/work/${id}/merge/${task}`)).json()).approved).toBe(false)
+    }
+    if (mode === "queued-wake" || mode === "wake-paused")
+      await runtime.runPromise(WorkController.Service.use((controller) => controller.signal(goalID, "wake")))
     await request(`/api/work/${id}/merge/${task}`, { token: review.token, approved: true })
+    if (leased || mode === "queued-wake") {
+      const pending = await runtime.runPromise(
+        WorkController.Service.use((controller) => controller.dispatches(goalID)),
+      )
+      expect(pending[0]?.signal).toBe(prior)
+      if (held) {
+        expect(pending[0]!.revision).toBe(held.revision + 1)
+        await runtime.runPromise(WorkController.Service.use((controller) => controller.run(held, Effect.void)))
+        expect(
+          (await runtime.runPromise(WorkController.Service.use((controller) => controller.dispatches(goalID))))[0]
+            ?.status,
+        ).toBe("pending")
+      }
+      await runtime.runPromise(WorkController.Service.use((controller) => controller.setDraining(false)))
+    }
     if (pause) {
       const goalID = Work.GoalID.make(id)
       const queued = await runtime.runPromise(WorkController.Service.use((controller) => controller.dispatches(goalID)))
-      expect(queued).toMatchObject([{ signal: mode === "approval-race" ? "interrupt" : "continue", status: "pending" }])
+      expect(queued).toMatchObject([
+        {
+          signal: mode === "approval-race" ? "interrupt" : mode === "wake-paused" ? "wake" : "continue",
+          status: "pending",
+        },
+      ])
       // Real durable pause transitions, with the advisory dispatch already queued.
       // Hold dispatch until after the pause projection, deterministically exercising
       // the consumer boundary rather than relying on timers to win a race.
+      if (mode === "wake-paused") {
+        // Work.pause also records interrupt; direct pause projections alone omit
+        // the product entry point's dispatch invariant (audit revision 119).
+        await request(`/api/work/${id}/pause`, {})
+        expect(
+          await runtime.runPromise(WorkController.Service.use((controller) => controller.dispatches(goalID))),
+        ).toMatchObject([{ signal: "interrupt", status: "pending" }])
+      }
       if (mode === "queued-pause")
         await runtime.runPromise(
           Effect.gen(function* () {
@@ -158,6 +210,12 @@ test.each(["idle", "queued-pause", "approval-race"])(
         await sleep(25)
       }
       expect(settled).toBe(true)
+      if (mode === "wake-paused")
+        console.info("wake-paused boundary", {
+          goalStatus: (await (await request(`/api/work/${id}`)).json()).data.goal.status,
+          applied: await Bun.file(path.join(tmp.path, "feature.txt")).exists(),
+          providerCallsAfterApproval: calls - before,
+        })
       expect((await (await request(`/api/work/${id}`)).json()).data.goal.status).toBe("paused")
       expect(await Bun.file(path.join(tmp.path, "feature.txt")).exists()).toBe(false)
       expect(calls).toBe(before)

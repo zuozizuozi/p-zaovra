@@ -23,6 +23,26 @@ const runtimeA = Work.ControllerRuntimeID.make("controller_runtime_cluster_a")
 const runtimeB = Work.ControllerRuntimeID.make("controller_runtime_cluster_b")
 
 describe("WorkController", () => {
+  for (const signal of ["wake", "continue"] as const) {
+    it.effect(`retains a late approval after a leased ${signal} settles`, () =>
+      Effect.gen(function* () {
+        const db = (yield* Database.Service).db
+        const goalID = Work.GoalID.make(`goal_approval_leased_${signal}`)
+        yield* insertGoal(db, goalID)
+        yield* WorkController.Service.use((controller) =>
+          Effect.gen(function* () {
+            yield* controller.signal(goalID, signal)
+            const first = (yield* controller.claim({ goalID }))[0]!
+            yield* controller.signal(goalID, "continue")
+            expect(yield* controller.dispatches(goalID)).toMatchObject([{ signal, revision: 2, processedRevision: 0 }])
+            yield* controller.run(first, Effect.void)
+            expect(yield* controller.claim({ goalID })).toMatchObject([{ signal, revision: 2, fence: 2 }])
+          }),
+        ).pipe(Effect.provide(controllerLayer(controllerA, runtimeA)))
+      }),
+    )
+  }
+
   it.effect("does not let a late approval overwrite an unprocessed interrupt", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db
