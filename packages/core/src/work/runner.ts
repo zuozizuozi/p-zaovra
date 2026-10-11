@@ -1052,7 +1052,7 @@ export const layer = Layer.effect(
       )
       const hostEvidenceID = Work.EvidenceID.make(`evidence_${hash(`${attempt.id}:session-checks`)}`)
       const prior = yield* store.evidence(task.id)
-      const hostEvidence = WorkReviewer.sessionEvidence({
+      const observationInput = {
         goal,
         task,
         attempt,
@@ -1061,7 +1061,8 @@ export const layer = Layer.effect(
         targets,
         snapshot,
         timestamp: yield* DateTime.now,
-      })
+      }
+      const hostEvidence = WorkReviewer.sessionEvidence(observationInput)
       if (hostEvidence && !prior.some((item) => item.id === hostEvidenceID))
         yield* events.publish(Work.Event.EvidenceRecorded, {
           goalID: goal.id,
@@ -1109,7 +1110,30 @@ export const layer = Layer.effect(
         yield* blockGoal(goal.id, reason, timestamp)
         return false
       }
-      const evidence = [...deterministic, ...(hostEvidence ? [hostEvidence] : [])]
+      const observations = [
+        WorkReviewer.browserEvidence(observationInput),
+        yield* WorkReviewer.gitEvidence(observationInput, proc),
+      ].filter((item) => item !== undefined)
+      for (const info of observations)
+        if (!prior.some((item) => item.id === info.id))
+          yield* events.publish(Work.Event.EvidenceRecorded, { goalID: goal.id, info, timestamp: info.createdAt })
+      // Preserve the original provenance at final review; never turn historical observations into fresh passes.
+      const upstream =
+        task.acceptance?.scope === "final"
+          ? (yield* Effect.forEach(task.dependsOn, (id) =>
+              Effect.gen(function* () {
+                const dependency = yield* store.getTask(id)
+                if (dependency?.status !== "completed") return []
+                const latest = (yield* store.attempts(id)).findLast(
+                  (item) => item.kind === "review" && item.status === "succeeded",
+                )
+                return (yield* store.evidence(id)).filter(
+                  (item) => item.attemptID === latest?.id && ["browser-host/1", "git-host/1"].includes(item.producer),
+                )
+              }),
+            )).flat()
+          : []
+      const evidence = [...upstream, ...deterministic, ...(hostEvidence ? [hostEvidence] : []), ...observations]
       const handoffs = yield* store.mailbox(task.id)
       const input = { goal, task, attempt, criteria, evidence, handoffs }
       const exit = yield* Effect.uninterruptibleMask((restore) =>

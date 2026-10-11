@@ -962,7 +962,10 @@ describe("WorkRunner", () => {
       ])
       expect(new Set(attempts.map((attempt) => attempt.sessionID)).size).toBe(2)
       expect(yield* db.select().from(SessionInputTable).all().pipe(Effect.orDie)).toHaveLength(1)
-      expect(yield* store.evidence(created.tasks[0].id)).toMatchObject([{ kind: "review" }])
+      expect((yield* store.evidence(created.tasks[0].id)).map((item) => item.producer).sort()).toEqual([
+        "git-host/1",
+        "work-reviewer/1",
+      ])
       expect(yield* store.evaluations(created.tasks[0].id)).toMatchObject([{ verdict: "pass" }])
     }),
   )
@@ -1287,6 +1290,7 @@ describe("WorkRunner", () => {
       expect(yield* store.getTask(created.tasks[0].id)).toMatchObject({ status: "completed" })
       expect(yield* store.evidence(created.tasks[0].id)).toMatchObject([
         { kind: "test", payload: { type: "command", exitCode: 0 } },
+        { kind: "diff", producer: "git-host/1" },
         { kind: "review" },
       ])
       expect(yield* store.evaluations(created.tasks[0].id)).toMatchObject([
@@ -1643,6 +1647,7 @@ describe("WorkRunner", () => {
 
       expect(yield* work.get(goalID)).toMatchObject({ status: "completed" })
       expect((yield* store.evidence(task.id)).map((evidence) => evidence.producer).sort()).toEqual([
+        "git-host/1",
         "work-reviewer/1",
         "work-verifier/command",
       ])

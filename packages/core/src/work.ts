@@ -104,6 +104,10 @@ import { isDeepStrictEqual } from "node:util"
 import { EventV2 } from "./event"
 import { makeGlobalNode } from "./effect/app-node"
 import { Location } from "./location"
+import { Project } from "./project"
+import { ProjectDirectories } from "./project/directories"
+import { ProjectTable } from "./project/sql"
+import { Database } from "./database/database"
 import { WorkExecution } from "./work/execution"
 import { WorkAccessFailure } from "./work/access-failure"
 import { WorkIsolation } from "./work/isolation"
@@ -360,6 +364,9 @@ const layer = Layer.effect(
     const execution = yield* WorkExecution.Service
     const isolation = yield* WorkIsolation.Service
     const store = yield* WorkStore.Service
+    const projects = yield* Project.Service
+    const directories = yield* ProjectDirectories.Service
+    const db = (yield* Database.Service).db
 
     const get = Effect.fn("Work.get")(function* (goalID: GoalID) {
       const goal = yield* store.getGoal(goalID)
@@ -508,6 +515,17 @@ const layer = Layer.effect(
           })
         const validated = validateTaskGraph(acceptanceCriteria, desired, roleContracts)
         if ("message" in validated) return yield* new CreateConflictError({ goalID, message: validated.message })
+
+        // A legacy project can admit a Goal before creating its first V2 Session.
+        const project = yield* projects.resolve(input.location.directory)
+        yield* db
+          .insert(ProjectTable)
+          .values({ id: project.id, worktree: project.directory, vcs: project.vcs?.type, sandboxes: [] })
+          .onConflictDoNothing()
+          .run()
+          .pipe(Effect.orDie)
+        if (project.id !== Project.ID.global)
+          yield* directories.create({ projectID: project.id, directory: input.location.directory })
 
         if (!existing) {
           const timestamp = yield* DateTime.now
@@ -1030,5 +1048,14 @@ function topologicalTasks(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [EventV2.node, WorkExecution.node, WorkIsolation.node, WorkProjector.node, WorkStore.node],
+  deps: [
+    EventV2.node,
+    WorkExecution.node,
+    WorkIsolation.node,
+    WorkProjector.node,
+    WorkStore.node,
+    Project.node,
+    ProjectDirectories.node,
+    Database.node,
+  ],
 })

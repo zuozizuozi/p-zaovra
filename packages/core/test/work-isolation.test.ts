@@ -18,6 +18,10 @@ import { ProjectCopy } from "@zaovra-ai/core/project/copy"
 import { ProjectDirectories } from "@zaovra-ai/core/project/directories"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { Global } from "@zaovra-ai/core/global"
+import { AppProcess } from "@zaovra-ai/core/process"
+import { Database } from "@zaovra-ai/core/database/database"
+import { ProjectTable } from "@zaovra-ai/core/project/sql"
+import { DateTime } from "effect"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
@@ -31,6 +35,8 @@ const it = testEffect(
       WorkStore.node,
       ProjectCopy.node,
       ProjectDirectories.node,
+      AppProcess.node,
+      Database.node,
     ]),
     [
       [SessionExecution.node, SessionExecution.noopLayer],
@@ -64,17 +70,19 @@ const it = testEffect(
         Layer.succeed(
           WorkReviewer.Service,
           WorkReviewer.Service.of({
-            run: ({ criteria }) =>
-              Effect.succeed(
-                Work.ReviewOutput.make({
+            run: ({ criteria, task, evidence }) =>
+              Effect.sync(() => {
+                if (task.acceptance?.scope === "final")
+                  expect(evidence.some((item) => item.taskID !== task.id && item.producer === "git-host/1")).toBe(true)
+                return Work.ReviewOutput.make({
                   criteria: criteria.map((item) => ({
                     criterionID: item.id,
                     verdict: "pass",
                     findings: [],
                     allowsRepair: false,
                   })),
-                }),
-              ),
+                })
+              }),
           }),
         ),
       ],
@@ -103,6 +111,61 @@ function workspace(git = true) {
 }
 
 describe("Work isolation admission", () => {
+  it.live(
+    "registers a legacy project on Goal admission and exposes real worktree Git observations",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* workspace()
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(directory, "tracked.txt"), "before\n")
+          await $`git add tracked.txt`.cwd(directory).quiet()
+          await $`git -c commit.gpgsign=false commit -m baseline`.cwd(directory).quiet()
+        })
+        const projects = yield* Project.Service
+        const directories = yield* ProjectDirectories.Service
+        const work = yield* Work.Service
+        const runner = yield* WorkRunner.Service
+        const store = yield* WorkStore.Service
+        const proc = yield* AppProcess.Service
+        const project = yield* projects.resolve(directory)
+        const database = yield* Database.Service
+        yield* database.db
+          .insert(ProjectTable)
+          .values({ id: project.id, worktree: project.directory, vcs: project.vcs?.type, sandboxes: [] })
+          .run()
+          .pipe(Effect.orDie)
+        expect(yield* directories.list(project.id)).toEqual([])
+        // No Session is created before Goal admission.
+        const created = yield* work.create({
+          location: { directory },
+          objective: "Inspect",
+          planning: true,
+          acceptanceCriteria: [{ description: "Fixture inspected", required: true, evidence: "review" }],
+        })
+        expect(yield* directories.contains({ projectID: project.id, directory })).toBe(true)
+        yield* runner.run({ goalID: created.goal.id, force: true })
+        const task = (yield* work.tasks(created.goal.id)).find((item) => item.role === "build")!
+        expect(task.isolationState).toEqual({ status: "isolated" })
+        const attempts = yield* store.attempts(task.id)
+        yield* Effect.promise(() => fs.writeFile(path.join(task.location!.directory, "new.txt"), "untracked"))
+        yield* Effect.promise(() => fs.writeFile(path.join(task.location!.directory, "tracked.txt"), "after\n"))
+        const evidence = yield* WorkReviewer.gitEvidence(
+          { goal: created.goal, task, attempt: attempts[0]!, timestamp: yield* DateTime.now },
+          proc,
+        )
+        expect(evidence).toMatchObject({
+          kind: "diff",
+          producer: "git-host/1",
+          payload: {
+            status: { exit: 0, output: " M tracked.txt\n?? new.txt\n" },
+            diff: { exit: 0, output: "1\t1\ttracked.txt\n" },
+            head: { exit: 0 },
+          },
+        })
+      }),
+    30000,
+  )
+
   it.live(
     "registers a first V2 session before copy creation, preserving the ownership boundary",
     () =>

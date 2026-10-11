@@ -173,4 +173,54 @@ test("review receives host Session checks with provenance and cannot count stale
   expect(prompt).toContain(source.sessionID!)
   expect(prompt).toContain("eligiblePass")
   expect(prompt).toContain("Coffee page works")
+  const browser = (content: SessionMessage.AssistantContent[]) =>
+    WorkReviewer.browserEvidence({
+      goal,
+      task,
+      source,
+      attempt,
+      messages: [{ ...message, content }],
+      targets: [],
+      timestamp: time.created,
+    })
+  const click: SessionMessage.AssistantTool = {
+    ...tool("click"),
+    name: "browser",
+    state: {
+      status: "completed",
+      input: { action: "click", selector: "button" },
+      content: [{ type: "text", text: 'URL: http://localhost:8080/fixture\n- button "1"' }],
+      outputPaths: ["/project/screenshot.png"],
+      structured: {},
+    },
+  }
+  const observed = browser([click])!
+  expect(observed).toMatchObject({
+    kind: "external",
+    producer: "browser-host/1",
+    payload: {
+      type: "observation",
+      sourceAttemptID: source.id,
+      observations: [{ callID: "click", status: "completed", outputPaths: ["/project/screenshot.png"] }],
+    },
+  })
+  expect(
+    WorkReviewer.prompt({ goal, task, attempt, criteria: [criterion], evidence: [observed], handoffs: [] }),
+  ).toContain("http://localhost:8080/fixture")
+  expect(browser([{ type: "text", id: "claim", text: "I clicked and verified the browser" }])).toBeUndefined()
+  expect(browser([{ ...click, provider: { executed: true } }])).toBeUndefined()
+  expect(
+    browser([
+      {
+        ...click,
+        state: {
+          status: "error",
+          input: { action: "click" },
+          content: [],
+          structured: {},
+          error: { type: "unknown", message: "Element not found" },
+        },
+      },
+    ]),
+  ).toMatchObject({ payload: { observations: [{ status: "error", error: { message: "Element not found" } }] } })
 })
