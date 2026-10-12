@@ -65,22 +65,22 @@ describe("Tool.Progress", () => {
         if (!row) return yield* Effect.die("Missing projected assistant")
         return Schema.decodeUnknownSync(SessionMessage.Assistant)({ ...row.data, id: row.id, type: row.type })
       })
-      const start = (callID: string) =>
+      const start = (callID: string, tool = "bash", input: Record<string, unknown> = { command: "pwd" }) =>
         Effect.gen(function* () {
           yield* service.publish(SessionEvent.Tool.Input.Started, {
             sessionID,
             timestamp,
             assistantMessageID,
             callID,
-            name: "bash",
+            name: tool,
           })
           yield* service.publish(SessionEvent.Tool.Called, {
             sessionID,
             timestamp,
             assistantMessageID,
             callID,
-            tool: "bash",
-            input: { command: "pwd" },
+            tool,
+            input,
             provider: { executed: false },
           })
         })
@@ -172,6 +172,31 @@ describe("Tool.Progress", () => {
           content: content(`Batch steps: ${JSON.stringify(steps)}`),
         },
       })
+
+      yield* start("call-completed-batch", "browser", {
+        action: "batch",
+        actions: [{ action: "click", selector: "#save" }],
+      })
+      yield* service.publish(SessionEvent.Tool.Success, {
+        sessionID,
+        timestamp,
+        assistantMessageID,
+        callID: "call-completed-batch",
+        structured: { steps: [{ index: 1, action: "click", status: "executed" }] },
+        content: content("Final snapshot: saved"),
+        provider: { executed: false },
+      })
+      const completed = (yield* readAssistant).content[3]
+      expect(completed).toMatchObject({ state: { status: "completed" } })
+      yield* service.publish(SessionEvent.Tool.Progress, {
+        sessionID,
+        timestamp: DateTime.makeUnsafe(2),
+        assistantMessageID,
+        callID: "call-completed-batch",
+        structured: { steps: [{ index: 1, action: "click", status: "outcome_unknown" }] },
+        content: content("Late batch progress"),
+      })
+      expect((yield* readAssistant).content[3]).toEqual(completed)
 
       const rows = yield* db
         .select({ type: EventTable.type })
