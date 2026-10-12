@@ -1526,6 +1526,37 @@ it.effect("preserves the recorded overloaded response.failed code and message", 
   }),
 )
 
+it.effect("prefers outer then event.error then response.error fields, including classification", () =>
+  Effect.gen(function* () {
+    for (const fields of [
+      { code: "outer", message: "direct", error: { code: "nested", message: "nested" } },
+      { error: { code: "context_length_exceeded", message: "nested", param: null } },
+      { error: null },
+    ]) {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents({
+              type: "error",
+              response: { error: { code: "fallback", message: "fallback" } },
+              ...fields,
+            }),
+          ),
+        ),
+      )
+      expect(response.events[0]).toEqual({
+        type: "provider-error",
+        message: fields.code
+          ? "outer: direct"
+          : fields.error
+            ? "context_length_exceeded: nested"
+            : "fallback: fallback",
+        ...(fields.error?.code === "context_length_exceeded" ? { classification: "context-overflow" } : {}),
+      })
+    }
+  }),
+)
+
 if (process.env.ZAOVRA_RESPONSES_REPLAY_DIR) {
   for (const file of ["1791719910623.sse", "1791723637491.sse"]) {
     it.effect(
@@ -1539,7 +1570,9 @@ if (process.env.ZAOVRA_RESPONSES_REPLAY_DIR) {
           console.log(JSON.stringify({ archive: file, errors }))
           if (file === "1791719910623.sse") expect(errors[0]?.message).toContain("upstream_http2_stream_error")
           if (file === "1791723637491.sse")
-            expect(errors.some((event) => event.message.includes("server_error"))).toBe(true)
+            expect(errors[0]?.message).toBe(
+              "server_error: Our servers are currently overloaded. Please try again later.",
+            )
         }),
       120000,
     )

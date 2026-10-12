@@ -230,6 +230,7 @@ const OpenAIResponsesEvent = Schema.Struct({
   code: Schema.optional(Schema.String),
   message: Schema.optional(Schema.String),
   param: optionalNull(Schema.String),
+  error: optionalNull(OpenAIResponsesErrorPayload),
 })
 type OpenAIResponsesEvent = Schema.Schema.Type<typeof OpenAIResponsesEvent>
 
@@ -894,15 +895,14 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
 // the bare message — production rate limits and context-length failures used
 // to be indistinguishable from generic stream drops.
 const providerErrorMessage = (event: OpenAIResponsesEvent, fallback: string): string => {
-  const nested = event.response?.error ?? undefined
-  const message = event.message || nested?.message || undefined
-  const code = event.code || nested?.code || undefined
+  const message = event.message || event.error?.message || event.response?.error?.message || undefined
+  const code = event.code || event.error?.code || event.response?.error?.code || undefined
   if (message && code) return `${code}: ${message}`
   return message || code || fallback
 }
 
 const providerError = (event: OpenAIResponsesEvent, fallback: string) => {
-  const code = event.code || event.response?.error?.code || undefined
+  const code = event.code || event.error?.code || event.response?.error?.code || undefined
   const message = providerErrorMessage(event, fallback)
   return LLMEvent.providerError({
     message,
