@@ -9,6 +9,7 @@ import { useLanguage } from "@/context/language"
 import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 import { showToast } from "@/utils/toast"
 import { commandVerification, staleVerification } from "@/utils/verification-label"
+import { artifactPath } from "@/utils/artifact-path"
 
 export function SessionOutcomeDock() {
   const params = useParams()
@@ -201,8 +202,19 @@ export function SessionOutcomeDock() {
                               </div>
                             )}
                           </For>
-                          <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
-                          <For each={check.logs}>{(log) => <div>{log}</div>}</For>
+                          <For each={check.targets}>
+                            {(target) => (
+                              <div title={target.path}>
+                                {artifactPath(target.path, sdk().directory)?.path ?? target.path.split(/[\\/]/).at(-1)}
+                              </div>
+                            )}
+                          </For>
+                          <details>
+                            <summary>{language.t("session.outcome.details")}</summary>
+                            <div>{check.callID}</div>
+                            <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
+                            <For each={check.logs}>{(log) => <div>{log}</div>}</For>
+                          </details>
                         </details>
                       )}
                     </For>
@@ -211,12 +223,15 @@ export function SessionOutcomeDock() {
               )}
             </For>
             <Show when={outcome()?.missing.length}>
-              <div role="alert" class="text-icon-critical-base font-medium">
+              <details role="alert" class="text-icon-critical-base font-medium">
+                <summary>
+                  {language.t("session.outcome.missing")} · {outcome()?.missing.length}
+                </summary>
                 {language.t("session.outcome.missing")}{" "}
                 {outcome()
                   ?.missing.map((item) => (item === "requirements" ? language.t("session.outcome.requirements") : item))
                   .join(", ")}
-              </div>
+              </details>
             </Show>
           </Show>
           <Show when={!abandoned()}>

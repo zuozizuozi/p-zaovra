@@ -467,6 +467,21 @@ export const SettingsGeneral: Component = () => {
     </div>
   )
 
+  const ExperimentsSection = () => (
+    <div class="flex flex-col gap-1">
+      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.experiments")}</h3>
+      <SettingsList>
+        <SettingsRow title={language.t("work.experimental")} description={language.t("work.experimental.description")}>
+          <Switch
+            checked={settings.general.workGraph()}
+            onChange={settings.general.setWorkGraph}
+            aria-label={language.t("work.experimental")}
+          />
+        </SettingsRow>
+      </SettingsList>
+    </div>
+  )
+
   const AppearanceSection = () => (
     <div class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.appearance")}</h3>
@@ -778,6 +793,7 @@ export const SettingsGeneral: Component = () => {
         <SoundsSection />
 
         <UpdatesSection />
+        <ExperimentsSection />
 
         <DisplaySection />
 

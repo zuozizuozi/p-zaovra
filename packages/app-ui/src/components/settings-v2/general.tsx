@@ -769,11 +769,13 @@ export const SettingsGeneralV2: Component<{
 
         <GeneralSection />
         <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">隐私与网络</h3>
+          <h3 class="settings-v2-section-title">{language.t("settings.network.privacy")}</h3>
           <SettingsListV2>
             <SettingsRowV2
-              title="自动更新模型目录"
-              description={`访问 ${network()?.source ?? "https://models.dev"}/api.json；仅下载模型目录，不发送对话。`}
+              title={language.t("settings.network.models")}
+              description={language.t("settings.network.source", {
+                url: `${network()?.source ?? "https://models.dev"}/api.json`,
+              })}
             >
               <Switch
                 hideLabel
@@ -783,19 +785,19 @@ export const SettingsGeneralV2: Component<{
                   await serverSdk()
                     .client.global.modelsNetwork.set({ autoRefresh }, { throwOnError: true })
                     .catch((error) => {
-                      showToast({ title: "网络设置未保存", description: String(error) })
+                      showToast({ title: language.t("settings.network.saveError"), description: String(error) })
                     })
                   await reloadNetwork()
                 }}
               >
-                自动更新模型目录
+                {language.t("settings.network.models")}
               </Switch>
             </SettingsRowV2>
           </SettingsListV2>
           <Show when={platform.updater?.autoCheck}>
             <SettingsRowV2
-              title="自动检查更新"
-              description="默认开启；启动后延迟检查，每天最多一次。仅访问 GitHub 获取版本信息，确认后才下载。"
+              title={language.t("settings.network.updates")}
+              description={language.t("settings.network.updateHint")}
             >
               <Switch
                 hideLabel
@@ -804,23 +806,22 @@ export const SettingsGeneralV2: Component<{
                 onChange={async (enabled) => {
                   await platform.updater
                     ?.setAutoCheck?.(enabled)
-                    .catch((error) => showToast({ title: "网络设置未保存", description: String(error) }))
+                    .catch((error) =>
+                      showToast({ title: language.t("settings.network.saveError"), description: String(error) }),
+                    )
                   await reloadAutomatic()
                 }}
               >
-                自动检查更新
+                {language.t("settings.network.updates")}
               </Switch>
             </SettingsRowV2>
           </Show>
-          <p class="text-12-regular text-text-weak">
-            关闭自动检查后仍可手动检查更新；下载需要你确认。发布版不启用
-            Sentry，更新说明随包附带。模型服务、工具、MCP、LSP 和 OTLP 仅按你的配置或任务请求访问。
-          </p>
+          <p class="text-12-regular text-text-weak">{language.t("settings.network.policy")}</p>
           <Show when={network.error}>
-            <p class="text-12-regular text-text-weak">无法读取网络设置，请确认服务器连接。</p>
+            <p class="text-12-regular text-text-weak">{language.t("settings.network.readError")}</p>
           </Show>
           <Show when={network()?.locked}>
-            <p class="text-12-regular text-text-weak">后台刷新已被服务器启动配置关闭。</p>
+            <p class="text-12-regular text-text-weak">{language.t("settings.network.locked")}</p>
           </Show>
         </div>
 
@@ -835,6 +836,20 @@ export const SettingsGeneralV2: Component<{
         </Show>
 
         <DisplaySection />
+
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">{language.t("settings.experiments")}</h3>
+          <SettingsListV2>
+            <SettingsRowV2
+              title={language.t("work.experimental")}
+              description={language.t("work.experimental.description")}
+            >
+              <Switch hideLabel checked={settings.general.workGraph()} onChange={settings.general.setWorkGraph}>
+                {language.t("work.experimental")}
+              </Switch>
+            </SettingsRowV2>
+          </SettingsListV2>
+        </div>
 
         <AdvancedSection />
       </div>

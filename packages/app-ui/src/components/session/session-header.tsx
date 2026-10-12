@@ -547,9 +547,9 @@ function SessionHeaderV2Actions(props: { state: SessionHeaderV2ActionsState }) {
           type="button"
           class="h-9 rounded-md px-3 text-xs text-text-weak hover:bg-background-stronger hover:text-text-strong"
           onClick={props.state.onArtifacts}
-          aria-label="查看成果"
+          aria-label={language.t("artifact.view")}
         >
-          成果
+          {language.t("artifact.panel")}
         </button>
         <TooltipV2
           class="shrink-0"

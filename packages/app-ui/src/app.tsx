@@ -464,23 +464,26 @@ function AccountGate(props: ParentProps) {
 
 function DesktopCommands() {
   const command = useCommand()
+  const settings = useSettings()
   const language = useLanguage()
   const platform = usePlatform()
   const navigate = useNavigate()
 
   command.register("desktop", () => {
-    const commands: CommandOption[] = [
-      {
-        id: "work.open",
-        title: "Open WorkGraph",
-        category: "Agent",
-        onSelect: () => navigate("/work"),
-      },
-    ]
+    const commands: CommandOption[] = settings.general.workGraph()
+      ? [
+          {
+            id: "work.open",
+            title: language.t("work.open"),
+            category: "Agent",
+            onSelect: () => navigate("/work"),
+          },
+        ]
+      : []
     if (platform.platform === "desktop" && platform.exportDebugLogs) {
       commands.push({
         id: "logs.export",
-        title: "Export logs",
+        title: language.t("app.exportLogs"),
         category: language.t("command.category.settings"),
         onSelect: () => {
           void platform.exportDebugLogs?.()

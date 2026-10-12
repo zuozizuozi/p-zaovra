@@ -33,6 +33,7 @@ export interface Settings {
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
     showCustomAgents: boolean
+    workGraph?: boolean
     mobileTitlebarPosition: "top" | "bottom"
     newLayoutDesigns?: boolean
     layoutTransitionEligible?: boolean
@@ -385,6 +386,8 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "editToolPartsExpanded", value)
         },
         showCustomAgents,
+        workGraph: () => store.general?.workGraph ?? false,
+        setWorkGraph: (value: boolean) => setStore("general", "workGraph", value),
         setShowCustomAgents(value: boolean) {
           setStore("general", "showCustomAgents", value)
         },

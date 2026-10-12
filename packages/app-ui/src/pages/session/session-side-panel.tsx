@@ -362,7 +362,7 @@ export function SessionSidePanel(props: {
                                   </div>
                                 </Tabs.Trigger>
                               </Show>
-                              <Tabs.Trigger value="artifacts">成果</Tabs.Trigger>
+                              <Tabs.Trigger value="artifacts">{language.t("artifact.panel")}</Tabs.Trigger>
                               <Show when={contextOpen()}>
                                 <Tabs.Trigger
                                   value="context"
@@ -467,7 +467,7 @@ export function SessionSidePanel(props: {
                           <Show when={tabs().all().includes("artifacts")}>
                             <div
                               role="tabpanel"
-                              aria-label="成果"
+                              aria-label={language.t("artifact.panel")}
                               class="h-full min-h-0 overflow-hidden"
                               classList={{ hidden: activeTab() !== "artifacts" }}
                             >
@@ -585,7 +585,7 @@ export function SessionSidePanel(props: {
                                   : language.t("session.tab.review")}
                               </Tabs.Trigger>
                             </Show>
-                            <Tabs.Trigger value="artifacts">成果</Tabs.Trigger>
+                            <Tabs.Trigger value="artifacts">{language.t("artifact.panel")}</Tabs.Trigger>
                             <Show when={contextOpen()}>
                               <Tabs.Trigger
                                 value="context"
@@ -710,7 +710,7 @@ export function SessionSidePanel(props: {
                         <Show when={tabs().all().includes("artifacts")}>
                           <div
                             role="tabpanel"
-                            aria-label="成果"
+                            aria-label={language.t("artifact.panel")}
                             class="h-full min-h-0 overflow-hidden"
                             classList={{ hidden: activeTab() !== "artifacts" }}
                           >

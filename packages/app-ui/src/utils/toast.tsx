@@ -9,8 +9,9 @@ export function setV2Toast(value: boolean) {
 }
 
 export function ToastRegion(props: { v2: boolean }) {
-  if (props.v2) return <ToastV2.Region />
-  return <Toast.Region />
+  const placement = { top: "64px", bottom: "auto", "max-height": "40dvh", overflow: "auto" }
+  if (props.v2) return <ToastV2.Region style={placement} />
+  return <Toast.Region style={placement} />
 }
 
 export function showToast(options: ToastOptions | string) {

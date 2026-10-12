@@ -211,6 +211,7 @@ export function FileTabContent(props: { tab: string }) {
 }
 
 export function SessionFileView(props: { tab: string; active?: boolean }) {
+  const language = useLanguage()
   const settings = useSettings()
   const platform = usePlatform()
   const file = useFile()
@@ -223,10 +224,10 @@ export function SessionFileView(props: { tab: string; active?: boolean }) {
       <Show when={preview()}>
         <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border-weak-base px-3">
           <button class="h-10 px-2 text-xs" aria-pressed={!mode.source} onClick={() => setMode("source", false)}>
-            成果预览
+            {language.t("artifact.preview")}
           </button>
           <button class="h-10 px-2 text-xs" aria-pressed={mode.source} onClick={() => setMode("source", true)}>
-            源文件
+            {language.t("artifact.source")}
           </button>
         </div>
       </Show>

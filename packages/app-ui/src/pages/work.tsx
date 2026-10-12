@@ -187,24 +187,27 @@ export default function WorkPage() {
   return (
     <div class="flex h-full min-h-0 w-full bg-v2-background-bg-base text-v2-text-text-base">
       <aside class="flex w-[300px] shrink-0 flex-col border-r border-v2-border-border-muted bg-v2-background-bg-deep">
-        <div class="flex h-12 shrink-0 items-center justify-between border-b border-v2-border-border-muted px-4">
-          <div>
-            <div class="text-[13px] font-semibold">WorkGraph</div>
-            <div class="text-[11px] text-v2-text-text-muted">Durable goals</div>
+        <div class="flex min-h-20 shrink-0 items-center justify-between gap-2 border-b border-v2-border-border-muted px-4 py-2">
+          <div class="min-w-0">
+            <div class="text-[13px] font-semibold">{language.t("work.experimental")}</div>
+            <div class="text-[11px] text-v2-text-text-muted">{language.t("work.ui.durable.goals")}</div>
           </div>
           <div class="flex items-center gap-1">
             <ButtonV2 size="small" variant="ghost-muted" onClick={openCreate}>
-              New
+              {language.t("work.ui.new")}
             </ButtonV2>
             <ButtonV2 size="small" variant="ghost-muted" disabled={goals.loading} onClick={() => void refresh()}>
-              Refresh
+              {language.t("work.ui.refresh")}
             </ButtonV2>
           </div>
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto p-2">
-          <Show when={!goals.loading} fallback={<Empty label="Loading goals…" />}>
-            <Show when={(goals.latest?.length ?? 0) > 0} fallback={<Empty label="No durable goals yet" />}>
+          <Show when={!goals.loading} fallback={<Empty label={language.t("work.ui.loading.goals")} />}>
+            <Show
+              when={(goals.latest?.length ?? 0) > 0}
+              fallback={<Empty label={language.t("work.ui.no.durable.goals.yet")} />}
+            >
               <For each={goals.latest}>
                 {(goal) => (
                   <button
@@ -217,7 +220,10 @@ export default function WorkPage() {
                     <div class="flex items-center justify-between gap-2 text-[11px] text-v2-text-text-muted">
                       <Status value={goal.status} />
                       <span>
-                        {goal.usage.attempts} attempts · {goal.usage.repairs} repairs
+                        {language.t("work.attemptRepairCounts", {
+                          attempts: goal.usage.attempts,
+                          repairs: goal.usage.repairs,
+                        })}
                       </span>
                     </div>
                   </button>
@@ -241,9 +247,9 @@ export default function WorkPage() {
               when={state.draft.open}
               fallback={
                 <div class="flex h-full flex-col items-center justify-center gap-4 text-[13px] text-v2-text-text-muted">
-                  <span>Select an existing Goal or create durable work</span>
+                  <span>{language.t("work.ui.select.an.existing.goal.or.create.durable.work")}</span>
                   <ButtonV2 variant="contrast" onClick={openCreate}>
-                    New Goal
+                    {language.t("work.ui.new.goal")}
                   </ButtonV2>
                 </div>
               }
@@ -265,7 +271,13 @@ export default function WorkPage() {
         >
           <Show
             when={detail.latest}
-            fallback={<Empty label={detail.loading ? "Loading WorkGraph…" : "Goal unavailable"} />}
+            fallback={
+              <Empty
+                label={
+                  detail.loading ? language.t("work.ui.loading.workgraph") : language.t("work.ui.goal.unavailable")
+                }
+              />
+            }
           >
             {(current) => (
               <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-5 p-6">
@@ -302,20 +314,25 @@ export default function WorkPage() {
                 />
 
                 <section class="grid grid-cols-2 gap-3 lg:grid-cols-6">
-                  <Metric label="Tasks" value={`${completedTasks(current())}/${current().tasks.length}`} />
-                  <Metric label="Attempts" value={String(current().goal.usage.attempts)} />
-                  <Metric label="Repairs" value={String(current().goal.usage.repairs)} />
                   <Metric
-                    label="Replans"
+                    label={language.t("work.ui.tasks")}
+                    value={`${completedTasks(current())}/${current().tasks.length}`}
+                  />
+                  <Metric label={language.t("work.ui.attempts")} value={String(current().goal.usage.attempts)} />
+                  <Metric label={language.t("work.ui.repairs")} value={String(current().goal.usage.repairs)} />
+                  <Metric
+                    label={language.t("work.ui.replans")}
                     value={String(current().tasks.filter((task) => task.role === "work-architect").length)}
                   />
-                  <Metric label="Evidence" value={String(current().evidence.length)} />
-                  <Metric label="Handoffs" value={String(current().handoffs.length)} />
+                  <Metric label={language.t("work.ui.evidence")} value={String(current().evidence.length)} />
+                  <Metric label={language.t("work.ui.handoffs")} value={String(current().handoffs.length)} />
                 </section>
 
                 <Section
-                  title="Agent organization"
-                  subtitle="Role Contracts snapshotted for this Goal, including Agent, authority, and Handoff policy"
+                  title={language.t("work.ui.agent.organization")}
+                  subtitle={language.t(
+                    "work.ui.role.contracts.snapshotted.for.this.goal.including.agent.authority.and.handoff.policy",
+                  )}
                 >
                   <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                     <For each={current().roles}>
@@ -324,9 +341,18 @@ export default function WorkPage() {
                           <div class="flex items-start justify-between gap-3">
                             <div>
                               <div class="text-[12px] font-semibold text-v2-text-text-strong">{role.title}</div>
-                              <div class="mt-1 font-mono text-[10px] text-v2-text-text-muted">{role.agentID}</div>
+                              <details>
+                                <summary>{language.t("session.outcome.details")}</summary>
+                                <div class="mt-1 font-mono text-[10px] text-v2-text-text-muted">{role.agentID}</div>
+                              </details>
                             </div>
-                            <Status value={role.workspaceAccess === "write" ? "can edit" : "read only"} />
+                            <Status
+                              value={
+                                role.workspaceAccess === "write"
+                                  ? language.t("work.ui.can.edit")
+                                  : language.t("work.ui.read.only")
+                              }
+                            />
                           </div>
                           <p class="mt-2 line-clamp-2 text-[11px] leading-5 text-v2-text-text-muted">{role.purpose}</p>
                           <div class="mt-2 text-[10px] text-v2-text-text-muted">
@@ -338,12 +364,15 @@ export default function WorkPage() {
                   </div>
                 </Section>
 
-                <Section title="Task graph" subtitle="Planner → parallel executor → verifier → reviewer → merge/repair">
+                <Section
+                  title={language.t("work.ui.task.graph")}
+                  subtitle={language.t("work.ui.planner.parallel.executor.verifier.reviewer.merge.repair")}
+                >
                   <Show when={["active", "paused"].includes(current().goal.status)}>
                     <div class="mb-3 flex flex-col gap-3 rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
                       <div class="flex items-center justify-between gap-3">
                         <div class="text-[11px] text-v2-text-text-muted">
-                          Extend the live DAG without restarting completed Tasks.
+                          {language.t("work.ui.extend.the.live.dag.without.restarting.completed.tasks")}
                         </div>
                         <ButtonV2
                           size="small"
@@ -351,7 +380,7 @@ export default function WorkPage() {
                           disabled={state.action === "expand"}
                           onClick={() => setState("expansion", "open", !state.expansion.open)}
                         >
-                          {state.expansion.open ? "Close" : "Add Task"}
+                          {state.expansion.open ? language.t("work.ui.close") : language.t("work.ui.add.task")}
                         </ButtonV2>
                       </div>
                       <Show when={state.expansion.open}>
@@ -365,7 +394,7 @@ export default function WorkPage() {
                           <input
                             class="h-9 rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 text-[12px] outline-none focus:border-v2-border-border-focus"
                             value={state.expansion.title}
-                            placeholder="Follow-up Task title"
+                            placeholder={language.t("work.ui.follow.up.task.title")}
                             onInput={(event) => setState("expansion", "title", event.currentTarget.value)}
                           />
                           <select
@@ -380,7 +409,10 @@ export default function WorkPage() {
                             <For each={current().roles}>
                               {(role) => (
                                 <option value={role.id}>
-                                  {role.title} · {role.workspaceAccess === "write" ? "can edit" : "read only"}
+                                  {role.title} ·{" "}
+                                  {role.workspaceAccess === "write"
+                                    ? language.t("work.ui.can.edit")
+                                    : language.t("work.ui.read.only")}
                                 </option>
                               )}
                             </For>
@@ -390,19 +422,24 @@ export default function WorkPage() {
                             value={state.expansion.dependsOn}
                             onInput={(event) => setState("expansion", "dependsOn", event.currentTarget.value)}
                           >
-                            <option value="">No dependency</option>
+                            <option value="">{language.t("work.ui.no.dependency")}</option>
                             <For
                               each={current().tasks.filter(
                                 (task) => task.role !== "work-planner" && task.role !== "work-architect",
                               )}
                             >
-                              {(task) => <option value={task.id}>After: {task.title}</option>}
+                              {(task) => (
+                                <option value={task.id}>
+                                  {language.t("work.ui.after")}
+                                  {task.title}
+                                </option>
+                              )}
                             </For>
                           </select>
                           <textarea
                             class="min-h-20 resize-y rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 py-2 text-[12px] leading-5 outline-none focus:border-v2-border-border-focus lg:col-span-2"
                             value={state.expansion.instructions}
-                            placeholder="Describe the additional result this Task must produce"
+                            placeholder={language.t("work.ui.describe.the.additional.result.this.task.must.produce")}
                             onInput={(event) => setState("expansion", "instructions", event.currentTarget.value)}
                           />
                           <div class="flex justify-end lg:col-span-2">
@@ -416,7 +453,9 @@ export default function WorkPage() {
                                 !state.expansion.instructions.trim()
                               }
                             >
-                              {state.action === "expand" ? "Adding…" : "Add to DAG"}
+                              {state.action === "expand"
+                                ? language.t("work.ui.adding")
+                                : language.t("work.ui.add.to.dag")}
                             </ButtonV2>
                           </div>
                         </form>
@@ -428,13 +467,20 @@ export default function WorkPage() {
                   </div>
                 </Section>
 
-                <Section title="Attempt timeline" subtitle="Every provider run has a durable identity and fence">
-                  <Show when={current().attempts.length > 0} fallback={<Empty label="No attempts admitted" compact />}>
+                <Section
+                  title={language.t("work.ui.attempt.timeline")}
+                  subtitle={language.t("work.ui.every.provider.run.has.a.durable.identity.and.fence")}
+                >
+                  <Show
+                    when={current().attempts.length > 0}
+                    fallback={<Empty label={language.t("work.ui.no.attempts.admitted")} compact />}
+                  >
                     <div class="flex flex-col gap-2">
                       <For each={current().attempts.slice().reverse()}>
                         {(attempt) => (
                           <AttemptRow
                             attempt={attempt}
+                            taskTitle={current().tasks.find((task) => task.id === attempt.taskID)?.title}
                             busy={state.action}
                             onOpen={() => {
                               if (!attempt.sessionID) return
@@ -460,12 +506,12 @@ export default function WorkPage() {
                 </Section>
 
                 <Section
-                  title="Project memory"
-                  subtitle="Governed facts, decisions, constraints, and explicit conflict resolution"
+                  title={language.t("work.ui.project.memory")}
+                  subtitle={language.t("work.ui.governed.facts.decisions.constraints.and.explicit.conflict.resolution")}
                 >
                   <Show
                     when={current().memory.entries.length > 0}
-                    fallback={<Empty label="No governed project memory" compact />}
+                    fallback={<Empty label={language.t("work.ui.no.governed.project.memory")} compact />}
                   >
                     <div class="flex max-h-[560px] flex-col gap-3 overflow-y-auto">
                       <For each={current().memory.entries}>
@@ -498,7 +544,7 @@ export default function WorkPage() {
                                     })
                                   }}
                                 >
-                                  Edit
+                                  {language.t("work.ui.edit")}
                                 </ButtonV2>
                                 <ButtonV2
                                   size="small"
@@ -526,7 +572,8 @@ export default function WorkPage() {
                             <Show when={entry.resolution}>
                               {(resolution) => (
                                 <div class="mt-2 text-[10px] leading-4 text-v2-text-text-muted">
-                                  Resolved by {resolution().resolver}
+                                  {language.t("work.ui.resolved.by")}
+                                  {resolution().resolver}
                                   <Show when={resolution().reason}> · {resolution().reason}</Show>
                                 </div>
                               )}
@@ -534,15 +581,19 @@ export default function WorkPage() {
                             <Show when={entry.resolution?.action === "replace" && entry.resolution.value}>
                               <div class="mt-3 rounded border border-emerald-500/30 bg-emerald-500/5 p-3">
                                 <div class="text-[9px] font-medium uppercase tracking-wide text-emerald-400">
-                                  User correction · {entry.resolution?.value?.kind}
+                                  {language.t("work.ui.user.correction")}
+                                  {entry.resolution?.value?.kind}
                                 </div>
                                 <p class="mt-2 whitespace-pre-wrap text-[11px] leading-5">
                                   {entry.resolution?.value?.text}
                                 </p>
                                 <Show when={entry.resolution?.value?.reference}>
-                                  <div class="mt-2 font-mono text-[9px] text-v2-text-text-muted">
-                                    {entry.resolution?.value?.reference}
-                                  </div>
+                                  <details>
+                                    <summary>{language.t("session.outcome.details")}</summary>
+                                    <div class="mt-2 font-mono text-[9px] text-v2-text-text-muted">
+                                      {entry.resolution?.value?.reference}
+                                    </div>
+                                  </details>
                                 </Show>
                               </div>
                             </Show>
@@ -607,7 +658,7 @@ export default function WorkPage() {
                                 <input
                                   class="h-9 rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 font-mono text-[11px] outline-none focus:border-v2-border-border-focus"
                                   value={state.memoryEdit.reference}
-                                  placeholder="Optional source reference"
+                                  placeholder={language.t("work.ui.optional.source.reference")}
                                   onInput={(event) => setState("memoryEdit", "reference", event.currentTarget.value)}
                                 />
                                 <div class="flex justify-end gap-2">
@@ -617,7 +668,7 @@ export default function WorkPage() {
                                     variant="neutral"
                                     onClick={() => setState("memoryEdit", "key", "")}
                                   >
-                                    Cancel
+                                    {language.t("work.ui.cancel")}
                                   </ButtonV2>
                                   <ButtonV2
                                     type="submit"
@@ -625,7 +676,7 @@ export default function WorkPage() {
                                     variant="contrast"
                                     disabled={!!state.action || !state.memoryEdit.text.trim()}
                                   >
-                                    Save correction
+                                    {language.t("work.ui.save.correction")}
                                   </ButtonV2>
                                 </div>
                               </form>
@@ -643,23 +694,33 @@ export default function WorkPage() {
                                     >
                                       <div class="flex items-center justify-between gap-2">
                                         <Status value={candidate.item.kind} />
-                                        <span class="truncate font-mono text-[9px] text-v2-text-text-muted">
-                                          {candidate.producer} · {candidate.taskID}
-                                        </span>
+                                        <details>
+                                          <summary>{language.t("session.outcome.details")}</summary>
+                                          <span class="truncate font-mono text-[9px] text-v2-text-text-muted">
+                                            {candidate.producer} · {candidate.taskID}
+                                          </span>
+                                        </details>
                                       </div>
                                       <p class="mt-2 whitespace-pre-wrap text-[11px] leading-5">
                                         {candidate.item.text}
                                       </p>
                                       <Show when={candidate.item.reference}>
-                                        <div class="mt-2 truncate font-mono text-[9px] text-v2-text-text-muted">
-                                          {candidate.item.reference}
-                                        </div>
+                                        <details>
+                                          <summary>{language.t("session.outcome.details")}</summary>
+                                          <div class="mt-2 truncate font-mono text-[9px] text-v2-text-text-muted">
+                                            {candidate.item.reference}
+                                          </div>
+                                        </details>
                                       </Show>
                                       <div class="mt-3 flex items-center justify-between gap-3">
-                                        <span class="truncate font-mono text-[9px] text-v2-text-text-muted">
-                                          {candidate.evidenceIDs.length} evidence · sha256:
-                                          {candidate.itemDigest.slice(0, 10)}
-                                        </span>
+                                        <details>
+                                          <summary>{language.t("session.outcome.details")}</summary>
+                                          <span class="truncate font-mono text-[9px] text-v2-text-text-muted">
+                                            {candidate.evidenceIDs.length}
+                                            {language.t("work.ui.evidence.sha256")}
+                                            {candidate.itemDigest.slice(0, 10)}
+                                          </span>
+                                        </details>
                                         <Show when={entry.status !== "current"}>
                                           <ButtonV2
                                             size="small"
@@ -679,7 +740,7 @@ export default function WorkPage() {
                                               )
                                             }
                                           >
-                                            {selected() ? "Selected" : "Select"}
+                                            {selected() ? language.t("work.ui.selected") : language.t("work.ui.select")}
                                           </ButtonV2>
                                         </Show>
                                       </div>
@@ -700,23 +761,29 @@ export default function WorkPage() {
                 </For>
 
                 <Section
-                  title="Agent mailbox"
-                  subtitle="Verified structured Handoffs between Tasks and into project memory"
+                  title={language.t("work.ui.agent.mailbox")}
+                  subtitle={language.t("work.ui.verified.structured.handoffs.between.tasks.and.into.project.memory")}
                 >
-                  <Show when={current().handoffs.length > 0} fallback={<Empty label="No Handoffs recorded" compact />}>
+                  <Show
+                    when={current().handoffs.length > 0}
+                    fallback={<Empty label={language.t("work.ui.no.handoffs.recorded")} compact />}
+                  >
                     <div class="grid max-h-[520px] gap-3 overflow-y-auto xl:grid-cols-2">
                       <For each={current().handoffs.slice().reverse()}>
                         {(handoff) => (
                           <article class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
                             <div class="mb-2 flex items-center justify-between gap-3">
                               <Status value={handoff.producer} />
-                              <span class="truncate font-mono text-[10px] text-v2-text-text-muted">
-                                {handoff.taskID}
-                              </span>
+                              <details>
+                                <summary>{language.t("session.outcome.details")}</summary>
+                                <span class="truncate font-mono text-[10px] text-v2-text-text-muted">
+                                  {handoff.taskID}
+                                </span>
+                              </details>
                             </div>
                             <p class="whitespace-pre-wrap text-[12px] leading-5">{handoff.summary}</p>
                             <div class="mt-2 text-[10px] text-v2-text-text-muted">
-                              Routed to{" "}
+                              {language.t("work.ui.routed.to")}{" "}
                               {handoff.recipients.length > 0
                                 ? handoff.recipients
                                     .map(
@@ -742,17 +809,23 @@ export default function WorkPage() {
                                       </div>
                                     </Show>
                                     <Show when={item.reference}>
-                                      <div class="mt-1 truncate font-mono text-[10px] text-v2-text-text-muted">
-                                        {item.reference}
-                                      </div>
+                                      <details>
+                                        <summary>{language.t("session.outcome.details")}</summary>
+                                        <div class="mt-1 truncate font-mono text-[10px] text-v2-text-text-muted">
+                                          {item.reference}
+                                        </div>
+                                      </details>
                                     </Show>
                                   </div>
                                 )}
                               </For>
                             </div>
-                            <div class="mt-3 truncate font-mono text-[9px] text-v2-text-text-muted">
-                              sha256:{handoff.digest}
-                            </div>
+                            <details>
+                              <summary>{language.t("session.outcome.details")}</summary>
+                              <div class="mt-3 truncate font-mono text-[9px] text-v2-text-text-muted">
+                                sha256:{handoff.digest}
+                              </div>
+                            </details>
                           </article>
                         )}
                       </For>
@@ -761,10 +834,13 @@ export default function WorkPage() {
                 </Section>
 
                 <div class="grid gap-5 xl:grid-cols-2">
-                  <Section title="Evidence" subtitle="Tests, commands, diffs, artifacts and reviews">
+                  <Section
+                    title={language.t("work.ui.evidence")}
+                    subtitle={language.t("work.ui.tests.commands.diffs.artifacts.and.reviews")}
+                  >
                     <Show
                       when={current().evidence.length > 0}
-                      fallback={<Empty label="No evidence recorded" compact />}
+                      fallback={<Empty label={language.t("work.ui.no.evidence.recorded")} compact />}
                     >
                       <div class="flex max-h-[420px] flex-col gap-2 overflow-y-auto">
                         <For each={current().evidence.slice().reverse()}>
@@ -784,14 +860,17 @@ export default function WorkPage() {
                                     {language.t(
                                       `verification.${workVerification(item, current().evaluations.find((evaluation) => evaluation.evidenceIDs.includes(item.id))?.verdict)}`,
                                     )}{" "}
-                                    · {item.kind}
+                                    · <Status value={item.kind} />
                                   </span>
                                 </Show>
-                                <span>{item.producer}</span>
                               </div>
-                              <pre class="max-h-44 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5">
-                                {JSON.stringify(item.payload, null, 2)}
-                              </pre>
+                              <details>
+                                <summary>{language.t("session.outcome.details")}</summary>
+                                <div>{item.producer}</div>
+                                <pre class="max-h-44 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5">
+                                  {JSON.stringify(item.payload, null, 2)}
+                                </pre>
+                              </details>
                             </div>
                           )}
                         </For>
@@ -799,10 +878,13 @@ export default function WorkPage() {
                     </Show>
                   </Section>
 
-                  <Section title="Evaluations" subtitle="Acceptance criteria and quality verdicts">
+                  <Section
+                    title={language.t("work.ui.evaluations")}
+                    subtitle={language.t("work.ui.acceptance.criteria.and.quality.verdicts")}
+                  >
                     <Show
                       when={current().evaluations.length > 0}
-                      fallback={<Empty label="No evaluations recorded" compact />}
+                      fallback={<Empty label={language.t("work.ui.no.evaluations.recorded")} compact />}
                     >
                       <div class="flex max-h-[420px] flex-col gap-2 overflow-y-auto">
                         <For each={current().evaluations.slice().reverse()}>
@@ -846,6 +928,7 @@ function CreateGoal(props: {
   onCancel: () => void
   onCreate: () => Promise<unknown>
 }) {
+  const language = useLanguage()
   const valid = () => props.objective.trim().length > 0 && props.directory.trim().length > 0
 
   return (
@@ -859,24 +942,27 @@ function CreateGoal(props: {
         }}
       >
         <div>
-          <h1 class="text-[18px] font-semibold text-v2-text-text-strong">Create durable Goal</h1>
+          <h1 class="text-[18px] font-semibold text-v2-text-text-strong">
+            {language.t("work.ui.create.durable.goal")}
+          </h1>
           <p class="mt-1 text-[12px] leading-5 text-v2-text-text-muted">
-            A durable Planner will inspect the project, create a validated Task DAG, run independent Tasks with bounded
-            parallelism, verify evidence, review quality, and repair failures within budget.
+            {language.t(
+              "work.ui.a.durable.planner.will.inspect.the.project.create.a.validated.task.dag.run.independent.tasks.with.bounded.parallelism.verify.evidence.review.quality.and.repair.failures.within.budget",
+            )}
           </p>
         </div>
         <label class="flex flex-col gap-2 text-[12px] font-medium">
-          Objective
+          {language.t("work.ui.objective")}
           <textarea
             class="min-h-36 resize-y rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 py-2 text-[13px] font-normal leading-5 outline-none focus:border-v2-border-border-focus"
             autofocus
             value={props.objective}
-            placeholder="Describe the outcome that must be achieved…"
+            placeholder={language.t("work.ui.describe.the.outcome.that.must.be.achieved")}
             onInput={(event) => props.onObjective(event.currentTarget.value)}
           />
         </label>
         <label class="flex flex-col gap-2 text-[12px] font-medium">
-          Workspace directory
+          {language.t("work.ui.workspace.directory")}
           <input
             class="h-9 rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 font-mono text-[12px] font-normal outline-none focus:border-v2-border-border-focus"
             value={props.directory}
@@ -885,8 +971,9 @@ function CreateGoal(props: {
           />
         </label>
         <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-02 p-3 text-[11px] leading-5 text-v2-text-text-muted">
-          Default guardrails: up to 8 attempts per Task, 3 repair passes, and 3 concurrent isolated Tasks. The reviewer
-          must explicitly pass the objective before completion.
+          {language.t(
+            "work.ui.default.guardrails.up.to.8.attempts.per.task.3.repair.passes.and.3.concurrent.isolated.tasks.the.reviewer.must.explicitly.pass.the.objective.before.completion",
+          )}
         </div>
         <Show when={props.error}>
           <div class="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-300">
@@ -895,10 +982,10 @@ function CreateGoal(props: {
         </Show>
         <div class="flex justify-end gap-2">
           <ButtonV2 type="button" variant="neutral" disabled={props.busy} onClick={props.onCancel}>
-            Cancel
+            {language.t("work.ui.cancel")}
           </ButtonV2>
           <ButtonV2 type="submit" variant="contrast" disabled={props.busy || !valid()}>
-            {props.busy ? "Starting…" : "Create & Run"}
+            {props.busy ? language.t("work.ui.starting") : language.t("work.ui.create.run")}
           </ButtonV2>
         </div>
       </form>
@@ -916,6 +1003,7 @@ function GoalHeader(props: {
   onReplan: () => Promise<unknown>
   onCancel: () => Promise<unknown>
 }) {
+  const language = useLanguage()
   const controls = () => workGoalControls(props.detail.goal.status)
   const pending = (command: string) => props.commands.includes(command)
   const disabled = (command: string) => workGoalControlDisabled({ busy: props.busy, commands: props.commands, command })
@@ -926,33 +1014,36 @@ function GoalHeader(props: {
         <div class="min-w-0">
           <div class="mb-2 flex items-center gap-2">
             <Status value={props.detail.goal.status} />
-            <span class="font-mono text-[10px] text-v2-text-text-muted">{props.detail.goal.id}</span>
           </div>
           <h1 class="text-[20px] font-semibold leading-7 text-v2-text-text-strong">{props.detail.goal.objective}</h1>
-          <div class="mt-2 text-[11px] text-v2-text-text-muted">
-            {props.detail.goal.location.directory} · revision {props.detail.goal.revision} · updated{" "}
-            {new Date(props.detail.goal.time.updated).toLocaleString()}
-          </div>
+          <details class="mt-2 text-[11px] text-v2-text-text-muted">
+            <summary>{language.t("session.outcome.details")}</summary>
+            <div>{props.detail.goal.id}</div>
+            {props.detail.goal.location.directory}
+            {language.t("work.ui.revision")}
+            {props.detail.goal.revision}
+            {language.t("work.ui.updated")} {new Date(props.detail.goal.time.updated).toLocaleString()}
+          </details>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <Show when={controls().resume}>
             <ButtonV2 variant="contrast" disabled={disabled("resume")} onClick={() => void props.onResume()}>
-              {pending("resume") ? "Resuming…" : "Resume"}
+              {pending("resume") ? language.t("work.ui.resuming") : language.t("work.ui.resume")}
             </ButtonV2>
           </Show>
           <Show when={controls().pause}>
             <ButtonV2 variant="neutral" disabled={disabled("pause")} onClick={() => void props.onPause()}>
-              {pending("pause") ? "Pausing…" : "Pause"}
+              {pending("pause") ? language.t("work.ui.pausing") : language.t("work.ui.pause")}
             </ButtonV2>
           </Show>
           <Show when={controls().replan}>
             <ButtonV2 variant="neutral" disabled={disabled("replan")} onClick={() => void props.onReplan()}>
-              {pending("replan") ? "Replanning…" : "Architect Replan"}
+              {pending("replan") ? language.t("work.ui.replanning") : language.t("work.ui.architect.replan")}
             </ButtonV2>
           </Show>
           <Show when={controls().cancel}>
             <ButtonV2 variant="danger" disabled={disabled("cancel")} onClick={() => void props.onCancel()}>
-              {pending("cancel") ? "Cancelling…" : "Cancel"}
+              {pending("cancel") ? language.t("work.ui.cancelling") : language.t("work.ui.cancel")}
             </ButtonV2>
           </Show>
         </div>
@@ -965,6 +1056,7 @@ function GoalHeader(props: {
 }
 
 function TaskCard(props: { task: WorkDetail["tasks"][number]; detail: WorkDetail }) {
+  const language = useLanguage()
   const attempts = () => props.detail.attempts.filter((attempt) => attempt.taskID === props.task.id)
   const evaluations = () => props.detail.evaluations.filter((item) => item.taskID === props.task.id)
   const handoff = () => props.detail.handoffs.find((item) => item.taskID === props.task.id)
@@ -976,16 +1068,24 @@ function TaskCard(props: { task: WorkDetail["tasks"][number]; detail: WorkDetail
         <div class="min-w-0">
           <h3 class="text-[13px] font-semibold text-v2-text-text-strong">{props.task.title}</h3>
           <div class="mt-1 text-[11px] text-v2-text-text-muted">
-            {role()?.title ?? props.task.role} · {role()?.workspaceAccess === "read_only" ? "read only" : "can edit"} ·{" "}
+            <Status value={props.task.role} /> ·{" "}
+            {role()?.workspaceAccess === "read_only" ? language.t("work.ui.read.only") : language.t("work.ui.can.edit")}{" "}
+            ·{" "}
             {props.task.location?.directory !== undefined &&
             props.task.location.directory !== props.detail.goal.location.directory
-              ? "isolated"
-              : "shared"}{" "}
-            · {attempts().length} attempts · {evaluations().length} evaluations
+              ? language.t("work.ui.isolated")
+              : language.t("work.ui.shared")}{" "}
+            ·{" "}
+            {language.t("work.attemptEvaluationCounts", {
+              attempts: attempts().length,
+              evaluations: evaluations().length,
+            })}
           </div>
           <Show when={props.task.isolationState?.reason}>
             <div class="mt-1 text-xs" role="status">
-              {props.task.isolationState?.status === "blocked" ? "隔离失败，任务已阻塞：" : "未隔离："}
+              {props.task.isolationState?.status === "blocked"
+                ? language.t("work.ui.isolation.failed.task.blocked")
+                : language.t("work.ui.not.isolated")}
               {props.task.isolationState?.reason}
             </div>
           </Show>
@@ -997,13 +1097,15 @@ function TaskCard(props: { task: WorkDetail["tasks"][number]; detail: WorkDetail
       </p>
       <Show when={props.task.dependsOn.length > 0}>
         <div class="mt-3 font-mono text-[10px] text-v2-text-text-muted">
-          depends on {props.task.dependsOn.join(", ")}
+          {language.t("work.ui.depends.on")}
+          {props.task.dependsOn.map((id) => props.detail.tasks.find((task) => task.id === id)?.title ?? id).join(", ")}
         </div>
       </Show>
       <Show when={handoff()}>
         {(item) => (
           <div class="mt-3 rounded bg-v2-background-bg-layer-02 px-2.5 py-2 text-[11px] leading-5 text-v2-text-text-muted">
-            Handoff: {item().summary}
+            {language.t("work.ui.handoff")}
+            {item().summary}
           </div>
         )}
       </Show>
@@ -1013,6 +1115,7 @@ function TaskCard(props: { task: WorkDetail["tasks"][number]; detail: WorkDetail
 
 function AttemptRow(props: {
   attempt: WorkAttemptInfo
+  taskTitle?: string
   busy?: string
   onOpen: () => void
   onRetry: () => Promise<unknown>
@@ -1035,12 +1138,22 @@ function AttemptRow(props: {
   )
   return (
     <div class="flex flex-wrap items-center gap-3 rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 px-3 py-2.5">
-      <div class="w-16 shrink-0 font-mono text-[11px] uppercase text-v2-text-text-muted">{props.attempt.kind}</div>
+      <div class="w-16 shrink-0 font-mono text-[11px] uppercase text-v2-text-text-muted">
+        <Status value={props.attempt.kind} />
+      </div>
       <div class="min-w-0 flex-1">
-        <div class="truncate font-mono text-[11px]">{props.attempt.id}</div>
+        <div class="truncate text-[12px]">{props.taskTitle ?? language.t("work.ui.attempts")}</div>
+        <details class="text-[10px] text-v2-text-text-muted">
+          <summary>{language.t("session.outcome.details")}</summary>
+          {props.attempt.id}
+          <Show when={props.attempt.fence}>
+            {language.t("work.ui.fence")}
+            {props.attempt.fence}
+          </Show>
+        </details>
         <div class="mt-1 text-[10px] text-v2-text-text-muted">
-          run #{props.attempt.number}
-          <Show when={props.attempt.fence}> · fence {props.attempt.fence}</Show>
+          {language.t("work.ui.run")}
+          {props.attempt.number}
           <Show when={props.attempt.failure}>
             {" "}
             · {missingModel() ? language.t("work.model.missing") : props.attempt.failure?.message}
@@ -1069,12 +1182,12 @@ function AttemptRow(props: {
           </span>
         </Show>
         <ButtonV2 size="small" variant="ghost-muted" onClick={props.onOpen}>
-          Open session
+          {language.t("work.ui.open.session")}
         </ButtonV2>
       </Show>
       <Show when={props.attempt.status === "unknown"}>
         <ButtonV2 size="small" variant="neutral" disabled={!!props.busy} onClick={() => void props.onRetry()}>
-          Authorize retry
+          {language.t("work.ui.authorize.retry")}
         </ButtonV2>
       </Show>
     </div>
@@ -1117,9 +1230,15 @@ function Empty(props: { label: string; compact?: boolean }) {
 }
 
 function Status(props: { value: string }) {
+  const language = useLanguage()
+  const label = () => {
+    const key = `work.status.${props.value}`
+    const text = language.t(key as Parameters<typeof language.t>[0])
+    return text === key ? props.value : text
+  }
   return (
     <span class="inline-flex shrink-0 items-center rounded-full border border-v2-border-border-muted bg-v2-background-bg-layer-03 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-v2-text-text-base">
-      {props.value}
+      {label()}
     </span>
   )
 }
@@ -1129,13 +1248,14 @@ function completedTasks(detail: WorkDetail) {
 }
 
 function MergeApproval(props: { goalID: string; taskID: string; refresh: () => Promise<unknown> }) {
+  const language = useLanguage()
   const sdk = useServerSDK()
   const [state, setState] = createStore({ busy: false, error: "" })
   const [review, actions] = createResource(
     () => [sdk().scope, props.goalID, props.taskID] as const,
     async () => {
       const result = await sdk().client.v2.work.mergeReview({ goalID: props.goalID, taskID: props.taskID })
-      if (!result.data) throw new Error("无法读取待合并改动")
+      if (!result.data) throw new Error(language.t("work.ui.cannot.read.pending.changes"))
       return result.data
     },
   )
@@ -1149,7 +1269,8 @@ function MergeApproval(props: { goalID: string; taskID: string; refresh: () => P
         taskID: props.taskID,
         workMergeDecision: { token: current.token, approved },
       })
-      if (result.error) throw new Error("审批已失效或保存失败，请刷新改动后重试")
+      if (result.error)
+        throw new Error(language.t("work.ui.approval.expired.or.could.not.be.saved.refresh.changes.and.retry"))
       await actions.refetch()
       await props.refresh()
     } catch (error) {
@@ -1159,14 +1280,21 @@ function MergeApproval(props: { goalID: string; taskID: string; refresh: () => P
     }
   }
   return (
-    <Section title="审阅后应用改动" subtitle="隔离任务已完成，等待你确认；不会自动提交或推送。">
+    <Section
+      title={language.t("work.ui.review.and.apply.changes")}
+      subtitle={language.t(
+        "work.ui.the.isolated.task.is.complete.and.awaits.your.approval.changes.will.not.be.committed.or.pushed.automatically",
+      )}
+    >
       <Show when={review.error}>
         <p role="alert">
-          无法读取合并基线或改动，请检查工作目录与 Git 状态后刷新。尚未获得可审阅证据，不会应用改动。
+          {language.t(
+            "work.ui.cannot.read.the.merge.baseline.or.changes.check.the.workspace.and.git.status.then.refresh.no.changes.will.be.applied.without.reviewable.evidence",
+          )}
           <br />
           {String(review.error)}
           <ButtonV2 disabled={state.busy || review.loading} onClick={() => void actions.refetch()}>
-            刷新改动
+            {language.t("work.ui.refresh.changes")}
           </ButtonV2>
         </p>
       </Show>
@@ -1176,20 +1304,25 @@ function MergeApproval(props: { goalID: string; taskID: string; refresh: () => P
       <Show when={!review.error && review()}>
         {(current) => (
           <>
-            <p class="text-xs">目标基线：{current().baseline.slice(0, 12)}</p>
+            <p class="text-xs">
+              {language.t("work.ui.target.baseline")}
+              {current().baseline.slice(0, 12)}
+            </p>
             <Show when={current().reason}>
               <p role="alert">{current().reason}</p>
             </Show>
-            <pre class="max-h-96 overflow-auto whitespace-pre text-xs p-3">{current().diff || "没有文件差异"}</pre>
+            <pre class="max-h-96 overflow-auto whitespace-pre text-xs p-3">
+              {current().diff || language.t("work.ui.no.file.differences")}
+            </pre>
             <div class="flex gap-2">
               <ButtonV2 disabled={state.busy || review.loading || !!current().reason} onClick={() => void decide(true)}>
-                批准并应用
+                {language.t("work.ui.approve.and.apply")}
               </ButtonV2>
               <ButtonV2 disabled={state.busy || review.loading} onClick={() => void decide(false)}>
-                暂不应用
+                {language.t("work.ui.not.now")}
               </ButtonV2>
               <ButtonV2 disabled={state.busy} onClick={() => void actions.refetch()}>
-                刷新改动
+                {language.t("work.ui.refresh.changes")}
               </ButtonV2>
             </div>
           </>

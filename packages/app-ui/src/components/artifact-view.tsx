@@ -1,16 +1,21 @@
-import { createEffect, onCleanup, onMount, Show, lazy, Suspense } from "solid-js"
+import { createEffect, createResource, onCleanup, onMount, Show, lazy, Suspense } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { artifactViewer, type ArtifactState } from "@/artifact-preview"
+import { useSDK } from "@/context/sdk"
+import { useLanguage } from "@/context/language"
+import { artifactPath } from "@/utils/artifact-path"
+import { sourcePreviewNeedsBuild } from "@/utils/source-preview"
 
 const PDF = lazy(() => import("./artifact-pdf"))
 type Props = { target: string; directory: string; active?: boolean }
 export function ArtifactView(props: Props) {
+  const language = useLanguage()
   const platform = usePlatform()
   return (
     <Show when={artifactViewer(props.target) === "pdf"} fallback={<ArtifactBrowserView {...props} />}>
-      <div class="flex h-full min-h-0 flex-col" aria-label="PDF 成果预览">
+      <div class="flex h-full min-h-0 flex-col" aria-label={language.t("artifact.pdf")}>
         <div class="flex h-10 shrink-0 items-center justify-between border-b border-border-weak-base px-3 text-xs">
           <span class="min-w-0 truncate">{props.target}</span>
           <button
@@ -23,10 +28,10 @@ export function ArtifactView(props: Props) {
               else void platform.openPath?.(target)
             }}
           >
-            外部打开
+            {language.t("artifact.external")}
           </button>
         </div>
-        <Suspense fallback={<p class="p-3 text-xs">正在加载文档查看器…</p>}>
+        <Suspense fallback={<p class="p-3 text-xs">{language.t("artifact.loadingPdf")}</p>}>
           <PDF
             load={() => {
               if (!platform.artifactPreview?.readPDF) return Promise.reject(new Error("PDF viewer requires desktop"))
@@ -39,6 +44,27 @@ export function ArtifactView(props: Props) {
   )
 }
 function ArtifactBrowserView(props: Props) {
+  const sdk = useSDK()
+  const language = useLanguage()
+  const [needsBuild] = createResource(
+    () => {
+      const path = artifactPath(props.target, props.directory)?.path
+      return path && /\.html?$/i.test(path) ? path : undefined
+    },
+    async (path) => {
+      const result = await Promise.allSettled([
+        sdk().client.file.read({ path }),
+        sdk().client.file.read({
+          path: `${path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : ""}package.json`,
+        }),
+      ])
+      return sourcePreviewNeedsBuild(
+        path,
+        result[0].status === "fulfilled" ? (result[0].value.data?.content ?? "") : "",
+        result[1].status === "fulfilled" ? (result[1].value.data?.content ?? "") : "",
+      )
+    },
+  )
   const platform = usePlatform()
   const dialog = useDialog()
   const api = platform.artifactPreview
@@ -62,11 +88,11 @@ function ArtifactBrowserView(props: Props) {
     const next = JSON.stringify({ bounds, visible })
     if (next === lastBounds) return
     lastBounds = next
-    void api.bounds({ id, bounds, visible }).catch(() => setState("error", "预览区域更新失败，请重新打开"))
+    void api.bounds({ id, bounds, visible }).catch(() => setState("error", language.t("artifact.boundsError")))
   }
   const open = async () => {
     if (!api) {
-      setState({ loading: false, error: "请在更新后的造物桌面端打开成果预览" })
+      setState({ loading: false, error: language.t("artifact.needDesktop") })
       return
     }
     try {
@@ -87,7 +113,7 @@ function ArtifactBrowserView(props: Props) {
       void open()
       return
     }
-    void api?.action({ id, action }).catch(() => setState("error", "操作失败，请重新打开预览"))
+    void api?.action({ id, action }).catch(() => setState("error", language.t("artifact.actionError")))
   }
   createEffect(() => {
     dialog.active
@@ -131,21 +157,21 @@ function ArtifactBrowserView(props: Props) {
   const button =
     "h-10 shrink-0 rounded-md px-2 text-xs hover:bg-background-stronger focus-visible:outline-2 focus-visible:outline-border-active disabled:opacity-40"
   return (
-    <section class="flex h-full min-h-0 flex-col bg-background-base" aria-label="成果预览">
+    <section class="flex h-full min-h-0 flex-col bg-background-base" aria-label={language.t("artifact.preview")}>
       <div class="flex shrink-0 items-center gap-1 border-b border-border-weak-base px-2">
         <button class={button} onClick={() => action("reload")}>
-          刷新
+          {language.t("artifact.refresh")}
         </button>
         <span class="min-w-0 flex-1 truncate text-xs text-text-weak" title={state.url || props.target}>
           {props.target}
         </span>
-        <button class={button} aria-label="缩小成果" onClick={() => action("zoom-out")}>
+        <button class={button} aria-label={language.t("artifact.zoomOut")} onClick={() => action("zoom-out")}>
           −
         </button>
-        <button class={button} aria-label="恢复原始大小" onClick={() => action("reset")}>
+        <button class={button} aria-label={language.t("artifact.zoomReset")} onClick={() => action("reset")}>
           {Math.round(state.zoom * 100)}%
         </button>
-        <button class={button} aria-label="放大成果" onClick={() => action("zoom-in")}>
+        <button class={button} aria-label={language.t("artifact.zoomIn")} onClick={() => action("zoom-in")}>
           ＋
         </button>
         <button
@@ -159,16 +185,21 @@ function ArtifactBrowserView(props: Props) {
             const path = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
               ? props.target
               : `${props.directory}/${props.target}`
-            void platform.openPath?.(path).catch(() => setState("error", "无法在外部打开此文件"))
+            void platform.openPath?.(path).catch(() => setState("error", language.t("artifact.externalError")))
           }}
         >
-          外部打开
+          {language.t("artifact.external")}
         </button>
       </div>
       <Show when={state.loading}>
         <div role="status" class="shrink-0 px-3 py-2 text-xs text-text-weak">
-          正在加载成果…
+          {language.t("artifact.loading")}
         </div>
+      </Show>
+      <Show when={needsBuild()}>
+        <p role="status" class="shrink-0 px-3 py-2 text-xs text-text-weak">
+          {language.t("artifact.sourceBuild")}
+        </p>
       </Show>
       <Show when={state.error}>
         <div role="alert" class="shrink-0 break-words px-3 py-2 text-xs text-text-weak">
