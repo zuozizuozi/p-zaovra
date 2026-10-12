@@ -91,7 +91,7 @@ export const dict = {
   "provider.custom.discovery.timeout": "لم تستجب الخدمة خلال 15 ثانية. أعد المحاولة أو أدخل النماذج يدويًا.",
   "provider.custom.discovery.unsupported":
     "لا تدعم الخدمة سرد النماذج على هذا العنوان. تحقق من الرابط أو أدخل معرّف نموذج يدويًا.",
-  "provider.custom.discovery.saved": "تم حفظ إعدادات {provider}",
+  "provider.custom.discovery.saved": "تم حفظ إعدادات {{provider}}",
   "provider.custom.discovery.savedDescription": "اختر نموذجًا لبدء مهمة. لم يتم التحقق من التوليد واستدعاء الأدوات.",
   "provider.custom.discovery.intro": "أدخل عنوان الخدمة ومفتاح API، ثم اجلب قائمة النماذج.",
   "provider.custom.discovery.fetch": "جلب النماذج",

@@ -624,7 +624,7 @@ export const dict = {
   "provider.custom.discovery.timeout": "The service did not respond within 15 seconds. Retry or enter models manually.",
   "provider.custom.discovery.unsupported":
     "This service does not support listing models at this address. Check the URL or enter a model ID manually.",
-  "provider.custom.discovery.saved": "{provider} configuration saved",
+  "provider.custom.discovery.saved": "{{provider}} configuration saved",
   "provider.custom.discovery.savedDescription":
     "Select a model to start a task. Generation and tool calling have not been verified.",
   "provider.custom.discovery.intro":

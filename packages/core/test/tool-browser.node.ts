@@ -105,7 +105,7 @@ test(
       }
       response.setHeader("Content-Type", "text/html")
       response.end(
-        `<!doctype html><title>Browser fixture</title><label>Name<input aria-label="Name"></label><button onclick="this.textContent='Saved'">Save</button><button>Duplicate</button><button>Duplicate</button><label>Upload<input type="file"></label><p id="counter">0</p><canvas id="board" width="320" height="120" aria-label="Keyboard canvas"></canvas><img src="${outsideURL}/image"><script>let down=false,n=0;onkeydown=()=>down=true;onkeyup=()=>down=false;setInterval(()=>{if(down){counter.textContent=String(++n);const c=board.getContext("2d");c.fillStyle="#e0e7ff";c.fillRect(0,0,320,120);c.fillStyle="#4f46e5";c.fillRect(n*4,40,24,24)}},20);console.log('fixture ready')</script>`,
+        `<!doctype html><title>Browser fixture</title><label>Name<input type="search" aria-label="Name"></label><button onclick="this.textContent='Saved'">Save</button><button>Duplicate</button><button>Duplicate</button><label>Upload<input type="file"></label><p id="counter">0</p><canvas id="board" width="320" height="120" aria-label="Keyboard canvas"></canvas><img src="${outsideURL}/image"><script>let down=false,n=0;onkeydown=()=>down=true;onkeyup=()=>down=false;setInterval(()=>{if(down){counter.textContent=String(++n);const c=board.getContext("2d");c.fillStyle="#e0e7ff";c.fillRect(0,0,320,120);c.fillStyle="#4f46e5";c.fillRect(n*4,40,24,24)}},20);console.log('fixture ready')</script>`,
       )
     })
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -248,6 +248,10 @@ test(
           denied = false
           const opened = yield* call({ action: "open", url: url.href })
           expect(JSON.stringify(opened)).toContain("Browser fixture")
+          const invalidKey = yield* call({ action: "press", key: "NotAKey" })
+          expect(JSON.stringify(invalidKey)).toContain("Not executed")
+          expect(JSON.stringify(invalidKey)).not.toContain("Outcome may have occurred")
+          expect((yield* call({ action: "press", key: "CTRL+a" })).result.type).toBe("text")
           expect(assertions.at(-1)?.resources).toEqual([url.origin])
           expect(outsideHits).toBe(0)
           expect(JSON.stringify(yield* call({ action: "open", url: new URL("uncertain", url).href }))).toContain(
@@ -261,9 +265,9 @@ test(
           expect(
             JSON.stringify(yield* call({ action: "click", target: { role: "button", name: "Duplicate" } })),
           ).toContain("matched 2")
-          expect(JSON.stringify(yield* call({ action: "type", target: { label: "Name" }, text: "Hello" }))).toContain(
-            "Hello",
-          )
+          expect(
+            JSON.stringify(yield* call({ action: "type", target: { role: "searchbox", name: "Name" }, text: "Hello" })),
+          ).toContain("Hello")
           expect(JSON.stringify(yield* call({ action: "click", target: { role: "button", name: "Save" } }))).toContain(
             "Saved",
           )

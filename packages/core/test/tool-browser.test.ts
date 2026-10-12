@@ -12,6 +12,15 @@ import { Catalog } from "../src/catalog"
 import { SessionStore } from "../src/session/store"
 import { ToolOutputStore } from "../src/tool-output-store"
 
+test("keyboard aliases normalize and malformed shortcuts reject before dispatch", () => {
+  expect(BrowserTool.normalizeKey("CTRL+a")).toBe("Control+a")
+  expect(BrowserTool.normalizeKey("ESC")).toBe("Escape")
+  expect(BrowserTool.normalizeKey("+")).toBe("+")
+  expect(() => BrowserTool.normalizeKey("Control++a")).toThrow("Invalid keyboard")
+  expect(() => BrowserTool.normalizeKey("NotAKey")).toThrow("Invalid keyboard")
+  expect(() => BrowserTool.normalizeKey("CTRL+a", 100)).toThrow("single key")
+})
+
 test.skipIf(process.platform !== "win32")("does not register browser in Windows Bun", async () => {
   let registered = false
   await Effect.runPromise(

@@ -214,6 +214,10 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       current?: { publisher: ReturnType<typeof createLLMEventPublisher>; requestPerformed: boolean },
     ) {
+      // Cancellation can precede the provider's first event. Still record the
+      // attempted turn so Stop cannot expose the previous turn as its outcome
+      // or silently omit the request from incomplete-usage accounting.
+      if (current) yield* current.publisher.startAssistant()
       const settlement = current?.publisher.stepSettlement()
       const reported =
         current && settlement
@@ -254,7 +258,7 @@ const layer = Layer.effect(
               : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           ...(reported && message.id === reported.assistantMessageID
             ? { usageReported: reported.usageReported, requestPerformed: reported.requestPerformed }
-            : {}),
+            : { usageReported: false, ...(current ? { requestPerformed: current.requestPerformed } : {}) }),
         })
       }
     })

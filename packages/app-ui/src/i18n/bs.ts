@@ -92,7 +92,7 @@ export const dict = {
     "Usluga nije odgovorila u roku od 15 sekundi. Pokušajte ponovo ili ručno unesite modele.",
   "provider.custom.discovery.unsupported":
     "Ova usluga ne podržava listanje modela na ovoj adresi. Provjerite URL ili ručno unesite ID modela.",
-  "provider.custom.discovery.saved": "Konfiguracija za {provider} je sačuvana",
+  "provider.custom.discovery.saved": "Konfiguracija za {{provider}} je sačuvana",
   "provider.custom.discovery.savedDescription":
     "Odaberite model da započnete zadatak. Generisanje i pozivanje alata nisu provjereni.",
   "provider.custom.discovery.intro": "Unesite URL usluge i API ključ, zatim preuzmite listu modela.",

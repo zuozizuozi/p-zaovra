@@ -96,7 +96,7 @@ export const dict = {
     "Der Dienst hat innerhalb von 15 Sekunden nicht geantwortet. Versuchen Sie es erneut oder geben Sie Modelle manuell ein.",
   "provider.custom.discovery.unsupported":
     "Dieser Dienst unterstützt an dieser Adresse keine Modellliste. Prüfen Sie die URL oder geben Sie eine Modell-ID manuell ein.",
-  "provider.custom.discovery.saved": "Konfiguration für {provider} gespeichert",
+  "provider.custom.discovery.saved": "Konfiguration für {{provider}} gespeichert",
   "provider.custom.discovery.savedDescription":
     "Wählen Sie ein Modell, um eine Aufgabe zu starten. Generierung und Werkzeugaufrufe wurden nicht überprüft.",
   "provider.custom.discovery.intro":

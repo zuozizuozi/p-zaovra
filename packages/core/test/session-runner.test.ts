@@ -854,6 +854,22 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("Stop before the first provider event records interruption and unknown usage", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Wait for provider" }), resume: false })
+      const started = yield* Deferred.make<void>()
+      responseStream = Stream.fromEffect(Deferred.succeed(started, undefined)).pipe(Stream.flatMap(() => Stream.never))
+      const runner = yield* SessionRunner.Service
+      const fiber = yield* runner.run({ sessionID, force: true }).pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      yield* Fiber.interrupt(fiber)
+      expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 1 })
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ type: "assistant", finish: "interrupted" })
+      expect((yield* session.outcome(sessionID)).state).toBe("interrupted")
+    }),
+  )
   it.effect("records a defective provider stream as unreported exactly once", () =>
     Effect.gen(function* () {
       yield* setup

@@ -16,7 +16,90 @@ import { BrowserSession } from "./browser-session"
 
 const Target = Schema.Union([
   Schema.Struct({
-    role: Schema.Literals(["button", "link", "textbox", "checkbox", "combobox", "radio", "menuitem", "tab"]),
+    role: Schema.Literals([
+      "alert",
+      "alertdialog",
+      "application",
+      "article",
+      "banner",
+      "blockquote",
+      "button",
+      "caption",
+      "cell",
+      "checkbox",
+      "code",
+      "columnheader",
+      "combobox",
+      "complementary",
+      "contentinfo",
+      "definition",
+      "deletion",
+      "dialog",
+      "directory",
+      "document",
+      "emphasis",
+      "feed",
+      "figure",
+      "form",
+      "generic",
+      "grid",
+      "gridcell",
+      "group",
+      "heading",
+      "img",
+      "insertion",
+      "link",
+      "list",
+      "listbox",
+      "listitem",
+      "log",
+      "main",
+      "marquee",
+      "math",
+      "meter",
+      "menu",
+      "menubar",
+      "menuitem",
+      "menuitemcheckbox",
+      "menuitemradio",
+      "navigation",
+      "none",
+      "note",
+      "option",
+      "paragraph",
+      "presentation",
+      "progressbar",
+      "radio",
+      "radiogroup",
+      "region",
+      "row",
+      "rowgroup",
+      "rowheader",
+      "scrollbar",
+      "search",
+      "searchbox",
+      "separator",
+      "slider",
+      "spinbutton",
+      "status",
+      "strong",
+      "subscript",
+      "superscript",
+      "switch",
+      "tab",
+      "table",
+      "tablist",
+      "tabpanel",
+      "term",
+      "textbox",
+      "time",
+      "timer",
+      "toolbar",
+      "tooltip",
+      "tree",
+      "treegrid",
+      "treeitem",
+    ]),
     name: Schema.String,
   }),
   Schema.Struct({ label: Schema.String }),
@@ -72,6 +155,52 @@ function origin(value: string) {
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
     throw new Error("Only HTTP(S) origins without credentials are allowed")
   return url.origin
+}
+
+/** Validate the public key vocabulary before a keyboard action can have effects. */
+export function normalizeKey(value: string, holdMs = 0) {
+  const aliases: Record<string, string> = {
+    ctrl: "Control",
+    control: "Control",
+    alt: "Alt",
+    shift: "Shift",
+    meta: "Meta",
+    cmd: "Meta",
+    command: "Meta",
+    esc: "Escape",
+    escape: "Escape",
+    enter: "Enter",
+    return: "Enter",
+    tab: "Tab",
+    space: "Space",
+    backspace: "Backspace",
+    delete: "Delete",
+    del: "Delete",
+    up: "ArrowUp",
+    down: "ArrowDown",
+    left: "ArrowLeft",
+    right: "ArrowRight",
+    controlormeta: "ControlOrMeta",
+  }
+  const parts = value === "+" ? [value] : (value.match(/[^+]+|\+(?=$)/g) ?? [])
+  const keys = parts.map((part) => aliases[part.toLowerCase()] ?? part)
+  const modifiers = ["Control", "Alt", "Shift", "Meta", "ControlOrMeta"]
+  const named =
+    /^(?:Arrow(?:Up|Down|Left|Right)|Enter|Tab|Escape|Space|Backspace|Delete|Insert|Home|End|PageUp|PageDown|CapsLock|NumLock|ScrollLock|Pause|PrintScreen|ContextMenu|F(?:[1-9]|1[0-9]|2[0-4])|Key[A-Z]|Digit[0-9]|Numpad(?:[0-9]|Add|Subtract|Multiply|Divide|Decimal|Enter))$/
+  if (
+    !keys.length ||
+    parts.join("+") !== value ||
+    (holdMs > 0 && keys.length > 1) ||
+    keys.some((key, index) =>
+      index < keys.length - 1
+        ? !modifiers.includes(key)
+        : !modifiers.includes(key) && !named.test(key) && !/^[\x20-\x7e]$/.test(key),
+    )
+  )
+    throw new Error(
+      "Invalid keyboard key: use a supported key such as Enter, Escape, ArrowDown or Control+a; holdMs requires a single key",
+    )
+  return keys.join("+")
 }
 
 const layer = Layer.effect(
@@ -142,6 +271,14 @@ const layer = Layer.effect(
           execute: (input, context) =>
             locks.withLock(context.sessionID)(
               Effect.gen(function* () {
+                const key =
+                  input.action === "press"
+                    ? yield* Effect.try({
+                        try: () => normalizeKey(input.key, input.holdMs),
+                        catch: (error) =>
+                          new Tool.Failure({ message: `Not executed: ${String(error)}`, metadata: { phase: "input" } }),
+                      })
+                    : undefined
                 if (input.action === "close") {
                   yield* Effect.promise(() => close(context.sessionID))
                   return { text: "Browser closed. Preview server was not stopped." }
@@ -355,13 +492,13 @@ const layer = Layer.effect(
                       if (input.action === "press") {
                         started = true
                         if (input.holdMs) {
-                          await page.keyboard.down(input.key)
+                          await page.keyboard.down(key!)
                           try {
                             await new Promise((resolve) => setTimeout(resolve, input.holdMs))
                           } finally {
-                            await page.keyboard.up(input.key).catch(() => {})
+                            await page.keyboard.up(key!).catch(() => {})
                           }
-                        } else await page.keyboard.press(input.key)
+                        } else await page.keyboard.press(key!)
                       }
                       if (input.action === "scroll") {
                         started = true

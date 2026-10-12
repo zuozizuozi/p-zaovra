@@ -151,6 +151,10 @@ export const dict: Record<string, string> = {
 
   "ui.basicTool.called": "Called `{{tool}}`",
   "ui.toolErrorCard.failed": "Failed",
+  "ui.toolErrorCard.invalidInput": "Invalid tool input",
+  "ui.toolErrorCard.uncertain": "Outcome unknown; inspect before retrying",
+  "ui.toolErrorCard.verificationFailed": "Verification failed",
+  "ui.toolErrorCard.notExecuted": "Not executed",
   "ui.toolErrorCard.copyError": "Copy error",
 
   "ui.common.file.one": "file",

@@ -246,7 +246,7 @@ export const dict = {
   "provider.custom.discovery.environment": "此處無法讀取環境變數中的密鑰，請手動填寫模型 ID，或貼上 Key 後取得。",
   "provider.custom.discovery.timeout": "服務在 15 秒內未回應，請重試或手動填寫模型。",
   "provider.custom.discovery.unsupported": "此位址不支援取得模型清單，請檢查位址，或手動填寫模型 ID。",
-  "provider.custom.discovery.saved": "{provider} 設定已儲存",
+  "provider.custom.discovery.saved": "{{provider}} 設定已儲存",
   "provider.custom.discovery.savedDescription": "可以選擇模型開始任務，尚未驗證生成和工具呼叫能力。",
   "provider.custom.discovery.intro": "填寫服務位址和 API Key，取得模型後選擇即可。",
   "provider.custom.discovery.fetch": "取得模型",

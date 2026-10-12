@@ -69,6 +69,10 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
 
   const subtitle = createMemo(() => {
     if (split.subtitle) return split.subtitle
+    if (/^Invalid tool input\b/i.test(tail())) return i18n.t("ui.toolErrorCard.invalidInput")
+    if (/^Outcome may have occurred\b/i.test(tail())) return i18n.t("ui.toolErrorCard.uncertain")
+    if (/^Verification failed\b/i.test(tail())) return i18n.t("ui.toolErrorCard.verificationFailed")
+    if (/^Not executed\b/i.test(tail())) return i18n.t("ui.toolErrorCard.notExecuted")
     const parts = tail().split(": ")
     if (parts.length <= 1) return i18n.t("ui.toolErrorCard.failed")
     const head = (parts[0] ?? "").trim()
@@ -77,9 +81,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   })
 
   const body = createMemo(() => {
-    const parts = tail().split(": ")
-    if (parts.length <= 1) return cleaned()
-    return parts.slice(1).join(": ").trim() || cleaned()
+    return split.error
   })
 
   const copy = async () => {

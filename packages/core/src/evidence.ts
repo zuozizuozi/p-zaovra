@@ -80,7 +80,11 @@ const layer = Layer.effect(
       read: (sessionID, id, offset, length, query) =>
         Effect.tryPromise({
           try: async () => {
-            if (!/^ev_[a-f0-9]{64}$/.test(id)) throw new Error({ message: "Invalid Evidence ID" })
+            if (!/^ev_[a-f0-9]{64}$/.test(id))
+              throw new Error({
+                message:
+                  "Invalid Evidence ID: expected ev_ followed by exactly 64 lowercase hexadecimal characters. Copy the full ID from the original tool result; do not shorten or reconstruct it.",
+              })
             if (
               !Number.isSafeInteger(offset) ||
               offset < 0 ||

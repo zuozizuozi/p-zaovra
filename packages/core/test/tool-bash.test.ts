@@ -156,6 +156,34 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("rejects missing external workdir before any permission request", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withTool(tmp.path, (registry) =>
+          settleTool(
+            registry,
+            call({
+              command: "pwd",
+              workdir: path.join(tmp.path, "..", "missing-f1-workdir", "nested"),
+            }),
+          ),
+        ).pipe(
+          Effect.andThen((settled) =>
+            Effect.sync(() => {
+              expect(settled.result.type).toBe("error")
+              expect(JSON.stringify(settled.result)).toContain("当前项目目录")
+              expect(JSON.stringify(settled.result)).toContain("省略 workdir")
+              expect(assertions).toEqual([])
+              expect(runs).toEqual([])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
   it.live("runs commands while ignoring nonexistent assertion paths and directories", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

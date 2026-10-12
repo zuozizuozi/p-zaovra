@@ -32,6 +32,7 @@ test("evidence is stable, session-owned, paginated and searchable without rerunn
       expect(denied._tag).toBe("Failure")
       const traversal = yield* Effect.result(evidence.read(session, "../../secret", 0, 100))
       expect(traversal._tag).toBe("Failure")
+      expect(JSON.stringify(traversal)).toContain("exactly 64 lowercase hexadecimal")
       yield* Effect.promise(() => fs.rm(file))
       expect((yield* Effect.result(evidence.read(session, ids[0], 0, 100)))._tag).toBe("Failure")
     }).pipe(

@@ -92,7 +92,7 @@ export const dict = {
     "O serviço não respondeu em 15 segundos. Tente novamente ou insira os modelos manualmente.",
   "provider.custom.discovery.unsupported":
     "Este serviço não permite listar modelos neste endereço. Verifique a URL ou insira um ID de modelo manualmente.",
-  "provider.custom.discovery.saved": "Configuração de {provider} salva",
+  "provider.custom.discovery.saved": "Configuração de {{provider}} salva",
   "provider.custom.discovery.savedDescription":
     "Selecione um modelo para iniciar uma tarefa. A geração e as chamadas de ferramentas não foram verificadas.",
   "provider.custom.discovery.intro": "Insira a URL do serviço e a chave de API e busque a lista de modelos.",

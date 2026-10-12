@@ -96,7 +96,7 @@ export const dict = {
     "Hizmet 15 saniye içinde yanıt vermedi. Yeniden deneyin veya modelleri elle girin.",
   "provider.custom.discovery.unsupported":
     "Bu hizmet, bu adreste model listelemeyi desteklemiyor. URL'yi kontrol edin veya bir model kimliğini elle girin.",
-  "provider.custom.discovery.saved": "{provider} yapılandırması kaydedildi",
+  "provider.custom.discovery.saved": "{{provider}} yapılandırması kaydedildi",
   "provider.custom.discovery.savedDescription":
     "Bir görev başlatmak için model seçin. Üretim ve araç çağrıları henüz doğrulanmadı.",
   "provider.custom.discovery.intro": "Hizmet URL'sini ve API anahtarını girip model listesini getirin.",

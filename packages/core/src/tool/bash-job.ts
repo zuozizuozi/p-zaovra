@@ -116,7 +116,7 @@ const layer = Layer.effect(
             input: Schema.Struct({
               job_id: Schema.String,
               action: Schema.Literals(["get", "wait", "cancel"]),
-              timeout: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 60_000 })).pipe(Schema.optional),
+              timeout: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)).pipe(Schema.optional),
             }),
             output: Schema.Struct({
               status: Schema.String,
@@ -169,25 +169,32 @@ const layer = Layer.effect(
                     source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                   })
                   .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
+                const notice =
+                  input.action === "wait" && (input.timeout ?? 0) > 60_000
+                    ? `Requested wait timeout ${input.timeout}ms was clamped to 60000ms.\n`
+                    : ""
                 if (!job)
                   return {
                     status: record.message.time.completed ? "finished" : "unavailable",
                     output:
-                      record.message.output ||
-                      "The owning process is unavailable. Do not assume completion or retry automatically; inspect the command log and workspace.",
+                      notice +
+                      (record.message.output ||
+                        "The owning process is unavailable. Do not assume completion or retry automatically; inspect the command log and workspace."),
                   }
                 const result =
                   input.action === "cancel"
                     ? yield* jobs.cancel(input.job_id)
                     : input.action === "wait"
-                      ? (yield* jobs.wait({ id: input.job_id, timeout: input.timeout ?? 30_000 })).info
+                      ? (yield* jobs.wait({ id: input.job_id, timeout: Math.min(input.timeout ?? 30_000, 60_000) }))
+                          .info
                       : job
                 return {
                   status: result?.status ?? "unavailable",
                   kind: typeof result?.metadata?.kind === "string" ? result.metadata.kind : undefined,
                   workdir: typeof result?.metadata?.workdir === "string" ? result.metadata.workdir : undefined,
                   output:
-                    result?.output ?? result?.error ?? "Still running. Read the command log or wait for completion.",
+                    notice +
+                    (result?.output ?? result?.error ?? "Still running. Read the command log or wait for completion."),
                 }
               }),
           }),

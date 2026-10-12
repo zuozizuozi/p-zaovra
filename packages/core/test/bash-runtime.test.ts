@@ -160,14 +160,20 @@ it.live("background commands settle durably, enforce ownership, and stop with th
         settleTool(registry, {
           sessionID,
           ...toolIdentity,
-          call: { type: "tool-call", id: `observe-${action}`, name: "bash_job", input: { job_id: job, action } },
+          call: {
+            type: "tool-call",
+            id: `observe-${action}`,
+            name: "bash_job",
+            input: { job_id: job, action, timeout: 120000 },
+          },
         })
       expect((yield* observe(other.id, "cancel")).result.type).toBe("error")
       const finished = yield* observe(session.id, "wait")
       expect(finished.output?.structured).toMatchObject({
         status: "completed",
       })
-      expect(finished.output?.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("finished") })
+      expect(JSON.stringify(finished.output?.content)).toContain("finished")
+      expect(JSON.stringify(finished.output?.content)).toContain("clamped to 60000ms")
       expect(yield* Effect.promise(() => Bun.file(first.outputPaths![0]).text())).toBe("finished")
       expect(
         (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell"),

@@ -95,7 +95,7 @@ export const dict = {
     "Tjenesten svarte ikke innen 15 sekunder. Prøv igjen, eller skriv inn modeller manuelt.",
   "provider.custom.discovery.unsupported":
     "Tjenesten støtter ikke henting av modellister på denne adressen. Kontroller URL-en, eller skriv inn en modell-ID manuelt.",
-  "provider.custom.discovery.saved": "Konfigurasjonen for {provider} er lagret",
+  "provider.custom.discovery.saved": "Konfigurasjonen for {{provider}} er lagret",
   "provider.custom.discovery.savedDescription":
     "Velg en modell for å starte en oppgave. Generering og verktøykall er ikke verifisert.",
   "provider.custom.discovery.intro": "Skriv inn tjenestens URL og API-nøkkel, og hent deretter modellisten.",

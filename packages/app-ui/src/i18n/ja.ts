@@ -92,7 +92,7 @@ export const dict = {
     "サービスが15秒以内に応答しませんでした。再試行するか、モデルを手動で入力してください。",
   "provider.custom.discovery.unsupported":
     "このサービスは、このアドレスでのモデル一覧取得に対応していません。URL を確認するか、モデル ID を手動で入力してください。",
-  "provider.custom.discovery.saved": "{provider} の設定を保存しました",
+  "provider.custom.discovery.saved": "{{provider}} の設定を保存しました",
   "provider.custom.discovery.savedDescription":
     "モデルを選択してタスクを開始してください。生成とツール呼び出しは未検証です。",
   "provider.custom.discovery.intro": "サービスの URL と API キーを入力して、モデル一覧を取得します。",

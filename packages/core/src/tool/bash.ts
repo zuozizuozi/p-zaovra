@@ -13,6 +13,7 @@ import { SessionEvent } from "../session/event"
 import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
+import { Location } from "../location"
 import { AppProcess } from "../process"
 import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
@@ -60,7 +61,8 @@ export const Input = Schema.Struct({
   }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
   workdir: Schema.String.pipe(Schema.optional).annotate({
-    description: "Working directory. Defaults to the active Location; relative paths resolve from that Location.",
+    description:
+      "Working directory. Defaults to the project directory; prefer relative paths or omit workdir. Relative paths resolve from the active Location.",
   }),
   timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
@@ -138,6 +140,7 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const snapshots = yield* Snapshot.Service
     const mutation = yield* LocationMutation.Service
+    const location = yield* Location.Service
     const fs = yield* FSUtil.Service
     const appProcess = yield* AppProcess.Service
     const config = yield* Config.Service
@@ -175,6 +178,14 @@ const layer = Layer.effectDiscard(
               if (input.background_kind && !input.run_in_background)
                 return yield* new ToolFailure({ message: "background_kind requires run_in_background=true" })
               const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
+              const directory = yield* fs
+                .stat(target.canonical)
+                .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+              if (!directory || directory.type !== "Directory")
+                return yield* new ToolFailure({
+                  message: `目录不存在或不是目录：${target.canonical}；当前项目目录：${location.directory}；建议用相对路径或省略 workdir`,
+                  metadata: { phase: "input" },
+                })
               const external = target.externalDirectory
               if (external)
                 yield* permission.assert({
@@ -513,6 +524,7 @@ export const node = makeLocationNode({
   name: "tool/bash",
   layer,
   deps: [
+    Location.node,
     ToolRegistry.node,
     Snapshot.node,
     BashJob.node,

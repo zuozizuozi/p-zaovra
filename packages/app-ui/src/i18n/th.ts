@@ -91,7 +91,7 @@ export const dict = {
   "provider.custom.discovery.timeout": "บริการไม่ตอบกลับภายใน 15 วินาที ลองอีกครั้งหรือกรอกโมเดลเอง",
   "provider.custom.discovery.unsupported":
     "บริการนี้ไม่รองรับการแสดงรายการโมเดลที่ที่อยู่นี้ ตรวจสอบ URL หรือกรอก ID โมเดลเอง",
-  "provider.custom.discovery.saved": "บันทึกการตั้งค่า {provider} แล้ว",
+  "provider.custom.discovery.saved": "บันทึกการตั้งค่า {{provider}} แล้ว",
   "provider.custom.discovery.savedDescription":
     "เลือกโมเดลเพื่อเริ่มงาน ยังไม่ได้ตรวจสอบการสร้างเนื้อหาและการเรียกใช้เครื่องมือ",
   "provider.custom.discovery.intro": "กรอก URL ของบริการและคีย์ API แล้วดึงรายการโมเดล",

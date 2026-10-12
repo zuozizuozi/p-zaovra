@@ -92,7 +92,7 @@ export const dict = {
     "Tjenesten svarede ikke inden for 15 sekunder. Prøv igen, eller indtast modeller manuelt.",
   "provider.custom.discovery.unsupported":
     "Tjenesten understøtter ikke visning af modeller på denne adresse. Kontrollér URL'en, eller indtast et model-id manuelt.",
-  "provider.custom.discovery.saved": "Konfigurationen for {provider} er gemt",
+  "provider.custom.discovery.saved": "Konfigurationen for {{provider}} er gemt",
   "provider.custom.discovery.savedDescription":
     "Vælg en model for at starte en opgave. Generering og værktøjskald er ikke blevet kontrolleret.",
   "provider.custom.discovery.intro": "Indtast tjenestens URL og API-nøgle, og hent derefter modellisten.",
