@@ -143,6 +143,36 @@ describe("Tool.Progress", () => {
       expect(Schema.is(SessionEvent.Durable)(success)).toBe(true)
       expect(Schema.is(SessionEvent.Durable)(failed)).toBe(true)
 
+      const steps = [
+        { index: 1, action: "click", status: "executed" },
+        { index: 2, action: "press", status: "outcome_unknown" },
+        { index: 3, action: "click", status: "not_executed" },
+      ]
+      yield* start("call-cancelled-batch")
+      yield* service.publish(SessionEvent.Tool.Progress, {
+        sessionID,
+        timestamp,
+        assistantMessageID,
+        callID: "call-cancelled-batch",
+        structured: { steps },
+        content: content(`Batch steps: ${JSON.stringify(steps)}`),
+      })
+      yield* service.publish(SessionEvent.Tool.Failed, {
+        sessionID,
+        timestamp,
+        assistantMessageID,
+        callID: "call-cancelled-batch",
+        error: { type: "unknown", message: "Tool execution interrupted" },
+        provider: { executed: false },
+      })
+      expect((yield* readAssistant).content[2]).toMatchObject({
+        state: {
+          status: "error",
+          structured: { steps },
+          content: content(`Batch steps: ${JSON.stringify(steps)}`),
+        },
+      })
+
       const rows = yield* db
         .select({ type: EventTable.type })
         .from(EventTable)

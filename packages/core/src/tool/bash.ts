@@ -183,7 +183,7 @@ const layer = Layer.effectDiscard(
                 .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
               if (!directory || directory.type !== "Directory")
                 return yield* new ToolFailure({
-                  message: `目录不存在或不是目录：${target.canonical}；当前项目目录：${location.directory}；建议用相对路径或省略 workdir`,
+                  message: `Not executed: working directory does not exist or is not a directory: ${target.canonical}. Current project directory: ${location.directory}. Use a relative path or omit workdir.`,
                   metadata: { phase: "input" },
                 })
               const external = target.externalDirectory

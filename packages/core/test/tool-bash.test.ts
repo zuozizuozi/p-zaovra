@@ -173,8 +173,8 @@ describe("BashTool", () => {
           Effect.andThen((settled) =>
             Effect.sync(() => {
               expect(settled.result.type).toBe("error")
-              expect(JSON.stringify(settled.result)).toContain("当前项目目录")
-              expect(JSON.stringify(settled.result)).toContain("省略 workdir")
+              expect(JSON.stringify(settled.result)).toContain("Current project directory")
+              expect(JSON.stringify(settled.result)).toContain("omit workdir")
               expect(assertions).toEqual([])
               expect(runs).toEqual([])
             }),

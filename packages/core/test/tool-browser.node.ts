@@ -29,6 +29,7 @@ import { SessionSchema } from "../src/session/schema"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { Config } from "../src/config"
+import { EventV2 } from "../src/event"
 import { ToolOutputStore } from "../src/tool-output-store"
 import { toolIdentity, settleTool } from "./lib/tool"
 
@@ -62,6 +63,8 @@ test(
     let uncertainHits = 0
     let effectHits = 0
     let webSocketHits = 0
+    let batchHits = 0
+    let batchKeys = 0
     const outside = createServer((_request, response) => {
       outsideHits++
       response.end("outside")
@@ -75,6 +78,19 @@ test(
     if (!outsideAddress || typeof outsideAddress === "string") throw Error("No outside server")
     const outsideURL = `http://127.0.0.1:${outsideAddress.port}`
     const server = createServer((request, response) => {
+      if (request.url === "/batch-hit" || request.url === "/batch-key") {
+        if (request.url === "/batch-hit") batchHits++
+        if (request.url === "/batch-key") batchKeys++
+        response.end("ok")
+        return
+      }
+      if (request.url === "/batch") {
+        response.setHeader("Content-Type", "text/html")
+        response.end(
+          `<title>Batch fixture</title><input type="search" aria-label="Search"><button onclick="fetch('/batch-hit');document.querySelector('p').textContent=document.querySelector('input').value">Save</button><p>empty</p><script>onkeydown=(e)=>{if(e.key==='ArrowRight')fetch('/batch-key')}</script>`,
+        )
+        return
+      }
       if (request.url === "/effect") {
         effectHits++
         response.end("ok")
@@ -113,6 +129,7 @@ test(
     if (!address || typeof address === "string") throw Error("No server")
     const url = new URL(`http://127.0.0.1:${address.port}`)
     const assertions: PermissionV2.AssertInput[] = []
+    const progress: unknown[] = []
     let denied = false
     let known = false
     let vision = false
@@ -131,6 +148,17 @@ test(
       limit: { context: 1000, output: 1000 },
     })
     const layer = AppNodeBuilder.build(LayerNode.group([BrowserTool.node, ToolRegistry.node, ToolRegistry.toolsNode]), [
+      [
+        EventV2.node,
+        Layer.mock(EventV2.Service, {
+          recentAfter: () => ({ events: [], complete: false }),
+          publish: (definition, data) =>
+            Effect.sync(() => {
+              progress.push(data)
+              return { id: EventV2.ID.create(), type: definition.type, data } as EventV2.Payload<typeof definition>
+            }),
+        }),
+      ],
       [
         PermissionV2.node,
         Layer.mock(PermissionV2.Service, {
@@ -197,14 +225,15 @@ test(
           const actions = [
             "open",
             "click",
-            "click_position",
             "type",
             "press",
             "scroll",
+            "click_position",
             "snapshot",
             "screenshot",
             "console",
             "close",
+            "batch",
           ]
           const responses = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
             LLM.request({
@@ -242,6 +271,78 @@ test(
             })
           const missing = yield* call({ action: "snapshot" })
           expect(JSON.stringify(missing)).toContain("no active browser")
+          const sequence = [
+            { action: "type", target: { role: "searchbox", name: "Search" }, text: "batch value" },
+            { action: "press", key: "Tab" },
+            { action: "click", target: { role: "button", name: "Save" } },
+            { action: "scroll", x: 0, y: 10 },
+          ]
+          yield* call({ action: "open", url: new URL("batch", url).href })
+          const beforeSingle = calls
+          for (const action of sequence) yield* call(action)
+          const singleCalls = calls - beforeSingle
+          const single = yield* call({ action: "snapshot" })
+          expect(batchHits).toBe(1)
+          yield* call({ action: "open", url: new URL("batch", url).href })
+          const beforeBatch = calls
+          const batch = yield* call({ action: "batch", actions: sequence })
+          expect(calls - beforeBatch).toBe(1)
+          expect(singleCalls).toBe(4)
+          expect(batchHits).toBe(2)
+          assert.deepEqual(
+            (batch.output?.structured as { steps: unknown }).steps,
+            sequence.map((action, index) => ({ index: index + 1, action: action.action, status: "executed" })),
+          )
+          const batchSnapshot = yield* call({ action: "snapshot" })
+          expect(batchSnapshot.output?.structured).toEqual(single.output?.structured)
+          const batchImage = yield* call({
+            action: "batch",
+            actions: [{ action: "scroll", x: 0, y: 0 }],
+            observation: "screenshot",
+          })
+          assert.ok(
+            (batchImage.output?.structured as { screenshot?: { name: string } }).screenshot?.name.endsWith(".png"),
+          )
+          expect((batchImage.output?.structured as { steps: { status: string }[] }).steps[0]?.status).toBe("executed")
+          const click = { action: "click", target: { role: "button", name: "Save" } }
+          for (const actions of [
+            [click, { action: "press", key: "NotAKey" }],
+            [click, { action: "open", url: url.href }],
+            Array(5).fill(click),
+            [],
+            [click, { action: "batch", actions: [click] }],
+            [click, { action: "type", target: { selector: "[" }, text: "bad" }],
+          ]) {
+            expect((yield* call({ action: "batch", actions })).result.type).toBe("error")
+            expect(batchHits).toBe(2)
+          }
+          denied = true
+          const blocked = yield* call({ action: "batch", actions: [click, click] })
+          expect(JSON.stringify(blocked)).toContain("not_executed")
+          expect(batchHits).toBe(2)
+          denied = false
+          const failed = yield* call({
+            action: "batch",
+            actions: [click, { action: "click", target: { role: "button", name: "Missing" } }, click],
+          })
+          expect(failed.result.type).toBe("error")
+          expect(batchHits).toBe(3)
+          expect(
+            (progress.at(-1) as { structured: { steps: { status: string }[] } }).structured.steps.map((x) => x.status),
+          ).toEqual(["executed", "not_executed", "not_executed"])
+          const previousKeys = batchKeys
+          const cancel = yield* call({
+            action: "batch",
+            actions: [click, { action: "press", key: "ArrowRight", holdMs: 1500 }, click],
+          }).pipe(Effect.forkChild)
+          for (let i = 0; batchKeys === previousKeys && i < 100; i++) yield* Effect.sleep("20 millis")
+          assert.ok(batchKeys > previousKeys, "wait for the held key to actually begin")
+          yield* Fiber.interrupt(cancel)
+          yield* Effect.sleep("100 millis")
+          expect(batchHits).toBe(4)
+          expect(
+            (progress.at(-1) as { structured: { steps: { status: string }[] } }).structured.steps.map((x) => x.status),
+          ).toEqual(["executed", "outcome_unknown", "not_executed"])
           expect(JSON.stringify(yield* call({ action: "open", url: "file:///etc/passwd" }))).toContain("Not executed")
           denied = true
           expect(JSON.stringify(yield* call({ action: "open", url: url.href }))).toContain("permission denied")
@@ -334,9 +435,20 @@ test(
           assert.ok((flood.outputPaths?.length ?? 0) > 0)
           assert.ok(Buffer.byteLength(JSON.stringify(flood.output?.content)) < 52000)
           expect(
-            JSON.stringify(yield* call({ action: "click", target: { role: "button", name: "Timeout" } })),
+            JSON.stringify(
+              yield* call({
+                action: "batch",
+                actions: [
+                  { action: "click", target: { role: "button", name: "Timeout" } },
+                  { action: "click", target: { role: "button", name: "Timeout" } },
+                ],
+              }),
+            ),
           ).toContain("Outcome may have occurred")
           expect(effectHits).toBe(1)
+          expect(
+            (progress.at(-1) as { structured: { steps: { status: string }[] } }).structured.steps.map((x) => x.status),
+          ).toEqual(["outcome_unknown", "not_executed"])
           yield* call({ action: "close" })
           yield* call({ action: "open", url: url.href })
           const pressing = yield* call({ action: "press", key: "ArrowRight", holdMs: 3000 }).pipe(Effect.forkChild)
@@ -349,6 +461,7 @@ test(
             yield* Effect.sleep("200 millis")
             expect(JSON.stringify(yield* call({ action: "snapshot" }))).toContain("Browser fixture")
           }
+          expect(batchHits).toBe(4)
         }).pipe(Effect.provide(layer), Effect.provideService(BrowserTool.IdleTimeout, 500)),
       )
     } finally {

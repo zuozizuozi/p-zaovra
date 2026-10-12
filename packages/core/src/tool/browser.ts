@@ -1,6 +1,8 @@
 export * as BrowserTool from "./browser"
 
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import { EventV2 } from "../event"
+import { SessionEvent } from "../session/event"
 import type { Browser, Page, Locator } from "playwright-core"
 import { makeLocationNode } from "../effect/app-node"
 import { KeyedMutex } from "../effect/keyed-mutex"
@@ -105,14 +107,8 @@ const Target = Schema.Union([
   Schema.Struct({ label: Schema.String }),
   Schema.Struct({ selector: Schema.String }),
 ])
-const Input = Schema.Union([
-  Schema.Struct({
-    action: Schema.Literal("open"),
-    url: Schema.String,
-    allowOrigins: Schema.optional(Schema.Array(Schema.String)),
-  }),
+const Actions = [
   Schema.Struct({ action: Schema.Literal("click"), target: Target }),
-  Schema.Struct({ action: Schema.Literal("click_position"), x: Schema.Number, y: Schema.Number }),
   Schema.Struct({ action: Schema.Literal("type"), target: Target, text: Schema.String }),
   Schema.Struct({
     action: Schema.Literal("press"),
@@ -124,10 +120,31 @@ const Input = Schema.Union([
     x: Schema.Number.check(Schema.isBetween({ minimum: -2000, maximum: 2000 })),
     y: Schema.Number.check(Schema.isBetween({ minimum: -2000, maximum: 2000 })),
   }),
+] as const
+const Action = Schema.Union(Actions)
+const Input = Schema.Union([
+  Schema.Struct({
+    action: Schema.Literal("open"),
+    url: Schema.String,
+    allowOrigins: Schema.optional(Schema.Array(Schema.String)),
+  }),
+  ...Actions,
+  Schema.Struct({ action: Schema.Literal("click_position"), x: Schema.Number, y: Schema.Number }),
   Schema.Struct({ action: Schema.Literals(["snapshot", "screenshot", "console", "close"]) }),
+  Schema.Struct({
+    action: Schema.Literal("batch"),
+    actions: Schema.Array(Action).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
+    observation: Schema.optional(Schema.Literals(["snapshot", "screenshot"])),
+  }),
 ])
+const Step = Schema.Struct({
+  index: Schema.Int,
+  action: Schema.String,
+  status: Schema.Literals(["executed", "not_executed", "outcome_unknown"]),
+})
 const Output = Schema.Struct({
   text: Schema.String,
+  steps: Schema.optional(Schema.Array(Step)),
   screenshot: Schema.optional(
     Schema.Struct({
       data: Schema.String,
@@ -212,6 +229,7 @@ const layer = Layer.effect(
     const catalog = yield* Catalog.Service
     const sessions = yield* SessionStore.Service
     const outputs = yield* ToolOutputStore.Service
+    const events = yield* EventV2.Service
     const idle = yield* IdleTimeout
     const owned = new Map<SessionSchema.ID, Owned>()
     const locks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
@@ -230,21 +248,19 @@ const layer = Layer.effect(
       .register({
         browser: Tool.make({
           description:
-            "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript.",
+            "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Use batch for up to 4 already-known click/type/press/scroll actions with one final snapshot (default) or screenshot. Batch stops at the first error; inspect step statuses before continuing, never replay completed actions. Use single steps when the next target depends on a new observation. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript.",
           input: Input,
           output: Output,
           structured: Schema.Struct({
             text: Schema.String,
+            steps: Schema.optional(Schema.Array(Step)),
             screenshot: Schema.optional(
-              Schema.Struct({
-                mime: Schema.Literal("image/png"),
-                name: Schema.String,
-                modelVisible: Schema.Boolean,
-              }),
+              Schema.Struct({ mime: Schema.Literal("image/png"), name: Schema.String, modelVisible: Schema.Boolean }),
             ),
           }),
           toStructuredOutput: ({ output }) => ({
             text: output.text,
+            ...(output.steps ? { steps: output.steps } : {}),
             ...(output.screenshot
               ? {
                   screenshot: {
@@ -268,17 +284,26 @@ const layer = Layer.effect(
                 ]
               : []),
           ],
-          execute: (input, context) =>
-            locks.withLock(context.sessionID)(
+          execute: (input, context) => {
+            const steps: { index: number; action: string; status: typeof Step.Type.status }[] =
+              input.action === "batch"
+                ? input.actions.map((action, index) => ({
+                    index: index + 1,
+                    action: action.action,
+                    status: "not_executed",
+                  }))
+                : []
+            const summary = () => `Batch steps: ${JSON.stringify(steps)}`
+            return locks.withLock(context.sessionID)(
               Effect.gen(function* () {
-                const key =
-                  input.action === "press"
-                    ? yield* Effect.try({
-                        try: () => normalizeKey(input.key, input.holdMs),
-                        catch: (error) =>
-                          new Tool.Failure({ message: `Not executed: ${String(error)}`, metadata: { phase: "input" } }),
-                      })
-                    : undefined
+                const keys = yield* Effect.try({
+                  try: () =>
+                    (input.action === "batch" ? input.actions : [input]).map((action) =>
+                      action.action === "press" ? normalizeKey(action.key, action.holdMs) : undefined,
+                    ),
+                  catch: (error) =>
+                    new Tool.Failure({ message: `Not executed: ${String(error)}`, metadata: { phase: "input" } }),
+                })
                 if (input.action === "close") {
                   yield* Effect.promise(() => close(context.sessionID))
                   return { text: "Browser closed. Preview server was not stopped." }
@@ -451,6 +476,12 @@ const layer = Layer.effect(
                       }
                       if (signal.aborted) throw new Error("Cancelled")
                       const page = current.page
+                      // Validate selector syntax for the entire batch, but resolve
+                      // uniqueness at each step because earlier actions can change the DOM.
+                      if (input.action === "batch")
+                        for (const action of input.actions)
+                          if ((action.action === "click" || action.action === "type") && "selector" in action.target)
+                            await page.locator(action.target.selector).count()
                       const locate = async (target: typeof Target.Type): Promise<Locator> => {
                         const locator =
                           "role" in target
@@ -470,12 +501,54 @@ const layer = Layer.effect(
                         started = true
                         await page.goto(input.url, { waitUntil: "domcontentloaded" })
                       }
-                      if (input.action === "click" || input.action === "type") {
-                        const locator = await locate(input.target)
-                        started = true
-                        if (input.action === "click") await locator.click()
-                        if (input.action === "type") await locator.fill(input.text)
+                      const perform = async (
+                        action: typeof Action.Type,
+                        key?: string,
+                        step?: (typeof steps)[number],
+                      ) => {
+                        if (signal.aborted) throw new Error("Cancelled")
+                        if (action.action === "click" || action.action === "type") {
+                          const locator = await locate(action.target)
+                          if (signal.aborted) throw new Error("Cancelled")
+                          if (step) step.status = "outcome_unknown"
+                          started = true
+                          if (action.action === "click") await locator.click()
+                          if (action.action === "type") await locator.fill(action.text)
+                        }
+                        if (action.action === "press") {
+                          if (step) step.status = "outcome_unknown"
+                          started = true
+                          if (action.holdMs) {
+                            await page.keyboard.down(key!)
+                            try {
+                              await new Promise((resolve) => setTimeout(resolve, action.holdMs))
+                            } finally {
+                              await page.keyboard.up(key!).catch(() => {})
+                            }
+                          } else await page.keyboard.press(key!)
+                        }
+                        if (action.action === "scroll") {
+                          if (step) step.status = "outcome_unknown"
+                          started = true
+                          await page.mouse.wheel(action.x, action.y)
+                        }
+                        if (signal.aborted) throw new Error("Cancelled")
                       }
+                      if (input.action === "batch") {
+                        for (const [index, action] of input.actions.entries()) {
+                          if (signal.aborted) throw new Error("Cancelled")
+                          started = false
+                          await perform(action, keys[index], steps[index])
+                          steps[index]!.status = "executed"
+                        }
+                      }
+                      if (
+                        input.action === "click" ||
+                        input.action === "type" ||
+                        input.action === "press" ||
+                        input.action === "scroll"
+                      )
+                        await perform(input, keys[0])
                       if (input.action === "click_position") {
                         if (
                           !Number.isFinite(input.x) ||
@@ -489,28 +562,15 @@ const layer = Layer.effect(
                         started = true
                         await page.mouse.click(input.x, input.y)
                       }
-                      if (input.action === "press") {
-                        started = true
-                        if (input.holdMs) {
-                          await page.keyboard.down(key!)
-                          try {
-                            await new Promise((resolve) => setTimeout(resolve, input.holdMs))
-                          } finally {
-                            await page.keyboard.up(key!).catch(() => {})
-                          }
-                        } else await page.keyboard.press(key!)
-                      }
-                      if (input.action === "scroll") {
-                        started = true
-                        await page.mouse.wheel(input.x, input.y)
-                      }
+                      if (signal.aborted) throw new Error("Cancelled")
                       const snapshot =
                         input.action === "console"
                           ? ""
                           : (await page.locator("body").ariaSnapshot({ timeout: 8000 })).slice(0, 24000)
                       const logs = current.logs.splice(0)
                       const screenshot =
-                        input.action === "screenshot"
+                        input.action === "screenshot" ||
+                        (input.action === "batch" && input.observation === "screenshot")
                           ? await page.screenshot({ type: "png", fullPage: false, timeout: 8000 })
                           : undefined
                       return {
@@ -534,7 +594,11 @@ const layer = Layer.effect(
                       message: `${started ? "Outcome may have occurred; observe before retrying" : "Not executed"}: ${String(error)}`,
                     }),
                 })
-                if (!result.screenshot) return { text: result.text }
+                if (!result.screenshot)
+                  return {
+                    text: steps.length ? `${summary()}\n${result.text}` : result.text,
+                    ...(steps.length ? { steps } : {}),
+                  }
                 const name = yield* outputs
                   .image(context.sessionID, result.screenshot)
                   .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
@@ -548,7 +612,8 @@ const layer = Layer.effect(
                     : undefined
                 const modelVisible = (context.inputModalities ?? model?.capabilities.input)?.includes("image") === true
                 return {
-                  text: `${result.text}\n${modelVisible ? "Screenshot attached to model input." : "Screenshot saved for the user; model has not viewed the image."}`,
+                  ...(steps.length ? { steps } : {}),
+                  text: `${steps.length ? summary() + "\n" : ""}${result.text}\n${modelVisible ? "Screenshot attached to model input." : "Screenshot saved for the user; model has not viewed the image."}`,
                   screenshot: {
                     data: result.screenshot.toString("base64"),
                     mime: "image/png" as const,
@@ -556,8 +621,35 @@ const layer = Layer.effect(
                     modelVisible,
                   },
                 }
-              }),
-            ),
+              }).pipe(
+                Effect.mapError((error) =>
+                  steps.length
+                    ? new Tool.Failure({
+                        message: `${error.message}\n${summary()}. Do not replay executed steps.`,
+                        metadata: error.metadata,
+                      })
+                    : error,
+                ),
+                // Retain the partial-action ledger when Stop prevents an ordinary result.
+                Effect.ensuring(
+                  Effect.suspend(() =>
+                    steps.length
+                      ? events
+                          .publish(SessionEvent.Tool.Progress, {
+                            sessionID: context.sessionID,
+                            assistantMessageID: context.assistantMessageID,
+                            callID: context.toolCallID,
+                            timestamp: DateTime.nowUnsafe(),
+                            structured: { steps: steps.map((step) => ({ ...step })) },
+                            content: [{ type: "text", text: summary() }],
+                          })
+                          .pipe(Effect.asVoid)
+                      : Effect.void,
+                  ),
+                ),
+              ),
+            )
+          },
         }),
       })
       .pipe(Effect.orDie)
@@ -568,5 +660,5 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [ToolRegistry.node, PermissionV2.node, Catalog.node, SessionStore.node, ToolOutputStore.node],
+  deps: [ToolRegistry.node, PermissionV2.node, Catalog.node, SessionStore.node, ToolOutputStore.node, EventV2.node],
 })

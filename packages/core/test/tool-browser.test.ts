@@ -11,6 +11,7 @@ import { PermissionV2 } from "../src/permission"
 import { Catalog } from "../src/catalog"
 import { SessionStore } from "../src/session/store"
 import { ToolOutputStore } from "../src/tool-output-store"
+import { EventV2 } from "../src/event"
 
 test("keyboard aliases normalize and malformed shortcuts reject before dispatch", () => {
   expect(BrowserTool.normalizeKey("CTRL+a")).toBe("Control+a")
@@ -40,6 +41,7 @@ test.skipIf(process.platform !== "win32")("does not register browser in Windows 
           [Catalog.node, Layer.empty],
           [SessionStore.node, Layer.empty],
           [ToolOutputStore.node, Layer.empty],
+          [EventV2.node, Layer.empty],
         ]),
       ),
     ),
