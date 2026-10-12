@@ -60,7 +60,7 @@ export const DialogSettings: Component<{
                     </TabsV2.Trigger>
                     <TabsV2.Trigger value="about">
                       <Icon name="help" />
-                      关于 Zaovra
+                      {language.t("settings.about.title")}
                     </TabsV2.Trigger>
                   </div>
                 </div>

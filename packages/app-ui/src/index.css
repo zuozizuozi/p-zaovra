@@ -330,3 +330,23 @@
     }
   }
 }
+.app-toast-region {
+  & [data-component="toast-v2"],
+  & [data-component="toast"] {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+  & [data-slot="toast-inner"] {
+    min-width: 0;
+    flex: 1;
+  }
+  & [data-slot="toast-v2-title"],
+  & [data-slot="toast-title"],
+  & [data-slot="toast-v2-description"],
+  & [data-slot="toast-description"] {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}

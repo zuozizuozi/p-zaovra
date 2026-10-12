@@ -1,3 +1,4 @@
+import { useLanguage } from "@/context/language"
 import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist"
@@ -6,6 +7,7 @@ import worker from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 GlobalWorkerOptions.workerSrc = worker
 
 export default function ArtifactPDF(props: { load: () => Promise<ArrayBuffer> }) {
+  const language = useLanguage()
   const [state, setState] = createStore({ page: 1, zoom: 1, width: 600, error: "" })
   let host: HTMLDivElement | undefined
   let canvas: HTMLCanvasElement | undefined
@@ -26,7 +28,7 @@ export default function ArtifactPDF(props: { load: () => Promise<ArrayBuffer> })
       tasks.push(task)
       return await task.promise
     } catch {
-      setState("error", "无法读取 PDF，文件可能损坏或需要密码")
+      setState("error", language.t("artifact.pdf.readError"))
       return
     }
   })
@@ -66,7 +68,7 @@ export default function ArtifactPDF(props: { load: () => Promise<ArrayBuffer> })
         })
       })
       .catch(() => {
-        if (!cancelled) setState("error", "此页渲染失败，请尝试其他页或外部打开")
+        if (!cancelled) setState("error", language.t("artifact.pdf.renderError"))
       })
     onCleanup(() => {
       cancelled = true
@@ -78,9 +80,9 @@ export default function ArtifactPDF(props: { load: () => Promise<ArrayBuffer> })
     <div class="flex h-full min-h-0 flex-col">
       <div class="flex shrink-0 flex-wrap items-center justify-center gap-1 border-b border-border-weak-base">
         <button class={button} disabled={state.page <= 1} onClick={() => setState("page", state.page - 1)}>
-          上一页
+          {language.t("artifact.pdf.previous")}
         </button>
-        <span class="px-2 text-xs" aria-label="PDF 页码">
+        <span class="px-2 text-xs" aria-label={language.t("artifact.pdf.pageNumber")}>
           {state.page} / {pdf()?.numPages ?? "—"}
         </span>
         <button
@@ -88,38 +90,38 @@ export default function ArtifactPDF(props: { load: () => Promise<ArrayBuffer> })
           disabled={!pdf() || state.page >= pdf()!.numPages}
           onClick={() => setState("page", state.page + 1)}
         >
-          下一页
+          {language.t("artifact.pdf.next")}
         </button>
         <button
           class={button}
           disabled={state.zoom <= 0.5}
           onClick={() => setState("zoom", Math.max(0.5, state.zoom - 0.25))}
         >
-          缩小
+          {language.t("artifact.pdf.zoomOut")}
         </button>
         <button class={button} onClick={() => setState("zoom", 1)}>
-          适合宽度
+          {language.t("artifact.pdf.fit")}
         </button>
         <button
           class={button}
           disabled={state.zoom >= 2}
           onClick={() => setState("zoom", Math.min(2, state.zoom + 0.25))}
         >
-          放大
+          {language.t("artifact.pdf.zoomIn")}
         </button>
       </div>
       <Show when={pdf.loading}>
         <p role="status" class="p-3 text-xs text-text-weak">
-          正在读取 PDF…
+          {language.t("artifact.pdf.loading")}
         </p>
       </Show>
       <Show when={state.error || pdf.error}>
         <p role="alert" class="p-3 text-xs text-text-weak">
-          {state.error || "无法读取 PDF，请检查文件路径"}
+          {state.error || language.t("artifact.pdf.pathError")}
         </p>
       </Show>
       <div ref={host} class="min-h-0 flex-1 overflow-auto p-4">
-        <canvas ref={canvas} class="block bg-white" aria-label="PDF 页面" />
+        <canvas ref={canvas} class="block bg-white" aria-label={language.t("artifact.pdf.page")} />
       </div>
     </div>
   )

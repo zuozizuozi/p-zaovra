@@ -82,7 +82,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
   )
   const [state, setState] = persisted(
     Persist.window(`artifacts:${sessionKey()}`),
-    createStore({ input: "", targets: [] as string[], active: "", split: 30 }),
+    createStore({ input: "", targets: [] as string[], active: "", split: undefined as number | undefined }),
   )
   const open = () => {
     const target = state.input.trim()
@@ -138,8 +138,8 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
         </button>
       </form>
       <div
-        class="flex min-h-24 shrink-0 flex-col overflow-hidden border-b border-border-weak-base p-3"
-        style={{ height: `${state.split ?? 30}%`, "max-height": "60%" }}
+        class="flex min-h-36 shrink-0 flex-col overflow-hidden border-b border-border-weak-base p-3"
+        style={{ height: `${state.split ?? 20}%`, "max-height": "60%" }}
       >
         <div class="flex items-center justify-between text-xs">
           <strong>{language.t("artifact.files")}</strong>
@@ -211,7 +211,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
         aria-label={language.t("artifact.resize")}
         aria-valuemin={15}
         aria-valuemax={60}
-        aria-valuenow={state.split ?? 30}
+        aria-valuenow={state.split ?? 20}
         class="h-2 shrink-0 cursor-row-resize bg-background-stronger touch-none focus-visible:outline-2 focus-visible:outline-border-active"
         onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
         onPointerMove={(event) => {
@@ -222,7 +222,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
         onKeyDown={(event) => {
           if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
           event.preventDefault()
-          setState("split", Math.max(15, Math.min(60, (state.split ?? 30) + (event.key === "ArrowUp" ? -5 : 5))))
+          setState("split", Math.max(15, Math.min(60, (state.split ?? 20) + (event.key === "ArrowUp" ? -5 : 5))))
         }}
       />
       <Show when={state.targets.length > 0}>

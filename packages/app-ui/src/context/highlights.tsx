@@ -1,3 +1,4 @@
+import { useLanguage } from "@/context/language"
 import { createEffect, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
@@ -7,15 +8,13 @@ import { useSettings } from "@/context/settings"
 import { persisted } from "@/utils/persist"
 import { DialogReleaseNotes, type Highlight } from "@/components/dialog-release-notes"
 
-const BUNDLED_RELEASES = [
+const bundledReleases = (description: string) => [
   {
     tag: "0.1.0",
     highlights: [
       {
         source: "desktop",
-        items: [
-          { title: "Zaovra 0.1.0", description: "使用自己的模型服务开展编码任务，查看执行状态、验证信息与交付成果。" },
-        ],
+        items: [{ title: "Zaovra 0.1.0", description: description }],
       },
     ],
   },
@@ -156,6 +155,7 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
     const platform = usePlatform()
     const dialog = useDialog()
     const settings = useSettings()
+    const language = useLanguage()
     const [store, setStore, _, ready] = persisted("highlights.v1", createStore<Store>({ version: undefined }))
 
     const [range, setRange] = createStore({
@@ -183,7 +183,11 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
       }
 
       onCleanup(clearTimer)
-      const highlights = loadReleaseHighlights(BUNDLED_RELEASES, platform.version, previous)
+      const highlights = loadReleaseHighlights(
+        bundledReleases(language.t("app.releaseSummary")),
+        platform.version,
+        previous,
+      )
       if (highlights.length === 0) {
         markSeen()
         return

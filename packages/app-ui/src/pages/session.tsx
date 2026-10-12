@@ -389,7 +389,11 @@ export default function Page() {
   const openResultFile = (input: string, encoded = false) => {
     const target = artifactPath(input, sdk().directory, encoded)
     if (!target) {
-      showToast({ variant: "error", title: "无法打开文件", description: "请选择当前项目内的有效文件路径。" })
+      showToast({
+        variant: "error",
+        title: language.t("artifact.openError"),
+        description: language.t("artifact.pathError"),
+      })
       return
     }
     if (artifactPreviewable(target.path)) {

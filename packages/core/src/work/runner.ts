@@ -1309,6 +1309,9 @@ export const layer = Layer.effect(
         location: task.location ?? goal.location,
         agent: AgentV2.ID.make("review"),
       })
+      yield* sessions
+        .update({ sessionID, title: `${task.title} · Review · #${task.attemptCount + 1}` })
+        .pipe(Effect.orDie)
       const timestamp = yield* DateTime.now
       yield* events.publish(Work.Event.AttemptAdmitted, {
         goalID: goal.id,
@@ -1589,6 +1592,9 @@ export const layer = Layer.effect(
       const attemptID = Work.AttemptID.create()
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
       yield* sessions.create({ id: sessionID, location: goal.location, agent: AgentV2.ID.make("work-planner") })
+      yield* sessions
+        .update({ sessionID, title: `${task.title} · Planner · #${task.attemptCount + 1}` })
+        .pipe(Effect.orDie)
       const timestamp = yield* DateTime.now
       yield* events.publish(Work.Event.AttemptAdmitted, {
         goalID: goal.id,
@@ -1829,6 +1835,9 @@ export const layer = Layer.effect(
       const attemptID = Work.AttemptID.create()
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
       yield* sessions.create({ id: sessionID, location: goal.location, agent: AgentV2.ID.make("work-architect") })
+      yield* sessions
+        .update({ sessionID, title: `${task.title} · Architect · #${task.attemptCount + 1}` })
+        .pipe(Effect.orDie)
       const timestamp = yield* DateTime.now
       yield* events.publish(Work.Event.AttemptAdmitted, {
         goalID: goal.id,
@@ -1928,6 +1937,12 @@ export const layer = Layer.effect(
         location: task.location ?? goal.location,
         agent: agentID,
       })
+      yield* sessions
+        .update({
+          sessionID,
+          title: `${task.title} · ${(goal.roleContracts ?? WorkRole.contracts).find((role) => role.id === task.role)?.title ?? task.role} · #${task.attemptCount + 1}`,
+        })
+        .pipe(Effect.orDie)
       const timestamp = yield* DateTime.now
       yield* events.publish(Work.Event.AttemptAdmitted, {
         goalID: goal.id,

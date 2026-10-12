@@ -693,7 +693,7 @@ export function NewHome() {
             <p>{language.t("home.welcome.description")}</p>
             <Show when={!providers.loading() && providers.connected().length === 0}>
               <ButtonV2 variant="neutral" onClick={openModelSettings}>
-                添加模型服务
+                {language.t("home.addProvider")}
               </ButtonV2>
             </Show>
             <form

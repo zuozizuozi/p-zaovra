@@ -386,6 +386,16 @@ describe("WorkRunner", () => {
       })
       expect(tasks.find((task) => task.role === "build")).toMatchObject({ status: "completed" })
       expect(yield* store.attempts(created.tasks[0].id)).toMatchObject([{ kind: "plan", status: "succeeded" }])
+      const sessions = yield* SessionV2.Service
+      const listed = yield* sessions.list()
+      for (const task of tasks) {
+        const attempts = yield* store.attempts(task.id)
+        for (const attempt of attempts) {
+          const session = listed.find((session) => session.id === attempt.sessionID)
+          expect(session?.title.startsWith(`${task.title} · `)).toBe(true)
+          expect(session?.title.endsWith(` · #${attempt.number}`)).toBe(true)
+        }
+      }
     }),
   )
 
