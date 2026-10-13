@@ -117,14 +117,47 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   /* A navigation surface, not a second welcome screen. */
+  [data-component="desktop-rail"] {
+    width: 52px;
+    flex: 0 0 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 6px;
+    background: var(--zaovra-canvas);
+    border-right: 1px solid var(--zaovra-line);
+    > button {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--zaovra-radius-control);
+      color: var(--zaovra-secondary);
+      transition:
+        background-color 160ms,
+        color 160ms;
+      &:hover {
+        background: var(--zaovra-hover);
+        color: var(--zaovra-ink);
+      }
+      &:focus-visible {
+        outline: 2px solid var(--zaovra-focus);
+        outline-offset: -2px;
+      }
+    }
+  }
+
   [data-component="desktop-sidebar-v2"] {
-    width: 276px;
+    width: 264px;
     background: var(--zaovra-rail);
     border-color: var(--zaovra-line);
   }
 
   [data-component="desktop-sidebar-v2"] > div:first-child {
-    height: 36px;
+    height: 50px;
     padding-inline: 10px;
     border-bottom: 1px solid var(--zaovra-line);
   }
@@ -186,11 +219,6 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"]:focus-within [data-slot="tab-close"] button {
     opacity: 1;
-  }
-
-  [data-component="desktop-sidebar-v2"] > div:last-child {
-    padding: 10px 12px;
-    gap: 2px;
   }
 
   [data-slot="titlebar-v2"] {

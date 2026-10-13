@@ -7,12 +7,9 @@ import { useCommand } from "@/context/command"
 import { useGlobal, type ServerCtx } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { type LocalProject, useLayout } from "@/context/layout"
-import { usePlatform } from "@/context/platform"
 import { ServerConnection } from "@/context/server"
 import { tabHref, tabKey, type SessionTab, type Tab, useTabs } from "@/context/tabs"
 import { DraftTabItem, TabNavItem } from "@/components/titlebar-tab-nav"
-import { WindowsAppMenu } from "@/components/windows-app-menu"
-import { useSettingsDialog } from "@/components/settings-dialog"
 import { displayName } from "@/pages/layout/helpers"
 import { ProjectGlyph } from "@/components/project-glyph"
 import { BrandMark } from "@/components/brand-mark"
@@ -81,9 +78,7 @@ export function DesktopSidebar() {
   const global = useGlobal()
   const language = useLanguage()
   const layout = useLayout()
-  const platform = usePlatform()
   const tabs = useTabs()
-  const openSettings = useSettingsDialog()
   const dialog = useDialog()
   const [view, setView] = createStore({ expanded: "" })
   const groupKey = (group: ProjectGroup) => `${group.server}:${group.project.worktree}`
@@ -147,14 +142,6 @@ export function DesktopSidebar() {
       aria-label={language.t("sidebar.nav.projectsAndSessions")}
     >
       <div class="flex h-10 shrink-0 items-center gap-1 px-2" data-tauri-drag-region>
-        <Show when={["beta", "dev"].includes(import.meta.env.VITE_ZAOVRA_CHANNEL)}>
-          <div class="rounded bg-v2-icon-icon-interactive px-2 py-1 font-mono text-[11px] font-semibold uppercase text-white">
-            {import.meta.env.VITE_ZAOVRA_CHANNEL.toUpperCase()}
-          </div>
-        </Show>
-        <Show when={platform.os === "windows" || platform.os === "linux"}>
-          <WindowsAppMenu command={command} platform={platform} variant="v2" />
-        </Show>
         <div class="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm font-semibold text-v2-text-text-base">
           <BrandMark class="size-6 shrink-0" />
           <span>Zaovra</span>
@@ -288,25 +275,6 @@ export function DesktopSidebar() {
             )}
           </For>
         </nav>
-      </div>
-
-      <div class="flex shrink-0 flex-col gap-1 border-t border-v2-border-border-muted p-3">
-        <button
-          type="button"
-          class="flex h-8 items-center gap-2 rounded-md px-2 text-left text-[13px] text-v2-text-text-base hover:bg-v2-background-bg-layer-02"
-          onClick={openSettings}
-        >
-          <IconV2 name="settings-gear" size="small" />
-          {language.t("sidebar.settings")}
-        </button>
-        <button
-          type="button"
-          class="flex h-8 items-center gap-2 rounded-md px-2 text-left text-[13px] text-v2-text-text-base hover:bg-v2-background-bg-layer-02"
-          onClick={() => platform.openLink("https://zaovra.com/desktop-feedback")}
-        >
-          <IconV2 name="help" size="small" />
-          {language.t("sidebar.help")}
-        </button>
       </div>
     </aside>
   )

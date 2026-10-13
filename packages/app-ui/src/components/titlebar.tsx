@@ -50,7 +50,7 @@ const tauriApi = () => (window as unknown as { __TAURI__?: TauriApi }).__TAURI__
 const currentDesktopWindow = () => tauriApi()?.window?.getCurrentWindow?.()
 const currentThemeWindow = () => tauriApi()?.webviewWindow?.getCurrentWebviewWindow?.()
 const legacyTitlebarHeight = 40
-const v2TitlebarHeight = 36
+const v2TitlebarHeight = 38
 const minTitlebarZoom = 0.25
 const windowsControlsBaseWidth = 138 // 3 native Windows caption buttons at 46px each.
 
@@ -422,6 +422,13 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                   "md:pl-4": !mac(),
                 }}
               >
+                <Show when={props.minimal}>
+                  <ChannelIndicator />
+                  <Show when={windows() || linux()}>
+                    <WindowsAppMenu command={command} platform={platform} variant="v2" />
+                  </Show>
+                  <span class="text-xs text-v2-text-text-muted">Zaovra</span>
+                </Show>
                 <Show when={!props.minimal}>
                   <ChannelIndicator />
                   <Show when={windows() || linux()}>
