@@ -1,3 +1,4 @@
+import { TaskMascot } from "./task-mascot"
 import { Show } from "solid-js"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useLanguage } from "@/context/language"
@@ -12,11 +13,14 @@ export function ExecutionErrorCard(props: {
   const kind = () => executionErrorKind(props.detail)
   return (
     <section data-component="execution-error-card" role="alert">
-      <h3>{language.t("common.requestFailed")}</h3>
+      <div class="flex items-center gap-2">
+        <TaskMascot state="error" />
+        <h3>{kind() ? language.t(`error.title.${kind()!}`) : language.t("common.requestFailed")}</h3>
+      </div>
       <p>{kind() ? language.t(`error.execution.${kind()!}`) : language.t("error.execution.unknown")}</p>
       <div class="flex flex-wrap items-center gap-2">
         <Show when={props.onConfigure}>
-          <ButtonV2 variant="outline" onClick={() => props.onConfigure?.()}>
+          <ButtonV2 variant="contrast" onClick={() => props.onConfigure?.()}>
             {language.t("settings.providers.title")}
           </ButtonV2>
         </Show>

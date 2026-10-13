@@ -347,7 +347,7 @@ export default function WorkPage() {
                               </details>
                             </div>
                             <Status
-                              value={
+                              label={
                                 role.workspaceAccess === "write"
                                   ? language.t("work.ui.can.edit")
                                   : language.t("work.ui.read.only")
@@ -1229,15 +1229,20 @@ function Empty(props: { label: string; compact?: boolean }) {
   )
 }
 
-function Status(props: { value: string }) {
+function Status(props: { value: string; label?: never } | { label: string; value?: never }) {
   const language = useLanguage()
   const label = () => {
+    if (props.label !== undefined) return props.label
     const key = `work.status.${props.value}`
     const text = language.t(key as Parameters<typeof language.t>[0])
-    return text === key ? props.value : text
+    return !text || text === key ? props.value : text
   }
   return (
-    <span class="inline-flex shrink-0 items-center rounded-full border border-v2-border-border-muted bg-v2-background-bg-layer-03 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-v2-text-text-base">
+    <span
+      data-component="work-status"
+      data-value={props.value}
+      class="inline-flex shrink-0 items-center rounded-full border border-v2-border-border-muted bg-v2-background-bg-layer-03 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-v2-text-text-base"
+    >
       {label()}
     </span>
   )

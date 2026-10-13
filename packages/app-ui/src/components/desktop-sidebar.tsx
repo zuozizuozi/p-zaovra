@@ -102,6 +102,17 @@ export function DesktopSidebar() {
       const owner = groupForTab(tab)
       return owner?.server === group.server && owner.project.worktree === group.project.worktree
     })
+  const recent = createMemo(() =>
+    tabs.store
+      .filter((tab): tab is SessionTab => tab.type === "session")
+      .map((tab) => {
+        const connection = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
+        const ctx = connection ? global.ensureServerCtx(connection) : undefined
+        return { tab, ctx, updated: ctx?.sync.session.peek(tab.sessionId)?.time.updated ?? 0 }
+      })
+      .sort((a, b) => b.updated - a.updated)
+      .slice(0, 5),
+  )
   const currentTab = () => {
     const route = layout.route()
     if (route.type === "draft") {
@@ -146,6 +157,14 @@ export function DesktopSidebar() {
           <BrandMark class="size-6 shrink-0" />
           <span>Zaovra</span>
         </div>
+        <button
+          type="button"
+          class="flex size-8 items-center justify-center rounded-lg hover:bg-v2-background-bg-layer-02"
+          aria-label={language.t("command.palette")}
+          onClick={() => command.trigger("command.palette")}
+        >
+          <IconV2 name="magnifying-glass" size="small" />
+        </button>
       </div>
 
       <div class="shrink-0 px-3 pb-3 pt-2">
@@ -274,6 +293,24 @@ export function DesktopSidebar() {
               </section>
             )}
           </For>
+          <Show when={recent().length}>
+            <section data-slot="sidebar-recent" class="mt-3 flex flex-col gap-1">
+              <div class="px-2 py-2 text-xs text-v2-text-text-faint">
+                {language.t("sidebar.project.recentSessions")}
+              </div>
+              <For each={recent()}>
+                {(item) => (
+                  <DesktopSessionTab
+                    tab={item.tab}
+                    active={() => currentTab() === item.tab}
+                    serverCtx={() => item.ctx}
+                    onClose={() => tabs.closeTab(tabs.store.findIndex((tab) => tab === item.tab))}
+                    onNavigate={() => tabs.select(item.tab)}
+                  />
+                )}
+              </For>
+            </section>
+          </Show>
         </nav>
       </div>
     </aside>

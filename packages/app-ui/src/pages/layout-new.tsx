@@ -1,7 +1,7 @@
-import { createEffect, lazy, Show, Suspense, type ParentProps } from "solid-js"
+import { createEffect, lazy, on, Show, Suspense, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { UpdaterNotification } from "@/components/updater-notification"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
@@ -28,6 +28,7 @@ export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
   const desktop = () => platform.platform === "desktop"
   const navigate = useNavigate()
+  const location = useLocation()
   const command = useCommand()
   const global = useGlobal()
   const language = useLanguage()
@@ -45,6 +46,13 @@ export default function NewLayout(props: ParentProps) {
   })
   setNavigate(navigate)
   makeEventListener(window, "zaovra:settings-close", () => setSettingsPage("open", false))
+  createEffect(
+    on(
+      () => location.pathname,
+      () => setSettingsPage("open", false),
+      { defer: true },
+    ),
+  )
 
   createEffect(() => setV2Toast(true))
 

@@ -1,6 +1,8 @@
 import { For, Show, createMemo } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { createQuery, useMutation } from "@tanstack/solid-query"
+import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
+import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { Button } from "@zaovra-ai/ui/button"
 import { useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
@@ -97,209 +99,238 @@ export function SessionOutcomeDock() {
               {language.t("session.outcome.unknown")}
             </span>
           </Show>
-          <details data-component="verification-panel">
-            <summary class="font-medium cursor-pointer" data-component="verification-summary">
-              {language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`)} ·{" "}
-              <Show when={currentChecks().length} fallback={language.t("session.outcome.noChecks")}>
-                {language.t("session.outcome.latestCount", { count: passedChecks() })}
-              </Show>
-            </summary>
-            <Show when={!outcome()?.checks.length && outcome()?.recentChecks?.length}>
-              <details data-component="verification-recent" class="text-text-weak">
-                <summary>{language.t("session.outcome.recent")}</summary>
-                <For each={outcome()?.recentChecks}>
-                  {(item) => (
-                    <div class="min-w-0 break-words" data-source-message={item.userMessageID}>
-                      {language.t("session.outcome.recentSource", { turn: item.turn })}
-                      {" · "}
-                      {language.t(item.fresh ? "session.outcome.recentFresh" : "session.outcome.recentStale")}
-                      {" · "}
-                      {item.check.kind}
-                      {" · "}
-                      {item.check.command}
-                    </div>
-                  )}
-                </For>
-              </details>
-            </Show>
-            <Show when={outcome()?.checks.length || outcome()?.missing.length}>
-              <details data-component="verification-details">
-                <summary class="cursor-pointer text-text-weak">
-                  {failedChecks()
-                    ? language.t("session.outcome.earlierFailures", { count: failedChecks() })
-                    : language.t("session.outcome.inspectChecks")}
-                </summary>
-                <details data-component="verification-explanation" class="py-1">
-                  <summary>{language.t("session.outcome.explanation")}</summary>
-                  <Show when={failedChecks()}>
-                    <p>{language.t("session.outcome.unresolvedHint")}</p>
-                  </Show>
-                  <Show when={staleChecks()}>
-                    <p>{language.t("session.outcome.staleCount", { count: staleChecks() })}</p>
-                    <p>{language.t("session.outcome.staleHint")}</p>
-                  </Show>
-                  <Show when={incompleteChecks()}>
-                    <p>{language.t("session.outcome.incompleteCount", { count: incompleteChecks() })}</p>
-                  </Show>
-                  <For each={outcome()?.missing}>
-                    {(item) => <p>{item === "requirements" ? language.t("session.outcome.requirements") : item}</p>}
+          <Show when={outcome()?.state !== "failed" || outcome()?.checks.length || outcome()?.missing.length}>
+            <details data-component="verification-panel">
+              <summary
+                class="font-medium cursor-pointer"
+                data-component="verification-summary"
+                data-warning={failedChecks() || staleChecks() || incompleteChecks() ? "" : undefined}
+              >
+                {language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`)} ·{" "}
+                <Show when={currentChecks().length} fallback={language.t("session.outcome.noChecks")}>
+                  {language.t("session.outcome.latestCount", { count: passedChecks() })}
+                </Show>
+              </summary>
+              <Show when={!outcome()?.checks.length && outcome()?.recentChecks?.length}>
+                <details data-component="verification-recent" class="text-text-weak">
+                  <summary>{language.t("session.outcome.recent")}</summary>
+                  <For each={outcome()?.recentChecks}>
+                    {(item) => (
+                      <div class="min-w-0 break-words" data-source-message={item.userMessageID}>
+                        {language.t("session.outcome.recentSource", { turn: item.turn })}
+                        {" · "}
+                        {language.t(item.fresh ? "session.outcome.recentFresh" : "session.outcome.recentStale")}
+                        {" · "}
+                        {item.check.kind}
+                        {" · "}
+                        {item.check.command}
+                      </div>
+                    )}
                   </For>
                 </details>
-                <For
-                  each={[
-                    {
-                      history: false,
-                      unresolved: false,
-                      stale: false,
-                      checks: currentChecks().filter(
-                        (check) => (check.exit === 0 || !!check.execution) && !stale(check),
-                      ),
-                    },
-                    { history: false, unresolved: true, stale: false, checks: unresolvedChecks() },
-                    { history: false, unresolved: false, stale: true, checks: currentChecks().filter(stale) },
-                    { history: true, unresolved: false, stale: false, checks: historicalChecks() },
-                  ]}
-                >
-                  {(group) => (
-                    <Show when={group.checks.length}>
-                      <details
-                        open={!group.history && !group.stale}
-                        classList={{ "text-text-weak": group.history }}
-                        data-component={
-                          group.history
-                            ? "verification-history"
-                            : group.unresolved
-                              ? "verification-unresolved"
-                              : group.stale
-                                ? "verification-stale"
-                                : "verification-current"
-                        }
-                      >
-                        <summary>
-                          {language.t(
-                            group.history
-                              ? "session.outcome.history"
-                              : group.unresolved
-                                ? "session.outcome.unresolved"
-                                : group.stale
-                                  ? "session.outcome.staleGroup"
-                                  : "session.outcome.current",
-                          )}
-                          {" · "}
-                          {group.checks.length}
-                        </summary>
-                        <For each={group.checks}>
-                          {(check) => (
-                            <details
-                              class="group/check min-w-0 break-all"
-                              classList={{
-                                "text-icon-critical-base":
-                                  !group.history && (check.exit !== 0 || !!check.execution || stale(check)),
-                              }}
-                            >
-                              <summary
-                                class="flex min-w-0 items-baseline gap-2 cursor-pointer"
-                                title={language.t("session.outcome.expandCheck")}
-                              >
-                                <span aria-hidden="true" class="shrink-0 group-open/check:rotate-90">
-                                  ›
-                                </span>
-                                <span class="shrink-0">
-                                  {stale(check)
-                                    ? language.t("session.outcome.stale")
-                                    : language.t(`verification.${commandVerification(check)}`)}{" "}
-                                  · {check.kind}
-                                </span>
-                                <span class="min-w-0 flex-1 truncate">{check.command}</span>
-                                <span class="shrink-0">
-                                  {check.execution
-                                    ? language.t(`session.outcome.execution.${check.execution}`)
-                                    : `exit ${check.exit}`}
-                                </span>
-                              </summary>
-                              <pre class="whitespace-pre-wrap break-all font-inherit">{check.command}</pre>
-                              <Show when={check.cwd}>
-                                <div>
-                                  {language.t("session.outcome.directory")} {check.cwd}
-                                </div>
-                              </Show>
-                              <Show when={group.unresolved}>
-                                <Button
-                                  size="small"
-                                  variant="ghost"
-                                  disabled={prompt.dirty()}
-                                  title={language.t("session.outcome.prepareHint")}
-                                  onClick={() => {
-                                    const text = language.t("session.outcome.recheckPrompt", {
-                                      command: check.command,
-                                      directory: check.cwd ?? sdk().directory,
-                                      targets: check.targets?.map((target) => target.path).join(", ") ?? "",
-                                    })
-                                    prompt.set(
-                                      [{ type: "text", content: text, start: 0, end: text.length }],
-                                      text.length,
-                                    )
-                                  }}
-                                >
-                                  {language.t("session.outcome.prepareRecheck")}
-                                </Button>
-                              </Show>
-                              <Show when={check.execution}>
-                                <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
-                              </Show>
-                              <Show when={check.supersededBy}>
-                                <div>{language.t("session.outcome.superseded")}</div>
-                              </Show>
-                              <For each={check.requirements}>
-                                {(requirement) => (
-                                  <div>
-                                    {language.t("session.outcome.coverage")} {requirement}
-                                  </div>
-                                )}
-                              </For>
-                              <For each={check.targets}>
-                                {(target) => (
-                                  <div title={target.path}>
-                                    {artifactPath(target.path, sdk().directory)?.path ??
-                                      target.path.split(/[\\/]/).at(-1)}
-                                  </div>
-                                )}
-                              </For>
-                              <details>
-                                <summary>{language.t("session.outcome.details")}</summary>
-                                <div>{check.callID}</div>
-                                <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
-                                <For each={check.logs}>{(log) => <div>{log}</div>}</For>
-                              </details>
-                            </details>
-                          )}
-                        </For>
-                      </details>
+              </Show>
+              <Show when={outcome()?.checks.length || outcome()?.missing.length}>
+                <details data-component="verification-details">
+                  <summary class="cursor-pointer text-text-weak">
+                    {failedChecks()
+                      ? language.t("session.outcome.earlierFailures", { count: failedChecks() })
+                      : language.t("session.outcome.inspectChecks")}
+                  </summary>
+                  <details data-component="verification-explanation" class="py-1">
+                    <summary>{language.t("session.outcome.explanation")}</summary>
+                    <Show when={failedChecks()}>
+                      <p>{language.t("session.outcome.unresolvedHint")}</p>
                     </Show>
-                  )}
-                </For>
-              </details>
-            </Show>
-          </details>
+                    <Show when={staleChecks()}>
+                      <p>{language.t("session.outcome.staleCount", { count: staleChecks() })}</p>
+                      <p>{language.t("session.outcome.staleHint")}</p>
+                    </Show>
+                    <Show when={incompleteChecks()}>
+                      <p>{language.t("session.outcome.incompleteCount", { count: incompleteChecks() })}</p>
+                    </Show>
+                    <For each={outcome()?.missing}>
+                      {(item) => <p>{item === "requirements" ? language.t("session.outcome.requirements") : item}</p>}
+                    </For>
+                  </details>
+                  <For
+                    each={[
+                      {
+                        history: false,
+                        unresolved: false,
+                        stale: false,
+                        checks: currentChecks().filter(
+                          (check) => (check.exit === 0 || !!check.execution) && !stale(check),
+                        ),
+                      },
+                      { history: false, unresolved: true, stale: false, checks: unresolvedChecks() },
+                      { history: false, unresolved: false, stale: true, checks: currentChecks().filter(stale) },
+                      { history: true, unresolved: false, stale: false, checks: historicalChecks() },
+                    ]}
+                  >
+                    {(group) => (
+                      <Show when={group.checks.length}>
+                        <details
+                          open={!group.history && !group.stale}
+                          classList={{ "text-text-weak": group.history }}
+                          data-component={
+                            group.history
+                              ? "verification-history"
+                              : group.unresolved
+                                ? "verification-unresolved"
+                                : group.stale
+                                  ? "verification-stale"
+                                  : "verification-current"
+                          }
+                        >
+                          <summary>
+                            {language.t(
+                              group.history
+                                ? "session.outcome.history"
+                                : group.unresolved
+                                  ? "session.outcome.unresolved"
+                                  : group.stale
+                                    ? "session.outcome.staleGroup"
+                                    : "session.outcome.current",
+                            )}
+                            {" · "}
+                            {group.checks.length}
+                          </summary>
+                          <For each={group.checks}>
+                            {(check) => (
+                              <details
+                                class="group/check min-w-0 break-all"
+                                classList={{
+                                  "text-icon-critical-base":
+                                    !group.history && (check.exit !== 0 || !!check.execution || stale(check)),
+                                }}
+                              >
+                                <summary
+                                  class="flex min-w-0 items-baseline gap-2 cursor-pointer"
+                                  title={language.t("session.outcome.expandCheck")}
+                                >
+                                  <span aria-hidden="true" class="shrink-0 group-open/check:rotate-90">
+                                    ›
+                                  </span>
+                                  <span class="shrink-0">
+                                    {stale(check)
+                                      ? language.t("session.outcome.stale")
+                                      : language.t(`verification.${commandVerification(check)}`)}{" "}
+                                    · {check.kind}
+                                  </span>
+                                  <span class="min-w-0 flex-1 truncate">{check.command}</span>
+                                  <span class="shrink-0">
+                                    {check.execution
+                                      ? language.t(`session.outcome.execution.${check.execution}`)
+                                      : `exit ${check.exit}`}
+                                  </span>
+                                </summary>
+                                <pre class="whitespace-pre-wrap break-all font-inherit">{check.command}</pre>
+                                <Show when={check.cwd}>
+                                  <div>
+                                    {language.t("session.outcome.directory")} {check.cwd}
+                                  </div>
+                                </Show>
+                                <Show when={group.unresolved}>
+                                  <Button
+                                    size="small"
+                                    variant="ghost"
+                                    disabled={prompt.dirty()}
+                                    title={language.t("session.outcome.prepareHint")}
+                                    onClick={() => {
+                                      const text = language.t("session.outcome.recheckPrompt", {
+                                        command: check.command,
+                                        directory: check.cwd ?? sdk().directory,
+                                        targets: check.targets?.map((target) => target.path).join(", ") ?? "",
+                                      })
+                                      prompt.set(
+                                        [{ type: "text", content: text, start: 0, end: text.length }],
+                                        text.length,
+                                      )
+                                    }}
+                                  >
+                                    {language.t("session.outcome.prepareRecheck")}
+                                  </Button>
+                                </Show>
+                                <Show when={check.execution}>
+                                  <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
+                                </Show>
+                                <Show when={check.supersededBy}>
+                                  <div>{language.t("session.outcome.superseded")}</div>
+                                </Show>
+                                <For each={check.requirements}>
+                                  {(requirement) => (
+                                    <div>
+                                      {language.t("session.outcome.coverage")} {requirement}
+                                    </div>
+                                  )}
+                                </For>
+                                <For each={check.targets}>
+                                  {(target) => (
+                                    <div title={target.path}>
+                                      {artifactPath(target.path, sdk().directory)?.path ??
+                                        target.path.split(/[\\/]/).at(-1)}
+                                    </div>
+                                  )}
+                                </For>
+                                <details>
+                                  <summary>{language.t("session.outcome.details")}</summary>
+                                  <div>{check.callID}</div>
+                                  <For each={check.targets}>{(target) => <div>{target.path}</div>}</For>
+                                  <For each={check.logs}>{(log) => <div>{log}</div>}</For>
+                                </details>
+                              </details>
+                            )}
+                          </For>
+                        </details>
+                      </Show>
+                    )}
+                  </For>
+                </details>
+              </Show>
+            </details>
+          </Show>
           <Show when={!abandoned()}>
             <div class="flex flex-wrap gap-1">
               <Show
                 when={outcome()?.messageID && (outcome()?.state === "interrupted" || outcome()?.state === "failed")}
               >
-                <For each={["continue", "retry", "abandon"] as const}>
-                  {(action) => (
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      disabled={recover.isPending}
-                      onClick={() =>
-                        recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action })
-                      }
-                    >
-                      {language.t(`session.outcome.${action}`)}
-                    </Button>
-                  )}
-                </For>
+                <ButtonV2
+                  size="small"
+                  variant="outline"
+                  disabled={recover.isPending}
+                  onClick={() =>
+                    recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action: "retry" })
+                  }
+                >
+                  {language.t("session.outcome.retry")}
+                </ButtonV2>
+                <MenuV2>
+                  <MenuV2.Trigger
+                    as={ButtonV2}
+                    size="small"
+                    variant="ghost-muted"
+                    disabled={recover.isPending}
+                    aria-label={language.t("common.moreOptions")}
+                  >
+                    ···
+                  </MenuV2.Trigger>
+                  <MenuV2.Portal>
+                    <MenuV2.Content>
+                      <For each={["continue", "abandon"] as const}>
+                        {(action) => (
+                          <MenuV2.Item
+                            disabled={recover.isPending}
+                            onSelect={() =>
+                              recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action })
+                            }
+                          >
+                            {language.t(`session.outcome.${action}`)}
+                          </MenuV2.Item>
+                        )}
+                      </For>
+                    </MenuV2.Content>
+                  </MenuV2.Portal>
+                </MenuV2>
               </Show>
               <Button
                 size="small"

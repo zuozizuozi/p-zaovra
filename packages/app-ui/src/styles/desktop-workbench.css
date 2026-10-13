@@ -730,3 +730,11 @@ html[data-theme="oc-2"] body[data-new-layout] {
   opacity: 1;
   pointer-events: auto;
 }
+
+html[data-theme="oc-2"] body[data-new-layout] [data-component="verification-summary"][data-warning] {
+  color: var(--zaovra-warning);
+  background: var(--zaovra-warning-soft);
+}
+html[data-theme="oc-2"] body[data-new-layout] [data-session-title] > div:first-child {
+  height: 50px;
+}
