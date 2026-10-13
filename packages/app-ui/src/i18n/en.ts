@@ -322,6 +322,10 @@ export const dict = {
   "session.outcome.unknown":
     "Some operations have no recorded result. Inspect the logs and workspace before repeating them.",
   "session.outcome.checks": "Verification information",
+  "session.outcome.latestCount": "Latest checks: {{count}} passed",
+  "session.outcome.earlierFailures": "{{count}} earlier failure records remain unresolved",
+  "session.outcome.inspectChecks": "View check details",
+  "session.outcome.explanation": "About these checks",
   "session.outcome.noChecks": "No current checks",
   "session.outcome.staleCount": "{{count}} checks expired (dependencies changed)",
   "session.outcome.stale": "Expired",
