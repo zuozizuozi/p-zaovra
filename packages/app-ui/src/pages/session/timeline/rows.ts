@@ -122,7 +122,9 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
+    // Activity feedback remains visible while tools run, including when reasoning
+    // summaries are expanded. A transcript part is not a live execution status.
+    if (isActive && status === "busy" && !error) {
       const heading = assistantMessages
         .slice(-1)
         .flatMap((message) => getMessageParts(message.id))

@@ -52,8 +52,12 @@
 [data-component="task-mascot"][data-state="awaiting"] > img {
   animation: mascot-pulse 3s ease-in-out infinite;
 }
+[data-component="task-mascot"][data-state="working"] > img {
+  animation: mascot-work 1.6s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
 [data-component="task-mascot"][data-state="success"] > img {
-  animation: mascot-pulse 1.2s ease-in-out 1;
+  animation: mascot-complete 700ms ease-out 1;
 }
 [data-component="task-mascot"][data-state="error"] > img {
   animation: mascot-shake 0.7s ease-in-out 1;
@@ -61,6 +65,22 @@
 @keyframes mascot-pulse {
   50% {
     opacity: 0.55;
+  }
+}
+@keyframes mascot-work {
+  25% {
+    transform: rotate(-3deg) translateY(-1px);
+  }
+  75% {
+    transform: rotate(3deg) translateY(-1px);
+  }
+}
+@keyframes mascot-complete {
+  40% {
+    transform: translateY(-3px) scale(1.04);
+  }
+  100% {
+    transform: none;
   }
 }
 @keyframes mascot-dot {

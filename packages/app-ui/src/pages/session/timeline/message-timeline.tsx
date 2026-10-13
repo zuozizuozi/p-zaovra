@@ -33,6 +33,8 @@ import { DiffChanges } from "@zaovra-ai/ui/diff-changes"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { TaskMascot, type MascotState } from "@/components/task-mascot"
+import { TaskActivity } from "@/components/task-activity"
+import { runningTool } from "@/utils/running-tool"
 import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
@@ -48,7 +50,6 @@ import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@zaovr
 import { StickyAccordionHeader } from "@zaovra-ai/ui/sticky-accordion-header"
 import { TextField } from "@zaovra-ai/ui/text-field"
 import { TextReveal } from "@zaovra-ai/ui/text-reveal"
-import { TextShimmer } from "@zaovra-ai/ui/text-shimmer"
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -134,6 +135,7 @@ const markBoundaryGesture = (input: {
 
 function TimelineThinkingRow(props: {
   state: MascotState
+  activity?: ReturnType<typeof runningTool>
   reasoningHeading?: string
   showReasoningSummaries: boolean
   reviewing?: boolean
@@ -142,18 +144,14 @@ function TimelineThinkingRow(props: {
 
   return (
     <div data-slot="session-turn-thinking">
-      <span data-slot="brand-placeholder" data-placement="thinking" aria-hidden="true">
-        <TaskMascot state={props.state} size="large" />
-      </span>
-      <TextShimmer
-        text={language.t(
-          props.reviewing
-            ? "session.status.verifying"
-            : props.state === "working"
-              ? "session.activity.running"
-              : "ui.sessionTurn.status.thinking",
-        )}
+      <TaskActivity
+        state={props.state}
+        tool={props.state === "working" ? props.activity?.label : undefined}
+        started={props.state === "working" ? props.activity?.started : undefined}
       />
+      <Show when={props.reviewing}>
+        <span>{language.t("session.status.verifying")}</span>
+      </Show>
       <Show when={!props.showReasoningSummaries}>
         <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
       </Show>
@@ -375,13 +373,27 @@ export function MessageTimeline(props: {
         }
         if (!previous || previous[1] === "idle" || !mascot.user) return
         const latest = assistantMessagesByParent().get(mascot.user)?.at(-1)
-        setMascot("terminal", latest?.error ? "error" : latest?.time.completed ? "success" : "idle")
+        setMascot(
+          "terminal",
+          latest?.error?.name === "MessageAbortedError"
+            ? "idle"
+            : latest?.error
+              ? "error"
+              : latest?.time.completed
+                ? "success"
+                : "idle",
+        )
         mascotTimer = setTimeout(() => setMascot("terminal", "idle"), 1600)
       },
     ),
   )
   onCleanup(() => clearTimeout(mascotTimer))
-  const mascotState = (user: string, thinking = false): MascotState => {
+  const activeTool = createMemo(() =>
+    runningTool(
+      (assistantMessagesByParent().get(activeMessageID() ?? "") ?? []).flatMap((message) => getMsgParts(message.id)),
+    ),
+  )
+  const mascotState = (user: string): MascotState => {
     const id = sessionID()
     if (sessionStatus().type !== "idle" && activeMessageID() === user) {
       if (
@@ -390,10 +402,7 @@ export function MessageTimeline(props: {
           (serverSync().session.data.question[id]?.length ?? 0) > 0)
       )
         return "awaiting"
-      const hasOutput = (assistantMessagesByParent().get(user) ?? []).some((message) =>
-        getMsgParts(message.id).some((part) => part.type === "tool" || (part.type === "text" && !!part.text)),
-      )
-      return thinking && !hasOutput ? "thinking" : "working"
+      return activeTool() ? "working" : "thinking"
     }
     return mascot.session === id && mascot.user === user ? mascot.terminal : "idle"
   }
@@ -1272,6 +1281,11 @@ export function MessageTimeline(props: {
                   <div data-slot="assistant-heading">
                     <TaskMascot state={mascotState(assistantPartRow().userMessageID)} />
                     <span data-slot="assistant-brand">Zaovra</span>
+                    <Show when={["success", "error"].includes(mascotState(assistantPartRow().userMessageID))}>
+                      <span role="status">
+                        {language.t(`session.activity.${mascotState(assistantPartRow().userMessageID)}`)}
+                      </span>
+                    </Show>
                     <Show when={modelName()}>
                       <span data-slot="assistant-model">{modelName()}</span>
                     </Show>
@@ -1289,7 +1303,8 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <TimelineThinkingRow
-                state={mascotState(thinkingRow().userMessageID, true)}
+                state={mascotState(thinkingRow().userMessageID)}
+                activity={activeTool()}
                 reasoningHeading={thinkingRow().reasoningHeading}
                 reviewing={thinkingRow().reviewing}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}

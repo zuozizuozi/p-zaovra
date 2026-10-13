@@ -1,0 +1,27 @@
+[data-component="task-activity"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-weak);
+  font-size: 13px;
+  line-height: 20px;
+}
+[data-slot="activity-label"],
+[data-slot="activity-elapsed"] {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+[data-slot="activity-command"] {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+[data-slot="activity-elapsed"] {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-weaker);
+}
