@@ -207,16 +207,16 @@ export default function NewSessionPage() {
                       </Show>
                     </div>
                   </Show>
+                  <ProviderTip
+                    ready={() => serverSync().child(sdk().directory)[0].provider_ready}
+                    connected={() => providers.paid().length > 0}
+                    openProviders={openProviders}
+                  />
                   <PromptInputV2Composer controller={promptInputV2Controller} />
                 </div>
                 {/*</Show>*/}
               </div>
             </NewSessionDesignView>
-            <ProviderTip
-              ready={() => serverSync().child(sdk().directory)[0].provider_ready}
-              connected={() => providers.paid().length > 0}
-              openProviders={openProviders}
-            />
           </div>
         </div>
       </div>
@@ -250,12 +250,12 @@ function ProviderTip(props: { ready: () => boolean; connected: () => boolean; op
 
   return (
     <Show when={presence.present()}>
-      <div class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-10">
+      <div data-component="workbench-banner" class="flex justify-center">
         <div
           ref={setRef}
           data-component="provider-tip"
           data-visible={visible()}
-          class="group/provider-tip pointer-events-auto relative flex h-6 max-w-full items-center transition-[opacity,transform] duration-[250ms] ease-[cubic-bezier(0.215,0.61,0.355,1)] motion-reduce:transition-none"
+          class="group/provider-tip relative flex min-h-8 w-full items-center justify-between gap-3 transition-[opacity,transform] duration-[180ms] ease-out motion-reduce:transition-none"
           classList={{
             "data-[visible=false]:animate-out fade-out slide-out-to-bottom-4": true,
           }}
@@ -271,7 +271,7 @@ function ProviderTip(props: { ready: () => boolean; connected: () => boolean; op
             </span>
           </button>
           <TooltipV2
-            class="hover-reveal absolute left-full top-0 flex h-6 w-7 items-center justify-end delay-0 duration-0 group-hover/provider-tip:delay-[250ms] group-hover/provider-tip:duration-150 group-hover/provider-tip:opacity-100 focus-within:delay-0 focus-within:duration-0 focus-within:opacity-100"
+            class="flex h-8 w-8 shrink-0 items-center justify-center"
             placement="top"
             openDelay={1000}
             value={language.t("common.dismiss")}

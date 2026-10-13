@@ -17,7 +17,7 @@ export function NewSessionDesignView(props: { children: JSX.Element }) {
               role="img"
               aria-label="Zaovra"
             >
-              <IdleMascot class="size-14" />
+              <IdleMascot class="size-[72px]" />
             </div>
             <h1 class="text-20-medium text-v2-text-text-base">{language.t("session.new.title")}</h1>
           </header>
