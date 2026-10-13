@@ -14,10 +14,23 @@ import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
 import { Work } from "@zaovra-ai/schema/work"
 import { DateTime, Effect, ManagedRuntime } from "effect"
 
-test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake", "leased-continue", "wake-paused"])(
+test.each([
+  "idle",
+  "queued-pause",
+  "approval-race",
+  "queued-wake",
+  "leased-wake",
+  "leased-continue",
+  "wake-paused",
+  "cancel-approval",
+  "cancel-paused",
+])(
   "merge approval dispatch: %s",
   async (mode) => {
-    const pause = mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused"
+    const pause =
+      mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused" || mode === "cancel-paused"
+    const cancel = mode === "cancel-approval" || mode === "cancel-paused"
+    const abort = new AbortController()
     await using tmp = await tmpdir({ git: true })
     const isolated = path.join(tmp.path, "isolated")
     let calls = 0
@@ -59,6 +72,7 @@ test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake"
     await $`git worktree add --detach ${isolated}`.cwd(tmp.path).quiet()
     await Bun.write(path.join(isolated, "feature.txt"), "isolated change\n".repeat(6000))
     const app = Server.Default().app
+    await using http = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: app.fetch })
     const headers = { "content-type": "application/json", "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const id = `goal_merge_${Date.now()}`
     const request = async (url: string, body?: unknown) => {
@@ -102,7 +116,7 @@ test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake"
       EventV2.Service.use((events) =>
         events.listen((event) => {
           if (
-            mode !== "approval-race" ||
+            (mode !== "approval-race" && !cancel) ||
             event.type !== Work.Event.TaskMergeReviewed.type ||
             event.durable?.aggregateID !== id
           )
@@ -110,7 +124,8 @@ test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake"
           // publish awaits listeners after commit and before decide writes its signal.
           // Pause through the real API at that exact boundary, without mocking services.
           return Effect.promise(async () => {
-            await request(`/api/work/${id}/pause`, {})
+            if (pause) await request(`/api/work/${id}/pause`, {})
+            if (cancel) abort.abort()
           })
         }),
       ),
@@ -147,7 +162,34 @@ test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake"
     }
     if (mode === "queued-wake" || mode === "wake-paused")
       await runtime.runPromise(WorkController.Service.use((controller) => controller.signal(goalID, "wake")))
-    await request(`/api/work/${id}/merge/${task}`, { token: review.token, approved: true })
+    if (cancel) {
+      await fetch(`http://127.0.0.1:${http.port}/api/work/${id}/merge/${task}`, {
+        headers,
+        method: "POST",
+        body: JSON.stringify({ token: review.token, approved: true }),
+        signal: abort.signal,
+      }).then(
+        () => {
+          throw new Error("approval request was not cancelled")
+        },
+        (error) => {
+          expect(error.name).toBe("AbortError")
+        },
+      )
+      while (Date.now() < deadline) {
+        const dispatches = await runtime.runPromise(
+          WorkController.Service.use((controller) => controller.dispatches(goalID)),
+        )
+        if (dispatches.some((dispatch) => dispatch.signal === (pause ? "interrupt" : "continue"))) break
+        await sleep(25)
+      }
+      expect(
+        await runtime.runPromise(WorkController.Service.use((controller) => controller.dispatches(goalID))),
+      ).toMatchObject([{ signal: pause ? "interrupt" : "continue", status: "pending" }])
+      if (!pause) await runtime.runPromise(WorkController.Service.use((controller) => controller.setDraining(false)))
+    } else {
+      await request(`/api/work/${id}/merge/${task}`, { token: review.token, approved: true })
+    }
     if (leased || mode === "queued-wake") {
       const pending = await runtime.runPromise(
         WorkController.Service.use((controller) => controller.dispatches(goalID)),
@@ -168,7 +210,12 @@ test.each(["idle", "queued-pause", "approval-race", "queued-wake", "leased-wake"
       const queued = await runtime.runPromise(WorkController.Service.use((controller) => controller.dispatches(goalID)))
       expect(queued).toMatchObject([
         {
-          signal: mode === "approval-race" ? "interrupt" : mode === "wake-paused" ? "wake" : "continue",
+          signal:
+            mode === "approval-race" || mode === "cancel-paused"
+              ? "interrupt"
+              : mode === "wake-paused"
+                ? "wake"
+                : "continue",
           status: "pending",
         },
       ])
