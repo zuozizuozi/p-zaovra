@@ -100,6 +100,6 @@ for (const warning of ["not-run", "stale", "failed"]) {
     )
     if (warning === "stale") await group.locator(":scope > summary").click()
     await group.locator(":scope > details > summary").click()
-    await expect(page.getByText("product.js", { exact: true })).toBeVisible()
+    await expect(group.getByTitle("product.js", { exact: true })).toBeVisible()
   })
 }

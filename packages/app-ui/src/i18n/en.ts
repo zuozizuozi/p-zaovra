@@ -1,4 +1,5 @@
 export const dict = {
+  "session.new.projectTitle": "What would you like to do in {{project}}?",
   "prompt.permission.automatic": "Auto-approve",
   "prompt.permission.ask": "Ask first",
   "settings.search": "Search settings",

@@ -157,7 +157,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
         }}
       >
         <input
-          class="h-10 min-w-0 flex-1 rounded-md border border-border-weak-base bg-transparent px-3 text-sm outline-none focus:border-border-active"
+          class="h-10 min-w-0 flex-1 rounded-full border border-border-weak-base bg-transparent px-3 text-sm outline-none focus:border-border-active"
           aria-label={language.t("artifact.address")}
           placeholder={language.t("artifact.placeholder")}
           value={state.input}

@@ -171,7 +171,7 @@ export default function NewLayout(props: ParentProps) {
       <div class="flex min-h-0 min-w-0 flex-1">
         <Show when={desktop()}>
           <DesktopRail />
-          <Show when={!settingsPage.open}>
+          <Show when={!settingsPage.open && layout.sidebar.opened()}>
             <DesktopSidebar />
           </Show>
         </Show>

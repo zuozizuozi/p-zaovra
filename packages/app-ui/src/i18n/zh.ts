@@ -3,6 +3,7 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.new.projectTitle": "你想在 {{project}} 中做什么？",
   "prompt.permission.automatic": "自动批准",
   "prompt.permission.ask": "请求批准",
   "settings.search": "搜索设置",

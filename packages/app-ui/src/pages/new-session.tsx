@@ -1,3 +1,4 @@
+import { displayName } from "@/pages/layout/helpers"
 import { Show, createEffect, createMemo, createResource, createSignal, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
@@ -173,7 +174,13 @@ export default function NewSessionPage() {
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
         <div class="@container relative flex flex-col min-h-0 h-full flex-1">
           <div class="flex-1 min-h-0 overflow-hidden rounded-[10px]">
-            <NewSessionDesignView>
+            <NewSessionDesignView
+              heading={
+                projectController.selected()
+                  ? language.t("session.new.projectTitle", { project: displayName(projectController.selected()!) })
+                  : undefined
+              }
+            >
               <div data-slot="new-session-task" class={NEW_SESSION_CONTENT_WIDTH}>
                 <div class="flex flex-col" classList={{ "gap-8": showWorkspaceBar(), "gap-3": !showWorkspaceBar() }}>
                   <Show when={projectController.empty()}>

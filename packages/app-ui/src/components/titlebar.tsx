@@ -427,7 +427,14 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                   <Show when={windows() || linux()}>
                     <WindowsAppMenu command={command} platform={platform} variant="v2" />
                   </Show>
-                  <span class="text-xs text-v2-text-text-muted">Zaovra</span>
+                  <IconButtonV2
+                    variant="ghost-muted"
+                    size="small"
+                    icon="sidebar"
+                    aria-label={language.t("command.sidebar.toggle")}
+                    aria-expanded={layout.sidebar.opened()}
+                    onClick={layout.sidebar.toggle}
+                  />
                 </Show>
                 <Show when={!props.minimal}>
                   <ChannelIndicator />
