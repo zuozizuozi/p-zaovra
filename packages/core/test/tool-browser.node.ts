@@ -304,12 +304,34 @@ test(
             (batchImage.output?.structured as { screenshot?: { name: string } }).screenshot?.name.endsWith(".png"),
           )
           expect((batchImage.output?.structured as { steps: { status: string }[] }).steps[0]?.status).toBe("executed")
+          for (const observation of ["snapshot", "screenshot"]) {
+            const trailing = yield* call({
+              action: "batch",
+              actions: [...Array(4).fill({ action: "scroll", x: 0, y: 0 }), { action: observation }],
+            })
+            expect(trailing.result.type).toBe("text")
+            expect((trailing.output?.structured as { steps: unknown[] }).steps.length).toBe(4)
+            if (observation === "screenshot")
+              assert.ok((trailing.output?.structured as { screenshot?: unknown }).screenshot)
+          }
+          expect(
+            (yield* call({
+              action: "batch",
+              actions: [{ action: "scroll", x: 0, y: 0 }, { action: "snapshot" }],
+              observation: "screenshot",
+            })).result.type,
+          ).toBe("error")
           const click = { action: "click", target: { role: "button", name: "Save" } }
+          const absent = yield* call({ action: "batch" })
+          expect(absent.result.type).toBe("error")
+          expect(JSON.stringify(absent)).toContain("Batch requires actions. Example:")
           for (const actions of [
             [click, { action: "press", key: "NotAKey" }],
             [click, { action: "open", url: url.href }],
             Array(5).fill(click),
             [],
+            [{ action: "snapshot" }],
+            [click, { action: "snapshot" }, click],
             [click, { action: "batch", actions: [click] }],
             [click, { action: "type", target: { selector: "[" }, text: "bad" }],
           ]) {

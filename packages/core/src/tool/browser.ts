@@ -1,6 +1,6 @@
 export * as BrowserTool from "./browser"
 
-import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import { Context, DateTime, Effect, Layer, Schema, SchemaGetter } from "effect"
 import { EventV2 } from "../event"
 import { SessionEvent } from "../session/event"
 import type { Browser, Page, Locator } from "playwright-core"
@@ -122,6 +122,55 @@ const Actions = [
   }),
 ] as const
 const Action = Schema.Union(Actions)
+const Observation = Schema.Literals(["snapshot", "screenshot"])
+const Batch = Schema.Struct({
+  action: Schema.Literal("batch"),
+  actions: Schema.Array(Action).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
+  observation: Schema.optional(Observation),
+})
+const BatchInput = Schema.Struct({
+  action: Schema.Literal("batch"),
+  actions: Schema.Array(Schema.Union([Action, Schema.Struct({ action: Observation })]))
+    .check(Schema.isMinLength(1), Schema.isMaxLength(5))
+    .pipe(
+      Schema.annotateKey({
+        messageMissingKey:
+          'Batch requires actions. Example: {"action":"batch","actions":[{"action":"press","key":"Tab"}],"observation":"snapshot"}',
+      }),
+    ),
+  observation: Schema.optional(Observation),
+})
+  .check(
+    Schema.makeFilter((input) => {
+      const tail = input.actions.at(-1)
+      const observation = tail?.action === "snapshot" || tail?.action === "screenshot" ? tail.action : undefined
+      const actions = observation ? input.actions.slice(0, -1) : input.actions
+      return (
+        (actions.length >= 1 &&
+          actions.length <= 4 &&
+          actions.every((action) => action.action !== "snapshot" && action.action !== "screenshot") &&
+          (!observation || !input.observation || observation === input.observation)) ||
+        'Expected 1–4 actions and at most one final observation, with no conflicting observation. Example: {"action":"batch","actions":[{"action":"press","key":"Tab"},{"action":"snapshot"}]}'
+      )
+    }),
+  )
+  .pipe(
+    Schema.decodeTo(Batch, {
+      decode: SchemaGetter.transform((input) => {
+        const tail = input.actions.at(-1)
+        const observation =
+          tail?.action === "snapshot" || tail?.action === "screenshot" ? tail.action : input.observation
+        return {
+          action: input.action,
+          actions: input.actions.filter(
+            (action): action is typeof Action.Type => action.action !== "snapshot" && action.action !== "screenshot",
+          ),
+          ...(observation ? { observation } : {}),
+        }
+      }),
+      encode: SchemaGetter.passthrough({ strict: false }),
+    }),
+  )
 const Input = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("open"),
@@ -131,11 +180,7 @@ const Input = Schema.Union([
   ...Actions,
   Schema.Struct({ action: Schema.Literal("click_position"), x: Schema.Number, y: Schema.Number }),
   Schema.Struct({ action: Schema.Literals(["snapshot", "screenshot", "console", "close"]) }),
-  Schema.Struct({
-    action: Schema.Literal("batch"),
-    actions: Schema.Array(Action).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
-    observation: Schema.optional(Schema.Literals(["snapshot", "screenshot"])),
-  }),
+  BatchInput,
 ])
 const Step = Schema.Struct({
   index: Schema.Int,

@@ -19,13 +19,18 @@ export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (han
         "provider.get",
         Effect.fn(function* (ctx) {
           const catalog = yield* Catalog.Service
-          const provider = yield* catalog.provider.get(ctx.params.providerID)
-          if (!provider)
-            return yield* new ProviderNotFoundError({
-              providerID: ctx.params.providerID,
-              message: `Provider not found: ${ctx.params.providerID}`,
-            })
-          return yield* response(Effect.succeed(provider))
+          return yield* response(
+            Effect.gen(function* () {
+              const provider = yield* catalog.provider.get(ctx.params.providerID)
+              if (!provider)
+                return yield* new ProviderNotFoundError({
+                  providerID: ctx.params.providerID,
+                  message: `Provider not found: ${ctx.params.providerID}`,
+                })
+              return provider
+            }),
+            "catalog",
+          )
         }),
       )
   }),

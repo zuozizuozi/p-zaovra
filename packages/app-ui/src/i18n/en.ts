@@ -327,7 +327,17 @@ export const dict = {
   "session.outcome.stale": "Expired",
   "session.outcome.staleHint": "Dependencies changed. Refresh verification status or run the check again.",
   "session.outcome.passedCount": "{{count}} current checks passed",
-  "session.outcome.failedCount": "{{count}} checks failed",
+  "session.outcome.failedCount": "{{count}} failure records not superseded",
+  "session.outcome.unresolved": "Failure records not superseded",
+  "session.outcome.staleGroup": "Older checks with changed dependencies (not current evidence)",
+  "session.outcome.unresolvedHint":
+    "These failures have no later evidence meeting replacement requirements. Passing different targets or changed assertions does not automatically replace an earlier failure; this does not establish that the deliverable is broken. Expand to inspect the original command and targets.",
+  "session.outcome.directory": "Working directory:",
+  "session.outcome.prepareRecheck": "Prepare recheck",
+  "session.outcome.prepareHint":
+    "Fill an empty composer for you to review and send. Does not execute automatically or replace a draft.",
+  "session.outcome.recheckPrompt":
+    "Review this failure record that has not been superseded. Directory: {{directory}}\nOriginal command: {{command}}\nOriginal targets: {{targets}}\nFirst check whether the original assertions changed and explain any differences, then run the appropriate checks. Do not hide failures by changing assertions or treat passing different targets as resolving the old failure.",
   "session.outcome.incompleteCount": "{{count}} checks did not produce a valid result",
   "session.outcome.current": "Current checks",
   "session.outcome.history": "Replaced checks (history)",

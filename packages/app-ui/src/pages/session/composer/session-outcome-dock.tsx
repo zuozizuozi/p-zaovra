@@ -6,6 +6,7 @@ import { useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
+import { usePrompt } from "@/context/prompt"
 import { hasUnfinishedShell } from "@/context/v2-session-adapter"
 import { showToast } from "@/utils/toast"
 import { commandVerification, staleVerification } from "@/utils/verification-label"
@@ -17,6 +18,7 @@ export function SessionOutcomeDock() {
   const server = useServerSDK()
   const sync = useServerSync()
   const language = useLanguage()
+  const prompt = usePrompt()
   const query = createQuery(() => {
     const id = params.id
     const messages = sync().session.data.message[id ?? ""] ?? []
@@ -49,7 +51,8 @@ export function SessionOutcomeDock() {
   const passedChecks = createMemo(
     () => currentChecks().filter((check) => check.exit === 0 && !check.execution && !stale(check)).length,
   )
-  const failedChecks = createMemo(() => currentChecks().filter((check) => check.exit !== 0 && !check.execution).length)
+  const unresolvedChecks = createMemo(() => currentChecks().filter((check) => check.exit !== 0 && !check.execution))
+  const failedChecks = () => unresolvedChecks().length
   const incompleteChecks = createMemo(() => currentChecks().filter((check) => !!check.execution).length)
   const recover = useMutation(() => ({
     mutationFn: (input: { sessionID: string; messageID: string; action: "continue" | "retry" | "abandon" }) =>
@@ -122,6 +125,9 @@ export function SessionOutcomeDock() {
           <Show when={staleChecks()}>
             <span>{language.t("session.outcome.staleHint")}</span>
           </Show>
+          <Show when={failedChecks()}>
+            <span>{language.t("session.outcome.unresolvedHint")}</span>
+          </Show>
           <Show when={!outcome()?.checks.length && outcome()?.recentChecks?.length}>
             <details data-component="verification-recent" class="text-text-weak">
               <summary>{language.t("session.outcome.recent")}</summary>
@@ -143,19 +149,42 @@ export function SessionOutcomeDock() {
           <Show when={outcome()?.checks.length || outcome()?.missing.length}>
             <For
               each={[
-                { history: false, checks: currentChecks() },
-                { history: true, checks: historicalChecks() },
+                {
+                  history: false,
+                  unresolved: false,
+                  stale: false,
+                  checks: currentChecks().filter((check) => (check.exit === 0 || !!check.execution) && !stale(check)),
+                },
+                { history: false, unresolved: true, stale: false, checks: unresolvedChecks() },
+                { history: false, unresolved: false, stale: true, checks: currentChecks().filter(stale) },
+                { history: true, unresolved: false, stale: false, checks: historicalChecks() },
               ]}
             >
               {(group) => (
                 <Show when={group.checks.length}>
                   <details
-                    open={!group.history}
+                    open={!group.history && !group.stale}
                     classList={{ "text-text-weak": group.history }}
-                    data-component={group.history ? "verification-history" : "verification-current"}
+                    data-component={
+                      group.history
+                        ? "verification-history"
+                        : group.unresolved
+                          ? "verification-unresolved"
+                          : group.stale
+                            ? "verification-stale"
+                            : "verification-current"
+                    }
                   >
                     <summary>
-                      {language.t(group.history ? "session.outcome.history" : "session.outcome.current")}
+                      {language.t(
+                        group.history
+                          ? "session.outcome.history"
+                          : group.unresolved
+                            ? "session.outcome.unresolved"
+                            : group.stale
+                              ? "session.outcome.staleGroup"
+                              : "session.outcome.current",
+                      )}
                       {" · "}
                       {group.checks.length}
                     </summary>
@@ -189,6 +218,29 @@ export function SessionOutcomeDock() {
                             </span>
                           </summary>
                           <pre class="whitespace-pre-wrap break-all font-inherit">{check.command}</pre>
+                          <Show when={check.cwd}>
+                            <div>
+                              {language.t("session.outcome.directory")} {check.cwd}
+                            </div>
+                          </Show>
+                          <Show when={group.unresolved}>
+                            <Button
+                              size="small"
+                              variant="ghost"
+                              disabled={prompt.dirty()}
+                              title={language.t("session.outcome.prepareHint")}
+                              onClick={() => {
+                                const text = language.t("session.outcome.recheckPrompt", {
+                                  command: check.command,
+                                  directory: check.cwd ?? sdk().directory,
+                                  targets: check.targets?.map((target) => target.path).join(", ") ?? "",
+                                })
+                                prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
+                              }}
+                            >
+                              {language.t("session.outcome.prepareRecheck")}
+                            </Button>
+                          </Show>
                           <Show when={check.execution}>
                             <div>{language.t(`session.outcome.execution.${check.execution!}`)}</div>
                           </Show>

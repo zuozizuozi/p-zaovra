@@ -308,7 +308,16 @@ export const dict = {
   "session.outcome.stale": "已失效",
   "session.outcome.staleHint": "依赖文件已变化，请刷新验证状态或重新运行检查。",
   "session.outcome.passedCount": "当前 {{count}} 项检查通过",
-  "session.outcome.failedCount": "{{count}} 项检查未通过",
+  "session.outcome.failedCount": "{{count}} 项失败证据尚未被替代",
+  "session.outcome.unresolved": "尚未被替代的失败检查",
+  "session.outcome.staleGroup": "依赖已变化的旧检查（不能代表当前结果）",
+  "session.outcome.unresolvedHint":
+    "以下失败记录尚无满足覆盖条件的后续证据。不同目标或已修改断言的通过，不能自动覆盖旧失败；这不等于成品已确认失败。展开可查看原命令和目标。",
+  "session.outcome.directory": "执行目录：",
+  "session.outcome.prepareRecheck": "准备重新检查",
+  "session.outcome.prepareHint": "将检查请求填入空白输入框，由你确认后发送；不会自动执行或覆盖已有草稿。",
+  "session.outcome.recheckPrompt":
+    "请复核这项尚未被替代的失败检查。目录：{{directory}}\n原命令：{{command}}\n原目标：{{targets}}\n先核对原测试断言是否变化，说明差异，再执行适用的检查。不要通过修改断言掩盖失败，不要把不同目标的通过当成旧失败已解决。",
   "session.outcome.incompleteCount": "{{count}} 项检查未取得有效结果",
   "session.outcome.current": "当前检查",
   "session.outcome.history": "已覆盖的历史检查",

@@ -9,6 +9,63 @@ import { it, pollWithTimeout } from "../lib/effect"
 import { waitGlobalBusEvent } from "./global-bus"
 import { Global } from "@zaovra-ai/core/global"
 
+it.live("new global custom provider resolves on cold locations and retains key setup after disposal", () =>
+  Effect.gen(function* () {
+    const file = Bun.file(path.join(Global.Path.config, "zaovra.jsonc"))
+    const before = yield* Effect.promise(async () => ((await file.exists()) ? file.text() : undefined))
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        await (before === undefined ? file.delete() : Bun.write(file, before))
+        await app().request("/global/dispose", { method: "POST" })
+      }),
+    )
+    const updated = yield* Effect.promise(() =>
+      Promise.resolve(
+        app().request("/global/config", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            provider: {
+              "f2-new": {
+                npm: "@ai-sdk/openai",
+                options: { baseURL: "http://127.0.0.1:1/v1" },
+                models: { fixture: { name: "fixture" } },
+              },
+            },
+          }),
+        }),
+      ),
+    )
+    expect(updated.status).toBe(200)
+    const directory = yield* tmpdirEffect({})
+    const query = `?location[directory]=${encodeURIComponent(directory.path)}`
+    // No provider/model list may warm the catalog before the single-item lookup.
+    const responses = yield* Effect.promise(() =>
+      Promise.all([app().request(`/api/provider/f2-new${query}`), app().request(`/api/integration/f2-new${query}`)]),
+    )
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect((yield* Effect.promise(() => responses[0].json())).data.id).toBe("f2-new")
+    const connected = yield* Effect.promise(() =>
+      Promise.resolve(
+        app().request(`/api/integration/f2-new/connect/key${query}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key: "fixture-only" }),
+        }),
+      ),
+    )
+    expect(connected.status).toBe(204)
+    yield* Effect.promise(() => Promise.resolve(app().request("/global/dispose", { method: "POST" })))
+    const models = yield* Effect.promise(() => Promise.resolve(app().request(`/api/model${query}`)))
+    expect(models.status).toBe(200)
+    expect((yield* Effect.promise(() => models.json())).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ providerID: "f2-new", id: "fixture" })]),
+    )
+    const absent = yield* Effect.promise(() => Promise.resolve(app().request(`/api/provider/f2-missing${query}`)))
+    expect(absent.status).toBe(404)
+  }),
+)
+
 function app() {
   return Server.Default().app
 }
