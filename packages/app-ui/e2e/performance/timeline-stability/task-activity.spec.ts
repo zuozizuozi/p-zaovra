@@ -43,3 +43,40 @@ test("long tool feedback stays bounded and animated scrolling matches reduced mo
   const p95 = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.95)]!
   expect(p95(animated)).toBeLessThan(Math.max(50, p95(reduced) * 2))
 })
+
+test("mascot blinks while visible and suspends offscreen or with reduced motion", async ({ page }) => {
+  await setupTimeline(page, {
+    messages: [userMessage(), assistantMessage([shell("prt_blink", "running")], { completed: false })],
+  })
+  const mascot = page.locator('[data-component="task-activity"] [data-component="task-mascot"]')
+  await expect(mascot).toHaveAttribute("data-motion", "running")
+  const blinks = await mascot.evaluate(async (element) => {
+    const times: number[] = []
+    const observer = new MutationObserver(() => {
+      if (element.getAttribute("data-blink")) times.push(performance.now())
+    })
+    observer.observe(element, { attributes: true, attributeFilter: ["data-blink"] })
+    await new Promise((resolve) => setTimeout(resolve, 12500))
+    observer.disconnect()
+    return times
+  })
+  expect(blinks.length).toBeGreaterThanOrEqual(2)
+  blinks.slice(1).forEach((time, index) => {
+    expect(time - blinks[index]).toBeGreaterThanOrEqual(2900)
+    expect(time - blinks[index]).toBeLessThan(6500)
+  })
+  // Move the fixture outside the viewport to exercise the real IntersectionObserver.
+  await mascot.evaluate((element) => (element.style.position = "fixed"))
+  await mascot.evaluate((element) => (element.style.top = "-1000px"))
+  await expect(mascot).toHaveAttribute("data-motion", "paused")
+  await expect(mascot).toHaveAttribute("data-blink", "")
+  expect(
+    await mascot.evaluate((element) => element.getAnimations({ subtree: true }).every((a) => a.playState === "paused")),
+  ).toBe(true)
+  await mascot.evaluate((element) => element.removeAttribute("style"))
+  await expect(mascot).toHaveAttribute("data-motion", "running")
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await expect(mascot).toHaveAttribute("data-motion", "paused")
+  expect(await mascot.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0)
+  await expect(mascot).toHaveAttribute("data-blink", "")
+})
