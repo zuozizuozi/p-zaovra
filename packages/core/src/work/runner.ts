@@ -2214,17 +2214,18 @@ export const layer = Layer.effect(
               if (resumable.length > 0) {
                 const timestamp = yield* DateTime.now
                 yield* Effect.forEach(
-                  resumable.filter((task) => task.attemptCount > 0 || !task.isolationState),
+                  resumable,
                   (task) =>
-                    events.publish(Work.Event.TaskReworkRequested, {
-                      goalID: input.goalID,
-                      taskID: task.id,
-                      status: "rework",
-                      reason:
-                        task.isolationState?.status === "blocked"
-                          ? "Isolation repaired after user intervention"
-                          : "Access repaired after user intervention",
-                      timestamp,
+                    Effect.gen(function* () {
+                      // Isolation resolution already readmitted unused tasks as pending.
+                      if ((yield* store.getTask(task.id))?.status !== "blocked") return
+                      yield* events.publish(Work.Event.TaskReworkRequested, {
+                        goalID: input.goalID,
+                        taskID: task.id,
+                        status: "rework",
+                        reason: "Access repaired after user intervention",
+                        timestamp,
+                      })
                     }),
                   { concurrency: 1, discard: true },
                 )
