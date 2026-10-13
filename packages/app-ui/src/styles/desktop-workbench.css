@@ -366,6 +366,45 @@ html[data-theme="oc-2"] body[data-new-layout] {
     padding-inline: 32px;
   }
 
+  [data-slot="session-turn-message-content"],
+  [data-slot="session-turn-assistant-content"] {
+    max-width: 720px;
+    margin-inline: auto;
+  }
+
+  [data-component="assistant-message"],
+  [data-slot="session-turn-assistant-content"] [data-component="markdown"] {
+    font-size: 14.5px;
+    line-height: 1.75;
+    background: transparent;
+  }
+
+  [data-slot="user-message-text"] {
+    border-radius: 16px;
+    padding: 12px 16px;
+    background: var(--zaovra-user-bubble);
+  }
+
+  [data-component="prompt-input-v2"] {
+    border-radius: var(--zaovra-radius-composer);
+    box-shadow: inset 0 0 0 1px var(--zaovra-line), var(--zaovra-shadow);
+  }
+
+  [data-component="verification-summary"] {
+    width: fit-content;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--zaovra-hover);
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  [data-component="session-revert-dock"] {
+    border-radius: var(--zaovra-radius-panel);
+    border-color: var(--zaovra-line);
+    background: var(--zaovra-surface);
+  }
+
   [data-slot="brand-placeholder"] {
     display: inline-flex;
     flex: 0 0 auto;
@@ -408,8 +447,8 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="prompt-input-v2"] > div:last-child {
     border-top: 1px solid var(--zaovra-line);
-    border-radius: 0 0 var(--zaovra-radius-panel) var(--zaovra-radius-panel);
-    background: var(--zaovra-canvas);
+    border-radius: 0 0 var(--zaovra-radius-composer) var(--zaovra-radius-composer);
+    background: var(--zaovra-surface);
   }
 
   [data-component="button-v2"],
