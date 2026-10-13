@@ -385,6 +385,7 @@ describe("Work isolation admission", () => {
               .orderBy(asc(EventTable.seq))
               .all()
               .pipe(Effect.orDie)
+            expect(history.filter((row) => row.type.startsWith(Work.Event.TaskReworkRequested.type))).toHaveLength(0)
             yield* db.delete(WorkGoalTable).where(eq(WorkGoalTable.id, created.goal.id)).run().pipe(Effect.orDie)
             yield* events.remove(created.goal.id)
             yield* events.replayAll(
@@ -402,4 +403,84 @@ describe("Work isolation admission", () => {
         60000,
       )
     }
+
+  for (const legacy of [false, true]) {
+    it.live(
+      `recovers a resolved isolation across a crash (legacy rework: ${legacy})`,
+      () =>
+        Effect.gen(function* () {
+          const { directory } = yield* workspace()
+          const projects = yield* Project.Service
+          const project = yield* projects.resolve(directory)
+          const obstruction = path.join(Global.Path.data, "worktree", project.id)
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.dirname(obstruction), { recursive: true })
+            await fs.writeFile(obstruction, "blocked")
+          })
+          yield* Effect.addFinalizer(() => Effect.promise(() => fs.rm(obstruction, { recursive: true, force: true })))
+          const work = yield* Work.Service
+          const runner = yield* WorkRunner.Service
+          const store = yield* WorkStore.Service
+          const events = yield* EventV2.Service
+          const db = (yield* Database.Service).db
+          const created = yield* work.create({
+            location: { directory },
+            objective: "Inspect",
+            planning: true,
+            acceptanceCriteria: [{ description: "Fixture inspected", required: true, evidence: "review" }],
+          })
+          yield* runner.run({ goalID: created.goal.id, force: true })
+          const task = (yield* store.tasks(created.goal.id)).find((task) => task.role === "build")!
+          // The persisted boundary after provisioning, before the runner activates the Goal.
+          yield* events.publish(Work.Event.TaskIsolationResolved, {
+            goalID: created.goal.id,
+            taskID: task.id,
+            isolation: { status: "shared", reason: "dirty" },
+            location: { directory },
+            timestamp: DateTime.nowUnsafe(),
+          })
+          expect((yield* store.getTask(task.id))?.status).toBe("pending")
+          if (legacy) {
+            yield* events.publish(Work.Event.GoalActivated, {
+              goalID: created.goal.id,
+              timestamp: DateTime.nowUnsafe(),
+            })
+            yield* events.publish(Work.Event.TaskReworkRequested, {
+              goalID: created.goal.id,
+              taskID: task.id,
+              status: "rework",
+              reason: "Isolation repaired after user intervention",
+              timestamp: DateTime.nowUnsafe(),
+            })
+          }
+          const tasks = yield* store.tasks(created.goal.id)
+          const goal = yield* store.getGoal(created.goal.id)
+          const history = yield* db
+            .select()
+            .from(EventTable)
+            .where(eq(EventTable.aggregate_id, created.goal.id))
+            .orderBy(asc(EventTable.seq))
+            .all()
+            .pipe(Effect.orDie)
+          yield* db.delete(WorkGoalTable).where(eq(WorkGoalTable.id, created.goal.id)).run().pipe(Effect.orDie)
+          yield* events.remove(created.goal.id)
+          yield* events.replayAll(
+            history.map((row) => ({
+              id: row.id,
+              aggregateID: row.aggregate_id,
+              seq: row.seq,
+              type: row.type,
+              data: row.data,
+            })),
+          )
+          expect(yield* store.tasks(created.goal.id)).toEqual(tasks)
+          expect(yield* store.getGoal(created.goal.id)).toEqual(goal)
+          if (legacy) return
+          yield* runner.run({ goalID: created.goal.id, force: true })
+          expect((yield* store.attempts(task.id))[0].kind).toBe("execute")
+          expect((yield* store.getGoal(created.goal.id))?.usage.repairs).toBe(0)
+        }),
+      30000,
+    )
+  }
 })
