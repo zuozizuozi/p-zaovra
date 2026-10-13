@@ -31,6 +31,7 @@ test.each([
       mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused" || mode === "cancel-paused"
     const cancel = mode === "cancel-approval" || mode === "cancel-paused"
     const abort = new AbortController()
+    const disconnected = Promise.withResolvers<void>()
     await using tmp = await tmpdir({ git: true })
     const isolated = path.join(tmp.path, "isolated")
     let calls = 0
@@ -72,7 +73,14 @@ test.each([
     await $`git worktree add --detach ${isolated}`.cwd(tmp.path).quiet()
     await Bun.write(path.join(isolated, "feature.txt"), "isolated change\n".repeat(6000))
     const app = Server.Default().app
-    await using http = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: app.fetch })
+    await using http = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        request.signal.addEventListener("abort", () => disconnected.resolve(), { once: true })
+        return app.fetch(request)
+      },
+    })
     const headers = { "content-type": "application/json", "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const id = `goal_merge_${Date.now()}`
     const request = async (url: string, body?: unknown) => {
@@ -125,7 +133,10 @@ test.each([
           // Pause through the real API at that exact boundary, without mocking services.
           return Effect.promise(async () => {
             if (pause) await request(`/api/work/${id}/pause`, {})
-            if (cancel) abort.abort()
+            if (cancel) {
+              abort.abort()
+              await disconnected.promise
+            }
           })
         }),
       ),
