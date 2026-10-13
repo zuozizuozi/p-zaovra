@@ -1347,6 +1347,7 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <Card variant="error" class="error-card">
+                <TaskActivity state="error" />
                 {explainExecutionError(errorRow().text, (key) => language.t(key as Parameters<typeof language.t>[0]))}
                 <Show when={provider()}>
                   {(id) => (

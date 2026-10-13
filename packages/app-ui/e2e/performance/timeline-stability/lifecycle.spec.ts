@@ -124,7 +124,7 @@ test.describe("timeline visual lifecycle stability", () => {
     await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(0)
     await timeline.send(partUpdated(reasoningPart(reasoningID, "## Planning\n\nChecking the visible timeline.")), 160)
     await timeline.waitForPart(reasoningID)
-    await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
+    await expect(page.locator('[data-timeline-row="Thinking"]')).toBeVisible()
     await timeline.send(partUpdated(textPart(textID, "Starting")), 100)
     await timeline.send(partDelta(textID, " **stable"), 90)
     await timeline.send(partDelta(textID, " output** with `code` and [a link"), 130)
