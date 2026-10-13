@@ -38,6 +38,7 @@ export async function measureFirstNavigation(
               source: visible(sourceSelector),
               destination: `${location.pathname}${location.search}` === destinationPath && visible(destinationSelector),
               content: visible(contentSelector),
+              loading: visible('[data-component="draft-loading"]'),
               pathname: `${location.pathname}${location.search}`,
               center: document.elementFromPoint(innerWidth / 2, innerHeight / 2)?.textContent?.slice(0, 80),
             })

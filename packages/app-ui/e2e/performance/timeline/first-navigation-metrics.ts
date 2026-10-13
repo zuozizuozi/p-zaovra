@@ -3,6 +3,7 @@ export type FirstNavigationSample = {
   source: boolean
   destination: boolean
   content: boolean
+  loading?: boolean
   pathname?: string
   center?: string
 }
@@ -10,6 +11,7 @@ export type FirstNavigationSample = {
 function category(sample: FirstNavigationSample) {
   if (sample.destination && !sample.source) return "destination"
   if (sample.source && !sample.destination) return "source"
+  if (sample.loading) return "loading"
   if (!sample.content) return "blank"
   return "unknown"
 }
@@ -26,6 +28,7 @@ export function summarizeFirstNavigation(samples: FirstNavigationSample[]) {
     stableDestinationObservedMs: stable === -1 ? null : samples[stable + 2]!.observedAtMs,
     sourceSamples: categories.filter((value) => value === "source").length,
     blankSamples: categories.filter((value) => value === "blank").length,
+    loadingSamples: categories.filter((value) => value === "loading").length,
     unknownSamples: categories.filter((value) => value === "unknown").length,
     destinationSamples: categories.filter((value) => value === "destination").length,
   }
