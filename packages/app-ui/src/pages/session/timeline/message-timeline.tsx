@@ -353,26 +353,38 @@ export function MessageTimeline(props: {
   const assistantMessagesByParent = projection.assistantMessagesByParent
   const lastAssistantGroupKey = projection.lastAssistantGroupKey
   const messageByID = projection.messageByID
-  const [mascot, setMascot] = createStore<{ session?: string; user?: string; terminal: MascotState }>({
-    terminal: "idle",
-  })
+  const [mascot, setMascot] = createStore<{ session?: string; user?: string; settled?: string; terminal: MascotState }>(
+    {
+      terminal: "idle",
+    },
+  )
   let mascotTimer: ReturnType<typeof setTimeout> | undefined
   createEffect(
     on(
-      () => [sessionID(), sessionStatus().type, activeMessageID()] as const,
-      ([session, status, user], previous) => {
+      () =>
+        [
+          sessionID(),
+          sessionStatus().type,
+          activeMessageID(),
+          assistantMessagesByParent()
+            .get(mascot.user ?? "")
+            ?.at(-1),
+        ] as const,
+      ([session, status, user, latest], previous) => {
         if (session !== previous?.[0]) {
           clearTimeout(mascotTimer)
-          setMascot({ session, user: status !== "idle" ? user : undefined, terminal: "idle" })
+          setMascot({ session, user: status !== "idle" ? user : undefined, settled: undefined, terminal: "idle" })
           return
         }
         if (status !== "idle") {
           clearTimeout(mascotTimer)
-          setMascot({ user: user ?? mascot.user, terminal: "idle" })
+          setMascot({ user: user ?? mascot.user, settled: undefined, terminal: "idle" })
           return
         }
-        if (!previous || previous[1] === "idle" || !mascot.user) return
-        const latest = assistantMessagesByParent().get(mascot.user)?.at(-1)
+        // Idle can arrive before the completed assistant projection. Observe both,
+        // and consume each completion once so later row updates cannot replay it.
+        if (!mascot.user || !latest || mascot.settled === latest.id || (!latest.error && !latest.time.completed)) return
+        setMascot("settled", latest.id)
         setMascot(
           "terminal",
           latest?.error?.name === "MessageAbortedError"
@@ -383,7 +395,8 @@ export function MessageTimeline(props: {
                 ? "success"
                 : "idle",
         )
-        mascotTimer = setTimeout(() => setMascot("terminal", "idle"), 1600)
+        clearTimeout(mascotTimer)
+        mascotTimer = setTimeout(() => setMascot("terminal", "idle"), 5000)
       },
     ),
   )
