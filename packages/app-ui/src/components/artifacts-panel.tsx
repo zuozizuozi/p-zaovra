@@ -22,6 +22,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
   const [inventory, setInventory] = createSignal<Awaited<ReturnType<typeof collectArtifactFiles>>>()
   const [loading, setLoading] = createSignal(false)
   const [baseline, setBaseline] = createSignal<Set<string>>()
+  const [drawer, setDrawer] = createStore({ open: false, filter: "" })
   let scannedAt = 0
   let generation = 0
   const running = () => !!params.id && (sync().data.session_status[params.id]?.type ?? "idle") !== "idle"
@@ -82,7 +83,13 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
   )
   const [state, setState] = persisted(
     Persist.window(`artifacts:${sessionKey()}`),
-    createStore({ input: "", targets: [] as string[], active: "", split: undefined as number | undefined }),
+    createStore({
+      input: "",
+      targets: [] as string[],
+      active: "",
+      split: undefined as number | undefined,
+      maximized: false,
+    }),
   )
   const open = () => {
     const target = state.input.trim()
@@ -113,8 +120,17 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
       ref={panel}
       data-component="artifacts-panel"
       class="flex h-full min-h-0 flex-col bg-background-base"
+      classList={{ "!fixed top-[38px] left-[52px] right-0 bottom-0 !h-auto z-50": props.active && state.maximized }}
       aria-label={language.t("artifact.panel")}
     >
+      <div class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-weak-base px-3">
+        <button type="button" aria-expanded={drawer.open} onClick={() => setDrawer("open", !drawer.open)}>
+          {language.t("artifact.files")} ⌄
+        </button>
+        <button type="button" onClick={() => setState("maximized", !state.maximized)}>
+          {language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
+        </button>
+      </div>
       <form
         class="flex shrink-0 gap-2 border-b border-border-weak-base p-3"
         onSubmit={(event) => {
@@ -137,94 +153,107 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
           {language.t("artifact.open")}
         </button>
       </form>
-      <div
-        class="flex min-h-36 shrink-0 flex-col overflow-hidden border-b border-border-weak-base p-3"
-        style={{ height: `${state.split ?? 20}%`, "max-height": "60%" }}
-      >
-        <div class="flex items-center justify-between text-xs">
-          <strong>{language.t("artifact.files")}</strong>
-          <button type="button" disabled={loading()} onClick={() => void refresh()}>
-            {loading() ? language.t("artifact.refreshing") : language.t("artifact.refreshFiles")}
-          </button>
-        </div>
-        <div class="mt-2 min-h-0 flex-1 overflow-auto">
-          <For each={inventory()?.files}>
-            {(path) => (
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  class="block w-full truncate py-1 text-left text-xs hover:underline"
-                  title={path}
-                  onClick={() => openFile?.(path)}
-                >
-                  {path}
-                  <Show when={baseline() && !baseline()!.has(path)}>
-                    <span class="ml-2 text-text-weak">{language.t("artifact.observed")}</span>
-                  </Show>
-                </button>
-                <details
-                  class="shrink-0 text-xs"
-                  onToggle={(event) => {
-                    if (event.currentTarget.open) void file.load(path)
-                  }}
-                >
-                  <summary class="cursor-pointer">{language.t("artifact.details")}</summary>
-                  <Show when={file.get(path)?.error}>
-                    <span role="alert">{language.t("artifact.unreadable")}</span>
-                    <button type="button" onClick={() => void file.load(path, { force: true })}>
-                      {language.t("artifact.retry")}
-                    </button>
-                  </Show>
-                  <Show when={file.get(path)?.loading}>
-                    <span>{language.t("artifact.reading")}</span>
-                  </Show>
-                  <Show when={!file.get(path)?.error && !file.get(path)?.loading && file.get(path)?.content}>
-                    {(content) => (
-                      <span>
-                        {artifactLines(content()) === undefined
-                          ? language.t("artifact.binary")
-                          : language.t("artifact.lines", { count: artifactLines(content()) ?? 0 })}
-                      </span>
-                    )}
-                  </Show>
-                </details>
-              </div>
-            )}
-          </For>
-          <Show when={inventory() && !inventory()!.files.length}>
-            <p class="text-xs text-text-weak">{language.t("artifact.empty")}</p>
+      <Show when={drawer.open}>
+        <div
+          class="flex min-h-36 shrink-0 flex-col overflow-hidden border-b border-border-weak-base p-3"
+          style={{ height: `${state.split ?? 20}%`, "max-height": "60%" }}
+        >
+          <div class="flex items-center justify-between text-xs">
+            <strong>{language.t("artifact.files")}</strong>
+            <button type="button" disabled={loading()} onClick={() => void refresh()}>
+              {loading() ? language.t("artifact.refreshing") : language.t("artifact.refreshFiles")}
+            </button>
+          </div>
+          <div class="mt-2 min-h-0 flex-1 overflow-auto">
+            <input
+              class="mb-2 w-full rounded-md border border-border-weak-base bg-transparent px-2 py-1 text-xs"
+              value={drawer.filter}
+              onInput={(event) => setDrawer("filter", event.currentTarget.value)}
+              aria-label={language.t("artifact.filter")}
+              placeholder={language.t("artifact.filter")}
+            />
+            <For
+              each={inventory()?.files.filter((path) =>
+                path.toLocaleLowerCase().includes(drawer.filter.toLocaleLowerCase()),
+              )}
+            >
+              {(path) => (
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="block w-full truncate py-1 text-left text-xs hover:underline"
+                    title={path}
+                    onClick={() => openFile?.(path)}
+                  >
+                    {path}
+                    <Show when={baseline() && !baseline()!.has(path)}>
+                      <span class="ml-2 text-text-weak">{language.t("artifact.observed")}</span>
+                    </Show>
+                  </button>
+                  <details
+                    class="shrink-0 text-xs"
+                    onToggle={(event) => {
+                      if (event.currentTarget.open) void file.load(path)
+                    }}
+                  >
+                    <summary class="cursor-pointer">{language.t("artifact.details")}</summary>
+                    <Show when={file.get(path)?.error}>
+                      <span role="alert">{language.t("artifact.unreadable")}</span>
+                      <button type="button" onClick={() => void file.load(path, { force: true })}>
+                        {language.t("artifact.retry")}
+                      </button>
+                    </Show>
+                    <Show when={file.get(path)?.loading}>
+                      <span>{language.t("artifact.reading")}</span>
+                    </Show>
+                    <Show when={!file.get(path)?.error && !file.get(path)?.loading && file.get(path)?.content}>
+                      {(content) => (
+                        <span>
+                          {artifactLines(content()) === undefined
+                            ? language.t("artifact.binary")
+                            : language.t("artifact.lines", { count: artifactLines(content()) ?? 0 })}
+                        </span>
+                      )}
+                    </Show>
+                  </details>
+                </div>
+              )}
+            </For>
+            <Show when={inventory() && !inventory()!.files.length}>
+              <p class="text-xs text-text-weak">{language.t("artifact.empty")}</p>
+            </Show>
+          </div>
+          <Show when={inventory()?.limited}>
+            <p class="mt-2 text-xs text-text-weak">{language.t("artifact.limited")}</p>
+          </Show>
+          <Show when={inventory()?.errors.length}>
+            <p role="alert" class="mt-2 text-xs text-text-weak">
+              {language.t("artifact.partial")}
+            </p>
           </Show>
         </div>
-        <Show when={inventory()?.limited}>
-          <p class="mt-2 text-xs text-text-weak">{language.t("artifact.limited")}</p>
-        </Show>
-        <Show when={inventory()?.errors.length}>
-          <p role="alert" class="mt-2 text-xs text-text-weak">
-            {language.t("artifact.partial")}
-          </p>
-        </Show>
-      </div>
-      <button
-        type="button"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label={language.t("artifact.resize")}
-        aria-valuemin={15}
-        aria-valuemax={60}
-        aria-valuenow={state.split ?? 20}
-        class="h-2 shrink-0 cursor-row-resize bg-background-stronger touch-none focus-visible:outline-2 focus-visible:outline-border-active"
-        onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
-        onPointerMove={(event) => {
-          if (!event.currentTarget.hasPointerCapture(event.pointerId) || !panel) return
-          const bounds = panel.getBoundingClientRect()
-          setState("split", Math.max(15, Math.min(60, ((event.clientY - bounds.top - 64) / bounds.height) * 100)))
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
-          event.preventDefault()
-          setState("split", Math.max(15, Math.min(60, (state.split ?? 20) + (event.key === "ArrowUp" ? -5 : 5))))
-        }}
-      />
+        <button
+          type="button"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={language.t("artifact.resize")}
+          aria-valuemin={15}
+          aria-valuemax={60}
+          aria-valuenow={state.split ?? 20}
+          class="h-2 shrink-0 cursor-row-resize bg-background-stronger touch-none focus-visible:outline-2 focus-visible:outline-border-active"
+          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId) || !panel) return
+            const bounds = panel.getBoundingClientRect()
+            setState("split", Math.max(15, Math.min(60, ((event.clientY - bounds.top - 64) / bounds.height) * 100)))
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+            event.preventDefault()
+            setState("split", Math.max(15, Math.min(60, (state.split ?? 20) + (event.key === "ArrowUp" ? -5 : 5))))
+          }}
+        />
+      </Show>
       <Show when={state.targets.length > 0}>
         <div
           class="flex shrink-0 overflow-x-auto border-b border-border-weak-base"

@@ -1,4 +1,7 @@
 export const dict = {
+  "artifact.maximize": "Maximize preview",
+  "artifact.restore": "Restore preview",
+  "artifact.filter": "Filter files",
   "error.execution.model": "This model is unavailable. Check the model name and your provider access.",
   "error.execution.unknown": "The task encountered an error. Review the details and current execution state before continuing.",
   "settings.about.title": "About Zaovra",

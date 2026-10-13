@@ -3,6 +3,9 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "artifact.maximize": "最大化预览",
+  "artifact.restore": "还原预览",
+  "artifact.filter": "筛选文件",
   "error.execution.model": "当前模型不可用，请检查模型名称和服务商的模型访问权限。",
   "error.execution.unknown": "任务遇到错误，请查看技术详情和当前执行状态，再决定是否继续。",
   "settings.about.title": "关于 Zaovra",
