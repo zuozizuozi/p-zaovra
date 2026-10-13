@@ -155,6 +155,13 @@ const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder
 const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
 const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
 
+export function unknownKeys(input: unknown) {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return []
+  return Object.keys(input).filter(
+    (key) => !Object.hasOwn(Info.fields, key) && !Object.hasOwn(ConfigV1.Info.fields, key),
+  )
+}
+
 export function decode(input: unknown): Option.Option<Info> {
   if (!input || typeof input !== "object" || Array.isArray(input)) return Option.none<Info>()
 
@@ -208,13 +215,19 @@ const layer = Layer.effect(
     const location = yield* Location.Service
     const policy = yield* Policy.Service
     const names = ["zaovra.json", "zaovra.jsonc"]
-    const loadText = (text: string, filepath?: string) => {
+    const loadText = Effect.fnUntraced(function* (text: string, filepath?: string) {
       const errors: ParseError[] = []
       const input: unknown = parse(text, errors, { allowTrailingComma: true })
       if (errors.length)
         throw new ConfigErrorV1.JsonError({
           path: filepath ?? "ZAOVRA_CONFIG_CONTENT",
           message: "Invalid configuration JSON",
+        })
+      const extra = unknownKeys(input)
+      if (extra.length)
+        yield* Effect.logWarning("Ignoring unknown top-level configuration fields", {
+          path: filepath ?? "ZAOVRA_CONFIG_CONTENT",
+          fields: extra,
         })
       const info = Option.getOrUndefined(decode(input))
       if (!info)
@@ -223,12 +236,12 @@ const layer = Layer.effect(
           message: "Invalid configuration values",
         })
       return new Document({ type: "document", path: filepath, info })
-    }
+    })
 
     const loadFile = Effect.fnUntraced(function* (filepath: string) {
       const text = yield* fs.readFileStringSafe(filepath)
       if (!text) return
-      return loadText(text, filepath)
+      return yield* loadText(text, filepath)
     })
 
     const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath) {
@@ -270,7 +283,7 @@ const layer = Layer.effect(
     const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.zaovra` files.
-    const injected = process.env.ZAOVRA_CONFIG_CONTENT ? loadText(process.env.ZAOVRA_CONFIG_CONTENT) : undefined
+    const injected = process.env.ZAOVRA_CONFIG_CONTENT ? yield* loadText(process.env.ZAOVRA_CONFIG_CONTENT) : undefined
     const configs = [
       ...(supplementary[0] ?? []),
       ...direct,

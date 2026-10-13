@@ -217,7 +217,7 @@ describe("config HttpApi", () => {
   )
 
   it.live(
-    "does not hide unknown settings behind the native preferences view",
+    "loads forward-compatible top-level settings without removing them from disk",
     Effect.gen(function* () {
       const tmp = yield* tmpdirEffect({ git: true })
       yield* Effect.promise(() =>
@@ -236,7 +236,28 @@ describe("config HttpApi", () => {
           }),
         ),
       )
-      expect(response.status).toBe(400)
+      expect(response.status).toBe(200)
+      const runtime = yield* Effect.promise(() =>
+        Promise.resolve(
+          app().request("/api/provider", {
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
+          }),
+        ),
+      )
+      expect(runtime.status).toBe(200)
+      const saved = yield* Effect.promise(() =>
+        Promise.resolve(
+          app().request("/config", {
+            method: "PATCH",
+            headers: { "x-zaovra-directory": encodeURIComponent(tmp.path), "content-type": "application/json" },
+            body: JSON.stringify({ username: "forward-compatible" }),
+          }),
+        ),
+      )
+      expect(saved.status).toBe(200)
+      expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "zaovra.json")).json())).toMatchObject({
+        unexpected_setting: true,
+      })
     }),
   )
 

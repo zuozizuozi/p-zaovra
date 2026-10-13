@@ -1,7 +1,7 @@
 export * as ConfigParse from "./parse"
 
 import { type ParseError as JsoncParseError, parse as parseJsoncImpl, printParseErrorCode } from "jsonc-parser"
-import { Cause, Exit, Schema as EffectSchema, SchemaIssue } from "effect"
+import { Cause, Effect, Exit, Schema as EffectSchema, SchemaIssue } from "effect"
 import type { DeepMutable } from "@zaovra-ai/core/schema"
 import { InvalidError, JsonError } from "@zaovra-ai/core/v1/config/error"
 import { Config } from "@zaovra-ai/core/config"
@@ -9,17 +9,11 @@ import { ConfigV1 } from "@zaovra-ai/core/v1/config/config"
 import { Option } from "effect"
 
 export function configuration(data: unknown, source: string) {
-  const extra =
-    typeof data === "object" && data !== null && !Array.isArray(data)
-      ? Object.keys(data).filter(
-          (key) => !Object.hasOwn(Config.Info.fields, key) && !Object.hasOwn(ConfigV1.Info.fields, key),
-        )
-      : []
+  const extra = Config.unknownKeys(data)
   if (extra.length)
-    throw new InvalidError({
-      path: source,
-      issues: [{ code: "unrecognized_keys", keys: extra, path: [], message: `Unrecognized keys: ${extra.join(", ")}` }],
-    })
+    Effect.runSync(
+      Effect.logWarning("Ignoring unknown top-level configuration fields", { path: source, fields: extra }),
+    )
   const decoded = Config.decode(data)
   if (Option.isSome(decoded)) return decoded.value
   throw new InvalidError({ path: source, issues: [{ path: [], message: "Invalid configuration values" }] })
@@ -55,11 +49,12 @@ export function jsonc(text: string, filepath: string): unknown {
 /** These execution controls belong to V2; legacy bootstrap must not reject them. */
 export function legacyConfiguration(data: unknown, source: string) {
   configuration(data, source)
+  const extra = new Set(Config.unknownKeys(data))
   const fields = Object.fromEntries(
     // Other native fields still use the existing native compatibility view.
     // Silently dropping provider_filter here would lose its inherited allow list.
     Object.entries(data as Record<string, unknown>).filter(
-      ([key]) => key !== "session_token_budget" && key !== "session_output" && key !== "permissions",
+      ([key]) => !extra.has(key) && key !== "session_token_budget" && key !== "session_output" && key !== "permissions",
     ),
   )
   return schema(ConfigV1.Info, fields, source)

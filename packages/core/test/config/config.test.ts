@@ -1,7 +1,7 @@
 import path from "path"
 import fs from "fs/promises"
 import { describe, expect } from "bun:test"
-import { Cause, Effect, Exit, Layer, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Logger, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Config } from "@zaovra-ai/core/config"
 import { ConfigProvider } from "@zaovra-ai/core/config/provider"
@@ -52,6 +52,33 @@ const provider = {
 }
 
 describe("Config", () => {
+  it.live("warns about unknown top-level fields without exposing values or rejecting the location", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const logs: unknown[] = []
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(tmp.path, "zaovra.json"),
+          JSON.stringify({
+            model: "fixture/model",
+            future_feature: "private-value-must-not-be-logged",
+          }),
+        ),
+      )
+      yield* Effect.gen(function* () {
+        const config = yield* Config.Service
+        expect(Config.latest(yield* config.entries(), "model")).toBe("fixture/model")
+      }).pipe(
+        Effect.provide(testLayer(tmp.path)),
+        Effect.provide(Logger.layer([Logger.make((entry) => logs.push(entry.message))])),
+      )
+      expect(JSON.stringify(logs)).toContain("future_feature")
+      expect(JSON.stringify(logs)).not.toContain("private-value-must-not-be-logged")
+    }),
+  )
   it.live("preserves native providers and ordered permissions beside legacy settings", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
