@@ -430,7 +430,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                   <IconButtonV2
                     variant="ghost-muted"
                     size="small"
-                    icon="sidebar"
+                    icon={<Icon name="sidebar" size="small" />}
                     aria-label={language.t("command.sidebar.toggle")}
                     aria-expanded={layout.sidebar.opened()}
                     onClick={layout.sidebar.toggle}

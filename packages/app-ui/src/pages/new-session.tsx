@@ -5,8 +5,7 @@ import { Portal } from "solid-js/web"
 import { useLocation, useSearchParams } from "@solidjs/router"
 import { Tooltip } from "@zaovra-ai/ui/tooltip"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
-import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
-import { TooltipV2 } from "@zaovra-ai/ui/v2/tooltip-v2"
+import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { NewSessionDesignView } from "@/components/session"
 import { PromptInputV2Composer, usePromptInputV2Controller } from "@/components/prompt-input-v2"
 import { StatusPopoverV2 } from "@/components/status-popover"
@@ -216,7 +215,7 @@ export default function NewSessionPage() {
                   </Show>
                   <ProviderTip
                     ready={() => serverSync().child(sdk().directory)[0].provider_ready}
-                    connected={() => providers.paid().length > 0}
+                    connected={() => providers.connected().some((provider) => Object.keys(provider.models).length > 0)}
                     openProviders={openProviders}
                   />
                   <PromptInputV2Composer controller={promptInputV2Controller} />
@@ -267,31 +266,18 @@ function ProviderTip(props: { ready: () => boolean; connected: () => boolean; op
             "data-[visible=false]:animate-out fade-out slide-out-to-bottom-4": true,
           }}
         >
-          <button
-            type="button"
-            class="flex h-6 min-w-0 items-center rounded-[4px] pl-1.5 text-[13px] leading-none tracking-[-0.04px] text-v2-text-text-faint transition-[background-color,color] duration-150 ease-in-out hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-muted focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:text-v2-text-text-muted focus-visible:outline-none"
-            onClick={props.openProviders}
-          >
-            <span class="truncate">{language.t("home.providerTip")}</span>
-            <span class="flex size-6 shrink-0 items-center justify-center" aria-hidden="true">
-              <IconV2 name="chevron-down" size="small" class="-rotate-90" />
-            </span>
-          </button>
-          <TooltipV2
-            class="flex h-8 w-8 shrink-0 items-center justify-center"
-            placement="top"
-            openDelay={1000}
-            value={language.t("common.dismiss")}
-          >
-            <button
-              type="button"
-              class="flex size-6 items-center justify-center rounded-[4px] text-v2-icon-icon-muted transition-[background-color,color] duration-150 ease-in-out hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-icon-icon-base focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:text-v2-icon-icon-base focus-visible:outline-none"
-              aria-label={language.t("common.dismiss")}
-              onClick={dismiss}
-            >
-              <IconV2 name="xmark-small" />
-            </button>
-          </TooltipV2>
+          <div class="min-w-0">
+            <strong class="text-sm text-v2-text-text-strong">{language.t("session.new.noModels")}</strong>
+            <p class="mt-1 text-xs text-v2-text-text-muted">{language.t("session.new.noModelsHint")}</p>
+          </div>
+          <div class="flex shrink-0 items-center gap-1">
+            <ButtonV2 size="small" variant="contrast" onClick={props.openProviders}>
+              {language.t("session.new.addProvider")}
+            </ButtonV2>
+            <ButtonV2 size="small" variant="ghost-muted" onClick={dismiss}>
+              {language.t("session.new.later")}
+            </ButtonV2>
+          </div>
         </div>
       </div>
     </Show>

@@ -3,6 +3,11 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.new.noModels": "还没有可用的模型服务",
+  "session.new.noModelsHint": "添加你自己的 API Key，选择模型后即可开始任务。",
+  "session.new.addProvider": "添加模型服务",
+  "session.new.later": "稍后",
+
   "session.new.projectTitle": "你想在 {{project}} 中做什么？",
   "prompt.permission.automatic": "自动批准",
   "prompt.permission.ask": "请求批准",

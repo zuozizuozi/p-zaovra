@@ -1,4 +1,9 @@
 export const dict = {
+  "session.new.noModels": "No model is available yet",
+  "session.new.noModelsHint": "Add your API key and choose a model to start a task.",
+  "session.new.addProvider": "Add model provider",
+  "session.new.later": "Later",
+
   "session.new.projectTitle": "What would you like to do in {{project}}?",
   "prompt.permission.automatic": "Auto-approve",
   "prompt.permission.ask": "Ask first",
