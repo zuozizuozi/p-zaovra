@@ -27,6 +27,7 @@ import { WorkRole } from "./role"
 type DatabaseClient = EffectDrizzleSqlite.EffectSQLiteDatabase
 type DurablePayload = { readonly durable?: { readonly seq: number } }
 type TaskTransition = DurablePayload & {
+  readonly type: string
   readonly data: {
     readonly goalID: Work.GoalID
     readonly taskID: Work.TaskID
@@ -794,19 +795,18 @@ const layer = Layer.effectDiscard(
     yield* events.project(Work.Event.TaskIsolationResolved, (event) =>
       Effect.gen(function* () {
         const task = yield* requireTask(db, event.data.goalID, event.data.taskID)
-        invariant(
-          task.status === "blocked" && task.isolation?.status === "blocked",
-          "Only isolation-blocked Tasks can reprovision",
-        )
+        invariant(task.status === "blocked" && task.isolation !== null, "Only isolation-blocked Tasks can reprovision")
         invariant(task.attempt_count === 0, "Cannot relocate a Task after execution")
         invariant(
           event.data.isolation.status !== "isolated" || !!event.data.location,
           "Isolated Task requires a location",
         )
+        if (event.data.isolation.status !== "blocked") WorkStateMachine.task(task.status, "pending")
         yield* db
           .update(WorkTaskTable)
           .set({
             isolation: event.data.isolation,
+            status: event.data.isolation.status === "blocked" ? "blocked" : "pending",
             directory: event.data.location?.directory ?? null,
             workspace_id: event.data.location?.workspaceID ?? null,
             revision: revision(event),
@@ -1328,7 +1328,18 @@ function projectGoalStatus(
 function projectTaskStatus(db: DatabaseClient, event: TaskTransition) {
   return Effect.gen(function* () {
     const row = yield* requireTask(db, event.data.goalID, event.data.taskID)
-    WorkStateMachine.task(row.status, event.data.status)
+    // Older histories requested rework immediately after resolving an unused isolation.
+    // Preserve their replay; new runners readmit these tasks through TaskReadied.
+    if (
+      !(
+        row.status === "pending" &&
+        row.attempt_count === 0 &&
+        row.isolation &&
+        row.isolation.status !== "blocked" &&
+        event.type === Work.Event.TaskReworkRequested.type
+      )
+    )
+      WorkStateMachine.task(row.status, event.data.status)
     if (event.data.status === "completed" && row.acceptance) {
       const attempts = yield* db
         .select()

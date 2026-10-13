@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Work } from "@zaovra-ai/core/work"
@@ -11,6 +11,7 @@ import { WorkPlanner } from "@zaovra-ai/core/work/planner"
 import { WorkReviewer } from "@zaovra-ai/core/work/reviewer"
 import { WorkExecution } from "@zaovra-ai/core/work/execution"
 import { WorkStore } from "@zaovra-ai/core/work/store"
+import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { Project } from "@zaovra-ai/core/project"
@@ -20,75 +21,83 @@ import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { Global } from "@zaovra-ai/core/global"
 import { AppProcess } from "@zaovra-ai/core/process"
 import { Database } from "@zaovra-ai/core/database/database"
+import { EventV2 } from "@zaovra-ai/core/event"
+import { EventTable } from "@zaovra-ai/core/event/sql"
+import { WorkGoalTable } from "@zaovra-ai/core/work/sql"
+import { asc, eq } from "drizzle-orm"
 import { ProjectTable } from "@zaovra-ai/core/project/sql"
 import { DateTime } from "effect"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
-const it = testEffect(
-  AppNodeBuilder.build(
-    LayerNode.group([
-      Project.node,
-      SessionV2.node,
-      Work.node,
-      WorkRunner.node,
-      WorkStore.node,
-      ProjectCopy.node,
-      ProjectDirectories.node,
-      AppProcess.node,
-      Database.node,
-    ]),
-    [
-      [SessionExecution.node, SessionExecution.noopLayer],
-      [WorkExecution.node, WorkExecution.noopLayer],
+const isolationTests = (taskCount = 1) =>
+  testEffect(
+    AppNodeBuilder.build(
+      LayerNode.group([
+        Project.node,
+        SessionV2.node,
+        Work.node,
+        WorkRunner.node,
+        WorkStore.node,
+        ProjectCopy.node,
+        ProjectDirectories.node,
+        AppProcess.node,
+        Database.node,
+        EventV2.node,
+        WorkMergeReview.node,
+      ]),
       [
-        WorkPlanner.node,
-        Layer.succeed(
-          WorkPlanner.Service,
-          WorkPlanner.Service.of({
-            run: ({ goal }) =>
-              Effect.succeed(
-                Work.PlanOutput.make({
-                  tasks: [
-                    {
-                      key: "build",
+        [SessionExecution.node, SessionExecution.noopLayer],
+        [WorkExecution.node, WorkExecution.noopLayer],
+        [
+          WorkPlanner.node,
+          Layer.succeed(
+            WorkPlanner.Service,
+            WorkPlanner.Service.of({
+              run: ({ goal }) =>
+                Effect.succeed(
+                  Work.PlanOutput.make({
+                    tasks: Array.from({ length: taskCount }, (_, index) => ({
+                      key: `build-${index}`,
                       title: "Build",
                       instructions: "Inspect the fixture",
-                      dependsOn: [],
+                      dependsOn: index === 0 ? [] : [`build-${index - 1}`],
                       role: "build",
                       isolation: "worktree",
                       criteria: goal.acceptanceCriteria.map((item) => item.id),
-                    },
-                  ],
+                    })),
+                  }),
+                ),
+            }),
+          ),
+        ],
+        [
+          WorkReviewer.node,
+          Layer.succeed(
+            WorkReviewer.Service,
+            WorkReviewer.Service.of({
+              run: ({ criteria, task, evidence }) =>
+                Effect.sync(() => {
+                  if (task.acceptance?.scope === "final")
+                    expect(evidence.some((item) => item.taskID !== task.id && item.producer === "git-host/1")).toBe(
+                      true,
+                    )
+                  return Work.ReviewOutput.make({
+                    criteria: criteria.map((item) => ({
+                      criterionID: item.id,
+                      verdict: "pass",
+                      findings: [],
+                      allowsRepair: false,
+                    })),
+                  })
                 }),
-              ),
-          }),
-        ),
+            }),
+          ),
+        ],
       ],
-      [
-        WorkReviewer.node,
-        Layer.succeed(
-          WorkReviewer.Service,
-          WorkReviewer.Service.of({
-            run: ({ criteria, task, evidence }) =>
-              Effect.sync(() => {
-                if (task.acceptance?.scope === "final")
-                  expect(evidence.some((item) => item.taskID !== task.id && item.producer === "git-host/1")).toBe(true)
-                return Work.ReviewOutput.make({
-                  criteria: criteria.map((item) => ({
-                    criterionID: item.id,
-                    verdict: "pass",
-                    findings: [],
-                    allowsRepair: false,
-                  })),
-                })
-              }),
-          }),
-        ),
-      ],
-    ],
-  ),
-)
+    ),
+  )
+const it = isolationTests()
 
 function workspace(git = true) {
   return Effect.gen(function* () {
@@ -293,7 +302,104 @@ describe("Work isolation admission", () => {
         expect(resumed.location?.directory).not.toBe(directory)
         expect(resumed.status).not.toBe("blocked")
         expect((yield* store.attempts(task.id)).length).toBeGreaterThan(0)
+        expect((yield* store.attempts(task.id))[0].kind).toBe("execute")
+        expect((yield* work.get(created.goal.id))?.usage.repairs).toBe(0)
       }),
     30000,
   )
+
+  for (const count of [2, 3])
+    for (const maximum of [1, 3]) {
+      isolationTests(count).live(
+        `readmits isolation failure chain ${count} at concurrency ${maximum}`,
+        () =>
+          Effect.gen(function* () {
+            const { directory } = yield* workspace()
+            const projects = yield* Project.Service
+            const project = yield* projects.resolve(directory)
+            const obstruction = path.join(Global.Path.data, "worktree", project.id)
+            yield* Effect.promise(async () => {
+              await fs.mkdir(path.dirname(obstruction), { recursive: true })
+              await fs.writeFile(obstruction, "blocked")
+            })
+            yield* Effect.addFinalizer(() => Effect.promise(() => fs.rm(obstruction, { recursive: true, force: true })))
+            const work = yield* Work.Service
+            const runner = yield* WorkRunner.Service
+            const store = yield* WorkStore.Service
+            const events = yield* EventV2.Service
+            const db = (yield* Database.Service).db
+            const created = yield* work.create({
+              location: { directory },
+              objective: "Inspect chain",
+              planning: true,
+              budget: { maxParallelTasks: maximum, maxRepairAttempts: 1 },
+              acceptanceCriteria: [{ description: "Fixture inspected", required: true, evidence: "review" }],
+            })
+            yield* runner.run({ goalID: created.goal.id, force: true })
+            const blocked = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
+            expect(blocked).toHaveLength(count)
+            expect(blocked.every((task) => task.status === "blocked" && task.attemptCount === 0)).toBe(true)
+            yield* Effect.promise(() => fs.unlink(obstruction))
+            const admitted: { kind: string; ready: boolean }[] = []
+            const unsubscribe = yield* events.listen((event) =>
+              Effect.gen(function* () {
+                if (!Schema.is(Work.Event.AttemptAdmitted)(event) || event.data.info.goalID !== created.goal.id) return
+                const task = yield* store.getTask(event.data.info.taskID)
+                if (task?.role !== "build") return
+                const handoffs = yield* store.handoffs(created.goal.id)
+                const dependencies: boolean[] = []
+                for (const dependency of task.dependsOn) {
+                  dependencies.push(
+                    (yield* store.getTask(dependency))?.status === "completed" &&
+                      handoffs.some((handoff) => handoff.taskID === dependency && handoff.recipients.includes(task.id)),
+                  )
+                }
+                admitted.push({ kind: event.data.info.kind, ready: dependencies.every(Boolean) })
+              }),
+            )
+            yield* Effect.addFinalizer(() => unsubscribe)
+            yield* runner.run({ goalID: created.goal.id, force: true })
+            const review = yield* WorkMergeReview.Service
+            for (let index = 0; index < count; index++) {
+              const current = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
+              expect(current.filter((task) => task.status === "pending")).toHaveLength(count - index - 1)
+              const merging = current.find((task) => task.status === "merging")!
+              expect(merging).toBeDefined()
+              const candidate = yield* review.read(created.goal.id, merging.id)
+              yield* review.decide(created.goal.id, merging.id, candidate.token, true)
+              yield* runner.run({ goalID: created.goal.id, force: true })
+            }
+            const tasks = yield* store.tasks(created.goal.id)
+            const goal = yield* store.getGoal(created.goal.id)
+            expect(tasks.filter((task) => task.role === "build").map((task) => task.status)).toEqual(
+              Array(count).fill("completed"),
+            )
+            expect(goal?.usage.repairs).toBe(0)
+            expect(admitted.filter((item) => item.kind !== "review")).toEqual(
+              Array.from({ length: count }, () => ({ kind: "execute", ready: true })),
+            )
+            const history = yield* db
+              .select()
+              .from(EventTable)
+              .where(eq(EventTable.aggregate_id, created.goal.id))
+              .orderBy(asc(EventTable.seq))
+              .all()
+              .pipe(Effect.orDie)
+            yield* db.delete(WorkGoalTable).where(eq(WorkGoalTable.id, created.goal.id)).run().pipe(Effect.orDie)
+            yield* events.remove(created.goal.id)
+            yield* events.replayAll(
+              history.map((row) => ({
+                id: row.id,
+                aggregateID: row.aggregate_id,
+                seq: row.seq,
+                type: row.type,
+                data: row.data,
+              })),
+            )
+            expect(yield* store.tasks(created.goal.id)).toEqual(tasks)
+            expect(yield* store.getGoal(created.goal.id)).toEqual(goal)
+          }),
+        60000,
+      )
+    }
 })
