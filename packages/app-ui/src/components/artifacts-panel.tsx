@@ -10,6 +10,7 @@ import { useFileLink } from "@zaovra-ai/session-ui/context/file-link"
 import { collectArtifactFiles } from "@/utils/artifact-files"
 import { useFile } from "@/context/file"
 import { artifactLines } from "@/utils/artifact-lines"
+import { Icon } from "@zaovra-ai/ui/icon"
 
 export function ArtifactsPanel(props: { active: boolean; target?: { path: string } }) {
   const language = useLanguage()
@@ -18,7 +19,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
   const sync = useSync()
   const file = useFile()
   const openFile = useFileLink()
-  const { sessionKey, params } = useSessionLayout()
+  const { sessionKey, params, view } = useSessionLayout()
   const [inventory, setInventory] = createSignal<Awaited<ReturnType<typeof collectArtifactFiles>>>()
   const [loading, setLoading] = createSignal(false)
   const [baseline, setBaseline] = createSignal<Set<string>>()
@@ -120,16 +121,33 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
       ref={panel}
       data-component="artifacts-panel"
       class="flex h-full min-h-0 flex-col bg-background-base"
-      classList={{ "!fixed top-[38px] left-[52px] right-0 bottom-0 !h-auto z-50": props.active && state.maximized }}
+      classList={{ "!fixed inset-0 !h-auto z-50": props.active && state.maximized }}
       aria-label={language.t("artifact.panel")}
     >
       <div class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-weak-base px-3">
         <button type="button" aria-expanded={drawer.open} onClick={() => setDrawer("open", !drawer.open)}>
           {language.t("artifact.files")} ⌄
         </button>
-        <button type="button" onClick={() => setState("maximized", !state.maximized)}>
-          {language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            class="flex size-8 items-center justify-center rounded-lg hover:bg-background-stronger"
+            onClick={() => setState("maximized", !state.maximized)}
+            aria-label={language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
+            title={language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
+          >
+            <Icon name={state.maximized ? "collapse" : "expand"} />
+          </button>
+          <button
+            type="button"
+            class="flex size-8 items-center justify-center rounded-lg hover:bg-background-stronger"
+            onClick={() => view().reviewPanel.close()}
+            aria-label={language.t("common.close")}
+            title={language.t("common.close")}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
       </div>
       <form
         class="flex shrink-0 gap-2 border-b border-border-weak-base p-3"

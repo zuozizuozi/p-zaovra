@@ -545,11 +545,12 @@ function SessionHeaderV2Actions(props: { state: SessionHeaderV2ActionsState }) {
       <Show when={props.state.reviewVisible}>
         <button
           type="button"
-          class="h-9 rounded-md px-3 text-xs text-text-weak hover:bg-background-stronger hover:text-text-strong"
+          class="flex size-9 items-center justify-center rounded-md text-text-weak hover:bg-background-stronger hover:text-text-strong"
           onClick={props.state.onArtifacts}
           aria-label={language.t("artifact.view")}
+          title={language.t("artifact.view")}
         >
-          {language.t("artifact.panel")}
+          <Icon name="window-cursor" />
         </button>
         <TooltipV2
           class="shrink-0"
