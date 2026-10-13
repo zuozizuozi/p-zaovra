@@ -1,4 +1,6 @@
-import { createEffect, Show, Suspense, type ParentProps } from "solid-js"
+import { createEffect, lazy, Show, Suspense, type ParentProps } from "solid-js"
+import { createStore } from "solid-js/store"
+import { makeEventListener } from "@solid-primitives/event-listener"
 import { useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { UpdaterNotification } from "@/components/updater-notification"
@@ -18,6 +20,10 @@ import { useTabs } from "@/context/tabs"
 import { homeProjectDirectories } from "@/pages/layout/helpers"
 import { DraftLoading } from "@/components/draft-loading"
 
+const DesktopSettings = lazy(() =>
+  import("@/components/settings-v2/dialog-settings-v2").then((module) => ({ default: module.DialogSettings })),
+)
+
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
   const desktop = () => platform.platform === "desktop"
@@ -29,7 +35,16 @@ export default function NewLayout(props: ParentProps) {
   const server = useServer()
   const tabs = useTabs()
   const pickDirectory = useDirectoryPicker()
+  const [settingsPage, setSettingsPage] = createStore<{ open: boolean; sessionID?: string; defaultValue?: string }>({
+    open: false,
+  })
+  makeEventListener(window, "zaovra:settings-open", (event) => {
+    if (!desktop() || !(event instanceof CustomEvent)) return
+    event.preventDefault()
+    setSettingsPage({ open: true, sessionID: event.detail?.sessionID, defaultValue: event.detail?.defaultValue })
+  })
   setNavigate(navigate)
+  makeEventListener(window, "zaovra:settings-close", () => setSettingsPage("open", false))
 
   createEffect(() => setV2Toast(true))
 
@@ -148,11 +163,25 @@ export default function NewLayout(props: ParentProps) {
       <div class="flex min-h-0 min-w-0 flex-1">
         <Show when={desktop()}>
           <DesktopRail />
-          <DesktopSidebar />
+          <Show when={!settingsPage.open}>
+            <DesktopSidebar />
+          </Show>
         </Show>
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
-            <Suspense fallback={<DraftLoading />}>{props.children}</Suspense>
+          <main class="relative flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
+            <div class="size-full min-h-0 flex flex-col" classList={{ hidden: settingsPage.open }}>
+              <Suspense fallback={<DraftLoading />}>{props.children}</Suspense>
+            </div>
+            <Show when={settingsPage.open}>
+              <Suspense fallback={<DraftLoading />}>
+                <DesktopSettings
+                  embedded
+                  sessionID={settingsPage.sessionID}
+                  defaultValue={settingsPage.defaultValue}
+                  onClose={() => setSettingsPage("open", false)}
+                />
+              </Suspense>
+            </Show>
           </main>
           {import.meta.env.DEV && import.meta.env.VITE_ZAOVRA_DEBUG_OVERLAY === "1" && <DebugBar inline />}
           <UpdaterNotification />

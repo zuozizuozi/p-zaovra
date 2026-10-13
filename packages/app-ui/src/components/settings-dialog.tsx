@@ -15,6 +15,11 @@ export function useSettingsDialog(defaultValue?: string) {
   })
 
   return () => {
+    const event = new CustomEvent("zaovra:settings-open", {
+      cancelable: true,
+      detail: { sessionID: params.id, defaultValue },
+    })
+    if (!window.dispatchEvent(event)) return
     const current = ++run
     const sessionID = params.id
     void import("@/components/settings-v2").then((module) => {

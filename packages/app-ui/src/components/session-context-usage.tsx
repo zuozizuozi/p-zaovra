@@ -128,10 +128,13 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   const tooltipValue = () => (
     <div class="flex w-[120px] flex-col gap-2">
       <ContextTooltipRow name={language.t("context.usage.cost")} value={cost()} />
-      <ContextTooltipRow name={language.t("context.usage.usage")} value={`${context()?.usage ?? 0}%`} />
+      <ContextTooltipRow
+        name={language.t("context.usage.usage")}
+        value={context() ? `${context()!.usage}%` : language.t("usage.unknown")}
+      />
       <ContextTooltipRow
         name={language.t("context.usage.tokens")}
-        value={context()?.total.toLocaleString(language.intl()) ?? "0"}
+        value={context()?.total.toLocaleString(language.intl()) ?? language.t("usage.unknown")}
       />
     </div>
   )

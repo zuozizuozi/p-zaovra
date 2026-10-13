@@ -84,7 +84,10 @@ const playDemoSound = (id: string | undefined) => {
 
 export const SettingsGeneralV2: Component<{
   sessionID?: string
+  section?: "general" | "appearance" | "privacy" | "experiments" | "permissions"
 }> = (props) => {
+  const visible = (section: "general" | "appearance" | "privacy" | "experiments" | "permissions") =>
+    !props.section || props.section === section
   const theme = useTheme()
   const language = useLanguage()
   const permission = usePermission()
@@ -285,17 +288,6 @@ export const SettingsGeneralV2: Component<{
             label={(o) => o.label}
             onSelect={(option) => option && language.setLocale(option.value)}
           />
-        </SettingsRowV2>
-
-        <SettingsRowV2
-          title={language.t("command.permissions.autoaccept.enable")}
-          description={language.t("toast.permissions.autoaccept.on.description")}
-        >
-          <div data-action="settings-auto-accept-permissions">
-            <Switch hideLabel checked={accepting()} disabled={!dir()} onChange={toggleAccept}>
-              {language.t("command.permissions.autoaccept.enable")}
-            </Switch>
-          </div>
         </SettingsRowV2>
 
         <SettingsRowV2
@@ -755,103 +747,137 @@ export const SettingsGeneralV2: Component<{
   return (
     <>
       <div class="settings-v2-tab-header">
-        <h2 class="settings-v2-tab-title">{language.t("settings.tab.general")}</h2>
+        <h2 class="settings-v2-tab-title">
+          {language.t(
+            props.section === "appearance"
+              ? "settings.general.section.appearance"
+              : props.section === "privacy"
+                ? "settings.network.privacy"
+                : props.section === "experiments"
+                  ? "settings.experiments"
+                  : props.section === "permissions"
+                    ? "settings.permissions.title"
+                    : "settings.tab.general",
+          )}
+        </h2>
       </div>
 
       <div class="settings-v2-tab-body">
-        <Show when={settings.general.layoutTransitionAvailable()}>
-          <InterfaceSection />
-        </Show>
-
-        <Show when={settings.general.newInterfaceNoticeVisible()}>
-          <InterfaceNoticeSection />
-        </Show>
-
-        <GeneralSection />
-        <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.network.privacy")}</h3>
+        <Show when={visible("permissions")}>
           <SettingsListV2>
             <SettingsRowV2
-              title={language.t("settings.network.models")}
-              description={language.t("settings.network.source", {
-                url: `${network()?.source ?? "https://models.dev"}/api.json`,
-              })}
+              title={language.t("command.permissions.autoaccept.enable")}
+              description={language.t("toast.permissions.autoaccept.on.description")}
             >
-              <Switch
-                hideLabel
-                checked={network()?.autoRefresh ?? false}
-                disabled={!network() || network()?.locked}
-                onChange={async (autoRefresh) => {
-                  await serverSdk()
-                    .client.global.modelsNetwork.set({ autoRefresh }, { throwOnError: true })
-                    .catch((error) => {
-                      showToast({ title: language.t("settings.network.saveError"), description: String(error) })
-                    })
-                  await reloadNetwork()
-                }}
-              >
-                {language.t("settings.network.models")}
-              </Switch>
+              <div data-action="settings-auto-accept-permissions">
+                <Switch hideLabel checked={accepting()} disabled={!dir()} onChange={toggleAccept}>
+                  {language.t("command.permissions.autoaccept.enable")}
+                </Switch>
+              </div>
             </SettingsRowV2>
           </SettingsListV2>
-          <Show when={platform.updater?.autoCheck}>
-            <SettingsRowV2
-              title={language.t("settings.network.updates")}
-              description={language.t("settings.network.updateHint")}
-            >
-              <Switch
-                hideLabel
-                checked={automatic() ?? true}
-                disabled={automatic.loading}
-                onChange={async (enabled) => {
-                  await platform.updater
-                    ?.setAutoCheck?.(enabled)
-                    .catch((error) =>
-                      showToast({ title: language.t("settings.network.saveError"), description: String(error) }),
-                    )
-                  await reloadAutomatic()
-                }}
+        </Show>
+        <Show when={visible("general")}>
+          <Show when={settings.general.layoutTransitionAvailable()}>
+            <InterfaceSection />
+          </Show>
+
+          <Show when={settings.general.newInterfaceNoticeVisible()}>
+            <InterfaceNoticeSection />
+          </Show>
+
+          <GeneralSection />
+        </Show>
+        <Show when={visible("privacy")}>
+          <div class="settings-v2-section">
+            <h3 class="settings-v2-section-title">{language.t("settings.network.privacy")}</h3>
+            <SettingsListV2>
+              <SettingsRowV2
+                title={language.t("settings.network.models")}
+                description={language.t("settings.network.source", {
+                  url: `${network()?.source ?? "https://models.dev"}/api.json`,
+                })}
               >
-                {language.t("settings.network.updates")}
-              </Switch>
-            </SettingsRowV2>
-          </Show>
-          <p class="text-12-regular text-text-weak">{language.t("settings.network.policy")}</p>
-          <Show when={network.error}>
-            <p class="text-12-regular text-text-weak">{language.t("settings.network.readError")}</p>
-          </Show>
-          <Show when={network()?.locked}>
-            <p class="text-12-regular text-text-weak">{language.t("settings.network.locked")}</p>
-          </Show>
-        </div>
-
-        <AppearanceSection />
-
-        <NotificationsSection />
-
-        <SoundsSection />
-
-        <Show when={desktop()}>
-          <UpdatesSection />
+                <Switch
+                  hideLabel
+                  checked={network()?.autoRefresh ?? false}
+                  disabled={!network() || network()?.locked}
+                  onChange={async (autoRefresh) => {
+                    await serverSdk()
+                      .client.global.modelsNetwork.set({ autoRefresh }, { throwOnError: true })
+                      .catch((error) => {
+                        showToast({ title: language.t("settings.network.saveError"), description: String(error) })
+                      })
+                    await reloadNetwork()
+                  }}
+                >
+                  {language.t("settings.network.models")}
+                </Switch>
+              </SettingsRowV2>
+            </SettingsListV2>
+            <Show when={platform.updater?.autoCheck}>
+              <SettingsRowV2
+                title={language.t("settings.network.updates")}
+                description={language.t("settings.network.updateHint")}
+              >
+                <Switch
+                  hideLabel
+                  checked={automatic() ?? true}
+                  disabled={automatic.loading}
+                  onChange={async (enabled) => {
+                    await platform.updater
+                      ?.setAutoCheck?.(enabled)
+                      .catch((error) =>
+                        showToast({ title: language.t("settings.network.saveError"), description: String(error) }),
+                      )
+                    await reloadAutomatic()
+                  }}
+                >
+                  {language.t("settings.network.updates")}
+                </Switch>
+              </SettingsRowV2>
+            </Show>
+            <p class="text-12-regular text-text-weak">{language.t("settings.network.policy")}</p>
+            <Show when={network.error}>
+              <p class="text-12-regular text-text-weak">{language.t("settings.network.readError")}</p>
+            </Show>
+            <Show when={network()?.locked}>
+              <p class="text-12-regular text-text-weak">{language.t("settings.network.locked")}</p>
+            </Show>
+          </div>
+        </Show>
+        <Show when={visible("appearance")}>
+          <AppearanceSection />
+          <DisplaySection />
         </Show>
 
-        <DisplaySection />
+        <Show when={visible("general")}>
+          <NotificationsSection />
 
-        <div class="settings-v2-section">
-          <h3 class="settings-v2-section-title">{language.t("settings.experiments")}</h3>
-          <SettingsListV2>
-            <SettingsRowV2
-              title={language.t("work.experimental")}
-              description={language.t("work.experimental.description")}
-            >
-              <Switch hideLabel checked={settings.general.workGraph()} onChange={settings.general.setWorkGraph}>
-                {language.t("work.experimental")}
-              </Switch>
-            </SettingsRowV2>
-          </SettingsListV2>
-        </div>
+          <SoundsSection />
 
-        <AdvancedSection />
+          <Show when={desktop()}>
+            <UpdatesSection />
+          </Show>
+
+          <AdvancedSection />
+        </Show>
+
+        <Show when={visible("experiments")}>
+          <div class="settings-v2-section">
+            <h3 class="settings-v2-section-title">{language.t("settings.experiments")}</h3>
+            <SettingsListV2>
+              <SettingsRowV2
+                title={language.t("work.experimental")}
+                description={language.t("work.experimental.description")}
+              >
+                <Switch hideLabel checked={settings.general.workGraph()} onChange={settings.general.setWorkGraph}>
+                  {language.t("work.experimental")}
+                </Switch>
+              </SettingsRowV2>
+            </SettingsListV2>
+          </div>
+        </Show>
       </div>
     </>
   )

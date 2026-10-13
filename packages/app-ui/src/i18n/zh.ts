@@ -3,6 +3,12 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "prompt.permission.automatic": "自动批准",
+  "prompt.permission.ask": "请求批准",
+  "settings.search": "搜索设置",
+  "session.turn.duration": "用时 {{seconds}} 秒",
+  "session.changes.inspect": "查看变更",
+  "usage.unknownSummary": "服务商未返回用量，当前总量未知。",
   "artifact.maximize": "最大化预览",
   "artifact.restore": "还原预览",
   "artifact.filter": "筛选文件",

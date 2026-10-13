@@ -1,4 +1,6 @@
-import { Component, Show, createSignal, startTransition } from "solid-js"
+import { Component, For, Show, createEffect, createSignal, startTransition } from "solid-js"
+import { createStore } from "solid-js/store"
+import { Dynamic } from "solid-js/web"
 import { Dialog, DialogHeader, DialogTitle } from "@zaovra-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@zaovra-ai/ui/v2/tabs-v2"
 import { Icon } from "@zaovra-ai/ui/icon"
@@ -17,21 +19,80 @@ import { SettingsAbout } from "./about"
 export const DialogSettings: Component<{
   sessionID?: string
   defaultValue?: string
+  embedded?: boolean
+  onClose?: () => void
 }> = (props) => {
   const language = useLanguage()
   const platform = usePlatform()
   const dialog = useDialog()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
+  createEffect(() => setTab(props.defaultValue ?? "general"))
+  const [search, setSearch] = createStore({ value: "" })
+  const groups = [
+    {
+      label: "settings.section.desktop",
+      items: [
+        { value: "general", label: "settings.tab.general", icon: "sliders" },
+        { value: "appearance", label: "settings.general.section.appearance", icon: "sliders" },
+        { value: "shortcuts", label: "settings.tab.shortcuts", icon: "keyboard" },
+      ],
+    },
+    {
+      label: "settings.section.server",
+      items: [
+        { value: "providers", label: "settings.providers.title", icon: "providers" },
+        { value: "models", label: "settings.models.title", icon: "models" },
+        { value: "usage", label: "usage.title", icon: "models" },
+        { value: "servers", label: "status.popover.tab.servers", icon: "server" },
+      ],
+    },
+    {
+      label: "sidebar.settings",
+      items: [
+        { value: "permissions", label: "settings.permissions.title", icon: "shield" },
+        { value: "privacy", label: "settings.network.privacy", icon: "shield" },
+        { value: "experiments", label: "settings.experiments", icon: "branch" },
+        { value: "about", label: "settings.about.title", icon: "help" },
+      ],
+    },
+  ] as const
 
   const showProviders = () => {
+    if (props.embedded) {
+      dialog.close()
+      setTab("providers")
+      return
+    }
     void dialog.show(() => <DialogSettings sessionID={props.sessionID} defaultValue="providers" />)
   }
 
   return (
-    <Dialog size="x-large" variant="settings" class="settings-v2-dialog">
-      <DialogHeader closeLabel={language.t("common.close")}>
-        <DialogTitle>{language.t("sidebar.settings")}</DialogTitle>
-      </DialogHeader>
+    <Dynamic
+      component={props.embedded ? "section" : Dialog}
+      size="x-large"
+      variant="settings"
+      class={props.embedded ? "settings-v2-page" : "settings-v2-dialog"}
+    >
+      <Show
+        when={props.embedded}
+        fallback={
+          <DialogHeader closeLabel={language.t("common.close")}>
+            <DialogTitle>{language.t("sidebar.settings")}</DialogTitle>
+          </DialogHeader>
+        }
+      >
+        <header class="flex h-[50px] shrink-0 items-center justify-between border-b border-v2-border-border-muted px-6">
+          <span class="text-sm font-medium">{language.t("sidebar.settings")}</span>
+          <button
+            type="button"
+            class="flex size-10 items-center justify-center rounded-lg hover:bg-v2-background-bg-layer-02"
+            onClick={props.onClose}
+            aria-label={language.t("common.close")}
+          >
+            ×
+          </button>
+        </header>
+      </Show>
       <TabsV2
         orientation="vertical"
         variant="settings"
@@ -40,62 +101,56 @@ export const DialogSettings: Component<{
         class="settings-v2"
       >
         <TabsV2.List>
-          <div class="flex flex-col justify-between h-full w-full">
-            <div class="flex flex-col gap-3 w-full">
-              <div class="flex flex-col gap-3">
-                <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>{language.t("settings.section.desktop")}</TabsV2.SectionTitle>
-                  <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="general">
-                      <Icon name="sliders" />
-                      {language.t("settings.tab.general")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="shortcuts">
-                      <Icon name="keyboard" />
-                      {language.t("settings.tab.shortcuts")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="usage">
-                      <Icon name="models" />
-                      {language.t("usage.title")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="about">
-                      <Icon name="help" />
-                      {language.t("settings.about.title")}
-                    </TabsV2.Trigger>
-                  </div>
-                </div>
-
-                <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>
-                    {language.t(platform.remoteServers === false ? "settings.models.title" : "settings.section.server")}
-                  </TabsV2.SectionTitle>
-                  <div class="flex flex-col gap-1.5 w-full">
-                    <Show when={platform.remoteServers !== false}>
-                      <TabsV2.Trigger value="servers">
-                        <Icon name="server" />
-                        {language.t("status.popover.tab.servers")}
+          <div class="flex h-full w-full flex-col gap-4 overflow-auto">
+            <input
+              type="search"
+              class="h-8 w-full shrink-0 rounded-lg border border-v2-border-border-muted bg-transparent px-2 text-xs outline-none focus:border-v2-border-border-focus"
+              aria-label={language.t("settings.search")}
+              placeholder={language.t("settings.search")}
+              value={search.value}
+              onInput={(event) => setSearch("value", event.currentTarget.value)}
+            />
+            <For each={groups}>
+              {(group) => (
+                <div class="flex flex-col gap-1">
+                  <TabsV2.SectionTitle>{language.t(group.label)}</TabsV2.SectionTitle>
+                  <For
+                    each={group.items.filter(
+                      (item) =>
+                        (item.value !== "servers" || platform.remoteServers !== false) &&
+                        language.t(item.label).toLocaleLowerCase().includes(search.value.toLocaleLowerCase()),
+                    )}
+                  >
+                    {(item) => (
+                      <TabsV2.Trigger value={item.value}>
+                        <Icon name={item.icon} />
+                        {language.t(item.label)}
                       </TabsV2.Trigger>
-                    </Show>
-                    <TabsV2.Trigger value="providers">
-                      <Icon name="providers" />
-                      {language.t("settings.providers.title")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="models">
-                      <Icon name="models" />
-                      {language.t("settings.models.title")}
-                    </TabsV2.Trigger>
-                  </div>
+                    )}
+                  </For>
                 </div>
-              </div>
-            </div>
-            <div class="settings-v2-nav-footer">
+              )}
+            </For>
+            <div class="settings-v2-nav-footer mt-auto">
               <span>{language.t("app.name.desktop")}</span>
               <span>v{platform.version}</span>
             </div>
           </div>
         </TabsV2.List>
         <TabsV2.Content value="general" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} />
+          <SettingsGeneralV2 sessionID={props.sessionID} section="general" />
+        </TabsV2.Content>
+        <TabsV2.Content value="permissions" class="settings-v2-panel">
+          <SettingsGeneralV2 sessionID={props.sessionID} section="permissions" />
+        </TabsV2.Content>
+        <TabsV2.Content value="appearance" class="settings-v2-panel">
+          <SettingsGeneralV2 sessionID={props.sessionID} section="appearance" />
+        </TabsV2.Content>
+        <TabsV2.Content value="privacy" class="settings-v2-panel">
+          <SettingsGeneralV2 sessionID={props.sessionID} section="privacy" />
+        </TabsV2.Content>
+        <TabsV2.Content value="experiments" class="settings-v2-panel">
+          <SettingsGeneralV2 sessionID={props.sessionID} section="experiments" />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />
@@ -118,6 +173,6 @@ export const DialogSettings: Component<{
           <SettingsAbout />
         </TabsV2.Content>
       </TabsV2>
-    </Dialog>
+    </Dynamic>
   )
 }

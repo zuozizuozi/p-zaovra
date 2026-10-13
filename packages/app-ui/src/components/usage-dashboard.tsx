@@ -140,8 +140,7 @@ export function SessionUsageBar() {
           <Show when={value()}>
             {(data) => (
               <>
-                <UsageCard label={language.t("usage.conversation")} totals={data().total} />
-                <UsageEstimates models={data().models} total={data().total} />
+                <UsagePopoverSummary totals={data().total} />
               </>
             )}
           </Show>
@@ -155,6 +154,63 @@ export function SessionUsageBar() {
         </Popover.Content>
       </Popover.Portal>
     </Popover>
+  )
+}
+
+function UsagePopoverSummary(props: { totals: Totals }) {
+  const language = useLanguage()
+  const segments = () => [
+    { key: "input" as const, value: props.totals.input, color: "var(--zaovra-accent, #7c3aed)" },
+    { key: "cacheRead" as const, value: props.totals.cacheRead, color: "var(--zaovra-success, #23845a)" },
+    { key: "cacheWrite" as const, value: props.totals.cacheWrite, color: "var(--zaovra-warning, #b4610e)" },
+    {
+      key: "outputIncludingReasoning" as const,
+      value: usageDisplay(props.totals).output,
+      color: "var(--zaovra-muted, #8e8a97)",
+    },
+  ]
+  return (
+    <Show
+      when={!usageDisplay(props.totals).unknown}
+      fallback={<p class="p-4 text-sm">{language.t("usage.unknownSummary")}</p>}
+    >
+      <section class="usage-card" aria-label={language.t("usage.conversation")}>
+        <div class="usage-total">
+          {tokenLabel(props.totals)} <span>Tokens</span>
+        </div>
+        <div class="mb-4 flex h-2 overflow-hidden rounded-full" aria-hidden="true">
+          <For each={segments()}>
+            {(segment) => (
+              <span
+                style={{
+                  background: segment.color,
+                  width: `${props.totals.total ? (segment.value / props.totals.total) * 100 : 0}%`,
+                }}
+              />
+            )}
+          </For>
+        </div>
+        <dl>
+          <For each={segments()}>
+            {(segment) => (
+              <div>
+                <dt class="flex items-center gap-2">
+                  <span class="size-2 rounded-full" style={{ background: segment.color }} />
+                  {language.t(`usage.${segment.key}`)}
+                </dt>
+                <dd>
+                  {props.totals.unreported ? "≥ " : ""}
+                  {segment.value.toLocaleString()}
+                </dd>
+              </div>
+            )}
+          </For>
+        </dl>
+        <Show when={props.totals.unreported}>
+          <p>{language.t("usage.incomplete")}</p>
+        </Show>
+      </section>
+    </Show>
   )
 }
 

@@ -1,4 +1,10 @@
 export const dict = {
+  "prompt.permission.automatic": "Auto-approve",
+  "prompt.permission.ask": "Ask first",
+  "settings.search": "Search settings",
+  "session.turn.duration": "Took {{seconds}}s",
+  "session.changes.inspect": "Review changes",
+  "usage.unknownSummary": "The provider did not report usage; the total is unknown.",
   "artifact.maximize": "Maximize preview",
   "artifact.restore": "Restore preview",
   "artifact.filter": "Filter files",
