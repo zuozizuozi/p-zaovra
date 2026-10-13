@@ -1616,7 +1616,8 @@ function HomeSessionSearchResultRow(props: {
   onHighlight: () => void
   onSelect: (session: Session, options?: OpenSessionOptions) => void
 }) {
-  const title = createMemo(() => sessionTitle(props.record.session.title) || props.record.session.id)
+  const language = useLanguage()
+  const title = createMemo(() => sessionTitle(props.record.session.title, language) || props.record.session.id)
   const showProjectName = () => props.showProjectName && props.record.projectName
 
   const key = () => homeSessionSearchKey(props.record)
@@ -1691,7 +1692,7 @@ function HomeSessionRow(props: {
   archiveSession: (session: Session) => Promise<void>
 }) {
   const language = useLanguage()
-  const title = createMemo(() => sessionTitle(props.record.session.title) || props.record.session.id)
+  const title = createMemo(() => sessionTitle(props.record.session.title, language) || props.record.session.id)
   const showProjectName = () => props.showProjectName && props.record.projectName
 
   return (

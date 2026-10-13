@@ -351,6 +351,7 @@ export const dict = {
   "session.activity.question": "等待你回答",
   "session.activity.running": "执行中",
   "session.activity.thinking": "思考中",
+  "session.title.child": "子对话",
   "session.activity.working": "正在执行",
   "session.activity.awaiting": "等待确认",
   "session.activity.success": "已完成",

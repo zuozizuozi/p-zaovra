@@ -9,6 +9,7 @@ import { ServerConnection, serverName } from "@/context/server"
 import { displayName, projectForSession } from "@/pages/layout/helpers"
 import { SessionTabAvatar } from "@/pages/layout/session-tab-avatar"
 import { showToast } from "@/utils/toast"
+import { sessionTitle } from "@/utils/session-title"
 import type { Session } from "@zaovra-ai/sdk/v2"
 import { canOpenTabRename, forwardTabRef } from "./titlebar-tab-gesture"
 import { TabPreviewPopover } from "./titlebar-tab-popover"
@@ -58,7 +59,7 @@ export function TabNavItem(props: {
     if (!session) return
     return projectForSession(session, serverCtx()?.projects.list() ?? [])
   })
-  const title = createMemo(() => props.session()?.title ?? props.fallbackTitle)
+  const title = createMemo(() => sessionTitle(props.session()?.title ?? props.fallbackTitle, language))
 
   const projectName = createMemo(() => {
     const session = props.session()
@@ -332,7 +333,7 @@ export function TabNavItem(props: {
       }}
       data={{
         projectName: projectName(),
-        title: props.session()?.title,
+        title: sessionTitle(props.session()?.title, language),
         path: previewPath(),
         serverName: serverLabel(),
       }}

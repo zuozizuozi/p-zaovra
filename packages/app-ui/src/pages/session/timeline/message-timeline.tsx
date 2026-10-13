@@ -308,7 +308,7 @@ export function MessageTimeline(props: {
     return sync().session.get(id)
   })
   const titleValue = createMemo(() => info()?.title)
-  const titleLabel = createMemo(() => sessionTitle(titleValue()))
+  const titleLabel = createMemo(() => sessionTitle(titleValue(), language))
   const shareUrl = createMemo(() => info()?.share?.url)
   const shareEnabled = createMemo(() => false)
   const parentID = createMemo(() => info()?.parentID)
@@ -322,7 +322,7 @@ export function MessageTimeline(props: {
     if (!id) return emptyMessages
     return sync().data.message[id] ?? emptyMessages
   })
-  const parentTitle = createMemo(() => sessionTitle(parent()?.title) ?? language.t("command.session.new"))
+  const parentTitle = createMemo(() => sessionTitle(parent()?.title, language) ?? language.t("command.session.new"))
   const getMsgParts = (msgId: string) => sync().data.part[msgId] ?? emptyParts
   const getMsgPart = (messageID: string, partID: string) => getMsgParts(messageID).find((part) => part.id === partID)
   const childTaskDescription = createMemo(() => {
@@ -975,7 +975,7 @@ export function MessageTimeline(props: {
 
   function DialogDeleteSession(props: { sessionID: string }) {
     const name = createMemo(
-      () => sessionTitle(sync().session.get(props.sessionID)?.title) ?? language.t("command.session.new"),
+      () => sessionTitle(sync().session.get(props.sessionID)?.title, language) ?? language.t("command.session.new"),
     )
     const handleDelete = async () => {
       await deleteSession(props.sessionID)
