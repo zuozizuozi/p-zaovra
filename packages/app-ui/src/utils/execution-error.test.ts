@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { explainExecutionError } from "./execution-error"
+import { explainExecutionError, executionErrorKind } from "./execution-error"
 import { dict } from "../i18n/zh"
 
 test("explains common execution failures in both languages without replacing redacted details", async () => {
@@ -33,4 +33,10 @@ test("does not turn every bad request into a protocol error", () => {
 test("leaves unrecognized failures intact", () => {
   expect(explainExecutionError("custom tool rejected field x", () => "wrong")).toBe("custom tool rejected field x")
   expect(explainExecutionError("file.ts:401 failed assertion", () => "wrong")).toBe("file.ts:401 failed assertion")
+})
+
+test("distinguishes missing models from missing protocol endpoints", () => {
+  expect(executionErrorKind("HTTP 404 model_not_found")).toBe("model")
+  expect(executionErrorKind("HTTP 404: model luna does not exist")).toBe("model")
+  expect(executionErrorKind("HTTP 404: /v1/responses not found")).toBe("protocol")
 })

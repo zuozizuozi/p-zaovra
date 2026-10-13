@@ -1,4 +1,6 @@
-import { explainExecutionError, executionErrorKind } from "@/utils/execution-error"
+import { executionErrorKind } from "@/utils/execution-error"
+import { ExecutionErrorCard } from "@/components/execution-error-card"
+import { useSettingsDialog } from "@/components/settings-dialog"
 import { protocolChoice } from "@/components/provider-protocol"
 import {
   createEffect,
@@ -20,7 +22,6 @@ import { useMutation } from "@tanstack/solid-query"
 import { createVirtualizer, defaultRangeExtractor, elementScroll, type VirtualItem } from "@tanstack/solid-virtual"
 import { Accordion } from "@zaovra-ai/ui/accordion"
 import { Button } from "@zaovra-ai/ui/button"
-import { Card } from "@zaovra-ai/ui/card"
 import {
   ContextToolGroup,
   Message,
@@ -286,6 +287,7 @@ export function MessageTimeline(props: {
   const settings = useSettings()
   const tabs = useTabs()
   const dialog = useDialog()
+  const openProviderSettings = useSettingsDialog("providers")
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
   const ownerSessionKey = sessionKey()
@@ -1359,9 +1361,7 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <Card variant="error" class="error-card">
-                <TaskActivity state="error" />
-                {explainExecutionError(errorRow().text, (key) => language.t(key as Parameters<typeof language.t>[0]))}
+              <ExecutionErrorCard detail={errorRow().text} onConfigure={openProviderSettings}>
                 <Show when={provider()}>
                   {(id) => (
                     <Button
@@ -1376,7 +1376,7 @@ export function MessageTimeline(props: {
                     </Button>
                   )}
                 </Show>
-              </Card>
+              </ExecutionErrorCard>
             </div>
           </TimelineRowFrame>
         )

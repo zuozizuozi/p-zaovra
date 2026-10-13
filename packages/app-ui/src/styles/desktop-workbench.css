@@ -116,6 +116,42 @@ html[data-theme="oc-2"] body[data-new-layout] {
     line-height: 1.6;
   }
 
+  [data-component="execution-error-card"] {
+    width: 100%;
+    max-width: 720px;
+    margin: 12px auto;
+    padding: 18px;
+    border: 1px solid var(--zaovra-line);
+    border-radius: var(--zaovra-radius-panel);
+    background: var(--zaovra-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--zaovra-error);
+    }
+    p {
+      color: var(--zaovra-secondary);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    details {
+      color: var(--zaovra-muted);
+      font-size: 12px;
+    }
+    summary {
+      cursor: pointer;
+    }
+    pre {
+      margin-top: 8px;
+      max-height: 240px;
+      overflow: auto;
+      color: var(--zaovra-secondary);
+    }
+  }
+
   /* A navigation surface, not a second welcome screen. */
   [data-component="desktop-rail"] {
     width: 52px;
@@ -387,7 +423,9 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="prompt-input-v2"] {
     border-radius: var(--zaovra-radius-composer);
-    box-shadow: inset 0 0 0 1px var(--zaovra-line), var(--zaovra-shadow);
+    box-shadow:
+      inset 0 0 0 1px var(--zaovra-line),
+      var(--zaovra-shadow);
   }
 
   [data-component="verification-summary"] {

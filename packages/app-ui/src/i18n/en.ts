@@ -1,4 +1,6 @@
 export const dict = {
+  "error.execution.model": "This model is unavailable. Check the model name and your provider access.",
+  "error.execution.unknown": "The task encountered an error. Review the details and current execution state before continuing.",
   "settings.about.title": "About Zaovra",
   "settings.about.version": "Version",
   "settings.about.dev": "Development",

@@ -14,20 +14,22 @@ export function executionErrorKind(detail: string) {
           ? "billing"
           : status === "429" || /rate.limit|too.many.requests/i.test(detail)
             ? "rateLimit"
-            : status === "404" ||
-                /not implemented|unsupported.*(?:protocol|endpoint)|(?:use|requires?|only supports?|not supported).*(?:\/responses|\/chat\/completions)|(?:\/responses|\/chat\/completions).*(?:not supported|unsupported|use instead)/i.test(
-                  detail,
-                )
-              ? "protocol"
-              : /context.length|context.window|maximum.context/i.test(detail)
-                ? "context"
-                : /timeout|timed.out|ETIMEDOUT/i.test(detail)
-                  ? "timeout"
-                  : /ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|network error/i.test(detail)
-                    ? "network"
-                    : /^50[0-4]$/.test(status ?? "") || /internal.server.error|service.unavailable/i.test(detail)
-                      ? "provider"
-                      : undefined
+            : /model[_ -]not[_ -]found|model.*(?:does not exist|not available|not found)/i.test(detail)
+              ? "model"
+              : status === "404" ||
+                  /not implemented|unsupported.*(?:protocol|endpoint)|(?:use|requires?|only supports?|not supported).*(?:\/responses|\/chat\/completions)|(?:\/responses|\/chat\/completions).*(?:not supported|unsupported|use instead)/i.test(
+                    detail,
+                  )
+                ? "protocol"
+                : /context.length|context.window|maximum.context/i.test(detail)
+                  ? "context"
+                  : /timeout|timed.out|ETIMEDOUT/i.test(detail)
+                    ? "timeout"
+                    : /ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|network error/i.test(detail)
+                      ? "network"
+                      : /^50[0-4]$/.test(status ?? "") || /internal.server.error|service.unavailable/i.test(detail)
+                        ? "provider"
+                        : undefined
   return key
 }
 
