@@ -77,6 +77,93 @@ const it = testEffect(layer)
 const sessionID = SessionV2.ID.make("ses_mcp")
 
 describe("MCP canonical tools", () => {
+  for (const pair of [
+    [
+      ["a_b", "c"],
+      ["a", "b_c"],
+    ],
+    [
+      ["a.b", "echo"],
+      ["a_b", "echo"],
+    ],
+    [
+      ["long".repeat(20), "echo".repeat(20)],
+      ["long".repeat(20), "echo".repeat(20) + "2"],
+    ],
+  ]) {
+    // Different long server names keep both tools on independently reconnectable services.
+    const entries = pair[0][0] === pair[1][0] ? [pair[0], [pair[1][0] + "2", pair[1][1]]] : pair
+    const collisionIt = testEffect(
+      AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node, MCP.node]), [
+        [
+          Config.node,
+          Layer.succeed(
+            Config.Service,
+            Config.Service.of({
+              entries: () =>
+                Effect.succeed([
+                  new Config.Document({
+                    type: "document",
+                    info: new Config.Info({
+                      mcp: new ConfigMCP.Info({
+                        servers: Object.fromEntries(
+                          entries.map(([server, tool]) => [
+                            server,
+                            new ConfigMCP.Local({
+                              type: "local",
+                              disabled: true,
+                              command: [process.execPath, path.join(directory, "mcp-canonical-stdio.ts")],
+                              environment: { MCP_TEST_SERVER: server, MCP_TEST_TOOL: tool },
+                            }),
+                          ]),
+                        ),
+                      }),
+                    }),
+                  }),
+                ]),
+            }),
+          ),
+        ],
+        [Location.node, location],
+        [PermissionV2.node, permission],
+        [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
+      ]),
+    )
+    collisionIt.live(
+      `keeps collision pair ${entries[0][0]} / ${entries[1][0]} stable through reverse connection and reconnect`,
+      () =>
+        Effect.gen(function* () {
+          const mcp = yield* MCP.Service
+          const registry = yield* ToolRegistry.Service
+          const identities = new Map<string, string>()
+          for (const order of [entries, entries.toReversed(), entries]) {
+            for (const [server] of entries) yield* mcp.disconnect(server)
+            for (const [server] of order) yield* mcp.reconnect(server)
+            const instructions = yield* mcp.instructions()
+            const names = instructions.flatMap((item) => item.tools)
+            expect(names).toHaveLength(2)
+            expect(new Set(names).size).toBe(2)
+            for (const [server, tool] of entries) {
+              const name = instructions.find((item) => item.name === server)!.tools[0]
+              expect(name.length).toBeLessThanOrEqual(64)
+              expect(name).toMatch(/^[A-Za-z0-9_-]+$/)
+              expect((yield* toolDefinitions(registry)).some((item) => item.name === name)).toBe(true)
+              if (identities.has(server)) expect(name).toBe(identities.get(server)!)
+              identities.set(server, name)
+              expect(
+                yield* executeTool(registry, {
+                  sessionID,
+                  ...toolIdentity,
+                  call: { type: "tool-call", id: `call-${server}`, name, input: { text: "route" } },
+                }),
+              ).toEqual({ type: "text", value: `${server}:${tool}:route` })
+            }
+          }
+        }),
+      30000,
+    )
+  }
+
   it.live("retains oversized MCP isError output as error evidence", () =>
     Effect.gen(function* () {
       const mcp = yield* MCP.Service
@@ -87,7 +174,12 @@ describe("MCP canonical tools", () => {
       const result = yield* settleTool(registry, {
         sessionID,
         ...toolIdentity,
-        call: { type: "tool-call", id: "mcp-error", name: "mcp_fixture_echo", input: { text: `error:${message}` } },
+        call: {
+          type: "tool-call",
+          id: "mcp-error",
+          name: "mcp_fixture_echo_ec544279c5e5dba9",
+          input: { text: `error:${message}` },
+        },
       })
       expect(result.inputRejected).toBe(false)
       expect(result.output).toBeUndefined()
@@ -118,7 +210,7 @@ describe("MCP canonical tools", () => {
         {
           name: "fixture",
           instructions: "Use project facts as the durable source of truth.",
-          tools: ["mcp_fixture_echo"],
+          tools: ["mcp_fixture_echo_ec544279c5e5dba9"],
         },
       ])
       expect(yield* integrations.get(Integration.ID.make("mcp:remote"))).toMatchObject({
@@ -138,9 +230,13 @@ describe("MCP canonical tools", () => {
       expect((yield* SystemContext.initialize(yield* contexts.load())).baseline).toContain(
         "Use project facts as the durable source of truth.",
       )
-      expect((yield* toolDefinitions(registry)).map((definition) => definition.name)).toContain("mcp_fixture_echo")
+      expect((yield* toolDefinitions(registry)).map((definition) => definition.name)).toContain(
+        "mcp_fixture_echo_ec544279c5e5dba9",
+      )
       expect(
-        (yield* toolDefinitions(registry)).find((definition) => definition.name === "mcp_fixture_echo"),
+        (yield* toolDefinitions(registry)).find(
+          (definition) => definition.name === "mcp_fixture_echo_ec544279c5e5dba9",
+        ),
       ).toMatchObject({
         inputSchema: {
           properties: { text: { type: "string", minLength: 1 } },
@@ -153,10 +249,15 @@ describe("MCP canonical tools", () => {
         yield* executeTool(registry, {
           sessionID,
           ...toolIdentity,
-          call: { type: "tool-call", id: "call-mcp", name: "mcp_fixture_echo", input: { text: "stable" } },
+          call: {
+            type: "tool-call",
+            id: "call-mcp",
+            name: "mcp_fixture_echo_ec544279c5e5dba9",
+            input: { text: "stable" },
+          },
         }),
       ).toEqual({ type: "text", value: "echo:stable" })
-      expect(permissions).toMatchObject([{ action: "mcp_fixture_echo", resources: ["*"] }])
+      expect(permissions).toMatchObject([{ action: "mcp_fixture_echo_ec544279c5e5dba9", resources: ["*"] }])
     }),
   )
 

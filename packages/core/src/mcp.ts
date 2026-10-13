@@ -14,7 +14,7 @@ import {
   ToolListChangedNotificationSchema,
   type Tool as MCPTool,
 } from "@modelcontextprotocol/sdk/types.js"
-import { Cause, Context, Effect, Exit, Layer, Schema, Scope } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Schema, Scope, Semaphore } from "effect"
 import { Config } from "./config"
 import { ConfigMCP } from "./config/mcp"
 import { Credential } from "./credential"
@@ -115,6 +115,7 @@ const layer = Layer.effect(
     const runFork = Effect.runForkWith(context)
     const runPromise = Effect.runPromiseWith(context)
     const locks = KeyedMutex.makeUnsafe<string>()
+    const registrations = Semaphore.makeUnsafe(1)
     const entries = yield* config.entries()
     const configured = Config.latest(entries, "mcp")?.servers ?? {}
     const defaults = Config.latest(entries, "mcp")?.timeout
@@ -154,7 +155,8 @@ const layer = Layer.effect(
       const registered: Record<string, Tool.AnyTool> = {}
       const names: string[] = []
       for (const definition of definitions) {
-        const toolName = uniqueToolName(registered, serverToolName(serverName, definition.name), definition.name)
+        const toolName = serverToolName(serverName, definition.name)
+        if (registered[toolName]) return yield* Effect.fail(new Error(`Duplicate MCP tool name: ${toolName}`))
         registered[toolName] = canonicalTool(toolName, server, definition, client, permission, defaults?.request)
         names.push(toolName)
       }
@@ -164,6 +166,11 @@ const layer = Layer.effect(
       // Network discovery is interruptible; replacing the registration and its owner is one commit.
       yield* Effect.uninterruptible(
         Effect.gen(function* () {
+          const occupied = new Set(
+            Array.from(active.entries()).flatMap(([name, entry]) => (name === serverName ? [] : entry.definitionNames)),
+          )
+          if (names.some((name) => occupied.has(name)))
+            return yield* Effect.fail(new Error(`MCP tool name collision for server: ${serverName}`))
           const registration = yield* Scope.fork(parentScope)
           yield* tools.register(registered).pipe(
             Scope.provide(registration),
@@ -172,7 +179,7 @@ const layer = Layer.effect(
           active.set(serverName, { ...previous, definitionNames: names, registration })
           yield* Scope.close(previous.registration, Exit.void).pipe(Effect.ignore)
           statuses[serverName] = { status: "connected", tools: names.length }
-        }),
+        }).pipe(registrations.withPermits(1)),
       )
     })
 
@@ -658,21 +665,11 @@ function listAll<Result extends { nextCursor?: string }>(request: (cursor?: stri
 
 function serverToolName(server: string, tool: string) {
   const value = `mcp_${sanitize(server)}_${sanitize(tool)}`
-  if (value.length <= 64) return value
-  return `${value.slice(0, 51)}_${hash(value).slice(0, 12)}`
-}
-
-function uniqueToolName(tools: Readonly<Record<string, Tool.AnyTool>>, name: string, source: string) {
-  if (!tools[name]) return name
-  return `${name.slice(0, 51)}_${hash(source).slice(0, 12)}`
+  return `${value.slice(0, 47)}_${Hash.sha256(JSON.stringify([server, tool])).slice(0, 16)}`
 }
 
 function sanitize(value: string) {
   return value.replace(/[^A-Za-z0-9_-]/g, "_")
-}
-
-function hash(value: string) {
-  return Hash.sha256(value)
 }
 
 function modelContent(value: unknown): ReadonlyArray<Tool.Content> {

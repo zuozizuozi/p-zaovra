@@ -29,7 +29,7 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
   Promise.resolve({
     tools: [
       {
-        name: "echo",
+        name: process.env.MCP_TEST_TOOL ?? "echo",
         description: "Echo one string",
         inputSchema: {
           type: "object",
@@ -53,7 +53,14 @@ server.setRequestHandler(CallToolRequestSchema, (request) => {
   if (text.startsWith("error:"))
     return Promise.resolve({ isError: true, content: [{ type: "text", text: text.slice(6) }] })
   return Promise.resolve({
-    content: [{ type: "text", text: `echo:${text}` }],
+    content: [
+      {
+        type: "text",
+        text: process.env.MCP_TEST_SERVER
+          ? `${process.env.MCP_TEST_SERVER}:${request.params.name}:${text}`
+          : `echo:${text}`,
+      },
+    ],
     structuredContent: { echo: text },
   })
 })
