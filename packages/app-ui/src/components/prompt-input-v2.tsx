@@ -1,5 +1,8 @@
 import { ImagePreview } from "@zaovra-ai/ui/image-preview"
 import { SessionUsageBar } from "./usage-dashboard"
+import { SessionContextUsage } from "./session-context-usage"
+import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
+import { useParams } from "@solidjs/router"
 import { DialogAttachmentText } from "./dialog-attachment-text"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
@@ -51,6 +54,18 @@ export type PromptInputV2ComposerController = PromptInputV2Interaction & {
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const command = useCommand()
   const language = useLanguage()
+  const params = useParams<{ id?: string }>()
+  const sdk = useSDK()
+  const permission = usePermission()
+  const accepting = () =>
+    params.id
+      ? permission.isAutoAccepting(params.id, sdk().directory)
+      : permission.isAutoAcceptingDirectory(sdk().directory)
+  const choosePermission = (automatic: boolean) => {
+    if (accepting() === automatic) return
+    if (params.id) permission.toggleAutoAccept(params.id, sdk().directory)
+    else permission.toggleAutoAcceptDirectory(sdk().directory)
+  }
 
   useCommands(props)
   useEditHandler(props)
@@ -62,15 +77,42 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
         controller={props.controller}
         class={props.class}
         modelControl={
-          <PromptInputV2ModelControl
-            loading={props.controller.model.loading}
-            title={language.t("command.model.choose")}
-            keybind={command.keybindParts("model.choose")}
-            model={props.controller.model.selection}
-            providerID={props.controller.model.selection.current()?.provider?.id}
-            modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
-            onClose={props.controller.restoreFocus}
-          />
+          <>
+            <MenuV2>
+              <MenuV2.Trigger
+                class="h-7 shrink-0 rounded-full bg-v2-background-bg-layer-02 px-2 text-xs"
+                title={language.t(
+                  accepting()
+                    ? "toast.permissions.autoaccept.on.description"
+                    : "toast.permissions.autoaccept.off.description",
+                )}
+              >
+                {language.t(accepting() ? "prompt.permission.automatic" : "prompt.permission.ask")} ⌄
+              </MenuV2.Trigger>
+              <MenuV2.Portal>
+                <MenuV2.Content>
+                  <MenuV2.Item onSelect={() => choosePermission(false)}>
+                    {language.t("toast.permissions.autoaccept.off.description")}
+                  </MenuV2.Item>
+                  <MenuV2.Item onSelect={() => choosePermission(true)}>
+                    {language.t("toast.permissions.autoaccept.on.description")}
+                  </MenuV2.Item>
+                </MenuV2.Content>
+              </MenuV2.Portal>
+            </MenuV2>
+            <PromptInputV2ModelControl
+              loading={props.controller.model.loading}
+              title={language.t("command.model.choose")}
+              keybind={command.keybindParts("model.choose")}
+              model={props.controller.model.selection}
+              providerID={props.controller.model.selection.current()?.provider?.id}
+              modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+              onClose={props.controller.restoreFocus}
+            />
+            <Show when={params.id}>
+              <SessionContextUsage variant="indicator" buttonAppearance="v2" />
+            </Show>
+          </>
         }
       />
       <SessionUsageBar />

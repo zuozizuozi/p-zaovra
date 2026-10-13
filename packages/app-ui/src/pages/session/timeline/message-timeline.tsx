@@ -160,7 +160,7 @@ function TimelineThinkingRow(props: {
   )
 }
 
-function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
+function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[]; onRevert?: () => void }) {
   const language = useLanguage()
   const maxFiles = 10
   const [state, setState] = createStore({
@@ -186,6 +186,18 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
           )}
         </span>
         <DiffChanges changes={props.diffs} />
+        <ButtonV2
+          size="small"
+          variant="ghost"
+          onClick={() => setState({ showAll: true, expanded: props.diffs.map((diff) => diff.file) })}
+        >
+          {language.t("session.changes.inspect")}
+        </ButtonV2>
+        <Show when={props.onRevert}>
+          <ButtonV2 size="small" variant="ghost" onClick={() => props.onRevert?.()}>
+            {language.t("ui.message.revertMessage")}
+          </ButtonV2>
+        </Show>
         <Show when={overflow() > 0}>
           <span data-slot="session-turn-diffs-toggle" onClick={() => setState("showAll", !showAll())}>
             {showAll() ? language.t("ui.sessionTurn.diffs.showLess") : language.t("ui.sessionTurn.diffs.showAll")}
@@ -352,6 +364,7 @@ export function MessageTimeline(props: {
     inlineComments: settings.general.newLayoutDesigns,
   })
   const activeMessageID = projection.activeMessageID
+  const [turns, setTurns] = createStore<Record<string, boolean>>({})
   const assistantMessagesByParent = projection.assistantMessagesByParent
   const lastAssistantGroupKey = projection.lastAssistantGroupKey
   const messageByID = projection.messageByID
@@ -1146,7 +1159,7 @@ export function MessageTimeline(props: {
     )
   }
 
-  function TimelineRowFrame(input: { row: Accessor<FramedTimelineRow>; children: JSX.Element }) {
+  function TimelineRowFrame(input: { row: Accessor<FramedTimelineRow>; hidden?: boolean; children: JSX.Element }) {
     const anchor = () => {
       const row = input.row()
       return row._tag === "CommentStrip" || (row._tag === "UserMessage" && row.anchor)
@@ -1162,6 +1175,7 @@ export function MessageTimeline(props: {
         data-message-id={input.row().userMessageID}
         data-timeline-row={input.row()._tag}
         classList={{
+          hidden: input.hidden,
           "min-w-0 w-full max-w-full": true,
           "md:max-w-200 2xl:max-w-[1000px]": props.centered,
           "md:mx-auto": props.centered,
@@ -1276,6 +1290,22 @@ export function MessageTimeline(props: {
       }
       case "AssistantPart": {
         const assistantPartRow = row as Accessor<TimelineRowByTag<"AssistantPart">>
+        const folded = () =>
+          !workingTurn(assistantPartRow().userMessageID) && (turns[assistantPartRow().userMessageID] ?? true)
+        const foldable = () => {
+          const group = assistantPartRow().group
+          const refs = group.type === "part" ? [group.ref] : group.refs
+          return refs.every((ref) => {
+            const part = getMsgPart(ref.messageID, ref.partID)
+            return part?.type === "reasoning" || (part?.type === "tool" && part.state.status === "completed")
+          })
+        }
+        const elapsed = () => {
+          const id = assistantPartRow().userMessageID
+          const start = messageByID().get(id)?.time.created
+          const end = assistantMessagesByParent().get(id)?.at(-1)?.time.completed
+          return start && end ? Math.max(0, Math.round((end - start) / 1000)) : undefined
+        }
         const modelName = createMemo(() => {
           const group = assistantPartRow().group
           const ref = group.type === "part" ? group.ref : group.refs[0]
@@ -1285,14 +1315,34 @@ export function MessageTimeline(props: {
             serverSync().data.provider.all.get(message.providerID)?.models[message.modelID]?.name ?? message.modelID
           )
         })
+        const modelChanged = () => {
+          const group = assistantPartRow().group
+          const ref = group.type === "part" ? group.ref : group.refs[0]
+          const messages = sessionMessages()
+          const index = messages.findIndex((message) => message.id === ref?.messageID)
+          const current = messages[index]
+          const previous = messages.slice(0, index).findLast((message) => message.role === "assistant")
+          return (
+            current?.role === "assistant" &&
+            previous?.role === "assistant" &&
+            (current.modelID !== previous.modelID || current.providerID !== previous.providerID)
+          )
+        }
         return (
-          <TimelineRowFrame row={assistantPartRow}>
+          <TimelineRowFrame
+            row={assistantPartRow}
+            hidden={folded() && foldable() && assistantPartRow().previousAssistantPart}
+          >
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <div
                 data-slot="session-turn-assistant-content"
+                data-streaming={workingTurn(assistantPartRow().userMessageID)}
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
                 <Show when={!assistantPartRow().previousAssistantPart}>
+                  <Show when={modelChanged()}>
+                    <div data-slot="model-change-divider">{modelName()}</div>
+                  </Show>
                   <div data-slot="assistant-heading">
                     <TaskMascot state={mascotState(assistantPartRow().userMessageID)} />
                     <span data-slot="assistant-brand">Zaovra</span>
@@ -1304,9 +1354,19 @@ export function MessageTimeline(props: {
                     <Show when={modelName()}>
                       <span data-slot="assistant-model">{modelName()}</span>
                     </Show>
+                    <Show when={elapsed() !== undefined && !workingTurn(assistantPartRow().userMessageID)}>
+                      <button
+                        type="button"
+                        class="ml-auto text-xs text-text-weak"
+                        aria-expanded={!folded()}
+                        onClick={() => setTurns(assistantPartRow().userMessageID, !folded())}
+                      >
+                        {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "›" : "⌄"}
+                      </button>
+                    </Show>
                   </div>
                 </Show>
-                {renderAssistantPartGroup(assistantPartRow, onSizeChange)}
+                <Show when={!folded() || !foldable()}>{renderAssistantPartGroup(assistantPartRow, onSizeChange)}</Show>
               </div>
             </div>
           </TimelineRowFrame>
@@ -1343,7 +1403,19 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={diffSummaryRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <TimelineDiffSummaryRow diffs={diffSummaryRow().diffs} />
+              <TimelineDiffSummaryRow
+                diffs={diffSummaryRow().diffs}
+                onRevert={
+                  props.actions?.revert
+                    ? () => {
+                        void props.actions?.revert?.({
+                          sessionID: sessionID()!,
+                          messageID: diffSummaryRow().userMessageID,
+                        })
+                      }
+                    : undefined
+                }
+              />
             </div>
           </TimelineRowFrame>
         )
