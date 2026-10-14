@@ -79,6 +79,103 @@ html[data-theme="oc-2"] body[data-new-layout] {
   --icon-interactive-base: var(--zaovra-accent);
   --border-interactive-base: var(--zaovra-focus);
 
+  /* Legacy dialogs and portaled menus share the desktop palette. Keep their
+   * existing focus, selection and error semantics instead of replacing controls. */
+  --surface-raised-stronger-non-alpha: var(--zaovra-raised);
+  --surface-raised-stronger: var(--zaovra-raised);
+  --surface-base-hover: var(--zaovra-hover);
+  --surface-base-active: var(--zaovra-selection);
+  --surface-raised-base-hover: var(--zaovra-hover);
+  --surface-raised-base-active: var(--zaovra-selection);
+  --input-base: var(--zaovra-surface);
+  --border-base: var(--zaovra-line);
+  --border-weak-base: var(--zaovra-line);
+  --border-selected: var(--zaovra-focus);
+  --border-weak-selected: var(--zaovra-accent-soft);
+  --button-primary-base: var(--zaovra-accent);
+  --button-secondary-base: var(--zaovra-surface);
+  --button-secondary-hover: var(--zaovra-hover);
+
+  :is([data-component="dialog"], [data-component="dialog-v2"]) {
+    [data-slot="dialog-content"] {
+      border-radius: var(--zaovra-radius-panel);
+      background: var(--zaovra-raised);
+      box-shadow:
+        inset 0 0 0 1px var(--zaovra-line),
+        var(--zaovra-shadow-float);
+    }
+    :is(input, select, textarea) {
+      min-width: 0;
+      max-width: 100%;
+      accent-color: var(--zaovra-accent);
+    }
+    :is(p, label) {
+      overflow-wrap: anywhere;
+    }
+  }
+
+  :is(
+    [data-component="popover-content"],
+    [data-component="dropdown-menu-content"],
+    [data-component="context-menu-content"],
+    [data-component="select-content"]
+  ) {
+    border-radius: var(--zaovra-radius-panel);
+    background: var(--zaovra-raised);
+    color: var(--zaovra-ink);
+    box-shadow:
+      inset 0 0 0 1px var(--zaovra-line),
+      var(--zaovra-shadow-float);
+    max-width: calc(100vw - 24px);
+  }
+
+  [data-component="button"][data-variant="primary"] {
+    color: var(--zaovra-on-accent);
+    [data-slot="icon-svg"] {
+      color: inherit;
+    }
+    &:is(:hover, :focus, :active):not(:disabled) {
+      background: color-mix(in srgb, var(--zaovra-accent) 88%, var(--zaovra-ink));
+    }
+    &:disabled {
+      background: var(--zaovra-hover);
+      color: var(--zaovra-muted);
+    }
+  }
+
+  [data-component="button"]:focus-visible {
+    outline: 2px solid var(--zaovra-focus);
+    outline-offset: 2px;
+  }
+
+  [data-component="work-page"] {
+    background: var(--zaovra-canvas);
+    > aside {
+      background: var(--zaovra-rail);
+    }
+    > main {
+      overflow-wrap: anywhere;
+    }
+    section {
+      border-radius: var(--zaovra-radius-panel);
+      background: var(--zaovra-surface);
+    }
+    [data-component="work-status"] {
+      background: var(--zaovra-hover);
+      font-family: inherit;
+    }
+    [data-work-tone="error"] {
+      color: var(--zaovra-error);
+      background: var(--zaovra-error-soft);
+      border-color: var(--zaovra-error);
+    }
+    [data-work-tone="success"] {
+      color: var(--zaovra-success);
+      background: var(--zaovra-success-soft);
+      border-color: var(--zaovra-success);
+    }
+  }
+
   color: var(--zaovra-ink);
   background: var(--zaovra-canvas);
 

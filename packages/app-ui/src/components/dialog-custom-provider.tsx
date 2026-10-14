@@ -39,13 +39,7 @@ export function DialogCustomProvider(props: Props) {
     <Dialog
       class="h-full"
       title={
-        <IconButton
-          tabIndex={-1}
-          icon="arrow-left"
-          variant="ghost"
-          onClick={props.onBack}
-          aria-label={language.t("common.goBack")}
-        />
+        <IconButton icon="arrow-left" variant="ghost" onClick={props.onBack} aria-label={language.t("common.goBack")} />
       }
       transition
     >

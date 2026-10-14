@@ -185,7 +185,7 @@ export default function WorkPage() {
   })
 
   return (
-    <div class="flex h-full min-h-0 w-full bg-v2-background-bg-base text-v2-text-text-base">
+    <div data-component="work-page" class="flex h-full min-h-0 w-full bg-v2-background-bg-base text-v2-text-text-base">
       <aside class="flex w-[300px] shrink-0 flex-col border-r border-v2-border-border-muted bg-v2-background-bg-deep">
         <div class="flex min-h-20 shrink-0 items-center justify-between gap-2 border-b border-v2-border-border-muted px-4 py-2">
           <div class="min-w-0">
@@ -232,7 +232,7 @@ export default function WorkPage() {
             </Show>
           </Show>
           <Show when={goals.error}>
-            <div class="m-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-300">
+            <div data-work-tone="error" class="m-2 rounded-md border p-3 text-[12px]">
               {String(goals.error)}
             </div>
           </Show>
@@ -579,8 +579,8 @@ export default function WorkPage() {
                               )}
                             </Show>
                             <Show when={entry.resolution?.action === "replace" && entry.resolution.value}>
-                              <div class="mt-3 rounded border border-emerald-500/30 bg-emerald-500/5 p-3">
-                                <div class="text-[9px] font-medium uppercase tracking-wide text-emerald-400">
+                              <div data-work-tone="success" class="mt-3 rounded border p-3">
+                                <div class="text-[9px] font-medium uppercase tracking-wide">
                                   {language.t("work.ui.user.correction")}
                                   {entry.resolution?.value?.kind}
                                 </div>
@@ -976,7 +976,7 @@ function CreateGoal(props: {
           )}
         </div>
         <Show when={props.error}>
-          <div class="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-300">
+          <div data-work-tone="error" class="rounded-md border p-3 text-[12px]">
             {props.error}
           </div>
         </Show>
@@ -1049,7 +1049,9 @@ function GoalHeader(props: {
         </div>
       </div>
       <Show when={props.error}>
-        <div class="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-[12px] text-red-300">{props.error}</div>
+        <div data-work-tone="error" class="rounded-md border p-3 text-[12px]">
+          {props.error}
+        </div>
       </Show>
     </header>
   )
