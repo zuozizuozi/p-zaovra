@@ -80,6 +80,8 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
           <>
             <MenuV2>
               <MenuV2.Trigger
+                data-component="permission-chip"
+                data-ask={!accepting() ? "" : undefined}
                 class="h-7 shrink-0 rounded-full bg-v2-background-bg-layer-02 px-2 text-xs"
                 title={language.t(
                   accepting()

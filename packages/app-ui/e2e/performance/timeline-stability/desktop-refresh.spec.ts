@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test"
-import { assistantMessage, messageUpdated, setupTimeline, shell, status, textPart, userMessage } from "./fixture"
+import {
+  assistantMessage,
+  messageUpdated,
+  setupTimeline,
+  shell,
+  status,
+  textPart,
+  userMessage,
+  userID,
+} from "./fixture"
 
 for (const [kind, detail] of Object.entries({
   auth: "HTTP 401: invalid API key",
@@ -26,7 +35,7 @@ for (const [kind, detail] of Object.entries({
     const card = page.locator('[data-component="execution-error-card"]')
     await expect(card).toBeVisible()
     await expect(card.locator("pre")).toBeHidden()
-    await expect(card.getByRole("button", { name: "Providers", exact: true })).toBeVisible()
+    await expect(card.getByRole("button", { name: "Check model service", exact: true })).toBeVisible()
     await card.locator("summary").click()
     await expect(card.locator("pre")).toHaveText(detail)
     await page.screenshot({ path: info.outputPath(`${kind}.png`) })
@@ -71,4 +80,61 @@ test("completion arriving after idle still shows once for five seconds", async (
   await expect(success).toHaveCount(0, { timeout: 4000 })
   await timeline.send(messageUpdated(assistantMessage([textPart("prt_finish", "Finishing")]).info))
   await expect(success).toHaveCount(0)
+})
+
+test("synthetic continuations share one disclosure and preserve final text", async ({ page }) => {
+  await setupTimeline(page, {
+    settings: { newLayoutDesigns: true },
+    viewport: { width: 1800, height: 1000 },
+    messages: [
+      userMessage(),
+      assistantMessage([shell("prt_first_tool", "completed", "first", "npm test")]),
+      userMessage([{ type: "text", id: "prt_synthetic", text: "Continue verification", synthetic: true }], {
+        id: "msg_1002_synthetic",
+      }),
+      assistantMessage(
+        [shell("prt_second_tool", "completed", "second", "npm run build"), textPart("prt_final", "Final deliverable")],
+        { id: "msg_1003_second", parentID: "msg_1002_synthetic" },
+      ),
+    ],
+  })
+  await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+  await page.reload()
+  const heads = page.getByRole("button", { name: /Took .*s/ })
+  await expect(heads).toHaveCount(1)
+  await expect(page.locator('[data-slot="assistant-brand"]')).toHaveCount(0)
+  await expect(page.getByText("Final deliverable", { exact: true })).toBeVisible()
+  await heads.click()
+  await expect(page.getByRole("button", { name: "Shell npm run build", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Shell npm test", exact: true })).toBeVisible()
+  const widths = await page
+    .locator('[data-slot="session-turn-assistant-content"]')
+    .evaluateAll((es) => es.map((e) => e.getBoundingClientRect().width))
+  expect(Math.max(...widths)).toBeLessThanOrEqual(720)
+})
+
+test("empty checks remain absent and error recovery renders inside its card", async ({ page }) => {
+  const timeline = await setupTimeline(page, {
+    settings: { newLayoutDesigns: true },
+    messages: [userMessage(), assistantMessage([], { completed: false })],
+  })
+  await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+  await page.route("**/api/session/*/outcome**", (route) =>
+    route.fulfill({
+      json: { data: { state: "failed", messageID: userID, outcomeUnknown: false, checks: [], missing: [] } },
+    }),
+  )
+  await timeline.send(
+    messageUpdated(
+      assistantMessage([], {
+        completed: false,
+        error: { name: "APIError", data: { message: "HTTP 401: invalid API key", isRetryable: false } },
+      }).info,
+    ),
+  )
+  await timeline.send(status("idle"))
+  const card = page.locator('[data-component="execution-error-card"]')
+  await expect(card.getByRole("button", { name: "Retry original request", exact: true })).toBeVisible()
+  await expect(page.locator('[data-component="verification-summary"]')).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Refresh verification status", exact: true })).toHaveCount(0)
 })

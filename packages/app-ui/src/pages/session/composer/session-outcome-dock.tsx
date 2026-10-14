@@ -1,4 +1,7 @@
-import { For, Show, createMemo } from "solid-js"
+import { For, Show, createMemo, createEffect, onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
+import { Dynamic, Portal } from "solid-js/web"
+import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { useParams } from "@solidjs/router"
 import { createQuery, useMutation } from "@tanstack/solid-query"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
@@ -69,6 +72,21 @@ export function SessionOutcomeDock() {
   const abandoned = () =>
     !!sync().session.get(params.id ?? "")?.time.archived ||
     (recover.isSuccess && recover.variables?.sessionID === params.id && recover.variables.action === "abandon")
+  const [display, setDisplay] = createStore<{ target?: HTMLElement }>({})
+  createEffect(() => {
+    const id = outcome()?.messageID
+    const update = () => {
+      const target = id
+        ? (document.querySelector<HTMLElement>(`[data-recovery-target="${CSS.escape(id)}"]`) ?? undefined)
+        : undefined
+      if (target !== display.target) setDisplay("target", target)
+    }
+    update()
+    // A virtualized error card can mount after the outcome query, or leave the viewport.
+    const observer = new MutationObserver(update)
+    observer.observe(document.body, { childList: true, subtree: true })
+    onCleanup(() => observer.disconnect())
+  })
   return (
     <Show
       when={!query.isError}
@@ -99,7 +117,7 @@ export function SessionOutcomeDock() {
               {language.t("session.outcome.unknown")}
             </span>
           </Show>
-          <Show when={outcome()?.state !== "failed" || outcome()?.checks.length || outcome()?.missing.length}>
+          <Show when={outcome()?.checks.length || outcome()?.missing.length}>
             <details data-component="verification-panel">
               <summary
                 class="font-medium cursor-pointer"
@@ -111,6 +129,14 @@ export function SessionOutcomeDock() {
                   {language.t("session.outcome.latestCount", { count: passedChecks() })}
                 </Show>
               </summary>
+              <IconButton
+                icon="reset"
+                variant="ghost"
+                aria-label={language.t("session.outcome.refresh")}
+                title={language.t("session.outcome.refresh")}
+                disabled={query.isFetching || recover.isPending}
+                onClick={() => void query.refetch()}
+              />
               <Show when={!outcome()?.checks.length && outcome()?.recentChecks?.length}>
                 <details data-component="verification-recent" class="text-text-weak">
                   <summary>{language.t("session.outcome.recent")}</summary>
@@ -290,57 +316,51 @@ export function SessionOutcomeDock() {
             </details>
           </Show>
           <Show when={!abandoned()}>
-            <div class="flex flex-wrap gap-1">
-              <Show
-                when={outcome()?.messageID && (outcome()?.state === "interrupted" || outcome()?.state === "failed")}
-              >
-                <ButtonV2
-                  size="small"
-                  variant="outline"
-                  disabled={recover.isPending}
-                  onClick={() =>
-                    recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action: "retry" })
-                  }
+            <Dynamic component={display.target ? Portal : "div"} mount={display.target}>
+              <div class="flex flex-wrap items-center gap-1" data-component="session-recovery-actions">
+                <Show
+                  when={outcome()?.messageID && (outcome()?.state === "interrupted" || outcome()?.state === "failed")}
                 >
-                  {language.t("session.outcome.retry")}
-                </ButtonV2>
-                <MenuV2>
-                  <MenuV2.Trigger
-                    as={ButtonV2}
+                  <ButtonV2
                     size="small"
-                    variant="ghost-muted"
+                    variant="outline"
                     disabled={recover.isPending}
-                    aria-label={language.t("common.moreOptions")}
+                    onClick={() =>
+                      recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action: "retry" })
+                    }
                   >
-                    ···
-                  </MenuV2.Trigger>
-                  <MenuV2.Portal>
-                    <MenuV2.Content>
-                      <For each={["continue", "abandon"] as const}>
-                        {(action) => (
-                          <MenuV2.Item
-                            disabled={recover.isPending}
-                            onSelect={() =>
-                              recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action })
-                            }
-                          >
-                            {language.t(`session.outcome.${action}`)}
-                          </MenuV2.Item>
-                        )}
-                      </For>
-                    </MenuV2.Content>
-                  </MenuV2.Portal>
-                </MenuV2>
-              </Show>
-              <Button
-                size="small"
-                variant="ghost"
-                disabled={query.isFetching || recover.isPending}
-                onClick={() => void query.refetch()}
-              >
-                {language.t("session.outcome.refresh")}
-              </Button>
-            </div>
+                    {language.t("session.outcome.retry")}
+                  </ButtonV2>
+                  <MenuV2>
+                    <MenuV2.Trigger
+                      as={ButtonV2}
+                      size="small"
+                      variant="ghost-muted"
+                      disabled={recover.isPending}
+                      aria-label={language.t("common.moreOptions")}
+                    >
+                      ···
+                    </MenuV2.Trigger>
+                    <MenuV2.Portal>
+                      <MenuV2.Content>
+                        <For each={["continue", "abandon"] as const}>
+                          {(action) => (
+                            <MenuV2.Item
+                              disabled={recover.isPending}
+                              onSelect={() =>
+                                recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action })
+                              }
+                            >
+                              {language.t(`session.outcome.${action}`)}
+                            </MenuV2.Item>
+                          )}
+                        </For>
+                      </MenuV2.Content>
+                    </MenuV2.Portal>
+                  </MenuV2>
+                </Show>
+              </div>
+            </Dynamic>
           </Show>
         </div>
       </Show>

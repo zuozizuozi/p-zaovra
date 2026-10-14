@@ -105,6 +105,10 @@ export function DesktopSidebar() {
   const recent = createMemo(() =>
     tabs.store
       .filter((tab): tab is SessionTab => tab.type === "session")
+      .filter((tab) => {
+        const group = groupForTab(tab)
+        return !group || view.expanded !== groupKey(group)
+      })
       .map((tab) => {
         const connection = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
         const ctx = connection ? global.ensureServerCtx(connection) : undefined

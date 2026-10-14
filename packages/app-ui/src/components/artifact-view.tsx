@@ -9,28 +9,41 @@ import { artifactPath } from "@/utils/artifact-path"
 import { sourcePreviewNeedsBuild } from "@/utils/source-preview"
 
 const PDF = lazy(() => import("./artifact-pdf"))
-type Props = { target: string; directory: string; active?: boolean }
+export type ArtifactControls = {
+  reload: () => void
+  zoom: (action: "zoom-in" | "zoom-out" | "reset") => void
+  percent: number
+}
+type Props = {
+  target: string
+  directory: string
+  active?: boolean
+  compact?: boolean
+  onControls?: (controls: ArtifactControls | undefined) => void
+}
 export function ArtifactView(props: Props) {
   const language = useLanguage()
   const platform = usePlatform()
   return (
     <Show when={artifactViewer(props.target) === "pdf"} fallback={<ArtifactBrowserView {...props} />}>
       <div class="flex h-full min-h-0 flex-col" aria-label={language.t("artifact.pdf")}>
-        <div class="flex h-10 shrink-0 items-center justify-between border-b border-border-weak-base px-3 text-xs">
-          <span class="min-w-0 truncate">{props.target}</span>
-          <button
-            class="h-10 shrink-0 px-2"
-            onClick={() => {
-              const target = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
-                ? props.target
-                : `${props.directory}/${props.target}`
-              if (/^https?:/.test(props.target)) platform.openLink(props.target)
-              else void platform.openPath?.(target)
-            }}
-          >
-            {language.t("artifact.external")}
-          </button>
-        </div>
+        <Show when={!props.compact}>
+          <div class="flex h-10 shrink-0 items-center justify-between border-b border-border-weak-base px-3 text-xs">
+            <span class="min-w-0 truncate">{props.target}</span>
+            <button
+              class="h-10 shrink-0 px-2"
+              onClick={() => {
+                const target = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
+                  ? props.target
+                  : `${props.directory}/${props.target}`
+                if (/^https?:/.test(props.target)) platform.openLink(props.target)
+                else void platform.openPath?.(target)
+              }}
+            >
+              {language.t("artifact.external")}
+            </button>
+          </div>
+        </Show>
         <Suspense fallback={<p class="p-3 text-xs">{language.t("artifact.loadingPdf")}</p>}>
           <PDF
             load={() => {
@@ -115,6 +128,10 @@ function ArtifactBrowserView(props: Props) {
     }
     void api?.action({ id, action }).catch(() => setState("error", language.t("artifact.actionError")))
   }
+  createEffect(() =>
+    props.onControls?.({ reload: () => action("reload"), zoom: action, percent: Math.round(state.zoom * 100) }),
+  )
+  onCleanup(() => props.onControls?.(undefined))
   createEffect(() => {
     dialog.active
     props.active
@@ -158,39 +175,41 @@ function ArtifactBrowserView(props: Props) {
     "h-10 shrink-0 rounded-md px-2 text-xs hover:bg-background-stronger focus-visible:outline-2 focus-visible:outline-border-active disabled:opacity-40"
   return (
     <section class="flex h-full min-h-0 flex-col bg-background-base" aria-label={language.t("artifact.preview")}>
-      <div class="flex shrink-0 items-center gap-1 border-b border-border-weak-base px-2">
-        <button class={button} onClick={() => action("reload")}>
-          {language.t("artifact.refresh")}
-        </button>
-        <span class="min-w-0 flex-1 truncate text-xs text-text-weak" title={state.url || props.target}>
-          {props.target}
-        </span>
-        <button class={button} aria-label={language.t("artifact.zoomOut")} onClick={() => action("zoom-out")}>
-          −
-        </button>
-        <button class={button} aria-label={language.t("artifact.zoomReset")} onClick={() => action("reset")}>
-          {Math.round(state.zoom * 100)}%
-        </button>
-        <button class={button} aria-label={language.t("artifact.zoomIn")} onClick={() => action("zoom-in")}>
-          ＋
-        </button>
-        <button
-          class={button}
-          disabled={!state.url}
-          onClick={() => {
-            if (/^https?:\/\//i.test(props.target)) {
-              platform.openLink(state.url)
-              return
-            }
-            const path = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
-              ? props.target
-              : `${props.directory}/${props.target}`
-            void platform.openPath?.(path).catch(() => setState("error", language.t("artifact.externalError")))
-          }}
-        >
-          {language.t("artifact.external")}
-        </button>
-      </div>
+      <Show when={!props.compact}>
+        <div class="flex shrink-0 items-center gap-1 border-b border-border-weak-base px-2">
+          <button class={button} onClick={() => action("reload")}>
+            {language.t("artifact.refresh")}
+          </button>
+          <span class="min-w-0 flex-1 truncate text-xs text-text-weak" title={state.url || props.target}>
+            {props.target}
+          </span>
+          <button class={button} aria-label={language.t("artifact.zoomOut")} onClick={() => action("zoom-out")}>
+            −
+          </button>
+          <button class={button} aria-label={language.t("artifact.zoomReset")} onClick={() => action("reset")}>
+            {Math.round(state.zoom * 100)}%
+          </button>
+          <button class={button} aria-label={language.t("artifact.zoomIn")} onClick={() => action("zoom-in")}>
+            ＋
+          </button>
+          <button
+            class={button}
+            disabled={!state.url}
+            onClick={() => {
+              if (/^https?:\/\//i.test(props.target)) {
+                platform.openLink(state.url)
+                return
+              }
+              const path = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
+                ? props.target
+                : `${props.directory}/${props.target}`
+              void platform.openPath?.(path).catch(() => setState("error", language.t("artifact.externalError")))
+            }}
+          >
+            {language.t("artifact.external")}
+          </button>
+        </div>
+      </Show>
       <Show when={state.loading}>
         <div role="status" class="shrink-0 px-3 py-2 text-xs text-text-weak">
           {language.t("artifact.loading")}

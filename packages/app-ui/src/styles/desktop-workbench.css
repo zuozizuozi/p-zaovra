@@ -408,12 +408,16 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-slot="session-turn-message-container"] {
+    width: 100%;
+    max-width: 784px;
+    margin-inline: auto;
     padding-inline: 32px;
   }
 
   [data-slot="session-turn-message-content"],
   [data-slot="session-turn-assistant-content"] {
-    max-width: 720px;
+    width: 100%;
+    max-width: 720px !important;
     margin-inline: auto;
   }
 
@@ -428,6 +432,20 @@ html[data-theme="oc-2"] body[data-new-layout] {
     border-radius: 16px;
     padding: 12px 16px;
     background: var(--zaovra-user-bubble);
+  }
+
+  [data-slot="session-turn-message-content"] [data-component="user-message"] {
+    margin-left: auto;
+    max-width: 100%;
+  }
+
+  [data-slot="titlebar-v2"] {
+    background: var(--zaovra-canvas);
+  }
+
+  [data-component="permission-chip"][data-ask] {
+    background: var(--zaovra-warning-soft);
+    color: var(--zaovra-warning);
   }
 
   [data-component="prompt-input-v2"] {

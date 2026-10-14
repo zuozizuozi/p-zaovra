@@ -106,7 +106,7 @@ function defaultBackgroundColor() {
 function overlay(theme: Partial<TitlebarTheme> = {}, zoom = 1) {
   const mode = theme.mode ?? tone()
   return {
-    color: "#00000000",
+    color: mode === "dark" ? "#151418" : "#f6f5f8",
     symbolColor: mode === "dark" ? "white" : "black",
     height: Math.max(titlebarHeight, Math.round(titlebarHeight * zoom)),
   }

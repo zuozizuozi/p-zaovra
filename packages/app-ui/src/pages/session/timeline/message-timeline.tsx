@@ -1051,6 +1051,27 @@ export function MessageTimeline(props: {
     )
   }
 
+  // Synthetic continuation inputs are transcript boundaries, not a new human turn.
+  const displayTurns = createMemo(() => {
+    const owners = new Map<string, string>()
+    props.userMessages.reduce<string | undefined>((previous, message) => {
+      const parts = getMsgParts(message.id)
+      const continuation =
+        parts.length > 0 &&
+        parts.every(
+          (part) =>
+            part.type === "step-start" || part.type === "compaction" || (part.type === "text" && part.synthetic),
+        )
+      const owner = continuation && previous ? previous : message.id
+      owners.set(message.id, owner)
+      return owner
+    }, undefined)
+    return owners
+  })
+  const displayTurn = (id: string) => displayTurns().get(id) ?? id
+  const firstDisplayPart = (id: string) =>
+    projection.rows().find((row) => row._tag === "AssistantPart" && displayTurn(row.userMessageID) === displayTurn(id))
+
   const workingTurn = (userMessageID: string) => sessionStatus().type !== "idle" && activeMessageID() === userMessageID
   const waitingToJoin = (userMessageID: string) =>
     sessionStatus().type !== "idle" &&
@@ -1291,7 +1312,8 @@ export function MessageTimeline(props: {
       case "AssistantPart": {
         const assistantPartRow = row as Accessor<TimelineRowByTag<"AssistantPart">>
         const folded = () =>
-          !workingTurn(assistantPartRow().userMessageID) && (turns[assistantPartRow().userMessageID] ?? true)
+          !workingTurn(assistantPartRow().userMessageID) &&
+          (turns[displayTurn(assistantPartRow().userMessageID)] ?? true)
         const foldable = () => {
           const group = assistantPartRow().group
           const refs = group.type === "part" ? [group.ref] : group.refs
@@ -1300,11 +1322,15 @@ export function MessageTimeline(props: {
             return part?.type === "reasoning" || (part?.type === "tool" && part.state.status === "completed")
           })
         }
+        const first = () => firstDisplayPart(assistantPartRow().userMessageID) === assistantPartRow()
         const elapsed = () => {
-          const id = assistantPartRow().userMessageID
-          const start = messageByID().get(id)?.time.created
-          const end = assistantMessagesByParent().get(id)?.at(-1)?.time.completed
-          return start && end ? Math.max(0, Math.round((end - start) / 1000)) : undefined
+          const owner = displayTurn(assistantPartRow().userMessageID)
+          const start = messageByID().get(owner)?.time.created
+          const ends = props.userMessages
+            .filter((m) => displayTurn(m.id) === owner)
+            .flatMap((m) => assistantMessagesByParent().get(m.id) ?? [])
+            .flatMap((m) => (m.time.completed === undefined ? [] : [m.time.completed]))
+          return start && ends.length ? Math.max(0, Math.round((Math.max(...ends) - start) / 1000)) : undefined
         }
         const modelName = createMemo(() => {
           const group = assistantPartRow().group
@@ -1329,37 +1355,28 @@ export function MessageTimeline(props: {
           )
         }
         return (
-          <TimelineRowFrame
-            row={assistantPartRow}
-            hidden={folded() && foldable() && assistantPartRow().previousAssistantPart}
-          >
+          <TimelineRowFrame row={assistantPartRow} hidden={folded() && foldable() && !first()}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <div
                 data-slot="session-turn-assistant-content"
                 data-streaming={workingTurn(assistantPartRow().userMessageID)}
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
-                <Show when={!assistantPartRow().previousAssistantPart}>
-                  <Show when={modelChanged()}>
-                    <div data-slot="model-change-divider">{modelName()}</div>
-                  </Show>
+                <Show when={modelChanged() && !assistantPartRow().previousAssistantPart}>
+                  <div data-slot="model-change-divider">{modelName()}</div>
+                </Show>
+                <Show when={first()}>
                   <div data-slot="assistant-heading">
-                    <TaskMascot state={mascotState(assistantPartRow().userMessageID)} />
-                    <span data-slot="assistant-brand">Zaovra</span>
-                    <Show when={["success", "error"].includes(mascotState(assistantPartRow().userMessageID))}>
-                      <span role="status">
-                        {language.t(`session.activity.${mascotState(assistantPartRow().userMessageID)}`)}
-                      </span>
-                    </Show>
-                    <Show when={modelName()}>
-                      <span data-slot="assistant-model">{modelName()}</span>
+                    <Show when={mascotState(assistantPartRow().userMessageID) === "success"}>
+                      <TaskMascot state="success" />
+                      <span role="status">{language.t("session.activity.success")}</span>
                     </Show>
                     <Show when={elapsed() !== undefined && !workingTurn(assistantPartRow().userMessageID)}>
                       <button
                         type="button"
-                        class="ml-auto text-xs text-text-weak"
+                        class="text-xs text-text-weak"
                         aria-expanded={!folded()}
-                        onClick={() => setTurns(assistantPartRow().userMessageID, !folded())}
+                        onClick={() => setTurns(displayTurn(assistantPartRow().userMessageID), !folded())}
                       >
                         {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "›" : "⌄"}
                       </button>
@@ -1433,7 +1450,11 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <ExecutionErrorCard detail={errorRow().text} onConfigure={openProviderSettings}>
+              <ExecutionErrorCard
+                detail={errorRow().text}
+                recoveryID={errorRow().userMessageID}
+                onConfigure={openProviderSettings}
+              >
                 <Show when={provider()}>
                   {(id) => (
                     <Button

@@ -3,17 +3,21 @@ import { Persist, persisted } from "@/utils/persist"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createEffect, createSignal, For, on, onCleanup, Show, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
-import { ArtifactView } from "@/components/artifact-view"
+import { ArtifactView, type ArtifactControls } from "@/components/artifact-view"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useFileLink } from "@zaovra-ai/session-ui/context/file-link"
 import { collectArtifactFiles } from "@/utils/artifact-files"
 import { useFile } from "@/context/file"
 import { artifactLines } from "@/utils/artifact-lines"
+import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
+import { usePlatform } from "@/context/platform"
 import { Icon } from "@zaovra-ai/ui/icon"
 
-export function ArtifactsPanel(props: { active: boolean; target?: { path: string } }) {
+export function ArtifactsPanel(props: { active: boolean; target?: { path: string }; onReview?: () => void }) {
   const language = useLanguage()
+  const platform = usePlatform()
+  const [controls, setControls] = createStore<{ current?: ArtifactControls }>({})
   let panel: HTMLDivElement | undefined
   const sdk = useSDK()
   const sync = useSync()
@@ -103,7 +107,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
     setState({
       targets: [...state.targets.filter((item) => item !== target), target].slice(-8),
       active: target,
-      input: "",
+      input: target,
     })
   }
   const close = (target: string) => {
@@ -114,7 +118,7 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
     const target = props.target?.path
     if (!target) return
     setState("targets", (items) => [...items.filter((item) => item !== target), target].slice(-8))
-    setState("active", target)
+    setState({ active: target, input: target })
   })
   return (
     <div
@@ -124,52 +128,149 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
       classList={{ "!fixed inset-0 !h-auto z-50": props.active && state.maximized }}
       aria-label={language.t("artifact.panel")}
     >
-      <div class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-weak-base px-3">
-        <button type="button" aria-expanded={drawer.open} onClick={() => setDrawer("open", !drawer.open)}>
-          {language.t("artifact.files")} ⌄
+      <div data-slot="artifact-tabs-row" class="flex h-10 shrink-0 items-center border-b border-border-weak-base px-2">
+        <button type="button" class="shrink-0 px-2 text-xs" onClick={props.onReview}>
+          {language.t("session.tab.review")}
         </button>
-        <div class="flex items-center gap-1">
-          <button
-            type="button"
-            class="flex size-8 items-center justify-center rounded-lg hover:bg-background-stronger"
-            onClick={() => setState("maximized", !state.maximized)}
-            aria-label={language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
-            title={language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
-          >
-            <Icon name={state.maximized ? "collapse" : "expand"} />
-          </button>
-          <button
-            type="button"
-            class="flex size-8 items-center justify-center rounded-lg hover:bg-background-stronger"
-            onClick={() => view().reviewPanel.close()}
-            aria-label={language.t("common.close")}
-            title={language.t("common.close")}
-          >
-            <Icon name="close" />
-          </button>
+        <div class="flex min-w-0 flex-1 overflow-x-auto" role="tablist" aria-label={language.t("artifact.tabs")}>
+          <Show when={!state.targets.length}>
+            <span class="px-2 text-xs">{language.t("artifact.panel")}</span>
+          </Show>
+          <For each={state.targets}>
+            {(target) => (
+              <div class="flex min-w-0 shrink-0 items-center">
+                <button
+                  role="tab"
+                  aria-selected={state.active === target}
+                  class="h-9 max-w-40 truncate rounded-lg px-2 text-xs"
+                  classList={{ "bg-background-stronger": state.active === target }}
+                  title={target}
+                  onClick={() => setState({ active: target, input: target })}
+                >
+                  {target.split(/[\\/]/).filter(Boolean).at(-1) || target}
+                </button>
+                <button
+                  type="button"
+                  class="size-7 shrink-0"
+                  aria-label={language.t("artifact.close", { target })}
+                  onClick={() => close(target)}
+                >
+                  <Icon name="close-small" />
+                </button>
+              </div>
+            )}
+          </For>
         </div>
+        <button
+          type="button"
+          class="size-8 shrink-0"
+          onClick={() => setState("maximized", !state.maximized)}
+          aria-label={language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
+          title={language.t(state.maximized ? "artifact.restore" : "artifact.maximize")}
+        >
+          <Icon name={state.maximized ? "collapse" : "expand"} />
+        </button>
+        <button
+          type="button"
+          class="size-8 shrink-0"
+          onClick={() => view().reviewPanel.close()}
+          aria-label={language.t("common.close")}
+          title={language.t("common.close")}
+        >
+          <Icon name="close" />
+        </button>
       </div>
       <form
-        class="flex shrink-0 gap-2 border-b border-border-weak-base p-3"
+        data-slot="artifact-address-row"
+        class="flex h-11 shrink-0 items-center gap-1 border-b border-border-weak-base px-2"
         onSubmit={(event) => {
           event.preventDefault()
           open()
         }}
       >
+        <button
+          type="button"
+          class="size-8 shrink-0"
+          disabled={!controls.current}
+          onClick={() => controls.current?.reload()}
+          aria-label={language.t("artifact.refresh")}
+          title={language.t("artifact.refresh")}
+        >
+          <Icon name="reset" />
+        </button>
         <input
-          class="h-10 min-w-0 flex-1 rounded-full border border-border-weak-base bg-transparent px-3 text-sm outline-none focus:border-border-active"
+          class="h-8 min-w-0 flex-1 rounded-full border border-border-weak-base bg-transparent px-3 text-xs outline-none focus:border-border-active"
           aria-label={language.t("artifact.address")}
-          placeholder={language.t("artifact.placeholder")}
+          placeholder={language.t("artifact.address")}
           value={state.input}
           onInput={(event) => setState("input", event.currentTarget.value)}
         />
         <button
           type="submit"
-          class="h-10 shrink-0 rounded-md bg-background-stronger px-3 text-sm disabled:opacity-40"
+          class="size-8 shrink-0"
           disabled={!state.input.trim()}
+          aria-label={language.t("artifact.open")}
+          title={language.t("artifact.open")}
         >
-          {language.t("artifact.open")}
+          <Icon name="arrow-right" />
         </button>
+        <button
+          type="button"
+          class="size-8 shrink-0"
+          aria-label={language.t("artifact.files")}
+          title={language.t("artifact.files")}
+          aria-expanded={drawer.open}
+          onClick={() => setDrawer("open", !drawer.open)}
+        >
+          <Icon name="folder" />
+        </button>
+        <button
+          type="button"
+          class="size-8 shrink-0"
+          disabled={!state.active}
+          aria-label={language.t("artifact.external")}
+          title={language.t("artifact.external")}
+          onClick={() => {
+            if (/^https?:\/\//i.test(state.active)) {
+              platform.openLink(state.active)
+              return
+            }
+            const target = /^(?:[A-Za-z]:[\\/]|\/)/.test(state.active)
+              ? state.active
+              : `${sdk().directory}/${state.active}`
+            void platform.openPath?.(target)
+          }}
+        >
+          <Icon name="square-arrow-top-right" />
+        </button>
+        <MenuV2>
+          <MenuV2.Trigger
+            class="size-8 shrink-0"
+            aria-label={language.t("common.moreOptions")}
+            title={language.t("common.moreOptions")}
+          >
+            ···
+          </MenuV2.Trigger>
+          <MenuV2.Portal>
+            <MenuV2.Content>
+              <For
+                each={
+                  [
+                    { action: "zoom-out", key: "artifact.zoomOut" },
+                    { action: "reset", key: "artifact.zoomReset" },
+                    { action: "zoom-in", key: "artifact.zoomIn" },
+                  ] as const
+                }
+              >
+                {(item) => (
+                  <MenuV2.Item disabled={!controls.current} onSelect={() => controls.current?.zoom(item.action)}>
+                    {language.t(item.key)} {item.action === "reset" ? `${controls.current?.percent ?? 100}%` : ""}
+                  </MenuV2.Item>
+                )}
+              </For>
+            </MenuV2.Content>
+          </MenuV2.Portal>
+        </MenuV2>
       </form>
       <Show when={drawer.open}>
         <div
@@ -272,36 +373,6 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
           }}
         />
       </Show>
-      <Show when={state.targets.length > 0}>
-        <div
-          class="flex shrink-0 overflow-x-auto border-b border-border-weak-base"
-          role="tablist"
-          aria-label={language.t("artifact.tabs")}
-        >
-          <For each={state.targets}>
-            {(target) => (
-              <div class="flex shrink-0 items-center" classList={{ "bg-background-stronger": state.active === target }}>
-                <button
-                  role="tab"
-                  aria-selected={state.active === target}
-                  class="h-10 max-w-48 truncate px-3 text-xs"
-                  title={target}
-                  onClick={() => setState("active", target)}
-                >
-                  {target.split(/[\\/]/).filter(Boolean).at(-1) || target}
-                </button>
-                <button
-                  class="h-10 w-10 shrink-0 text-text-weak hover:text-text-strong"
-                  aria-label={language.t("artifact.close", { target })}
-                  onClick={() => close(target)}
-                >
-                  ×
-                </button>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
       <div class="min-h-0 flex-1 overflow-hidden">
         <Show
           when={state.active}
@@ -314,7 +385,14 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
           }
         >
           <Show when={props.active && state.active} keyed>
-            {(target) => <ArtifactView target={target} directory={sdk().directory} />}
+            {(target) => (
+              <ArtifactView
+                target={target}
+                directory={sdk().directory}
+                compact
+                onControls={(current) => setControls("current", current)}
+              />
+            )}
           </Show>
         </Show>
       </div>

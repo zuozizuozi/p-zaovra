@@ -1,4 +1,11 @@
 export const dict = {
+  "error.checkModelService": "Check model service",
+  "usage.viewDetails": "View detailed usage",
+  "settings.group.general": "General",
+  "settings.group.models": "Models & usage",
+  "settings.group.security": "Security",
+  "settings.group.other": "Other",
+
   "session.new.noModels": "No model is available yet",
   "session.new.noModelsHint": "Add your API key and choose a model to start a task.",
   "session.new.addProvider": "Add model provider",
@@ -1577,7 +1584,7 @@ export const dict = {
   "settings.shortcuts.group.terminal": "Terminal",
   "settings.shortcuts.group.prompt": "Prompt",
 
-  "settings.providers.title": "Providers",
+  "settings.providers.title": "Model services",
   "settings.providers.description": "Provider settings will be configurable here.",
   "settings.providers.section.connected": "Connected providers",
   "settings.providers.connected.empty": "No connected providers",

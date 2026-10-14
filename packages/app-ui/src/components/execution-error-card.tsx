@@ -7,6 +7,7 @@ import { executionErrorKind } from "@/utils/execution-error"
 export function ExecutionErrorCard(props: {
   detail: string
   onConfigure?: () => void
+  recoveryID?: string
   children?: import("solid-js").JSX.Element
 }) {
   const language = useLanguage()
@@ -21,10 +22,11 @@ export function ExecutionErrorCard(props: {
       <div class="flex flex-wrap items-center gap-2">
         <Show when={props.onConfigure}>
           <ButtonV2 variant="contrast" onClick={() => props.onConfigure?.()}>
-            {language.t("settings.providers.title")}
+            {language.t("error.checkModelService")}
           </ButtonV2>
         </Show>
         {props.children}
+        <span data-recovery-target={props.recoveryID} class="contents" />
       </div>
       <details>
         <summary>{language.t("session.outcome.details")}</summary>

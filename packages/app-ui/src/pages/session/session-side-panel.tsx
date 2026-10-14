@@ -341,7 +341,7 @@ export function SessionSidePanel(props: {
                         <DragDropSensors />
                         <ConstrainDragYAxis />
                         <Tabs value={activeTab()} onChange={activateTab}>
-                          <div class="sticky top-0 shrink-0 flex">
+                          <div class="sticky top-0 shrink-0 flex" classList={{ hidden: activeTab() === "artifacts" }}>
                             <Tabs.List
                               ref={(el: HTMLDivElement) => {
                                 const stop = createFileTabListSync({ el, contextOpen })
@@ -473,7 +473,11 @@ export function SessionSidePanel(props: {
                             >
                               <Show when={sessionKey()} keyed>
                                 {(_key) => (
-                                  <ArtifactsPanel active={activeTab() === "artifacts"} target={props.artifactTarget} />
+                                  <ArtifactsPanel
+                                    active={activeTab() === "artifacts"}
+                                    target={props.artifactTarget}
+                                    onReview={() => activateTab("review")}
+                                  />
                                 )}
                               </Show>
                             </div>
@@ -559,7 +563,10 @@ export function SessionSidePanel(props: {
                       }}
                     >
                       <Tabs value={activeTab()} onChange={activateTab}>
-                        <div class="session-review-v2-tabs-bar sticky top-0 shrink-0 flex items-center">
+                        <div
+                          class="session-review-v2-tabs-bar sticky top-0 shrink-0 flex items-center"
+                          classList={{ hidden: activeTab() === "artifacts" }}
+                        >
                           <Tabs.List
                             ref={(el: HTMLDivElement) => {
                               tabList = el
@@ -716,7 +723,11 @@ export function SessionSidePanel(props: {
                           >
                             <Show when={sessionKey()} keyed>
                               {(_key) => (
-                                <ArtifactsPanel active={activeTab() === "artifacts"} target={props.artifactTarget} />
+                                <ArtifactsPanel
+                                  active={activeTab() === "artifacts"}
+                                  target={props.artifactTarget}
+                                  onReview={() => activateTab("review")}
+                                />
                               )}
                             </Show>
                           </div>

@@ -703,7 +703,7 @@ function ChannelIndicator() {
   return (
     <>
       {["beta", "dev"].includes(import.meta.env.VITE_ZAOVRA_CHANNEL) && (
-        <div class="bg-icon-interactive-base text-[#FFF] font-medium px-2 rounded-sm uppercase font-mono">
+        <div data-slot="channel-label" class="text-text-weaker text-[10px] font-medium px-1 uppercase tracking-wide">
           {import.meta.env.VITE_ZAOVRA_CHANNEL.toUpperCase()}
         </div>
       )}

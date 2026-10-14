@@ -92,68 +92,61 @@ export function SessionUsageBar() {
   )
   const value = () => (!params.id || usage.loading || usage.error ? undefined : usage())
   return (
-    <Popover placement="top-end" gutter={8} modal={false}>
-      <Popover.Trigger ref={trigger} class="session-usage-bar" title={language.t("usage.sessionScope")}>
-        <span>{language.t("usage.details")}</span>
-        <Icon name="chevron-down" size="small" />
-        <Show when={!usage.error} fallback={<span>{language.t("usage.error")}</span>}>
-          <span>
-            {language.t("usage.conversation")}{" "}
-            <b>
-              {value()
-                ? usageDisplay(value()!.total).unknown
-                  ? language.t("usage.unknown")
-                  : tokenLabel(value()!.total)
-                : params.id
-                  ? "—"
-                  : "0"}
-            </b>{" "}
-            Tokens
-          </span>
-          <span>
-            {language.t("usage.lastTurn")}{" "}
-            <b>
-              {value()?.lastTurn
-                ? usageDisplay(value()!.lastTurn!).unknown
-                  ? language.t("usage.unknown")
-                  : tokenLabel(value()!.lastTurn!)
-                : "—"}
-            </b>
-          </span>
-          <Show when={value()?.total.unreported}>
-            <span>{language.t("usage.incomplete")}</span>
-          </Show>
-        </Show>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          class="session-usage-details"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            trigger.focus({ preventScroll: true })
-          }}
-        >
-          <div class="usage-panel-heading">
-            <Popover.Title>{language.t("usage.details")}</Popover.Title>
-            <Popover.CloseButton as={IconButton} icon="close" variant="ghost" aria-label={language.t("common.close")} />
-          </div>
-          <Show when={value()}>
-            {(data) => (
-              <>
-                <UsagePopoverSummary totals={data().total} />
-              </>
-            )}
-          </Show>
-          <Popover.CloseButton
-            class="text-12-regular underline p-2"
-            aria-label={language.t("usage.title")}
-            onClick={open}
+    <Show when={params.id && (usage.error || (value()?.total.total ?? 0) > 0 || value()?.total.unreported)}>
+      <Popover placement="top-end" gutter={8} modal={false}>
+        <Popover.Trigger ref={trigger} class="session-usage-bar" title={language.t("usage.sessionScope")}>
+          {usage.error
+            ? language.t("usage.error")
+            : value() && usageDisplay(value()!.total).unknown
+              ? language.t("usage.unknown")
+              : `${value() ? tokenLabel(value()!.total) : "—"} Tokens`}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content
+            class="session-usage-details"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              trigger.focus({ preventScroll: true })
+            }}
           >
-            {language.t("usage.title")}
-          </Popover.CloseButton>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover>
+            <div class="usage-panel-heading">
+              <Popover.Title>{language.t("usage.details")}</Popover.Title>
+              <Popover.CloseButton
+                as={IconButton}
+                icon="close"
+                variant="ghost"
+                aria-label={language.t("common.close")}
+              />
+            </div>
+            <Show when={value()}>
+              {(data) => (
+                <>
+                  <UsagePopoverSummary totals={data().total} />
+                  <p class="px-5 py-2 text-xs text-text-weak">
+                    {language.t("usage.lastTurn")} ·{" "}
+                    {data().lastTurn
+                      ? usageDisplay(data().lastTurn!).unknown
+                        ? language.t("usage.unknown")
+                        : tokenLabel(data().lastTurn!)
+                      : "—"}
+                  </p>
+                </>
+              )}
+            </Show>
+            <Show when={usage.error}>
+              <p class="p-4 text-xs">{language.t("usage.error")}</p>
+            </Show>
+            <Popover.CloseButton
+              class="flex w-full items-center justify-between rounded-lg p-3 text-xs hover:bg-background-stronger"
+              aria-label={language.t("usage.title")}
+              onClick={open}
+            >
+              {language.t("usage.viewDetails")} <span aria-hidden="true">›</span>
+            </Popover.CloseButton>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover>
+    </Show>
   )
 }
 

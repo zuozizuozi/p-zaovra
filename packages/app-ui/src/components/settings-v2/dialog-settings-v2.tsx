@@ -30,27 +30,32 @@ export const DialogSettings: Component<{
   const [search, setSearch] = createStore({ value: "" })
   const groups = [
     {
-      label: "settings.section.desktop",
+      label: "settings.group.general",
       items: [
         { value: "general", label: "settings.tab.general", icon: "sliders" },
-        { value: "appearance", label: "settings.general.section.appearance", icon: "sliders" },
+        { value: "appearance", label: "settings.general.section.appearance", icon: "eye" },
         { value: "shortcuts", label: "settings.tab.shortcuts", icon: "keyboard" },
       ],
     },
     {
-      label: "settings.section.server",
+      label: "settings.group.models",
       items: [
         { value: "providers", label: "settings.providers.title", icon: "providers" },
         { value: "models", label: "settings.models.title", icon: "models" },
-        { value: "usage", label: "usage.title", icon: "models" },
-        { value: "servers", label: "status.popover.tab.servers", icon: "server" },
+        { value: "usage", label: "usage.title", icon: "bullet-list" },
       ],
     },
     {
-      label: "sidebar.settings",
+      label: "settings.group.security",
       items: [
         { value: "permissions", label: "settings.permissions.title", icon: "shield" },
-        { value: "privacy", label: "settings.network.privacy", icon: "shield" },
+        { value: "privacy", label: "settings.network.privacy", icon: "glasses" },
+      ],
+    },
+    {
+      label: "settings.group.other",
+      items: [
+        { value: "servers", label: "status.popover.tab.servers", icon: "server" },
         { value: "experiments", label: "settings.experiments", icon: "branch" },
         { value: "about", label: "settings.about.title", icon: "help" },
       ],

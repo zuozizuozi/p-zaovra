@@ -1,4 +1,6 @@
 .session-usage-bar {
+  width: fit-content;
+  align-self: flex-end;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

@@ -3,6 +3,13 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "error.checkModelService": "检查模型服务",
+  "usage.viewDetails": "查看详细用量",
+  "settings.group.general": "常规",
+  "settings.group.models": "模型与用量",
+  "settings.group.security": "安全",
+  "settings.group.other": "其他",
+
   "session.new.noModels": "还没有可用的模型服务",
   "session.new.noModelsHint": "添加你自己的 API Key，选择模型后即可开始任务。",
   "session.new.addProvider": "添加模型服务",
@@ -1417,7 +1424,7 @@ export const dict = {
   "settings.shortcuts.group.terminal": "终端",
   "settings.shortcuts.group.prompt": "提示",
 
-  "settings.providers.title": "提供商",
+  "settings.providers.title": "模型服务",
   "settings.providers.description": "提供商设置将在此处可配置。",
   "settings.providers.section.connected": "已连接的提供商",
   "settings.providers.connected.empty": "没有已连接的提供商",
