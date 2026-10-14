@@ -377,9 +377,14 @@ html[data-theme="oc-2"] body[data-new-layout] {
     box-shadow: none;
   }
 
-  [data-component="artifacts-panel"] form button {
-    background: var(--zaovra-accent);
-    color: var(--zaovra-on-accent);
+  [data-component="artifacts-panel"] [data-slot="artifact-address-row"] button {
+    background: transparent;
+    color: var(--zaovra-ink);
+    border-radius: 8px;
+  }
+
+  [data-component="artifacts-panel"] [data-slot="artifact-address-row"] button:not(:disabled):hover {
+    background: var(--zaovra-selection);
   }
 
   [data-component="artifacts-panel"] [role="tab"][aria-selected="true"] {

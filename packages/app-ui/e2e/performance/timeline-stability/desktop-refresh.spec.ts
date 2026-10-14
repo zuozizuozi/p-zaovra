@@ -114,14 +114,27 @@ test("synthetic continuations share one disclosure and preserve final text", asy
 })
 
 test("empty checks remain absent and error recovery renders inside its card", async ({ page }) => {
+  const requests: unknown[] = []
   const timeline = await setupTimeline(page, {
     settings: { newLayoutDesigns: true },
     messages: [userMessage(), assistantMessage([], { completed: false })],
   })
   await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+  await page.route("**/api/session/*/recover**", async (route) => {
+    requests.push(route.request().postDataJSON())
+    await route.fulfill({ json: { data: {} } })
+  })
   await page.route("**/api/session/*/outcome**", (route) =>
     route.fulfill({
-      json: { data: { state: "failed", messageID: userID, outcomeUnknown: false, checks: [], missing: [] } },
+      json: {
+        data: {
+          state: "failed",
+          messageID: assistantMessage([]).info.id,
+          outcomeUnknown: false,
+          checks: [],
+          missing: [],
+        },
+      },
     }),
   )
   await timeline.send(
@@ -137,4 +150,7 @@ test("empty checks remain absent and error recovery renders inside its card", as
   await expect(card.getByRole("button", { name: "Retry original request", exact: true })).toBeVisible()
   await expect(page.locator('[data-component="verification-summary"]')).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Refresh verification status", exact: true })).toHaveCount(0)
+  await card.getByRole("button", { name: "Retry original request", exact: true }).click()
+  await expect.poll(() => requests.length).toBe(1)
+  expect(requests[0]).toMatchObject({ messageID: assistantMessage([]).info.id, action: "retry" })
 })

@@ -74,7 +74,9 @@ export function SessionOutcomeDock() {
     (recover.isSuccess && recover.variables?.sessionID === params.id && recover.variables.action === "abandon")
   const [display, setDisplay] = createStore<{ target?: HTMLElement }>({})
   createEffect(() => {
-    const id = outcome()?.messageID
+    const messageID = outcome()?.messageID
+    const message = sync().session.data.message[params.id ?? ""]?.find((item) => item.id === messageID)
+    const id = message?.role === "assistant" ? message.parentID : messageID
     const update = () => {
       const target = id
         ? (document.querySelector<HTMLElement>(`[data-recovery-target="${CSS.escape(id)}"]`) ?? undefined)
