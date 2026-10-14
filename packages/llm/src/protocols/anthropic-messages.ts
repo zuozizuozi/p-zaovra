@@ -404,6 +404,16 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
   breakpoints: Cache.Breakpoints,
 ) {
   const messages: AnthropicMessage[] = []
+  // Tool results share one user turn on the wire. Keep canonical history and
+  // block order intact, including cache hints and wrapped operator updates.
+  const appendUser = (content: readonly AnthropicUserBlock[]) => {
+    const previous = messages.at(-1)
+    if (previous?.role === "user") {
+      messages[messages.length - 1] = { role: "user", content: [...previous.content, ...content] }
+      return
+    }
+    messages.push({ role: "user", content })
+  }
 
   for (const [index, message] of request.messages.entries()) {
     if (message.role === "system") {
@@ -415,10 +425,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
       }
       const part = yield* ProviderShared.wrappedSystemUpdate("Anthropic Messages", message)
       const block = { type: "text" as const, text: part.text, cache_control: cacheControl(breakpoints, part.cache) }
-      const previous = messages.at(-1)
-      if (previous?.role === "user")
-        messages[messages.length - 1] = { role: "user", content: [...previous.content, block] }
-      else messages.push({ role: "user", content: [block] })
+      appendUser([block])
       continue
     }
 
@@ -435,7 +442,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
         }
         return yield* ProviderShared.unsupportedContent("Anthropic Messages", "user", ["text", "media"])
       }
-      messages.push({ role: "user", content })
+      appendUser(content)
       continue
     }
 
@@ -482,7 +489,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
         cache_control: cacheControl(breakpoints, part.cache),
       })
     }
-    messages.push({ role: "user", content })
+    appendUser(content)
   }
 
   return messages

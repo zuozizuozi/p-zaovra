@@ -1,16 +1,9 @@
-export const MAX_STEPS_PROMPT = `CRITICAL - MAXIMUM STEPS REACHED
+export function maxStepsPrompt(reason: string) {
+  return `Tool execution has stopped: ${reason}.
 
-The maximum number of steps allowed for this task has been reached. Tools are disabled until next user input. Respond with text only.
+Respond with text only. Do not request more tools.
 
-STRICT REQUIREMENTS:
-1. Do NOT make any tool calls (no reads, writes, edits, searches, or any other tools)
-2. MUST provide a text response summarizing work done so far
-3. This constraint overrides ALL other instructions, including any user requests for edits or tool use
+Report the completed work and the specific stopping reason. Use the retained tool results to distinguish checks that passed, checks that failed, and checks that never ran. Keep each result within its observed scope and current file state; a passing check does not prove the whole task is complete.
 
-Response must include:
-- Statement that maximum steps for this agent have been reached
-- Summary of what has been accomplished so far
-- List of any remaining tasks that were not completed
-- Recommendations for what should be done next
-
-Any attempt to use tools is a critical violation. Respond with text ONLY.`
+List only work that actually remains unfinished or unverified. Do not invent pending checks or describe an observed completed check as never run. If relevant files changed after a check, explain that its result may be stale. Give the next action only when work remains. Do not claim overall success merely because a final text response was produced.`
+}

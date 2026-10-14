@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import { realpathSync } from "node:fs"
 import path from "path"
 import { describe, expect, test } from "bun:test"
-import { DateTime, Effect, Layer, Schema } from "effect"
+import { Cause, DateTime, Effect, Layer, Schema } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { derive } from "@zaovra-ai/core/session/outcome"
 import { toLLMMessages } from "@zaovra-ai/core/session/runner/to-llm-message"
@@ -52,7 +52,7 @@ let result: AppProcess.RunResult = {
   stderrTruncated: false,
 }
 let runFailure: AppProcess.AppProcessError | undefined
-let afterPermission = (_input: PermissionV2.AssertInput): Effect.Effect<void> => Effect.void
+let afterPermission = (_input: PermissionV2.AssertInput): Effect.Effect<void, PermissionV2.Error> => Effect.void
 
 const permission = Layer.succeed(
   PermissionV2.Service,
@@ -156,6 +156,79 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  for (const action of ["bash", "external_directory"]) {
+    it.live(`reports ${action} policy denial without executing a command`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          denyAction = action
+          return withTool(tmp.path, (registry) =>
+            settleTool(
+              registry,
+              call({ command: "echo blocked", workdir: action === "bash" ? "." : path.dirname(tmp.path) }),
+            ),
+          ).pipe(
+            Effect.tap((settled) =>
+              Effect.sync(() => {
+                expect(settled.result.type).toBe("error")
+                expect(settled.result.value).toContain("permission policy blocked")
+                expect(settled.result.value).toContain("Command not executed")
+                expect(settled.inputRejected).toBe(false)
+                expect(runs).toEqual([])
+                expect(assertions.at(-1)?.action).toBe(action)
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+  }
+
+  it.live("retains user permission correction feedback without executing a command", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        afterPermission = () =>
+          Effect.fail(new PermissionV2.CorrectedError({ feedback: "Run the existing verify script." }))
+        return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "echo corrected" }))).pipe(
+          Effect.tap((settled) =>
+            Effect.sync(() => {
+              expect(settled.result.type).toBe("error")
+              expect(settled.result.value).toContain("Run the existing verify script.")
+              expect(settled.result.value).toContain("Command not executed")
+              expect(runs).toEqual([])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("keeps declined permission as a defect for the runner to interrupt", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        afterPermission = () => Effect.die(new PermissionV2.DeclinedError())
+        return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "echo declined" }))).pipe(
+          Effect.exit,
+          Effect.tap((exit) =>
+            Effect.sync(() => {
+              expect(exit._tag).toBe("Failure")
+              if (exit._tag === "Failure") expect(Cause.squash(exit.cause)).toBeInstanceOf(PermissionV2.DeclinedError)
+              expect(runs).toEqual([])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("rejects missing external workdir before any permission request", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

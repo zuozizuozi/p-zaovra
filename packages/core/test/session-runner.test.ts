@@ -4441,13 +4441,66 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.finish({ reason: "stop" }),
         ],
       ]
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      const error = yield* session.resume(sessionID).pipe(Effect.flip)
+      expect(error).toBeInstanceOf(LLMError)
+      expect(error.message).toContain("Repeated shell failures stopped tool execution")
       expect(requests).toHaveLength(5)
       expect(requests[4]!.tools).toEqual([])
       expect(requests[4]!.toolChoice).toMatchObject({ type: "none" })
       expect(JSON.stringify(requests[3]!.system)).toContain("Change approach")
+      expect(JSON.stringify(requests[4]!.messages)).toContain("Repeated shell failures stopped tool execution")
+      expect(JSON.stringify(requests[4]!.messages)).not.toContain("CRITICAL - MAXIMUM STEPS REACHED")
       expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
       expect(yield* session.outcome(sessionID)).toMatchObject({ state: "failed", outcomeUnknown: false })
+    }),
+  )
+
+  it.effect("retains a passed check at the turn limit without claiming overall completion", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("build"), (agent) => {
+          agent.steps = 2
+        }),
+      )
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        bash: Tool.make({
+          description: "A recorded check",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ verification: Schema.Unknown }),
+          execute: (_input, context) =>
+            Effect.succeed({
+              verification: { kind: "test", command: "bun test", callID: context.toolCallID, exit: 0 },
+            }),
+        }),
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Verify the artifact" }), resume: false })
+      requests.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "passed-before-limit", name: "bash", input: {} }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "report", ["The observed check passed; the turn limit stopped further work."])
+          .completeEvents,
+      ]
+      const error = yield* session.resume(sessionID).pipe(Effect.flip)
+      expect(error.message).toContain("Maximum agent steps reached before completion")
+      expect(requests).toHaveLength(2)
+      expect(requests[1]!.tools).toEqual([])
+      expect(requests[1]!.toolChoice).toMatchObject({ type: "none" })
+      expect(JSON.stringify(requests[1]!.messages)).toContain("passed-before-limit")
+      expect(JSON.stringify(requests[1]!.messages)).toContain("Do not invent pending checks")
+      const context = yield* session.context(sessionID)
+      expect(context.at(-1)).toMatchObject({ finish: "max-steps" })
+      const outcome = SessionOutcome.derive(context, false)
+      expect(outcome.state).toBe("failed")
+      expect(outcome.checks).toContainEqual(expect.objectContaining({ callID: "passed-before-limit", exit: 0 }))
     }),
   )
 
@@ -5618,7 +5671,7 @@ describe("SessionRunnerLLM", () => {
       expect(requests[1]?.tools).toEqual([])
       expect(requests[1]?.messages.at(-1)).toMatchObject({
         role: "assistant",
-        content: [{ type: "text", text: expect.stringContaining("MAXIMUM STEPS REACHED") }],
+        content: [{ type: "text", text: expect.stringContaining("Maximum agent steps reached before completion") }],
       })
       expect(executions).toEqual(["done"])
       expect(yield* session.context(sessionID)).toMatchObject([
