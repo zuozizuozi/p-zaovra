@@ -1,3 +1,6 @@
+import { usePermission } from "./permission"
+import { notificationText, permissionDescription } from "@/utils/notification-content"
+import { sessionHref } from "@/utils/session-route"
 import { createStore, reconcile } from "solid-js/store"
 import { type Accessor, batch, createEffect, createMemo, createRoot, getOwner, onCleanup } from "solid-js"
 import { useParams, useSearchParams } from "@solidjs/router"
@@ -121,6 +124,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
     const platform = usePlatform()
     const settings = useSettings()
     const language = useLanguage()
+    const permission = usePermission()
     const owner = getOwner()
     const states = new Map<ServerScope, { dispose: () => void; state: NotificationState }>()
 
@@ -146,6 +150,8 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
           dispose,
           state: createServerNotificationState({
             sdk: ctx.sdk,
+            key,
+            permission: permission.ensureServerState(key),
             sync: ctx.sync,
             active: () => server.scope(activeServer()) === ctx.sdk.scope,
             directory: activeDirectory,
@@ -203,6 +209,8 @@ type NotificationState = ReturnType<typeof createServerNotificationState>
 
 function createServerNotificationState(input: {
   sdk: ServerSDK
+  key: ServerConnection.Key
+  permission: ReturnType<ReturnType<typeof usePermission>["ensureServerState"]>
   sync: ServerSync
   active: Accessor<boolean>
   directory: Accessor<string | undefined>
@@ -386,8 +394,44 @@ function createServerNotificationState(input: {
     })
   }
 
+  const alerted = new Map<string, number>()
   const unsub = serverSDK().event.listen((e) => {
     const event = e.details
+    if (
+      event.type === "question.replied" ||
+      event.type === "question.rejected" ||
+      event.type === "permission.replied"
+    ) {
+      alerted.delete(`${e.name}:${event.properties.sessionID}`)
+      return
+    }
+    if (event.type === "question.asked" || event.type === "permission.asked") {
+      if (event.type === "permission.asked" && input.permission.autoResponds(event.properties, e.name)) return
+      const key = `${e.name}:${event.properties.sessionID}`
+      const time = Date.now()
+      if (time - (alerted.get(key) ?? 0) < 5000) return
+      alerted.set(key, time)
+      void lookup(e.name, event.properties.sessionID).then((session) => {
+        if (meta.disposed || alerted.get(key) !== time) return
+        const question = event.type === "question.asked"
+        const body = notificationText(
+          question
+            ? event.properties.questions[0]?.question || language.t("notification.question.title")
+            : event.properties.permission === "bash" && event.properties.patterns[0]
+              ? language.t("notification.permission.run", { command: event.properties.patterns[0] })
+              : permissionDescription(event.properties.permission, language.t),
+        )
+        const route = settings.general.newLayoutDesigns()
+          ? sessionHref(input.key, event.properties.sessionID)
+          : `/${base64Encode(e.name)}/session/${event.properties.sessionID}`
+        const href = `${route}#${question ? "question" : "permission"}=${encodeURIComponent(event.properties.id)}`
+        if (!question && settings.sounds.permissionsEnabled()) void playSoundById(settings.sounds.permissions())
+        if (question ? settings.notifications.agent() : settings.notifications.permissions()) {
+          void platform.notify(session?.title ?? language.t("command.session.new"), body, href)
+        }
+      })
+      return
+    }
     if (event.type !== "session.idle" && event.type !== "session.error") return
 
     const directory = e.name

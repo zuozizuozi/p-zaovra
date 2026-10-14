@@ -1106,6 +1106,7 @@ export const dict = {
   "error.chain.configInvalid": "配置文件 {{path}} 无效",
   "error.chain.configInvalidWithMessage": "配置文件 {{path}} 无效：{{message}}",
 
+  "notification.permission.run": "想运行 {{command}}",
   "notification.permission.title": "需要权限",
   "notification.permission.description": "{{sessionTitle}}（{{projectName}}）需要权限",
   "notification.question.title": "问题",
@@ -1547,6 +1548,9 @@ export const dict = {
   "session.review.noVcs.createGit.actionLoading": "正在创建 Git 仓库...",
   "session.review.noVcs.createGit.action": "创建 Git 仓库",
   "session.todo.progress": "已完成 {{done}} 个任务（共 {{total}} 个）",
+  "session.question.skip": "跳过",
+  "session.question.recommended": "推荐",
+  "session.question.custom": "或自行撰写回复",
   "session.question.progress": "{{current}}/{{total}} 个问题",
   "session.header.open.finder": "访达",
   "session.header.open.fileExplorer": "文件资源管理器",

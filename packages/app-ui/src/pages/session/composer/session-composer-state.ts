@@ -1,7 +1,7 @@
 import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { PermissionView, QuestionView, Todo } from "@zaovra-ai/sdk/v2"
-import { useParams } from "@solidjs/router"
+import { useLocation, useParams } from "@solidjs/router"
 import { showToast } from "@/utils/toast"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
@@ -27,6 +27,7 @@ const idle = { type: "idle" as const }
 
 export function createSessionComposerController(options?: { closeMs?: number | (() => number) }) {
   const params = useParams()
+  const location = useLocation()
   const sdk = useSDK()
   const sync = useSync()
   const serverSync = useServerSync()
@@ -34,10 +35,17 @@ export function createSessionComposerController(options?: { closeMs?: number | (
   const permission = usePermission()
 
   const questionRequest = createMemo((): QuestionView | undefined => {
-    return sessionQuestionRequest(sync().data.session, sync().data.question, params.id)
+    const requested = new URLSearchParams(location.hash.slice(1)).get("question")
+    return (
+      sync().data.question[params.id ?? ""]?.find((item) => item.id === requested) ??
+      sessionQuestionRequest(sync().data.session, sync().data.question, params.id)
+    )
   })
 
   const permissionRequest = createMemo((): PermissionView | undefined => {
+    const requested = new URLSearchParams(location.hash.slice(1)).get("permission")
+    const target = sync().data.permission[params.id ?? ""]?.find((item) => item.id === requested)
+    if (target && !permission.autoResponds(target, sdk().directory)) return target
     return sessionPermissionRequest(sync().data.session, sync().data.permission, params.id, (item) => {
       return !permission.autoResponds(item, sdk().directory)
     })

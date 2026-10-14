@@ -148,7 +148,17 @@ export function SessionComposerRegion(props: {
               </Show>
               <Show
                 when={controller.child()}
-                fallback={<Show when={!controller.state.blocked()}>{props.promptInput}</Show>}
+                fallback={
+                  <Show when={!controller.state.blocked() || controller.state.questionRequest()}>
+                    <div
+                      inert={controller.state.blocked()}
+                      aria-disabled={controller.state.blocked()}
+                      data-slot="question-composer"
+                    >
+                      {props.promptInput}
+                    </div>
+                  </Show>
+                }
               >
                 <div
                   ref={controller.setPromptRef}

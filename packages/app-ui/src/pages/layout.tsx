@@ -44,7 +44,7 @@ import { Binary } from "@zaovra-ai/core/util/binary"
 import { retry } from "@zaovra-ai/core/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
-import { setNavigate } from "@/utils/notification-click"
+import { handleNotificationClick, setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
@@ -436,27 +436,13 @@ export default function LegacyLayout(props: ParentProps) {
           e.details.type === "permission.asked"
             ? language.t("notification.permission.description", { sessionTitle, projectName })
             : language.t("notification.question.description", { sessionTitle, projectName })
-        const href = `/${base64Encode(directory)}/session/${props.sessionID}`
+        const target = e.details.type === "question.asked" ? "question" : "permission"
+        const href = `/${base64Encode(directory)}/session/${props.sessionID}#${target}=${encodeURIComponent(props.id)}`
 
         const now = Date.now()
         const lastAlerted = alertedAtBySession.get(sessionKey) ?? 0
         if (now - lastAlerted < cooldownMs) return
         alertedAtBySession.set(sessionKey, now)
-
-        if (e.details.type === "permission.asked") {
-          if (settings.sounds.permissionsEnabled()) {
-            void playSoundById(settings.sounds.permissions())
-          }
-          if (settings.notifications.permissions()) {
-            void platform.notify(title, description, href)
-          }
-        }
-
-        if (e.details.type === "question.asked") {
-          if (settings.notifications.agent()) {
-            void platform.notify(title, description, href)
-          }
-        }
 
         const currentSession = params.id
         if (pathKey(directory) === pathKey(currentDir()) && props.sessionID === currentSession) return
@@ -472,7 +458,7 @@ export default function LegacyLayout(props: ParentProps) {
           actions: [
             {
               label: language.t("notification.action.goToSession"),
-              onClick: () => navigate(href),
+              onClick: () => handleNotificationClick(href),
             },
             {
               label: language.t("common.dismiss"),
