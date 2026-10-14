@@ -55,9 +55,21 @@ export function SessionTabAvatar(props: {
     >
       <Show when={state.loading()} fallback={projectAvatar()}>
         <span class="relative block size-4 shrink-0">
-          <SessionProgressIndicatorV2
-            class={`absolute inset-0 ${props.revealProjectOnHover === false ? "" : "group-hover:invisible"}`}
-          />
+          <Show
+            when={props.conversationIcon}
+            fallback={
+              <SessionProgressIndicatorV2
+                class={`absolute inset-0 ${props.revealProjectOnHover === false ? "" : "group-hover:invisible"}`}
+              />
+            }
+          >
+            <span
+              aria-hidden="true"
+              data-slot="session-running-ring"
+              class="absolute inset-0 rounded-full border-2 border-current border-t-transparent text-v2-icon-icon-accent motion-safe:animate-spin"
+              classList={{ "group-hover:invisible": props.revealProjectOnHover !== false }}
+            />
+          </Show>
           <Show when={props.revealProjectOnHover !== false}>
             <span class="invisible absolute inset-0 group-hover:visible">{projectAvatar()}</span>
           </Show>

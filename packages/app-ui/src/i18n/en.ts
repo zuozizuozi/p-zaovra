@@ -305,6 +305,7 @@ export const dict = {
   "server.errorDetails": "Details",
   "usage.details": "Usage details",
   "usage.unknown": "Unknown",
+  "usage.unknownLabel": "Usage unknown",
   "usage.outputIncludingReasoning": "Output (including reasoning)",
   "usage.hitRate": "Input cache hit rate",
   "usage.hitRateHint":

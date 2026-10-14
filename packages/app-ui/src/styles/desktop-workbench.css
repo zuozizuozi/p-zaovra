@@ -585,6 +585,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   .settings-v2-tab-header {
     padding: 30px 32px 24px;
+    background: var(--zaovra-canvas);
   }
 
   .settings-v2-tab-title {

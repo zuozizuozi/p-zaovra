@@ -98,7 +98,7 @@ export function SessionUsageBar() {
           {usage.error
             ? language.t("usage.error")
             : value() && usageDisplay(value()!.total).unknown
-              ? language.t("usage.unknown")
+              ? language.t("usage.unknownLabel")
               : `${value() ? tokenLabel(value()!.total) : "—"} Tokens`}
         </Popover.Trigger>
         <Popover.Portal>

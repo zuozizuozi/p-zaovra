@@ -292,6 +292,7 @@ export const dict = {
   "server.errorDetails": "详情",
   "usage.details": "用量明细",
   "usage.unknown": "未知",
+  "usage.unknownLabel": "用量未知",
   "usage.outputIncludingReasoning": "输出（含推理）",
   "usage.hitRate": "输入缓存命中率",
   "usage.hitRateHint": "缓存读取 ÷（非缓存输入＋缓存读取＋缓存写入）；推理已包含在输出中，不再累加。",
