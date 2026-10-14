@@ -108,14 +108,16 @@ const layer = Effect.gen(function* () {
       )
       if (review.token !== token || review.reason)
         return yield* new Conflict({ message: review.reason ?? "Workspace changed; reload the diff before deciding" })
-      yield* events.publish(WorkEvent.TaskMergeReviewed, {
-        goalID,
-        taskID,
-        token,
-        approved,
-        timestamp: yield* DateTime.now,
-      })
-      if (approved) yield* controller.signal(goalID, "continue")
+      yield* Effect.gen(function* () {
+        yield* events.publish(WorkEvent.TaskMergeReviewed, {
+          goalID,
+          taskID,
+          token,
+          approved,
+          timestamp: yield* DateTime.now,
+        })
+        if (approved) yield* controller.signal(goalID, "continue")
+      }).pipe(Effect.uninterruptible)
     }),
   }
 })

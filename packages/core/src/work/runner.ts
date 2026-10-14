@@ -2116,10 +2116,14 @@ export const layer = Layer.effect(
 
     const resumableBlockedTasks = Effect.fn("WorkRunner.resumableBlockedTasks")(function* (goal: Work.GoalInfo) {
       const goalID = goal.id
-      const blocked = (yield* store.tasks(goalID)).filter((task) => task.status === "blocked")
+      const blocked = (yield* store.tasks(goalID)).filter(
+        (task) =>
+          task.status === "blocked" || (task.status === "pending" && task.attemptCount === 0 && task.isolationState),
+      )
       if (blocked.length === 0) return []
 
       const reasons = new Map<Work.TaskID, string>()
+      const resolved = new Set<Work.TaskID>()
       let cursor = -1
       while (true) {
         const history = yield* EventV2.readAggregate(db, {
@@ -2131,6 +2135,10 @@ export const layer = Layer.effect(
         history.events
           .filter((event) => event.type === Work.Event.TaskBlocked.type)
           .forEach((event) => reasons.set(event.data.taskID, event.data.reason))
+        history.events
+          .filter((event) => event.type === Work.Event.TaskIsolationResolved.type)
+          .filter((event) => event.data.isolation.status !== "blocked")
+          .forEach((event) => resolved.add(event.data.taskID))
         if (!history.hasMore) break
         const next = history.events.at(-1)?.durable?.seq
         if (next === undefined) break
@@ -2138,9 +2146,15 @@ export const layer = Layer.effect(
       }
 
       const candidates = yield* Effect.forEach(blocked, (task) =>
-        task.isolationState?.status === "blocked"
+        task.attemptCount === 0 &&
+        task.isolationState &&
+        (task.isolationState.status === "blocked" || resolved.has(task.id) || reasons.get(task.id)?.startsWith("隔离"))
           ? Effect.gen(function* () {
-              const [prepared] = yield* provisionGraph(goal, [{ ...task, isolation: "worktree" }])
+              if (task.status === "pending") return task
+              const [prepared] =
+                task.isolationState!.status === "blocked"
+                  ? yield* provisionGraph(goal, [{ ...task, isolation: "worktree" }])
+                  : [{ provisioning: task.isolationState, location: task.location }]
               const isolation = prepared.provisioning
               if (!isolation) return undefined
               yield* events.publish(Work.Event.TaskIsolationResolved, {
@@ -2152,8 +2166,8 @@ export const layer = Layer.effect(
               })
               return isolation.status === "blocked" ? undefined : task
             })
-          : task.attemptCount === 0 && reasons.get(task.id)?.startsWith("隔离") && task.isolationState
-            ? Effect.succeed(task)
+          : task.status !== "blocked"
+            ? Effect.succeed(undefined)
             : store
                 .attempts(task.id)
                 .pipe(
@@ -2202,15 +2216,16 @@ export const layer = Layer.effect(
                 yield* Effect.forEach(
                   resumable,
                   (task) =>
-                    events.publish(Work.Event.TaskReworkRequested, {
-                      goalID: input.goalID,
-                      taskID: task.id,
-                      status: "rework",
-                      reason:
-                        task.isolationState?.status === "blocked"
-                          ? "Isolation repaired after user intervention"
-                          : "Access repaired after user intervention",
-                      timestamp,
+                    Effect.gen(function* () {
+                      // Isolation resolution already readmitted unused tasks as pending.
+                      if ((yield* store.getTask(task.id))?.status !== "blocked") return
+                      yield* events.publish(Work.Event.TaskReworkRequested, {
+                        goalID: input.goalID,
+                        taskID: task.id,
+                        status: "rework",
+                        reason: "Access repaired after user intervention",
+                        timestamp,
+                      })
                     }),
                   { concurrency: 1, discard: true },
                 )

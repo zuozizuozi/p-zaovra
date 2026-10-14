@@ -33,7 +33,7 @@ const taskTransitions = {
   merging: ["completed", "blocked", "cancelled"],
   rework: ["running", "blocked", "cancelled"],
   completed: [],
-  blocked: ["rework", "superseded"],
+  blocked: ["pending", "rework", "superseded"],
   superseded: [],
   cancelled: [],
 } satisfies Record<Work.TaskStatus, Work.TaskStatus[]>

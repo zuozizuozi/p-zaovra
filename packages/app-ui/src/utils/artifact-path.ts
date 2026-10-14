@@ -1,10 +1,12 @@
 export function artifactPath(input: string, directory: string, encoded = false) {
   const valueIsURL = encoded || /^file:\/\//i.test(input.trim())
-  // File-list entries and inline paths are literal file names, not URL-encoded strings.
-  // Keep encoded traversal rejected even when it arrives through a literal-path entry point.
-  if (!valueIsURL && /%(?:2e|2f|5c|00)/i.test(input)) return
+  // Split URL fragments before decoding: an encoded # belongs to the file name.
+  // File-list entries remain literal, including percent escapes and #L suffixes.
+  const source = valueIsURL ? input.trim() : input
+  const fragment = valueIsURL ? source.indexOf("#") : -1
+  const line = fragment >= 0 ? source.slice(fragment).match(/^#L(\d+)$/) : undefined
   const decoded = (() => {
-    const value = input.trim().replace(/^file:\/\//i, "")
+    const value = (fragment >= 0 ? source.slice(0, fragment) : source).replace(/^file:\/\//i, "")
     if (!valueIsURL) return value
     try {
       return decodeURIComponent(value)
@@ -13,11 +15,7 @@ export function artifactPath(input: string, directory: string, encoded = false) 
     }
   })()
   if (!decoded || /[\r\n\0]/.test(decoded)) return
-  const line = decoded.match(/(?::(\d+)|#L(\d+))$/)
-  const value = decoded
-    .replace(/(?::\d+|#L\d+)$/, "")
-    .replaceAll("\\", "/")
-    .replace(/^\/([a-z]:\/)/i, "$1")
+  const value = decoded.replaceAll("\\", "/").replace(/^\/([a-z]:\/)/i, "$1")
   const root = directory.replaceAll("\\", "/").replace(/\/$/, "")
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z]:\//i.test(value)) return
   const absolute = /^(?:[a-z]:\/|\/)/i.test(value)
@@ -37,7 +35,7 @@ export function artifactPath(input: string, directory: string, encoded = false) 
     parts.push(part)
   }
   if (!parts.length) return
-  return { path: parts.join("/"), line: line ? Number(line[1] ?? line[2]) : undefined }
+  return { path: parts.join("/"), line: line ? Number(line[1]) : undefined }
 }
 
 export const artifactPreviewable = (path: string) =>

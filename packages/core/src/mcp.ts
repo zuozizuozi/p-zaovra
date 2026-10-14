@@ -14,7 +14,7 @@ import {
   ToolListChangedNotificationSchema,
   type Tool as MCPTool,
 } from "@modelcontextprotocol/sdk/types.js"
-import { Cause, Context, Effect, Exit, Layer, Schema, Scope } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Schema, Scope, Semaphore } from "effect"
 import { Config } from "./config"
 import { ConfigMCP } from "./config/mcp"
 import { Credential } from "./credential"
@@ -81,6 +81,8 @@ type Server = typeof ConfigMCP.Server.Type
 type Active = {
   readonly client: Client
   readonly transport: Transport
+  readonly server: Server
+  readonly definitions: ReadonlyArray<MCPTool>
   readonly definitionNames: ReadonlyArray<string>
   registration: Scope.Closeable
 }
@@ -115,6 +117,7 @@ const layer = Layer.effect(
     const runFork = Effect.runForkWith(context)
     const runPromise = Effect.runPromiseWith(context)
     const locks = KeyedMutex.makeUnsafe<string>()
+    const registrations = Semaphore.makeUnsafe(1)
     const entries = yield* config.entries()
     const configured = Config.latest(entries, "mcp")?.servers ?? {}
     const defaults = Config.latest(entries, "mcp")?.timeout
@@ -131,12 +134,68 @@ const layer = Layer.effect(
       })
     })
 
+    // Recompute the whole collision set before publishing any names, including existing peers.
+    const register = Effect.fnUntraced(function* (next: Map<string, Active>) {
+      const counts = new Map<string, number>()
+      for (const [name, entry] of next)
+        for (const definition of entry.definitions) {
+          const readable = serverToolName(name, definition.name)
+          counts.set(readable, (counts.get(readable) ?? 0) + 1)
+        }
+      const occupied = new Set<string>()
+      const plans = Array.from(next, ([name, entry]) => ({
+        name,
+        entry,
+        names: entry.definitions.map((definition) => {
+          const readable = serverToolName(name, definition.name)
+          return serverToolName(name, definition.name, counts.get(readable)! > 1 || readable.length > 64)
+        }),
+      }))
+      for (const plan of plans)
+        for (const name of plan.names) {
+          if (occupied.has(name)) return yield* Effect.fail(new Error(`Duplicate MCP tool name: ${name}`))
+          occupied.add(name)
+        }
+      const staged = yield* Scope.fork(parentScope)
+      yield* Effect.gen(function* () {
+        for (const plan of plans) {
+          yield* tools
+            .register(
+              Object.fromEntries(
+                plan.entry.definitions.map((definition, index) => [
+                  plan.names[index],
+                  canonicalTool(
+                    plan.names[index],
+                    plan.entry.server,
+                    definition,
+                    plan.entry.client,
+                    permission,
+                    defaults?.request,
+                  ),
+                ]),
+              ),
+            )
+            .pipe(Scope.provide(staged))
+          next.set(plan.name, { ...plan.entry, definitionNames: plan.names, registration: staged })
+        }
+      }).pipe(Effect.onError(() => Scope.close(staged, Exit.void)))
+      const previous = new Set(Array.from(active.values(), (entry) => entry.registration))
+      active.clear()
+      next.forEach((entry, name) => active.set(name, entry))
+      for (const registration of previous) yield* Scope.close(registration, Exit.void).pipe(Effect.ignore)
+      if (next.size === 0) yield* Scope.close(staged, Exit.void)
+    })
+
     const close = Effect.fnUntraced(function* (name: string) {
-      const current = active.get(name)
-      active.delete(name)
-      if (!current) return
-      yield* Scope.close(current.registration, Exit.void).pipe(Effect.ignore)
-      yield* Effect.tryPromise(() => current.client.close()).pipe(Effect.ignore)
+      const current = yield* Effect.gen(function* () {
+        const current = active.get(name)
+        if (!current) return
+        const next = new Map(active)
+        next.delete(name)
+        yield* register(next).pipe(Effect.orDie)
+        return current
+      }).pipe(registrations.withPermits(1), Effect.uninterruptible)
+      if (current) yield* Effect.tryPromise(() => current.client.close()).pipe(Effect.ignore)
     })
 
     const refresh = Effect.fn("MCP.refresh")(function* (serverName: string, client: Client, server: Server) {
@@ -151,28 +210,16 @@ const layer = Layer.effect(
             }),
           ).pipe(Effect.map((pages) => pages.flatMap((page) => page.tools)))
         : []
-      const registered: Record<string, Tool.AnyTool> = {}
-      const names: string[] = []
-      for (const definition of definitions) {
-        const toolName = uniqueToolName(registered, serverToolName(serverName, definition.name), definition.name)
-        registered[toolName] = canonicalTool(toolName, server, definition, client, permission, defaults?.request)
-        names.push(toolName)
-      }
-
-      const previous = active.get(serverName)
-      if (previous?.client !== client) return
       // Network discovery is interruptible; replacing the registration and its owner is one commit.
       yield* Effect.uninterruptible(
         Effect.gen(function* () {
-          const registration = yield* Scope.fork(parentScope)
-          yield* tools.register(registered).pipe(
-            Scope.provide(registration),
-            Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(registration, exit) : Effect.void)),
-          )
-          active.set(serverName, { ...previous, definitionNames: names, registration })
-          yield* Scope.close(previous.registration, Exit.void).pipe(Effect.ignore)
-          statuses[serverName] = { status: "connected", tools: names.length }
-        }),
+          const previous = active.get(serverName)
+          if (previous?.client !== client) return
+          const next = new Map(active)
+          next.set(serverName, { ...previous, definitions })
+          yield* register(next)
+          statuses[serverName] = { status: "connected", tools: definitions.length }
+        }).pipe(registrations.withPermits(1)),
       )
     })
 
@@ -181,8 +228,7 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const current = active.get(name)
           if (current?.client !== client) return
-          active.delete(name)
-          yield* Scope.close(current.registration, Exit.void).pipe(Effect.ignore)
+          yield* close(name)
           statuses[name] = { status: "failed", error: "Connection closed" }
         }),
       )
@@ -250,6 +296,8 @@ const layer = Layer.effect(
       active.set(name, {
         client,
         transport,
+        server,
+        definitions: [],
         definitionNames: [],
         registration: yield* Scope.fork(parentScope),
       })
@@ -656,23 +704,14 @@ function listAll<Result extends { nextCursor?: string }>(request: (cursor?: stri
   })
 }
 
-function serverToolName(server: string, tool: string) {
+function serverToolName(server: string, tool: string, digest = false) {
   const value = `mcp_${sanitize(server)}_${sanitize(tool)}`
-  if (value.length <= 64) return value
-  return `${value.slice(0, 51)}_${hash(value).slice(0, 12)}`
-}
-
-function uniqueToolName(tools: Readonly<Record<string, Tool.AnyTool>>, name: string, source: string) {
-  if (!tools[name]) return name
-  return `${name.slice(0, 51)}_${hash(source).slice(0, 12)}`
+  if (!digest) return value
+  return `${value.slice(0, 47)}_${Hash.sha256(JSON.stringify([server, tool])).slice(0, 16)}`
 }
 
 function sanitize(value: string) {
   return value.replace(/[^A-Za-z0-9_-]/g, "_")
-}
-
-function hash(value: string) {
-  return Hash.sha256(value)
 }
 
 function modelContent(value: unknown): ReadonlyArray<Tool.Content> {

@@ -3,17 +3,19 @@ import { ConfigPluginV1 } from "@zaovra-ai/core/v1/config/plugin"
 import { pathToFileURL, fileURLToPath } from "url"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
 import path from "path"
+import { Filesystem } from "@/util/filesystem"
 
 export type Scope = "global" | "local"
 
 export async function hasLocalSource(dir: string, plugins: Origin[] = []) {
   for (const plugin of plugins) {
-    const spec = pluginSpecifier(plugin.spec)
-    if (!spec.startsWith("file://")) continue
+    if (!isPathPluginSpec(pluginSpecifier(plugin.spec))) continue
+    const spec = pluginSpecifier(await resolvePluginSpec(plugin.spec, plugin.source))
     const file = fileURLToPath(spec)
     const relative = path.relative(dir, file)
     if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) continue
-    if (/\.(?:[cm]?[jt]s)$/.test(file) && (await Bun.file(file).exists())) return true
+    const target = await resolvePathPluginTarget(spec).catch(() => undefined)
+    if (target && (await Filesystem.exists(fileURLToPath(target)))) return true
   }
   return (
     (
