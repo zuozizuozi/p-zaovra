@@ -96,6 +96,26 @@ html[data-theme="oc-2"] body[data-new-layout] {
   --button-secondary-base: var(--zaovra-surface);
   --button-secondary-hover: var(--zaovra-hover);
 
+  [data-component="dialog-overlay"] {
+    background: light-dark(rgb(20 16 30 / 40%), rgb(0 0 0 / 60%));
+  }
+
+  [data-component="session-turn-diffs-group"] {
+    padding: 12px;
+    border: 1px solid var(--zaovra-line);
+    border-radius: var(--zaovra-radius-panel);
+    background: var(--zaovra-surface);
+
+    [data-slot="session-turn-diffs-header"] {
+      position: static;
+      height: auto;
+      min-height: 36px;
+      flex-wrap: wrap;
+      padding: 0 0 12px;
+      background: transparent;
+    }
+  }
+
   :is([data-component="dialog"], [data-component="dialog-v2"]) {
     [data-slot="dialog-content"] {
       border-radius: var(--zaovra-radius-panel);

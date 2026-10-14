@@ -188,14 +188,14 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[]; onRevert?: () => 
         <DiffChanges changes={props.diffs} />
         <ButtonV2
           size="small"
-          variant="ghost"
+          variant="outline"
           onClick={() => setState({ showAll: true, expanded: props.diffs.map((diff) => diff.file) })}
         >
           {language.t("session.changes.inspect")}
         </ButtonV2>
         <Show when={props.onRevert}>
           <ButtonV2 size="small" variant="ghost" onClick={() => props.onRevert?.()}>
-            {language.t("ui.message.revertMessage")}
+            {language.t("session.changes.undo")}
           </ButtonV2>
         </Show>
         <Show when={overflow() > 0}>

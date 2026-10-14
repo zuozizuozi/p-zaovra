@@ -1,4 +1,8 @@
 export const dict = {
+  "session.changes.undo": "Undo changes",
+  "session.permission.details": "Permission details",
+  "session.permission.requestedAccess": "Review requested access",
+  "session.permission.repeatedCall": "Continue repeated tool calls",
   "error.checkModelService": "Check model service",
   "usage.viewDetails": "View detailed usage",
   "settings.group.general": "General",

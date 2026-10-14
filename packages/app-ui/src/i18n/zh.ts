@@ -3,6 +3,10 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.changes.undo": "撤销更改",
+  "session.permission.details": "权限详情",
+  "session.permission.requestedAccess": "确认本次访问请求",
+  "session.permission.repeatedCall": "继续重复的工具调用",
   "error.checkModelService": "检查模型服务",
   "usage.viewDetails": "查看详细用量",
   "settings.group.general": "常规",

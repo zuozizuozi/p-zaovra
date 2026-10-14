@@ -47,9 +47,10 @@ export function SessionPermissionDock(props: {
   }
 
   const toolDescription = () => {
+    if (props.request.permission === "doom_loop") return language.t("session.permission.repeatedCall")
     const key = `settings.permissions.tool.${props.request.permission}.description`
     const value = language.t(key as Parameters<typeof language.t>[0])
-    if (value === key) return ""
+    if (value === key) return language.t("session.permission.requestedAccess")
     return value
   }
   const patterns = () => [...new Set(props.request.patterns)]
@@ -92,14 +93,15 @@ export function SessionPermissionDock(props: {
     >
       <div data-slot="permission-row">
         <span data-slot="permission-spacer" aria-hidden="true" />
-        <code class="text-12-regular text-text-strong break-all">{props.request.permission}</code>
+        <div class="text-14-medium text-text-strong break-words">{toolDescription()}</div>
       </div>
-      <Show when={toolDescription()}>
-        <div data-slot="permission-row">
-          <span data-slot="permission-spacer" aria-hidden="true" />
-          <div data-slot="permission-hint">{toolDescription()}</div>
-        </div>
-      </Show>
+      <div data-slot="permission-row">
+        <span data-slot="permission-spacer" aria-hidden="true" />
+        <details class="min-w-0 text-12-regular text-text-weak">
+          <summary class="cursor-pointer">{language.t("session.permission.details")}</summary>
+          <code class="block break-all py-1">{props.request.permission}</code>
+        </details>
+      </div>
       <Show when={props.request.permission === "bash"}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />

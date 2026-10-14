@@ -41,7 +41,6 @@ export function DialogCustomProvider(props: Props) {
       title={
         <IconButton icon="arrow-left" variant="ghost" onClick={props.onBack} aria-label={language.t("common.goBack")} />
       }
-      transition
     >
       <CustomProviderForm />
     </Dialog>
