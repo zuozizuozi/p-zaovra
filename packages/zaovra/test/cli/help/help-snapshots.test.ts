@@ -11,7 +11,7 @@
 // terminal sizes. The default zaovra tui command is excluded —
 // `zaovra --help` includes an ASCII banner that pulls in the install
 // version (changes per release), so we'd snapshot a moving target.
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { cliIt } from "../../lib/cli-process"
 import { normalizeForSnapshot, PATH_SEP } from "../../lib/snapshot"
@@ -28,7 +28,7 @@ import { normalizeForSnapshot, PATH_SEP } from "../../lib/snapshot"
 //      line-wraps onto a fresh line on Windows). `\s+` matches both forms.
 function normalize(text: string): string {
   // yargs may wrap a long home path inside the quoted default before normalization.
-  return normalizeForSnapshot(text.replace(/\[default: "[^"]*oc-cli-[A-Za-z0-9]+"\]/g, '[default: "<HOME>"]'), {
+  return normalizeForSnapshot(text.replace(/\[default:\s+"[^"]*oc-cli-[A-Za-z0-9]+"\]/g, '[default: "<HOME>"]'), {
     pathReplacements: [
       // Mixed-case [A-Za-z0-9] because node's mkdtemp suffix is mixed-case
       // (the harness now uses FileSystem.makeTempDirectoryScoped under the
@@ -89,6 +89,15 @@ const SUBCOMMANDS = [
 const SNAPSHOT_ENV = { COLUMNS: "120" }
 
 describe("zaovra CLI help-text snapshots", () => {
+  test("normalizes temporary home defaults wrapped after the colon", () => {
+    expect(normalize('--cwd  working directory  [string] [default:\n    "F:/fixture/oc-cli-AbC123"]')).toBe(
+      normalize('--cwd  working directory [string] [default: "F:/fixture/oc-cli-AbC123"]'),
+    )
+    expect(normalize('--cwd  working directory [string] [default: "user-project"]')).toBe(
+      '--cwd  working directory [string] [default: "user-project"]',
+    )
+  })
+
   // Single test, parallel spawns. Each command's help fires under
   // `concurrency: 8` — wall-clock stays under ~10s even for ~35 commands,
   // versus ~1 minute if we serialized.
