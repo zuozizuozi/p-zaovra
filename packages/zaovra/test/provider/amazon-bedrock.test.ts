@@ -1,3 +1,4 @@
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
 import { afterEach, describe, expect, test } from "bun:test"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Effect } from "effect"
@@ -13,7 +14,9 @@ import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
 
-const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node])))
+const it = testEffect(
+  LayerNode.compile(LayerNode.group([Provider.node, Env.node]), [[LocationServiceMap.node, locationServiceMapLayer]]),
+)
 
 const originalEnv = new Map<string, string | undefined>()
 

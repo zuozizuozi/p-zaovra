@@ -61,7 +61,7 @@ test("real session execution persists provider usage and serves conversation and
     }),
   )
   const app = Server.Default().app
-  const headers = { "content-type": "application/json", "x-zaovra-directory": tmp.path }
+  const headers = { "content-type": "application/json", "x-zaovra-directory": encodeURIComponent(tmp.path) }
   const id = `ses_usage_${Date.now()}`
   const created = await app.request("/api/session", {
     method: "POST",

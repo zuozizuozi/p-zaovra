@@ -96,7 +96,7 @@ describe("provider HttpApi", () => {
     "keeps provider.models hook input mutations out of provider state",
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory
-      const headers = { "x-zaovra-directory": directory }
+      const headers = { "x-zaovra-directory": encodeURIComponent(directory) }
       const providerResponse = yield* request("/provider", { headers })
       const configResponse = yield* request("/config/providers", { headers })
       expect(providerResponse.status).toBe(200)

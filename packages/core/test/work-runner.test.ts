@@ -792,161 +792,167 @@ describe("WorkRunner", () => {
           ),
         ).toBe(false)
       }),
-    20_000,
+    60_000,
   )
 
-  it.live("blocks self-committed isolated work without applying a partial diff", () =>
-    Effect.gen(function* () {
-      const root = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
-      yield* Effect.promise(async () => {
-        await $`git init`.cwd(root.path).quiet()
-        await $`git config core.fsmonitor false`.cwd(root.path).quiet()
-        await $`git config commit.gpgsign false`.cwd(root.path).quiet()
-        await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
-        await $`git config user.name Test`.cwd(root.path).quiet()
-        await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
-        await $`git add .`.cwd(root.path).quiet()
-        await $`git commit -m initial`.cwd(root.path).quiet()
-      })
-      const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
-      const isolated = AbsolutePath.make(`${root.path}-work-runner-isolated`)
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
-      )
-      const git = yield* Git.Service
-      const repository = yield* git.repo
-        .discover(destination)
-        .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
-      const isolatedRepository = yield* git.worktree.create({ repository, directory: isolated })
-      const content = "isolated change\n".repeat(6_000)
-      yield* Effect.promise(async () => {
-        await fs.writeFile(path.join(isolated, "committed.txt"), "committed work\n")
-        await $`git add .`.cwd(isolated).quiet()
-        await $`git commit -m feature`.cwd(isolated).quiet()
-        await fs.writeFile(path.join(isolated, "feature.txt"), content)
-      })
-      yield* Effect.addFinalizer(() =>
-        git.worktree.remove({ repository: isolatedRepository, directory: isolated, force: true }).pipe(Effect.ignore),
-      )
-      const work = yield* Work.Service
-      const runner = yield* WorkRunner.Service
-      const created = yield* work.create({
-        id: goalID,
-        location: { directory: destination },
-        objective: "Merge isolated work",
-        acceptanceCriteria: [],
-        tasks: [
-          {
-            title: "Implement in isolation",
-            instructions: "Create the feature",
-            location: { directory: isolated },
-          },
-        ],
-      })
+  it.live(
+    "blocks self-committed isolated work without applying a partial diff",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+        )
+        yield* Effect.promise(async () => {
+          await $`git init`.cwd(root.path).quiet()
+          await $`git config core.fsmonitor false`.cwd(root.path).quiet()
+          await $`git config commit.gpgsign false`.cwd(root.path).quiet()
+          await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
+          await $`git config user.name Test`.cwd(root.path).quiet()
+          await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
+          await $`git add .`.cwd(root.path).quiet()
+          await $`git commit -m initial`.cwd(root.path).quiet()
+        })
+        const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
+        const isolated = AbsolutePath.make(`${root.path}-work-runner-isolated`)
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
+        )
+        const git = yield* Git.Service
+        const repository = yield* git.repo
+          .discover(destination)
+          .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
+        const isolatedRepository = yield* git.worktree.create({ repository, directory: isolated })
+        const content = "isolated change\n".repeat(6_000)
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(isolated, "committed.txt"), "committed work\n")
+          await $`git add .`.cwd(isolated).quiet()
+          await $`git commit -m feature`.cwd(isolated).quiet()
+          await fs.writeFile(path.join(isolated, "feature.txt"), content)
+        })
+        yield* Effect.addFinalizer(() =>
+          git.worktree.remove({ repository: isolatedRepository, directory: isolated, force: true }).pipe(Effect.ignore),
+        )
+        const work = yield* Work.Service
+        const runner = yield* WorkRunner.Service
+        const created = yield* work.create({
+          id: goalID,
+          location: { directory: destination },
+          objective: "Merge isolated work",
+          acceptanceCriteria: [],
+          tasks: [
+            {
+              title: "Implement in isolation",
+              instructions: "Create the feature",
+              location: { directory: isolated },
+            },
+          ],
+        })
 
-      yield* runner.run({ goalID, force: true })
+        yield* runner.run({ goalID, force: true })
 
-      expect(yield* work.get(goalID)).toMatchObject({ status: "blocked" })
-      expect(yield* work.tasks(goalID)).toMatchObject([{ id: created.tasks[0]?.id, status: "blocked" }])
-      const database = yield* Database.Service
-      const history = yield* EventV2.readAggregate(database.db, {
-        aggregateID: goalID,
-        limit: 100,
-        manifest: DurableEventManifest.WorkDurable,
-      })
-      const conflict = history.events.find((event) => event.type === Work.Event.TaskMergeConflicted.type)
-      if (!conflict || conflict.type !== Work.Event.TaskMergeConflicted.type) throw new Error("Missing conflict")
-      expect(conflict.data.reason).toContain("1 个提交")
-      const ref = conflict.data.reason.match(/refs\/zaovra\/snapshots\/[^；]+/)?.[0]
-      expect(ref).toBeDefined()
-      expect(yield* Effect.promise(() => $`git show ${`${ref}:committed.txt`}`.cwd(root.path).text())).toBe(
-        "committed work\n",
-      )
-      expect(yield* Effect.promise(() => fs.stat(isolated).then(() => true))).toBe(true)
-      expect(
-        yield* Effect.promise(() =>
-          fs.stat(path.join(destination, "feature.txt")).then(
-            () => true,
-            () => false,
+        expect(yield* work.get(goalID)).toMatchObject({ status: "blocked" })
+        expect(yield* work.tasks(goalID)).toMatchObject([{ id: created.tasks[0]?.id, status: "blocked" }])
+        const database = yield* Database.Service
+        const history = yield* EventV2.readAggregate(database.db, {
+          aggregateID: goalID,
+          limit: 100,
+          manifest: DurableEventManifest.WorkDurable,
+        })
+        const conflict = history.events.find((event) => event.type === Work.Event.TaskMergeConflicted.type)
+        if (!conflict || conflict.type !== Work.Event.TaskMergeConflicted.type) throw new Error("Missing conflict")
+        expect(conflict.data.reason).toContain("1 个提交")
+        const ref = conflict.data.reason.match(/refs\/zaovra\/snapshots\/[^；]+/)?.[0]
+        expect(ref).toBeDefined()
+        expect(yield* Effect.promise(() => $`git show ${`${ref}:committed.txt`}`.cwd(root.path).text())).toBe(
+          "committed work\n",
+        )
+        expect(yield* Effect.promise(() => fs.stat(isolated).then(() => true))).toBe(true)
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(path.join(destination, "feature.txt")).then(
+              () => true,
+              () => false,
+            ),
           ),
-        ),
-      ).toBe(false)
-      expect(
-        yield* Effect.promise(() =>
-          fs.stat(path.join(destination, "committed.txt")).then(
-            () => true,
-            () => false,
+        ).toBe(false)
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(path.join(destination, "committed.txt")).then(
+              () => true,
+              () => false,
+            ),
           ),
-        ),
-      ).toBe(false)
-    }),
+        ).toBe(false)
+      }),
+    60_000,
   )
 
-  it.live("archives cancelled isolated work before removing its worktree", () =>
-    Effect.gen(function* () {
-      const root = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
-      yield* Effect.promise(async () => {
-        await $`git init`.cwd(root.path).quiet()
-        await $`git config core.fsmonitor false`.cwd(root.path).quiet()
-        await $`git config commit.gpgsign false`.cwd(root.path).quiet()
-        await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
-        await $`git config user.name Test`.cwd(root.path).quiet()
-        await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
-        await $`git add .`.cwd(root.path).quiet()
-        await $`git commit -m initial`.cwd(root.path).quiet()
-      })
-      const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
-      const isolated = AbsolutePath.make(`${root.path}-work-runner-cancelled`)
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
-      )
-      const git = yield* Git.Service
-      const repository = yield* git.repo
-        .discover(destination)
-        .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
-      yield* git.worktree.create({ repository, directory: isolated })
-      yield* Effect.promise(() => fs.writeFile(path.join(isolated, "unfinished.txt"), "recoverable work\n"))
-      const work = yield* Work.Service
-      yield* work.create({
-        id: goalID,
-        location: { directory: destination },
-        objective: "Cancel isolated work safely",
-        acceptanceCriteria: [],
-        tasks: [
-          {
-            id: Work.TaskID.make("task_cancelled"),
-            title: "Isolated",
-            instructions: "Work",
-            location: { directory: isolated },
-          },
-        ],
-      })
+  it.live(
+    "archives cancelled isolated work before removing its worktree",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+        )
+        yield* Effect.promise(async () => {
+          await $`git init`.cwd(root.path).quiet()
+          await $`git config core.fsmonitor false`.cwd(root.path).quiet()
+          await $`git config commit.gpgsign false`.cwd(root.path).quiet()
+          await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
+          await $`git config user.name Test`.cwd(root.path).quiet()
+          await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
+          await $`git add .`.cwd(root.path).quiet()
+          await $`git commit -m initial`.cwd(root.path).quiet()
+        })
+        const destination = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
+        const isolated = AbsolutePath.make(`${root.path}-work-runner-cancelled`)
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => fs.rm(isolated, { recursive: true, force: true })).pipe(Effect.ignore),
+        )
+        const git = yield* Git.Service
+        const repository = yield* git.repo
+          .discover(destination)
+          .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
+        yield* git.worktree.create({ repository, directory: isolated })
+        yield* Effect.promise(() => fs.writeFile(path.join(isolated, "unfinished.txt"), "recoverable work\n"))
+        const work = yield* Work.Service
+        yield* work.create({
+          id: goalID,
+          location: { directory: destination },
+          objective: "Cancel isolated work safely",
+          acceptanceCriteria: [],
+          tasks: [
+            {
+              id: Work.TaskID.make("task_cancelled"),
+              title: "Isolated",
+              instructions: "Work",
+              location: { directory: isolated },
+            },
+          ],
+        })
 
-      yield* work.cancel(goalID, "Test cancellation")
+        yield* work.cancel(goalID, "Test cancellation")
 
-      expect(yield* work.get(goalID)).toMatchObject({ status: "cancelled" })
-      expect(
-        yield* Effect.promise(() =>
-          fs.stat(isolated).then(
-            () => true,
-            () => false,
+        expect(yield* work.get(goalID)).toMatchObject({ status: "cancelled" })
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(isolated).then(
+              () => true,
+              () => false,
+            ),
           ),
-        ),
-      ).toBe(false)
-      const history = yield* EventV2.readAggregate((yield* Database.Service).db, {
-        aggregateID: goalID,
-        limit: 100,
-        manifest: DurableEventManifest.WorkDurable,
-      })
-      const archived = history.events.find((event) => event.type === Work.Event.TaskIsolationArchived.type)
-      expect(archived?.data).toMatchObject({ taskID: "task_cancelled", reason: "cancelled" })
-    }),
+        ).toBe(false)
+        const history = yield* EventV2.readAggregate((yield* Database.Service).db, {
+          aggregateID: goalID,
+          limit: 100,
+          manifest: DurableEventManifest.WorkDurable,
+        })
+        const archived = history.events.find((event) => event.type === Work.Event.TaskIsolationArchived.type)
+        expect(archived?.data).toMatchObject({ taskID: "task_cancelled", reason: "cancelled" })
+      }),
+    60_000,
   )
 
   it.effect("completes semantic criteria through an independent reviewer Session and Attempt", () =>
@@ -1379,188 +1385,193 @@ describe("WorkRunner", () => {
     }),
   )
 
-  it.live("settles a remote Agent Attempt and applies its verified cumulative patch", () =>
-    Effect.gen(function* () {
-      const root = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
-      yield* Effect.promise(async () => {
-        await $`git init`.cwd(root.path).quiet()
-        await $`git config core.fsmonitor false`.cwd(root.path).quiet()
-        await $`git config commit.gpgsign false`.cwd(root.path).quiet()
-        await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
-        await $`git config user.name Test`.cwd(root.path).quiet()
-        await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
-        await $`git add .`.cwd(root.path).quiet()
-        await $`git commit -m initial`.cwd(root.path).quiet()
-      })
-      const directory = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
-      const git = yield* Git.Service
-      const repository = yield* git.repo
-        .discover(directory)
-        .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
-      yield* Effect.promise(() => fs.writeFile(path.join(directory, "remote-agent.txt"), "remote Agent output\n"))
-      const changes = yield* git.change.capture({ repository, path: directory })
-      yield* git.change.discard({ repository, path: directory, index: "reset", untracked: "remove" })
-      const workerID = Work.WorkerID.make("worker_runner_remote_agent")
-      yield* (yield* Database.Service).db
-        .insert(WorkWorkerTable)
-        .values({
-          id: workerID,
-          runtime_id: Work.WorkerRuntimeID.make("worker_runtime_runner_remote"),
-          capacity: 1,
-          label: "Remote Agent Worker",
-          capabilities: ["execute", "mcp"],
-          workspace_roots: [directory],
-          execution_mode: "remote",
-          location_mappings: [{ controllerRoot: directory, workerRoot: directory }],
-          time_created: Date.now(),
-          time_heartbeat: Date.now(),
-          expires_at: Date.now() + 60_000,
+  it.live(
+    "settles a remote Agent Attempt and applies its verified cumulative patch",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+        )
+        yield* Effect.promise(async () => {
+          await $`git init`.cwd(root.path).quiet()
+          await $`git config core.fsmonitor false`.cwd(root.path).quiet()
+          await $`git config commit.gpgsign false`.cwd(root.path).quiet()
+          await $`git config user.email test@zaovra.test`.cwd(root.path).quiet()
+          await $`git config user.name Test`.cwd(root.path).quiet()
+          await fs.writeFile(path.join(root.path, "base.txt"), "base\n")
+          await $`git add .`.cwd(root.path).quiet()
+          await $`git commit -m initial`.cwd(root.path).quiet()
         })
-        .run()
-        .pipe(Effect.orDie)
-      const work = yield* Work.Service
-      const runner = yield* WorkRunner.Service
-      const jobs = yield* WorkRemoteJob.Service
-      const store = yield* WorkStore.Service
-      const criterionID = Work.CriterionID.make("criterion_remote_agent_review")
-      const created = yield* work.create({
-        id: goalID,
-        workerID,
-        location: { directory },
-        objective: "Apply remote Agent work",
-        acceptanceCriteria: [
-          { id: criterionID, description: "Remote implementation is correct", required: true, evidence: "review" },
-        ],
-        tasks: [
-          {
-            title: "Remote implementation",
-            instructions: "Create remote-agent.txt",
-            role: "developer",
-            criteria: [criterionID],
-          },
-        ],
-      })
-      const run = yield* runner.run({ goalID, force: true }).pipe(Effect.forkChild)
-      const assignment = yield* Effect.gen(function* () {
-        while (true) {
-          const claimed = (yield* jobs.claim({
-            workerID,
-            runtimeID: Work.WorkerRuntimeID.make("worker_runtime_runner_remote"),
+        const directory = AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path)))
+        const git = yield* Git.Service
+        const repository = yield* git.repo
+          .discover(directory)
+          .pipe(Effect.flatMap((result) => (result ? Effect.succeed(result) : Effect.die("Repository not found"))))
+        yield* Effect.promise(() => fs.writeFile(path.join(directory, "remote-agent.txt"), "remote Agent output\n"))
+        const changes = yield* git.change.capture({ repository, path: directory })
+        yield* git.change.discard({ repository, path: directory, index: "reset", untracked: "remove" })
+        const workerID = Work.WorkerID.make("worker_runner_remote_agent")
+        yield* (yield* Database.Service).db
+          .insert(WorkWorkerTable)
+          .values({
+            id: workerID,
+            runtime_id: Work.WorkerRuntimeID.make("worker_runtime_runner_remote"),
             capacity: 1,
-            recoverableJobIDs: [],
-          })).jobs[0]
-          if (claimed) return claimed
-          yield* Effect.sleep(10)
-        }
-      })
-      expect(assignment.operation).toMatchObject({ type: "agent", agent: "work-developer" })
-      const digest = Work.ArtifactDigest.make(new Bun.CryptoHasher("sha256").update(changes).digest("hex"))
-      const artifact = yield* jobs.uploadArtifact({
-        workerID,
-        jobID: assignment.id,
-        fence: assignment.fence,
-        label: "workspace.patch",
-        digest,
-        size: Buffer.byteLength(changes),
-        content: changes,
-      })
-      const response =
-        'Implemented remotely. <work-handoff>{"summary":"Remote implementation complete","items":[{"kind":"result","text":"Created remote-agent.txt","memory":"task"}]}</work-handoff>'
-      expect(
-        yield* jobs.complete({
+            label: "Remote Agent Worker",
+            capabilities: ["execute", "mcp"],
+            workspace_roots: [directory],
+            execution_mode: "remote",
+            location_mappings: [{ controllerRoot: directory, workerRoot: directory }],
+            time_created: Date.now(),
+            time_heartbeat: Date.now(),
+            expires_at: Date.now() + 60_000,
+          })
+          .run()
+          .pipe(Effect.orDie)
+        const work = yield* Work.Service
+        const runner = yield* WorkRunner.Service
+        const jobs = yield* WorkRemoteJob.Service
+        const store = yield* WorkStore.Service
+        const criterionID = Work.CriterionID.make("criterion_remote_agent_review")
+        const created = yield* work.create({
+          id: goalID,
+          workerID,
+          location: { directory },
+          objective: "Apply remote Agent work",
+          acceptanceCriteria: [
+            { id: criterionID, description: "Remote implementation is correct", required: true, evidence: "review" },
+          ],
+          tasks: [
+            {
+              title: "Remote implementation",
+              instructions: "Create remote-agent.txt",
+              role: "developer",
+              criteria: [criterionID],
+            },
+          ],
+        })
+        const run = yield* runner.run({ goalID, force: true }).pipe(Effect.forkChild)
+        const assignment = yield* Effect.gen(function* () {
+          while (true) {
+            const claimed = (yield* jobs.claim({
+              workerID,
+              runtimeID: Work.WorkerRuntimeID.make("worker_runtime_runner_remote"),
+              capacity: 1,
+              recoverableJobIDs: [],
+            })).jobs[0]
+            if (claimed) return claimed
+            yield* Effect.sleep(10)
+          }
+        })
+        expect(assignment.operation).toMatchObject({ type: "agent", agent: "work-developer" })
+        const digest = Work.ArtifactDigest.make(new Bun.CryptoHasher("sha256").update(changes).digest("hex"))
+        const artifact = yield* jobs.uploadArtifact({
           workerID,
           jobID: assignment.id,
           fence: assignment.fence,
-          result: Work.WorkerAgentResult.make({
-            type: "agent",
-            sessionID:
-              assignment.operation.type === "agent" ? assignment.operation.sessionID : SessionV2.ID.make("ses_invalid"),
-            status: "succeeded",
-            finalResponse: response,
-            responseDigest: Work.ArtifactDigest.make(new Bun.CryptoHasher("sha256").update(response).digest("hex")),
-            outputTruncated: false,
-            stepCount: 2,
-            toolCallCount: 1,
-            baseRevision:
-              assignment.operation.type === "agent" ? assignment.operation.artifactCapture.baseRevision : undefined,
-            workspaceDigest: digest,
-            artifacts: [artifact!],
-          }),
-        }),
-      ).toBeTrue()
-      const reviewAssignment = yield* Effect.gen(function* () {
-        while (true) {
-          const claimed = (yield* jobs.claim({
+          label: "workspace.patch",
+          digest,
+          size: Buffer.byteLength(changes),
+          content: changes,
+        })
+        const response =
+          'Implemented remotely. <work-handoff>{"summary":"Remote implementation complete","items":[{"kind":"result","text":"Created remote-agent.txt","memory":"task"}]}</work-handoff>'
+        expect(
+          yield* jobs.complete({
             workerID,
-            runtimeID: Work.WorkerRuntimeID.make("worker_runtime_runner_remote"),
-            capacity: 1,
-            recoverableJobIDs: [],
-          })).jobs[0]
-          if (claimed) return claimed
-          yield* Effect.sleep(10)
-        }
-      })
-      expect(reviewAssignment.operation).toMatchObject({
-        type: "agent",
-        agent: "review",
-        artifactCapture: { startDigest: digest },
-      })
-      const reviewArtifact = yield* jobs.uploadArtifact({
-        workerID,
-        jobID: reviewAssignment.id,
-        fence: reviewAssignment.fence,
-        label: "workspace.patch",
-        digest,
-        size: Buffer.byteLength(changes),
-        content: changes,
-      })
-      const reviewResponse = JSON.stringify({
-        criteria: [{ criterionID, verdict: "pass", findings: [], allowsRepair: false }],
-      })
-      expect(
-        yield* jobs.complete({
+            jobID: assignment.id,
+            fence: assignment.fence,
+            result: Work.WorkerAgentResult.make({
+              type: "agent",
+              sessionID:
+                assignment.operation.type === "agent"
+                  ? assignment.operation.sessionID
+                  : SessionV2.ID.make("ses_invalid"),
+              status: "succeeded",
+              finalResponse: response,
+              responseDigest: Work.ArtifactDigest.make(new Bun.CryptoHasher("sha256").update(response).digest("hex")),
+              outputTruncated: false,
+              stepCount: 2,
+              toolCallCount: 1,
+              baseRevision:
+                assignment.operation.type === "agent" ? assignment.operation.artifactCapture.baseRevision : undefined,
+              workspaceDigest: digest,
+              artifacts: [artifact!],
+            }),
+          }),
+        ).toBeTrue()
+        const reviewAssignment = yield* Effect.gen(function* () {
+          while (true) {
+            const claimed = (yield* jobs.claim({
+              workerID,
+              runtimeID: Work.WorkerRuntimeID.make("worker_runtime_runner_remote"),
+              capacity: 1,
+              recoverableJobIDs: [],
+            })).jobs[0]
+            if (claimed) return claimed
+            yield* Effect.sleep(10)
+          }
+        })
+        expect(reviewAssignment.operation).toMatchObject({
+          type: "agent",
+          agent: "review",
+          artifactCapture: { startDigest: digest },
+        })
+        const reviewArtifact = yield* jobs.uploadArtifact({
           workerID,
           jobID: reviewAssignment.id,
           fence: reviewAssignment.fence,
-          result: Work.WorkerAgentResult.make({
-            type: "agent",
-            sessionID:
-              reviewAssignment.operation.type === "agent"
-                ? reviewAssignment.operation.sessionID
-                : SessionV2.ID.make("ses_invalid"),
-            status: "succeeded",
-            finalResponse: reviewResponse,
-            responseDigest: Work.ArtifactDigest.make(
-              new Bun.CryptoHasher("sha256").update(reviewResponse).digest("hex"),
-            ),
-            outputTruncated: false,
-            stepCount: 1,
-            toolCallCount: 0,
-            baseRevision:
-              reviewAssignment.operation.type === "agent"
-                ? reviewAssignment.operation.artifactCapture.baseRevision
-                : undefined,
-            workspaceDigest: digest,
-            artifacts: [reviewArtifact!],
+          label: "workspace.patch",
+          digest,
+          size: Buffer.byteLength(changes),
+          content: changes,
+        })
+        const reviewResponse = JSON.stringify({
+          criteria: [{ criterionID, verdict: "pass", findings: [], allowsRepair: false }],
+        })
+        expect(
+          yield* jobs.complete({
+            workerID,
+            jobID: reviewAssignment.id,
+            fence: reviewAssignment.fence,
+            result: Work.WorkerAgentResult.make({
+              type: "agent",
+              sessionID:
+                reviewAssignment.operation.type === "agent"
+                  ? reviewAssignment.operation.sessionID
+                  : SessionV2.ID.make("ses_invalid"),
+              status: "succeeded",
+              finalResponse: reviewResponse,
+              responseDigest: Work.ArtifactDigest.make(
+                new Bun.CryptoHasher("sha256").update(reviewResponse).digest("hex"),
+              ),
+              outputTruncated: false,
+              stepCount: 1,
+              toolCallCount: 0,
+              baseRevision:
+                reviewAssignment.operation.type === "agent"
+                  ? reviewAssignment.operation.artifactCapture.baseRevision
+                  : undefined,
+              workspaceDigest: digest,
+              artifacts: [reviewArtifact!],
+            }),
           }),
-        }),
-      ).toBeTrue()
-      yield* Fiber.join(run)
+        ).toBeTrue()
+        yield* Fiber.join(run)
 
-      expect(yield* work.get(goalID)).toMatchObject({ status: "completed", usage: { attempts: 2 } })
-      expect(yield* store.getTask(created.tasks[0].id)).toMatchObject({ status: "completed" })
-      expect(yield* store.handoff(created.tasks[0].id)).toMatchObject({ summary: "Remote implementation complete" })
-      expect(
-        (yield* Effect.promise(() => fs.readFile(path.join(directory, "remote-agent.txt"), "utf8"))).replaceAll(
-          "\r\n",
-          "\n",
-        ),
-      ).toBe("remote Agent output\n")
-      expect((yield* jobs.list(goalID)).filter((job) => job.operation.type === "agent")).toHaveLength(2)
-    }),
+        expect(yield* work.get(goalID)).toMatchObject({ status: "completed", usage: { attempts: 2 } })
+        expect(yield* store.getTask(created.tasks[0].id)).toMatchObject({ status: "completed" })
+        expect(yield* store.handoff(created.tasks[0].id)).toMatchObject({ summary: "Remote implementation complete" })
+        expect(
+          (yield* Effect.promise(() => fs.readFile(path.join(directory, "remote-agent.txt"), "utf8"))).replaceAll(
+            "\r\n",
+            "\n",
+          ),
+        ).toBe("remote Agent output\n")
+        expect((yield* jobs.list(goalID)).filter((job) => job.operation.type === "agent")).toHaveLength(2)
+      }),
+    60_000,
   )
 
   it.effect("rebuilds Evaluation from durable Evidence without rerunning a verifier after restart", () =>

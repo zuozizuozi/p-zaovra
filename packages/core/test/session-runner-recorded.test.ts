@@ -1,4 +1,3 @@
-import { HttpRecorder } from "@zaovra-ai/http-recorder"
 import { HttpRecorderInternal } from "@zaovra-ai/http-recorder/internal"
 import * as OpenAIChat from "@zaovra-ai/llm/protocols/openai-chat"
 import { Auth, LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
@@ -42,11 +41,12 @@ import { testEffect } from "./lib/effect"
 
 const cassette =
   process.env.RECORD === "true"
-    ? HttpRecorderInternal.cassetteLayer("session-runner/openai-chat-streams-text", {
+    ? HttpRecorderInternal.cassetteLayer("session-runner/openai-chat-streams-text-current", {
         directory: path.resolve(import.meta.dir, "fixtures/recordings"),
         mode: "record",
       })
-    : HttpRecorder.http("session-runner/openai-chat-streams-text", {
+    : HttpRecorderInternal.cassetteLayer("session-runner/openai-chat-streams-text-current", {
+        mode: "replay",
         directory: path.resolve(import.meta.dir, "fixtures/recordings"),
       })
 const executor = RequestExecutor.layer.pipe(Layer.provide(cassette))
@@ -74,12 +74,18 @@ const systemContext = AppNodeBuilder.build(SystemContextRegistry.node)
 const skillGuidance = Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const config = Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed([]) }))
+const location = Location.boundNode({ directory: AbsolutePath.make(path.resolve("/project")) })
+const plugins = AppNodeBuilder.build(PluginV2.node, [
+  [Config.node, config],
+  [Location.node, location],
+])
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [Snapshot.node, Snapshot.noopLayer],
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
   [SystemContextRegistry.node, systemContext],
-  [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+  [Location.node, location],
+  [PluginV2.node, plugins],
   [SkillGuidance.node, skillGuidance],
   [ReferenceGuidance.node, referenceGuidance],
   [Config.node, config],
@@ -126,7 +132,8 @@ const it = testEffect(
       [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
       [SessionRunnerModel.node, models],
       [SystemContextRegistry.node, systemContext],
-      [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+      [Location.node, location],
+      [PluginV2.node, plugins],
       [SkillGuidance.node, skillGuidance],
       [ReferenceGuidance.node, referenceGuidance],
       [Config.node, config],
@@ -138,7 +145,7 @@ const it = testEffect(
 const sessionID = SessionV2.ID.make("ses_runner_recorded")
 
 describe("SessionRunnerLLM recorded", () => {
-  it.effect("executes one recorded V2 prompt through the recorded HTTP transport", () =>
+  it.live("executes one recorded V2 prompt through the recorded HTTP transport", () =>
     Effect.gen(function* () {
       // This transport fixture has no plugin tools, but the runner still waits for initialization.
       const plugins = yield* PluginV2.Service
@@ -146,7 +153,7 @@ describe("SessionRunnerLLM recorded", () => {
       const { db } = yield* Database.Service
       yield* db
         .insert(ProjectTable)
-        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(path.resolve("/project")), sandboxes: [] })
         .onConflictDoNothing()
         .run()
         .pipe(Effect.orDie)
@@ -156,7 +163,7 @@ describe("SessionRunnerLLM recorded", () => {
           id: sessionID,
           project_id: Project.ID.global,
           slug: "test",
-          directory: "/project",
+          directory: path.resolve("/project"),
           title: "test",
           version: "test",
         })

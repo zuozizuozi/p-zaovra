@@ -43,15 +43,11 @@ test("reports a divergent native offset once and ignores equal offsets and unrel
   await frames(2)
   expect(calls).toEqual([])
 
-  route.remove()
-  document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await reconnect(route)
   await frames(3)
   expect(calls).toEqual([[0, false]])
 
-  route.remove()
-  document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await reconnect(route)
   await frames(3)
   expect(calls).toEqual([[0, false]])
 
@@ -81,9 +77,7 @@ test("keeps checking until stale reset-delay callbacks can no longer win", async
     instance.scrollOffset = offset
   })
 
-  route.remove()
-  document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await reconnect(route)
   await frames(1)
   expect(instance.scrollOffset).toBe(0)
 
@@ -123,9 +117,7 @@ test.each([
     instance.scrollOffset = offset
   })
 
-  route.remove()
-  document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await reconnect(route)
   await frames(3)
 
   expect(calls).toEqual([[expected, false]])
@@ -180,9 +172,7 @@ test("cleanup cancels reconnect checks and delegated offset observation", async 
   const calls: number[] = []
   const cleanup = observeElementOffsetReconnectAware(instance, (offset) => calls.push(offset))
 
-  route.remove()
-  document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await reconnect(route)
   cleanup?.()
   instance.scrollOffset = 100
   viewport.dispatchEvent(new Event("scroll"))
@@ -196,4 +186,17 @@ async function frames(count: number) {
   for (let index = 0; index < count; index++) {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   }
+}
+
+// Wait for the mutation batch itself; a zero-delay timer can run before Happy DOM delivers it.
+async function reconnect(route: HTMLElement) {
+  await new Promise<void>((resolve) => {
+    const observer = new MutationObserver(() => {
+      observer.disconnect()
+      resolve()
+    })
+    observer.observe(document.body, { childList: true })
+    route.remove()
+    document.body.append(route)
+  })
 }

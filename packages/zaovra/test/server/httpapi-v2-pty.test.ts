@@ -19,7 +19,7 @@ const testPty = process.platform === "win32" ? test.skip : test
 
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  headers.set("x-zaovra-directory", directory)
+  headers.set("x-zaovra-directory", encodeURIComponent(directory))
   return HttpApiApp.webHandler().handler(
     new Request(`http://localhost${route}`, {
       ...init,
@@ -53,7 +53,7 @@ const effectIt = testEffect(
   ),
 )
 
-const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-zaovra-directory", dir)
+const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-zaovra-directory", encodeURIComponent(dir))
 
 const serverUrl = () => HttpServer.HttpServer.use((server) => Effect.succeed(HttpServer.formatAddress(server.address)))
 

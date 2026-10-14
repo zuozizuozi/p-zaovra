@@ -206,6 +206,7 @@ describe("MCP canonical tools", () => {
       expect(result.outputPaths).toHaveLength(1)
       expect(result.result.type).toBe("error")
       if (result.result.type !== "error") throw new Error("expected MCP error")
+      if (typeof result.result.value !== "string") throw new Error("expected textual MCP error")
       expect(Buffer.byteLength(result.result.value)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
       const id = Evidence.reference(sessionID, result.outputPaths![0])
       expect(result.result.value).toContain(id)

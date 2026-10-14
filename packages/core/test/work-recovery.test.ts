@@ -462,10 +462,12 @@ it.live(
         ),
       ).toBe(false)
       const ref = (yield* Effect.promise(() =>
-        $`git for-each-ref '--format=%(refname)' refs/zaovra/snapshots/`.cwd(root.path).text(),
+        $`git -c core.longpaths=true for-each-ref '--format=%(refname)' refs/zaovra/snapshots/`.cwd(root.path).text(),
       )).trim()
       expect(ref).toContain(created.tasks[0].id)
-      expect(yield* Effect.promise(() => $`git show ${`${ref}:result.txt`}`.cwd(root.path).text())).toBe("recover this")
+      expect(
+        yield* Effect.promise(() => $`git -c core.longpaths=true show ${`${ref}:result.txt`}`.cwd(root.path).text()),
+      ).toBe("recover this")
     }),
   15_000,
 )

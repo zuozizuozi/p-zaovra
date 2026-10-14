@@ -326,9 +326,13 @@ const layer = Layer.effect(
       yield* operation("reset", repository.worktree, ["reset", "--hard", revision])
     })
 
+    // Git for Windows also limits the UTF-8 spelling of an absolute GIT_DIR.
+    // A relative spelling avoids that limit; longpaths must be on before init.
     const repositoryArgs = (repository: Repository, args: string[]) => [
+      "-c",
+      "core.longpaths=true",
       "--git-dir",
-      repository.gitDirectory,
+      path.relative(repository.worktree, repository.gitDirectory) || ".",
       "--work-tree",
       repository.worktree,
       ...args,

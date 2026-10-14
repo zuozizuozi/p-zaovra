@@ -1,3 +1,11 @@
+import { Effect } from "effect"
+import { sql } from "drizzle-orm"
+import { Integration } from "@zaovra-ai/core/integration"
+import { Credential } from "@zaovra-ai/core/credential"
+import { Database } from "@zaovra-ai/core/database/database"
+import { EventV2 } from "@zaovra-ai/core/event"
+import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
+import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { describe, expect, test } from "bun:test"
 import {
   CodexAuthPlugin,
@@ -192,23 +200,13 @@ describe("plugin.codex", () => {
     )
   })
 
-  test("deduplicates concurrent Codex token refreshes", async () => {
-    let auth = {
-      type: "oauth" as const,
-      refresh: "refresh-old",
-      access: "",
-      expires: 0,
-    }
-    const authUpdates: Array<{
-      body: { refresh: string; access: string; expires: number; accountId?: string }
-    }> = []
-    let resolveRefresh: (() => void) | undefined
-    const refreshReady = new Promise<void>((resolve) => {
-      resolveRefresh = resolve
+  test("deduplicates concurrent Codex credential refreshes through V2", async () => {
+    let release: (() => void) | undefined
+    const ready = new Promise<void>((resolve) => {
+      release = resolve
     })
     let refreshRequests = 0
     const apiRequests: { authorization: string | null; accountId: string | null }[] = []
-
     using server = Bun.serve({
       port: 0,
       async fetch(request) {
@@ -216,73 +214,101 @@ describe("plugin.codex", () => {
         if (url.pathname === "/oauth/token") {
           expect(await request.text()).toContain("refresh_token=refresh-old")
           refreshRequests += 1
-          await refreshReady
-          return Response.json({
-            id_token: createTestJwt({ chatgpt_account_id: "acc-123" }),
-            access_token: "access-new",
-            refresh_token: "refresh-new",
-            expires_in: 3600,
-          })
+          await ready
+          return Response.json({ access: "access-new", refresh: "refresh-new", accountID: "acc-123" })
         }
-
-        if (url.pathname === "/backend-api/codex/responses") {
-          apiRequests.push({
-            authorization: request.headers.get("authorization"),
-            accountId: request.headers.get("ChatGPT-Account-Id"),
-          })
-          return new Response("{}", { status: 200 })
-        }
-
-        return new Response("unexpected request", { status: 500 })
+        apiRequests.push({
+          authorization: request.headers.get("authorization"),
+          accountId: request.headers.get("ChatGPT-Account-Id"),
+        })
+        return Response.json({})
       },
     })
-
-    const hooks = await CodexAuthPlugin(
-      {
-        client: {
-          auth: {
-            async set(input: { body: { refresh: string; access: string; expires: number; accountId?: string } }) {
-              authUpdates.push(input)
-              auth = {
-                type: "oauth",
-                refresh: input.body.refresh,
-                access: input.body.access,
-                expires: input.body.expires,
-                ...(input.body.accountId && { accountId: input.body.accountId }),
-              }
-            },
-          },
-        } as never,
-        project: {} as never,
-        directory: "",
-        worktree: "",
-        experimental_workspace: {
-          register() {},
-        },
-        serverUrl: new URL("https://example.com"),
-        $: {} as never,
-      },
-      {
-        issuer: server.url.origin,
-        codexApiEndpoint: new URL("/backend-api/codex/responses", server.url).toString(),
-      },
+    // The legacy auth.set contract is retired. Exercise actual V2 resolution and storage,
+    // then retain the Codex transport assertions with the resolved credential.
+    const resolving = Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const credentials = yield* Credential.Service
+      const database = yield* Database.Service
+      const integrationID = Integration.ID.make("codex-refresh-test")
+      const methodID = Integration.MethodID.make("local-oauth")
+      yield* integrations.transform((editor) =>
+        editor.method.update({
+          integrationID,
+          method: { id: methodID, type: "oauth", label: "Local Codex fixture" },
+          authorize: () => Effect.die("No sign-in in this test"),
+          refresh: (value) =>
+            Effect.promise(async () => {
+              const response = await fetch(new URL("/oauth/token", server.url), {
+                method: "POST",
+                body: new URLSearchParams({ refresh_token: value.refresh }),
+              })
+              const token = (await response.json()) as { access: string; refresh: string; accountID: string }
+              return Credential.OAuth.make({
+                ...value,
+                access: token.access,
+                refresh: token.refresh,
+                expires: Date.now() + 3_600_000,
+                metadata: { accountID: token.accountID },
+              })
+            }),
+        }),
+      )
+      const saved = yield* credentials.create({
+        integrationID,
+        value: Credential.OAuth.make({
+          type: "oauth",
+          methodID,
+          access: "",
+          refresh: "refresh-old",
+          expires: 0,
+        }),
+      })
+      yield* database.db.run("CREATE TEMP TABLE codex_refresh_writes (id TEXT)")
+      yield* database.db.run(
+        "CREATE TEMP TRIGGER count_codex_refresh AFTER UPDATE OF value ON credential BEGIN INSERT INTO codex_refresh_writes VALUES (NEW.id); END",
+      )
+      const connection = { type: "credential" as const, id: saved.id, label: saved.label }
+      const values = yield* Effect.all(
+        [integrations.connection.resolve(connection), integrations.connection.resolve(connection)],
+        { concurrency: "unbounded" },
+      )
+      expect(values).toEqual([
+        expect.objectContaining({ access: "access-new" }),
+        expect.objectContaining({ access: "access-new" }),
+      ])
+      expect((yield* credentials.get(saved.id))?.value).toMatchObject({
+        access: "access-new",
+        refresh: "refresh-new",
+        metadata: { accountID: "acc-123" },
+      })
+      expect(yield* database.db.all(sql`SELECT id FROM codex_refresh_writes`)).toEqual([{ id: saved.id }])
+      const value = values[0]
+      if (value?.type !== "oauth") throw new Error("Expected OAuth credential")
+      return { ...value, accountId: value.metadata?.accountID }
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        AppNodeBuilder.build(LayerNode.group([Integration.node, Credential.node, EventV2.node, Database.node])),
+      ),
+      Effect.runPromise,
     )
-    const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
-
-    const first = loaded.fetch!("https://api.openai.com/v1/responses")
-    const second = loaded.fetch!("https://api.openai.com/v1/responses")
-
-    await waitFor(() => refreshRequests === 1)
-    expect(apiRequests).toHaveLength(0)
-
-    resolveRefresh!()
-    await Promise.all([first, second])
-
+    try {
+      await waitFor(() => refreshRequests > 0)
+    } finally {
+      release!()
+    }
+    const auth = await resolving
     expect(refreshRequests).toBe(1)
-    expect(authUpdates).toHaveLength(1)
-    expect(authUpdates[0]?.body.refresh).toBe("refresh-new")
-    expect(authUpdates[0]?.body.access).toBe("access-new")
-    expect(authUpdates[0]?.body.accountId).toBe("acc-123")
+    const hooks = await CodexAuthPlugin({} as never, {
+      issuer: server.url.origin,
+      codexApiEndpoint: new URL("/backend-api/codex/responses", server.url).toString(),
+    })
+    const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
+    await Promise.all([
+      loaded.fetch!("https://api.openai.com/v1/responses"),
+      loaded.fetch!("https://api.openai.com/v1/responses"),
+    ])
     expect(apiRequests).toEqual([
       { authorization: "Bearer access-new", accountId: "acc-123" },
       { authorization: "Bearer access-new", accountId: "acc-123" },

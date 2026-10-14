@@ -386,7 +386,7 @@ it.instance(
     expect(error).toBeInstanceOf(Provider.NoProvidersError)
     expect(error._tag).toBe("ProviderNoProvidersError")
   }),
-  { config: { enabled_providers: [] } },
+  { git: true, config: { enabled_providers: [] } },
 )
 
 it.instance(
@@ -2047,10 +2047,16 @@ it.effect("zaovra loader accepts a V2 credential", () =>
     yield* Effect.gen(function* () {
       const locations = yield* LocationServiceMap.Service
       const integrations = yield* Integration.Service.pipe(
-        Effect.provide(
-          locations.get(Location.Ref.make({ directory: AbsolutePath.make(keyedDir) })),
-        ),
+        Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(keyedDir) }))),
       )
+      // The official account plugin is build-gated. This legacy-loader fixture
+      // only needs a local key method to exercise the V2 credential bridge.
+      yield* integrations.transform((draft) => {
+        draft.method.update({
+          integrationID: Integration.ID.make("zaovra"),
+          method: { type: "key", label: "Fixture key" },
+        })
+      })
       yield* integrations.connection.key({ integrationID: Integration.ID.make("zaovra"), key: "test-key" })
     }).pipe(
       provideInstanceEffect(keyedDir),

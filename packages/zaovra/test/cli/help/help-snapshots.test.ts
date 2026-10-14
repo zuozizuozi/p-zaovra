@@ -27,7 +27,8 @@ import { normalizeForSnapshot, PATH_SEP } from "../../lib/snapshot"
 //      path widths produce different leading-whitespace counts (or even
 //      line-wraps onto a fresh line on Windows). `\s+` matches both forms.
 function normalize(text: string): string {
-  return normalizeForSnapshot(text, {
+  // yargs may wrap a long home path inside the quoted default before normalization.
+  return normalizeForSnapshot(text.replace(/\[default: "[^"]*oc-cli-[A-Za-z0-9]+"\]/g, '[default: "<HOME>"]'), {
     pathReplacements: [
       // Mixed-case [A-Za-z0-9] because node's mkdtemp suffix is mixed-case
       // (the harness now uses FileSystem.makeTempDirectoryScoped under the
@@ -55,9 +56,6 @@ const TOP_LEVEL = [
   "serve",
   "web",
   "models",
-  "stats",
-  "export",
-  "import",
   "github",
   "pr",
   "session",
@@ -105,6 +103,9 @@ describe("zaovra CLI help-text snapshots", () => {
         expect(topLevel.stderr).not.toContain("--thinking")
         expect(topLevel.stderr).not.toContain("--variant")
         expect(topLevel.stderr).not.toContain("--demo")
+        for (const removed of ["stats", "export", "import"]) {
+          expect(topLevel.stderr).not.toMatch(new RegExp(`zaovra ${removed}\\b`))
+        }
 
         const argvs: Array<readonly string[]> = [...TOP_LEVEL.map((c) => [c] as const), ...SUBCOMMANDS]
 

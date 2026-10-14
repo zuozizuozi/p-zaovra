@@ -33,7 +33,10 @@ describe("Snapshot", () => {
             await $`git commit -m initial`.cwd(project).quiet()
           })
 
-          const layer = snapshotLayer(tmp.path, location)
+          // Keep the worktree short while the absolute snapshot path exceeds Git's UTF-8 limit.
+          const data = path.join(tmp.path, "x".repeat(Math.max(1, 180 - Buffer.byteLength(tmp.path))))
+          expect(Buffer.byteLength(path.join(data, "snapshot", "x".repeat(40), "x".repeat(40)))).toBeGreaterThan(260)
+          const layer = snapshotLayer(data, location)
           yield* Effect.gen(function* () {
             const snapshot = yield* Snapshot.Service
             const before = yield* snapshot.capture()

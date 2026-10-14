@@ -201,6 +201,14 @@ export function withCliFixture<A, E>(
         .pipe(Effect.retry(Schedule.spaced("50 millis").pipe(Schedule.both(Schedule.recurs(20)))), Effect.ignore),
     )
 
+    // Native Location config walks project ancestors even when the legacy
+    // ZAOVRA_DISABLE_PROJECT_CONFIG flag is set. Give it a fixture project
+    // boundary in addition to the isolated HOME and XDG directories.
+    const initialized = yield* appProc.run(
+      ChildProcess.make("git", ["-c", "core.longpaths=true", "init", "--quiet"], { cwd: home }),
+    )
+    if (initialized.exitCode !== 0) return yield* Effect.die(new Error("Could not isolate CLI fixture project"))
+
     const configJson = JSON.stringify(testProviderConfig(llm.url))
     const env = isolatedEnv(home, configJson)
 
@@ -211,7 +219,8 @@ export function withCliFixture<A, E>(
       // on `Bun.stdin.text()` (see src/cli/cmd/run.ts — non-TTY stdin is
       // consumed as the prompt). The old Process.run wrapper defaulted to
       // ignore; ChildProcess.make defaults to pipe, so we set it explicitly.
-      const command = ChildProcess.make("bun", ["run", "--conditions=browser", cliEntry, ...args], {
+      // Use the actual runtime, not a Windows package-manager shim whose child survives kill().
+      const command = ChildProcess.make(process.execPath, ["run", "--conditions=browser", cliEntry, ...args], {
         cwd: home,
         env: { ...env, ...opts?.env },
         extendEnv: true,
@@ -283,7 +292,7 @@ export function withCliFixture<A, E>(
       const options = runOpts(opts)
       const proc = yield* Effect.acquireRelease(
         Effect.sync(() =>
-          Bun.spawn(["bun", "run", "--conditions=browser", cliEntry, ...runArgs(message, opts)], {
+          Bun.spawn([process.execPath, "run", "--conditions=browser", cliEntry, ...runArgs(message, opts)], {
             cwd: home,
             env: { ...process.env, ...env, ...options?.env },
             stdin: "ignore",
@@ -324,7 +333,7 @@ export function withCliFixture<A, E>(
       // as a finalizer error during test teardown.
       const proc = yield* Effect.acquireRelease(
         Effect.sync(() =>
-          Bun.spawn(["bun", "run", "--conditions=browser", cliEntry, ...argv], {
+          Bun.spawn([process.execPath, "run", "--conditions=browser", cliEntry, ...argv], {
             cwd: home,
             env: { ...process.env, ...env, ...opts?.env },
             stdout: "pipe",
@@ -395,7 +404,7 @@ export function withCliFixture<A, E>(
       // Either way we await proc.exited so the test scope doesn't leak.
       const proc = yield* Effect.acquireRelease(
         Effect.sync(() =>
-          Bun.spawn(["bun", "run", "--conditions=browser", cliEntry, ...argv], {
+          Bun.spawn([process.execPath, "run", "--conditions=browser", cliEntry, ...argv], {
             cwd: opts?.cwd ?? home,
             env: { ...process.env, ...env, ...opts?.env },
             stdin: "pipe",

@@ -68,7 +68,7 @@ async function requestTicket(
     method: "POST",
     headers: {
       authorization: authorization(),
-      "x-zaovra-directory": dir,
+      "x-zaovra-directory": encodeURIComponent(dir),
       ...(options?.ticketHeader === false ? {} : { "x-zaovra-ticket": "1" }),
       ...(options?.origin ? { origin: options.origin } : {}),
     },
@@ -88,7 +88,7 @@ async function createCat(listener: Awaited<ReturnType<typeof startListener>>, di
     method: "POST",
     headers: {
       authorization: authorization(),
-      "x-zaovra-directory": dir,
+      "x-zaovra-directory": encodeURIComponent(dir),
       "content-type": "application/json",
     },
     body: JSON.stringify({ command: "/bin/cat", title: "listen-smoke" }),
@@ -173,7 +173,7 @@ describe("HttpApi Server.listen", () => {
     let stopped = false
     try {
       const response = await fetch(new URL(PtyPaths.shells, listener.url), {
-        headers: { authorization: authorization(), "x-zaovra-directory": tmp.path },
+        headers: { authorization: authorization(), "x-zaovra-directory": encodeURIComponent(tmp.path) },
       })
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual(
@@ -285,6 +285,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   test("default in-process handler does not emit Effect HTTP response logs", async () => {
+    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     let output = ""
     // oxlint-disable-next-line typescript-eslint/unbound-method -- restored in finally after temporarily capturing stderr.
     const original = process.stderr.write
@@ -293,7 +294,9 @@ describe("HttpApi Server.listen", () => {
       return true
     }) as typeof process.stderr.write
     try {
-      const response = await Server.Default().app.request("/status")
+      const response = await Server.Default().app.request("/global/health", {
+        headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
+      })
       expect(response.status).toBe(200)
     } finally {
       process.stderr.write = original
@@ -304,6 +307,7 @@ describe("HttpApi Server.listen", () => {
 
   test("plugin client requests reuse the listening server instance", async () => {
     await using tmp = await tmpdir({
+      git: true,
       init: async (directory) => {
         const plugin = path.join(directory, "plugin.ts")
         const initialized = path.join(directory, "initialized.txt")
@@ -334,8 +338,9 @@ describe("HttpApi Server.listen", () => {
     let listener: Awaited<ReturnType<typeof startListener>> | undefined
     try {
       listener = await startListener()
-      const response = await fetch(new URL("/config", listener.url), {
-        headers: { authorization: authorization(), "x-zaovra-directory": tmp.path },
+      // Config reads only resolve placement; /agent also bootstraps plugins.
+      const response = await fetch(new URL("/agent", listener.url), {
+        headers: { authorization: authorization(), "x-zaovra-directory": encodeURIComponent(tmp.path) },
       })
       expect(response.status).toBe(200)
       await withTimeout(
