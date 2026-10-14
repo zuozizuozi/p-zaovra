@@ -506,13 +506,23 @@ const layer = Layer.effectDiscard(
                 ...(warnings.length ? { warnings } : {}),
               }
             }).pipe(
-              Effect.mapError((error) =>
-                error instanceof ToolFailure && error.metadata?.phase === "input"
-                  ? error
-                  : new ToolFailure({
-                      message: `Unable to execute command: ${rawInput.command}\n${error instanceof Error ? error.message : String(error)}`,
-                    }),
-              ),
+              Effect.mapError((error) => {
+                if (error instanceof PermissionV2.BlockedError)
+                  return new ToolFailure({
+                    message:
+                      "Command not executed: permission policy blocked this action. Rewriting the same command does not grant permission. Use an already permitted action or report the required permission change to the user.",
+                    metadata: { phase: "permission", reason: error._tag },
+                  })
+                if (error instanceof PermissionV2.CorrectedError)
+                  return new ToolFailure({
+                    message: `Command not executed: the permission request was corrected.\n${error.feedback}`,
+                    metadata: { phase: "permission", reason: error._tag },
+                  })
+                if (error instanceof ToolFailure && error.metadata?.phase === "input") return error
+                return new ToolFailure({
+                  message: `Unable to execute command: ${rawInput.command}\n${error instanceof Error ? error.message : String(error)}`,
+                })
+              }),
             ),
         }),
       })

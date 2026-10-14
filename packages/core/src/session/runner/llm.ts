@@ -46,7 +46,7 @@ import { PluginV2 } from "../../plugin"
 import { PluginInternal } from "../../plugin/internal"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
-import { MAX_STEPS_PROMPT } from "./max-steps"
+import { maxStepsPrompt } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { FSUtil } from "../../fs-util"
 import { SessionMessage } from "../message"
@@ -423,10 +423,14 @@ const layer = Layer.effect(
             message.finish === "length" &&
             message.content.some((part) => part.type === "text" && part.text.length > 0),
         )
-      const isLastStep =
-        !subtask &&
-        (failures >= 4 ||
-          currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS))
+      const stopReason = subtask
+        ? undefined
+        : failures >= 4
+          ? "Repeated shell failures stopped tool execution"
+          : currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS)
+            ? "Maximum agent steps reached before completion"
+            : undefined
+      const isLastStep = stopReason !== undefined
       const toolMaterialization =
         isLastStep || textOnlyRecovery ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
@@ -515,7 +519,7 @@ const layer = Layer.effect(
               ]
             : []),
           ...(evidence ? [evidence] : []),
-          ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : []),
+          ...(stopReason ? [Message.assistant(maxStepsPrompt(stopReason))] : []),
         ],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep || textOnlyRecovery ? "none" : undefined,
@@ -1035,8 +1039,7 @@ const layer = Layer.effect(
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
-          const terminalFailure =
-            publisher.failureMessage() ?? (isLastStep ? "Maximum agent steps reached before completion" : undefined)
+          const terminalFailure = publisher.failureMessage() ?? stopReason
           if (terminalFailure)
             return yield* new LLMError({
               module: "SessionRunner",

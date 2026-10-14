@@ -218,6 +218,84 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
+  it.effect("groups adjacent tool results with trailing steer text without changing blocks or history", () =>
+    Effect.gen(function* () {
+      const messages = [
+        Message.user("Inspect three files."),
+        Message.assistant(["a", "b", "c"].map((id) => ToolCallPart.make({ id, name: "read", input: { path: id } }))),
+        Message.tool({ id: "a", name: "read", resultType: "text", result: "first" }),
+        Message.tool({ id: "b", name: "read", resultType: "error", result: "Permission blocked" }),
+        Message.tool({
+          id: "c",
+          name: "read",
+          resultType: "content",
+          result: [{ type: "file", uri: "data:image/png;base64,AAECAw==", mime: "image/png" }],
+          cache: new CacheHint({ type: "ephemeral" }),
+        }),
+        Message.user("Also explain the failure."),
+      ]
+      const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+        LLM.request({ model, messages, cache: "none" }),
+      )
+
+      expect(prepared.body.messages).toHaveLength(3)
+      expect(prepared.body.messages[2]).toEqual({
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "a", content: "first" },
+          { type: "tool_result", tool_use_id: "b", content: "Permission blocked", is_error: true },
+          {
+            type: "tool_result",
+            tool_use_id: "c",
+            content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAECAw==" } }],
+            cache_control: { type: "ephemeral" },
+          },
+          { type: "text", text: "Also explain the failure." },
+        ],
+      })
+      expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool", "tool", "user"])
+    }),
+  )
+
+  it.effect("keeps user block order around wrapped updates and respects native system boundaries", () =>
+    Effect.gen(function* () {
+      for (const route of [model, opus48]) {
+        const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+          LLM.request({
+            model: route,
+            messages: [
+              Message.user("Before."),
+              Message.user("Still before."),
+              Message.system("Operator update."),
+              Message.assistant("Reply."),
+              Message.user("Next turn."),
+            ],
+            cache: "none",
+          }),
+        )
+        const prefix = [
+          { type: "text", text: "Before." },
+          { type: "text", text: "Still before." },
+        ] as const
+        expect(prepared.body.messages).toEqual([
+          ...(route === opus48
+            ? ([
+                { role: "user", content: prefix },
+                { role: "system", content: [{ type: "text", text: "Operator update." }] },
+              ] as const)
+            : ([
+                {
+                  role: "user",
+                  content: [...prefix, { type: "text", text: "<system-update>\nOperator update.\n</system-update>" }],
+                },
+              ] as const)),
+          { role: "assistant", content: [{ type: "text", text: "Reply." }] },
+          { role: "user", content: [{ type: "text", text: "Next turn." }] },
+        ])
+      }
+    }),
+  )
+
   // Regression: screenshot/read tool results must stay structured so base64
   // image data is not JSON-stringified into `tool_result.content`.
   it.effect("lowers image tool-result content as structured image blocks", () =>
