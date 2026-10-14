@@ -30,6 +30,8 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
+let revertGate: Promise<void> | undefined
+const reverted: string[] = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const [promptStore, setPromptStore] = createStore<PromptStore>({
@@ -65,6 +67,13 @@ const clientFor = (directory: string) => {
   return {
     v2: {
       session: {
+        revert: {
+          commit: async ({ sessionID }: { sessionID: string }) => {
+            await revertGate
+            reverted.push(sessionID)
+            return { data: undefined }
+          },
+        },
         create: async () => {
           await createSessionGate
           createdSessions.push(directory)
@@ -294,10 +303,52 @@ beforeEach(() => {
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  revertGate = undefined
+  reverted.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
 describe("prompt submit worktree selection", () => {
+  for (const failure of [false, true]) {
+    test(`staged rewind settles before new input; failure=${failure}`, async () => {
+      params = { id: "existing" }
+      const gate = Promise.withResolvers<void>()
+      revertGate = gate.promise
+      const submit = createPromptSubmit({
+        prompt,
+        info: () => ({
+          id: "existing",
+          directory: "/repo/main",
+          projectID: "project",
+          title: "Existing",
+          version: "dev",
+          time: { created: 1, updated: 1 },
+          revert: { messageID: "rewound" },
+        }),
+        imageAttachments: () => [],
+        commentCount: () => 0,
+        autoAccept: () => false,
+        mode: () => "shell",
+        working: () => false,
+        editor: () => undefined,
+        queueScroll: () => undefined,
+        promptLength: () => 2,
+        addToHistory: () => undefined,
+        resetHistoryNavigation: () => undefined,
+        setMode: () => undefined,
+        setPopover: () => undefined,
+      })
+      const pending = submit.handleSubmit({ preventDefault: () => undefined } as Event)
+      await Promise.resolve()
+      await submit.handleSubmit({ preventDefault: () => undefined } as Event)
+      expect(sentShell).toEqual([])
+      if (failure) gate.reject(new Error("commit failed"))
+      else gate.resolve()
+      await pending
+      expect(reverted).toEqual(failure ? [] : ["existing"])
+      expect(sentShell).toEqual(failure ? [] : ["/repo/main"])
+    })
+  }
   for (const scenario of ["switch", "duplicate", "independent", "retry"] as const) {
     test(`new draft creation remains scoped: ${scenario}`, async () => {
       search.draftId = "draft-a"

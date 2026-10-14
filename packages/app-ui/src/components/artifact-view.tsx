@@ -215,7 +215,7 @@ function ArtifactBrowserView(props: Props) {
           {language.t("artifact.loading")}
         </div>
       </Show>
-      <Show when={needsBuild()}>
+      <Show when={!needsBuild.loading && needsBuild()}>
         <p role="status" class="shrink-0 px-3 py-2 text-xs text-text-weak">
           {language.t("artifact.sourceBuild")}
         </p>

@@ -281,7 +281,7 @@ export async function cancelFollowupDraft(
 
 type PromptSubmitInput = {
   prompt: ReturnType<typeof usePrompt>
-  info: Accessor<{ id: string } | undefined>
+  info: Accessor<Pick<Session, "id" | "revert"> | undefined>
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
   autoAccept: Accessor<boolean>
@@ -401,7 +401,11 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const handleSubmit = async (event: Event) => {
     event.preventDefault()
     const draftID = search.draftId
-    const key = params.id ? undefined : JSON.stringify([sdk().scope, sdk().directory, draftID ?? ""])
+    const key = params.id
+      ? input.info()?.revert
+        ? JSON.stringify([sdk().scope, sdk().directory, params.id, "rewind"])
+        : undefined
+      : JSON.stringify([sdk().scope, sdk().directory, draftID ?? ""])
     if (key && creatingDrafts.has(key)) return
     if (key) creatingDrafts.add(key)
     try {
@@ -608,6 +612,20 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       clearContext(submission.target())
       clearInput()
       return
+    }
+
+    // Sending from a staged rewind starts a new branch of the conversation.
+    // Commit the existing rewind before admitting new input; clear() would
+    // restore the old files, while leaving it staged hides the new messages.
+    if (session.revert) {
+      const committed = await client.v2.session.revert
+        .commit({ sessionID: session.id }, { throwOnError: true })
+        .then(() => true)
+        .catch((error: unknown) => {
+          showToast({ title: language.t("prompt.toast.promptSendFailed.title"), description: errorMessage(error) })
+          return false
+        })
+      if (!committed) return
     }
 
     input.onSubmit?.()

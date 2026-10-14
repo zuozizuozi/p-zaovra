@@ -742,22 +742,26 @@ export default function Page() {
     }
   })
   const refreshVcs = debounce(() => void queryClient.invalidateQueries({ queryKey: vcsKey() }), 100)
+  const turnMessageID = createMemo(
+    () =>
+      messages().findLast(
+        (message) =>
+          message.role === "user" &&
+          !(sync().data.part[message.id] ?? []).some((part) => part.type === "text" && part.synthetic),
+      )?.id,
+  )
   const turnQuery = createQuery(() => {
     const sessionID = params.id
     // Shell and synthetic history rows render as users, but do not own a turn diff.
-    const messageID = messages().findLast(
-      (message) =>
-        message.role === "user" &&
-        !(sync().data.part[message.id] ?? []).some((part) => part.type === "text" && part.synthetic),
-    )?.id
+    const messageID = turnMessageID()
     const latest = messages().findLast((message) => message.role === "assistant")
     return {
       queryKey: ["session-turn-diff", serverSDK().scope, sessionID, messageID, latest?.id, latest?.time.completed],
       enabled:
-        wantsReview() &&
-        reviewMode() === "turn" &&
         !!sessionID &&
         !!messageID &&
+        ((wantsReview() && reviewMode() === "turn") ||
+          (!!latest?.time.completed && !sync().data.session_working(sessionID))) &&
         sync().session.messageConfirmed(sessionID, messageID),
       queryFn:
         sessionID && messageID
@@ -767,6 +771,15 @@ export default function Page() {
                 .then((result) => result.data.data.map((diff) => ({ ...diff, file: diff.path })))
           : skipToken,
     }
+  })
+  // V2 stores snapshots on assistant messages rather than legacy user.summary.
+  // Reuse the authoritative turn diff already used by Review; never infer a net
+  // change from tool output or mutate the persisted transcript for presentation.
+  const timelineUserMessages = createMemo(() => {
+    const diffs = turnQuery.isFetched && !turnQuery.isError ? list(turnQuery.data) : undefined
+    return visibleUserMessages().map((message) =>
+      message.id === turnMessageID() && diffs ? { ...message, summary: { ...message.summary, diffs } } : message,
+    )
   })
   createEffect(
     on(
@@ -2373,7 +2386,7 @@ export default function Page() {
                     const root = scroller
                     if (root) scheduleScrollState(root)
                   }}
-                  userMessages={visibleUserMessages()}
+                  userMessages={timelineUserMessages()}
                   setHistoryAnchor={(handlers) => {
                     captureHistoryAnchor = handlers.capture
                     restoreHistoryAnchor = handlers.restore
@@ -2448,65 +2461,72 @@ export default function Page() {
             <SessionComposerRegion
               controller={controller}
               promptInput={
-                <Show
-                  when={newSessionDesign()}
-                  fallback={
-                    <PromptInput
-                      controls={inputController()}
-                      ref={(el) => {
-                        inputRef = el
-                      }}
-                      newSessionWorktree={newSessionWorktree()}
-                      onNewSessionWorktreeReset={() => setStore("newSessionWorktree", "main")}
-                      onSubmit={() => {
-                        comments.clear()
-                        resumeScroll()
-                      }}
-                      edit={editingFollowup()}
-                      onEditLoaded={clearFollowupEdit}
-                      shouldQueue={queueEnabled}
-                      onQueue={queueFollowup}
-                      onAbort={() => {
-                        const id = params.id
-                        if (!id) return
-                        setFollowup("paused", id, true)
-                      }}
-                    />
-                  }
+                <div
+                  data-component="prompt-admission"
+                  inert={reverting()}
+                  aria-busy={reverting()}
+                  class="w-full min-w-0"
                 >
-                  {(_) => {
-                    const controller = usePromptInputV2Controller({
-                      get controls() {
-                        return inputController()
-                      },
-                      ref: (el) => {
-                        inputRef = el
-                      },
-                      get newSessionWorktree() {
-                        return newSessionWorktree()
-                      },
-                      onNewSessionWorktreeReset: () => setStore("newSessionWorktree", "main"),
-                      onSubmit: () => {
-                        comments.clear()
-                        resumeScroll()
-                      },
-                      shouldQueue: queueEnabled,
-                      onQueue: queueFollowup,
-                      onAbort: () => {
-                        const id = params.id
-                        if (!id) return
-                        setFollowup("paused", id, true)
-                      },
-                    })
-                    return (
-                      <PromptInputV2Composer
-                        controller={controller}
+                  <Show
+                    when={newSessionDesign()}
+                    fallback={
+                      <PromptInput
+                        controls={inputController()}
+                        ref={(el) => {
+                          inputRef = el
+                        }}
+                        newSessionWorktree={newSessionWorktree()}
+                        onNewSessionWorktreeReset={() => setStore("newSessionWorktree", "main")}
+                        onSubmit={() => {
+                          comments.clear()
+                          resumeScroll()
+                        }}
                         edit={editingFollowup()}
                         onEditLoaded={clearFollowupEdit}
+                        shouldQueue={queueEnabled}
+                        onQueue={queueFollowup}
+                        onAbort={() => {
+                          const id = params.id
+                          if (!id) return
+                          setFollowup("paused", id, true)
+                        }}
                       />
-                    )
-                  }}
-                </Show>
+                    }
+                  >
+                    {(_) => {
+                      const controller = usePromptInputV2Controller({
+                        get controls() {
+                          return inputController()
+                        },
+                        ref: (el) => {
+                          inputRef = el
+                        },
+                        get newSessionWorktree() {
+                          return newSessionWorktree()
+                        },
+                        onNewSessionWorktreeReset: () => setStore("newSessionWorktree", "main"),
+                        onSubmit: () => {
+                          comments.clear()
+                          resumeScroll()
+                        },
+                        shouldQueue: queueEnabled,
+                        onQueue: queueFollowup,
+                        onAbort: () => {
+                          const id = params.id
+                          if (!id) return
+                          setFollowup("paused", id, true)
+                        },
+                      })
+                      return (
+                        <PromptInputV2Composer
+                          controller={controller}
+                          edit={editingFollowup()}
+                          onEditLoaded={clearFollowupEdit}
+                        />
+                      )
+                    }}
+                  </Show>
+                </div>
               }
             />
           )
