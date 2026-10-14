@@ -34,6 +34,15 @@ const it = testEffect(
     [Global.node, Global.layerWith({ config: "/global" })],
   ]),
 )
+const itWithoutGit = testEffect(
+  AppNodeBuilder.build(builtInsNode, [
+    [
+      Location.node,
+      Layer.succeed(Location.Service, Location.Service.of(location({ directory }, { projectDirectory }))),
+    ],
+    [Global.node, Global.layerWith({ config: "/global" })],
+  ]),
+)
 const instructionFS = Layer.effect(
   FSUtil.Service,
   FSUtil.Service.pipe(
@@ -55,6 +64,18 @@ const itWithInstructions = testEffect(
 )
 
 describe("SystemContextBuiltIns", () => {
+  itWithoutGit.effect("labels a non-git project root without implying a repository", () =>
+    Effect.gen(function* () {
+      const context = yield* SystemContextRegistry.Service
+      const initialized = yield* SystemContext.initialize(yield* context.load())
+
+      expect(initialized.baseline).toContain(`Working directory: ${directory}`)
+      expect(initialized.baseline).toContain(`Project root: ${projectDirectory}`)
+      expect(initialized.baseline).toContain("Is directory a git repo: no")
+      expect(initialized.baseline).not.toContain("Repository root:")
+    }),
+  )
+
   it.effect("loads location-scoped environment and host-local date context", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(timestamp)
