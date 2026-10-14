@@ -1,6 +1,7 @@
 import { getFilename } from "@zaovra-ai/core/util/path"
 import { type Session } from "@zaovra-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
+import projectIcon from "../../../public/favicon-v3.svg?url"
 import type { ServerConnection } from "@/context/server"
 import type { HomeProjectSelection } from "@/context/layout"
 
@@ -95,7 +96,7 @@ export function homeSessionServerStatus(active: boolean, status: () => { working
 const ZAOVRA_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
 
 export function getProjectAvatarSource(id?: string, icon?: { color?: string; url?: string; override?: string }) {
-  if (id === ZAOVRA_PROJECT_ID) return "https://zaovra.com/favicon.svg"
+  if (id === ZAOVRA_PROJECT_ID) return projectIcon
   if (icon?.override) return icon.override
   if (icon?.color) return undefined
   return icon?.url

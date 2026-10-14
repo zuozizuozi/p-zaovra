@@ -9,6 +9,7 @@ import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
 import { authFromToken } from "@/utils/server"
 import pkg from "../package.json"
+import notificationIcon from "../public/favicon-96x96-v3.png?url"
 import { ServerConnection } from "./context/server"
 
 const DEFAULT_SERVER_URL_KEY = "zaovra.settings.dat:defaultServerUrl"
@@ -69,7 +70,7 @@ const notify: Platform["notify"] = async (title, description, href) => {
 
   const notification = new Notification(title, {
     body: description ?? "",
-    icon: "https://zaovra.com/favicon-96x96-v3.png",
+    icon: notificationIcon,
   })
 
   notification.onclick = () => {
