@@ -11,10 +11,11 @@ import { AccountTable } from "@zaovra-ai/core/account/sql"
 import { Worktree } from "../../src/worktree"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { testEffectShared } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
 
-const it = testEffect(Layer.mergeAll(LayerNode.compile(Database.node), httpApiLayer))
+// Seed the same process-scoped database used by the HTTP handlers.
+const it = testEffectShared(Layer.mergeAll(LayerNode.compile(Database.node), httpApiLayer))
 const testWorktreeMutations = process.platform === "win32" ? it.instance.skip : it.instance
 
 function request(path: string, directory: string, init: RequestInit = {}) {
@@ -190,7 +191,7 @@ describe("experimental HttpApi", () => {
           body: JSON.stringify({ accountID, orgID: "org-test" }),
         })
 
-        expect(switched.status).toBe(200)
+        expect(switched.status, JSON.stringify(yield* json(switched))).toBe(200)
         expect(yield* json(switched)).toBe(true)
       }),
     { config: { formatter: false, lsp: false } },

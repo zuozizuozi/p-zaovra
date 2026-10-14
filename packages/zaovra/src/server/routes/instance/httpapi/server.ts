@@ -43,8 +43,7 @@ import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
 import { Ripgrep } from "@zaovra-ai/core/ripgrep"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionV2 } from "@zaovra-ai/core/session"
-import { SessionExecution } from "@zaovra-ai/core/session/execution"
-import * as SessionExecutionLocal from "@zaovra-ai/core/session/execution/local"
+import { SessionRuntime } from "@/effect/session-runtime"
 import { Work } from "@zaovra-ai/core/work"
 import { WorkArtifact } from "@zaovra-ai/core/work/artifact"
 import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
@@ -88,7 +87,7 @@ import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
 import { handlers } from "@zaovra-ai/server/handlers"
-import { buildLocationServiceMap, LocationServiceMap } from "@zaovra-ai/core/location-services"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { layer as locationLayer } from "@zaovra-ai/server/location"
 import { sessionLocationLayer } from "@zaovra-ai/server/middleware/session-location"
 import { PtyEnvironment } from "@zaovra-ai/server/pty-environment"
@@ -233,14 +232,7 @@ const app = LayerNode.group([
 export function createRoutes(
   corsOptions?: CorsOptions,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
-  const locationServiceMapV2 = Layer.unwrap(
-    Effect.gen(function* () {
-      const events = yield* EventV2Bridge.Service
-      return buildLocationServiceMap([[EventV2.node, Layer.succeed(EventV2.Service, events)]])
-    }),
-  )
   const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
-  const sharedEventV2 = Layer.effect(EventV2.Service, EventV2Bridge.Service)
   const v2Runtime = AppNodeBuilderV1.build(
     LayerNode.group([
       SessionV2.node,
@@ -257,13 +249,8 @@ export function createRoutes(
       WorkPlacement.node,
       WorkRecovery.startupNode,
     ]),
-    [
-      [LocationServiceMap.node, sharedLocationServiceMap],
-      [EventV2.node, sharedEventV2],
-      [SessionExecution.node, SessionExecutionLocal.node],
-      [WorkExecution.node, WorkExecutionLocal.node],
-    ],
-  ).pipe(Layer.provideMerge(locationServiceMapV2))
+    [...SessionRuntime.replacements, [WorkExecution.node, WorkExecutionLocal.node]],
+  )
 
   return Layer.mergeAll(
     rootApiRoutes,
@@ -287,9 +274,10 @@ export function createRoutes(
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
-    Layer.provide(v2Runtime),
+    Layer.provide(SessionRuntime.share(v2Runtime)),
 
-    Layer.provide(AppNodeBuilderV1.build(app)),
+    Layer.provide(SessionRuntime.share(AppNodeBuilderV1.build(app, SessionRuntime.replacements))),
+    Layer.provide(SessionRuntime.layer),
     // Must stay last: layers provided later in this pipe build beneath earlier ones,
     // so Observability must come after every service graph. Otherwise eagerly forked
     // fibers (e.g. the ModelsDev background refresh) capture Effect's default stdout

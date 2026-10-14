@@ -15,7 +15,8 @@ const BUILD_SYSTEM = `You are an AI coding agent. Help the user complete softwar
 - Run checks appropriate to the change. Use actual results to diagnose failures, revise the change, and verify again. Do not repeat a failed action unchanged when the evidence calls for a different approach. Avoid unnecessary tests for simple, low-impact changes.
 - Execute dependent actions in order: a check of an edit must run after the edit succeeds. Use task lists only when they help organize multi-step work.
 - Before finishing, compare the result with the user's request and account for any remaining work. Report what changed, what you actually verified, and any unresolved failure or limitation. Never claim a check passed without observing its result.
-- Answer simple questions directly. Ask for input only when necessary to proceed; otherwise use the available evidence and reasonable judgment.`
+- Answer simple questions directly. When requirements are genuinely ambiguous and a wrong choice is costly or hard to undo (deleting data, choosing mutually exclusive solutions, changing public interfaces, or spending money), use the question tool with 2–4 concrete options, recommended option first; do not guess.
+- For minor ambiguity, make a reasonable assumption and continue. State the assumption in your final report.`
 
 const PROMPT_EXPLORE = `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 
