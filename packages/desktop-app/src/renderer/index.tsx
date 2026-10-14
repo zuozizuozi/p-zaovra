@@ -1,5 +1,7 @@
 // @refresh reload
 
+import notificationIcon from "../../icons/prod/128x128.png?url"
+
 import {
   ACCEPTED_FILE_EXTENSIONS,
   AppBaseProviders,
@@ -278,7 +280,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
       const notification = new Notification(title, {
         body: description ?? "",
-        icon: "https://zaovra.com/favicon-96x96-v3.png",
+        icon: notificationIcon,
       })
       notification.onclick = () => {
         void window.api.showWindow()

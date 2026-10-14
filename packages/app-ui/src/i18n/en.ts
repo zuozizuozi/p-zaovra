@@ -1177,6 +1177,7 @@ export const dict = {
   "error.chain.configInvalid": "Config file at {{path}} is invalid",
   "error.chain.configInvalidWithMessage": "Config file at {{path}} is invalid: {{message}}",
 
+  "notification.permission.run": "Wants to run {{command}}",
   "notification.permission.title": "Permission required",
   "notification.permission.description": "{{sessionTitle}} in {{projectName}} needs permission",
   "notification.question.title": "Question",
@@ -1248,6 +1249,9 @@ export const dict = {
   "session.todo.collapse": "Collapse",
   "session.todo.expand": "Expand",
   "session.todo.progress": "{{done}} of {{total}} todos completed",
+  "session.question.skip": "Skip",
+  "session.question.recommended": "Recommended",
+  "session.question.custom": "Or write your own reply",
   "session.question.progress": "{{current}} of {{total}} questions",
   "session.question.minimize": "Minimize question",
   "session.question.restore": "Restore question",

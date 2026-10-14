@@ -1,3 +1,4 @@
+import { permissionDescription } from "@/utils/notification-content"
 import { createResource, For, Show } from "solid-js"
 import type { PermissionView } from "@zaovra-ai/sdk/v2"
 import { Button } from "@zaovra-ai/ui/button"
@@ -46,19 +47,16 @@ export function SessionPermissionDock(props: {
     return typeof workdir === "string" ? workdir : sdk().directory
   }
 
-  const toolDescription = () => {
-    if (props.request.permission === "doom_loop") return language.t("session.permission.repeatedCall")
-    const key = `settings.permissions.tool.${props.request.permission}.description`
-    const value = language.t(key as Parameters<typeof language.t>[0])
-    if (value === key) return language.t("session.permission.requestedAccess")
-    return value
-  }
+  const toolDescription = () => permissionDescription(props.request.permission, language.t)
   const patterns = () => [...new Set(props.request.patterns)]
   const remembered = () => [...new Set(props.request.always)].filter((pattern) => !patterns().includes(pattern))
 
   return (
     <DockPrompt
       kind="permission"
+      ref={(el) => {
+        el.dataset.notificationTarget = `permission:${props.request.id}`
+      }}
       header={
         <div data-slot="permission-row" data-variant="header">
           <span data-slot="permission-icon">

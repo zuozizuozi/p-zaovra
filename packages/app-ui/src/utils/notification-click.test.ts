@@ -3,7 +3,7 @@ import { handleNotificationClick, setNavigate } from "./notification-click"
 
 describe("notification click", () => {
   afterEach(() => {
-    setNavigate(undefined as any)
+    setNavigate(undefined)
   })
 
   test("navigates via registered navigate function", () => {
@@ -11,6 +11,22 @@ describe("notification click", () => {
     setNavigate((href) => calls.push(href))
     handleNotificationClick("/abc/session/123")
     expect(calls).toEqual(["/abc/session/123"])
+  })
+
+  test("focuses a request that arrives after navigation", async () => {
+    setNavigate(() => {})
+    handleNotificationClick("/abc/session/123#question=que_focus")
+    const card = document.createElement("div")
+    card.dataset.notificationTarget = "question:que_focus"
+    const button = document.createElement("button")
+    button.dataset.slot = "question-option"
+    card.append(button)
+    document.body.append(card)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(document.activeElement).toBe(button)
+    handleNotificationClick("/abc/session/123#question=que_focus")
+    expect(document.activeElement).toBe(button)
+    card.remove()
   })
 
   test("does not navigate when href is missing", () => {
