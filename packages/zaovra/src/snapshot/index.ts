@@ -80,8 +80,25 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
 
         const git = Effect.fnUntraced(
           function* (cmd: string[], opts?: { cwd?: string; env?: Record<string, string>; stdin?: string }) {
+            const cwd = opts?.cwd ?? state.directory
             const result = yield* appProcess.run(
-              ChildProcess.make("git", cmd, { cwd: opts?.cwd, env: opts?.env, extendEnv: true }),
+              ChildProcess.make(
+                "git",
+                [
+                  "-c",
+                  "core.longpaths=true",
+                  ...cmd.map((value, index) =>
+                    cmd[index - 1] === "--git-dir" ? path.relative(cwd, value) || "." : value,
+                  ),
+                ],
+                {
+                  cwd,
+                  env: opts?.env?.GIT_DIR
+                    ? { ...opts.env, GIT_DIR: path.relative(cwd, opts.env.GIT_DIR) || "." }
+                    : opts?.env,
+                  extendEnv: true,
+                },
+              ),
               { stdin: opts?.stdin },
             )
             return {
@@ -602,10 +619,16 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                   if (!refs.length) return new Map<string, { before: string; after: string }>()
 
                   const batch = yield* appProcess.run(
-                    ChildProcess.make("git", [...cfg, ...args(["cat-file", "--batch"])], {
-                      cwd: state.directory,
-                      extendEnv: true,
-                    }),
+                    ChildProcess.make(
+                      "git",
+                      [...cfg, ...args(["cat-file", "--batch"])].map((value) =>
+                        value === state.gitdir ? path.relative(state.directory, value) : value,
+                      ),
+                      {
+                        cwd: state.directory,
+                        extendEnv: true,
+                      },
+                    ),
                     { stdin: refs.map((item) => item.ref).join("\n") + "\n" },
                   )
                   if (batch.exitCode !== 0) {
