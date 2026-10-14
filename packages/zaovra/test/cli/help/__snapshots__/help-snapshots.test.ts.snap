@@ -16,7 +16,7 @@ Options:
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
       --mdns-domain  custom domain name for mDNS service (default: zaovra.local)
-                                                                [string] [default: "zaovra.local"]
+                                                                  [string] [default: "zaovra.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]
       --cwd          working directory [string] [default: "<HOME>"]"
 `;
@@ -28,7 +28,7 @@ manage MCP (Model Context Protocol) servers
 
 Commands:
   zaovra mcp add [name]     add an MCP server
-  zaovra mcp list           list MCP servers and their status                        [aliases: ls]
+  zaovra mcp list           list MCP servers and their status                          [aliases: ls]
   zaovra mcp auth [name]    authenticate with an OAuth-enabled MCP server
   zaovra mcp logout [name]  remove OAuth credentials for an MCP server
   zaovra mcp debug <name>   debug OAuth connection for an MCP server
@@ -58,10 +58,8 @@ Options:
       --dir           directory to run in                                                   [string]
   -c, --continue      continue the last session                                            [boolean]
   -s, --session       session id to continue                                                [string]
-      --fork          fork the session when continuing (use with --continue or --session)  [boolean]
-  -p, --password      basic auth password (defaults to ZAOVRA_SERVER_PASSWORD)            [string]
-  -u, --username      basic auth username (defaults to ZAOVRA_SERVER_USERNAME or 'zaovra')
-                                                                                            [string]
+  -p, --password      basic auth password (defaults to ZAOVRA_SERVER_PASSWORD)              [string]
+  -u, --username      basic auth username (defaults to ZAOVRA_SERVER_USERNAME or 'zaovra')  [string]
       --mini          start the minimal interactive interface             [boolean] [default: false]
       --no-replay     disable mini session history replay on resume and after resize       [boolean]
       --replay-limit  cap visible mini replay to the newest N messages                      [number]"
@@ -84,18 +82,15 @@ Options:
       --command      the command to run, use message for args                               [string]
   -c, --continue     continue the last session                                             [boolean]
   -s, --session      session id to continue                                                 [string]
-      --fork         fork the session before continuing (requires --continue or --session) [boolean]
-      --share        share the session                                                     [boolean]
   -m, --model        model to use in the format of provider/model                           [string]
       --agent        agent to use                                                           [string]
       --format       format: default (formatted) or json (raw JSON events)
                                           [string] [choices: "default", "json"] [default: "default"]
   -f, --file         file(s) to attach to message                                            [array]
       --title        title for the session (uses truncated prompt if no value provided)     [string]
-      --attach       attach to a running zaovra server (e.g., http://localhost:4096)      [string]
-  -p, --password     basic auth password (defaults to ZAOVRA_SERVER_PASSWORD)             [string]
-  -u, --username     basic auth username (defaults to ZAOVRA_SERVER_USERNAME or 'zaovra')
-                                                                                            [string]
+      --attach       attach to a running zaovra server (e.g., http://localhost:4096)        [string]
+  -p, --password     basic auth password (defaults to ZAOVRA_SERVER_PASSWORD)               [string]
+  -u, --username     basic auth username (defaults to ZAOVRA_SERVER_USERNAME or 'zaovra')   [string]
       --dir          directory to run in, path on remote server if attaching                [string]
       --port         port for the local server (defaults to random port if no value provided)
                                                                                             [number]
@@ -141,7 +136,7 @@ exports[`zaovra CLI help-text snapshots every documented command emits stable he
 manage AI providers and credentials
 
 Commands:
-  zaovra providers list               list providers and credentials                 [aliases: ls]
+  zaovra providers list               list providers and credentials                   [aliases: ls]
   zaovra providers login [url]        log in to a provider
   zaovra providers logout [provider]  log out from a configured provider
 
@@ -221,7 +216,7 @@ Options:
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
       --mdns-domain  custom domain name for mDNS service (default: zaovra.local)
-                                                                [string] [default: "zaovra.local"]
+                                                                  [string] [default: "zaovra.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]"
 `;
 
@@ -241,7 +236,7 @@ Options:
       --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
       --mdns-domain  custom domain name for mDNS service (default: zaovra.local)
-                                                                [string] [default: "zaovra.local"]
+                                                                  [string] [default: "zaovra.local"]
       --cors         additional domains to allow for CORS                      [array] [default: []]"
 `;
 
@@ -261,57 +256,6 @@ Options:
       --pure        run without external plugins                                           [boolean]
       --verbose     use more verbose model output (includes metadata like costs)           [boolean]
       --refresh     refresh the models cache from models.dev                               [boolean]"
-`;
-
-exports[`zaovra CLI help-text snapshots every documented command emits stable help text: zaovra stats --help 1`] = `
-"zaovra stats
-
-show token usage and cost statistics
-
-Options:
-  -h, --help        show help                                                              [boolean]
-  -v, --version     show version number                                                    [boolean]
-      --print-logs  print logs to stderr                                                   [boolean]
-      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure        run without external plugins                                           [boolean]
-      --days        show stats for the last N days (default: all time)                      [number]
-      --tools       number of tools to show (default: all)                                  [number]
-      --models      show model statistics (default: hidden). Pass a number to show top N, otherwise
-                    shows all
-      --project     filter by project (default: all projects, empty string: current project)[string]"
-`;
-
-exports[`zaovra CLI help-text snapshots every documented command emits stable help text: zaovra export --help 1`] = `
-"zaovra export [sessionID]
-
-export session data as JSON
-
-Positionals:
-  sessionID  session id to export                                                           [string]
-
-Options:
-  -h, --help        show help                                                              [boolean]
-  -v, --version     show version number                                                    [boolean]
-      --print-logs  print logs to stderr                                                   [boolean]
-      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure        run without external plugins                                           [boolean]
-      --sanitize    redact sensitive transcript and file data                              [boolean]"
-`;
-
-exports[`zaovra CLI help-text snapshots every documented command emits stable help text: zaovra import --help 1`] = `
-"zaovra import <file>
-
-import session data from JSON file or URL
-
-Positionals:
-  file  path to JSON file or share URL                                           [string] [required]
-
-Options:
-  -h, --help        show help                                                              [boolean]
-  -v, --version     show version number                                                    [boolean]
-      --print-logs  print logs to stderr                                                   [boolean]
-      --log-level   log level                   [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure        run without external plugins                                           [boolean]"
 `;
 
 exports[`zaovra CLI help-text snapshots every documented command emits stable help text: zaovra github --help 1`] = `
@@ -388,7 +332,7 @@ exports[`zaovra CLI help-text snapshots every documented command emits stable he
 database tools
 
 Commands:
-  zaovra db [query]     open an interactive sqlite3 shell or run a query                 [default]
+  zaovra db [query]     open an interactive sqlite3 shell or run a query                   [default]
   zaovra db path        print the database path
 
 Positionals:
@@ -441,7 +385,7 @@ exports[`zaovra CLI help-text snapshots every documented command emits stable he
 authenticate with an OAuth-enabled MCP server
 
 Commands:
-  zaovra mcp auth list  list OAuth-capable MCP servers and their auth status         [aliases: ls]
+  zaovra mcp auth list  list OAuth-capable MCP servers and their auth status           [aliases: ls]
 
 Positionals:
   name  name of the MCP server                                                              [string]
@@ -489,7 +433,7 @@ exports[`zaovra CLI help-text snapshots every documented command emits stable he
 log in to a provider
 
 Positionals:
-  url  zaovra auth provider                                                               [string]
+  url  zaovra auth provider                                                                 [string]
 
 Options:
   -h, --help        show help                                                              [boolean]

@@ -194,7 +194,8 @@ describe("Project.fromDirectory", () => {
       const rootResult = yield* projects.fromDirectory(tmp)
       const rootProject = rootResult.project
       const remoteID = remoteProjectID("github.com/acme/app")
-      const sessionID = Session.ID.make(crypto.randomUUID())
+      // Exercise migration of a persisted UUID from before prefixed Session IDs.
+      const sessionID = crypto.randomUUID() as Session.ID
       const workspaceID = WorkspaceV2.ID.ascending()
 
       yield* db

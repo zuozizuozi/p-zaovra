@@ -51,7 +51,7 @@ describe("HttpApi instance route authorization", () => {
     await Bun.write(`${tmp.path}/zaovra.json`, JSON.stringify({ permissions: [], mcp: { servers: {} }, skills: [] }))
     await Bun.write(`${tmp.path}/hello.txt`, "private content\n")
     const server = app({ password: "secret" })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     for (const route of [
       "/path",
       "/vcs",
@@ -84,7 +84,7 @@ describe("HttpApi instance route authorization", () => {
     await Bun.write(`${tmp.path}/zaovra.json`, JSON.stringify({ permissions: [], skills: [] }))
     await Bun.write(`${tmp.path}/hello.txt`, "before\n")
     const server = app({ password: "secret" })
-    const headers = { "x-zaovra-directory": tmp.path, "content-type": "application/json" }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path), "content-type": "application/json" }
     const body = JSON.stringify({
       patch: "diff --git a/hello.txt b/hello.txt\n--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n-before\n+after\n",
     })
@@ -107,7 +107,7 @@ describe("HttpApi instance route authorization", () => {
       JSON.stringify({ providers: {}, permissions: [], formatter: false, lsp: false }),
     )
     const server = app({ password: "secret" })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
 
     const missing = await server.request(EventPaths.event, { headers })
     await cancelBody(missing)
@@ -124,7 +124,7 @@ describe("HttpApi instance route authorization", () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     const server = app({ password: "secret" })
     const route = PtyPaths.connect.replace(":ptyID", PtyID.ascending())
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
 
     const missing = await server.request(route, { headers })
     await cancelBody(missing)

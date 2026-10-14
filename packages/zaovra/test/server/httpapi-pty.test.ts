@@ -50,7 +50,7 @@ function serverUrl() {
   return HttpServer.HttpServer.use((server) => Effect.succeed(HttpServer.formatAddress(server.address)))
 }
 
-const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-zaovra-directory", dir)
+const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-zaovra-directory", encodeURIComponent(dir))
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -60,7 +60,7 @@ afterEach(async () => {
 describe("pty HttpApi bridge", () => {
   testPty("shares terminal identity across V2 and legacy routes", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const headers = { "x-zaovra-directory": tmp.path, "content-type": "application/json" }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path), "content-type": "application/json" }
     const created = await app().request("/api/pty", {
       method: "POST",
       headers,
@@ -88,7 +88,9 @@ describe("pty HttpApi bridge", () => {
 
   test("serves available shell list through experimental Effect routes", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const response = await app().request(PtyPaths.shells, { headers: { "x-zaovra-directory": tmp.path } })
+    const response = await app().request(PtyPaths.shells, {
+      headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
+    })
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(
@@ -104,7 +106,7 @@ describe("pty HttpApi bridge", () => {
 
   testPty("serves PTY JSON routes through experimental Effect routes", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const list = await app().request(PtyPaths.list, { headers })
     expect(list.status).toBe(200)
     expect(await list.json()).toEqual([])
@@ -166,7 +168,7 @@ describe("pty HttpApi bridge", () => {
 
   testPty("hides exited sessions on the legacy surface", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const created = await app().request(PtyPaths.create, {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
@@ -193,7 +195,7 @@ describe("pty HttpApi bridge", () => {
 
   testPty("disposes PTY sessions with their legacy instance", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const created = await app().request(PtyPaths.create, {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
@@ -211,7 +213,7 @@ describe("pty HttpApi bridge", () => {
   test("returns 404 for missing PTY websocket before upgrade", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     const response = await app().request(PtyPaths.connect.replace(":ptyID", PtyID.ascending()), {
-      headers: { "x-zaovra-directory": tmp.path },
+      headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
     })
     expect(response.status).toBe(404)
   })
@@ -219,14 +221,14 @@ describe("pty HttpApi bridge", () => {
   test("returns 404 for missing PTY websocket before decoding cursor query", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     const response = await app().request(`${PtyPaths.connect.replace(":ptyID", PtyID.ascending())}?cursor=a&cursor=b`, {
-      headers: { "x-zaovra-directory": tmp.path },
+      headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
     })
     expect(response.status).toBe(404)
   })
 
   test("returns typed not found errors for missing PTY HTTP resources", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const missingID = String(PtyID.ascending())
     const expected = {
       _tag: "PtyNotFoundError",
@@ -253,7 +255,7 @@ describe("pty HttpApi bridge", () => {
 
   test("returns typed errors for PTY connect token failures", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const missingID = String(PtyID.ascending())
 
     const forbidden = await app().request(PtyPaths.connectToken.replace(":ptyID", missingID), {

@@ -50,7 +50,7 @@ const httpApiServerLayer = servedRoutes.pipe(
 const it = testEffect(Layer.mergeAll(testStateLayer, httpApiServerLayer))
 const handlerContext = Context.empty() as Context.Context<unknown>
 
-const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-zaovra-directory", dir)
+const directoryHeader = (dir: string) => HttpClientRequest.setHeader("x-zaovra-directory", encodeURIComponent(dir))
 
 describe("instance HttpApi", () => {
   it.live("serves the OpenAPI document", () =>
@@ -125,7 +125,7 @@ describe("instance HttpApi", () => {
         HttpApiApp.webHandler().handler(
           new Request(`http://localhost/project/${projectID}`, {
             method: "PATCH",
-            headers: { "x-zaovra-directory": dir, "content-type": "application/json" },
+            headers: { "x-zaovra-directory": encodeURIComponent(dir), "content-type": "application/json" },
             body: JSON.stringify({ name: "Missing" }),
           }),
           handlerContext,

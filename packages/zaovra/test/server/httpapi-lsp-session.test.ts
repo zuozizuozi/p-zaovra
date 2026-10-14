@@ -66,7 +66,7 @@ test("LSP status observes the language service used by a durable session", async
     }),
   )
   const app = Server.Default().app
-  const headers = { "content-type": "application/json", "x-zaovra-directory": tmp.path }
+  const headers = { "content-type": "application/json", "x-zaovra-directory": encodeURIComponent(tmp.path) }
   await using cleanup = {
     async [Symbol.asyncDispose]() {
       // Release the cached fixture process even when a later assertion fails.

@@ -1,3 +1,4 @@
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
 import { expect } from "bun:test"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Effect } from "effect"
@@ -5,7 +6,11 @@ import { Config } from "@/config/config"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(LayerNode.compile(LayerNode.group([Config.node, AgentSvc.node])))
+const it = testEffect(
+  LayerNode.compile(LayerNode.group([Config.node, AgentSvc.node]), [
+    [LocationServiceMap.node, locationServiceMapLayer],
+  ]),
+)
 
 it.instance(
   "agent color parsed from project config",

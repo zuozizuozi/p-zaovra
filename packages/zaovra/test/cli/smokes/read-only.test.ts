@@ -87,13 +87,14 @@ describe("zaovra read-only commands (smoke)", () => {
     60_000,
   )
 
-  // `stats` aggregates token usage from the session DB. Empty DB → all zeros.
+  // Usage is now served by HTTP; the retired stats command must not be advertised.
   cliIt.live(
-    "stats: exits 0",
+    "stats: retired command is absent from help",
     ({ zaovra }) =>
       Effect.gen(function* () {
-        const r = yield* zaovra.spawn(["stats"])
-        zaovra.expectExit(r, 0, "stats")
+        const r = yield* zaovra.spawn(["--help"])
+        zaovra.expectExit(r, 0, "help")
+        expect(r.stderr).not.toMatch(/zaovra stats\b/)
       }),
     60_000,
   )

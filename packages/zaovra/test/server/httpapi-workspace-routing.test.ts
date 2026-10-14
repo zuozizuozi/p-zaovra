@@ -510,14 +510,15 @@ describe("HttpApi workspace routing middleware", () => {
       // directory hints before using the process cwd.
       const queryResponse = yield* HttpClient.get(`/probe?directory=${encodeURIComponent(queryDir)}`)
       const headerResponse = yield* HttpClientRequest.get("/probe").pipe(
-        HttpClientRequest.setHeader("x-zaovra-directory", headerDir),
+        HttpClientRequest.setHeader("x-zaovra-directory", encodeURIComponent(headerDir)),
         HttpClient.execute,
       )
 
       expect(queryResponse.status).toBe(200)
       expect(yield* queryResponse.json).toEqual({ directory: queryDir, workspaceID: null })
       expect(headerResponse.status).toBe(200)
-      expect(yield* headerResponse.json).toEqual({ directory: headerDir, workspaceID: null })
+      // Workspace routing carries the header; instance-context decodes it later.
+      expect(yield* headerResponse.json).toEqual({ directory: encodeURIComponent(headerDir), workspaceID: null })
     }),
   )
 

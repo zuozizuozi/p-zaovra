@@ -143,7 +143,7 @@ const provider: Provider.Info = {
 
 describe("ACP service sessions", () => {
   const makeService = (
-    messages: readonly { info: unknown; parts: readonly unknown[] }[] = [],
+    messages: readonly unknown[] = [],
     options?: {
       abort?: (input: { sessionID: string }) => Promise<{ data: boolean }>
       prompt?: (input: unknown) => Promise<{ data: { info: ReturnType<typeof assistantInfo> } }>
@@ -154,12 +154,14 @@ describe("ACP service sessions", () => {
     const aborts: string[] = []
     const forks: string[] = []
     const prompts: unknown[] = []
+    const switches: unknown[] = []
+    let completed: ReturnType<typeof assistantInfo> | undefined
     const commands: unknown[] = []
     const summarizes: unknown[] = []
     const usageUpdates: string[] = []
     const sessions = Array.from({ length: 102 }, (_, index) => ({
       id: `ses_${index + 1}`,
-      directory: index % 2 === 0 ? "/workspace" : "/other",
+      location: { directory: index % 2 === 0 ? "/workspace" : "/other" },
       title: `Session ${index + 1}`,
       time: { created: index + 1, updated: index + 1 },
     }))
@@ -182,67 +184,79 @@ describe("ACP service sessions", () => {
             data: [{ name: "review-skill", description: "Review", location: "/skills/review", content: "review" }],
           }),
       },
-      command: {
-        list: () =>
-          Promise.resolve({
-            data: [{ name: "init", description: "Initialize", source: "command", template: "init", hints: [] }],
-          }),
-      },
-      session: {
-        create: () => Promise.resolve({ data: { id: "ses_new" } }),
-        get: () => Promise.resolve({ data: { id: "ses_loaded" } }),
-        list: (input: { directory?: string }) =>
-          Promise.resolve({
-            data: input.directory ? sessions.filter((session) => session.directory === input.directory) : sessions,
-          }),
-        messages: () => Promise.resolve({ data: messages }),
-        prompt:
-          options?.prompt ??
-          ((input: unknown) => {
-            prompts.push(input)
-            return Promise.resolve({
-              data: {
-                info: assistantInfo({
-                  input: 100,
-                  output: 40,
-                  reasoning: 7,
-                  cache: { read: 11, write: 13 },
-                }),
-              },
-            })
-          }),
-        command: (input: unknown) => {
-          commands.push(input)
-          return Promise.resolve({
-            data: {
-              info: assistantInfo({
-                input: 3,
-                output: 4,
-                reasoning: 0,
-                cache: { read: 0, write: 0 },
-              }),
-            },
-          })
-        },
-        summarize: (input: unknown) => {
-          summarizes.push(input)
-          return Promise.resolve({ data: true })
-        },
-        abort:
-          options?.abort ??
-          ((input: { sessionID: string }) => {
-            aborts.push(input.sessionID)
-            return Promise.resolve({ data: true })
-          }),
-        fork: (input: { sessionID: string }) => {
-          forks.push(input.sessionID)
-          return Promise.resolve({ data: { id: `fork_${input.sessionID}` } })
-        },
-      },
       mcp: {
         add: (input: { name?: string }) => {
           if (input.name) mcpAdds.push(input.name)
           return Promise.resolve({ data: {} })
+        },
+      },
+      v2: {
+        command: {
+          list: () =>
+            Promise.resolve({
+              data: {
+                data: [{ name: "init", description: "Initialize", source: "command", template: "init", hints: [] }],
+              },
+            }),
+        },
+        session: {
+          create: () => Promise.resolve({ data: { data: { id: "ses_new" } } }),
+          get: () => Promise.resolve({ data: { data: { id: "ses_loaded" } } }),
+          list: (input: { directory?: string }) =>
+            Promise.resolve({
+              data: {
+                data: input.directory
+                  ? sessions.filter((session) => session.location.directory === input.directory)
+                  : sessions,
+              },
+            }),
+          messages: () => Promise.resolve({ data: { data: completed ? [completed] : messages } }),
+          active: () => Promise.resolve({ data: { data: {} } }),
+          pendingInputs: () => Promise.resolve({ data: { data: [] } }),
+          switchAgent: (input: unknown) => {
+            switches.push(input)
+            return Promise.resolve({})
+          },
+          switchModel: (input: unknown) => {
+            switches.push(input)
+            return Promise.resolve({})
+          },
+          prompt: async (input: unknown) => {
+            prompts.push(input)
+            completed = options?.prompt
+              ? (await options.prompt(input)).data.info
+              : assistantInfo({ input: 100, output: 40, reasoning: 7, cache: { read: 11, write: 13 } })
+            return { data: { data: { timeCreated: 1 } } }
+          },
+          command: (input: unknown) => {
+            commands.push(input)
+            return Promise.resolve({
+              data: {
+                data: {
+                  info: assistantInfo({
+                    input: 3,
+                    output: 4,
+                    reasoning: 0,
+                    cache: { read: 0, write: 0 },
+                  }),
+                },
+              },
+            })
+          },
+          summarize: (input: unknown) => {
+            summarizes.push(input)
+            return Promise.resolve({ data: { data: true } })
+          },
+          interrupt:
+            options?.abort ??
+            ((input: { sessionID: string }) => {
+              aborts.push(input.sessionID)
+              return Promise.resolve({ data: { data: true } })
+            }),
+          fork: (input: { sessionID: string }) => {
+            forks.push(input.sessionID)
+            return Promise.resolve({ data: { data: { id: `fork_${input.sessionID}` } } })
+          },
         },
       },
     } as unknown as ZaovraClient
@@ -270,6 +284,7 @@ describe("ACP service sessions", () => {
       aborts,
       forks,
       prompts,
+      switches,
       commands,
       summarizes,
       usageUpdates,
@@ -281,10 +296,7 @@ describe("ACP service sessions", () => {
     const result = await Effect.runPromise(
       service.newSession({
         cwd: "/workspace",
-        mcpServers: [
-          { name: "tools", command: "node", args: ["server.js"], env: [] },
-          { name: "tools", command: "node", args: ["server.js"], env: [] },
-        ],
+        mcpServers: [],
       }),
     )
 
@@ -297,20 +309,19 @@ describe("ACP service sessions", () => {
     expect(updates).toHaveLength(1)
     expect(JSON.stringify(updates[0])).toContain("available_commands_update")
     expect(JSON.stringify(updates[0])).toContain("review-skill")
-    expect(mcpAdds).toEqual(["tools"])
+    expect(mcpAdds).toEqual([])
   })
 
   it("loads a session and restores model variant and mode from messages", async () => {
     const { service } = makeService([
       {
-        info: {
-          role: "assistant",
-          providerID: "test",
-          modelID: "test-model",
-          variant: "high",
-          mode: "plan",
-        },
-        parts: [],
+        type: "assistant",
+        id: "msg_assistant",
+        model: { providerID: "test", id: "test-model", variant: "high" },
+        agent: "plan",
+        time: { created: 1, completed: 2 },
+        content: [],
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       },
     ])
     const result = await Effect.runPromise(
@@ -323,13 +334,14 @@ describe("ACP service sessions", () => {
 
   it("replays loaded session transcript chunks", async () => {
     const { service, updates } = makeService([
+      { type: "user", id: "msg_user", text: "hello", files: [] },
       {
-        info: { id: "msg_user", sessionID: "ses_loaded", role: "user" },
-        parts: [{ id: "part_user", sessionID: "ses_loaded", messageID: "msg_user", type: "text", text: "hello" }],
-      },
-      {
-        info: { id: "msg_assistant", sessionID: "ses_loaded", role: "assistant" },
-        parts: [
+        type: "assistant",
+        id: "msg_assistant",
+        model: { providerID: "test", id: "test-model", variant: "default" },
+        agent: "build",
+        time: { created: 1, completed: 2 },
+        content: [
           {
             id: "part_assistant",
             sessionID: "ses_loaded",
@@ -338,6 +350,7 @@ describe("ACP service sessions", () => {
             text: "hi there",
           },
         ],
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       },
     ])
 
@@ -396,19 +409,15 @@ describe("ACP service sessions", () => {
 
   it("resumes a session and stores restored state without replaying transcript chunks", async () => {
     const { service, updates } = makeService([
+      { type: "model-switched", model: { providerID: "test", id: "test-model", variant: "high" } },
+      { type: "agent-switched", agent: "plan" },
       {
-        info: {
-          id: "msg_user",
-          sessionID: "ses_resume",
-          role: "user",
-          model: { providerID: "test", modelID: "test-model", variant: "high" },
-          agent: "plan",
-        },
-        parts: [{ id: "part_user", sessionID: "ses_resume", messageID: "msg_user", type: "text", text: "hello" }],
-      },
-      {
-        info: { id: "msg_assistant", sessionID: "ses_resume", role: "assistant" },
-        parts: [
+        type: "assistant",
+        id: "msg_assistant",
+        model: { providerID: "test", id: "test-model", variant: "default" },
+        agent: "build",
+        time: { created: 1, completed: 2 },
+        content: [
           {
             id: "part_assistant",
             sessionID: "ses_resume",
@@ -417,6 +426,7 @@ describe("ACP service sessions", () => {
             text: "hi there",
           },
         ],
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       },
     ])
     const resumed = await Effect.runPromise(
@@ -475,51 +485,24 @@ describe("ACP service sessions", () => {
     expect(await Effect.runPromise(service.closeSession({ sessionId: "missing" }))).toEqual({})
   })
 
-  it("forks a session, loads fork state, and returns config options", async () => {
-    const { service, forks } = makeService([
-      {
-        info: {
-          role: "assistant",
-          providerID: "test",
-          modelID: "second-model",
-          variant: "medium",
-          mode: "plan",
-        },
-        parts: [],
-      },
-    ])
-    const forked = await Effect.runPromise(
-      service.forkSession({ cwd: "/workspace", sessionId: "ses_parent", mcpServers: [] }),
+  it("rejects unsupported fork without creating a backing session", async () => {
+    const { service, forks } = makeService()
+    const error = await Effect.runPromise(
+      service.forkSession({ cwd: "/workspace", sessionId: "ses_parent", mcpServers: [] }).pipe(Effect.flip),
     )
-    const updated = await Effect.runPromise(
-      service.setSessionConfigOption({ sessionId: forked.sessionId, configId: "effort", value: "low" }),
-    )
-
-    expect(forked.sessionId).toBe("fork_ses_parent")
-    expect(select(forked, "model")?.currentValue).toBe("test/second-model")
-    expect(select(forked, "effort")?.currentValue).toBe("medium")
-    expect(select(updated, "effort")?.currentValue).toBe("low")
-    expect(forks).toEqual(["ses_parent"])
+    expect(error).toMatchObject({ _tag: "ACPUnsupportedOperationError", method: "session/fork" })
+    expect(forks).toEqual([])
+    expect(
+      (await Effect.runPromise(service.initialize({ protocolVersion: 1, clientCapabilities: {} }))).agentCapabilities
+        ?.sessionCapabilities?.fork,
+    ).toBeUndefined()
   })
 
-  it("restores model variant and mode from the latest user message", async () => {
+  it("restores model variant and mode from the latest native switch events", async () => {
     const { service } = makeService([
-      {
-        info: {
-          role: "user",
-          model: { providerID: "test", modelID: "test-model", variant: "default" },
-          agent: "build",
-        },
-        parts: [],
-      },
-      {
-        info: {
-          role: "user",
-          model: { providerID: "test", modelID: "test-model", variant: "high" },
-          agent: "plan",
-        },
-        parts: [],
-      },
+      { type: "model-switched", model: { providerID: "test", id: "test-model", variant: "default" } },
+      { type: "model-switched", model: { providerID: "test", id: "test-model", variant: "high" } },
+      { type: "agent-switched", agent: "plan" },
     ])
     const result = await Effect.runPromise(
       service.loadSession({ cwd: "/workspace", sessionId: "ses_loaded", mcpServers: [] }),
@@ -540,8 +523,10 @@ describe("ACP service sessions", () => {
           agents: () => Promise.resolve({ data: [] }),
           skills: () => Promise.resolve({ data: [] }),
         },
-        command: {
-          list: () => Promise.resolve({ data: [] }),
+        v2: {
+          command: {
+            list: () => Promise.resolve({ data: { data: [] } }),
+          },
         },
       } as unknown as ZaovraClient,
     })
@@ -571,15 +556,17 @@ describe("ACP service sessions", () => {
         agents: () => Promise.resolve({ data: [{ name: "build", mode: "primary", permission: [], options: {} }] }),
         skills: () => Promise.resolve({ data: [] }),
       },
-      command: {
-        list: () => Promise.resolve({ data: [] }),
-      },
-      session: {
-        create: () => Promise.resolve({ data: { id: "ses_retry" } }),
-        list: () => Promise.resolve({ data: [] }),
-      },
       mcp: {
         add: () => Promise.resolve({ data: {} }),
+      },
+      v2: {
+        command: {
+          list: () => Promise.resolve({ data: { data: [] } }),
+        },
+        session: {
+          create: () => Promise.resolve({ data: { data: { id: "ses_retry" } } }),
+          list: () => Promise.resolve({ data: { data: [] } }),
+        },
       },
     } as unknown as ZaovraClient
     const service = ACPService.make({ sdk })
@@ -596,53 +583,21 @@ describe("ACP service sessions", () => {
     expect(providersCalls).toBe(2)
   })
 
-  it("registers same-name MCP servers again for different sessions or configs", async () => {
-    const adds: unknown[] = []
-    let nextSession = 0
-    const sdk = {
-      config: {
-        providers: () => Promise.resolve({ data: { providers: [provider], default: { test: modelID } } }),
-        get: () => Promise.resolve({ data: {} }),
-      },
-      app: {
-        agents: () => Promise.resolve({ data: [{ name: "build", mode: "primary", permission: [], options: {} }] }),
-        skills: () => Promise.resolve({ data: [] }),
-      },
-      command: {
-        list: () => Promise.resolve({ data: [] }),
-      },
-      session: {
-        create: () => {
-          nextSession++
-          return Promise.resolve({ data: { id: `ses_${nextSession}` } })
-        },
-        list: () => Promise.resolve({ data: [] }),
-      },
-      mcp: {
-        add: (input: unknown) => {
-          adds.push(input)
-          return Promise.resolve({ data: {} })
-        },
-      },
-    } as unknown as ZaovraClient
-    const service = ACPService.make({ sdk })
-
-    await Effect.runPromise(
-      service.newSession({
-        cwd: "/workspace",
-        mcpServers: [{ name: "tools", command: "node", args: ["one.js"], env: [] }],
-      }),
-    )
-    await Effect.runPromise(
-      service.newSession({
-        cwd: "/workspace",
-        mcpServers: [{ name: "tools", command: "node", args: ["two.js"], env: [] }],
-      }),
-    )
-
-    expect(adds).toHaveLength(2)
-    expect(JSON.stringify(adds[0])).toContain("one.js")
-    expect(JSON.stringify(adds[1])).toContain("two.js")
+  it("rejects dynamic MCP registration for either config before creating a session", async () => {
+    const { service, mcpAdds } = makeService()
+    for (const file of ["one.js", "two.js"]) {
+      const error = await Effect.runPromise(
+        service
+          .newSession({ cwd: "/workspace", mcpServers: [{ name: "tools", command: "node", args: [file], env: [] }] })
+          .pipe(Effect.flip),
+      )
+      expect(error).toMatchObject({ _tag: "ACPUnsupportedOperationError", method: "mcp/add" })
+    }
+    expect(mcpAdds).toEqual([])
+    const capabilities = (await Effect.runPromise(service.initialize({ protocolVersion: 1, clientCapabilities: {} })))
+      .agentCapabilities
+    expect(capabilities?.mcpCapabilities?.http).toBeUndefined()
+    expect(capabilities?.mcpCapabilities?.sse).toBeUndefined()
   })
 
   it("uses the configured model as the new session default", async () => {
@@ -655,15 +610,17 @@ describe("ACP service sessions", () => {
         agents: () => Promise.resolve({ data: [{ name: "build", mode: "primary", permission: [], options: {} }] }),
         skills: () => Promise.resolve({ data: [] }),
       },
-      command: {
-        list: () => Promise.resolve({ data: [] }),
-      },
-      session: {
-        create: (input: { model?: { id?: string } }) => Promise.resolve({ data: { id: input.model?.id } }),
-        list: () => Promise.resolve({ data: [] }),
-      },
       mcp: {
         add: () => Promise.resolve({ data: {} }),
+      },
+      v2: {
+        command: {
+          list: () => Promise.resolve({ data: { data: [] } }),
+        },
+        session: {
+          create: (input: { model?: { id?: string } }) => Promise.resolve({ data: { data: { id: input.model?.id } } }),
+          list: () => Promise.resolve({ data: { data: [] } }),
+        },
       },
     } as unknown as ZaovraClient
     const service = ACPService.make({ sdk })
@@ -685,24 +642,26 @@ describe("ACP service sessions", () => {
         agents: () => Promise.resolve({ data: [{ name: "build", mode: "primary", permission: [], options: {} }] }),
         skills: () => Promise.resolve({ data: [] }),
       },
-      command: {
-        list: () => Promise.resolve({ data: [] }),
-      },
-      session: {
-        create: (input: { model?: { id?: string } }) => Promise.resolve({ data: { id: input.model?.id } }),
-        list: () => {
-          historyCalls.push("list")
-          return Promise.resolve({ data: [{ id: "ses_recent" }] })
-        },
-        messages: () => {
-          historyCalls.push("messages")
-          return Promise.resolve({
-            data: [{ info: { role: "user", model: { providerID: "test", modelID: "second-model" } } }],
-          })
-        },
-      },
       mcp: {
         add: () => Promise.resolve({ data: {} }),
+      },
+      v2: {
+        command: {
+          list: () => Promise.resolve({ data: { data: [] } }),
+        },
+        session: {
+          create: (input: { model?: { id?: string } }) => Promise.resolve({ data: { data: { id: input.model?.id } } }),
+          list: () => {
+            historyCalls.push("list")
+            return Promise.resolve({ data: { data: [{ id: "ses_recent" }] } })
+          },
+          messages: () => {
+            historyCalls.push("messages")
+            return Promise.resolve({
+              data: { data: [{ info: { role: "user", model: { providerID: "test", modelID: "second-model" } } }] },
+            })
+          },
+        },
       },
     } as unknown as ZaovraClient
     const service = ACPService.make({ sdk })
@@ -805,20 +764,22 @@ describe("ACP service sessions", () => {
           return Promise.resolve({ data: [] })
         },
       },
-      command: {
-        list: () => {
-          calls.commands++
-          return Promise.resolve({ data: [] })
-        },
-      },
-      session: {
-        create: () => Promise.resolve({ data: { id: "ses_fast" } }),
-        list: () => Promise.resolve({ data: [] }),
-      },
       mcp: {
         add: () => {
           calls.mcpAdds++
           return Promise.resolve({ data: {} })
+        },
+      },
+      v2: {
+        command: {
+          list: () => {
+            calls.commands++
+            return Promise.resolve({ data: { data: [] } })
+          },
+        },
+        session: {
+          create: () => Promise.resolve({ data: { data: { id: "ses_fast" } } }),
+          list: () => Promise.resolve({ data: { data: [] } }),
         },
       },
     } as unknown as ZaovraClient
@@ -863,18 +824,20 @@ describe("ACP service sessions", () => {
           return Promise.resolve({ data: [] })
         },
       },
-      command: {
-        list: () => {
-          calls.commands++
-          return Promise.resolve({ data: [] })
-        },
-      },
-      session: {
-        create: () => Promise.resolve({ data: { id: "ses_model_fast" } }),
-        list: () => Promise.resolve({ data: [] }),
-      },
       mcp: {
         add: () => Promise.resolve({ data: {} }),
+      },
+      v2: {
+        command: {
+          list: () => {
+            calls.commands++
+            return Promise.resolve({ data: { data: [] } })
+          },
+        },
+        session: {
+          create: () => Promise.resolve({ data: { data: { id: "ses_model_fast" } } }),
+          list: () => Promise.resolve({ data: { data: [] } }),
+        },
       },
     } as unknown as ZaovraClient
     const service = ACPService.make({ sdk })
@@ -923,28 +886,30 @@ describe("ACP service sessions", () => {
           return Promise.resolve({ data: [] })
         },
       },
-      command: {
-        list: () => {
-          calls.commands++
-          return Promise.resolve({ data: [] })
-        },
-      },
-      session: {
-        create: () => {
-          calls.creates++
-          return Promise.resolve({ data: { id: `ses_warm_${calls.creates}` } })
-        },
-        list: () => {
-          calls.sessionList++
-          return Promise.resolve({ data: [] })
-        },
-        messages: () => {
-          calls.messages++
-          return Promise.resolve({ data: [] })
-        },
-      },
       mcp: {
         add: () => Promise.resolve({ data: {} }),
+      },
+      v2: {
+        command: {
+          list: () => {
+            calls.commands++
+            return Promise.resolve({ data: { data: [] } })
+          },
+        },
+        session: {
+          create: () => {
+            calls.creates++
+            return Promise.resolve({ data: { data: { id: `ses_warm_${calls.creates}` } } })
+          },
+          list: () => {
+            calls.sessionList++
+            return Promise.resolve({ data: { data: [] } })
+          },
+          messages: () => {
+            calls.messages++
+            return Promise.resolve({ data: { data: [] } })
+          },
+        },
       },
     } as unknown as ZaovraClient
     const service = ACPService.make({ sdk })
@@ -967,7 +932,7 @@ describe("ACP service sessions", () => {
   })
 
   it("normal text prompt sends model variant mode and converted parts", async () => {
-    const { service, prompts, usageUpdates } = makeService()
+    const { service, prompts, switches, usageUpdates } = makeService()
     const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
     await Effect.runPromise(
       service.setSessionConfigOption({
@@ -995,11 +960,8 @@ describe("ACP service sessions", () => {
     expect(prompts).toEqual([
       {
         sessionID: session.sessionId,
-        model: { providerID, modelID },
-        variant: "high",
-        parts: [{ type: "text", text: "hello" }],
-        agent: "plan",
-        directory: "/workspace",
+        delivery: "steer",
+        prompt: { text: "hello", files: [] },
       },
     ])
     expect(result).toEqual({
@@ -1015,6 +977,10 @@ describe("ACP service sessions", () => {
       userMessageId: "00000000-0000-4000-8000-000000000001",
       _meta: {},
     })
+    expect(switches).toEqual([
+      { sessionID: session.sessionId, agent: "plan" },
+      { sessionID: session.sessionId, model: { providerID, id: modelID, variant: "high" } },
+    ])
     expect(usageUpdates).toEqual([session.sessionId])
   })
 
@@ -1080,14 +1046,8 @@ describe("ACP service sessions", () => {
 
     expect(prompts).toContainEqual({
       sessionID: session.sessionId,
-      model: { providerID, modelID },
-      variant: "default",
-      parts: [
-        { type: "text", text: "assistant context", synthetic: true },
-        { type: "text", text: "user context", ignored: true },
-      ],
-      agent: "build",
-      directory: "/workspace",
+      delivery: "steer",
+      prompt: { text: "assistant context", files: [] },
     })
   })
 
@@ -1112,63 +1072,41 @@ describe("ACP service sessions", () => {
       }),
     )
 
-    expect((prompts[0] as { parts?: unknown }).parts).toEqual([
-      {
-        type: "file",
-        url: "data:image/png;base64,AAAA",
-        filename: "screenshot.png",
-        mime: "image/png",
+    expect(prompts[0]).toEqual({
+      sessionID: session.sessionId,
+      delivery: "steer",
+      prompt: {
+        text: "",
+        files: [
+          { uri: "data:image/png;base64,AAAA", name: "screenshot.png" },
+          { uri: "data:application/pdf;base64,JVBERg==", name: "report.pdf" },
+        ],
       },
-      {
-        type: "file",
-        url: "data:application/pdf;base64,JVBERg==",
-        filename: "report.pdf",
-        mime: "application/pdf",
-      },
-    ])
+    })
   })
 
-  it("slash command prompt calls session command", async () => {
-    const { service, prompts, commands } = makeService()
-    const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
-
-    const result = await Effect.runPromise(
-      service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/init now" }] }),
-    )
-
-    expect(prompts).toEqual([])
-    expect(commands).toEqual([
-      {
-        sessionID: session.sessionId,
-        command: "init",
-        arguments: "now",
-        model: "test/test-model",
-        variant: "default",
-        agent: "build",
-        directory: "/workspace",
-      },
-    ])
-    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
-  })
-
-  it("compact slash command calls summarize path", async () => {
+  it("rejects unsupported session/command without admitting a prompt", async () => {
     const { service, prompts, commands, summarizes } = makeService()
     const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
-
-    await Effect.runPromise(
-      service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/compact" }] }),
+    const error = await Effect.runPromise(
+      service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/init now" }] }).pipe(Effect.flip),
     )
-
+    expect(error).toMatchObject({ _tag: "ACPUnsupportedOperationError", method: "session/command" })
     expect(prompts).toEqual([])
     expect(commands).toEqual([])
-    expect(summarizes).toEqual([
-      {
-        sessionID: session.sessionId,
-        directory: "/workspace",
-        providerID,
-        modelID,
-      },
-    ])
+    expect(summarizes).toEqual([])
+  })
+
+  it("rejects unsupported session/summarize without admitting a prompt", async () => {
+    const { service, prompts, commands, summarizes } = makeService()
+    const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
+    const error = await Effect.runPromise(
+      service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/compact" }] }).pipe(Effect.flip),
+    )
+    expect(error).toMatchObject({ _tag: "ACPUnsupportedOperationError", method: "session/summarize" })
+    expect(prompts).toEqual([])
+    expect(commands).toEqual([])
+    expect(summarizes).toEqual([])
   })
 
   it("maps prompt auth failures to auth-required request errors", async () => {
@@ -1184,16 +1122,20 @@ describe("ACP service sessions", () => {
           agents: () => Promise.resolve({ data: [{ name: "build", mode: "primary", permission: [], options: {} }] }),
           skills: () => Promise.resolve({ data: [] }),
         },
-        command: {
-          list: () => Promise.resolve({ data: [] }),
-        },
-        session: {
-          create: () => Promise.resolve({ data: { id: session.sessionId } }),
-          list: () => Promise.resolve({ data: [] }),
-          prompt: () => Promise.reject({ name: "ProviderAuthError", data: { providerID: "test" } }),
-        },
         mcp: {
           add: () => Promise.resolve({ data: {} }),
+        },
+        v2: {
+          command: {
+            list: () => Promise.resolve({ data: { data: [] } }),
+          },
+          session: {
+            create: () => Promise.resolve({ data: { data: { id: session.sessionId } } }),
+            list: () => Promise.resolve({ data: { data: [] } }),
+            switchAgent: () => Promise.resolve({}),
+            switchModel: () => Promise.resolve({}),
+            prompt: () => Promise.reject({ name: "ProviderAuthError", data: { providerID: "test" } }),
+          },
         },
       } as unknown as ZaovraClient,
       usage: UsageService.Service.of({
@@ -1215,17 +1157,18 @@ describe("ACP service sessions", () => {
   })
 })
 
-function assistantInfo(
-  tokens: UsageService.AssistantTokenCost["tokens"],
-  error?: AssistantMessage["error"],
-): UsageService.AssistantMessage & Pick<AssistantMessage, "error"> {
+function assistantInfo(tokens: UsageService.AssistantTokenCost["tokens"], error?: AssistantMessage["error"]) {
   return {
-    role: "assistant",
-    providerID: "test",
-    modelID: "test-model",
+    type: "assistant",
+    id: "msg_completed",
+    time: { created: 1, completed: 2 },
+    content: [],
+    model: { providerID: "test", id: "test-model" },
     cost: 0,
     tokens,
-    ...(error ? { error } : {}),
+    ...(error
+      ? { error: { type: error.name, message: "message" in error.data ? error.data.message : error.name } }
+      : {}),
   }
 }
 

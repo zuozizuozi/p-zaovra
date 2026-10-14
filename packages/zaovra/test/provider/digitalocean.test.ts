@@ -1,3 +1,6 @@
+import { Credential } from "@zaovra-ai/core/credential"
+import { Integration } from "@zaovra-ai/core/integration"
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
 import { expect } from "bun:test"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Provider } from "../../src/provider/provider"
@@ -7,7 +10,11 @@ import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 
 const DIGITALOCEAN = ProviderV2.ID.make("digitalocean")
-const it = testEffect(LayerNode.compile(Provider.node))
+const it = testEffect(
+  LayerNode.compile(LayerNode.group([Provider.node, Credential.node]), [
+    [LocationServiceMap.node, locationServiceMapLayer],
+  ]),
+)
 
 const withEnv = <A, E, R>(values: Record<string, string>, effect: Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
@@ -27,19 +34,16 @@ const withEnv = <A, E, R>(values: Record<string, string>, effect: Effect.Effect<
   )
 
 const withAuth = <A, E, R>(metadata: Record<string, string> | undefined, effect: Effect.Effect<A, E, R>) =>
-  withEnv(
-    {
-      ZAOVRA_AUTH_CONTENT: JSON.stringify({
-        digitalocean: {
-          type: "api",
-          key: "sk_do_test",
-          ...(metadata ? { metadata } : {}),
-        },
+  Credential.Service.use((credentials) =>
+    Effect.acquireUseRelease(
+      credentials.create({
+        integrationID: Integration.ID.make("digitalocean"),
+        value: Credential.Key.make({ type: "key", key: "sk_do_test", metadata }),
       }),
-    },
-    effect,
+      () => effect,
+      (credential) => credentials.remove(credential.id),
+    ),
   )
-
 it.instance(
   "digitalocean provider autoloads from DIGITALOCEAN_ACCESS_TOKEN",
   () =>

@@ -149,7 +149,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
-    "--format json emits a pure error record for a rejected prompt request",
+    "--format json emits the admitted step then a pure error record for an unknown model",
     ({ zaovra }) =>
       Effect.gen(function* () {
         const result = yield* zaovra.run("use an unknown model", {
@@ -159,14 +159,19 @@ describe("zaovra run (non-interactive subprocess)", () => {
 
         expect(result.exitCode).not.toBe(0)
         const events = zaovra.parseJsonEvents(result.stdout)
-        expect(events.map((event) => event.type)).toEqual(["error"])
-        expect(events[0]).toEqual({
+        // V2 admits the prompt before model resolution; failure is a durable step event.
+        expect(events.map((event) => event.type)).toEqual(["step_start", "error"])
+        expect(events[0]).toMatchObject({
+          type: "step_start",
+          event: { type: "session.next.step.started" },
+        })
+        expect(events[1]).toEqual({
           type: "error",
           timestamp: expect.any(Number),
           sessionID: expect.any(String),
           error: expect.any(Object),
         })
-        expect(result.stdout.split("\n").filter(Boolean)).toHaveLength(1)
+        expect(result.stdout.split("\n").filter(Boolean)).toHaveLength(2)
       }),
     30_000,
   )
@@ -244,6 +249,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
           "text",
           "tool_result",
           "step_finish",
+          "step_start",
           "error",
         ])
         expect(events.find((event) => event.type === "text")?.event).toEqual(

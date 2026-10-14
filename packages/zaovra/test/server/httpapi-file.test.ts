@@ -18,7 +18,7 @@ function request(route: string, directory: string, query?: Record<string, string
   return HttpApiApp.webHandler().handler(
     new Request(url, {
       headers: {
-        "x-zaovra-directory": directory,
+        "x-zaovra-directory": encodeURIComponent(directory),
       },
     }),
     context,
@@ -32,7 +32,7 @@ afterEach(async () => {
 
 describe("file HttpApi", () => {
   test("tooling endpoints reject invalid native configuration", async () => {
-    for (const invalid of [{ formatter: "invalid" }, { unknown_setting: true }]) {
+    for (const invalid of [{ formatter: "invalid" }, { lsp: "invalid" }]) {
       await using tmp = await tmpdir({ git: true })
       await Bun.write(
         path.join(tmp.path, "zaovra.json"),
@@ -43,7 +43,11 @@ describe("file HttpApi", () => {
       )
       for (const route of ["/lsp", "/formatter"]) {
         expect(
-          (await Server.Default().app.request(route, { headers: { "x-zaovra-directory": tmp.path } })).status,
+          (
+            await Server.Default().app.request(route, {
+              headers: { "x-zaovra-directory": encodeURIComponent(tmp.path) },
+            })
+          ).status,
         ).toBe(400)
       }
     }
@@ -60,7 +64,7 @@ describe("file HttpApi", () => {
       }),
     )
     const app = Server.Default().app
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const lsp = await app.request("/lsp", { headers })
     expect(lsp.status, await lsp.clone().text()).toBe(200)
     expect(await lsp.json()).toEqual([])
@@ -101,7 +105,7 @@ describe("file HttpApi", () => {
     await Bun.write(path.join(tmp.path, "zaovra.json"), config)
     await Bun.write(path.join(tmp.path, "hello.txt"), "needle\n")
     const app = Server.Default().app
-    const headers = { "x-zaovra-directory": tmp.path }
+    const headers = { "x-zaovra-directory": encodeURIComponent(tmp.path) }
     const location = await app.request("/path", { headers })
     expect(location.status).toBe(200)
     expect(await location.json()).toMatchObject({ directory: tmp.path, worktree: tmp.path })

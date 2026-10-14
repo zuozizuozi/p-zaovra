@@ -535,41 +535,45 @@ describe("BashTool", () => {
     )
   }
 
-  it.live("preserves real command output and bounded progress when a command times out", () =>
-    Effect.acquireUseRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) =>
-        Effect.gen(function* () {
-          reset()
-          const script = path.join(tmp.path, "timeout.js")
-          yield* Effect.promise(() =>
-            Bun.write(script, "process.stdout.write('diagnostic before timeout'); setInterval(() => {}, 1000)"),
-          )
-          const settled = yield* withTool(
-            tmp.path,
-            (registry) =>
-              settleTool(
-                registry,
-                call({
-                  command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
-                  timeout: 1_000,
-                }),
-              ),
-            LayerNode.compile(AppProcess.node),
-          )
-          expect(settled.output?.structured).toMatchObject({ timeout: true, truncated: false })
-          expect(settled.output?.content[0]).toMatchObject({
-            text: expect.stringContaining("diagnostic before timeout"),
-          })
-          expect(progress).toMatchObject([
-            {
-              type: "session.next.tool.progress",
-              data: { callID: "call-bash", content: [{ text: "diagnostic before timeout" }] },
-            },
-          ])
-        }),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ),
+  it.live(
+    "preserves real command output and bounded progress when a command times out",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            reset()
+            const script = path.join(tmp.path, "timeout.js")
+            yield* Effect.promise(() =>
+              Bun.write(script, "process.stdout.write('diagnostic before timeout'); setInterval(() => {}, 1000)"),
+            )
+            const settled = yield* withTool(
+              tmp.path,
+              (registry) =>
+                settleTool(
+                  registry,
+                  call({
+                    command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+                    // PowerShell plus Bun startup can exceed one second on Windows.
+                    timeout: process.platform === "win32" ? 3_000 : 1_000,
+                  }),
+                ),
+              LayerNode.compile(AppProcess.node),
+            )
+            expect(settled.output?.structured).toMatchObject({ timeout: true, truncated: false })
+            expect(settled.output?.content[0]).toMatchObject({
+              text: expect.stringContaining("diagnostic before timeout"),
+            })
+            expect(progress).toMatchObject([
+              {
+                type: "session.next.tool.progress",
+                data: { callID: "call-bash", content: [{ text: "diagnostic before timeout" }] },
+              },
+            ])
+          }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    10_000,
   )
 
   it.live("keeps the concrete process failure in model-facing errors", () =>

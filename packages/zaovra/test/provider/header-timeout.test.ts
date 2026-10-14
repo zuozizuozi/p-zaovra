@@ -1,3 +1,6 @@
+import { Credential } from "@zaovra-ai/core/credential"
+import { Integration } from "@zaovra-ai/core/integration"
+import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
 import { afterEach, expect } from "bun:test"
 import { createServer, type Server } from "node:http"
 import { streamText } from "ai"
@@ -19,7 +22,9 @@ afterEach(async () => {
 })
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node, CrossSpawnSpawner.node])),
+  LayerNode.compile(LayerNode.group([Provider.node, Credential.node, Env.node, Plugin.node, CrossSpawnSpawner.node]), [
+    [LocationServiceMap.node, locationServiceMapLayer],
+  ]),
 )
 
 it.live("headerTimeout does not abort delayed SSE body after headers arrive", () =>
@@ -138,7 +143,7 @@ it.live("headerTimeout is opt-in for non-OpenAI providers", () =>
 
 it.live("OpenAI Codex headerTimeout default can be disabled by config", () =>
   Effect.gen(function* () {
-    yield* withAuthContent(
+    yield* withCredential(
       Effect.gen(function* () {
         yield* provideTmpdirInstance(
           () =>
@@ -156,7 +161,7 @@ it.live("OpenAI Codex headerTimeout default can be disabled by config", () =>
 
 it.live("OpenAI API auth gets default headerTimeout", () =>
   Effect.gen(function* () {
-    yield* withAuthContent(
+    yield* withCredential(
       Effect.gen(function* () {
         yield* provideTmpdirInstance(() =>
           Effect.gen(function* () {
@@ -166,7 +171,7 @@ it.live("OpenAI API auth gets default headerTimeout", () =>
           }),
         )
       }),
-      { openai: { type: "api", key: "sk-test" } },
+      Credential.Key.make({ type: "key", key: "sk-test" }),
     )
   }),
 )
@@ -211,24 +216,21 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
   return { server, url: `http://127.0.0.1:${address.port}` }
 }
 
-function withAuthContent<A, E, R>(self: Effect.Effect<A, E, R>, value: Record<string, unknown> = defaultAuthContent()) {
-  return Effect.acquireUseRelease(
-    Effect.sync(() => {
-      const previous = process.env.ZAOVRA_AUTH_CONTENT
-      process.env.ZAOVRA_AUTH_CONTENT = JSON.stringify(value)
-      return previous
-    }),
-    () => self,
-    (previous) =>
-      Effect.sync(() => {
-        if (previous === undefined) delete process.env.ZAOVRA_AUTH_CONTENT
-        else process.env.ZAOVRA_AUTH_CONTENT = previous
-      }),
+function withCredential<A, E, R>(
+  self: Effect.Effect<A, E, R>,
+  value: Credential.Value = Credential.OAuth.make({
+    type: "oauth",
+    methodID: Integration.MethodID.make("codex"),
+    refresh: "refresh",
+    access: "access",
+    expires: Date.now() + 3_600_000,
+  }),
+) {
+  return Credential.Service.use((credentials) =>
+    Effect.acquireUseRelease(
+      credentials.create({ integrationID: Integration.ID.make("openai"), value }),
+      () => self,
+      (credential) => credentials.remove(credential.id),
+    ),
   )
-}
-
-function defaultAuthContent() {
-  return {
-    openai: { type: "oauth", refresh: "refresh", access: "access", expires: Date.now() + 60_000 },
-  }
 }
