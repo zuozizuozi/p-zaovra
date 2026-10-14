@@ -5,6 +5,7 @@ import {
   Cause,
   Clock,
   Context,
+  Deferred,
   Duration,
   Effect,
   Exit,
@@ -220,6 +221,9 @@ type TerminalAttempt = {
 }
 type AttemptEntry = PendingAttempt | TerminalAttempt
 
+// Integration registries are Location-scoped, but credential refresh ownership is process-wide.
+const resolving = new Map<Credential.ID, Deferred.Deferred<Credential.Value | undefined, AuthorizationError>>()
+
 export const locationLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -389,19 +393,34 @@ export const locationLayer = Layer.effect(
             const key = process.env[connection.name]
             return key ? Credential.Key.make({ type: "key", key }) : undefined
           }
-          const credential = yield* credentials.get(connection.id)
-          if (!credential) return undefined
-          if (credential.value.type === "key") return credential.value
-          const implementation = state
-            .get()
-            .integrations.get(credential.integrationID)
-            ?.implementations.get(credential.value.methodID)
-          if (!implementation?.refresh) return credential.value
-          const now = yield* Clock.currentTimeMillis
-          if (credential.value.expires > now + Duration.toMillis(Duration.minutes(5))) return credential.value
-          const value = yield* authorize(implementation.refresh(credential.value))
-          yield* credentials.update(credential.id, { value })
-          return value
+          return yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const pending = resolving.get(connection.id)
+              if (pending) return yield* restore(Deferred.await(pending))
+              const done = Deferred.makeUnsafe<Credential.Value | undefined, AuthorizationError>()
+              resolving.set(connection.id, done)
+              const exit = yield* Effect.gen(function* () {
+                // Read after acquiring ownership so a completed rotation cannot be refreshed again from stale data.
+                const credential = yield* restore(credentials.get(connection.id))
+                if (!credential) return undefined
+                if (credential.value.type === "key") return credential.value
+                const implementation = state
+                  .get()
+                  .integrations.get(credential.integrationID)
+                  ?.implementations.get(credential.value.methodID)
+                if (!implementation?.refresh) return credential.value
+                const now = yield* Clock.currentTimeMillis
+                if (credential.value.expires > now + Duration.toMillis(Duration.minutes(5))) return credential.value
+                const value = yield* restore(authorize(implementation.refresh(credential.value)))
+                // Once refresh succeeds, persist the rotated secret before honoring cancellation.
+                yield* credentials.update(credential.id, { value })
+                return value
+              }).pipe(Effect.exit)
+              resolving.delete(connection.id)
+              Deferred.doneUnsafe(done, exit)
+              return yield* exit
+            }),
+          )
         }),
         key: Effect.fn("Integration.connection.key")(function* (input) {
           const key = input.key.trim()

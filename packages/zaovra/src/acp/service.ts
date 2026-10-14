@@ -503,8 +503,12 @@ export function make(input: {
                 sessionID: current.id,
                 delivery: "steer",
                 prompt: {
+                  // ACP clients retain display-only content; it must not enter Zaovra's model history.
                   text: parts
-                    .filter((part): part is Extract<(typeof parts)[number], { type: "text" }> => part.type === "text")
+                    .filter(
+                      (part): part is Extract<(typeof parts)[number], { type: "text" }> =>
+                        part.type === "text" && !part.ignored,
+                    )
                     .map((part) => part.text)
                     .join("\n\n"),
                   files: parts.flatMap((part) =>
