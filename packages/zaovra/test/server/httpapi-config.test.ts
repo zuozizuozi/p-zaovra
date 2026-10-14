@@ -762,6 +762,19 @@ it.live(
         "PATCH",
       ),
     )
+    // A real listener uses its own memo map. It must see the same active drain,
+    // and disposing it must not cancel work owned by the other entrypoint.
+    const listener = yield* Effect.acquireRelease(
+      Effect.promise(() => Server.listen({ hostname: "127.0.0.1", port: 0 })),
+      (listener) => Effect.promise(() => listener.stop(true)),
+    )
+    const observed = yield* Effect.promise(async () => {
+      const response = await fetch(new URL("/api/session/active", listener.url))
+      expect(response.ok).toBe(true)
+      return response.json()
+    })
+    expect(observed.data[id]).toEqual({ type: "running" })
+    yield* Effect.promise(() => listener.stop(true))
     expect(urls).toEqual([`${baseURL}/chat/completions`])
     const active = yield* Effect.promise(() => api("/api/session/active"))
     expect(active.data[id]).toEqual({ type: "running" })

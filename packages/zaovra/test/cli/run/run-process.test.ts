@@ -13,12 +13,15 @@ describe("zaovra run (non-interactive subprocess)", () => {
   // If this fails, all the others likely will too — debug here first.
   cliIt.concurrent(
     "exits 0 and writes the response to stdout on a successful prompt",
-    ({ llm, zaovra }) =>
+    ({ home, llm, zaovra }) =>
       Effect.gen(function* () {
         yield* llm.text("hello from the test llm")
         const result = yield* zaovra.run("say hi")
         zaovra.expectExit(result, 0)
         expect(result.stdout).toBe("hello from the test llm\n")
+        const input = JSON.stringify(yield* llm.inputs).replaceAll("\\\\", "/")
+        expect(input).toContain(home.replaceAll("\\", "/"))
+        expect(input).not.toContain("effect-smol")
       }),
     60_000,
   )

@@ -61,6 +61,10 @@ function forkStderrDrain(stream: ReadableStream<Uint8Array>, into: string[]) {
 
 function isolatedEnv(home: string, configJson: string): Record<string, string> {
   return {
+    // Bun scripts can inherit the parent package PWD even with a different cwd.
+    // CLI run uses PWD to resolve its project; pin both to the fixture.
+    PWD: home,
+    GIT_ALLOW_PROTOCOL: "file",
     ZAOVRA_TEST_HOME: home,
     HOME: home,
     XDG_CONFIG_HOME: path.join(home, ".config"),

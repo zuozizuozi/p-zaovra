@@ -34,10 +34,10 @@ import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionV2 } from "@zaovra-ai/core/session"
-import { SessionExecution } from "@zaovra-ai/core/session/execution"
-import { SessionExecutionLocal } from "@zaovra-ai/core/session/execution/local"
 import { EventV2 } from "@zaovra-ai/core/event"
-import { LocationServiceMap, locationServiceMapLayer } from "@zaovra-ai/core/location-services"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
+
+import { SessionRuntime } from "./session-runtime"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -72,11 +72,13 @@ export const AppLayer = AppNodeBuilderV1.build(
     Worktree.node,
     Installation.node,
   ]),
-  [
-    [LocationServiceMap.node, locationServiceMapLayer],
-    [SessionExecution.node, SessionExecutionLocal.node],
-  ],
-).pipe(Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)), Layer.provideMerge(Observability.layer))
+  SessionRuntime.replacements,
+).pipe(
+  SessionRuntime.share,
+  Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)),
+  Layer.provideMerge(SessionRuntime.layer),
+  Layer.provideMerge(Observability.layer),
+)
 
 const rt = ManagedRuntime.make(AppLayer, { memoMap })
 type Runtime = Pick<typeof rt, "runSync" | "runPromise" | "runPromiseExit" | "runFork" | "runCallback" | "dispose">
