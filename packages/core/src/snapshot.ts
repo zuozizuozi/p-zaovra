@@ -139,7 +139,15 @@ const layer = Layer.effect(
           }),
         )
       }).pipe(
-        Effect.catch((cause) => Effect.logWarning("failed to capture snapshot", { cause }).pipe(Effect.as(undefined))),
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to capture snapshot", {
+            cause,
+            reason: cause.message,
+            absolutePathCharacters: gitDirectory.length,
+            absolutePathBytes: Buffer.byteLength(gitDirectory),
+            relativePathCharacters: path.relative(worktree, gitDirectory).length,
+          }).pipe(Effect.as(undefined)),
+        ),
       )
     })
 

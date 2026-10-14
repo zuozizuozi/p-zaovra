@@ -2,7 +2,7 @@ import { $ } from "bun"
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Logger } from "effect"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { Global } from "@zaovra-ai/core/global"
 import { Location } from "@zaovra-ai/core/location"
@@ -18,7 +18,9 @@ describe("Snapshot", () => {
       Effect.promise(() => tmpdir()),
       (tmp) =>
         Effect.gen(function* () {
-          const project = path.join(tmp.path, "project")
+          // Explicit multibyte characters test Git's byte limit independently of TEMP's spelling.
+          const shared = path.join(tmp.path, "项目".repeat(16), "x".repeat(Math.max(1, 140 - tmp.path.length - 34)))
+          const project = path.join(shared, "project")
           const location = path.join(project, "scope")
           yield* Effect.promise(async () => {
             await fs.mkdir(location, { recursive: true })
@@ -33,9 +35,11 @@ describe("Snapshot", () => {
             await $`git commit -m initial`.cwd(project).quiet()
           })
 
-          // Keep the worktree short while the absolute snapshot path exceeds Git's UTF-8 limit.
-          const data = path.join(tmp.path, "x".repeat(Math.max(1, 180 - Buffer.byteLength(tmp.path))))
-          expect(Buffer.byteLength(path.join(data, "snapshot", "x".repeat(40), "x".repeat(40)))).toBeGreaterThan(260)
+          const data = path.join(shared, "data")
+          const gitDirectory = path.join(data, "snapshot", "x".repeat(40), "x".repeat(40))
+          expect(Buffer.byteLength(gitDirectory)).toBeGreaterThan(260)
+          expect(gitDirectory.length).toBeLessThan(240)
+          expect(path.relative(project, gitDirectory).length).toBeLessThan(120)
           const layer = snapshotLayer(data, location)
           yield* Effect.gen(function* () {
             const snapshot = yield* Snapshot.Service
@@ -65,6 +69,59 @@ describe("Snapshot", () => {
             expect(yield* read(path.join(location, "added.txt"))).toBe("added\n")
             expect(yield* read(path.join(project, "outside.txt"))).toBe("changed outside\n")
           }).pipe(Effect.provide(layer))
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  testEffect(Layer.empty).live("reports unavailable snapshots beyond Windows character limits", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const shared = path.join(tmp.path, "x".repeat(Math.max(1, 180 - tmp.path.length - 1)))
+          const project = path.join(shared, "project")
+          const data = path.join(shared, "data")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(project, { recursive: true })
+            await fs.writeFile(path.join(project, "tracked.txt"), "one\n")
+            await $`git init`.cwd(project).quiet()
+            await $`git config commit.gpgsign false`.cwd(project).quiet()
+            await $`git config user.email test@zaovra.test`.cwd(project).quiet()
+            await $`git config user.name Test`.cwd(project).quiet()
+            await $`git add .`.cwd(project).quiet()
+            await $`git commit -m initial`.cwd(project).quiet()
+          })
+          const logs: Array<{ level: string; message: unknown }> = []
+          const snapshot = yield* Effect.gen(function* () {
+            const service = yield* Snapshot.Service
+            return yield* service.capture()
+          }).pipe(
+            Effect.provide(snapshotLayer(data, project)),
+            Effect.provide(
+              Logger.layer([Logger.make((entry) => logs.push({ level: entry.logLevel, message: entry.message }))]),
+            ),
+          )
+          const gitDirectory = path.join(data, "snapshot", "x".repeat(40), "x".repeat(40))
+          expect(gitDirectory.length).toBeGreaterThan(260)
+          expect(path.relative(project, gitDirectory).length).toBeLessThan(120)
+          if (process.platform !== "win32") {
+            expect(snapshot).toBeDefined()
+            return
+          }
+          expect(snapshot).toBeUndefined()
+          expect(logs).toContainEqual({
+            level: "Warn",
+            message: [
+              "failed to capture snapshot",
+              expect.objectContaining({
+                reason: expect.any(String),
+                absolutePathCharacters: gitDirectory.length,
+                absolutePathBytes: Buffer.byteLength(gitDirectory),
+                relativePathCharacters: path.relative(project, gitDirectory).length,
+              }),
+            ],
+          })
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
