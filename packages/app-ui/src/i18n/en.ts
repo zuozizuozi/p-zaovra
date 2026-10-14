@@ -1568,6 +1568,9 @@ export const dict = {
   "settings.general.sounds.errors.description": "Play sound when an error occurs",
 
   "settings.shortcuts.title": "Keyboard shortcuts",
+  "settings.shortcuts.composer.title": "While typing a prompt",
+  "settings.shortcuts.composer.hint":
+    "Enter sends · Shift+Enter adds a line · Ctrl+G stops a running task. Escape closes suggestions first. Confirming an IME candidate does not send. These input controls are fixed.",
   "settings.shortcuts.reset.button": "Reset to defaults",
   "settings.shortcuts.reset.toast.title": "Shortcuts reset",
   "settings.shortcuts.reset.toast.description": "Keyboard shortcuts have been reset to defaults.",

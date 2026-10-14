@@ -1409,6 +1409,9 @@ export const dict = {
   "settings.general.sounds.errors.description": "发生错误时播放声音",
 
   "settings.shortcuts.title": "键盘快捷键",
+  "settings.shortcuts.composer.title": "在任务输入框中",
+  "settings.shortcuts.composer.hint":
+    "Enter 发送 · Shift+Enter 换行 · Ctrl+G 停止正在运行的任务。Escape 优先关闭建议列表。输入法确认候选词时不会发送。这些输入操作不可改绑。",
   "settings.shortcuts.reset.button": "重置为默认值",
   "settings.shortcuts.reset.toast.title": "快捷键已重置",
   "settings.shortcuts.reset.toast.description": "键盘快捷键已重置为默认设置。",

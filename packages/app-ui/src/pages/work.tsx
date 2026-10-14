@@ -8,11 +8,12 @@ import { useServerSDK } from "@/context/server-sdk"
 import { workGoalControlDisabled, workGoalControls } from "./work-controls"
 import { useLanguage } from "@/context/language"
 import { workVerification } from "@/utils/verification-label"
-import { useSettingsDialog } from "@/components/settings-dialog"
+import { useSettingsCommand, useSettingsDialog } from "@/components/settings-dialog"
 
 const defaultRole: WorkDetail["roles"][number]["id"] = "developer"
 
 export default function WorkPage() {
+  useSettingsCommand()
   const language = useLanguage()
   const params = useParams<{ goalID?: string }>()
   const navigate = useNavigate()

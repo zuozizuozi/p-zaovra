@@ -414,6 +414,14 @@ export const SettingsKeybinds: Component<{ v2?: boolean }> = (props) => {
         "flex flex-col gap-8 max-w-[720px]": !props.v2,
       }}
     >
+      <Show when={!store.filter}>
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">{language.t("settings.shortcuts.composer.title")}</h3>
+          <List>
+            <p class="py-3 text-12-regular text-text-weak">{language.t("settings.shortcuts.composer.hint")}</p>
+          </List>
+        </div>
+      </Show>
       <For each={GROUPS}>
         {(group) => (
           <Show when={(filtered().get(group) ?? []).length > 0}>
