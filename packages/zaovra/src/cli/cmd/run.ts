@@ -674,7 +674,7 @@ export const RunCommand = effectCmd({
             // A length finish can still be followed by the host's recovery turn.
             // Wait for that outcome; idle without a terminal event is already an error.
             if (event.properties.finish === "length" || event.properties.finish === "tool-calls") return false
-            if (event.properties.finish !== "stop") {
+            if (event.properties.finish !== "stop" && event.properties.finish !== "interrupted") {
               error = `Session stopped before completion: ${event.properties.finish}`
               if (!emit("error", { error: { message: error } })) UI.error(error)
             }
