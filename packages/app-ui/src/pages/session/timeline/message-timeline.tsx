@@ -1174,9 +1174,11 @@ export function MessageTimeline(props: {
                   <div
                     role="status"
                     data-slot="snapshot-unavailable"
-                    class="mb-2 rounded-md border border-border-weak-base px-3 py-2 text-12-regular text-text-strong"
+                    class="mb-2 flex items-start gap-2 rounded-md px-3 py-2 text-12-regular"
+                    style={{ background: "var(--zaovra-warning-soft)", color: "var(--zaovra-warning)" }}
                   >
-                    {language.t("session.snapshot.unavailable")}
+                    <Icon name="warning" size="small" class="mt-0.5 shrink-0" />
+                    <span>{language.t("session.snapshot.unavailable")}</span>
                   </div>
                 </Show>
                 <MessagePart
@@ -2109,3 +2111,4 @@ export function MessageTimeline(props: {
     </div>
   )
 }
+
