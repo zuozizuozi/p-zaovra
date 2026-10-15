@@ -24,16 +24,18 @@ const server = new Server(
     instructions: "Use project facts as the durable source of truth.",
   },
 )
+let revision = 0
+let toolName = process.env.MCP_TEST_TOOL ?? "echo"
 
 server.setRequestHandler(ListToolsRequestSchema, () =>
   Promise.resolve({
     tools: [
       {
-        name: process.env.MCP_TEST_TOOL ?? "echo",
-        description: "Echo one string",
+        name: toolName,
+        description: `Echo one string ${revision}`,
         inputSchema: {
           type: "object",
-          properties: { text: { type: "string", minLength: 1 } },
+          properties: { text: { type: "string", minLength: revision + 1 } },
           required: ["text"],
           additionalProperties: false,
         },
@@ -48,8 +50,13 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
   }),
 )
 
-server.setRequestHandler(CallToolRequestSchema, (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const text = typeof request.params.arguments?.text === "string" ? request.params.arguments.text : ""
+  if (text === "notify" || text === "change-schema" || text === "change-name") {
+    if (text === "change-schema") revision++
+    if (text === "change-name") toolName += "_renamed"
+    await server.sendToolListChanged()
+  }
   if (text.startsWith("error:"))
     return Promise.resolve({ isError: true, content: [{ type: "text", text: text.slice(6) }] })
   return Promise.resolve({

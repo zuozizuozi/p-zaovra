@@ -2,6 +2,7 @@ export * as MCP from "./mcp"
 
 import path from "path"
 import { pathToFileURL } from "url"
+import { isDeepStrictEqual } from "node:util"
 import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js"
@@ -156,9 +157,21 @@ const layer = Layer.effect(
           if (occupied.has(name)) return yield* Effect.fail(new Error(`Duplicate MCP tool name: ${name}`))
           occupied.add(name)
         }
-      const staged = yield* Scope.fork(parentScope)
+      const staged: Scope.Closeable[] = []
       yield* Effect.gen(function* () {
         for (const plan of plans) {
+          const previous = active.get(plan.name)
+          if (
+            previous?.client === plan.entry.client &&
+            previous.server === plan.entry.server &&
+            isDeepStrictEqual(previous.definitions, plan.entry.definitions) &&
+            isDeepStrictEqual(previous.definitionNames, plan.names)
+          ) {
+            next.set(plan.name, previous)
+            continue
+          }
+          const scope = yield* Scope.fork(parentScope)
+          staged.push(scope)
           yield* tools
             .register(
               Object.fromEntries(
@@ -175,15 +188,16 @@ const layer = Layer.effect(
                 ]),
               ),
             )
-            .pipe(Scope.provide(staged))
-          next.set(plan.name, { ...plan.entry, definitionNames: plan.names, registration: staged })
+            .pipe(Scope.provide(scope))
+          next.set(plan.name, { ...plan.entry, definitionNames: plan.names, registration: scope })
         }
-      }).pipe(Effect.onError(() => Scope.close(staged, Exit.void)))
+      }).pipe(Effect.onError(() => Effect.forEach(staged, (scope) => Scope.close(scope, Exit.void))))
       const previous = new Set(Array.from(active.values(), (entry) => entry.registration))
+      const retained = new Set(Array.from(next.values(), (entry) => entry.registration))
       active.clear()
       next.forEach((entry, name) => active.set(name, entry))
-      for (const registration of previous) yield* Scope.close(registration, Exit.void).pipe(Effect.ignore)
-      if (next.size === 0) yield* Scope.close(staged, Exit.void)
+      for (const registration of previous)
+        if (!retained.has(registration)) yield* Scope.close(registration, Exit.void).pipe(Effect.ignore)
     })
 
     const close = Effect.fnUntraced(function* (name: string) {

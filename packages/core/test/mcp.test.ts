@@ -77,6 +77,120 @@ const it = testEffect(layer)
 const sessionID = SessionV2.ID.make("ses_mcp")
 
 describe("MCP canonical tools", () => {
+  const peers = testEffect(
+    AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node, MCP.node]), [
+      [
+        Config.node,
+        Layer.succeed(
+          Config.Service,
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed([
+                new Config.Document({
+                  type: "document",
+                  info: new Config.Info({
+                    mcp: new ConfigMCP.Info({
+                      servers: Object.fromEntries(
+                        ["a", "b"].map((name) => [
+                          name,
+                          new ConfigMCP.Local({
+                            type: "local",
+                            disabled: true,
+                            command: [process.execPath, path.join(directory, "mcp-canonical-stdio.ts")],
+                            environment: { MCP_TEST_SERVER: name },
+                          }),
+                        ]),
+                      ),
+                    }),
+                  }),
+                }),
+              ]),
+          }),
+        ),
+      ],
+      [Location.node, location],
+      [PermissionV2.node, permission],
+      [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
+    ]),
+  )
+  for (const change of ["connect", "disconnect", "notify", "change-schema"])
+    peers.live(
+      `retains materialized A when peer B changes: ${change}`,
+      () =>
+        Effect.gen(function* () {
+          const mcp = yield* MCP.Service
+          const registry = yield* ToolRegistry.Service
+          yield* mcp.reconnect("a")
+          if (change !== "connect") yield* mcp.reconnect("b")
+          const sent = yield* registry.materialize()
+          if (change === "connect") yield* mcp.reconnect("b")
+          if (change === "disconnect") yield* mcp.disconnect("b")
+          if (change === "notify" || change === "change-schema") {
+            yield* executeTool(registry, {
+              sessionID,
+              ...toolIdentity,
+              call: { type: "tool-call", id: "notify-b", name: "mcp_b_echo", input: { text: change } },
+            })
+            // A following SDK call is a protocol barrier; refresh runs asynchronously on receipt.
+            if (change === "change-schema") {
+              for (let retry = 0; retry < 100; retry++) {
+                if (
+                  (yield* toolDefinitions(registry)).find((tool) => tool.name === "mcp_b_echo")?.description ===
+                  "Echo one string 1"
+                )
+                  break
+                yield* Effect.sleep("10 millis")
+              }
+              expect((yield* toolDefinitions(registry)).find((tool) => tool.name === "mcp_b_echo")?.description).toBe(
+                "Echo one string 1",
+              )
+            } else yield* Effect.sleep("100 millis")
+          }
+          const result = yield* sent.settle({
+            sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id: "a-after-peer", name: "mcp_a_echo", input: { text: "kept" } },
+          })
+          expect(result.result).toEqual({ type: "text", value: "a:echo:kept" })
+        }),
+      15000,
+    )
+  for (const change of ["client", "change-schema", "change-name"])
+    peers.live(
+      `rejects materialized A after its own ${change} changes`,
+      () =>
+        Effect.gen(function* () {
+          const mcp = yield* MCP.Service
+          const registry = yield* ToolRegistry.Service
+          yield* mcp.reconnect("a")
+          const sent = yield* registry.materialize()
+          if (change === "client") yield* mcp.reconnect("a")
+          else {
+            yield* executeTool(registry, {
+              sessionID,
+              ...toolIdentity,
+              call: { type: "tool-call", id: "change-a", name: "mcp_a_echo", input: { text: change } },
+            })
+            for (let retry = 0; retry < 100; retry++) {
+              const definitions = yield* toolDefinitions(registry)
+              if (
+                change === "change-name"
+                  ? definitions.some((tool) => tool.name === "mcp_a_echo_renamed")
+                  : definitions.find((tool) => tool.name === "mcp_a_echo")?.description === "Echo one string 1"
+              )
+                break
+              yield* Effect.sleep("10 millis")
+            }
+          }
+          const result = yield* sent.settle({
+            sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id: "stale-a", name: "mcp_a_echo", input: { text: "stale" } },
+          })
+          expect(result.result).toEqual({ type: "error", value: "Stale tool call: mcp_a_echo" })
+        }),
+      15000,
+    )
   it.live("preserves the exact legacy name and permission action when no tools collide", () =>
     Effect.gen(function* () {
       const mcp = yield* MCP.Service
