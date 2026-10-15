@@ -1,118 +1,146 @@
-[data-page="about"] {
-  min-height: 100svh;
-  color: #dfe9f7;
-  background:
-    radial-gradient(820px 440px at 72% 18%, rgba(70, 105, 158, 0.16), transparent 68%),
-    #080b13;
-  font-family: var(--font-sans);
+[data-skin="zaovra"][data-page="about"] [data-slot="about-copy"] h1 {
+  font-size: clamp(36px, 4.8vw, 60px);
 }
 
-[data-page="about"] ::selection { background: rgba(151, 190, 243, 0.28); color: #f7faff; }
-
-[data-page="about"] [data-component="about-header"] {
-  min-height: 72px;
-  padding: 16px clamp(22px, 5vw, 72px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid rgba(196, 215, 242, 0.09);
+[data-page="about"] [data-component="about-content"] {
+  width: min(1160px, calc(100% - 32px));
+  margin: 0 auto;
+  padding-bottom: clamp(56px, 8vw, 96px);
 }
-
-[data-page="about"] [data-component="about-header"] img { display: block; width: 132px; height: auto; outline: none; }
-[data-page="about"] [data-component="about-header"] nav { display: flex; align-items: center; gap: 6px; }
-[data-page="about"] [data-component="about-header"] nav a {
-  min-height: 42px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  color: #8f9db1;
-  font-size: 13px;
-  text-decoration: none;
-  border-radius: 9px;
-}
-[data-page="about"] [data-component="about-header"] nav a:hover,
-[data-page="about"] [data-component="about-header"] nav a:focus-visible { color: #edf4ff; background: rgba(136, 168, 213, 0.07); }
-[data-page="about"] [data-component="about-header"] [data-slot="login-link"] { margin-left: 7px; color: #dce8f9; box-shadow: inset 0 0 0 1px rgba(193, 216, 248, 0.16); }
-
-[data-page="about"] [data-component="about-content"] { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
 
 [data-page="about"] [data-component="about-hero"] {
-  min-height: 570px;
+  min-height: 520px;
+  padding: clamp(48px, 8vw, 96px) 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(340px, 0.92fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.8fr);
   align-items: center;
-  gap: clamp(44px, 8vw, 120px);
-  border-bottom: 1px solid rgba(195, 214, 242, 0.09);
+  gap: clamp(32px, 6vw, 80px);
 }
 
-[data-page="about"] [data-slot="about-copy"] { max-width: 650px; }
-[data-page="about"] h1 { margin: 0; color: #edf4ff; font-size: clamp(48px, 7vw, 88px); line-height: 0.98; letter-spacing: -0.045em; font-weight: 590; }
-[data-page="about"] [data-slot="about-copy"] p { max-width: 62ch; margin: 30px 0 0; color: #9daabd; font-size: 17px; line-height: 1.72; }
+[data-page="about"] [data-slot="about-copy"] p {
+  max-width: 620px;
+  margin: 28px 0 0;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.8;
+}
 
 [data-page="about"] [data-slot="about-mark"] {
-  position: relative;
-  width: min(390px, 100%);
-  aspect-ratio: 1;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle, rgba(80, 117, 174, 0.18), transparent 68%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(132, 66, 252, 0.3), transparent 65%);
 }
 
-[data-page="about"] [data-slot="about-mark"]::before,
-[data-page="about"] [data-slot="about-mark"]::after {
-  content: "";
-  position: absolute;
-  border-radius: 24px 20px 28px 22px;
-  box-shadow: 0 0 0 1px rgba(184, 207, 239, 0.1);
+[data-page="about"] [data-slot="about-mark"] img {
+  width: min(300px, 75%);
+  height: auto;
+  filter: drop-shadow(0 30px 50px rgba(132, 66, 252, 0.55));
 }
-[data-page="about"] [data-slot="about-mark"]::before { inset: 13%; transform: rotate(7deg); }
-[data-page="about"] [data-slot="about-mark"]::after { inset: 25%; transform: rotate(-10deg); }
-[data-page="about"] [data-slot="about-mark"] > span {
-  position: relative;
-  z-index: 2;
-  width: 116px;
-  height: 116px;
-  padding: 9px;
-  border-radius: 26px 23px 30px 21px;
-  background: linear-gradient(145deg, rgba(121, 158, 210, 0.25), rgba(23, 32, 47, 0.75));
-  box-shadow: 0 0 0 1px rgba(193, 216, 247, 0.15), 0 30px 60px -36px rgba(91, 147, 225, 0.9), inset 0 1px rgba(255, 255, 255, 0.07);
-}
-[data-page="about"] [data-slot="about-mark"] img { width: 100%; height: 100%; object-fit: cover; border-radius: 19px 17px 23px 15px; outline: none; }
-[data-page="about"] [data-slot="about-mark"] i { position: absolute; width: 4px; height: 4px; background: #8fb8ee; box-shadow: 0 0 12px rgba(117, 172, 242, 0.72); }
-[data-page="about"] [data-slot="about-mark"] i:nth-of-type(1) { left: 18%; top: 28%; }
-[data-page="about"] [data-slot="about-mark"] i:nth-of-type(2) { right: 15%; top: 48%; }
-[data-page="about"] [data-slot="about-mark"] i:nth-of-type(3) { left: 38%; bottom: 13%; }
 
-[data-page="about"] [data-component="about-principles"] { display: grid; grid-template-columns: repeat(3, 1fr); }
-[data-page="about"] [data-component="about-principles"] article { min-height: 330px; padding: 56px 38px; border-right: 1px solid rgba(195, 214, 242, 0.09); }
-[data-page="about"] [data-component="about-principles"] article:first-child { padding-left: 0; }
-[data-page="about"] [data-component="about-principles"] article:last-child { padding-right: 0; border-right: 0; }
-[data-page="about"] [data-component="about-principles"] article > span { color: #8296b4; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
-[data-page="about"] [data-component="about-principles"] h2 { margin: 24px 0 14px; color: #dde8f7; font-size: 24px; line-height: 1.24; letter-spacing: -0.025em; font-weight: 570; }
-[data-page="about"] [data-component="about-principles"] p { margin: 0; color: #8e9caf; font-size: 14px; line-height: 1.68; }
+[data-page="about"] [data-component="about-principles"] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+[data-page="about"] [data-component="about-principles"] article {
+  padding: 28px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+[data-page="about"] [data-component="about-principles"] span {
+  color: var(--brand-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+[data-page="about"] [data-component="about-principles"] h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+[data-page="about"] [data-component="about-principles"] p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.75;
+}
 
 [data-page="about"] [data-component="about-actions"] {
-  padding: 72px 0 90px;
+  margin-top: clamp(48px, 7vw, 80px);
+  padding: clamp(28px, 4vw, 44px);
   display: flex;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 36px;
-  border-top: 1px solid rgba(195, 214, 242, 0.09);
+  gap: 24px;
+  border-radius: 24px;
+  background:
+    radial-gradient(60% 120% at 100% 0%, rgba(132, 66, 252, 0.3), transparent 65%),
+    var(--surface-2);
+  box-shadow: 0 0 0 1px rgba(162, 115, 255, 0.28) inset;
 }
-[data-page="about"] [data-component="about-actions"] h2 { margin: 0 0 10px; color: #e8f1fe; font-size: 32px; letter-spacing: -0.03em; }
-[data-page="about"] [data-component="about-actions"] p { margin: 0; color: #8f9daf; }
-[data-page="about"] [data-component="about-actions"] > div:last-child { display: flex; gap: 10px; }
-[data-page="about"] [data-component="about-actions"] a { min-height: 46px; padding: 0 18px; display: inline-flex; align-items: center; color: #b3c3d9; text-decoration: none; border-radius: 10px 10px 12px 8px; box-shadow: inset 0 0 0 1px rgba(192, 214, 245, 0.15); }
-[data-page="about"] [data-component="about-actions"] a[data-variant="primary"] { color: #101722; background: #b9cbe3; box-shadow: 0 10px 28px -18px rgba(140, 186, 244, 0.8); }
-[data-page="about"] a:focus-visible { outline: 2px solid rgba(159, 202, 255, 0.76); outline-offset: 3px; }
 
-@media (max-width: 48rem) {
-  [data-page="about"] [data-component="about-header"] nav a:not([data-slot="login-link"]) { display: none; }
-  [data-page="about"] [data-component="about-hero"] { grid-template-columns: 1fr; min-height: auto; padding: 80px 0 48px; gap: 24px; }
-  [data-page="about"] [data-slot="about-mark"] { width: min(330px, 86vw); justify-self: center; }
-  [data-page="about"] [data-component="about-principles"] { grid-template-columns: 1fr; }
-  [data-page="about"] [data-component="about-principles"] article,
-  [data-page="about"] [data-component="about-principles"] article:first-child,
-  [data-page="about"] [data-component="about-principles"] article:last-child { min-height: auto; padding: 36px 0; border-right: 0; border-bottom: 1px solid rgba(195, 214, 242, 0.09); }
-  [data-page="about"] [data-component="about-actions"] { align-items: flex-start; flex-direction: column; }
+[data-page="about"] [data-component="about-actions"] h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+[data-page="about"] [data-component="about-actions"] p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+[data-page="about"] [data-component="about-actions"] > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+[data-page="about"] [data-component="about-actions"] a {
+  min-height: 46px;
+  padding: 0 20px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 1px var(--line-strong) inset;
+}
+
+[data-page="about"] [data-component="about-actions"] a[data-variant="primary"] {
+  color: #fff;
+  background: linear-gradient(180deg, #9558ff, var(--brand));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 12px 32px -10px rgba(132, 66, 252, 0.85);
+}
+
+@media (max-width: 860px) {
+  [data-page="about"] [data-component="about-hero"],
+  [data-page="about"] [data-component="about-principles"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-page="about"] [data-component="about-hero"] {
+    min-height: 0;
+  }
+
+  [data-page="about"] [data-slot="about-mark"] {
+    width: min(240px, 60%);
+    justify-self: center;
+    order: -1;
+  }
 }

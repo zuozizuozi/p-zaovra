@@ -1,18 +1,18 @@
 import "./index.css"
 import { Meta, Title } from "@solidjs/meta"
-import { Header } from "~/component/header"
+import { SiteFooter, SiteHeader } from "~/component/site-chrome"
 import { LocaleLinks } from "~/component/locale-links"
 
 const email = "support@zaovra.com"
 
 export default function TermsOfService() {
   return (
-    <main data-page="legal">
+    <main data-page="legal" data-skin="zaovra">
+      <SiteHeader />
       <Title>Zaovra | Terms of Service</Title>
       <Meta name="description" content="Terms governing use of the Zaovra website, account, memberships, and desktop app." />
       <LocaleLinks path="/legal/terms-of-service" />
       <div data-component="container">
-        <Header />
         <div data-component="content">
           <section data-component="brand-content">
             <article data-component="terms-of-service">
@@ -99,6 +99,7 @@ export default function TermsOfService() {
           </section>
         </div>
       </div>
+      <SiteFooter />
     </main>
   )
 }

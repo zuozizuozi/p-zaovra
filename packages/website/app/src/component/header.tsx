@@ -10,10 +10,11 @@ export function Header(_props: { hideGetStarted?: boolean }) {
   const language = useLanguage()
   const [open, setOpen] = createSignal(false)
   const links = [
-    { href: "/pricing", label: "Pricing" },
-    { href: "/#byok", label: "BYOK" },
-    { href: "/download", label: "Download" },
-    { href: "/about", label: "About us" },
+    { href: "/pricing", label: () => i18n.t("site.nav.pricing") },
+    { href: "/#byok", label: () => "BYOK" },
+    { href: "/download", label: () => i18n.t("site.nav.download") },
+    { href: "/docs", label: () => i18n.t("site.nav.docs") },
+    { href: "/about", label: () => i18n.t("site.nav.about") },
   ]
 
   return (
@@ -23,10 +24,10 @@ export function Header(_props: { hideGetStarted?: boolean }) {
         <img data-slot="logo dark" src={logoDark} alt={i18n.t("nav.logoAlt")} width="189" height="34" />
       </A>
 
-      <nav data-component="nav-desktop" aria-label="Primary navigation">
+      <nav data-component="nav-desktop" aria-label={i18n.t("site.nav.ariaLabel")}>
         <ul>
-          {links.map((link) => <li><A href={language.route(link.href)}>{link.label}</A></li>)}
-          <li><A href={language.route("/login")} data-slot="login">Log in</A></li>
+          {links.map((link) => <li><A href={language.route(link.href)}>{link.label()}</A></li>)}
+          <li><A href={language.route("/login")} data-slot="login">{i18n.t("site.nav.login")}</A></li>
         </ul>
       </nav>
 
@@ -46,8 +47,8 @@ export function Header(_props: { hideGetStarted?: boolean }) {
         </button>
         <Show when={open()}>
           <div id="nav-mobile-menu">
-            {links.map((link) => <A href={language.route(link.href)} onClick={() => setOpen(false)}>{link.label}</A>)}
-            <A href={language.route("/login")} onClick={() => setOpen(false)}>Log in</A>
+            {links.map((link) => <A href={language.route(link.href)} onClick={() => setOpen(false)}>{link.label()}</A>)}
+            <A href={language.route("/login")} onClick={() => setOpen(false)}>{i18n.t("site.nav.login")}</A>
           </div>
         </Show>
       </nav>

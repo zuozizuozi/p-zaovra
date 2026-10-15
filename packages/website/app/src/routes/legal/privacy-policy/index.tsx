@@ -1,18 +1,18 @@
 import "./index.css"
 import { Meta, Title } from "@solidjs/meta"
-import { Header } from "~/component/header"
+import { SiteFooter, SiteHeader } from "~/component/site-chrome"
 import { LocaleLinks } from "~/component/locale-links"
 
 const email = "support@zaovra.com"
 
 export default function PrivacyPolicy() {
   return (
-    <main data-page="legal">
+    <main data-page="legal" data-skin="zaovra">
+      <SiteHeader />
       <Title>Zaovra | Privacy Policy</Title>
       <Meta name="description" content="How Zaovra handles account, billing, desktop, BYOK, and managed model data." />
       <LocaleLinks path="/legal/privacy-policy" />
       <div data-component="container">
-        <Header />
         <div data-component="content">
           <section data-component="brand-content">
             <article data-component="privacy-policy">
@@ -103,6 +103,7 @@ export default function PrivacyPolicy() {
           </section>
         </div>
       </div>
+      <SiteFooter />
     </main>
   )
 }

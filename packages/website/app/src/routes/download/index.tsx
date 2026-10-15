@@ -1,9 +1,10 @@
 import "./index.css"
 import { Meta, Title } from "@solidjs/meta"
 import { A } from "@solidjs/router"
-import logo from "../../asset/logo-ornate-dark.svg"
-import logoSquare from "../../asset/brand/zaovra-logo-light-square.png"
+import mascot from "../../asset/mascot/thinking-512.webp"
+import { SiteFooter, SiteHeader } from "~/component/site-chrome"
 import { LocaleLinks } from "~/component/locale-links"
+import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
 
 function WindowsIcon() {
@@ -23,77 +24,57 @@ function ArrowIcon() {
 }
 
 export default function Download() {
+  const i18n = useI18n()
   const language = useLanguage()
   return (
-    <main data-page="download">
-      <Title>Download Zaovra for Windows</Title>
-      <Meta name="description" content="Download Zaovra for Windows. macOS is coming soon." />
+    <main data-page="download" data-skin="zaovra">
+      <Title>{i18n.t("download.metaTitle")}</Title>
+      <Meta name="description" content={i18n.t("download.metaDescription")} />
       <LocaleLinks path="/download" />
 
-      <header data-component="download-header">
-        <A href={language.route("/")} aria-label="Zaovra home">
-          <img src={logo} alt="Zaovra" width="140" height="32" />
-        </A>
-        <nav aria-label="Download page navigation">
-          <A href={language.route("/pricing")}>Pricing</A>
-          <A href={language.route("/#byok")}>BYOK</A>
-          <A href={language.route("/about")}>About us</A>
-          <A href={language.route("/login?continue=/download")} data-slot="login-link">Log in</A>
-        </nav>
-      </header>
+      <SiteHeader />
 
       <div data-component="download-content">
         <section data-component="download-hero" aria-labelledby="download-title">
           <div data-slot="download-copy">
-            <span data-slot="platform-label"><WindowsIcon /> Windows desktop</span>
-            <h1 id="download-title">Bring Zaovra to the code you are working on.</h1>
-            <p>
-              Download the Windows desktop app, then sign in with your Zaovra account. BYOK credentials are configured
-              only inside the desktop app and do not require a membership.
-            </p>
+            <span data-slot="platform-label"><WindowsIcon /> {i18n.t("download.platform")}</span>
+            <h1 id="download-title">{i18n.t("download.title")}</h1>
+            <p>{i18n.t("download.body")}</p>
             <div data-slot="hero-actions">
-              <button type="button" data-variant="primary" disabled>Windows release pending</button>
-              <A href={language.route("/pricing")}>View pricing</A>
+              <button type="button" data-variant="primary" disabled>{i18n.t("download.pending")}</button>
+              <A href={language.route("/pricing")}>{i18n.t("download.viewPricing")}</A>
             </div>
           </div>
 
           <div data-slot="download-mark" aria-hidden="true">
-            <span data-slot="mark-shell"><span><img src={logoSquare} alt="" /></span></span>
-            <i data-position="one" /><i data-position="two" /><i data-position="three" />
+            <img src={mascot} alt="" width="280" height="280" />
           </div>
         </section>
 
-        <section data-component="access-panel" aria-label="Desktop availability">
+        <section data-component="access-panel" aria-label={i18n.t("download.panelLabel")}>
           <article>
             <span data-slot="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7.5h14v9H5v-9Zm2-3v3m10-3v3M8.5 12h7" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></span>
             <div>
-              <span data-slot="step-label">Account access</span>
-              <h2>Sign in to use Zaovra</h2>
-              <p>Every desktop session requires a Zaovra account. A membership is optional when you use BYOK.</p>
+              <span data-slot="step-label">{i18n.t("download.account.label")}</span>
+              <h2>{i18n.t("download.account.title")}</h2>
+              <p>{i18n.t("download.account.body")}</p>
             </div>
-            <A href={language.route("/login?continue=/download")}>Log in <ArrowIcon /></A>
+            <A href={language.route("/login?continue=/download")}>{i18n.t("site.nav.login")} <ArrowIcon /></A>
           </article>
 
           <article>
             <span data-slot="step-icon"><WindowsIcon /></span>
             <div>
-              <span data-slot="step-label">Windows x64</span>
-              <h2>Windows release</h2>
-              <p>The Windows installer is not published yet. macOS is coming soon; no other platforms are promised.</p>
+              <span data-slot="step-label">{i18n.t("download.windows.label")}</span>
+              <h2>{i18n.t("download.windows.title")}</h2>
+              <p>{i18n.t("download.windows.body")}</p>
             </div>
-            <button type="button" disabled>Not yet available</button>
+            <button type="button" disabled>{i18n.t("download.windows.action")}</button>
           </article>
         </section>
 
-        <footer data-component="download-footer">
-          <span>Zaovra for Windows</span>
-          <div>
-            <A href={language.route("/legal/terms-of-service")}>Terms</A>
-            <A href={language.route("/legal/privacy-policy")}>Privacy</A>
-            <A href={language.route("/")}>Home</A>
-          </div>
-        </footer>
       </div>
+      <SiteFooter />
     </main>
   )
 }

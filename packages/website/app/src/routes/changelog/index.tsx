@@ -1,9 +1,7 @@
 import "./index.css"
 import { Title, Meta } from "@solidjs/meta"
 import { createAsync } from "@solidjs/router"
-import { Header } from "~/component/header"
-import { Footer } from "~/component/footer"
-import { Legal } from "~/component/legal"
+import { SiteFooter, SiteHeader } from "~/component/site-chrome"
 import { changelog } from "~/lib/changelog"
 import type { HighlightGroup } from "~/lib/changelog"
 import { For, Show, createSignal } from "solid-js"
@@ -105,13 +103,13 @@ export default function Changelog() {
   const releases = () => data() ?? []
 
   return (
-    <main data-page="changelog">
+    <main data-page="changelog" data-skin="zaovra">
+      <SiteHeader />
       <Title>{i18n.t("changelog.title")}</Title>
       <LocaleLinks path="/changelog" />
       <Meta name="description" content={i18n.t("changelog.meta.description")} />
 
       <div data-component="container">
-        <Header />
 
         <div data-component="content">
           <section data-component="changelog-hero">
@@ -167,10 +165,9 @@ export default function Changelog() {
           </section>
         </div>
 
-        <Footer />
       </div>
 
-      <Legal />
+      <SiteFooter />
     </main>
   )
 }

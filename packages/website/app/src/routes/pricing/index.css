@@ -1,0 +1,174 @@
+[data-page="pricing"] [data-component="pricing-shell"] {
+  width: min(1160px, calc(100% - 32px));
+  margin: 0 auto;
+  padding-bottom: clamp(56px, 8vw, 96px);
+}
+
+[data-page="pricing"] [data-component="pricing-hero"] {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(56px, 9vw, 104px) 0 32px;
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+[data-page="pricing"] [data-slot="eyebrow"] {
+  color: var(--brand-soft);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+[data-page="pricing"] [data-component="pricing-hero"] p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+[data-page="pricing"] [data-component="checkout-status"] {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 40px;
+  padding: 10px 16px;
+  color: var(--brand-soft);
+  font-size: 14px;
+  text-align: center;
+  border-radius: 999px;
+  background: rgba(132, 66, 252, 0.12);
+  box-shadow: 0 0 0 1px rgba(162, 115, 255, 0.3) inset;
+}
+
+[data-page="pricing"] [data-component="plan-grid"] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+[data-page="pricing"] [data-component="plan-card"] {
+  position: relative;
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+[data-page="pricing"] [data-component="plan-card"][data-featured] {
+  background:
+    radial-gradient(90% 60% at 50% 0%, rgba(132, 66, 252, 0.34), transparent 70%),
+    var(--surface-2);
+  box-shadow: 0 0 0 1px rgba(162, 115, 255, 0.45) inset, 0 30px 80px -40px rgba(132, 66, 252, 0.8);
+}
+
+[data-page="pricing"] [data-slot="plan-name"] {
+  color: var(--brand-soft);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+[data-page="pricing"] [data-slot="price"] {
+  margin: 14px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+[data-page="pricing"] [data-slot="price"] strong {
+  font-family: var(--display);
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+[data-page="pricing"] [data-slot="price"] span {
+  color: var(--dim);
+}
+
+[data-page="pricing"] [data-slot="summary"] {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+[data-page="pricing"] [data-component="plan-card"] ul {
+  margin: 0;
+  padding: 20px 0 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+
+[data-page="pricing"] [data-component="plan-card"] li {
+  display: flex;
+  gap: 10px;
+  color: #d6d2e3;
+  font-size: 15px;
+}
+
+[data-page="pricing"] [data-component="plan-card"] li::before {
+  content: "✓";
+  color: var(--brand-hi);
+  font-weight: 700;
+}
+
+[data-page="pricing"] [data-component="plan-card"] button {
+  margin-top: auto;
+  min-height: 46px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 1px var(--line-strong) inset;
+  cursor: not-allowed;
+}
+
+[data-page="pricing"] [data-component="plan-card"][data-featured] button {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(132, 66, 252, 0.35);
+  box-shadow: 0 0 0 1px rgba(162, 115, 255, 0.45) inset;
+}
+
+[data-page="pricing"] [data-component="pricing-notes"] {
+  margin-top: clamp(40px, 6vw, 64px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  padding-top: 32px;
+  border-top: 1px solid var(--line);
+}
+
+[data-page="pricing"] [data-component="pricing-notes"] h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+[data-page="pricing"] [data-component="pricing-notes"] p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+@media (max-width: 860px) {
+  [data-page="pricing"] [data-component="plan-grid"],
+  [data-page="pricing"] [data-component="pricing-notes"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-page="pricing"] [data-component="checkout-status"] {
+    border-radius: 14px;
+  }
+}
