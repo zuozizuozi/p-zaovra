@@ -1601,3 +1601,29 @@ test("delivery facts retain snapshot, added and partial files without inferring 
     ]).changes,
   ).toEqual([])
 })
+
+test("shell recovery resets on real progress without merging different quoted literals or directories", () => {
+  const tool = (command: string, exit = 1, workdir = "."): SessionMessage.AssistantTool => ({
+    type: "tool",
+    id: command,
+    name: "bash",
+    time: assistant.time,
+    state: { status: "completed", input: { command, workdir }, content: [], structured: { exit } },
+  })
+  const recovery = (content: SessionMessage.AssistantTool[]) =>
+    SessionOutcome.shellRecovery([{ ...assistant, content }])
+  expect(recovery([tool("inspect  --broken"), tool(" inspect --broken "), tool("inspect --broken")])).toMatchObject({
+    failures: 3,
+    repeated: 3,
+  })
+  expect(recovery([tool("inspect 'a b'"), tool("inspect 'a  b'")])).toMatchObject({ failures: 2, repeated: 1 })
+  expect(recovery([tool("inspect", 1, "one"), tool("inspect", 1, "two")])).toMatchObject({ failures: 2, repeated: 1 })
+  expect(recovery([tool("bad"), tool("inspect", 0), tool("bad")])).toMatchObject({ failures: 1, repeated: 1 })
+  expect(
+    recovery([
+      tool("bad"),
+      { ...tool("read"), name: "read", state: { status: "completed", input: {}, content: [], structured: {} } },
+      tool("bad"),
+    ]),
+  ).toMatchObject({ failures: 1, repeated: 1 })
+})

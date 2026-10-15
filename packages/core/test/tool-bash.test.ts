@@ -186,6 +186,31 @@ describe("BashTool", () => {
     )
   }
 
+  for (const diagnostic of [
+    "/bin/sh: 1: absenttool: not found\n",
+    "/bin/bash: line 1: absenttool: command not found\n",
+  ])
+    it.live(`R1 exit 127 explains missing command: ${diagnostic.trim()}`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          result = { ...result, exitCode: 127, output: Buffer.from(diagnostic), stderr: Buffer.from(diagnostic) }
+          return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "absenttool --inspect" }))).pipe(
+            Effect.tap((settled) =>
+              Effect.sync(() => {
+                expect(settled.output?.structured).toMatchObject({ exit: 127 })
+                expect(JSON.stringify(settled.result)).toContain("missing absenttool")
+                expect(JSON.stringify(settled.result)).toContain("another available tool")
+                expect(runs).toHaveLength(1)
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+
   it.live("retains user permission correction feedback without executing a command", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

@@ -2080,7 +2080,7 @@ describe("SessionRunnerLLM", () => {
         responses = [
           [
             LLMEvent.stepStart({ index: 0 }),
-            ...Array.from({ length: 4 }, (_, index) =>
+            ...Array.from({ length: 10 }, (_, index) =>
               LLMEvent.toolCall({
                 id: `failure-${index}`,
                 name: "bash",
@@ -2093,7 +2093,7 @@ describe("SessionRunnerLLM", () => {
           stop,
         ]
         yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(4)
+        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(10)
         const messageID = SessionMessage.ID.create()
         yield* events.publish(SessionEvent.Compaction.Started, {
           sessionID,
@@ -2109,16 +2109,16 @@ describe("SessionRunnerLLM", () => {
           text: handoff("Fix the task"),
           recent: "",
         })
-        // Original implementation used this projected count and incorrectly reset 4 -> 0.
+        // Original implementation used this projected count and incorrectly reset 10 -> 0.
         expect(SessionOutcome.recoveryFailures(yield* session.context(sessionID))).toBe(0)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(4)
+        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(10)
         response = stop
         responses = undefined
         yield* session.resume(sessionID).pipe(Effect.exit)
         expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Repeated shell failures")
         expect(requests.at(-1)?.tools).toEqual([])
         yield* replaySessionProjection(sessionID)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(4)
+        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(10)
         yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New user direction" }), resume: false })
         yield* session.resume(sessionID)
         expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(0)
@@ -4555,6 +4555,55 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const scenario of [
+    {
+      name: "varied exploration",
+      commands: ["missing-tool", "grep needle file", "echo ${PIPESTATUS[0]}", "inspect --other"],
+      stop: false,
+    },
+    { name: "identical failures", commands: ["check --broken", "check --broken", "check --broken"], stop: true },
+    { name: "whitespace variants", commands: ["check --broken", "check  --broken", " check --broken  "], stop: true },
+    { name: "ten varied failures", commands: Array.from({ length: 10 }, (_, i) => `inspect-${i}`), stop: true },
+  ])
+    it.effect(`R1 shell resilience: ${scenario.name}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        yield* registry.register({
+          bash: Tool.make({
+            description: "Controlled shell results",
+            input: Schema.Struct({ command: Schema.String }),
+            output: Schema.Struct({ exit: Schema.Number }),
+            execute: ({ command }) =>
+              Effect.succeed({ exit: command === "missing-tool" ? 127 : command.includes("PIPESTATUS") ? 2 : 1 }),
+          }),
+        })
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Inspect and repair the workspace" }),
+          resume: false,
+        })
+        requests.length = 0
+        responses = [
+          ...scenario.commands.map((command, index) => [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: `shell-${index}`, name: "bash", input: { command } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ]),
+          fragmentFixture("text", "end", ["Observed results and remaining work."]).completeEvents,
+        ]
+        const result = yield* session.resume(sessionID).pipe(Effect.exit)
+        expect(result._tag).toBe(scenario.stop ? "Failure" : "Success")
+        expect(requests).toHaveLength(scenario.commands.length + 1)
+        expect(requests.at(-1)!.tools.length === 0).toBe(scenario.stop)
+        if (scenario.commands.length >= 4) expect(JSON.stringify(requests[4]!.system)).toContain("Change approach")
+        if (!scenario.stop) expect(JSON.stringify(requests.at(-1)!.system)).not.toContain("Tool execution is stopped")
+      }),
+    )
+
   it.effect("stops varied failed shell attempts with a final report instead of spending more tool turns", () =>
     Effect.gen(function* () {
       yield* setup
@@ -4571,7 +4620,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Verify the artifact" }), resume: false })
       requests.length = 0
       responses = [
-        ...Array.from({ length: 4 }, (_, index) => [
+        ...Array.from({ length: 10 }, (_, index) => [
           LLMEvent.stepStart({ index: 0 }),
           LLMEvent.toolCall({ id: `failed-shell-${index}`, name: "bash", input: { command: `bad-command-${index}` } }),
           LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
@@ -4586,12 +4635,12 @@ describe("SessionRunnerLLM", () => {
       const error = yield* session.resume(sessionID).pipe(Effect.flip)
       expect(error).toBeInstanceOf(LLMError)
       expect(error.message).toContain("Repeated shell failures stopped tool execution")
-      expect(requests).toHaveLength(5)
-      expect(requests[4]!.tools).toEqual([])
-      expect(requests[4]!.toolChoice).toMatchObject({ type: "none" })
-      expect(JSON.stringify(requests[3]!.system)).toContain("Change approach")
-      expect(JSON.stringify(requests[4]!.messages)).toContain("Repeated shell failures stopped tool execution")
-      expect(JSON.stringify(requests[4]!.messages)).not.toContain("CRITICAL - MAXIMUM STEPS REACHED")
+      expect(requests).toHaveLength(11)
+      expect(requests[10]!.tools).toEqual([])
+      expect(requests[10]!.toolChoice).toMatchObject({ type: "none" })
+      expect(JSON.stringify(requests[4]!.system)).toContain("Change approach")
+      expect(JSON.stringify(requests[10]!.messages)).toContain("Repeated shell failures stopped tool execution")
+      expect(JSON.stringify(requests[10]!.messages)).not.toContain("CRITICAL - MAXIMUM STEPS REACHED")
       expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
       expect(yield* session.outcome(sessionID)).toMatchObject({ state: "failed", outcomeUnknown: false })
     }),

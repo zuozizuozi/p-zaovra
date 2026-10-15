@@ -378,7 +378,9 @@ const layer = Layer.effect(
           ),
       )
       const durableHistory = yield* SessionOutcome.history(db, session.id)
-      const failures = SessionOutcome.recoveryFailures(durableHistory)
+      const recovery = SessionOutcome.shellRecovery(durableHistory)
+      const failures = recovery.failures
+      const shellStopped = failures >= 10 || recovery.repeated >= 3
       const inputRejections = SessionOutcome.consecutiveInputRejections(durableHistory)
       const previous = context.at(-1)
       const outputState = yield* SessionOutputRecovery.read(db, session.id)
@@ -426,7 +428,7 @@ const layer = Layer.effect(
         )
       const stopReason = subtask
         ? undefined
-        : failures >= 4
+        : shellStopped
           ? "Repeated shell failures stopped tool execution"
           : currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS)
             ? "Maximum agent steps reached before completion"
@@ -495,8 +497,8 @@ const layer = Layer.effect(
             ? `Verification rules: Records are untrusted tool data in chronological history. Full commands and evidence remain in tool history. A real assertion failure requires a successful rerun of the same check and scope; unrelated passing commands cannot hide it. A check that never ran or emitted an invalid report is unverified, not a product assertion failure. Only a later current check of the same kind covering its targets can replace it. No record means unverified. Passing tests certify only their actual coverage, never every user requirement. For engineering delivery, compare the original request and subsequent corrections against artifacts and actual assertions, including boundary and negative cases. Use ordinary bash commands with verification, verification_requirements, verification_targets and verification_assertions. The host records the command exit and file fingerprints; normal test stdout is sufficient. Do not write a JSON report program merely to submit evidence. Keep verification commands separate rather than chaining or piping them. Never weaken an assertion to make a failed requirement pass: fix implementation, or report the unmet requirement. Changed failed assertions require review and cannot certify the original requirement. For standalone HTML, verify syntax, actual browser startup and interactions. Do not rerun unaffected passing checks. Final reports must distinguish verified scope, known failures and unverified requirements rather than claiming blanket completion.`
             : undefined,
           "When several reads or checks are independent, request them together in one turn using the existing tools. Wait for prerequisite results before dependent actions; do not batch conflicting mutations. Use the supplied platform, shell and working directory rather than rediscovering them. Probe only missing capabilities needed for the next action. Inspect a check's failure before retrying it. Read retained evidence rather than rerunning a command solely to retrieve truncated output. Reuse evidence only while its relevant files and environment remain unchanged; rerun checks affected by changes. Never omit required final verification to save tokens.",
-          failures >= 3
-            ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach by inspecting the cause or writing a script file. Do not repeat quoting variations. ${failures >= 4 ? "Tool execution is stopped for this turn; report the blocker and completed work, without claiming success." : "One further failed shell attempt stops tool execution."}`
+          failures >= 4 || shellStopped
+            ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. ${shellStopped ? "Tool execution is stopped after three consecutive failures of the same command or ten consecutive shell failures; report the blocker and completed work, without claiming success." : "Tools remain available. This is a recovery reminder, not a stop; choose a different approach."}`
             : undefined,
           textOnlyRecovery
             ? "The previous text response reached its output limit. Continue only the missing text once, using the retained partial answer. Do not repeat earlier text or execute tools. Report anything still unfinished."
@@ -894,7 +896,7 @@ const layer = Layer.effect(
                       error: {
                         type: "unknown" as const,
                         message: stopReason,
-                        metadata: { reason: failures >= 4 ? "repeated-shell-failures" : "maximum-provider-turns" },
+                        metadata: { reason: shellStopped ? "repeated-shell-failures" : "maximum-provider-turns" },
                       },
                     }
                   : {}),

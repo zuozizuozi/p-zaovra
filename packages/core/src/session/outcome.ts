@@ -877,15 +877,26 @@ function checkKey(check: SessionOutcome.Check, input: Record<string, unknown>) {
 }
 
 export function recoveryFailures(messages: readonly SessionMessage.Message[]) {
+  return shellRecovery(messages).failures
+}
+
+/** Derive from durable history so compaction or a new drain cannot reset protection. */
+export function shellRecovery(messages: readonly SessionMessage.Message[]) {
+  const reset = { failures: 0, repeated: 0, command: "" }
   const start = messages.findLastIndex((message) => message.type === "user")
-  return messages.slice(Math.max(0, start)).reduce((count, message) => {
-    if (message.type !== "assistant") return count
-    return message.content.reduce((count, part) => {
-      if (part.type !== "tool" || part.provider?.executed) return count
-      if (part.name === "bash") {
-        if (part.state.status === "error") return rejected(part) ? count : count + 1
-        if (part.state.status !== "completed") return count
-        const checks = toolChecks(part)
+  return messages.slice(Math.max(0, start)).reduce((state, message) => {
+    if (message.type !== "assistant") return state
+    return message.content.reduce((state, part) => {
+      if (part.type !== "tool" || part.provider?.executed) return state
+      if (part.name !== "bash")
+        return part.state.status === "completed" &&
+          ["read", "grep", "glob", "edit", "write", "apply_patch"].includes(part.name)
+          ? reset
+          : state
+      if (part.state.status !== "completed" && part.state.status !== "error") return state
+      if (rejected(part)) return state
+      const checks = toolChecks(part)
+      if (part.state.status === "completed") {
         if (
           checks.length &&
           checks.every(
@@ -896,21 +907,29 @@ export function recoveryFailures(messages: readonly SessionMessage.Message[]) {
                 part.state.structured.exit === 0),
           )
         )
-          return count
+          return state
         if (
-          part.state.structured.timeout ||
-          toolChecks(part).some((check) => check.exit !== 0) ||
-          (typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)
+          !part.state.structured.timeout &&
+          !checks.some((check) => check.exit !== 0) &&
+          !(typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)
         )
-          return count + 1
-        return toolChecks(part).some((check) => check.exit === 0) && part.state.structured.exit === 0 ? 0 : count
+          return part.state.structured.exit === 0 ? reset : state
       }
-      return part.state.status === "completed" &&
-        ["read", "grep", "glob", "edit", "write", "apply_patch"].includes(part.name)
-        ? 0
-        : count
-    }, count)
-  }, 0)
+      // Only ignore spacing outside quotes. Do not conflate different literals or working directories.
+      const command =
+        typeof part.state.input.command === "string"
+          ? JSON.stringify([
+              part.state.input.command.match(/(?:[^\s"']+|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? [],
+              part.state.input.workdir ?? "",
+            ])
+          : ""
+      return {
+        failures: state.failures + 1,
+        repeated: command && command === state.command ? state.repeated + 1 : command ? 1 : 0,
+        command,
+      }
+    }, state)
+  }, reset)
 }
 
 /** Durable count, so rebuilding a drain cannot reset automatic correction limits. */

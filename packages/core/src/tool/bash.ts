@@ -377,6 +377,12 @@ const layer = Layer.effectDiscard(
                   assertions.length
                     ? `\nFailed assertion files are protected: ${assertions.map((file) => file.path).join(", ")}. Fix implementation and rerun this check with these files UNCHANGED first. Once that exact version passes, new tests can be added normally. Until then put additional tests in separate files. Changing expectations cannot prove a repair.`
                     : "")
+                if (result.exitCode === 127) {
+                  const missing = output.match(/(?:^|\n)(?:.*?:\s*)?([\w./-]+): (?:command )?not found(?:\r?\n|$)/)?.[1]
+                  warnings.push(
+                    `This environment is missing ${missing ?? "a command required by this invocation"} (exit 127). Install it if appropriate, or use another available tool. Check the actual shell and PATH; do not repeat the same command unchanged.`,
+                  )
+                }
                 const filesAfter = yield* fingerprint(fs, targets)
                 if (verification && capture)
                   yield* capture.append(
