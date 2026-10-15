@@ -13,6 +13,8 @@ import { Integration } from "./integration"
 export type ProviderRecord = {
   provider: ProviderV2.MutableInfo
   models: Map<ModelV2.ID, ModelV2.MutableInfo>
+  /** An explicitly configured endpoint may use no credentials or custom headers. */
+  configuredEndpoint?: boolean
 }
 
 export type DefaultModel = { providerID: ProviderV2.ID; modelID: ModelV2.ID }
@@ -184,8 +186,12 @@ const layer = Layer.effect(
 
         available: Effect.fn("CatalogV2.provider.available")(function* () {
           const active = new Map((yield* integrations.list()).map((integration) => [integration.id, integration]))
-          return (yield* result.provider.all()).filter((provider) =>
-            available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))),
+          return (yield* result.provider.all()).filter(
+            (provider) =>
+              available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))) ||
+              (!provider.disabled &&
+                provider.integrationID === undefined &&
+                state.get().providers.get(provider.id)?.configuredEndpoint === true),
           )
         }),
       },

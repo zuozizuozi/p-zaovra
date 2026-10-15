@@ -7,7 +7,7 @@ body[data-new-layout] {
 
 html[data-theme="oc-2"] body[data-new-layout] {
   --zaovra-canvas: light-dark(#f6f5f8, #151418);
-  --zaovra-rail: light-dark(#f1f0f4, #18171b);
+  --zaovra-rail: var(--zaovra-canvas);
   --zaovra-surface: light-dark(#ffffff, #1d1c21);
   --zaovra-raised: light-dark(#ffffff, #232228);
   --zaovra-hover: light-dark(#e9e7ee, #28262d);
@@ -376,7 +376,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-slot="titlebar-v2"] {
     background: var(--zaovra-canvas);
-    box-shadow: inset 0 -1px var(--zaovra-line);
+    box-shadow: none;
   }
 
   /* Brand stays recognizable, while the existing composer takes precedence. */
@@ -511,8 +511,8 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="prompt-input-v2"]:focus-within {
     box-shadow:
-      inset 0 0 0 1px light-dark(#777980, #9b9da5),
-      0 0 0 2px light-dark(#77798018, #9b9da520);
+      inset 0 0 0 1px var(--zaovra-line),
+      var(--zaovra-shadow);
   }
 
   /* Primary actions stay flat: the shared gradient lightens purple enough
@@ -1014,4 +1014,11 @@ html[data-theme="oc-2"] body[data-new-layout] [data-component="session-question-
       background: var(--zaovra-on-accent);
     }
   }
+}
+
+html[data-theme="oc-2"]
+  body[data-new-layout][data-input-modality="keyboard"]
+  [data-component="prompt-input-v2"]:has(:focus-visible) {
+  outline: 1px solid color-mix(in srgb, var(--zaovra-accent) 35%, transparent);
+  outline-offset: 2px;
 }

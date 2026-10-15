@@ -20,7 +20,6 @@ import { createStore, produce } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
 import { Logo } from "@zaovra-ai/ui/logo"
-import { IdleMascot } from "@/components/idle-mascot"
 import { resolveDraftDirectory } from "@/context/draft-directory"
 import "./home-welcome.css"
 import { Spinner } from "@zaovra-ai/ui/spinner"
@@ -39,8 +38,7 @@ import { usePlatform } from "@/context/platform"
 import { DateTime } from "luxon"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { useDirectoryPicker } from "@/components/directory-picker"
-import { useSettingsCommand, useSettingsDialog } from "@/components/settings-dialog"
-import { useProviders } from "@/hooks/use-providers"
+import { useSettingsCommand } from "@/components/settings-dialog"
 import { DialogSelectServer, useServerManagementController } from "@/components/dialog-select-server"
 import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { ServerConnection, serverName, useServer } from "@/context/server"
@@ -306,8 +304,6 @@ export function NewHome() {
   const notification = useNotification()
   const marked = useMarked()
   const openSettings = useSettingsCommand()
-  const openModelSettings = useSettingsDialog("providers")
-  const providers = useProviders()
   let focusSessionSearch: (() => void) | undefined
   let sessionViewport: HTMLDivElement | undefined
   const [sessionThumbTrack, setSessionThumbTrack] = createSignal<HTMLDivElement>()
@@ -315,7 +311,6 @@ export function NewHome() {
   const [state, setState] = createStore({
     search: "",
     searchFocused: false,
-    welcomePrompt: "",
     starting: false,
   })
   const selection = layout.home.selection
@@ -365,6 +360,14 @@ export function NewHome() {
         ? undefined
         : projects().find((project) => project.worktree === availableProject()),
   )
+  // Root navigation has one composer: the real draft, never an intermediate textarea.
+  createEffect(() => {
+    const conn = focusedServer()
+    const project = newSessionProject()
+    if (searchParams.view === "projects" || !conn || !project || state.starting) return
+    setState("starting", true)
+    void tabs.newDraft({ server: ServerConnection.key(conn), directory: project.worktree })
+  })
   const directories = (project: LocalProject) => [project.worktree, ...(project.sandboxes ?? [])]
   const projectDirectories = createMemo(() => {
     const project = selectedProject()
@@ -683,84 +686,7 @@ export function NewHome() {
           containHomeWheel(event, sessionViewport)
         }}
       >
-        <Show when={platform.platform === "desktop" || searchParams.view !== "projects"}>
-          <section class="home-welcome" aria-labelledby="home-welcome-title">
-            <div class="home-welcome-brand" role="img" aria-label="Zaovra">
-              <IdleMascot class="home-welcome-logo" />
-              <span>Zaovra</span>
-            </div>
-            <h1 id="home-welcome-title">{language.t("session.new.title")}</h1>
-            <p>{language.t("home.welcome.description")}</p>
-            <Show when={!providers.loading() && providers.connected().length === 0}>
-              <ButtonV2 variant="neutral" onClick={openModelSettings}>
-                {language.t("home.addProvider")}
-              </ButtonV2>
-            </Show>
-            <form
-              class="home-welcome-composer"
-              onSubmit={(event) => {
-                event.preventDefault()
-                const conn = focusedServer()
-                const project = newSessionProject()
-                if (!conn || !project || state.starting) return
-                setState("starting", true)
-                void tabs
-                  .newDraft({ server: ServerConnection.key(conn), directory: project.worktree }, state.welcomePrompt)
-                  .finally(() => setState("starting", false))
-              }}
-            >
-              <textarea
-                aria-label={language.t("prompt.placeholder.simple")}
-                placeholder={language.t("prompt.placeholder.simple")}
-                value={state.welcomePrompt}
-                onInput={(event) => setState("welcomePrompt", event.currentTarget.value)}
-                rows={3}
-              />
-              <div class="home-welcome-actions">
-                <Show when={newSessionProject()}>
-                  <label class="home-welcome-project">
-                    <IconV2 name="folder" />
-                    <select
-                      aria-label={language.t("home.projects")}
-                      value={newSessionProject()?.worktree}
-                      onChange={(event) => {
-                        const conn = focusedServer()
-                        if (conn)
-                          setSelection({ server: ServerConnection.key(conn), directory: event.currentTarget.value })
-                      }}
-                    >
-                      <For each={projects()}>
-                        {(project) => <option value={project.worktree}>{displayName(project)}</option>}
-                      </For>
-                    </select>
-                  </label>
-                </Show>
-                <ButtonV2
-                  type="button"
-                  variant="ghost-muted"
-                  onClick={() => {
-                    const conn = focusedServer()
-                    if (conn) chooseProject(conn)
-                  }}
-                >
-                  {language.t("command.project.open")}
-                </ButtonV2>
-                <ButtonV2 type="submit" variant="neutral" disabled={!newSessionProject() || state.starting}>
-                  {language.t("home.welcome.continue")}
-                </ButtonV2>
-              </div>
-            </form>
-            <div class="mt-6 flex items-center gap-4">
-              <HomeUtilityNav
-                class="flex"
-                openSettings={openSettings}
-                openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
-                language={language}
-              />
-            </div>
-          </section>
-        </Show>
-        <Show when={platform.platform !== "desktop" && searchParams.view === "projects"}>
+        <Show when={searchParams.view === "projects" || !newSessionProject()}>
           <header class="mx-auto w-full max-w-[1080px] px-6 pt-8">
             <h1 class="text-20-medium text-v2-text-text-base">{language.t("home.projects")}</h1>
           </header>

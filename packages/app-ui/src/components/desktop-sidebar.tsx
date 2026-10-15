@@ -16,6 +16,7 @@ import { BrandMark } from "@/components/brand-mark"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { desktopProjectGroup } from "./desktop-project-group"
+import type { PromptSession } from "@/context/prompt-state"
 
 type ProjectGroup = {
   server: ServerConnection.Key
@@ -99,6 +100,10 @@ export function DesktopSidebar() {
   const groupForTab = (tab: Tab) => desktopProjectGroup(groups(), tab.server, directory(tab))
   const tabsForGroup = (group: ProjectGroup) =>
     tabs.store.filter((tab) => {
+      if (tab.type === "draft" && tab !== currentTab()) {
+        const prompt = tabs.stateValue<PromptSession>(tab, "prompt")
+        if (prompt?.ready() && !prompt.dirty() && prompt.context.items().length === 0) return false
+      }
       const owner = groupForTab(tab)
       return owner?.server === group.server && owner.project.worktree === group.project.worktree
     })

@@ -705,6 +705,12 @@ export function AppInterface(props: {
   // The visual new layout lives in the router root so it remains mounted across
   // route changes. Draft and session routes override only their server-bound data
   // providers beneath it.
+  makeEventListener(document, "keydown", (event) => {
+    if (event.key === "Tab") document.body.dataset.inputModality = "keyboard"
+  })
+  makeEventListener(document, "pointerdown", () => {
+    document.body.dataset.inputModality = "pointer"
+  })
   const ServerShell = (shellProps: ParentProps) => (
     <QueryProvider>
       <SharedProviders>
