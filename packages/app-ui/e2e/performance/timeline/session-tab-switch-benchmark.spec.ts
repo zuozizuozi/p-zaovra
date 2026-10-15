@@ -24,7 +24,9 @@ benchmark("renders a cold destination while its outcome request is pending", asy
     await response.promise
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ data: { state: "completed_unverified", outcomeUnknown: false, checks: [], missing: [] } }),
+      body: JSON.stringify({
+        data: { state: "completed_unverified", outcomeUnknown: false, checks: [], missing: ["requirements"] },
+      }),
     })
   })
   try {
@@ -41,7 +43,9 @@ benchmark("renders a cold destination while its outcome request is pending", asy
   } finally {
     response.resolve()
   }
-  await expect(page.getByText("Finished — verification incomplete", { exact: true })).toBeVisible()
+  const summary = page.locator('[data-component="verification-summary"]')
+  await expect(summary).toBeVisible()
+  await expect(summary).toContainText("Finished — verification incomplete")
   report({ renderedBeforeOutcomeResponse: true, outcomeRenderedAfterResponse: true })
 })
 
