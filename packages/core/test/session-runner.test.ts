@@ -4646,6 +4646,49 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const limit of [150, 300])
+    it.effect(
+      `R3 bounds provider turns at ${limit}`,
+      () =>
+        Effect.gen(function* () {
+          yield* setup
+          verificationEnabled = false
+          const agents = yield* AgentV2.Service
+          if (limit === 300)
+            yield* agents.transform((draft) =>
+              draft.update(AgentV2.ID.make("build"), (agent) => {
+                agent.steps = 1000
+              }),
+            )
+          const session = yield* SessionV2.Service
+          yield* session.prompt({
+            sessionID,
+            prompt: Prompt.make({ text: "Continue a bounded long task" }),
+            resume: false,
+          })
+          requests.length = 0
+          responses = [
+            ...Array.from({ length: limit - 1 }, (_, i) => [
+              LLMEvent.stepStart({ index: 0 }),
+              LLMEvent.toolCall({ id: `progress-${i}`, name: "echo", input: { text: `progress-${i}` } }),
+              LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+              LLMEvent.finish({ reason: "tool-calls" }),
+            ]),
+            fragmentFixture("text", "closing", ["Work remains at the limit."]).completeEvents,
+          ]
+          const error = yield* session.resume(sessionID).pipe(Effect.flip)
+          expect(error.message).toContain("Maximum agent steps reached")
+          expect(requests).toHaveLength(limit)
+          expect(requests.at(-2)!.tools.length).toBeGreaterThan(0)
+          expect(requests.at(-1)!.tools).toEqual([])
+          expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+            finish: "max-steps",
+            error: { metadata: { reason: "maximum-provider-turns" } },
+          })
+        }),
+      60000,
+    )
+
   it.effect("production execution persists one terminal reason and counts only real provider requests", () =>
     Effect.gen(function* () {
       yield* setup

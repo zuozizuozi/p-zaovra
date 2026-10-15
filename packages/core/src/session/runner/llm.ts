@@ -107,8 +107,8 @@ import { SessionMessageTable } from "../sql"
  * explicit loop starts the next provider turn after local settlement. Configured agent step limits bound the loop.
  */
 
-const DEFAULT_MAX_PROVIDER_TURNS = 64
-const HARD_MAX_PROVIDER_TURNS = 128
+const DEFAULT_MAX_PROVIDER_TURNS = 150
+const HARD_MAX_PROVIDER_TURNS = 300
 const MAX_IDENTICAL_TOOL_CALLS = 3
 
 const layer = Layer.effect(
