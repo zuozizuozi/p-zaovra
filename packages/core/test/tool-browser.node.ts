@@ -412,6 +412,7 @@ test(
                 console.log("RECOVERY_SNAPSHOT", Date.now(), JSON.stringify(observed.result))
               if (
                 observed.result.type === "text" &&
+                typeof observed.result.value === "string" &&
                 `\n${observed.result.value}`.includes(`\nURL: ${url.href}\nTitle: Browser fixture\n`) &&
                 observed.result.value.includes('- button "Upload"')
               )
