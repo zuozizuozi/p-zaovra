@@ -25,6 +25,7 @@ const server = new Server(
   },
 )
 let revision = 0
+let approvalCalls = 0
 let toolName = process.env.MCP_TEST_TOOL ?? "echo"
 
 server.setRequestHandler(ListToolsRequestSchema, () =>
@@ -35,7 +36,12 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
         description: `Echo one string ${revision}`,
         inputSchema: {
           type: "object",
-          properties: { text: { type: "string", minLength: revision + 1 } },
+          properties: {
+            text: { type: "string", minLength: revision + 1 },
+            ...(process.env.MCP_TEST_APPROVAL === "1"
+              ? { nested: { type: "object" }, apiKey: { type: "string" } }
+              : {}),
+          },
           required: ["text"],
           additionalProperties: false,
         },
@@ -63,9 +69,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     content: [
       {
         type: "text",
-        text: process.env.MCP_TEST_SERVER
-          ? `${process.env.MCP_TEST_SERVER}:${request.params.name}:${text}`
-          : `echo:${text}`,
+        text:
+          process.env.MCP_TEST_APPROVAL === "1"
+            ? JSON.stringify({ arguments: request.params.arguments, calls: ++approvalCalls })
+            : process.env.MCP_TEST_SERVER
+              ? `${process.env.MCP_TEST_SERVER}:${request.params.name}:${text}`
+              : `echo:${text}`,
       },
     ],
     structuredContent: { echo: text },

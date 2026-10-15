@@ -1,3 +1,4 @@
+import type { ServerConnection } from "@/context/server"
 import { Component, For, Show, createEffect, createSignal, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
@@ -17,6 +18,8 @@ import { UsageDashboard } from "../usage-dashboard"
 import { SettingsAbout } from "./about"
 
 export const DialogSettings: Component<{
+  serverKey?: ServerConnection.Key
+  serverLabel?: string
   sessionID?: string
   defaultValue?: string
   embedded?: boolean
@@ -98,6 +101,11 @@ export const DialogSettings: Component<{
           </button>
         </header>
       </Show>
+      <Show when={props.serverLabel}>
+        <p data-slot="settings-server" class="px-6 py-2 text-sm">
+          {language.t("settings.targetServer", { server: props.serverLabel ?? "" })}
+        </p>
+      </Show>
       <TabsV2
         orientation="vertical"
         variant="settings"
@@ -143,19 +151,19 @@ export const DialogSettings: Component<{
           </div>
         </TabsV2.List>
         <TabsV2.Content value="general" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} section="general" />
+          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="general" />
         </TabsV2.Content>
         <TabsV2.Content value="permissions" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} section="permissions" />
+          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="permissions" />
         </TabsV2.Content>
         <TabsV2.Content value="appearance" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} section="appearance" />
+          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="appearance" />
         </TabsV2.Content>
         <TabsV2.Content value="privacy" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} section="privacy" />
+          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="privacy" />
         </TabsV2.Content>
         <TabsV2.Content value="experiments" class="settings-v2-panel">
-          <SettingsGeneralV2 sessionID={props.sessionID} section="experiments" />
+          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="experiments" />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

@@ -100,6 +100,25 @@ export function SessionPermissionDock(props: {
           <code class="block break-all py-1">{props.request.permission}</code>
         </details>
       </div>
+      <Show when={typeof props.request.metadata.mcpTool === "string"}>
+        <div data-slot="permission-row">
+          <span data-slot="permission-spacer" aria-hidden="true" />
+          <div data-slot="mcp-approval" class="min-w-0 flex-1 text-12-regular">
+            <p>
+              {language.t("session.permission.mcpServer")}: {String(props.request.metadata.mcpServer ?? "—")}
+            </p>
+            <p>
+              {language.t("session.permission.mcpTool")}: {String(props.request.metadata.mcpTool)}
+            </p>
+            <details open={JSON.stringify(props.request.metadata.mcpArguments ?? {}).length <= 500}>
+              <summary class="cursor-pointer">{language.t("session.permission.mcpArguments")}</summary>
+              <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                {JSON.stringify(props.request.metadata.mcpArguments ?? {}, null, 2)}
+              </pre>
+            </details>
+          </div>
+        </div>
+      </Show>
       <Show when={props.request.permission === "bash"}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />

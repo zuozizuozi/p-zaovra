@@ -1,4 +1,9 @@
 export const dict = {
+  "session.permission.mcpServer": "MCP server",
+  "session.permission.mcpTool": "Tool",
+  "session.permission.mcpArguments": "Validated arguments (sensitive fields redacted)",
+
+  "settings.targetServer": "Configuring: {{server}}",
   "session.changes.undo": "Undo changes",
   "session.permission.details": "Permission details",
   "session.permission.requestedAccess": "Review requested access",

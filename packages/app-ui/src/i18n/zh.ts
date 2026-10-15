@@ -3,6 +3,11 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.permission.mcpServer": "MCP 服务器",
+  "session.permission.mcpTool": "工具",
+  "session.permission.mcpArguments": "已校验参数（敏感字段已脱敏）",
+
+  "settings.targetServer": "正在设置：{{server}}",
   "session.changes.undo": "撤销更改",
   "session.permission.details": "权限详情",
   "session.permission.requestedAccess": "确认本次访问请求",

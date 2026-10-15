@@ -14,10 +14,14 @@ import { useCommand } from "@/context/command"
 import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
-import { ServerConnection, useServer } from "@/context/server"
+import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { homeProjectDirectories } from "@/pages/layout/helpers"
 import { DraftLoading } from "@/components/draft-loading"
+
+import { ServerSDKProvider } from "@/context/server-sdk"
+import { ServerSyncProvider } from "@/context/server-sync"
+import { ModelsProvider } from "@/context/models"
 
 const DesktopSettings = lazy(() =>
   import("@/components/settings-v2/dialog-settings-v2").then((module) => ({ default: module.DialogSettings })),
@@ -36,6 +40,8 @@ export default function NewLayout(props: ParentProps) {
   const tabs = useTabs()
   const pickDirectory = useDirectoryPicker()
   const settingsPage = createEmbeddedSettings(desktop, () => location.pathname + location.search + location.hash)
+  const settingsServer = () =>
+    global.servers.list().find((item) => ServerConnection.key(item) === settingsPage.serverKey)
   setNavigate(navigate)
 
   createEffect(() => setV2Toast(true))
@@ -166,12 +172,32 @@ export default function NewLayout(props: ParentProps) {
             </div>
             <Show when={settingsPage.open}>
               <Suspense fallback={<DraftLoading />}>
-                <DesktopSettings
-                  embedded
-                  sessionID={settingsPage.sessionID}
-                  defaultValue={settingsPage.defaultValue}
-                  onClose={() => window.dispatchEvent(new CustomEvent("zaovra:settings-close"))}
-                />
+                <Show
+                  when={settingsServer()}
+                  keyed
+                  fallback={
+                    <p role="status">
+                      {language.t("app.server.unreachable", { server: settingsPage.serverKey ?? "" })}
+                    </p>
+                  }
+                >
+                  {(connection) => (
+                    <ServerSDKProvider server={() => connection}>
+                      <ServerSyncProvider server={() => connection}>
+                        <ModelsProvider>
+                          <DesktopSettings
+                            embedded
+                            serverKey={settingsPage.serverKey}
+                            serverLabel={global.servers.list().length > 1 ? serverName(connection) : undefined}
+                            sessionID={settingsPage.sessionID}
+                            defaultValue={settingsPage.defaultValue}
+                            onClose={() => window.dispatchEvent(new CustomEvent("zaovra:settings-close"))}
+                          />
+                        </ModelsProvider>
+                      </ServerSyncProvider>
+                    </ServerSDKProvider>
+                  )}
+                </Show>
               </Suspense>
             </Show>
           </main>
