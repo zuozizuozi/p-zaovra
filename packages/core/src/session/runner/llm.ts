@@ -377,8 +377,9 @@ const layer = Layer.effect(
               item.content.some((part) => part.type === "tool" && part.id === `command_${message.id}`),
           ),
       )
-      const failures = SessionOutcome.recoveryFailures(context)
-      const inputRejections = SessionOutcome.consecutiveInputRejections(yield* SessionOutcome.history(db, session.id))
+      const durableHistory = yield* SessionOutcome.history(db, session.id)
+      const failures = SessionOutcome.recoveryFailures(durableHistory)
+      const inputRejections = SessionOutcome.consecutiveInputRejections(durableHistory)
       const previous = context.at(-1)
       const outputState = yield* SessionOutputRecovery.read(db, session.id)
       const configuration = yield* config.entries()
@@ -434,7 +435,7 @@ const layer = Layer.effect(
       const toolMaterialization =
         isLastStep || textOnlyRecovery ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
-      const verificationHistory = yield* SessionOutcome.history(db, session.id)
+      const verificationHistory = durableHistory
       const requirements = SessionOutcome.requested(verificationHistory)
       const reviewing =
         verificationEnabled &&
