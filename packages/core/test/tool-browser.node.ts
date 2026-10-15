@@ -381,7 +381,25 @@ test(
             "Outcome may have occurred",
           )
           expect(uncertainHits).toBe(1)
-          yield* call({ action: "open", url: url.href })
+          const reopened = yield* call({ action: "open", url: url.href })
+          if (process.env.BROWSER_RECOVERY_TRACE)
+            console.log("RECOVERY_REOPEN", Date.now(), JSON.stringify(reopened.result))
+          // Chromium can commit the previous failed navigation's error page after
+          // goto rejects. Observe the explicit reopen until its target is ready;
+          // never replay either navigation or the following upload action.
+          yield* Effect.gen(function* () {
+            while (true) {
+              const observed = yield* call({ action: "snapshot" })
+              if (process.env.BROWSER_RECOVERY_TRACE)
+                console.log("RECOVERY_SNAPSHOT", Date.now(), JSON.stringify(observed.result))
+              if (
+                observed.result.type === "text" &&
+                observed.result.value.startsWith(`URL: ${url.href}\nTitle: Browser fixture\n`) &&
+                observed.result.value.includes('- button "Upload"')
+              ) return
+              yield* Effect.sleep("50 millis")
+            }
+          }).pipe(Effect.timeout("8 seconds"))
           expect(JSON.stringify(yield* call({ action: "click", target: { label: "Upload" } }))).toContain(
             "File upload is not supported",
           )
