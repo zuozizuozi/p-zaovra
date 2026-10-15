@@ -170,7 +170,7 @@ export default function NewLayout(props: ParentProps) {
                   embedded
                   sessionID={settingsPage.sessionID}
                   defaultValue={settingsPage.defaultValue}
-                  onClose={() => setSettingsPage("open", false)}
+                  onClose={() => window.dispatchEvent(new CustomEvent("zaovra:settings-close"))}
                 />
               </Suspense>
             </Show>

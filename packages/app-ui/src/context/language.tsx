@@ -124,10 +124,10 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       initialValue: dicts.get(initial) ?? base,
     })
 
-    const translate = i18n.translator(() => dict() ?? base, i18n.resolveTemplate)
-    const english = i18n.translator(() => base, i18n.resolveTemplate)
+    const translate = i18n.translator((): Record<string, string> => dict() ?? base, i18n.resolveTemplate)
+    const english = i18n.translator((): Record<string, string> => base, i18n.resolveTemplate)
     const t = (key: keyof Dictionary, params?: Record<string, string | number | boolean>): string =>
-      translate(key, params) ?? english(key, params) ?? key
+      translate(String(key), params) ?? english(String(key), params) ?? String(key)
 
     const label = (value: Locale) => t(LABEL_KEY[value])
 
