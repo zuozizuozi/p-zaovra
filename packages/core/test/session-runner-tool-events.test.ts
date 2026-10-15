@@ -164,3 +164,16 @@ test("step finish records settlement without publishing step ended", async () =>
   expect(published.some((event) => event.type === "session.next.step.ended.2")).toBe(false)
   expect(publisher.stepSettlement()).toMatchObject({ finish: "stop" })
 })
+
+test("legacy step ended without error still decodes", () => {
+  const decoded = Schema.decodeUnknownSync(SessionEvent.Step.Ended.data)({
+    sessionID,
+    timestamp: Date.now(),
+    assistantMessageID: SessionMessage.ID.create(),
+    finish: "stop",
+    cost: 0,
+    tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+  expect(decoded.error).toBeUndefined()
+  expect(decoded.finish).toBe("stop")
+})

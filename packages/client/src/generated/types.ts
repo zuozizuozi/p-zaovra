@@ -1231,6 +1231,11 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly assistantMessageID: string
           readonly finish: string
+          readonly error?: {
+            readonly type: "unknown"
+            readonly message: string
+            readonly metadata?: { readonly [x: string]: string }
+          }
           readonly cost: number
           readonly usageReported?: boolean
           readonly requestPerformed?: boolean
@@ -1813,6 +1818,11 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly assistantMessageID: string
         readonly finish: string
+        readonly error?: {
+          readonly type: "unknown"
+          readonly message: string
+          readonly metadata?: { readonly [x: string]: string }
+        }
         readonly cost: number
         readonly usageReported?: boolean
         readonly requestPerformed?: boolean

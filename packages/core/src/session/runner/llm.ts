@@ -883,6 +883,15 @@ const layer = Layer.effect(
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
                 finish: isLastStep ? "max-steps" : stepSettlement.finish,
+                ...(stopReason
+                  ? {
+                      error: {
+                        type: "unknown" as const,
+                        message: stopReason,
+                        metadata: { reason: failures >= 4 ? "repeated-shell-failures" : "maximum-provider-turns" },
+                      },
+                    }
+                  : {}),
                 cost: 0,
                 tokens: stepSettlement.tokens,
                 usageReported: stepSettlement.usageReported,

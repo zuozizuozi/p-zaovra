@@ -9,6 +9,18 @@ import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
 
 describe("zaovra run (non-interactive subprocess)", () => {
+  cliIt.concurrent(
+    "exhausted text truncation exits nonzero after automatic continuation",
+    ({ llm, zaovra }) =>
+      Effect.gen(function* () {
+        yield* llm.push(reply().text("first truncated output").length(), reply().text("still truncated").length())
+        const result = yield* zaovra.run("finish the answer", { format: "json" })
+        expect(result.exitCode).not.toBe(0)
+        expect(yield* llm.calls).toBe(2)
+        expect(result.stdout).toContain("still truncated")
+      }),
+    60_000,
+  )
   // Happy path: prompt completes, output reaches stdout, process exits 0.
   // If this fails, all the others likely will too — debug here first.
   cliIt.concurrent(

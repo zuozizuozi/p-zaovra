@@ -990,6 +990,7 @@ export type GlobalEvent = {
           sessionID: string
           assistantMessageID: string
           finish: string
+          error?: SessionErrorUnknown
           cost: number
           usageReported?: boolean
           requestPerformed?: boolean
@@ -4239,6 +4240,7 @@ export type SyncEventSessionNextStepEnded = {
       sessionID: string
       assistantMessageID: string
       finish: string
+      error?: SessionErrorUnknown
       cost: number
       usageReported?: boolean
       requestPerformed?: boolean
@@ -5944,6 +5946,7 @@ export type SessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    error?: SessionErrorUnknown
     cost: number
     usageReported?: boolean
     requestPerformed?: boolean
@@ -8960,6 +8963,7 @@ export type EventSessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    error?: SessionErrorUnknown
     cost: number
     usageReported?: boolean
     requestPerformed?: boolean

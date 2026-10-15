@@ -42,6 +42,7 @@ import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
+import { LocationServiceMap } from "@zaovra-ai/core/location-service-map"
 import { SessionExecutionLocal } from "@zaovra-ai/core/session/execution/local"
 import { SessionRunCoordinator } from "@zaovra-ai/core/session/run-coordinator"
 import { SessionRunner } from "@zaovra-ai/core/session/runner"
@@ -74,7 +75,7 @@ import { ModelV2 } from "@zaovra-ai/core/model"
 import { Location } from "@zaovra-ai/core/location"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
-import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
+import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
@@ -4522,6 +4523,65 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("production execution persists one terminal reason and counts only real provider requests", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("build"), (agent) => {
+          agent.steps = 2
+        }),
+      )
+      const session = yield* SessionV2.Service
+      const store = yield* SessionStore.Service
+      const events = yield* EventV2.Service
+      const runner = yield* SessionRunner.Service
+      // Use the production coordinator/reportFailure, with this fixture's Location runner.
+      const placements = yield* LayerMap.make(() => Layer.succeed(SessionRunner.Service, runner))
+      const runtime = yield* Layer.build(
+        AppNodeBuilder.build(SessionExecutionLocal.node, [
+          [SessionStore.node, Layer.succeed(SessionStore.Service, store)],
+          [EventV2.node, Layer.succeed(EventV2.Service, events)],
+          [
+            LocationServiceMap.node,
+            Layer.succeed(
+              LocationServiceMap.Service,
+              placements as unknown as Context.Service.Shape<typeof LocationServiceMap.Service>,
+            ),
+          ],
+        ]),
+      )
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Finish the task" }), resume: false })
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "observed", name: "echo", input: { text: "done" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "closing", ["Completed the observed action; remaining work is blocked."])
+          .completeEvents,
+      ]
+      const result = yield* Context.get(runtime, SessionExecution.Service).resume(sessionID).pipe(Effect.exit)
+      expect(result._tag).toBe("Failure")
+      expect(requests).toHaveLength(2)
+      const before = yield* session.context(sessionID)
+      expect(before.filter((message) => message.type === "assistant")).toHaveLength(2)
+      expect(before.at(-1)).toMatchObject({
+        finish: "max-steps",
+        error: {
+          message: "Maximum agent steps reached before completion",
+          metadata: { reason: "maximum-provider-turns" },
+        },
+      })
+      expect((yield* SessionUsageQuery.read(sessionID)).total.calls).toBe(requests.length)
+      yield* replaySessionProjection(sessionID)
+      expect(yield* session.context(sessionID)).toEqual(before)
+      expect((yield* SessionUsageQuery.read(sessionID)).total.calls).toBe(2)
+      expect((yield* session.outcome(sessionID)).state).toBe("failed")
+    }),
+  )
   it.effect("retains a passed check at the turn limit without claiming overall completion", () =>
     Effect.gen(function* () {
       yield* setup

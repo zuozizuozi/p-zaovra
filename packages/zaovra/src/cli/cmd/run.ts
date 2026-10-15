@@ -665,9 +665,20 @@ export const RunCommand = effectCmd({
             }
 
             if (event.type !== "session.next.step.ended" || event.properties.sessionID !== sessionID) return false
-            const terminal = event.properties.finish !== "tool-calls"
             emit("step_finish", { event })
-            return terminal
+            if (event.properties.error) {
+              error = event.properties.error.message
+              if (!emit("error", { error: event.properties.error })) UI.error(error)
+              return true
+            }
+            // A length finish can still be followed by the host's recovery turn.
+            // Wait for that outcome; idle without a terminal event is already an error.
+            if (event.properties.finish === "length" || event.properties.finish === "tool-calls") return false
+            if (event.properties.finish !== "stop") {
+              error = `Session stopped before completion: ${event.properties.finish}`
+              if (!emit("error", { error: { message: error } })) UI.error(error)
+            }
+            return true
           }
 
           async function resolvePending() {

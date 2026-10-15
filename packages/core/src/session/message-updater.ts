@@ -222,6 +222,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
           draft.time.completed = event.data.timestamp
           draft.finish = event.data.finish
+          if (event.data.error) draft.error = event.data.error
           draft.cost = event.data.cost
           draft.tokens = event.data.tokens
           if (event.data.snapshot || event.data.files)

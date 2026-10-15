@@ -801,6 +801,11 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
       return out(data, commits)
     }
 
+    if (event.properties.error && !data.ids.has(msgErr(event.properties.assistantMessageID))) {
+      data.ids.add(msgErr(event.properties.assistantMessageID))
+      commits.push({ kind: "error", text: event.properties.error.message, phase: "start", source: "system",
+        messageID: event.properties.assistantMessageID })
+    }
     const usage = formatUsage(
       event.properties.tokens,
       undefined,
