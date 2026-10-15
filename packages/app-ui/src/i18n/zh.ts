@@ -1152,6 +1152,7 @@ export const dict = {
   "session.review.empty": "此会话暂无更改",
   "session.review.noVcs": "未检测到 Git 版本控制系统，无法显示更改",
   "session.review.noSnapshot": "配置中已禁用快照跟踪，因此会话更改不可用",
+  "session.snapshot.unavailable": "没有可用快照，本次文件改动无法撤销。",
   "session.review.noChanges": "无更改",
   "session.review.noUncommittedChanges": "尚无未提交的更改",
   "session.review.noBranchChanges": "尚无分支更改",

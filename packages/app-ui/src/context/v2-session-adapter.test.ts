@@ -15,6 +15,39 @@ const session: SessionV2Info = {
 }
 
 describe("V2 session timeline adapter", () => {
+  test("warns about missing undo snapshots only for completed potentially mutating tools", () => {
+    const assistant: Extract<SessionMessage, { type: "assistant" }> = {
+      id: "msg_snapshot",
+      type: "assistant",
+      agent: "build",
+      model: session.model!,
+      time: { created: 1, completed: 2 },
+      content: [
+        {
+          id: "call_write",
+          type: "tool",
+          name: "write",
+          time: { created: 1, completed: 2 },
+          state: { status: "completed", input: { path: "a.txt", content: "new" }, content: [], structured: {} },
+        },
+      ],
+    }
+    const warning = (value: typeof assistant) => {
+      const part = adaptSessionMessages(session, [
+        { id: "msg_user", type: "user", text: "edit", time: { created: 0 } },
+        value,
+      ])[1].parts[0]
+      return (
+        part.type === "tool" &&
+        part.state.status === "completed" &&
+        part.state.metadata.zaovraSnapshotUnavailable === true
+      )
+    }
+    expect(warning(assistant)).toBe(true)
+    expect(warning({ ...assistant, snapshot: { start: "before", end: "after", files: ["a.txt"] } })).toBe(false)
+    expect(warning({ ...assistant, snapshot: { start: "before" } })).toBe(true)
+    expect(warning({ ...assistant, content: assistant.content.map((part) => ({ ...part, name: "read" })) })).toBe(false)
+  })
   test("preserves durable execution failure reasons and references on reload", () => {
     const message = "输入或媒体处理超过运行时限制（RangeError）。ref=err_test"
     const result = adaptSessionMessages(session, [

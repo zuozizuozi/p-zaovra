@@ -1160,19 +1160,39 @@ export function MessageTimeline(props: {
         {(message) => (
           <Show when={part()}>
             {(part) => (
-              <MessagePart
-                part={part()}
-                message={message()}
-                showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
-                turnDurationMs={turnDurationMs(row().userMessageID)}
-                useV2Actions={settings.general.newLayoutDesigns()}
-                defaultOpen={defaultOpen()}
-                toolOpen={toolOpen[part().id] ?? defaultOpen()}
-                onToolOpenChange={(open) => setToolOpen(part().id, open)}
-                deferToolContent
-                virtualizeDiff={false}
-                onContentRendered={onSizeChange}
-              />
+              <>
+                <Show
+                  when={(() => {
+                    const value = part()
+                    return (
+                      value.type === "tool" &&
+                      value.state.status === "completed" &&
+                      value.state.metadata?.zaovraSnapshotUnavailable === true
+                    )
+                  })()}
+                >
+                  <div
+                    role="status"
+                    data-slot="snapshot-unavailable"
+                    class="mb-2 rounded-md border border-border-weak-base px-3 py-2 text-12-regular text-text-strong"
+                  >
+                    {language.t("session.snapshot.unavailable")}
+                  </div>
+                </Show>
+                <MessagePart
+                  part={part()}
+                  message={message()}
+                  showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
+                  turnDurationMs={turnDurationMs(row().userMessageID)}
+                  useV2Actions={settings.general.newLayoutDesigns()}
+                  defaultOpen={defaultOpen()}
+                  toolOpen={toolOpen[part().id] ?? defaultOpen()}
+                  onToolOpenChange={(open) => setToolOpen(part().id, open)}
+                  deferToolContent
+                  virtualizeDiff={false}
+                  onContentRendered={onSizeChange}
+                />
+              </>
             )}
           </Show>
         )}

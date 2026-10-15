@@ -20,7 +20,7 @@ await Effect.runPromise(
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
     const database = yield* Database.Service
-    if (phase === "before") {
+    if (phase === "snapshot" || phase === "before") {
       yield* session.create({
         id: sessionID,
         location: { directory },
@@ -33,6 +33,12 @@ await Effect.runPromise(
         },
         resume: false,
       })
+      if (phase === "snapshot") {
+        yield* session.resume(sessionID)
+        const result = { session: yield* session.get(sessionID), messages: yield* session.context(sessionID) }
+        yield* Effect.promise(() => Bun.write(path.join(directory, "snapshot.json"), JSON.stringify(result)))
+        return
+      }
       // Public resumes are explicit: partial/error recovery must not become an automatic crash retry.
       const partial = yield* session.resume(sessionID).pipe(Effect.result)
       const retried = yield* session.resume(sessionID).pipe(Effect.result)
