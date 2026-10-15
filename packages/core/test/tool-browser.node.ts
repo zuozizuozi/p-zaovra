@@ -502,7 +502,19 @@ test("real Session Stop, archive, Location disposal and browser process loss", {
   await mkdir(second)
   const initial = browserProcesses()
   const initialTree = browserProcesses(false)
-  const server = createServer((_request, response) => response.end("<title>Lifecycle</title><p>alive</p>"))
+  let streams = 0
+  const server = createServer((request, response) => {
+    if (request.url === "/stream") {
+      streams++
+      response.writeHead(200, { "Content-Type": "text/plain" })
+      response.write("first")
+      response.on("close", () => streams--)
+      return
+    }
+    response.end(
+      '<title>Lifecycle</title><p>alive</p><script>fetch("/stream").then(r=>r.body.getReader().read())</script>',
+    )
+  })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()
   if (!address || typeof address === "string") throw Error("No server")
@@ -531,11 +543,17 @@ test("real Session Stop, archive, Location disposal and browser process loss", {
           call(session, { action: "snapshot" }).pipe(Effect.map((value) => JSON.stringify(value)))
         for (const session of [a, b, c])
           expect(JSON.stringify(yield* call(session, { action: "open", url }))).toContain("Lifecycle")
+        for (let attempt = 0; attempt < 20 && streams !== 3; attempt++) yield* Effect.sleep("50 millis")
+        expect(streams).toBe(3)
         yield* sessions.interrupt(a.id)
+        for (let attempt = 0; attempt < 20 && streams !== 2; attempt++) yield* Effect.sleep("50 millis")
+        expect(streams).toBe(2)
         expect(yield* observe(a)).toContain("no active browser")
         expect(yield* observe(b)).toContain("Lifecycle")
         expect(yield* observe(c)).toContain("Lifecycle")
         yield* sessions.update({ sessionID: b.id, archived: true })
+        for (let attempt = 0; attempt < 20 && streams !== 1; attempt++) yield* Effect.sleep("50 millis")
+        expect(streams).toBe(1)
         expect(yield* observe(b)).toContain("no active browser")
         expect(yield* observe(c)).toContain("Lifecycle")
         yield* call(a, { action: "open", url })

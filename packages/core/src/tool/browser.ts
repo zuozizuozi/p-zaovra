@@ -294,7 +294,7 @@ const layer = Layer.effect(
       .register({
         browser: Tool.make({
           description:
-            "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Use batch for up to 4 already-known click/type/press/scroll actions with one final snapshot (default) or screenshot. Batch stops at the first error; inspect step statuses before continuing, never replay completed actions. Use single steps when the next target depends on a new observation. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript. Built-in browser does not support Web Workers; use the system browser for full capabilities.",
+            "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Use batch for up to 4 already-known click/type/press/scroll actions with one final snapshot (default) or screenshot. Batch stops at the first error; inspect step statuses before continuing, never replay completed actions. Use single steps when the next target depends on a new observation. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript. Built-in browser does not support Web Workers; use the system browser for full capabilities. Streaming is supported for GET/HEAD fetch, XHR and EventSource; navigation and mutating requests retain bounded zero-retry transport.",
           input: Input,
           output: Output,
           structured: Schema.Struct({
@@ -448,7 +448,8 @@ const layer = Layer.effect(
                               state.logs[0] = "[Earlier logs dropped: capture limit]"
                             }
                           }
-                          await BrowserNetwork.install(browserContext, state.origins, log)
+                          const network = await BrowserNetwork.install(browserContext, state.origins, log)
+                          await network.stream(page)
                           browserContext.on("page", (popup) => {
                             log("Popup blocked")
                             void popup.close().catch(() => {})
@@ -667,4 +668,3 @@ export const node = makeLocationNode({
   layer,
   deps: [ToolRegistry.node, PermissionV2.node, Catalog.node, SessionStore.node, ToolOutputStore.node, EventV2.node],
 })
-
