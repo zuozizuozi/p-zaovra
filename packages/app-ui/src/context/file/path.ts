@@ -106,7 +106,9 @@ export function createPathHelpers(scope: () => string) {
     const root = scope()
 
     let path = unquoteGitPath(
-      input.startsWith("file://") ? decodeFilePath(stripQueryAndHash(stripFileProtocol(input))) : input,
+      input.startsWith("file://")
+        ? decodeFilePath(stripQueryAndHash(stripFileProtocol(input))).replace(/^\/(?=[A-Za-z]:[\\/])/, "")
+        : input,
     )
 
     // Separator-agnostic prefix stripping for Cygwin/native Windows compatibility

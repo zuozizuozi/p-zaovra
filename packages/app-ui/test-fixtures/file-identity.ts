@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
+import { pathToFileURL } from "node:url"
 import { createRoot } from "solid-js"
 import { artifactPath } from "../src/utils/artifact-path"
 
@@ -68,6 +69,10 @@ try {
     assert.equal(file.get(tab), file.get(correct!))
     await file.load(tab, { force: true })
     assert.equal(file.get(tab)?.content?.content, `RIGHT:${correct}`)
+    const url = pathToFileURL(path.join(root, correct!)).href
+    assert.equal(file.normalize(url), correct)
+    await file.load(url, { force: true })
+    assert.equal(file.get(url), file.get(correct!))
   }
   for (const rejected of ["../outside.txt", "https://evil.test/file", "javascript:alert(1)", "file:///%2e%2e/outside"])
     assert.equal(artifactPath(rejected, root), undefined)
