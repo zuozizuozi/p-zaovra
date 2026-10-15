@@ -1,6 +1,5 @@
-import { createEffect, lazy, on, Show, Suspense, type ParentProps } from "solid-js"
-import { createStore } from "solid-js/store"
-import { makeEventListener } from "@solid-primitives/event-listener"
+import { createEffect, lazy, Show, Suspense, type ParentProps } from "solid-js"
+import { createEmbeddedSettings } from "./layout/embedded-settings"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
 import { UpdaterNotification } from "@/components/updater-notification"
@@ -36,23 +35,8 @@ export default function NewLayout(props: ParentProps) {
   const server = useServer()
   const tabs = useTabs()
   const pickDirectory = useDirectoryPicker()
-  const [settingsPage, setSettingsPage] = createStore<{ open: boolean; sessionID?: string; defaultValue?: string }>({
-    open: false,
-  })
-  makeEventListener(window, "zaovra:settings-open", (event) => {
-    if (!desktop() || !(event instanceof CustomEvent)) return
-    event.preventDefault()
-    setSettingsPage({ open: true, sessionID: event.detail?.sessionID, defaultValue: event.detail?.defaultValue })
-  })
+  const settingsPage = createEmbeddedSettings(desktop, () => location.pathname + location.search + location.hash)
   setNavigate(navigate)
-  makeEventListener(window, "zaovra:settings-close", () => setSettingsPage("open", false))
-  createEffect(
-    on(
-      () => location.pathname,
-      () => setSettingsPage("open", false),
-      { defer: true },
-    ),
-  )
 
   createEffect(() => setV2Toast(true))
 

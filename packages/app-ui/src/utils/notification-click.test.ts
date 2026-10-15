@@ -2,6 +2,57 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { handleNotificationClick, setNavigate } from "./notification-click"
 
 describe("notification click", () => {
+  for (const kind of ["question", "permission"])
+    test(`closes settings even when the ${kind} notification route is unchanged`, async () => {
+      const panel = document.createElement("div")
+      panel.style.display = "none"
+      const card = document.createElement("div")
+      card.dataset.notificationTarget = `${kind}:same`
+      const button = document.createElement("button")
+      card.append(button)
+      panel.append(card)
+      document.body.append(panel)
+      let closed = 0
+      const close = () => {
+        closed++
+        panel.style.display = "block"
+      }
+      window.addEventListener("zaovra:settings-close", close)
+      setNavigate(() => {})
+      try {
+        handleNotificationClick(`/session/current#${kind}=same`)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        expect(closed).toBe(1)
+        expect(document.activeElement).toBe(button)
+        panel.style.display = "none"
+        handleNotificationClick(`/session/current#${kind}=same`)
+        expect(closed).toBe(2)
+        expect(document.activeElement).toBe(button)
+      } finally {
+        window.removeEventListener("zaovra:settings-close", close)
+        panel.remove()
+      }
+    })
+  test("waits for a hidden request to become visible before focusing", async () => {
+    const panel = document.createElement("div")
+    panel.style.display = "none"
+    const card = document.createElement("div")
+    card.dataset.notificationTarget = "permission:later"
+    const button = document.createElement("button")
+    card.append(button)
+    panel.append(card)
+    document.body.append(panel)
+    setNavigate(() => {})
+    try {
+      handleNotificationClick("/session/current#permission=later")
+      expect(document.activeElement).not.toBe(button)
+      panel.style.display = "block"
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      expect(document.activeElement).toBe(button)
+    } finally {
+      panel.remove()
+    }
+  })
   afterEach(() => {
     setNavigate(undefined)
   })

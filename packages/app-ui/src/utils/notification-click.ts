@@ -11,6 +11,7 @@ export const handleNotificationClick = (href?: string) => {
   if (!href) return
   cancelFocus?.()
   if (nav) {
+    window.dispatchEvent(new CustomEvent("zaovra:settings-close"))
     nav(href)
     const target = href.match(/#(question|permission)=([^#]+)$/)
     if (!target) return
@@ -24,6 +25,18 @@ export const handleNotificationClick = (href?: string) => {
         card.querySelector<HTMLElement>('button[data-slot="question-option"]:not(:disabled)') ??
         card.querySelector<HTMLElement>("textarea:not(:disabled), button:not(:disabled)")
       if (!control) return false
+      for (let node: HTMLElement | null = control; node; node = node.parentElement) {
+        const style = getComputedStyle(node)
+        if (
+          node.hidden ||
+          node.inert ||
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          style.visibility === "collapse" ||
+          style.opacity === "0"
+        )
+          return false
+      }
       card.scrollIntoView({ block: "nearest" })
       control.focus({ preventScroll: true })
       return true
@@ -39,7 +52,12 @@ export const handleNotificationClick = (href?: string) => {
       clearTimeout(timeout)
       cancelFocus = undefined
     }
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] })
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["disabled", "class", "style", "hidden", "inert", "open"],
+    })
     return
   }
   console.warn("notification-click: navigate function not set, falling back to window.location.assign")
