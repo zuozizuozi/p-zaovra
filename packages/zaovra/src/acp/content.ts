@@ -29,6 +29,8 @@ export function promptContentToParts(content: readonly ContentBlock[]): PromptPa
 }
 
 export function contentBlockToParts(block: ContentBlock): PromptPart[] {
+  const audience = block.annotations?.audience
+  if (audience?.length && !audience.includes("assistant")) return []
   switch (block.type) {
     case "text":
       return [

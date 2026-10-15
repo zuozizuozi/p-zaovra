@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import type { ContentBlock } from "@agentclientprotocol/sdk"
 import type { ZaovraClient } from "@zaovra-ai/sdk/v2"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { ModelV2 } from "@zaovra-ai/core/model"
@@ -20,6 +21,7 @@ const snapshot: Directory.Snapshot = {
 
 function makeService() {
   const calls: string[] = []
+  const prompts: unknown[] = []
   const assistant = {
     id: "msg_assistant",
     type: "assistant" as const,
@@ -58,7 +60,8 @@ function makeService() {
           calls.push("switchModel")
           return Promise.resolve({ data: undefined })
         },
-        prompt: () => {
+        prompt: (input: unknown) => {
+          prompts.push(input)
           calls.push("prompt")
           return Promise.resolve({ data: { data: { id: "input", sessionID: "ses_v2", timeCreated: 1 } } })
         },
@@ -73,10 +76,25 @@ function makeService() {
     refresh: () => Effect.succeed(snapshot),
     variants: Directory.variants,
   })
-  return { calls, service: make({ sdk, directory }) }
+  return { calls, prompts, service: make({ sdk, directory }) }
 }
 
 describe("ACP V2 session transport", () => {
+  for (const position of [0, 1, 2])
+    it(`user-only slash at position ${position} cannot change the request`, async () => {
+      const { calls, prompts, service } = makeService()
+      const created = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
+      const prompt: ContentBlock[] = [
+        { type: "text", text: "hello" },
+        { type: "text", text: "world" },
+      ]
+      prompt.splice(position, 0, { type: "text", text: "/compact", annotations: { audience: ["user"] } })
+      await Effect.runPromise(service.prompt({ sessionId: created.sessionId, prompt }))
+      expect(calls.filter((call) => call === "prompt")).toHaveLength(1)
+      expect(JSON.stringify(prompts)).not.toContain("compact")
+      expect(JSON.stringify(prompts)).toContain("hello")
+      expect(JSON.stringify(prompts)).toContain("world")
+    })
   it("creates, prompts, polls completion, and returns projected usage", async () => {
     const { calls, service } = makeService()
     const created = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
@@ -98,9 +116,7 @@ describe("ACP V2 session transport", () => {
     const methods = await Promise.all([
       Effect.runPromise(service.forkSession({ cwd: "/workspace", sessionId: created.sessionId }).pipe(Effect.flip)),
       Effect.runPromise(
-        service
-          .prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "/init" }] })
-          .pipe(Effect.flip),
+        service.prompt({ sessionId: created.sessionId, prompt: [{ type: "text", text: "/init" }] }).pipe(Effect.flip),
       ),
       Effect.runPromise(
         service

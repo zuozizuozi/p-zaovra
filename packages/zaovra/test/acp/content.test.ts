@@ -4,6 +4,22 @@ import { pathToFileURL } from "node:url"
 import { contentBlockToParts, partsToContentChunks, promptContentToParts } from "../../src/acp/content"
 
 describe("acp content conversion", () => {
+  const blocks: ContentBlock[] = [
+    { type: "text", text: "context" },
+    { type: "image", data: "AAAA", mimeType: "image/png" },
+    { type: "resource_link", uri: "file:///context.txt", name: "context" },
+    { type: "resource", resource: { uri: "mcp://context", text: "context" } },
+    { type: "resource", resource: { uri: "mcp://context", blob: "AAAA", mimeType: "text/plain" } },
+  ]
+  for (const [index, block] of blocks.entries())
+    for (const audience of [undefined, ["assistant"], ["user"], ["assistant", "user"]] as const)
+      test(`raw audience filtering type ${index} audience ${audience?.join() ?? "omitted"}`, () => {
+        const value = { ...block, ...(audience ? { annotations: { audience: [...audience] } } : {}) }
+        expect(promptContentToParts([value])).toEqual(
+          audience?.length === 1 && audience[0] === "user" ? [] : contentBlockToParts(value),
+        )
+        expect(contentBlockToParts(value)).toHaveLength(audience?.length === 1 && audience[0] === "user" ? 0 : 1)
+      })
   test("plain text block becomes a text part", () => {
     expect(contentBlockToParts({ type: "text", text: "hello" })).toEqual([{ type: "text", text: "hello" }])
   })
@@ -18,14 +34,14 @@ describe("acp content conversion", () => {
     ).toEqual([{ type: "text", text: "internal", synthetic: true }])
   })
 
-  test("user-only text audience becomes ignored", () => {
+  test("user-only text audience is filtered before conversion", () => {
     expect(
       contentBlockToParts({
         type: "text",
         text: "visible to user",
         annotations: { audience: ["user"] },
       }),
-    ).toEqual([{ type: "text", text: "visible to user", ignored: true }])
+    ).toEqual([])
   })
 
   test("image block with base64 data becomes a data URL file part", () => {
