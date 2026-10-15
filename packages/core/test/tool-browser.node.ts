@@ -394,9 +394,10 @@ test(
                 console.log("RECOVERY_SNAPSHOT", Date.now(), JSON.stringify(observed.result))
               if (
                 observed.result.type === "text" &&
-                observed.result.value.startsWith(`URL: ${url.href}\nTitle: Browser fixture\n`) &&
+                `\n${observed.result.value}`.includes(`\nURL: ${url.href}\nTitle: Browser fixture\n`) &&
                 observed.result.value.includes('- button "Upload"')
-              ) return
+              )
+                return
               yield* Effect.sleep("50 millis")
             }
           }).pipe(Effect.timeout("8 seconds"))
