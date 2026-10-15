@@ -4689,6 +4689,45 @@ describe("SessionRunnerLLM", () => {
       60000,
     )
 
+  it.effect("R4 closing request retains explicit constraint checks from the default agent", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const agents = yield* AgentV2.Service
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agents) }))
+      yield* agents.transform((draft) =>
+        draft.update(AgentV2.ID.make("build"), (agent) => {
+          agent.steps = 2
+        }),
+      )
+      const session = yield* SessionV2.Service
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Update only source files; output results.csv with values between 1 and 5." }),
+        resume: false,
+      })
+      requests.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "observed", name: "echo", input: { text: "observed" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "closing", ["Some constraints remain unchecked."]).completeEvents,
+      ]
+      yield* session.resume(sessionID).pipe(Effect.exit)
+      expect(requests).toHaveLength(2)
+      expect(requests.at(-1)!.tools).toEqual([])
+      expect(JSON.stringify(requests.at(-1)!.system)).toContain("explicit constraints")
+      expect(JSON.stringify(requests.at(-1)!.system)).toContain(
+        "allowed changes, filenames, formats, and numeric ranges",
+      )
+      expect(JSON.stringify(requests.at(-1)!.system)).toContain("not checked")
+      expect(JSON.stringify(requests.at(-1)!.messages)).toContain("results.csv")
+    }),
+  )
+
   it.effect("production execution persists one terminal reason and counts only real provider requests", () =>
     Effect.gen(function* () {
       yield* setup
