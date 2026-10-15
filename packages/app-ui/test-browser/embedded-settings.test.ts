@@ -4,6 +4,28 @@ import { createStore } from "solid-js/store"
 import { createEmbeddedSettings } from "../src/pages/layout/embedded-settings"
 import { handleNotificationClick, setNavigate } from "../src/utils/notification-click"
 
+test("embedded settings keep their captured server while background selection changes", () => {
+  createRoot((dispose) => {
+    const [selection, setSelection] = createStore({ serverKey: "http://127.0.0.1:4592" })
+    const settings = createEmbeddedSettings(
+      () => true,
+      () => "/work",
+    )
+    try {
+      window.dispatchEvent(new CustomEvent("zaovra:settings-open", { detail: selection }))
+      expect(settings.serverKey).toBe("http://127.0.0.1:4592")
+      setSelection("serverKey", "http://localhost:4592")
+      expect(settings.open).toBe(true)
+      expect(settings.serverKey).toBe("http://127.0.0.1:4592")
+      window.dispatchEvent(new CustomEvent("zaovra:settings-close"))
+      window.dispatchEvent(new CustomEvent("zaovra:settings-open", { detail: selection }))
+      expect(settings.serverKey).toBe("http://localhost:4592")
+    } finally {
+      dispose()
+    }
+  })
+})
+
 test("embedded settings close on draft identity changes and same-route notifications", () => {
   let dispose = () => {}
   const [route, setRoute] = createStore({ pathname: "/new-session", search: "?draftId=a", hash: "" })
