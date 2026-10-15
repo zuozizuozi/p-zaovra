@@ -53,6 +53,33 @@ const capture = () => {
 }
 
 const call = LLMEvent.toolCall({ id: "call-image", name: "read", input: { path: "pixel.png" } })
+
+test("local tool safety classification survives the durable failure event codec", async () => {
+  const { published, publisher } = capture()
+  await Effect.runPromise(publisher.publish(call))
+  await Effect.runPromise(
+    publisher.publish(
+      LLMEvent.toolResult({
+        id: call.id,
+        name: call.name,
+        result: { type: "error", value: "Tool not executed: keep the original" },
+      }),
+      [],
+      { phase: "permission", reason: "PermissionV2.CorrectedError" },
+    ),
+  )
+  const failed = published.find((event) => event.type === "session.next.tool.failed.1")
+  const data = Schema.decodeUnknownSync(SessionEvent.Tool.Failed.data)(
+    Schema.encodeSync(SessionEvent.Tool.Failed.data)(
+      failed!.data as Schema.Schema.Type<typeof SessionEvent.Tool.Failed.data>,
+    ),
+  )
+  expect(data.error).toMatchObject({
+    type: "unknown",
+    message: "Tool not executed: keep the original",
+    metadata: { phase: "permission", reason: "PermissionV2.CorrectedError" },
+  })
+})
 const result = LLMEvent.toolResult({
   id: "call-image",
   name: "read",

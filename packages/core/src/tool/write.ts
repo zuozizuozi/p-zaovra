@@ -17,6 +17,7 @@ import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { safetyFailure } from "./safety-failure"
 
 export const name = "write"
 
@@ -113,6 +114,7 @@ const layer = Layer.effectDiscard(
               }).pipe(
                 Effect.mapError(
                   (error) =>
+                    safetyFailure(error) ??
                     new ToolFailure({
                       message:
                         error instanceof FileMutation.TargetExistsError

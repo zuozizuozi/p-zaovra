@@ -337,7 +337,11 @@ describe("ApplyPatchTool", () => {
                     registry,
                     call("*** Begin Patch\n*** Add File: existing.txt\n+replacement\n*** End Patch"),
                   ),
-                ).toEqual({ type: "error", value: "Unable to apply patch at existing.txt" })
+                ).toEqual({
+                  type: "error",
+                  value:
+                    "File already exists. Nothing was overwritten. Read and edit it or provide exact expectedContent.",
+                })
                 expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("sentinel\n")
               }),
             ),
@@ -362,7 +366,10 @@ describe("ApplyPatchTool", () => {
                 registry,
                 call("*** Begin Patch\n*** Add File: appeared.txt\n+replacement\n*** End Patch"),
               ),
-            ).toEqual({ type: "error", value: "Unable to apply patch at appeared.txt" })
+            ).toEqual({
+              type: "error",
+              value: "File already exists. Nothing was overwritten. Read and edit it or provide exact expectedContent.",
+            })
             expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("winner\n")
           }),
         )

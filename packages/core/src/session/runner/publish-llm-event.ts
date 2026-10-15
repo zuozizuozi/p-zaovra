@@ -246,6 +246,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
   const publish = Effect.fn("SessionRunner.publishLLMEvent")(function* (
     event: LLMEvent,
     outputPaths: ReadonlyArray<string> = [],
+    errorMetadata?: Record<string, string>,
   ) {
     switch (event.type) {
       case "step-start":
@@ -362,7 +363,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
             timestamp: yield* timestamp,
             assistantMessageID: tool.assistantMessageID,
             callID: event.id,
-            error: result.error,
+            error: { ...result.error, ...(errorMetadata ? { metadata: errorMetadata } : {}) },
             result: event.result,
             provider,
           })

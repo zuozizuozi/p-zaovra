@@ -15,6 +15,7 @@ import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { safetyFailure } from "./safety-failure"
 
 export const name = "apply_patch"
 
@@ -90,12 +91,21 @@ const layer = Layer.effectDiscard(
             toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
             execute: (input, context) => {
               const applied: Array<typeof Applied.Type> = []
-              const fail = (path: string) => {
+              const fail = (path: string, error?: unknown) => {
                 const prefix =
                   applied.length === 0
                     ? `Unable to apply patch at ${path}`
                     : `Patch partially applied before failing at ${path}. Applied: ${applied.map((item) => item.resource).join(", ")}`
-                return new ToolFailure({ message: prefix })
+                const safe = safetyFailure(error)
+                if (!applied.length && safe) return safe
+                return new ToolFailure({
+                  message: prefix,
+                  metadata: {
+                    phase: "mutation",
+                    reason: applied.length ? "partial-application" : "patch-failed",
+                    ...(applied.length ? { appliedFiles: JSON.stringify(applied.map((item) => item.resource)) } : {}),
+                  },
+                })
               }
               return Effect.gen(function* () {
                 const source = {
@@ -158,7 +168,14 @@ const layer = Layer.effectDiscard(
                       prepared.push({ ...hunk, target, before, after: "" })
                       return
                     }
-                    const update = Patch.derive(hunk.path, hunk.chunks, original)
+                    const update = yield* Effect.try({
+                      try: () => Patch.derive(hunk.path, hunk.chunks, original),
+                      catch: () =>
+                        new ToolFailure({
+                          message: `Patch did not match ${hunk.path}. Read the file before retrying.`,
+                          metadata: { phase: "mutation", reason: "match-failed" },
+                        }),
+                    })
                     prepared.push({
                       ...hunk,
                       target,
@@ -167,7 +184,7 @@ const layer = Layer.effectDiscard(
                       before,
                       after: update.content,
                     })
-                  }).pipe(Effect.mapError(() => fail(hunk.path)))
+                  }).pipe(Effect.mapError((error) => (error instanceof ToolFailure ? error : fail(hunk.path, error))))
                 }
 
                 const patchFiles: FileDiff.Info[] = []
@@ -228,11 +245,11 @@ const layer = Layer.effectDiscard(
                         ...(result.formatting ? { formatting: result.formatting } : {}),
                       })
                       patchFiles.push(patchFile({ ...change, after: result.content ?? change.after }))
-                    }).pipe(Effect.mapError(() => fail(change.path))),
+                    }).pipe(Effect.mapError((error) => fail(change.path, error))),
                   { discard: true },
                 )
                 return { applied, files: patchFiles }
-              }).pipe(Effect.mapError((error) => (error instanceof ToolFailure ? error : fail("patch"))))
+              }).pipe(Effect.mapError((error) => (error instanceof ToolFailure ? error : fail("patch", error))))
             },
           }),
           "edit",

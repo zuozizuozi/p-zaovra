@@ -277,7 +277,8 @@ describe("EditTool", () => {
             ),
           ).toEqual({
             type: "error",
-            value: `Unable to edit ${external}`,
+            value:
+              "Tool not executed: permission policy blocked this action. Use an already permitted action or ask the user to change permission.",
           })
           expect(assertions.map((input) => input.action)).toEqual(["external_directory"])
           expect(reads).toBe(0)
@@ -291,7 +292,8 @@ describe("EditTool", () => {
             ),
           ).toEqual({
             type: "error",
-            value: `Unable to edit ${external}`,
+            value:
+              "Tool not executed: permission policy blocked this action. Use an already permitted action or ask the user to change permission.",
           })
           expect(assertions.map((input) => input.action)).toEqual(["external_directory", "edit"])
           expect(reads).toBe(0)
@@ -325,7 +327,11 @@ describe("EditTool", () => {
                   call({ path: "secret.txt", oldString: "not present", newString: "replacement" }),
                 )
 
-                expect(matching).toEqual({ type: "error", value: "Unable to edit secret.txt" })
+                expect(matching).toEqual({
+                  type: "error",
+                  value:
+                    "Tool not executed: permission policy blocked this action. Use an already permitted action or ask the user to change permission.",
+                })
                 expect(missing).toEqual(matching)
                 expect(assertions.map((input) => input.action)).toEqual(["edit", "edit"])
                 expect(reads).toBe(0)
@@ -447,7 +453,8 @@ describe("EditTool", () => {
             Effect.gen(function* () {
               expect(result).toEqual({
                 type: "error",
-                value: "File changed after permission approval. Read it again before editing.",
+                value:
+                  "File content changed or does not match expectedContent. Nothing was overwritten. Read the file again before editing.",
               })
               expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("newer\n")
               expect(writes).toEqual([])

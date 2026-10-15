@@ -20,6 +20,7 @@ import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { safetyFailure } from "./safety-failure"
 
 export const name = "edit"
 
@@ -122,12 +123,8 @@ const layer = Layer.effectDiscard(
             execute: (input, context) => {
               const unableToEdit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
                 effect.pipe(
-                  Effect.mapError((error) =>
-                    error instanceof FileMutation.StaleContentError
-                      ? new ToolFailure({
-                          message: "File changed after permission approval. Read it again before editing.",
-                        })
-                      : new ToolFailure({ message: `Unable to edit ${input.path}` }),
+                  Effect.mapError(
+                    (error) => safetyFailure(error) ?? new ToolFailure({ message: `Unable to edit ${input.path}` }),
                   ),
                 )
 
@@ -180,12 +177,14 @@ const layer = Layer.effectDiscard(
                   return yield* new ToolFailure({
                     message:
                       "Could not find oldString in the file. It must match exactly, including whitespace and indentation.",
+                    metadata: { phase: "mutation", reason: "match-failed" },
                   })
                 }
                 if (replacements > 1 && input.replaceAll !== true) {
                   return yield* new ToolFailure({
                     message:
                       "Found multiple exact matches for oldString. Provide more surrounding context or set replaceAll to true.",
+                    metadata: { phase: "mutation", reason: "match-failed" },
                   })
                 }
 

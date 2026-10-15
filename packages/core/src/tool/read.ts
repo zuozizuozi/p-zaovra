@@ -14,6 +14,7 @@ import { ReadToolFileSystem } from "./read-filesystem"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { safetyFailure } from "./safety-failure"
 
 export const name = "read"
 const SUPPORTED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
@@ -111,7 +112,7 @@ const layer = Layer.effectDiscard(
                   error instanceof Image.SizeError
                     ? error.message
                     : `Unable to read ${input.path}`
-                return new ToolFailure({ message })
+                return safetyFailure(error) ?? new ToolFailure({ message })
               }),
             )
           },

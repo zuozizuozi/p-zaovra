@@ -296,7 +296,8 @@ describe("WriteTool", () => {
             ),
           ).toEqual({
             type: "error",
-            value: `Unable to write ${external}`,
+            value:
+              "Tool not executed: permission policy blocked this action. Use an already permitted action or ask the user to change permission.",
           })
           expect(assertions.map((input) => input.action)).toEqual(["external_directory"])
           expect(writes).toEqual([])
@@ -309,7 +310,8 @@ describe("WriteTool", () => {
             ),
           ).toEqual({
             type: "error",
-            value: "Unable to write denied.txt",
+            value:
+              "Tool not executed: permission policy blocked this action. Use an already permitted action or ask the user to change permission.",
           })
           expect(assertions.map((input) => input.action)).toEqual(["edit"])
           expect(writes).toEqual([])
