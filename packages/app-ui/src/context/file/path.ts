@@ -105,7 +105,9 @@ export function createPathHelpers(scope: () => string) {
   const normalize = (input: string) => {
     const root = scope()
 
-    let path = unquoteGitPath(decodeFilePath(stripQueryAndHash(stripFileProtocol(input))))
+    let path = unquoteGitPath(
+      input.startsWith("file://") ? decodeFilePath(stripQueryAndHash(stripFileProtocol(input))) : input,
+    )
 
     // Separator-agnostic prefix stripping for Cygwin/native Windows compatibility
     // Only case-insensitive on Windows (drive letter or UNC paths)

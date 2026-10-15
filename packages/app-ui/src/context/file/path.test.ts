@@ -2,6 +2,14 @@ import { describe, expect, test } from "bun:test"
 import { createPathHelpers, stripQueryAndHash, unquoteGitPath, encodeFilePath } from "./path"
 
 describe("file path helpers", () => {
+  for (const filename of ["report.txt#L10", "report%2Etxt", "dir%2Ffile.txt", "a%20b.txt", "中文 空格.txt"])
+    test(`preserves literal identity and decodes file URLs only once: ${filename}`, () => {
+      const paths = createPathHelpers(() => "/repo")
+      expect(paths.normalize(filename)).toBe(filename)
+      expect(paths.normalize(paths.normalize(filename))).toBe(filename)
+      expect(paths.pathFromTab(paths.tab(filename))).toBe(filename)
+      expect(paths.normalize(`file:///repo/${encodeFilePath(filename)}#L10`)).toBe(filename)
+    })
   test("normalizes file inputs against workspace root", () => {
     const path = createPathHelpers(() => "/repo")
     expect(path.normalize("file:///repo/src/app.ts?x=1#h")).toBe("src/app.ts")
