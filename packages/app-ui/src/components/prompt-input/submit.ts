@@ -29,7 +29,7 @@ type PendingPrompt = {
 
 const pending = new Map<string, PendingPrompt>()
 const interruptions = new Map<string, Promise<void>>()
-const creatingDrafts = new Set<string>()
+const submitting = new Set<string>()
 
 class CancelledFollowupInput extends Error {
   constructor() {
@@ -402,16 +402,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     event.preventDefault()
     const draftID = search.draftId
     const key = params.id
-      ? input.info()?.revert
-        ? JSON.stringify([sdk().scope, sdk().directory, params.id, "rewind"])
-        : undefined
-      : JSON.stringify([sdk().scope, sdk().directory, draftID ?? ""])
-    if (key && creatingDrafts.has(key)) return
-    if (key) creatingDrafts.add(key)
+      ? JSON.stringify([sdk().scope, sdk().directory, "session", params.id])
+      : JSON.stringify([sdk().scope, sdk().directory, "draft", draftID ?? ""])
+    if (submitting.has(key)) return
+    submitting.add(key)
     try {
       await submit(draftID, draftID ? tabs.draft(draftID).server : undefined)
     } finally {
-      if (key) creatingDrafts.delete(key)
+      submitting.delete(key)
     }
   }
 
@@ -715,7 +713,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return true
     }
 
-    void sendFollowupDraft({
+    await sendFollowupDraft({
       client,
       sync: sync(),
       serverSync: serverSync(),

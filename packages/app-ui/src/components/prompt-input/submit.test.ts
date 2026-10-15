@@ -30,6 +30,8 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
+let sendGate: Promise<void> | undefined
+const sentPrompts: string[] = []
 let revertGate: Promise<void> | undefined
 const reverted: string[] = []
 
@@ -94,9 +96,14 @@ const clientFor = (directory: string) => {
         },
         switchAgent: async () => ({ data: undefined }),
         switchModel: async () => ({ data: undefined }),
-        prompt: async () => ({ data: undefined }),
+        prompt: async () => {
+          sentPrompts.push(directory)
+          await sendGate
+          return { data: undefined }
+        },
         shell: async () => {
           sentShell.push(directory)
+          await sendGate
           return { data: undefined }
         },
         interrupt: async () => ({ data: undefined }),
@@ -303,12 +310,116 @@ beforeEach(() => {
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  sendGate = undefined
+  sentPrompts.length = 0
   revertGate = undefined
   reverted.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
 describe("prompt submit worktree selection", () => {
+  for (const mode of ["normal", "shell"] as const) {
+    test(`admission failure releases the session lock without blocking another session or draft: ${mode}`, async () => {
+      const gate = Promise.withResolvers<void>()
+      sendGate = gate.promise
+      params = { id: "first" }
+      const make = () => {
+        const id = params.id
+        return createPromptSubmit({
+          prompt,
+          info: () => (id ? { id } : undefined),
+          imageAttachments: () => [],
+          commentCount: () => 0,
+          autoAccept: () => false,
+          mode: () => mode,
+          working: () => false,
+          editor: () => undefined,
+          queueScroll: () => undefined,
+          promptLength: () => 2,
+          addToHistory: () => undefined,
+          resetHistoryNavigation: () => undefined,
+          setMode: () => undefined,
+          setPopover: () => undefined,
+        })
+      }
+      const first = make()
+      const event = { preventDefault: () => undefined } as Event
+      const pending = first.handleSubmit(event)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await first.handleSubmit(event)
+      expect([...sentPrompts, ...sentShell]).toHaveLength(1)
+      sendGate = undefined
+      params = { id: "second" }
+      await make().handleSubmit(event)
+      params = {}
+      search = { draftId: "first" }
+      await make().handleSubmit(event)
+      expect([...sentPrompts, ...sentShell]).toHaveLength(3)
+      gate.reject(new Error("admission failed"))
+      await pending
+      await first.handleSubmit(event)
+      expect([...sentPrompts, ...sentShell]).toHaveLength(4)
+    })
+  }
+  for (const mode of ["normal", "shell"] as const) {
+    for (const order of ["event-first", "response-first"] as const) {
+      test(`rewind submit lock survives projection and admission: ${mode} ${order}`, async () => {
+        params = { id: "existing" }
+        const commit = Promise.withResolvers<void>()
+        const send = Promise.withResolvers<void>()
+        revertGate = commit.promise
+        sendGate = send.promise
+        let staged = true
+        const make = () =>
+          createPromptSubmit({
+            prompt,
+            info: () => ({
+              id: "existing",
+              directory: "/repo/main",
+              projectID: "project",
+              title: "Existing",
+              version: "dev",
+              time: { created: 1, updated: 1 },
+              ...(staged ? { revert: { messageID: "rewound" } } : {}),
+            }),
+            imageAttachments: () => [],
+            commentCount: () => 0,
+            autoAccept: () => false,
+            mode: () => mode,
+            working: () => false,
+            editor: () => undefined,
+            queueScroll: () => undefined,
+            promptLength: () => 2,
+            addToHistory: () => undefined,
+            resetHistoryNavigation: () => undefined,
+            setMode: () => undefined,
+            setPopover: () => undefined,
+          })
+        const first = make()
+        const second = make()
+        const event = { preventDefault: () => undefined } as Event
+        const active = first.handleSubmit(event)
+        await Promise.resolve()
+        if (order === "response-first") {
+          commit.resolve()
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+        staged = false
+        const duplicate = second.handleSubmit(event)
+        commit.resolve()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        const sent = [...sentPrompts, ...sentShell]
+        send.resolve()
+        await Promise.all([active, duplicate])
+        expect(reverted).toEqual(["existing"])
+        expect(sent).toEqual(["/repo/main"])
+        expect([...sentPrompts, ...sentShell]).toEqual(["/repo/main"])
+        sendGate = undefined
+        await first.handleSubmit(event)
+        expect([...sentPrompts, ...sentShell]).toHaveLength(2)
+      })
+    }
+  }
   for (const failure of [false, true]) {
     test(`staged rewind settles before new input; failure=${failure}`, async () => {
       params = { id: "existing" }
@@ -347,6 +458,11 @@ describe("prompt submit worktree selection", () => {
       await pending
       expect(reverted).toEqual(failure ? [] : ["existing"])
       expect(sentShell).toEqual(failure ? [] : ["/repo/main"])
+      if (failure) {
+        revertGate = undefined
+        await submit.handleSubmit({ preventDefault: () => undefined } as Event)
+        expect(sentShell).toEqual(["/repo/main"])
+      }
     })
   }
   for (const scenario of ["switch", "duplicate", "independent", "retry"] as const) {
