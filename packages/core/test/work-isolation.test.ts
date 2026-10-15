@@ -23,7 +23,7 @@ import { AppProcess } from "@zaovra-ai/core/process"
 import { Database } from "@zaovra-ai/core/database/database"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { EventTable } from "@zaovra-ai/core/event/sql"
-import { WorkGoalTable } from "@zaovra-ai/core/work/sql"
+import { WorkGoalTable, WorkTaskTable } from "@zaovra-ai/core/work/sql"
 import { asc, eq } from "drizzle-orm"
 import { ProjectTable } from "@zaovra-ai/core/project/sql"
 import { DateTime } from "effect"
@@ -310,9 +310,14 @@ describe("Work isolation admission", () => {
 
   for (const count of [2, 3])
     for (const legacy of [false, true])
-      for (const maximum of [1, 3]) {
+      for (const scenario of [
+        { maximum: 1, missingHandoff: false },
+        { maximum: 3, missingHandoff: false },
+        { maximum: 3, missingHandoff: true },
+      ]) {
+        if (scenario.missingHandoff && (!legacy || count !== 2)) continue
         isolationTests(count).live(
-          `readmits isolation failure chain ${count} at concurrency ${maximum} legacy=${legacy}`,
+          `readmits isolation failure chain ${count} at concurrency ${scenario.maximum} legacy=${legacy} missingHandoff=${scenario.missingHandoff}`,
           () =>
             Effect.gen(function* () {
               const { directory } = yield* workspace()
@@ -335,7 +340,7 @@ describe("Work isolation admission", () => {
                 location: { directory },
                 objective: "Inspect chain",
                 planning: true,
-                budget: { maxParallelTasks: maximum, maxRepairAttempts: 1 },
+                budget: { maxParallelTasks: scenario.maximum, maxRepairAttempts: 1 },
                 acceptanceCriteria: [{ description: "Fixture inspected", required: true, evidence: "review" }],
               })
               yield* runner.run({ goalID: created.goal.id, force: true })
@@ -395,6 +400,23 @@ describe("Work isolation admission", () => {
                     .filter((task) => task.role === "build")
                     .every((task) => task.status === "rework" && task.attemptCount === 0),
                 ).toBe(true)
+                if (scenario.missingHandoff) {
+                  // Negative control: a completed upstream projection without any recoverable Handoff
+                  // must not let the old downstream rework bypass first-admission dependencies.
+                  const upstream = blocked.find((task) => task.dependsOn.length === 0)!
+                  const downstream = blocked.find((task) => task.dependsOn.includes(upstream.id))!
+                  yield* db
+                    .update(WorkTaskTable)
+                    .set({ status: "completed" })
+                    .where(eq(WorkTaskTable.id, upstream.id))
+                    .run()
+                    .pipe(Effect.orDie)
+                  yield* runner.run({ goalID: created.goal.id, force: true })
+                  expect(yield* store.handoff(upstream.id)).toBeUndefined()
+                  expect(yield* store.attempts(downstream.id)).toEqual([])
+                  expect((yield* store.getGoal(created.goal.id))?.usage.repairs).toBe(0)
+                  return
+                }
               }
               const admitted: { kind: string; ready: boolean }[] = []
               const unsubscribe = yield* events.listen((event) =>
@@ -465,7 +487,7 @@ describe("Work isolation admission", () => {
         )
       }
 
-  for (const legacy of [false, true]) {
+  for (const legacy of [false, true, "paused"] as const) {
     it.live(
       `recovers a resolved isolation across a crash (legacy rework: ${legacy})`,
       () =>
@@ -514,6 +536,7 @@ describe("Work isolation admission", () => {
               timestamp: DateTime.nowUnsafe(),
             })
           }
+          if (legacy === "paused") yield* work.pause(created.goal.id)
           const tasks = yield* store.tasks(created.goal.id)
           const goal = yield* store.getGoal(created.goal.id)
           const history = yield* db

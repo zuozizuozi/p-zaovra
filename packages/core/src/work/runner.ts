@@ -2210,7 +2210,8 @@ export const layer = Layer.effect(
                   ),
                 )
               const resumable =
-                input.force && (initial.status === "blocked" || initial.status === "active")
+                input.force &&
+                (initial.status === "blocked" || initial.status === "active" || initial.status === "paused")
                   ? yield* resumableBlockedTasks(initial)
                   : []
               if (
