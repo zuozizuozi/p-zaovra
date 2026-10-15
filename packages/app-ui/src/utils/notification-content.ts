@@ -9,5 +9,5 @@ export function permissionDescription(permission: string, t: ReturnType<typeof u
   if (permission === "doom_loop") return t("session.permission.repeatedCall")
   const key = `settings.permissions.tool.${permission}.description`
   const value = t(key as Parameters<typeof t>[0])
-  return value === key ? t("session.permission.requestedAccess") : value
+  return !value || value === key ? t("session.permission.requestedAccess") : value
 }
