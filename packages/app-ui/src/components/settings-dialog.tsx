@@ -1,7 +1,8 @@
-import { useParams } from "@solidjs/router"
+import { useLocation, useParams } from "@solidjs/router"
 import { onCleanup } from "solid-js"
 import { useLayout } from "@/context/layout"
-import { useServer } from "@/context/server"
+import { ServerConnection } from "@/context/server"
+import { useServerSDK } from "@/context/server-sdk"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -9,7 +10,8 @@ import { useDialog } from "@zaovra-ai/ui/context/dialog"
 export function useSettingsDialog(defaultValue?: string) {
   const dialog = useDialog()
   const layout = useLayout()
-  const server = useServer()
+  const sdk = useServerSDK()
+  const location = useLocation()
   const params = useParams<{ id?: string }>()
   let run = 0
   let dead = false
@@ -20,7 +22,10 @@ export function useSettingsDialog(defaultValue?: string) {
 
   return () => {
     const route = layout.route()
-    const serverKey = (route.type === "home" ? layout.home.selection().server : route.server) ?? server.key
+    // Work shares the legacy home route kind, but uses the selected server SDK.
+    const serverKey =
+      (location.pathname === "/" ? layout.home.selection().server : route.type === "home" ? undefined : route.server) ??
+      ServerConnection.key(sdk().server)
     const sessionID = route.type === "session" ? route.sessionId : params.id
     const event = new CustomEvent("zaovra:settings-open", {
       cancelable: true,

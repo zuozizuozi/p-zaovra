@@ -56,6 +56,10 @@ export const Plugin = define({
                 Object.assign(provider.request.body, item.request.body)
               }
             })
+            if (item.api !== undefined) {
+              const record = catalog.provider.get(providerID)
+              if (record) record.configuredEndpoint = !!item.api.url
+            }
             for (const [id, config] of Object.entries(item.models ?? {})) {
               catalog.model.update(providerID, id, (model) => {
                 if (config.family !== undefined) model.family = config.family

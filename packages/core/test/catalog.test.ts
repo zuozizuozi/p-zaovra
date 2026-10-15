@@ -30,6 +30,33 @@ const catalogLayer = AppNodeBuilder.build(
 const it = testEffect(catalogLayer)
 
 describe("CatalogV2", () => {
+  it.effect("explicit keyless endpoints still respect disabled providers and integration bindings", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const integrations = yield* Integration.Service
+      const id = ProviderV2.ID.make("keyless")
+      yield* integrations.transform((editor) => editor.update(Integration.ID.make(id), () => {}))
+      yield* catalog.transform((editor) => {
+        editor.provider.update(id, () => {})
+        required(editor.provider.get(id)).configuredEndpoint = true
+      })
+      expect((yield* catalog.provider.available()).map((provider) => provider.id)).toContain(id)
+      yield* catalog.transform((editor) =>
+        editor.provider.update(id, (provider) => {
+          provider.disabled = true
+        }),
+      )
+      expect(yield* catalog.provider.available()).toEqual([])
+      yield* catalog.transform((editor) =>
+        editor.provider.update(id, (provider) => {
+          provider.disabled = false
+          provider.integrationID = Integration.ID.make(id)
+        }),
+      )
+      expect(yield* catalog.provider.available()).toEqual([])
+    }),
+  )
+
   it.effect("publishes an updated event after catalog changes", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

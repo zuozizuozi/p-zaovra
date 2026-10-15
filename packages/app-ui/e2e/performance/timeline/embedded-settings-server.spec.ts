@@ -101,3 +101,63 @@ test("embedded settings omit the target label for one server", async ({ page }) 
   await expect(page.locator(".settings-v2-page")).toBeVisible()
   await expect(page.locator('[data-slot="settings-server"]')).toHaveCount(0)
 })
+
+for (const surface of ["work", "home"] as const) {
+  test(`${surface} settings target the page server despite separate defaults`, async ({ page }, info) => {
+    const port = process.env.PLAYWRIGHT_SERVER_PORT
+    const a = `http://127.0.0.1:${port}`
+    const b = `http://localhost:${port}`
+    for (const origin of [a, b]) {
+      const provider = { ...structuredClone(fixture.provider), connected: ["openai"] }
+      provider.all.forEach((item) => {
+        item.id = "openai"
+        item.name = origin === a ? "Work A Provider" : "Home B Provider"
+      })
+      await mockZaovraServer(page, {
+        origin,
+        provider,
+        directory: fixture.directory,
+        project: fixture.project,
+        sessions: fixture.sessions,
+        pageMessages,
+      })
+    }
+    await installTimelineSettings(page)
+    await page.addInitScript(
+      ({ b }) => {
+        localStorage.setItem(
+          "zaovra.global.dat:server",
+          JSON.stringify({ list: [{ type: "http", displayName: "Server B", http: { url: b } }] }),
+        )
+        localStorage.setItem("zaovra.global.dat:layout", JSON.stringify({ home: { selection: { server: b } } }))
+      },
+      { b },
+    )
+    await page.route("**/api/work*", (route) => route.fulfill({ json: { data: [] } }))
+    await page.route("**/api/provider/openai*", (route) => route.fulfill({ json: { data: { id: "openai" } } }))
+    await page.route("**/api/integration/openai*", (route) =>
+      route.fulfill({ json: { data: { id: "openai", connections: [{ type: "credential", id: "fixture-key" }] } } }),
+    )
+    await page.route("**/api/credential/fixture-key*", (route) => route.fulfill({ json: {} }))
+    await page.route("**/global/dispose", (route) => route.fulfill({ json: true }))
+    await page.goto(surface === "work" ? "/work" : "/?view=projects")
+    await page.keyboard.press("Control+,")
+    const settings = page.locator(".settings-v2-page")
+    await expect(settings).toBeVisible()
+    await settings.getByRole("tab", { name: "Model services", exact: true }).click()
+    await expect(
+      settings.getByText(surface === "work" ? "Work A Provider" : "Home B Provider", { exact: true }).first(),
+    ).toBeVisible()
+    await expect(
+      settings.getByText(surface === "work" ? "Home B Provider" : "Work A Provider", { exact: true }),
+    ).toHaveCount(0)
+    const writes: string[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "GET" && request.url().includes("/api/credential/")) writes.push(request.url())
+    })
+    await settings.getByRole("button", { name: "Disconnect", exact: true }).first().click()
+    await expect.poll(() => writes.length).toBeGreaterThan(0)
+    expect(writes.every((url) => new URL(url).origin === (surface === "work" ? a : b))).toBe(true)
+    await info.attach("work-settings-writes", { body: JSON.stringify(writes), contentType: "application/json" })
+  })
+}

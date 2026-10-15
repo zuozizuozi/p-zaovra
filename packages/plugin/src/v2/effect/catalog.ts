@@ -2,6 +2,8 @@ import type { ModelV2Info, ProviderV2Info } from "@zaovra-ai/sdk/v2/types"
 import type { Hooks } from "./registration.js"
 
 export interface CatalogProviderRecord {
+  /** Explicit endpoint configuration; credentials may be omitted. */
+  configuredEndpoint?: boolean
   readonly provider: ProviderV2Info
   readonly models: ReadonlyMap<string, ModelV2Info>
 }
