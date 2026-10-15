@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { DateTime } from "effect"
+import { RelativePath } from "@zaovra-ai/schema/schema"
 import path from "node:path"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
@@ -1536,4 +1537,67 @@ test("successful reruns inherit explicit replacement chains without weakening th
     ).toBeUndefined()
   }
   expect(derive(check("c", "replacement", 1)).checks.find((c) => c.callID === "a")?.supersededBy).toBeUndefined()
+})
+
+test("delivery facts retain snapshot, added and partial files without inferring execution or permission", () => {
+  const tool = (
+    id: string,
+    name: string,
+    state: SessionMessage.AssistantTool["state"],
+  ): SessionMessage.AssistantTool => ({
+    id,
+    name,
+    type: "tool",
+    time: assistant.time,
+    state,
+  })
+  const messages: SessionMessage.Message[] = [
+    {
+      ...assistant,
+      snapshot: { files: [RelativePath.make("shell-created.js")] },
+      content: [
+        tool("edit-1", "edit", {
+          status: "completed",
+          input: {},
+          content: [],
+          structured: { files: [{ file: "source.js", status: "modified" }] },
+        }),
+        tool("patch-1", "apply_patch", {
+          status: "error",
+          content: [],
+          structured: {},
+          input: {},
+          error: {
+            type: "unknown",
+            message: "partial",
+            metadata: {
+              phase: "mutation",
+              reason: "partial-application",
+              appliedFiles: JSON.stringify(["added.js"]),
+            },
+          },
+        }),
+        tool("denied", "write", {
+          status: "error",
+          content: [],
+          structured: {},
+          input: { path: "denied.js" },
+          error: { type: "unknown", message: "denied" },
+        }),
+        tool("pending", "write", { status: "pending", input: '{"path":"pending.js"}' }),
+      ],
+    },
+  ]
+  const facts = SessionOutcome.deliveryFacts(messages)
+  expect(facts.changes).toEqual([
+    { path: "shell-created.js", status: "changed", source: "snapshot" },
+    { path: "source.js", status: "modified", source: "tool", callID: "edit-1" },
+    { path: "added.js", status: "applied", source: "partial-application", callID: "patch-1" },
+  ])
+  expect(
+    SessionOutcome.deliveryFacts([
+      ...messages,
+      { type: "user", id: SessionMessage.ID.create(), text: "new unrelated task", time: assistant.time },
+    ]).changes,
+  ).toEqual([])
 })

@@ -55,6 +55,65 @@ export function acceptanceHistory(messages: readonly SessionMessage.Message[]) {
   return messages.slice(start)
 }
 
+/** Observations only: changed files are not permission or acceptance judgments. */
+export const DeliveryFacts = Schema.Struct({
+  changes: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      status: Schema.String,
+      source: Schema.Literals(["snapshot", "tool", "partial-application"]),
+      callID: Schema.optional(Schema.String),
+    }),
+  ),
+  checks: Schema.Array(SessionOutcome.Check),
+})
+
+export function deliveryFacts(messages: readonly SessionMessage.Message[]): typeof DeliveryFacts.Type {
+  const changes: Array<(typeof DeliveryFacts.Type.changes)[number]> = []
+  const checks: SessionOutcome.Check[] = []
+  for (const message of acceptanceHistory(messages)) {
+    if (message.type !== "assistant") continue
+    for (const file of message.snapshot?.files ?? [])
+      changes.push({ path: file, status: "changed", source: "snapshot" })
+    for (const tool of message.content) {
+      if (tool.type !== "tool" || tool.provider?.executed) continue
+      checks.push(...toolChecks(tool))
+      if (!["write", "edit", "apply_patch"].includes(tool.name)) continue
+      if (tool.state.status === "error") {
+        const metadata = tool.state.error.metadata
+        if (metadata?.phase !== "mutation" || metadata.reason !== "partial-application") continue
+        const paths = Schema.decodeUnknownOption(
+          Schema.UnknownFromJsonString.pipe(Schema.decodeTo(Schema.Array(Schema.String))),
+        )(metadata.appliedFiles)
+        if (Option.isSome(paths))
+          for (const file of paths.value)
+            changes.push({ path: file, status: "applied", source: "partial-application", callID: tool.id })
+        continue
+      }
+      if (tool.state.status !== "completed") continue
+      const output = tool.state.structured
+      if (tool.name === "write" && typeof output.resource === "string" && typeof output.existed === "boolean")
+        changes.push({
+          path: output.resource,
+          status: output.existed ? "modified" : "added",
+          source: "tool",
+          callID: tool.id,
+        })
+      const files = Schema.decodeUnknownOption(
+        Schema.Array(Schema.Struct({ file: Schema.String, status: Schema.String })),
+      )(output.files)
+      if (Option.isSome(files))
+        for (const file of files.value)
+          changes.push({ path: file.file, status: file.status, source: "tool", callID: tool.id })
+    }
+  }
+  return {
+    changes: changes.filter(
+      (change, index) => changes.findIndex((item) => JSON.stringify(item) === JSON.stringify(change)) === index,
+    ),
+    checks,
+  }
+}
 /** Load durable acceptance history, independently of generated compaction. */
 export const history = (db: Database.Interface["db"], sessionID: SessionSchema.ID, all = false) =>
   Effect.gen(function* () {

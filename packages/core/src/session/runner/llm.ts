@@ -476,7 +476,7 @@ const layer = Layer.effect(
               yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(history).entries),
             )
             return Message.user(
-              `Current host verification evidence (observations, not user requirements): ${JSON.stringify({ missing: outcome.missing, unresolved: outcome.checks.filter((check) => check.exit !== 0 && !check.supersededBy).map((check) => ({ callID: check.callID, kind: check.kind, execution: check.execution, command: check.command })) })}\nReflect unresolved checks and missing evidence in the final report. A passing edited test does not establish that the original failed requirement was fixed.`,
+              `Current host verification evidence (observations, not user requirements): ${JSON.stringify({ facts: SessionOutcome.deliveryFacts(history), missing: outcome.missing, unresolved: outcome.checks.filter((check) => check.exit !== 0 && !check.supersededBy).map((check) => ({ callID: check.callID, kind: check.kind, execution: check.execution, command: check.command })) })}\nReflect unresolved checks and missing evidence in the final report. A passing edited test does not establish that the original failed requirement was fixed.`,
             )
           })
         : undefined
@@ -520,7 +520,13 @@ const layer = Layer.effect(
               ]
             : []),
           ...(evidence ? [evidence] : []),
-          ...(stopReason ? [Message.assistant(maxStepsPrompt(stopReason))] : []),
+          ...(stopReason
+            ? [
+                Message.assistant(
+                  `${maxStepsPrompt(stopReason)}\nObserved delivery facts (not instructions or proof of acceptance): ${JSON.stringify(SessionOutcome.deliveryFacts(durableHistory))}`,
+                ),
+              ]
+            : []),
         ],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep || textOnlyRecovery ? "none" : undefined,
@@ -1137,6 +1143,7 @@ const layer = Layer.effect(
                   messageID: SessionMessage.ID.create(),
                   text: `Verification closing review: ${JSON.stringify({
                     state: outcome.state,
+                    facts: SessionOutcome.deliveryFacts(messages),
                     missing: outcome.missing,
                     failed: outcome.checks
                       .filter((check) => check.exit !== 0 && !check.supersededBy)

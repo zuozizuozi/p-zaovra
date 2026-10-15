@@ -3982,6 +3982,80 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const mode of ["review", "limit"] as const) {
+    it.effect(`delivery facts expose an omitted added file during ${mode} closing`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
+          Effect.promise(() => dir[Symbol.asyncDispose]()),
+        )
+        const fs = yield* FSUtil.Service
+        const agents = yield* AgentV2.Service
+        yield* agents.transform((draft) =>
+          draft.update(AgentV2.ID.make("build"), (agent) => {
+            agent.steps = mode === "limit" ? 3 : 20
+          }),
+        )
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        yield* registry.register({
+          write: Tool.make({
+            description: "Create an actual extra file",
+            input: Schema.Struct({}),
+            output: Schema.Struct({ resource: Schema.String, existed: Schema.Boolean }),
+            execute: () =>
+              fs
+                .writeFileString(`${dir.path}/extra.test.js`, "// extra test")
+                .pipe(Effect.as({ resource: "extra.test.js", existed: false }), Effect.orDie),
+          }),
+          bash: Tool.make({
+            description: "Recorded passing check",
+            input: Schema.Struct({}),
+            output: Schema.Struct({ verification: Schema.Unknown }),
+            execute: (_input, context) =>
+              Effect.succeed({
+                verification: {
+                  kind: "test",
+                  command: "bun test",
+                  callID: context.toolCallID,
+                  exit: 0,
+                  targets: [{ path: "extra.test.js", digest: "recorded-source-digest" }],
+                  assertions: [{ path: "extra.test.js", digest: "recorded-assertion-digest" }],
+                },
+              }),
+          }),
+        })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Only change source.js" }), resume: false })
+        requests.length = 0
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "extra-file", name: "write", input: {} }),
+            LLMEvent.toolCall({ id: "actual-check", name: "bash", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "incorrect", ["Only source.js was changed."]).completeEvents,
+          fragmentFixture("text", "corrected", [
+            "An extra.test.js file was also added; this exceeds the requested scope.",
+          ]).completeEvents,
+        ]
+        const result = yield* session.resume(sessionID).pipe(Effect.exit)
+        expect(Exit.isFailure(result)).toBe(mode === "limit")
+        expect(requests).toHaveLength(3)
+        const closing = requests[2].messages
+          .flatMap((message) => message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])))
+          .join("\n")
+        expect(closing).toContain(mode === "limit" ? "Observed delivery facts" : "Verification closing review:")
+        expect(closing).toContain('\"status\":\"added\"')
+        expect(closing).toContain("extra.test.js")
+        expect(closing).toContain("actual-check")
+        expect(closing).toContain("recorded-source-digest")
+        expect(closing).toContain("recorded-assertion-digest")
+        expect(yield* fs.readFileString(`${dir.path}/extra.test.js`)).toBe("// extra test")
+      }),
+    )
+  }
   it.effect("reviews green engineering work once and does not repeat after compaction or resume", () =>
     Effect.gen(function* () {
       yield* setup

@@ -7,6 +7,8 @@ import { Database } from "../database/database"
 import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import {
+  DeliveryFacts,
+  deliveryFacts,
   checkFreshness,
   checkReferenceProblem,
   derive,
@@ -34,6 +36,7 @@ export const Input = Schema.Struct({
   notes: SessionOutcome.Review.fields.notes,
 })
 const Output = Schema.Struct({
+  facts: DeliveryFacts,
   artifacts: Schema.Array(DeliveryAudit.Observation),
   requirements: Schema.Array(
     Schema.Struct({
@@ -125,6 +128,7 @@ export const layer = Layer.effectDiscard(
                 ...checkFreshness(check, targets, snapshot),
               }))
               return {
+                facts: deliveryFacts(messages),
                 artifacts,
                 requirements: request.entries,
                 checks: current,
