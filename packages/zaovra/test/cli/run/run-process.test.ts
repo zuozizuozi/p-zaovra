@@ -7,8 +7,150 @@ import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
+import { testProviderConfig } from "../../lib/test-provider"
+import { createZaovraClient } from "@zaovra-ai/sdk/v2"
 
 describe("zaovra run (non-interactive subprocess)", () => {
+  for (const mode of ["queue", "interrupt"] as const)
+    cliIt.live(
+      `V5 attached CLI observes host ${mode} before exit`,
+      ({ home, llm, zaovra }) =>
+        Effect.gen(function* () {
+          const release = Promise.withResolvers<void>()
+          yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+          yield* llm.push(
+            reply().wait(release.promise).text("first-input-result").stop(),
+            reply().text("queued-input-result").stop(),
+          )
+          const server = yield* zaovra.serve()
+          const client = createZaovraClient({ baseUrl: server.url, directory: home })
+          const session = yield* Effect.promise(() =>
+            client.v2.session
+              .create({ location: { directory: home } }, { throwOnError: true })
+              .then((result) => result.data.data),
+          )
+          const run = yield* zaovra.startRun("first input", {
+            format: "json",
+            extraArgs: ["--attach", server.url, "--session", session.id],
+          })
+          yield* llm.wait(1)
+          if (mode === "queue") {
+            yield* Effect.promise(() =>
+              client.v2.session.prompt(
+                { sessionID: session.id, prompt: { text: "queued input" }, delivery: "queue" },
+                { throwOnError: true },
+              ),
+            )
+            release.resolve()
+          } else {
+            yield* Effect.promise(() => client.v2.session.interrupt({ sessionID: session.id }, { throwOnError: true }))
+            release.resolve()
+          }
+          const result = yield* run.result
+          const outcome = yield* Effect.promise(() =>
+            client.v2.session
+              .outcome({ sessionID: session.id }, { throwOnError: true })
+              .then((response) => response.data.data),
+          )
+          expect(result.exitCode).toBe(0)
+          if (mode === "queue") {
+            expect(result.stdout).toContain("queued-input-result")
+            expect(yield* llm.calls).toBe(2)
+            expect(outcome.state).toBe("completed")
+          } else expect(outcome.state).toBe("interrupted")
+        }),
+      60_000,
+    )
+  cliIt.concurrent(
+    "V5 waits for host closing after an intermediate provider stop",
+    ({ llm, zaovra }) =>
+      Effect.gen(function* () {
+        yield* llm.push(
+          reply().tool("bash", { command: "echo checked", description: "Inspect fixture" }),
+          reply().text("intermediate-provider-stop").stop(),
+          reply().text("final-host-closing-result").stop(),
+        )
+        const result = yield* zaovra.run("Check empty CSV round trips", {
+          format: "json",
+          extraArgs: ["--dangerously-skip-permissions"],
+          env: {
+            ZAOVRA_CONFIG_CONTENT: JSON.stringify({
+              ...testProviderConfig(llm.url),
+              snapshot: false,
+              experimental: { verification: true },
+            }),
+          },
+        })
+        expect(result.exitCode).toBe(0)
+        expect(yield* llm.calls).toBe(3)
+        expect(result.stdout).toContain("final-host-closing-result")
+      }),
+    60_000,
+  )
+  cliIt.live(
+    "V5 drains more than 100 durable events and retains final output",
+    ({ home, llm, zaovra }) =>
+      Effect.gen(function* () {
+        const file = `${home}/fixture.txt`
+        yield* Effect.promise(() => Bun.write(file, "pagination fixture\n".repeat(60)))
+        yield* llm.push(
+          ...Array.from({ length: 55 }, (_, index) =>
+            reply().tool("read", { path: file, offset: index + 1, limit: 1 }),
+          ),
+          reply().text("after-all-history-pages").stop(),
+        )
+        const result = yield* zaovra.run("Read the fixture", {
+          format: "json",
+          extraArgs: ["--dangerously-skip-permissions"],
+          env: { ZAOVRA_CONFIG_CONTENT: JSON.stringify({ ...testProviderConfig(llm.url), snapshot: false }) },
+        })
+        expect(result.exitCode).toBe(0)
+        const events = zaovra.parseJsonEvents(result.stdout)
+        expect(events.filter((event) => event.type === "tool_result")).toHaveLength(55)
+        expect(result.stdout).toContain("after-all-history-pages")
+        expect(events.length).toBeGreaterThan(100)
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "V5 length recovery returns the completed answer",
+    ({ llm, zaovra }) =>
+      Effect.gen(function* () {
+        yield* llm.push(reply().text("partial-answer").length(), reply().text("recovered-answer").stop())
+        const result = yield* zaovra.run("Answer a question", { format: "json" })
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout).toContain("recovered-answer")
+        expect(yield* llm.calls).toBe(2)
+      }),
+    60_000,
+  )
+
+  cliIt.live(
+    "V5 max steps emits final report and failure exit",
+    ({ llm, zaovra }) =>
+      Effect.gen(function* () {
+        yield* llm.push(
+          reply().tool("bash", { command: "echo bounded", description: "Inspect" }),
+          reply().text("max-steps-final-report").stop(),
+        )
+        const result = yield* zaovra.run("Inspect a file", {
+          format: "json",
+          extraArgs: ["--dangerously-skip-permissions"],
+          env: {
+            ZAOVRA_CONFIG_CONTENT: JSON.stringify({
+              ...testProviderConfig(llm.url),
+              snapshot: false,
+              agent: { build: { steps: 2 } },
+            }),
+          },
+        })
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stdout).toContain("max-steps-final-report")
+        expect(yield* llm.calls).toBe(2)
+      }),
+    60_000,
+  )
   cliIt.concurrent(
     "exhausted text truncation exits nonzero after automatic continuation",
     ({ llm, zaovra }) =>

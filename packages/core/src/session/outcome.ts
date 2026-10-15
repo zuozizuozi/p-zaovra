@@ -915,11 +915,17 @@ export function shellRecovery(messages: readonly SessionMessage.Message[]) {
         )
           return part.state.structured.exit === 0 ? reset : state
       }
-      // Only ignore spacing outside quotes. Do not conflate different literals or working directories.
+      // Only simple unquoted words permit horizontal spacing normalization.
+      // Scripts, quotes, escapes and heredocs retain their exact source text.
       const command =
         typeof part.state.input.command === "string"
           ? JSON.stringify([
-              part.state.input.command.match(/(?:[^\s"']+|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? [],
+              /^[\w ./\t-]+$/.test(part.state.input.command)
+                ? part.state.input.command
+                    .trim()
+                    .split(/[ \t]+/)
+                    .join(" ")
+                : part.state.input.command,
               part.state.input.workdir ?? "",
             ])
           : ""

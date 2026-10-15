@@ -34,17 +34,19 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
       {
         name: toolName,
         description: `Echo one string ${revision}`,
-        inputSchema: {
-          type: "object",
-          properties: {
-            text: { type: "string", minLength: revision + 1 },
-            ...(process.env.MCP_TEST_APPROVAL === "1"
-              ? { nested: { type: "object" }, apiKey: { type: "string" } }
-              : {}),
-          },
-          required: ["text"],
-          additionalProperties: false,
-        },
+        inputSchema: process.env.MCP_TEST_SCHEMA
+          ? JSON.parse(process.env.MCP_TEST_SCHEMA)
+          : {
+              type: "object",
+              properties: {
+                text: { type: "string", minLength: revision + 1 },
+                ...(process.env.MCP_TEST_APPROVAL === "1"
+                  ? { nested: { type: "object" }, apiKey: { type: "string" } }
+                  : {}),
+              },
+              required: ["text"],
+              additionalProperties: false,
+            },
         outputSchema: {
           type: "object",
           properties: { echo: { type: "string" } },

@@ -1967,6 +1967,12 @@ export const layer = Layer.effect(
 
     const step = Effect.fn("WorkRunner.step")(function* (goalID: Work.GoalID, claim: WorkLease.Claim) {
       yield* leases.assert(claim)
+      yield* goalTransitions.withLock(goalID)(
+        Effect.gen(function* () {
+          const current = yield* store.getGoal(goalID)
+          if (current?.status === "active") yield* resumableBlockedTasks(current, true)
+        }),
+      )
       const goal = yield* store.getGoal(goalID)
       if (!goal || goal.status !== "active") return false
       const tasks = yield* store.tasks(goal.id)
@@ -2114,12 +2120,19 @@ export const layer = Layer.effect(
       )
     })
 
-    const resumableBlockedTasks = Effect.fn("WorkRunner.resumableBlockedTasks")(function* (goal: Work.GoalInfo) {
+    const resumableBlockedTasks = Effect.fn("WorkRunner.resumableBlockedTasks")(function* (
+      goal: Work.GoalInfo,
+      normalizeOnly = false,
+    ) {
       const goalID = goal.id
-      const blocked = (yield* store.tasks(goalID)).filter(
-        (task) =>
-          task.status === "blocked" ||
-          ((task.status === "pending" || task.status === "rework") && task.attemptCount === 0 && task.isolationState),
+      const blocked = (yield* store.tasks(goalID)).filter((task) =>
+        normalizeOnly
+          ? task.status === "rework" &&
+            task.attemptCount === 0 &&
+            task.isolationState &&
+            task.isolationState.status !== "blocked"
+          : task.status === "blocked" ||
+            ((task.status === "pending" || task.status === "rework") && task.attemptCount === 0 && task.isolationState),
       )
       if (blocked.length === 0) return []
 
