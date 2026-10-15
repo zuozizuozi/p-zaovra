@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
+import { Config } from "@zaovra-ai/core/config"
 import { Location } from "@zaovra-ai/core/location"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Global } from "@zaovra-ai/core/global"
@@ -151,3 +152,27 @@ describe("SystemContextBuiltIns", () => {
     }),
   )
 })
+
+for (const shell of ["/bin/bash", "/bin/sh"]) {
+  const configured = testEffect(
+    AppNodeBuilder.build(builtInsNode, [
+      [Location.node, locationLayer],
+      [
+        Config.node,
+        Layer.succeed(
+          Config.Service,
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed([new Config.Document({ type: "document", info: new Config.Info({ shell }) })]),
+          }),
+        ),
+      ],
+    ]),
+  )
+  configured.effect(`R2 environment identifies configured shell ${shell}`, () =>
+    Effect.gen(function* () {
+      const registry = yield* SystemContextRegistry.Service
+      expect((yield* SystemContext.initialize(yield* registry.load())).baseline).toContain(`Execution shell: ${shell}.`)
+    }),
+  )
+}

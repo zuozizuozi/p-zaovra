@@ -82,14 +82,21 @@ const appProcess = Layer.succeed(
       }),
   } as unknown as AppProcess.Interface),
 )
+let configuredShell: string | undefined
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
-    entries: () => Effect.succeed([]),
+    entries: () =>
+      Effect.succeed(
+        configuredShell
+          ? [new Config.Document({ type: "document", info: new Config.Info({ shell: configuredShell }) })]
+          : [],
+      ),
   }),
 )
 
 const reset = () => {
+  configuredShell = undefined
   assertions.length = 0
   progress.length = 0
   runs.length = 0
@@ -205,6 +212,28 @@ describe("BashTool", () => {
                 expect(runs).toHaveLength(1)
               }),
             ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+
+  for (const shell of ["/bin/bash", "/bin/sh"])
+    it.live(`R2 describes the actual configured shell ${shell}`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          configuredShell = shell
+          return withTool(tmp.path, (registry) =>
+            Effect.gen(function* () {
+              const definitions = yield* toolDefinitions(registry)
+              expect(definitions.find((tool) => tool.name === "bash")?.description).toContain(
+                `Execution shell: ${shell}`,
+              )
+              yield* settleTool(registry, call({ command: "echo inspection" }))
+              expect(runs[0]?.shell).toBe(shell)
+            }),
           )
         },
         (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),

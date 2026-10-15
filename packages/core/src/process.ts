@@ -3,6 +3,7 @@ import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { CrossSpawnSpawner } from "./cross-spawn-spawner"
+import { which } from "./util/which"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { makeGlobalNode } from "./effect/app-node"
@@ -67,7 +68,7 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/AppP
 /** Shared shell process lifecycle; callers retain their own authorization and output policy. */
 export const resolveShell = (configured?: string) => {
   if (configured) return configured
-  if (process.platform !== "win32") return "/bin/sh"
+  if (process.platform !== "win32") return which("bash") ?? "/bin/sh"
   const powershell = path.join(
     process.env.SystemRoot ?? "C:\\Windows",
     "System32",
