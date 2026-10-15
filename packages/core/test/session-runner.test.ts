@@ -2059,72 +2059,74 @@ describe("SessionRunnerLLM", () => {
   )
 
   for (const reason of ["auto", "manual"] as const)
-    it.effect(`keeps hard recovery failures across ${reason} compaction and resets on user input`, () =>
-      Effect.gen(function* () {
-        yield* setup
-        verificationEnabled = false
-        const session = yield* SessionV2.Service
-        const registry = yield* ToolRegistry.Service
-        const events = yield* EventV2.Service
-        const database = yield* Database.Service
-        yield* registry.register({
-          bash: Tool.make({
-            description: "Failed command",
-            input: Schema.Struct({ command: Schema.String }),
-            output: Schema.Struct({ exit: Schema.Number }),
-            execute: () => Effect.succeed({ exit: 1 }),
-          }),
-        })
-        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fix the task" }), resume: false })
-        const stop = fragmentFixture("text", "end", ["Stopped with failures."]).completeEvents
-        responses = [
-          [
-            LLMEvent.stepStart({ index: 0 }),
-            ...Array.from({ length: 10 }, (_, index) =>
-              LLMEvent.toolCall({
-                id: `failure-${index}`,
-                name: "bash",
-                input: { command: `check-${index}` },
-              }),
-            ),
-            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
-            LLMEvent.finish({ reason: "tool-calls" }),
-          ],
-          stop,
-        ]
-        yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(10)
-        const messageID = SessionMessage.ID.create()
-        yield* events.publish(SessionEvent.Compaction.Started, {
-          sessionID,
-          messageID,
-          timestamp: DateTime.makeUnsafe(1),
-          reason,
-        })
-        yield* events.publish(SessionEvent.Compaction.Ended, {
-          sessionID,
-          messageID,
-          timestamp: DateTime.makeUnsafe(2),
-          reason,
-          text: handoff("Fix the task"),
-          recent: "",
-        })
-        // Original implementation used this projected count and incorrectly reset 10 -> 0.
-        expect(SessionOutcome.recoveryFailures(yield* session.context(sessionID))).toBe(0)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(10)
-        response = stop
-        responses = undefined
-        yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Repeated shell failures")
-        expect(requests.at(-1)?.tools).toEqual([])
-        yield* replaySessionProjection(sessionID)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(10)
-        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New user direction" }), resume: false })
-        yield* session.resume(sessionID)
-        expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(0)
-        expect(requests.at(-1)?.tools.length).toBeGreaterThan(0)
-      }),
-    )
+    for (const mode of ["varied", "identical"] as const)
+      it.effect(`keeps ${mode} hard recovery failures across ${reason} compaction and resets on user input`, () =>
+        Effect.gen(function* () {
+          yield* setup
+          verificationEnabled = false
+          const count = mode === "varied" ? 10 : 3
+          const session = yield* SessionV2.Service
+          const registry = yield* ToolRegistry.Service
+          const events = yield* EventV2.Service
+          const database = yield* Database.Service
+          yield* registry.register({
+            bash: Tool.make({
+              description: "Failed command",
+              input: Schema.Struct({ command: Schema.String }),
+              output: Schema.Struct({ exit: Schema.Number }),
+              execute: () => Effect.succeed({ exit: 1 }),
+            }),
+          })
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fix the task" }), resume: false })
+          const stop = fragmentFixture("text", "end", ["Stopped with failures."]).completeEvents
+          responses = [
+            [
+              LLMEvent.stepStart({ index: 0 }),
+              ...Array.from({ length: count }, (_, index) =>
+                LLMEvent.toolCall({
+                  id: `failure-${index}`,
+                  name: "bash",
+                  input: { command: mode === "varied" ? `check-${index}` : "check --broken" },
+                }),
+              ),
+              LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+              LLMEvent.finish({ reason: "tool-calls" }),
+            ],
+            stop,
+          ]
+          yield* session.resume(sessionID).pipe(Effect.exit)
+          expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(count)
+          const messageID = SessionMessage.ID.create()
+          yield* events.publish(SessionEvent.Compaction.Started, {
+            sessionID,
+            messageID,
+            timestamp: DateTime.makeUnsafe(1),
+            reason,
+          })
+          yield* events.publish(SessionEvent.Compaction.Ended, {
+            sessionID,
+            messageID,
+            timestamp: DateTime.makeUnsafe(2),
+            reason,
+            text: handoff("Fix the task"),
+            recent: "",
+          })
+          // Projected context no longer has the failures; durable history must retain both limits.
+          expect(SessionOutcome.recoveryFailures(yield* session.context(sessionID))).toBe(0)
+          expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(count)
+          response = stop
+          responses = undefined
+          yield* session.resume(sessionID).pipe(Effect.exit)
+          expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Repeated shell failures")
+          expect(requests.at(-1)?.tools).toEqual([])
+          yield* replaySessionProjection(sessionID)
+          expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(count)
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New user direction" }), resume: false })
+          yield* session.resume(sessionID)
+          expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(0)
+          expect(requests.at(-1)?.tools.length).toBeGreaterThan(0)
+        }),
+      )
   it.effect("rebuilds the baseline directly after completed compaction", () =>
     Effect.gen(function* () {
       yield* setup
