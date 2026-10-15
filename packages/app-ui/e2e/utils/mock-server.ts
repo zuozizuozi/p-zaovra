@@ -5,6 +5,7 @@ const emptyList = new Set(["/skill", "/command", "/lsp", "/formatter", "/vcs/sta
 const emptyObject = new Set(["/global/config", "/config", "/provider/auth", "/mcp", "/experimental/resource"])
 
 export interface MockServerConfig {
+  origin?: string
   provider: unknown
   directory: string
   project: unknown
@@ -105,7 +106,8 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
     const appPort = new URL(
       process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "3000"}`,
     ).port
-    if (url.port !== targetPort && url.port !== appPort) return route.fallback()
+    if (config.origin ? url.origin !== config.origin : url.port !== targetPort && url.port !== appPort)
+      return route.fallback()
 
     const path = url.pathname
     if (path === "/global/event" || path === "/event") return sse(route, config.events?.(), config.eventRetry)

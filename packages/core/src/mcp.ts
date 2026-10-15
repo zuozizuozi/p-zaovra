@@ -1,5 +1,7 @@
 export * as MCP from "./mcp"
 
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
+
 import path from "path"
 import { pathToFileURL } from "url"
 import { isDeepStrictEqual } from "node:util"
@@ -179,6 +181,7 @@ const layer = Layer.effect(
                   plan.names[index],
                   canonicalTool(
                     plan.names[index],
+                    plan.name,
                     plan.entry.server,
                     definition,
                     plan.entry.client,
@@ -468,12 +471,14 @@ function connectTransport(location: Location.Interface, transport: Transport, ti
 
 function canonicalTool(
   name: string,
+  serverName: string,
   server: Server,
   definition: MCPTool,
   client: Client,
   permission: PermissionV2.Interface,
   fallback?: number,
 ) {
+  const validator = new AjvJsonSchemaValidator()
   return Tool.make({
     description: definition.description ?? `Call ${definition.name} on an MCP server`,
     input: Schema.Record(Schema.String, Schema.Unknown),
@@ -484,20 +489,41 @@ function canonicalTool(
     toModelOutput: ({ output }) => output.content.flatMap(modelContent),
     execute: (input, context) =>
       Effect.gen(function* () {
+        // Capture before asking: later mutation of a caller's object cannot change an approved invocation.
+        const args = yield* Effect.try({
+          try: () => structuredClone(input),
+          catch: () => new Tool.Failure({ message: "Invalid MCP tool input", metadata: { phase: "input" } }),
+        })
+        const checked = yield* Effect.try({
+          try: () => validator.getValidator(definition.inputSchema)(args),
+          catch: () => new Tool.Failure({ message: "Unsupported MCP input schema", metadata: { phase: "input" } }),
+        })
+        if (!checked.valid)
+          return yield* new Tool.Failure({
+            message: "Invalid MCP tool input: " + checked.errorMessage,
+            metadata: { phase: "input" },
+          })
         yield* permission
           .assert({
             action: name,
             resources: ["*"],
             save: ["*"],
-            metadata: { mcpTool: definition.name },
+            metadata: { mcpServer: serverName, mcpTool: definition.name, mcpArguments: redactMcpArguments(args) },
             sessionID: context.sessionID,
             agent: context.agent,
             source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
           })
-          .pipe(Effect.mapError(() => new Tool.Failure({ message: `Permission denied: ${name}` })))
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new Tool.Failure({
+                  message: error._tag === "PermissionV2.CorrectedError" ? error.feedback : `Permission denied: ${name}`,
+                }),
+            ),
+          )
         const result = yield* Effect.tryPromise({
           try: (signal) =>
-            client.callTool({ name: definition.name, arguments: input }, CallToolResultSchema, {
+            client.callTool({ name: definition.name, arguments: args }, CallToolResultSchema, {
               signal,
               timeout: server.timeout?.request ?? fallback ?? DEFAULT_REQUEST_TIMEOUT_MS,
               resetTimeoutOnProgress: true,
@@ -799,3 +825,17 @@ export const node = makeLocationNode({
     ToolRegistry.toolsNode,
   ],
 })
+
+// Redact before permission events are persisted; never copy secrets into approval metadata.
+function redactMcpArguments(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactMcpArguments)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      /token|password|secret|authorization|credential|api.?key|^key$/i.test(key)
+        ? "[REDACTED]"
+        : redactMcpArguments(item),
+    ]),
+  )
+}

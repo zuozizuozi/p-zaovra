@@ -81,6 +81,8 @@ test(
       if (request.url === "/batch-hit" || request.url === "/batch-key") {
         if (request.url === "/batch-hit") batchHits++
         if (request.url === "/batch-key") batchKeys++
+        if (process.env.BROWSER_BATCH_TRACE)
+          console.log("BATCH_HTTP", Date.now(), request.url, batchHits, batchKeys)
         response.end("ok")
         return
       }
@@ -269,6 +271,13 @@ test(
               inputModalities: known ? (vision ? ["text", "image"] : ["text"]) : undefined,
               call: { type: "tool-call", id: `call_${++calls}`, name: "browser", input },
             })
+          // A click dispatches fetch without waiting for the server to receive it.
+          // Observe real receipt, never replay an action to satisfy the counter.
+          const received = (count: number) =>
+            Effect.gen(function* () {
+              while (batchHits < count) yield* Effect.sleep("20 millis")
+              expect(batchHits).toBe(count)
+            }).pipe(Effect.timeout("2 seconds"))
           const missing = yield* call({ action: "snapshot" })
           expect(JSON.stringify(missing)).toContain("no active browser")
           const sequence = [
@@ -282,12 +291,14 @@ test(
           for (const action of sequence) yield* call(action)
           const singleCalls = calls - beforeSingle
           const single = yield* call({ action: "snapshot" })
+          yield* received(1)
           expect(batchHits).toBe(1)
           yield* call({ action: "open", url: new URL("batch", url).href })
           const beforeBatch = calls
           const batch = yield* call({ action: "batch", actions: sequence })
           expect(calls - beforeBatch).toBe(1)
           expect(singleCalls).toBe(4)
+          yield* received(2)
           expect(batchHits).toBe(2)
           assert.deepEqual(
             (batch.output?.structured as { steps: unknown }).steps,
@@ -343,11 +354,17 @@ test(
           expect(JSON.stringify(blocked)).toContain("not_executed")
           expect(batchHits).toBe(2)
           denied = false
+          if (process.env.BROWSER_BATCH_TRACE) console.log("BATCH_START", Date.now(), batchHits)
           const failed = yield* call({
             action: "batch",
             actions: [click, { action: "click", target: { role: "button", name: "Missing" } }, click],
           })
+          if (process.env.BROWSER_BATCH_TRACE) {
+            console.log("BATCH_RETURN", Date.now(), batchHits, JSON.stringify(failed.result), JSON.stringify(progress.at(-1)))
+          }
           expect(failed.result.type).toBe("error")
+          yield* received(3)
+          if (process.env.BROWSER_BATCH_TRACE) console.log("BATCH_OBSERVED", Date.now(), batchHits)
           expect(batchHits).toBe(3)
           expect(
             (progress.at(-1) as { structured: { steps: { status: string }[] } }).structured.steps.map((x) => x.status),
@@ -361,6 +378,7 @@ test(
           assert.ok(batchKeys > previousKeys, "wait for the held key to actually begin")
           yield* Fiber.interrupt(cancel)
           yield* Effect.sleep("100 millis")
+          yield* received(4)
           expect(batchHits).toBe(4)
           expect(
             (progress.at(-1) as { structured: { steps: { status: string }[] } }).structured.steps.map((x) => x.status),
@@ -381,7 +399,27 @@ test(
             "Outcome may have occurred",
           )
           expect(uncertainHits).toBe(1)
-          yield* call({ action: "open", url: url.href })
+          const reopened = yield* call({ action: "open", url: url.href })
+          if (process.env.BROWSER_RECOVERY_TRACE)
+            console.log("RECOVERY_REOPEN", Date.now(), JSON.stringify(reopened.result))
+          // Chromium can commit the previous failed navigation's error page after
+          // goto rejects. Observe the explicit reopen until its target is ready;
+          // never replay either navigation or the following upload action.
+          yield* Effect.gen(function* () {
+            while (true) {
+              const observed = yield* call({ action: "snapshot" })
+              if (process.env.BROWSER_RECOVERY_TRACE)
+                console.log("RECOVERY_SNAPSHOT", Date.now(), JSON.stringify(observed.result))
+              if (
+                observed.result.type === "text" &&
+                typeof observed.result.value === "string" &&
+                `\n${observed.result.value}`.includes(`\nURL: ${url.href}\nTitle: Browser fixture\n`) &&
+                observed.result.value.includes('- button "Upload"')
+              )
+                return
+              yield* Effect.sleep("50 millis")
+            }
+          }).pipe(Effect.timeout("8 seconds"))
           expect(JSON.stringify(yield* call({ action: "click", target: { label: "Upload" } }))).toContain(
             "File upload is not supported",
           )
@@ -502,7 +540,19 @@ test("real Session Stop, archive, Location disposal and browser process loss", {
   await mkdir(second)
   const initial = browserProcesses()
   const initialTree = browserProcesses(false)
-  const server = createServer((_request, response) => response.end("<title>Lifecycle</title><p>alive</p>"))
+  let streams = 0
+  const server = createServer((request, response) => {
+    if (request.url === "/stream") {
+      streams++
+      response.writeHead(200, { "Content-Type": "text/plain" })
+      response.write("first")
+      response.on("close", () => streams--)
+      return
+    }
+    response.end(
+      '<title>Lifecycle</title><p>alive</p><script>fetch("/stream").then(r=>r.body.getReader().read())</script>',
+    )
+  })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()
   if (!address || typeof address === "string") throw Error("No server")
@@ -531,11 +581,17 @@ test("real Session Stop, archive, Location disposal and browser process loss", {
           call(session, { action: "snapshot" }).pipe(Effect.map((value) => JSON.stringify(value)))
         for (const session of [a, b, c])
           expect(JSON.stringify(yield* call(session, { action: "open", url }))).toContain("Lifecycle")
+        for (let attempt = 0; attempt < 20 && streams !== 3; attempt++) yield* Effect.sleep("50 millis")
+        expect(streams).toBe(3)
         yield* sessions.interrupt(a.id)
+        for (let attempt = 0; attempt < 20 && streams !== 2; attempt++) yield* Effect.sleep("50 millis")
+        expect(streams).toBe(2)
         expect(yield* observe(a)).toContain("no active browser")
         expect(yield* observe(b)).toContain("Lifecycle")
         expect(yield* observe(c)).toContain("Lifecycle")
         yield* sessions.update({ sessionID: b.id, archived: true })
+        for (let attempt = 0; attempt < 20 && streams !== 1; attempt++) yield* Effect.sleep("50 millis")
+        expect(streams).toBe(1)
         expect(yield* observe(b)).toContain("no active browser")
         expect(yield* observe(c)).toContain("Lifecycle")
         yield* call(a, { action: "open", url })

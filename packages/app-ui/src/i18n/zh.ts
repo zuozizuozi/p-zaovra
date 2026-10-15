@@ -3,6 +3,11 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.permission.mcpServer": "MCP 服务器",
+  "session.permission.mcpTool": "工具",
+  "session.permission.mcpArguments": "已校验参数（敏感字段已脱敏）",
+
+  "settings.targetServer": "正在设置：{{server}}",
   "session.changes.undo": "撤销更改",
   "session.permission.details": "权限详情",
   "session.permission.requestedAccess": "确认本次访问请求",
@@ -1152,6 +1157,7 @@ export const dict = {
   "session.review.empty": "此会话暂无更改",
   "session.review.noVcs": "未检测到 Git 版本控制系统，无法显示更改",
   "session.review.noSnapshot": "配置中已禁用快照跟踪，因此会话更改不可用",
+  "session.snapshot.unavailable": "没有可用快照，本次文件改动无法撤销。",
   "session.review.noChanges": "无更改",
   "session.review.noUncommittedChanges": "尚无未提交的更改",
   "session.review.noBranchChanges": "尚无分支更改",

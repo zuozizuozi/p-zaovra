@@ -175,7 +175,15 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
                 },
               },
             ]
-          return [adaptTool(session.id, item.id, content)]
+          const part = adaptTool(session.id, item.id, content)
+          if (
+            part.type === "tool" &&
+            part.state.status === "completed" &&
+            ["write", "edit", "apply_patch", "bash"].includes(content.name) &&
+            (!item.snapshot?.start || (item.time.completed !== undefined && !item.snapshot.end))
+          )
+            part.state.metadata = { ...part.state.metadata, zaovraSnapshotUnavailable: true }
+          return [part]
         }),
       })
       continue

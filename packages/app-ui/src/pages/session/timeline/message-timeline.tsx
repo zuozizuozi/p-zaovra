@@ -1160,19 +1160,41 @@ export function MessageTimeline(props: {
         {(message) => (
           <Show when={part()}>
             {(part) => (
-              <MessagePart
-                part={part()}
-                message={message()}
-                showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
-                turnDurationMs={turnDurationMs(row().userMessageID)}
-                useV2Actions={settings.general.newLayoutDesigns()}
-                defaultOpen={defaultOpen()}
-                toolOpen={toolOpen[part().id] ?? defaultOpen()}
-                onToolOpenChange={(open) => setToolOpen(part().id, open)}
-                deferToolContent
-                virtualizeDiff={false}
-                onContentRendered={onSizeChange}
-              />
+              <>
+                <Show
+                  when={(() => {
+                    const value = part()
+                    return (
+                      value.type === "tool" &&
+                      value.state.status === "completed" &&
+                      value.state.metadata?.zaovraSnapshotUnavailable === true
+                    )
+                  })()}
+                >
+                  <div
+                    role="status"
+                    data-slot="snapshot-unavailable"
+                    class="mb-2 flex items-start gap-2 rounded-md px-3 py-2 text-12-regular"
+                    style={{ background: "var(--zaovra-warning-soft)", color: "var(--zaovra-warning)" }}
+                  >
+                    <Icon name="warning" size="small" class="mt-0.5 shrink-0" />
+                    <span>{language.t("session.snapshot.unavailable")}</span>
+                  </div>
+                </Show>
+                <MessagePart
+                  part={part()}
+                  message={message()}
+                  showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
+                  turnDurationMs={turnDurationMs(row().userMessageID)}
+                  useV2Actions={settings.general.newLayoutDesigns()}
+                  defaultOpen={defaultOpen()}
+                  toolOpen={toolOpen[part().id] ?? defaultOpen()}
+                  onToolOpenChange={(open) => setToolOpen(part().id, open)}
+                  deferToolContent
+                  virtualizeDiff={false}
+                  onContentRendered={onSizeChange}
+                />
+              </>
             )}
           </Show>
         )}
@@ -2089,3 +2111,4 @@ export function MessageTimeline(props: {
     </div>
   )
 }
+

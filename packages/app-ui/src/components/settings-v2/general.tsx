@@ -1,3 +1,4 @@
+import type { ServerConnection } from "@/context/server"
 import { Component, Show, createMemo, createResource, onMount } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
@@ -83,6 +84,7 @@ const playDemoSound = (id: string | undefined) => {
 }
 
 export const SettingsGeneralV2: Component<{
+  serverKey?: ServerConnection.Key
   sessionID?: string
   section?: "general" | "appearance" | "privacy" | "experiments" | "permissions"
 }> = (props) => {
@@ -90,7 +92,8 @@ export const SettingsGeneralV2: Component<{
     !props.section || props.section === section
   const theme = useTheme()
   const language = useLanguage()
-  const permission = usePermission()
+  const permissions = usePermission()
+  const permission = () => (props.serverKey ? permissions.ensureServerState(props.serverKey) : permissions)
   const platform = usePlatform()
   const dialog = useDialog()
   const settings = useSettings()
@@ -121,7 +124,7 @@ export const SettingsGeneralV2: Component<{
   const accepting = createMemo(() => {
     const value = dir()
     if (!value || !props.sessionID) return false
-    return permission.isAutoAccepting(props.sessionID, value)
+    return permission().isAutoAccepting(props.sessionID, value)
   })
 
   const toggleAccept = (checked: boolean) => {
@@ -129,11 +132,11 @@ export const SettingsGeneralV2: Component<{
     if (!value || !props.sessionID) return
 
     if (checked) {
-      permission.enableAutoAccept(props.sessionID, value)
+      permission().enableAutoAccept(props.sessionID, value)
       return
     }
 
-    permission.disableAutoAccept(props.sessionID, value)
+    permission().disableAutoAccept(props.sessionID, value)
   }
   const desktop = createMemo(() => platform.platform === "desktop")
 

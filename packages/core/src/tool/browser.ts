@@ -15,6 +15,7 @@ import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { BrowserSession } from "./browser-session"
+import { BrowserNetwork } from "./browser-network"
 
 const Target = Schema.Union([
   Schema.Struct({
@@ -293,7 +294,7 @@ const layer = Layer.effect(
       .register({
         browser: Tool.make({
           description:
-            "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Use batch for up to 4 already-known click/type/press/scroll actions with one final snapshot (default) or screenshot. Batch stops at the first error; inspect step statuses before continuing, never replay completed actions. Use single steps when the next target depends on a new observation. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript.",
+            "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Use batch for up to 4 already-known click/type/press/scroll actions with one final snapshot (default) or screenshot. Batch stops at the first error; inspect step statuses before continuing, never replay completed actions. Use single steps when the next target depends on a new observation. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript. Built-in browser does not support Web Workers; use the system browser for full capabilities. Streaming is supported for GET/HEAD fetch, XHR and EventSource; Chromium may resend native GET requests. Navigation and mutating requests retain bounded zero-retry transport.",
           input: Input,
           output: Output,
           structured: Schema.Struct({
@@ -447,48 +448,8 @@ const layer = Layer.effect(
                               state.logs[0] = "[Earlier logs dropped: capture limit]"
                             }
                           }
-                          await browserContext.route("**/*", async (route) => {
-                            const url = new URL(route.request().url())
-                            if (!["http:", "https:"].includes(url.protocol) || !state.origins.has(url.origin)) {
-                              log(`Blocked origin: ${url.origin}`)
-                              return route.abort("blockedbyclient").catch(() => {})
-                            }
-                            // Playwright does not route redirected requests again. Never let a
-                            // permitted URL redirect past the origin permission check.
-                            const response = await route
-                              .fetch({ maxRedirects: 0, maxRetries: 0, timeout: 10000 })
-                              .catch((error: Error) => {
-                                log(`Request failed; effects may be partial, no retry: ${error.message}`)
-                              })
-                            if (!response) return route.abort("failed").catch(() => {})
-                            if (response.status() >= 300 && response.status() < 400 && response.headers().location) {
-                              log(
-                                `Redirect blocked; explicitly open and authorize the destination: ${response.headers().location}`,
-                              )
-                              await response.dispose()
-                              return route
-                                .fulfill({
-                                  status: 409,
-                                  contentType: "text/plain",
-                                  body: "Redirect blocked. Explicitly open the destination after authorization.",
-                                })
-                                .catch(() => {})
-                            }
-                            await route.fulfill({ response }).catch((error: Error) => {
-                              log(`Response delivery failed; no retry: ${error.message}`)
-                            })
-                            await response.dispose()
-                          })
-                          await browserContext.routeWebSocket("**/*", (ws) => {
-                            const url = new URL(ws.url())
-                            url.protocol = url.protocol === "wss:" ? "https:" : "http:"
-                            if (state.origins.has(url.origin)) {
-                              ws.connectToServer()
-                              return
-                            }
-                            log(`Blocked WebSocket origin: ${url.origin}`)
-                            ws.close()
-                          })
+                          const network = await BrowserNetwork.install(browserContext, state.origins, log)
+                          await network.stream(page)
                           browserContext.on("page", (popup) => {
                             log("Popup blocked")
                             void popup.close().catch(() => {})
@@ -619,7 +580,7 @@ const layer = Layer.effect(
                           ? await page.screenshot({ type: "png", fullPage: false, timeout: 8000 })
                           : undefined
                       return {
-                        text: `URL: ${page.url()}\nTitle: ${await page.title()}\nViewport: 1280x720\n${snapshot}${snapshot.length >= 24000 ? "\n[Observation truncated]" : ""}\n${logs.join("\n")}`,
+                        text: `${BrowserNetwork.workerNotice}\nURL: ${page.url()}\nTitle: ${await page.title()}\nViewport: 1280x720\n${snapshot}${snapshot.length >= 24000 ? "\n[Observation truncated]" : ""}\n${logs.join("\n")}`,
                         screenshot,
                       }
                     } finally {
