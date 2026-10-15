@@ -2118,7 +2118,8 @@ export const layer = Layer.effect(
       const goalID = goal.id
       const blocked = (yield* store.tasks(goalID)).filter(
         (task) =>
-          task.status === "blocked" || (task.status === "pending" && task.attemptCount === 0 && task.isolationState),
+          task.status === "blocked" ||
+          ((task.status === "pending" || task.status === "rework") && task.attemptCount === 0 && task.isolationState),
       )
       if (blocked.length === 0) return []
 
@@ -2151,6 +2152,18 @@ export const layer = Layer.effect(
         (task.isolationState.status === "blocked" || resolved.has(task.id) || reasons.get(task.id)?.startsWith("隔离"))
           ? Effect.gen(function* () {
               if (task.status === "pending") return task
+              // Old runners recorded isolation recovery as rework even before a first attempt.
+              // Readmit through pending so dependency and Handoff checks still apply.
+              if (task.status === "rework") {
+                if (!resolved.has(task.id) || (yield* store.attempts(task.id)).length > 0) return undefined
+                yield* events.publish(Work.Event.TaskBlocked, {
+                  goalID,
+                  taskID: task.id,
+                  status: "blocked",
+                  reason: "隔离恢复：未执行的历史任务重新进入依赖检查",
+                  timestamp: yield* DateTime.now,
+                })
+              }
               const [prepared] =
                 task.isolationState!.status === "blocked"
                   ? yield* provisionGraph(goal, [{ ...task, isolation: "worktree" }])

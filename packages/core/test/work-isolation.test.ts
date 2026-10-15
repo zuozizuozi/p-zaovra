@@ -309,100 +309,161 @@ describe("Work isolation admission", () => {
   )
 
   for (const count of [2, 3])
-    for (const maximum of [1, 3]) {
-      isolationTests(count).live(
-        `readmits isolation failure chain ${count} at concurrency ${maximum}`,
-        () =>
-          Effect.gen(function* () {
-            const { directory } = yield* workspace()
-            const projects = yield* Project.Service
-            const project = yield* projects.resolve(directory)
-            const obstruction = path.join(Global.Path.data, "worktree", project.id)
-            yield* Effect.promise(async () => {
-              await fs.mkdir(path.dirname(obstruction), { recursive: true })
-              await fs.writeFile(obstruction, "blocked")
-            })
-            yield* Effect.addFinalizer(() => Effect.promise(() => fs.rm(obstruction, { recursive: true, force: true })))
-            const work = yield* Work.Service
-            const runner = yield* WorkRunner.Service
-            const store = yield* WorkStore.Service
-            const events = yield* EventV2.Service
-            const db = (yield* Database.Service).db
-            const created = yield* work.create({
-              location: { directory },
-              objective: "Inspect chain",
-              planning: true,
-              budget: { maxParallelTasks: maximum, maxRepairAttempts: 1 },
-              acceptanceCriteria: [{ description: "Fixture inspected", required: true, evidence: "review" }],
-            })
-            yield* runner.run({ goalID: created.goal.id, force: true })
-            const blocked = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
-            expect(blocked).toHaveLength(count)
-            expect(blocked.every((task) => task.status === "blocked" && task.attemptCount === 0)).toBe(true)
-            yield* Effect.promise(() => fs.unlink(obstruction))
-            const admitted: { kind: string; ready: boolean }[] = []
-            const unsubscribe = yield* events.listen((event) =>
-              Effect.gen(function* () {
-                if (!Schema.is(Work.Event.AttemptAdmitted)(event) || event.data.info.goalID !== created.goal.id) return
-                const task = yield* store.getTask(event.data.info.taskID)
-                if (task?.role !== "build") return
-                const handoffs = yield* store.handoffs(created.goal.id)
-                const dependencies: boolean[] = []
-                for (const dependency of task.dependsOn) {
-                  dependencies.push(
-                    (yield* store.getTask(dependency))?.status === "completed" &&
-                      handoffs.some((handoff) => handoff.taskID === dependency && handoff.recipients.includes(task.id)),
-                  )
-                }
-                admitted.push({ kind: event.data.info.kind, ready: dependencies.every(Boolean) })
-              }),
-            )
-            yield* Effect.addFinalizer(() => unsubscribe)
-            yield* runner.run({ goalID: created.goal.id, force: true })
-            const review = yield* WorkMergeReview.Service
-            for (let index = 0; index < count; index++) {
-              const current = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
-              expect(current.filter((task) => task.status === "pending")).toHaveLength(count - index - 1)
-              const merging = current.find((task) => task.status === "merging")!
-              expect(merging).toBeDefined()
-              const candidate = yield* review.read(created.goal.id, merging.id)
-              yield* review.decide(created.goal.id, merging.id, candidate.token, true)
+    for (const legacy of [false, true])
+      for (const maximum of [1, 3]) {
+        isolationTests(count).live(
+          `readmits isolation failure chain ${count} at concurrency ${maximum} legacy=${legacy}`,
+          () =>
+            Effect.gen(function* () {
+              const { directory } = yield* workspace()
+              const projects = yield* Project.Service
+              const project = yield* projects.resolve(directory)
+              const obstruction = path.join(Global.Path.data, "worktree", project.id)
+              yield* Effect.promise(async () => {
+                await fs.mkdir(path.dirname(obstruction), { recursive: true })
+                await fs.writeFile(obstruction, "blocked")
+              })
+              yield* Effect.addFinalizer(() =>
+                Effect.promise(() => fs.rm(obstruction, { recursive: true, force: true })),
+              )
+              const work = yield* Work.Service
+              const runner = yield* WorkRunner.Service
+              const store = yield* WorkStore.Service
+              const events = yield* EventV2.Service
+              const db = (yield* Database.Service).db
+              const created = yield* work.create({
+                location: { directory },
+                objective: "Inspect chain",
+                planning: true,
+                budget: { maxParallelTasks: maximum, maxRepairAttempts: 1 },
+                acceptanceCriteria: [{ description: "Fixture inspected", required: true, evidence: "review" }],
+              })
               yield* runner.run({ goalID: created.goal.id, force: true })
-            }
-            const tasks = yield* store.tasks(created.goal.id)
-            const goal = yield* store.getGoal(created.goal.id)
-            expect(tasks.filter((task) => task.role === "build").map((task) => task.status)).toEqual(
-              Array(count).fill("completed"),
-            )
-            expect(goal?.usage.repairs).toBe(0)
-            expect(admitted.filter((item) => item.kind !== "review")).toEqual(
-              Array.from({ length: count }, () => ({ kind: "execute", ready: true })),
-            )
-            const history = yield* db
-              .select()
-              .from(EventTable)
-              .where(eq(EventTable.aggregate_id, created.goal.id))
-              .orderBy(asc(EventTable.seq))
-              .all()
-              .pipe(Effect.orDie)
-            expect(history.filter((row) => row.type.startsWith(Work.Event.TaskReworkRequested.type))).toHaveLength(0)
-            yield* db.delete(WorkGoalTable).where(eq(WorkGoalTable.id, created.goal.id)).run().pipe(Effect.orDie)
-            yield* events.remove(created.goal.id)
-            yield* events.replayAll(
-              history.map((row) => ({
-                id: row.id,
-                aggregateID: row.aggregate_id,
-                seq: row.seq,
-                type: row.type,
-                data: row.data,
-              })),
-            )
-            expect(yield* store.tasks(created.goal.id)).toEqual(tasks)
-            expect(yield* store.getGoal(created.goal.id)).toEqual(goal)
-          }),
-        60000,
-      )
-    }
+              const blocked = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
+              expect(blocked).toHaveLength(count)
+              expect(blocked.every((task) => task.status === "blocked" && task.attemptCount === 0)).toBe(true)
+              yield* Effect.promise(() => fs.unlink(obstruction))
+              if (legacy) {
+                const copies = yield* ProjectCopy.Service
+                yield* events.publish(Work.Event.GoalActivated, {
+                  goalID: created.goal.id,
+                  timestamp: DateTime.nowUnsafe(),
+                })
+                for (const task of blocked) {
+                  const copy = yield* copies.create({
+                    projectID: project.id,
+                    strategy: ProjectCopy.StrategyID.make("git_worktree"),
+                    sourceDirectory: directory,
+                    directory: AbsolutePath.make(obstruction),
+                    name: task.id,
+                  })
+                  yield* events.publish(Work.Event.TaskIsolationResolved, {
+                    goalID: created.goal.id,
+                    taskID: task.id,
+                    isolation: { status: "isolated" },
+                    location: { directory: copy.directory },
+                    timestamp: DateTime.nowUnsafe(),
+                  })
+                  yield* events.publish(Work.Event.TaskReworkRequested, {
+                    goalID: created.goal.id,
+                    taskID: task.id,
+                    status: "rework",
+                    reason: "Isolation repaired after user intervention",
+                    timestamp: DateTime.nowUnsafe(),
+                  })
+                }
+                const history = yield* db
+                  .select()
+                  .from(EventTable)
+                  .where(eq(EventTable.aggregate_id, created.goal.id))
+                  .orderBy(asc(EventTable.seq))
+                  .all()
+                  .pipe(Effect.orDie)
+                yield* db.delete(WorkGoalTable).where(eq(WorkGoalTable.id, created.goal.id)).run().pipe(Effect.orDie)
+                yield* events.remove(created.goal.id)
+                yield* events.replayAll(
+                  history.map((row) => ({
+                    id: row.id,
+                    aggregateID: row.aggregate_id,
+                    seq: row.seq,
+                    type: row.type,
+                    data: row.data,
+                  })),
+                )
+                expect(
+                  (yield* store.tasks(created.goal.id))
+                    .filter((task) => task.role === "build")
+                    .every((task) => task.status === "rework" && task.attemptCount === 0),
+                ).toBe(true)
+              }
+              const admitted: { kind: string; ready: boolean }[] = []
+              const unsubscribe = yield* events.listen((event) =>
+                Effect.gen(function* () {
+                  if (!Schema.is(Work.Event.AttemptAdmitted)(event) || event.data.info.goalID !== created.goal.id)
+                    return
+                  const task = yield* store.getTask(event.data.info.taskID)
+                  if (task?.role !== "build") return
+                  const handoffs = yield* store.handoffs(created.goal.id)
+                  const dependencies: boolean[] = []
+                  for (const dependency of task.dependsOn) {
+                    dependencies.push(
+                      (yield* store.getTask(dependency))?.status === "completed" &&
+                        handoffs.some(
+                          (handoff) => handoff.taskID === dependency && handoff.recipients.includes(task.id),
+                        ),
+                    )
+                  }
+                  admitted.push({ kind: event.data.info.kind, ready: dependencies.every(Boolean) })
+                }),
+              )
+              yield* Effect.addFinalizer(() => unsubscribe)
+              yield* runner.run({ goalID: created.goal.id, force: true })
+              const review = yield* WorkMergeReview.Service
+              for (let index = 0; index < count; index++) {
+                const current = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
+                expect(current.filter((task) => task.status === "pending")).toHaveLength(count - index - 1)
+                const merging = current.find((task) => task.status === "merging")!
+                expect(merging).toBeDefined()
+                const candidate = yield* review.read(created.goal.id, merging.id)
+                yield* review.decide(created.goal.id, merging.id, candidate.token, true)
+                yield* runner.run({ goalID: created.goal.id, force: true })
+              }
+              const tasks = yield* store.tasks(created.goal.id)
+              const goal = yield* store.getGoal(created.goal.id)
+              expect(tasks.filter((task) => task.role === "build").map((task) => task.status)).toEqual(
+                Array(count).fill("completed"),
+              )
+              expect(goal?.usage.repairs).toBe(0)
+              expect(admitted.filter((item) => item.kind !== "review")).toEqual(
+                Array.from({ length: count }, () => ({ kind: "execute", ready: true })),
+              )
+              const history = yield* db
+                .select()
+                .from(EventTable)
+                .where(eq(EventTable.aggregate_id, created.goal.id))
+                .orderBy(asc(EventTable.seq))
+                .all()
+                .pipe(Effect.orDie)
+              expect(history.filter((row) => row.type.startsWith(Work.Event.TaskReworkRequested.type))).toHaveLength(
+                legacy ? count : 0,
+              )
+              yield* db.delete(WorkGoalTable).where(eq(WorkGoalTable.id, created.goal.id)).run().pipe(Effect.orDie)
+              yield* events.remove(created.goal.id)
+              yield* events.replayAll(
+                history.map((row) => ({
+                  id: row.id,
+                  aggregateID: row.aggregate_id,
+                  seq: row.seq,
+                  type: row.type,
+                  data: row.data,
+                })),
+              )
+              expect(yield* store.tasks(created.goal.id)).toEqual(tasks)
+              expect(yield* store.getGoal(created.goal.id)).toEqual(goal)
+            }),
+          60000,
+        )
+      }
 
   for (const legacy of [false, true]) {
     it.live(
@@ -475,7 +536,6 @@ describe("Work isolation admission", () => {
           )
           expect(yield* store.tasks(created.goal.id)).toEqual(tasks)
           expect(yield* store.getGoal(created.goal.id)).toEqual(goal)
-          if (legacy) return
           yield* runner.run({ goalID: created.goal.id, force: true })
           expect((yield* store.attempts(task.id))[0].kind).toBe("execute")
           expect((yield* store.getGoal(created.goal.id))?.usage.repairs).toBe(0)
