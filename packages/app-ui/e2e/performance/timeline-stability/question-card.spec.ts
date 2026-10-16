@@ -62,6 +62,12 @@ for (const locale of ["zh", "en"] as const) {
     await choices.first().focus()
     await page.keyboard.press("2")
     await expect(choices.nth(1)).toHaveAttribute("aria-checked", "true")
+    await expect(choices.nth(1)).toHaveCSS("border-left-width", "0px")
+    await expect(choices.nth(1)).toHaveCSS("box-shadow", "none")
+    await expect(choices.nth(1)).toHaveCSS(
+      "background-color",
+      locale === "zh" ? "rgb(228, 228, 228)" : "rgb(54, 54, 54)",
+    )
     await page.keyboard.press("ArrowUp")
     await expect(choices.first()).toBeFocused()
     await page.screenshot({ path: info.outputPath(`${locale}-question.png`) })
