@@ -153,6 +153,12 @@
   display: block;
 }
 
+[data-skin="zaovra"] [data-slot="brand"] img[data-slot="wordmark"],
+[data-skin="zaovra"] [data-component="site-footer"] [data-slot="brand"] img[data-slot="wordmark"] {
+  width: auto;
+  height: 15px;
+}
+
 [data-skin="zaovra"] [data-component="site-header"] [data-slot="nav"] {
   display: flex;
   gap: 4px;

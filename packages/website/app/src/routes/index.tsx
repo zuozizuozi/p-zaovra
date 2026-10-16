@@ -7,7 +7,7 @@ import thinking from "../asset/mascot/thinking-128.webp"
 import awaiting from "../asset/mascot/awaiting-128.webp"
 import failed from "../asset/mascot/error-128.webp"
 import success from "../asset/mascot/success-128.webp"
-import successLarge from "../asset/mascot/success-512.webp"
+import lockup from "../asset/brand-v2/lockup-white.webp"
 import { SiteFooter, SiteHeader } from "~/component/site-chrome"
 import { LocaleLinks } from "~/component/locale-links"
 import { useI18n } from "~/context/i18n"
@@ -61,8 +61,6 @@ export default function Home() {
     <main data-page="home" data-skin="zaovra">
       <Title>{i18n.t("home.next.metaTitle")}</Title>
       <Meta name="description" content={i18n.t("home.next.metaDescription")} />
-      <Meta property="og:image" content="/social-share.png" />
-      <Meta name="twitter:image" content="/social-share.png" />
       <LocaleLinks path="/" />
 
       <SiteHeader />
@@ -472,7 +470,7 @@ export default function Home() {
 
       <section data-component="cta">
         <div data-slot="glow" aria-hidden="true" />
-        <img src={successLarge} alt="" width="176" height="176" />
+        <img src={lockup} alt="Zaovra" width="1954" height="490" />
         <h2>{i18n.t("home.v3.cta.title")}</h2>
         <p>{i18n.t("home.v3.cta.body")}</p>
         <div data-slot="actions">

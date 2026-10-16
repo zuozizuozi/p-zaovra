@@ -1263,10 +1263,10 @@
 }
 
 [data-page="home"] [data-component="cta"] img {
-  width: clamp(112px, 14vw, 176px);
+  width: clamp(240px, 38vw, 440px);
   height: auto;
-  filter: drop-shadow(0 24px 40px rgba(132, 66, 252, 0.6));
-  animation: bob 4.5s ease-in-out infinite;
+  margin-bottom: 12px;
+  filter: drop-shadow(0 18px 40px rgba(132, 66, 252, 0.55));
 }
 
 [data-page="home"] [data-component="cta"] p {

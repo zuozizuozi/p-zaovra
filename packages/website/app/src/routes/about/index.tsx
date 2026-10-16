@@ -1,7 +1,7 @@
 import "./index.css"
 import { Meta, Title } from "@solidjs/meta"
 import { A } from "@solidjs/router"
-import mascot from "../../asset/mascot/idle-512.webp"
+import lockup from "../../asset/brand-v2/lockup-white.webp"
 import { SiteFooter, SiteHeader } from "~/component/site-chrome"
 import { LocaleLinks } from "~/component/locale-links"
 import { useI18n } from "~/context/i18n"
@@ -25,7 +25,7 @@ export default function About() {
             <p>{i18n.t("about.body")}</p>
           </div>
           <div data-slot="about-mark" aria-hidden="true">
-            <img src={mascot} alt="" width="320" height="320" />
+            <img src={lockup} alt="" width="1954" height="490" />
           </div>
         </section>
 

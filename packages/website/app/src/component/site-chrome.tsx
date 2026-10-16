@@ -1,5 +1,6 @@
 import "./site-chrome.css"
 import { A } from "@solidjs/router"
+import wordmark from "../asset/brand-v2/wordmark-white.webp"
 import idle from "../asset/mascot/idle-128.webp"
 import { LanguagePicker } from "~/component/language-picker"
 import { useI18n } from "~/context/i18n"
@@ -9,7 +10,7 @@ function Brand() {
   return (
     <>
       <img src={idle} alt="" width="32" height="32" />
-      <span>Zaovra</span>
+      <img data-slot="wordmark" src={wordmark} alt="" width="1405" height="204" />
     </>
   )
 }
