@@ -592,6 +592,7 @@ export const RunCommand = effectCmd({
           let idleChecks = 0
           let declined = false
           let error: string | undefined
+          let terminal = false
 
           async function handle(event: Event) {
             if (event.type === "session.next.step.started" && event.properties.sessionID === sessionID) {
@@ -727,17 +728,19 @@ export const RunCommand = effectCmd({
             const page = await client.v2.session
               .history({ sessionID, after, limit: 100 }, { throwOnError: true })
               .then((result) => result.data)
-            let terminal = false
             for (const item of page.data) {
               after = Math.max(after, item.durable?.seq ?? after)
               if (!admitted) {
                 admitted = item.type === "session.next.prompt.admitted" && item.data.messageID === promptID
                 continue
               }
+              if (item.type === "session.next.step.started") {
+                terminal = false
+                error = undefined
+              }
               terminal = (await handle({ id: item.id, type: item.type, properties: item.data } as Event)) || terminal
             }
             await resolvePending()
-            if (terminal) return error
             if (page.hasMore) continue
 
             const [active, pending] = await Promise.all([
@@ -748,6 +751,22 @@ export const RunCommand = effectCmd({
             ])
             idleChecks = admitted && !active && pending === 0 ? idleChecks + 1 : 0
             if (idleChecks >= 3) {
+              // Provider stop can precede closing review or queued input. Read
+              // the final host outcome only after the coordinator becomes idle.
+              const outcome = await client.v2.session
+                .outcome({ sessionID }, { throwOnError: true })
+                .then((result) => result.data.data)
+              if (outcome.state === "running") {
+                idleChecks = 0
+                continue
+              }
+              if (terminal) {
+                if (outcome.state === "failed" && !error) {
+                  error = "Session execution failed"
+                  if (!emit("error", { error: { message: error } })) UI.error(error)
+                }
+                return error
+              }
               if (declined) return error
               const message = "Session execution ended without a durable terminal event"
               if (!emit("error", { error: { message } })) UI.error(message)

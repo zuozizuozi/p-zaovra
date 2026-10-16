@@ -1602,6 +1602,35 @@ test("delivery facts retain snapshot, added and partial files without inferring 
   ).toEqual([])
 })
 
+test("V4 shell identity preserves multiline, escape and heredoc semantics", () => {
+  const tool = (command: string, workdir = "."): SessionMessage.AssistantTool => ({
+    type: "tool",
+    id: command,
+    name: "bash",
+    time: assistant.time,
+    state: { status: "completed", input: { command, workdir }, content: [], structured: { exit: 1 } },
+  })
+  for (const commands of [
+    ["echo first\necho second", "echo first echo second"],
+    ["echo first\\\nsecond", "echo first\\ second"],
+    ["cat <<EOF\nhello world\nEOF", "cat <<EOF\nhello  world\nEOF"],
+    ["echo 'a b'", "echo 'a  b'"],
+  ]) {
+    const content = [tool(commands[0]), tool(commands[1]), tool(commands[0])]
+    expect(SessionOutcome.shellRecovery([{ ...assistant, content }])).toMatchObject({ failures: 3, repeated: 1 })
+  }
+  const content = Array.from({ length: 3 }, () => tool("cat <<EOF\nhello\nEOF"))
+  expect(SessionOutcome.shellRecovery([{ ...assistant, content }])).toMatchObject({ failures: 3, repeated: 3 })
+  expect(
+    SessionOutcome.shellRecovery([
+      { ...assistant, content: Array.from({ length: 10 }, (_, i) => tool(`echo ${i}\nfalse`)) },
+    ]),
+  ).toMatchObject({ failures: 10, repeated: 1 })
+  expect(
+    SessionOutcome.shellRecovery([{ ...assistant, content: [tool("false", "one"), tool("false", "two")] }]),
+  ).toMatchObject({ failures: 2, repeated: 1 })
+})
+
 test("shell recovery resets on real progress without merging different quoted literals or directories", () => {
   const tool = (command: string, exit = 1, workdir = "."): SessionMessage.AssistantTool => ({
     type: "tool",

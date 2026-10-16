@@ -206,6 +206,8 @@
         "@zaovra-ai/plugin": "workspace:*",
         "@zaovra-ai/schema": "workspace:*",
         "ai-gateway-provider": "3.1.2",
+        "ajv": "8.20.0",
+        "ajv-formats": "3.0.1",
         "bun-pty": "0.4.8",
         "cross-spawn": "catalog:",
         "diff": "catalog:",

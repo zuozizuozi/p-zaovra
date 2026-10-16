@@ -4566,6 +4566,12 @@ describe("SessionRunnerLLM", () => {
     { name: "identical failures", commands: ["check --broken", "check --broken", "check --broken"], stop: true },
     { name: "whitespace variants", commands: ["check --broken", "check  --broken", " check --broken  "], stop: true },
     { name: "ten varied failures", commands: Array.from({ length: 10 }, (_, i) => `inspect-${i}`), stop: true },
+    {
+      name: "V4 multiline distinction",
+      commands: ["echo one\necho two", "echo one echo two", "echo one\necho two"],
+      stop: false,
+    },
+    { name: "V4 exact multiline repetition", commands: Array(3).fill("echo one\nfalse"), stop: true },
   ])
     it.effect(`R1 shell resilience: ${scenario.name}`, () =>
       Effect.gen(function* () {
@@ -4603,6 +4609,29 @@ describe("SessionRunnerLLM", () => {
         expect(requests.at(-1)!.tools.length === 0).toBe(scenario.stop)
         if (scenario.commands.length >= 4) expect(JSON.stringify(requests[4]!.system)).toContain("Change approach")
         if (!scenario.stop) expect(JSON.stringify(requests.at(-1)!.system)).not.toContain("Tool execution is stopped")
+        const database = yield* Database.Service
+        const before = SessionOutcome.shellRecovery(yield* SessionOutcome.history(database.db, sessionID))
+        const messageID = SessionMessage.ID.create()
+        const events = yield* EventV2.Service
+        yield* events.publish(SessionEvent.Compaction.Started, {
+          sessionID,
+          messageID,
+          timestamp: DateTime.makeUnsafe(1),
+          reason: "manual",
+        })
+        yield* events.publish(SessionEvent.Compaction.Ended, {
+          sessionID,
+          messageID,
+          timestamp: DateTime.makeUnsafe(2),
+          reason: "manual",
+          text: "Prior shell attempts",
+          recent: "",
+        })
+        expect(SessionOutcome.shellRecovery(yield* SessionOutcome.history(database.db, sessionID))).toEqual(before)
+        requests.length = 0
+        responses = [fragmentFixture("text", "restarted", ["Report remaining failure."]).completeEvents]
+        yield* session.resume(sessionID).pipe(Effect.exit)
+        expect(requests[0].tools.length === 0).toBe(scenario.stop)
       }),
     )
 

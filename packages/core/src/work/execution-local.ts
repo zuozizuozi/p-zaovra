@@ -12,7 +12,7 @@ import { WorkRecovery } from "./recovery"
 import { WorkRunner } from "./runner"
 import { WorkStore } from "./store"
 
-const layer = Layer.effect(
+export const layer = Layer.effect(
   WorkExecution.Service,
   Effect.gen(function* () {
     const controllers = yield* WorkController.Service

@@ -10,6 +10,9 @@ import { WorkRunner } from "@zaovra-ai/core/work/runner"
 import { WorkPlanner } from "@zaovra-ai/core/work/planner"
 import { WorkReviewer } from "@zaovra-ai/core/work/reviewer"
 import { WorkExecution } from "@zaovra-ai/core/work/execution"
+import { WorkExecutionLocal } from "@zaovra-ai/core/work/execution-local"
+import { WorkController } from "@zaovra-ai/core/work/controller"
+import { WorkRecovery } from "@zaovra-ai/core/work/recovery"
 import { WorkStore } from "@zaovra-ai/core/work/store"
 import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { SessionV2 } from "@zaovra-ai/core/session"
@@ -45,6 +48,8 @@ const isolationTests = (taskCount = 1) =>
         Database.node,
         EventV2.node,
         WorkMergeReview.node,
+        WorkController.node,
+        WorkRecovery.node,
       ]),
       [
         [SessionExecution.node, SessionExecution.noopLayer],
@@ -314,10 +319,13 @@ describe("Work isolation admission", () => {
         { maximum: 1, missingHandoff: false },
         { maximum: 3, missingHandoff: false },
         { maximum: 3, missingHandoff: true },
+        { maximum: 3, missingHandoff: false, automatic: true },
+        { maximum: 3, missingHandoff: false, automatic: true, restart: true },
       ]) {
         if (scenario.missingHandoff && (!legacy || count !== 2)) continue
+        if ("restart" in scenario && (!legacy || count !== 3)) continue
         isolationTests(count).live(
-          `readmits isolation failure chain ${count} at concurrency ${scenario.maximum} legacy=${legacy} missingHandoff=${scenario.missingHandoff}`,
+          `readmits isolation failure chain ${count} at concurrency ${scenario.maximum} legacy=${legacy} missingHandoff=${scenario.missingHandoff} automatic=${"automatic" in scenario} restart=${"restart" in scenario}`,
           () =>
             Effect.gen(function* () {
               const { directory } = yield* workspace()
@@ -439,7 +447,7 @@ describe("Work isolation admission", () => {
                 }),
               )
               yield* Effect.addFinalizer(() => unsubscribe)
-              yield* runner.run({ goalID: created.goal.id, force: true })
+              yield* runner.run({ goalID: created.goal.id, force: !("automatic" in scenario && legacy) })
               const review = yield* WorkMergeReview.Service
               for (let index = 0; index < count; index++) {
                 const current = (yield* store.tasks(created.goal.id)).filter((task) => task.role === "build")
@@ -448,7 +456,38 @@ describe("Work isolation admission", () => {
                 expect(merging).toBeDefined()
                 const candidate = yield* review.read(created.goal.id, merging.id)
                 yield* review.decide(created.goal.id, merging.id, candidate.token, true)
-                yield* runner.run({ goalID: created.goal.id, force: true })
+                if ("automatic" in scenario) {
+                  const controller = yield* WorkController.Service
+                  if (index === 0 && "restart" in scenario) {
+                    expect(yield* controller.dispatches(created.goal.id)).toMatchObject([
+                      { signal: "continue", status: "pending" },
+                    ])
+                    yield* Layer.build(WorkExecutionLocal.layer)
+                  }
+                  if (index === 0 && !("restart" in scenario)) {
+                    // Restart with a durable continue already queued, including
+                    // a pause that wins before the new dispatcher claims it.
+                    yield* work.pause(created.goal.id)
+                    const before = yield* store.tasks(created.goal.id)
+                    yield* Layer.build(WorkExecutionLocal.layer)
+                    yield* Effect.sleep("400 millis")
+                    expect(yield* store.tasks(created.goal.id)).toEqual(before)
+                    expect((yield* store.getGoal(created.goal.id))?.status).toBe("paused")
+                    yield* events.publish(Work.Event.GoalActivated, {
+                      goalID: created.goal.id,
+                      timestamp: DateTime.nowUnsafe(),
+                    })
+                    yield* controller.signal(created.goal.id, "continue")
+                  }
+                  // The public merge-review service durably writes continue;
+                  // the real local dispatcher must claim it without force.
+                  for (let wait = 0; wait < 600; wait++) {
+                    const dispatches = yield* controller.dispatches(created.goal.id)
+                    if (dispatches.every((dispatch) => dispatch.status !== "pending" && dispatch.status !== "leased"))
+                      break
+                    yield* Effect.sleep("50 millis")
+                  }
+                } else yield* runner.run({ goalID: created.goal.id, force: true })
               }
               const tasks = yield* store.tasks(created.goal.id)
               const goal = yield* store.getGoal(created.goal.id)
