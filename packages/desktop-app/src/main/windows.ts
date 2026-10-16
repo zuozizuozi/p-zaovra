@@ -77,7 +77,7 @@ export function setAppQuitting(quitting = true) {
 export function setBackgroundColor(color: string) {
   backgroundColor = color
   BrowserWindow.getAllWindows().forEach((win) => {
-    win.setBackgroundColor(color)
+    win.setBackgroundColor(process.platform === "win32" ? overlay(titlebarThemes.get(win)).color : color)
     if (process.platform === "darwin") win.invalidateShadow()
   })
 }
@@ -127,6 +127,7 @@ export function setTitlebar(win: BrowserWindow, theme: Partial<TitlebarTheme> = 
 export function updateTitlebar(win: BrowserWindow) {
   if (process.platform !== "win32") return
   win.setTitleBarOverlay(overlay(titlebarThemes.get(win), win.webContents.getZoomFactor()))
+  win.setBackgroundColor(overlay(titlebarThemes.get(win)).color)
 }
 
 export function setPinchZoomEnabled(enabled: boolean) {
@@ -183,7 +184,7 @@ export function createMainWindow(id: string = randomUUID()) {
     autoHideMenuBar: true,
     title: "Zaovra",
     icon: iconPath(),
-    backgroundColor: backgroundColor ?? defaultBackgroundColor(),
+    backgroundColor: process.platform === "win32" ? overlay({ mode }).color : backgroundColor ?? defaultBackgroundColor(),
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hidden" as const,
@@ -193,8 +194,8 @@ export function createMainWindow(id: string = randomUUID()) {
     ...(process.platform === "win32"
       ? {
           frame: false,
-          // Keep all outer edges frameless, rather than retaining Windows' side frame.
-          thickFrame: false,
+          // Keep native resize, Snap and shadow behavior while hiding the standard titlebar.
+          thickFrame: true,
           titleBarStyle: "hidden" as const,
           titleBarOverlay: overlay({ mode }),
         }
