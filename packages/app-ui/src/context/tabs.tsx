@@ -174,10 +174,10 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       }
     })
 
-    const navigateTab = (tab: Tab) => {
+    const navigateTab = (tab: Tab, options?: { replace?: boolean }) => {
       const href = tabHref(tab)
       setRecentKey(tabKey(tab))
-      navigate(href)
+      navigate(href, options)
     }
 
     const removeTab = (index: number) => {
@@ -245,11 +245,16 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         if (!tab || tab.type !== "draft") throw new Error(`Draft not found: ${draftID}`)
         return tab
       },
-      async newDraft(draft: Omit<DraftTab, "type" | "draftID">, prompt?: string, model?: PromptModel) {
+      async newDraft(
+        draft: Omit<DraftTab, "type" | "draftID">,
+        prompt?: string,
+        model?: PromptModel,
+        options?: { replace?: boolean },
+      ) {
         await ready.promise
         const directory = await resolveDirectory(draft)
         if (!directory) {
-          navigate("/?view=projects")
+          navigate("/?view=projects", options)
           return
         }
         await Promise.all(
@@ -276,7 +281,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           })
         if (existing) {
           if (model) memory.get<PromptSession>(tabKey(existing), "prompt")?.model.set(model)
-          navigateTab(existing)
+          navigateTab(existing, options)
           return existing
         }
         const draftID = uuid()
@@ -288,7 +293,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
               tabs.push(tab)
             }),
           )
-          navigate(draftHref(draftID))
+          navigate(draftHref(draftID), options)
         })
         return tab
       },
@@ -298,7 +303,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         // Recovery must not redirect a user who has navigated away meanwhile.
         if (location.query.draftId !== draftID) return
         if (!directory) {
-          navigate("/?view=projects")
+          navigate("/?view=projects", { replace: true })
           return
         }
         actions.updateDraft(draftID, { directory, worktree: undefined })

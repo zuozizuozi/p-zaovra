@@ -366,7 +366,9 @@ export function NewHome() {
     const project = newSessionProject()
     if (searchParams.view === "projects" || !conn || !project || state.starting) return
     setState("starting", true)
-    void tabs.newDraft({ server: ServerConnection.key(conn), directory: project.worktree })
+    void tabs.newDraft({ server: ServerConnection.key(conn), directory: project.worktree }, undefined, undefined, {
+      replace: true,
+    })
   })
   const directories = (project: LocalProject) => [project.worktree, ...(project.sandboxes ?? [])]
   const projectDirectories = createMemo(() => {

@@ -103,7 +103,7 @@ const SessionRoute = () => {
     if (!settings.general.newLayoutDesigns()) return
     if (params.id || search.draftId) return
     if (!tabs.ready() || !sdk().directory) return
-    tabs.newDraft({ server: server.key, directory: sdk().directory }, search.prompt)
+    tabs.newDraft({ server: server.key, directory: sdk().directory }, search.prompt, undefined, { replace: true })
   })
 
   return (
