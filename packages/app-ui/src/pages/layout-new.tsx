@@ -151,6 +151,7 @@ export default function NewLayout(props: ParentProps) {
 
   return (
     <div
+      data-window-edge={desktop() && platform.os === "windows" ? "windows" : undefined}
       class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
       style={{
         "padding-top": "env(safe-area-inset-top, 0px)",
@@ -161,9 +162,14 @@ export default function NewLayout(props: ParentProps) {
       <div class="flex min-h-0 min-w-0 flex-1">
         <Show when={desktop()}>
           <DesktopRail />
-          <Show when={!settingsPage.open && layout.sidebar.opened()}>
+          <div
+            data-component="desktop-sidebar-region"
+            data-open={!settingsPage.open && layout.sidebar.opened()}
+            inert={settingsPage.open || !layout.sidebar.opened()}
+            aria-hidden={settingsPage.open || !layout.sidebar.opened()}
+          >
             <DesktopSidebar />
-          </Show>
+          </div>
         </Show>
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
           <main
