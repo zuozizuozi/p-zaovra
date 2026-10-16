@@ -3,6 +3,8 @@ export * as MCP from "./mcp"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import Ajv from "ajv"
 import Ajv2020 from "ajv/dist/2020"
+import draft06 from "ajv/dist/refs/json-schema-draft-06.json"
+import AjvDraft04 from "ajv-draft-04"
 import addFormats from "ajv-formats"
 
 import path from "path"
@@ -481,17 +483,35 @@ function canonicalTool(
   permission: PermissionV2.Interface,
   fallback?: number,
 ) {
-  const dialect = definition.inputSchema.$schema
+  // These published dialect identifiers differ only in scheme or an empty fragment.
+  // Nonempty fragments and unrecognized dialects must not fall back to another draft.
+  const dialect =
+    typeof definition.inputSchema.$schema === "string"
+      ? definition.inputSchema.$schema.replace(/^https:\/\//, "http://").replace(/#$/, "")
+      : definition.inputSchema.$schema
   const supported =
     dialect === undefined ||
-    dialect === "https://json-schema.org/draft/2020-12/schema" ||
-    dialect === "http://json-schema.org/draft-07/schema#"
+    dialect === "http://json-schema.org/draft/2020-12/schema" ||
+    dialect === "http://json-schema.org/draft-07/schema" ||
+    dialect === "http://json-schema.org/draft-06/schema" ||
+    dialect === "http://json-schema.org/draft-04/schema"
+  const options = { strict: false, strictSchema: "log", validateSchema: true, allErrors: true } as const
   const ajv =
-    dialect === "http://json-schema.org/draft-07/schema#"
-      ? new Ajv({ strict: false, strictSchema: true, validateSchema: true, allErrors: true })
-      : new Ajv2020({ strict: false, strictSchema: true, validateSchema: true, allErrors: true })
+    dialect === "http://json-schema.org/draft-04/schema"
+      ? new AjvDraft04(options)
+      : dialect === "http://json-schema.org/draft-06/schema" || dialect === "http://json-schema.org/draft-07/schema"
+        ? new Ajv(options)
+        : new Ajv2020(options)
+  if (dialect === "http://json-schema.org/draft-06/schema") ajv.addMetaSchema(draft06)
   addFormats(ajv)
   const validator = new AjvJsonSchemaValidator(ajv)
+  const inputSchema = {
+    ...definition.inputSchema,
+    $schema:
+      dialect === undefined || dialect === "http://json-schema.org/draft/2020-12/schema"
+        ? "https://json-schema.org/draft/2020-12/schema"
+        : `${dialect}#`,
+  }
   return Tool.make({
     description: definition.description ?? `Call ${definition.name} on an MCP server`,
     input: Schema.Record(Schema.String, Schema.Unknown),
@@ -510,9 +530,13 @@ function canonicalTool(
         const checked = yield* Effect.try({
           try: () => {
             if (!supported) throw new Error("Unsupported JSON Schema dialect")
-            return validator.getValidator(definition.inputSchema)(args)
+            return validator.getValidator(inputSchema)(args)
           },
-          catch: () => new Tool.Failure({ message: "Unsupported MCP input schema", metadata: { phase: "input" } }),
+          catch: () =>
+            new Tool.Failure({
+              message: `Unsupported MCP input schema (dialect: ${String(definition.inputSchema.$schema ?? "2020-12")})`,
+              metadata: { phase: "input" },
+            }),
         })
         if (!checked.valid)
           return yield* new Tool.Failure({
