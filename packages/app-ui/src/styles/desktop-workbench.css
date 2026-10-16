@@ -223,16 +223,6 @@ html[data-theme="oc-2"] body[data-new-layout] {
   background: var(--zaovra-canvas);
 
   /* The workspace owns the shell boundary; nested session panels do not. */
-  [data-window-edge="windows"]::before {
-    content: "";
-    position: fixed;
-    inset: 0 0 auto;
-    height: 1px;
-    background: var(--zaovra-line);
-    pointer-events: none;
-    z-index: 100;
-  }
-
   :has(> [data-slot="titlebar-v2"]) {
     background: var(--zaovra-canvas);
   }
@@ -353,9 +343,13 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="desktop-sidebar-v2"] {
-    width: 264px;
-    background: var(--zaovra-rail);
-    border-color: var(--zaovra-line);
+    width: 256px;
+    height: calc(100% - 16px);
+    margin: 8px 8px 8px 0;
+    border: 1px solid var(--zaovra-line);
+    border-radius: var(--zaovra-radius-panel);
+    overflow: hidden;
+    background: var(--zaovra-surface);
   }
 
   [data-component="desktop-sidebar-v2"] > div:first-child {

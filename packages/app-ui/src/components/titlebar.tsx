@@ -424,7 +424,6 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                 }}
               >
                 <Show when={props.minimal}>
-                  <ChannelIndicator />
                   <Show when={windows() || linux()}>
                     <WindowsAppMenu command={command} platform={platform} variant="v2" />
                   </Show>

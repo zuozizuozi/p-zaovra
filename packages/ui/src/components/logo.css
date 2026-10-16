@@ -3,7 +3,8 @@
   aspect-ratio: 1;
 }
 
-[data-component="logo-lockup"] {
+[data-component="logo-lockup"],
+[data-component="logo-wordmark"] {
   display: inline-block;
   img {
     width: 100%;
@@ -14,7 +15,7 @@
     display: none;
   }
 }
-html[data-color-scheme="dark"] [data-component="logo-lockup"] {
+html[data-color-scheme="dark"] :is([data-component="logo-lockup"], [data-component="logo-wordmark"]) {
   [data-variant="light"] {
     display: none;
   }

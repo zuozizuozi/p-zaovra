@@ -193,6 +193,8 @@ export function createMainWindow(id: string = randomUUID()) {
     ...(process.platform === "win32"
       ? {
           frame: false,
+          // Keep all outer edges frameless, rather than retaining Windows' side frame.
+          thickFrame: false,
           titleBarStyle: "hidden" as const,
           titleBarOverlay: overlay({ mode }),
         }

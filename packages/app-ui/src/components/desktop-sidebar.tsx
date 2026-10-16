@@ -12,7 +12,7 @@ import { tabHref, tabKey, type SessionTab, type Tab, useTabs } from "@/context/t
 import { DraftTabItem, TabNavItem } from "@/components/titlebar-tab-nav"
 import { displayName } from "@/pages/layout/helpers"
 import { ProjectGlyph } from "@/components/project-glyph"
-import { BrandMark } from "@/components/brand-mark"
+import { Wordmark } from "@zaovra-ai/ui/logo"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { desktopProjectGroup } from "./desktop-project-group"
@@ -163,8 +163,7 @@ export function DesktopSidebar() {
     >
       <div class="flex h-10 shrink-0 items-center gap-1 px-2" data-tauri-drag-region>
         <div class="flex min-w-0 flex-1 items-center gap-2 px-2 text-sm font-semibold text-v2-text-text-base">
-          <BrandMark class="size-6 shrink-0" />
-          <span>Zaovra</span>
+          <Wordmark class="w-28 shrink-0" />
         </div>
         <button
           type="button"

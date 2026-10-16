@@ -36,23 +36,7 @@ for (const scheme of ["light", "dark"] as const) {
     const input = page.locator('[data-component="prompt-input-v2"] [contenteditable="true"]').first()
     await input.fill("Preserve this task while toggling")
     const sidebar = await page.locator('[data-component="desktop-sidebar-v2"]').elementHandle()
-    const edge = await page.locator('[data-window-edge="windows"]').evaluate((node) => {
-      const style = getComputedStyle(node, "::before")
-      return {
-        height: style.height,
-        top: style.top,
-        width: style.width,
-        events: style.pointerEvents,
-        viewport: innerWidth,
-      }
-    })
-    expect(edge).toEqual({
-      height: "1px",
-      top: "0px",
-      width: `${edge.viewport}px`,
-      events: "none",
-      viewport: edge.viewport,
-    })
+    await expect(page.locator('[data-window-edge="windows"]')).toHaveCount(0)
     // Seek the actual CSS transition, rather than rely on the machine's frame rate.
     await toggle.click()
     await expect(region).toHaveAttribute("inert", "")

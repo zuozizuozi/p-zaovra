@@ -39,7 +39,14 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(rail).toBeVisible()
     await expect(rail).toHaveCSS("border-right-width", "0px")
     await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click()
-    await expect(page.locator('[data-component="desktop-sidebar-v2"]')).toHaveCSS("border-right-width", "0px")
+    await expect(page.locator('[data-component="desktop-sidebar-region"]')).toHaveCSS("width", "264px")
+    await expect(page.locator('[data-component="desktop-sidebar-v2"]')).toHaveCSS("border-right-width", "1px")
+    await expect(page.locator('[data-component="desktop-sidebar-v2"]')).toHaveCSS("border-radius", "14px")
+    await expect(page.locator('[data-slot="channel-label"]')).toHaveCount(0)
+    await expect(page.locator('[data-component="desktop-sidebar-v2"] [data-component="brand-mark"]')).toHaveCount(0)
+    await expect(
+      page.locator('[data-component="desktop-sidebar-v2"]').getByRole("img", { name: "Zaovra", exact: true }),
+    ).toBeVisible()
     await page.screenshot({ path: info.outputPath("draft.png") })
     await page.goto(stressSessionHref(fixture.sourceID))
     await expect(composer).toBeVisible()

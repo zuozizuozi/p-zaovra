@@ -41,3 +41,15 @@ export const Logo = (props: { class?: string }) => {
     </span>
   )
 }
+
+/** English lettering from the approved lockup, without its mascot. */
+export const Wordmark = (props: { class?: string }) => (
+  <span data-component="logo-wordmark" class={props.class} role="img" aria-label="Zaovra">
+    <svg data-variant="light" viewBox="600 180 1420 215" aria-hidden="true">
+      <image href={lockupLight} width="2035" height="518" />
+    </svg>
+    <svg data-variant="dark" viewBox="600 180 1420 215" aria-hidden="true">
+      <image href={lockupDark} width="2035" height="518" />
+    </svg>
+  </span>
+)
