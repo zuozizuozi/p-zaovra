@@ -158,7 +158,7 @@ export function DesktopSidebar() {
   return (
     <aside
       data-component="desktop-sidebar-v2"
-      class="flex h-full w-[280px] shrink-0 flex-col border-r border-v2-border-border-muted bg-v2-background-bg-deep"
+      class="flex h-full w-[280px] shrink-0 flex-col bg-v2-background-bg-deep"
       aria-label={language.t("sidebar.nav.projectsAndSessions")}
     >
       <div class="flex h-10 shrink-0 items-center gap-1 px-2" data-tauri-drag-region>
@@ -270,7 +270,7 @@ export function DesktopSidebar() {
                 </div>
 
                 <Show when={view.expanded === groupKey(group)}>
-                  <div class="ml-3 flex min-w-0 flex-col gap-0.5 border-l border-v2-border-border-muted pl-2">
+                  <div class="flex min-w-0 flex-col gap-0.5">
                     <For each={tabsForGroup(group)}>
                       {(tab) => {
                         const close = () => tabs.closeTab(tabs.store.findIndex((item) => item === tab))

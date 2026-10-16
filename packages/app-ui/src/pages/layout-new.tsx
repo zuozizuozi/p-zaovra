@@ -166,7 +166,7 @@ export default function NewLayout(props: ParentProps) {
           </Show>
         </Show>
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <main class="relative flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
+          <main data-component={desktop() ? "desktop-workspace" : undefined} class="relative flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
             <div class="size-full min-h-0 flex flex-col" classList={{ hidden: settingsPage.open }}>
               <Suspense fallback={<DraftLoading />}>{props.children}</Suspense>
             </div>

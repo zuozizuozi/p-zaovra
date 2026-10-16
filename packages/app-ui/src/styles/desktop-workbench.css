@@ -10,7 +10,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
   --zaovra-rail: var(--zaovra-canvas);
   --zaovra-surface: light-dark(#ffffff, #1d1c21);
   --zaovra-raised: light-dark(#ffffff, #232228);
-  --zaovra-hover: light-dark(#e9e7ee, #28262d);
+  --zaovra-hover: light-dark(#efefef, #292929);
   --zaovra-ink: light-dark(#1d1b22, #eceaf1);
   --zaovra-secondary: light-dark(#55515e, #b3aebc);
   --zaovra-muted: light-dark(#8e8a97, #7b7684);
@@ -18,7 +18,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
   --zaovra-accent-soft: light-dark(#f1ebfe, #2a2340);
   --zaovra-accent-text: light-dark(#6d28d9, #c4b5fd);
   --zaovra-on-accent: light-dark(#ffffff, #17121f);
-  --zaovra-selection: light-dark(#e6e2f0, #2e2840);
+  --zaovra-selection: light-dark(#e4e4e4, #363636);
   --zaovra-line: light-dark(#e4e2e8, #2b2930);
   --zaovra-line-subtle: light-dark(#efeef2, #232127);
   --zaovra-success: light-dark(#23845a, #5cc796);
@@ -187,17 +187,29 @@ html[data-theme="oc-2"] body[data-new-layout] {
     [data-work-tone="error"] {
       color: var(--zaovra-error);
       background: var(--zaovra-error-soft);
-      border-color: var(--zaovra-error);
+      border-color: transparent;
     }
     [data-work-tone="success"] {
       color: var(--zaovra-success);
       background: var(--zaovra-success-soft);
-      border-color: var(--zaovra-success);
+      border-color: transparent;
     }
   }
 
   color: var(--zaovra-ink);
   background: var(--zaovra-canvas);
+
+  /* The workspace owns the shell boundary; nested session panels do not. */
+  [data-component="desktop-workspace"] {
+    margin: 0 8px 8px 0;
+    border: 1px solid var(--zaovra-line);
+    border-radius: var(--zaovra-radius-panel);
+    background: var(--zaovra-surface);
+    overflow: hidden;
+    [data-component="session-panel"] {
+      box-shadow: none;
+    }
+  }
 
   [data-component="workbench-pill"] {
     display: inline-flex;
@@ -279,7 +291,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
     gap: 6px;
     padding: 10px 6px;
     background: var(--zaovra-canvas);
-    border-right: 1px solid var(--zaovra-line);
+    border-right: 0;
     > button {
       position: relative;
       display: flex;
@@ -311,8 +323,8 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="desktop-sidebar-v2"] > div:first-child {
     height: 50px;
-    padding-inline: 10px;
-    border-bottom: 1px solid var(--zaovra-line);
+    padding-inline: 12px;
+    border-bottom: 0;
   }
 
   [data-component="desktop-sidebar-v2"] > div:first-child > button {
@@ -327,10 +339,8 @@ html[data-theme="oc-2"] body[data-new-layout] {
   [data-component="desktop-sidebar-v2"] > div:nth-child(2) [data-component="button-v2"] {
     justify-content: flex-start;
     height: 32px;
-    background: var(--zaovra-surface);
-    box-shadow:
-      inset 0 0 0 1px var(--zaovra-line),
-      var(--zaovra-shadow);
+    background: transparent;
+    box-shadow: none;
     color: var(--zaovra-ink);
     border-radius: var(--zaovra-radius-control);
   }
@@ -344,17 +354,18 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"] {
+    padding-inline: 8px;
     border-radius: var(--zaovra-radius-control);
     --tab-bg: transparent;
   }
 
   [data-component="desktop-sidebar-v2"] [data-slot="titlebar-tab-item"][data-active="true"] {
     --tab-bg: var(--zaovra-selection);
-    box-shadow: inset 2px 0 var(--zaovra-accent);
+    box-shadow: none;
   }
 
   [data-component="desktop-sidebar-v2"] [data-active="true"] [data-slot="tab-title"] {
-    color: var(--zaovra-accent);
+    color: var(--zaovra-ink);
     font-weight: 550;
   }
 
@@ -381,7 +392,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   /* Brand stays recognizable, while the existing composer takes precedence. */
   [data-component="session-new-design"] {
-    background: var(--zaovra-canvas);
+    background: transparent;
     overflow-y: auto;
   }
 
@@ -469,11 +480,19 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="prompt-input-v2"] {
-    border-radius: var(--zaovra-radius-panel);
+    border: 1px solid var(--zaovra-line);
+    border-radius: var(--zaovra-radius-composer);
     background: var(--zaovra-surface);
-    box-shadow:
-      inset 0 0 0 1px var(--zaovra-line),
-      var(--zaovra-shadow);
+    box-shadow: var(--zaovra-shadow);
+    > div {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    [data-slot="prompt-toolbar"] {
+      padding-inline: 16px;
+    }
   }
 
   [data-component="artifacts-panel"] {
@@ -506,13 +525,11 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="artifacts-panel"] [role="tab"][aria-selected="true"] {
     background: var(--zaovra-selection);
-    color: var(--zaovra-accent);
+    color: var(--zaovra-ink);
   }
 
   [data-component="prompt-input-v2"]:focus-within {
-    box-shadow:
-      inset 0 0 0 1px var(--zaovra-line),
-      var(--zaovra-shadow);
+    box-shadow: var(--zaovra-shadow);
   }
 
   /* Primary actions stay flat: the shared gradient lightens purple enough
@@ -530,6 +547,21 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-slot="session-turn-message-container"] {
+    width: 100%;
+    max-width: 784px;
+    margin-inline: auto;
+    padding-inline: 32px;
+  }
+
+  [data-session-title] {
+    padding-inline: 0;
+    [data-slot="session-title-child"] {
+      padding-left: 0;
+    }
+  }
+
+  [data-session-title] > div:first-child,
+  [data-component="session-prompt-dock"] > div {
     width: 100%;
     max-width: 784px;
     margin-inline: auto;
@@ -568,13 +600,6 @@ html[data-theme="oc-2"] body[data-new-layout] {
   [data-component="permission-chip"][data-ask] {
     background: var(--zaovra-warning-soft);
     color: var(--zaovra-warning);
-  }
-
-  [data-component="prompt-input-v2"] {
-    border-radius: var(--zaovra-radius-composer);
-    box-shadow:
-      inset 0 0 0 1px var(--zaovra-line),
-      var(--zaovra-shadow);
   }
 
   [data-component="verification-summary"] {
@@ -617,10 +642,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
     padding-block: 12px;
     &::before,
     &::after {
-      content: "";
-      flex: 1;
-      height: 1px;
-      background: var(--zaovra-line);
+      content: none;
     }
   }
 
@@ -654,12 +676,6 @@ html[data-theme="oc-2"] body[data-new-layout] {
     justify-content: center;
   }
 
-  [data-component="prompt-input-v2"] > div:last-child {
-    border-top: 1px solid var(--zaovra-line);
-    border-radius: 0 0 var(--zaovra-radius-composer) var(--zaovra-radius-composer);
-    background: var(--zaovra-surface);
-  }
-
   [data-component="button-v2"],
   [data-component="icon-button-v2"],
   [data-slot="tabs-v2-trigger"] {
@@ -686,18 +702,23 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="menu-v2-item"] {
-    --menu-v2-hover: var(--zaovra-selection);
+    --menu-v2-hover: var(--zaovra-hover);
+    --menu-v2-accent: var(--zaovra-ink);
     border-radius: var(--zaovra-radius-control);
+    &:is([data-selected], [data-checked]) {
+      background: var(--zaovra-selection);
+    }
   }
 
   [data-component="tabs-v2"][data-variant="settings"] [data-slot="tabs-v2-list"] {
     background: var(--zaovra-rail);
+    border: 0;
   }
 
   [data-component="tabs-v2"][data-variant="settings"] [data-slot="tabs-v2-trigger"][data-selected] {
     background: var(--zaovra-selection);
-    color: var(--zaovra-accent);
-    box-shadow: inset 2px 0 var(--zaovra-accent);
+    color: var(--zaovra-ink);
+    box-shadow: none;
   }
 
   .settings-v2-tab-header {
@@ -754,11 +775,12 @@ html[data-theme="oc-2"] body[data-new-layout] {
     background: var(--zaovra-surface);
     border-radius: var(--zaovra-radius-panel);
     padding-inline: 18px;
-    box-shadow: inset 0 0 0 1px var(--zaovra-line);
+    box-shadow: none;
   }
 
   [data-component="settings-v2-row"] {
     padding-block: 17px;
+    border: 0;
   }
 
   [data-slot="settings-v2-row-copy"] {
@@ -811,8 +833,76 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="tabs-v2"][data-variant="normal"] [data-slot="tabs-v2-trigger-wrapper"]:has([data-selected]) {
-    border-bottom-color: var(--zaovra-accent);
+    border-bottom: 0;
     color: var(--zaovra-ink);
+  }
+
+  /* Selection has one owner: a neutral rounded fill. Keyboard focus remains
+   * independent, so navigating without a pointer is still visible. */
+  [data-component="tabs-v2"] [data-slot="tabs-v2-trigger-wrapper"] {
+    border: 0;
+    border-radius: var(--zaovra-radius-control);
+    background: transparent;
+    &:hover {
+      border: 0;
+      background: var(--zaovra-hover);
+    }
+    &:has([data-selected]) {
+      border: 0;
+      background: var(--zaovra-selection);
+      color: var(--zaovra-ink);
+      font-weight: 550;
+    }
+    [data-slot="tabs-v2-trigger"] {
+      border: 0;
+      background: transparent;
+      font-weight: inherit;
+    }
+  }
+  [data-component="tabs-v2"] [data-slot="tabs-v2-list"]::before {
+    content: none;
+  }
+  :is([data-slot="list-item"], [role="option"], [data-slot="question-option"], [data-slot="file-tree-v2-row"], [data-component="home-project-row"]) {
+    border-radius: var(--zaovra-radius-control);
+    &:hover {
+      background: var(--zaovra-hover);
+    }
+    &:is([data-active="true"], [aria-selected="true"], [data-picked="true"], [data-selected]) {
+      border-color: transparent;
+      background: var(--zaovra-selection);
+      color: var(--zaovra-ink);
+      font-weight: 550;
+      box-shadow: none;
+    }
+  }
+  [data-component="work-page"] button[data-selected] {
+    background: var(--zaovra-selection);
+    border-color: transparent;
+    color: var(--zaovra-ink);
+    box-shadow: none;
+  }
+  [data-component="home-workbench"] button[data-selected] {
+    background: var(--zaovra-selection);
+    border: 0;
+    box-shadow: none;
+    color: var(--zaovra-ink);
+  }
+  [data-component="work-page"] > aside,
+  .settings-v2-page > header,
+  .settings-v2-dialog > [data-slot="dialog-header"],
+  [data-slot="artifact-tabs-row"],
+  [data-slot="artifact-address-row"] {
+    border: 0;
+  }
+  [data-slot="list-item-divider"] {
+    display: none;
+  }
+  :is([data-component="workbench-banner"], [data-component="execution-error-card"]) {
+    border: 0;
+    background: var(--zaovra-hover);
+  }
+  [data-component="dialog-v2"] [data-slot="dialog-content"] {
+    box-shadow: none;
   }
 
   /* Keep control feedback immediate when reduced motion is requested. Scope
@@ -836,7 +926,9 @@ html[data-theme="oc-2"] body[data-new-layout] {
       padding-inline: 24px;
     }
 
-    [data-slot="session-turn-message-container"] {
+    [data-slot="session-turn-message-container"],
+    [data-session-title] > div:first-child,
+    [data-component="session-prompt-dock"] > div {
       padding-inline: 20px;
     }
   }
@@ -952,8 +1044,7 @@ html[data-theme="oc-2"] body[data-new-layout] [data-session-title] > div:first-c
     flex-shrink: 0;
     gap: 10px;
   }
-  [data-slot="question-option"]:focus-visible,
-  [data-slot="question-option"]:focus-within {
+  [data-slot="question-option"]:focus-visible {
     outline: 2px solid var(--v2-border-border-focus);
     outline-offset: 1px;
   }
@@ -976,8 +1067,8 @@ html[data-theme="oc-2"] body[data-new-layout] [data-session-title] > div:first-c
     line-height: 18px;
     border-radius: 5px;
     padding: 0 6px;
-    color: var(--zaovra-accent-text, var(--v2-text-text-accent));
-    background: var(--zaovra-accent-soft, var(--v2-state-bg-info));
+    color: var(--zaovra-secondary, var(--v2-text-text-muted));
+    background: var(--zaovra-hover, var(--v2-background-bg-layer-02));
   }
   [data-slot="question-custom-toggle"] {
     border: 0;
@@ -1005,13 +1096,13 @@ html[data-theme="oc-2"] body[data-new-layout] [data-session-title] > div:first-c
 
 html[data-theme="oc-2"] body[data-new-layout] [data-component="session-question-dock"] {
   [data-slot="question-option-box"][data-picked="true"] {
-    background: var(--zaovra-accent);
-    border-color: var(--zaovra-accent);
+    background: var(--zaovra-ink);
+    border-color: var(--zaovra-ink);
     [data-component="icon"] {
-      color: var(--zaovra-on-accent);
+      color: var(--zaovra-surface);
     }
     [data-slot="question-option-radio-dot"] {
-      background: var(--zaovra-on-accent);
+      background: var(--zaovra-surface);
     }
   }
 }

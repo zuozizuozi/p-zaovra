@@ -210,7 +210,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
           </Show>
         </div>
 
-        <div class="flex h-11 items-center px-2">
+        <div data-slot="prompt-toolbar" class="flex h-11 items-center px-2">
           <div
             class="flex min-w-0 flex-1 items-center gap-1"
             aria-hidden={state.mode === "shell"}
