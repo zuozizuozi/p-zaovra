@@ -56,6 +56,16 @@ benchmark.describe("performance: first navigation paint", () => {
   benchmark("opens a child session without a blank frame", async ({ page, report }) => {
     await setup(page)
     const href = stressSessionHref(fixture.childID)
+    // Completed tool work is folded. Reveal the real entry before measuring
+    // navigation, so expanding the source turn does not consume the click probe.
+    const toggle = page
+      .locator(messageSelector(fixture.expected.sourceMessageIDs.at(-1)!))
+      .getByRole("button", { name: /Took .*s/ })
+    await expect(toggle).toHaveAttribute("aria-expanded", "false")
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    const child = page.locator(`a[href="${href}"]`, { has: page.locator('[data-component="task-tool-card"]') })
+    await expect(child).toBeVisible()
     const result = await measureFirstNavigation(page, {
       href,
       destinationPath: href,
@@ -63,7 +73,7 @@ benchmark.describe("performance: first navigation paint", () => {
       destinationSelector: messageSelector(fixture.expected.childMessageIDs.at(-1)!),
       contentSelector,
       navigate: async () => {
-        await page.locator(`a[href="${href}"]`, { has: page.locator('[data-component="task-tool-card"]') }).click()
+        await child.click()
         await expectSessionTitle(page, fixture.expected.childTitle)
       },
     })
