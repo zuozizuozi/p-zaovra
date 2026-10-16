@@ -201,7 +201,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   /* The workspace owns the shell boundary; nested session panels do not. */
   [data-component="desktop-workspace"] {
-    margin: 0 8px 8px 0;
+    margin: 8px 8px 8px 0;
     border: 1px solid var(--zaovra-line);
     border-radius: var(--zaovra-radius-panel);
     background: var(--zaovra-surface);

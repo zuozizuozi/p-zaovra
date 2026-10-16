@@ -50,7 +50,8 @@ const tauriApi = () => (window as unknown as { __TAURI__?: TauriApi }).__TAURI__
 const currentDesktopWindow = () => tauriApi()?.window?.getCurrentWindow?.()
 const currentThemeWindow = () => tauriApi()?.webviewWindow?.getCurrentWebviewWindow?.()
 const legacyTitlebarHeight = 40
-const v2TitlebarHeight = 38
+// Match the Electron titleBarOverlay height in desktop-app/src/main/windows.ts.
+const v2TitlebarHeight = 40
 const minTitlebarZoom = 0.25
 const windowsControlsBaseWidth = 138 // 3 native Windows caption buttons at 46px each.
 
@@ -92,7 +93,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
   const minHeight = () => {
     const height = useV2Titlebar() ? v2TitlebarHeight : legacyTitlebarHeight
     if (mac()) return `${height / zoom()}px`
-    if (windows()) return `${height / Math.min(titlebarZoom(), 1)}px`
+    if (windows()) return `${height / Math.min(zoom(), 1)}px`
     return undefined
   }
   const windowsControlsWidth = () => `${windowsControlsBaseWidth / Math.max(titlebarZoom(), 1)}px`
