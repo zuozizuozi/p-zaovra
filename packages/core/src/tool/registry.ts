@@ -66,6 +66,7 @@ const registryLayer = Layer.effect(
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
         ...(input.inputModalities === undefined ? {} : { inputModalities: input.inputModalities }),
+        ...(input.shell === undefined ? {} : { shell: input.shell }),
       }).pipe(
         Effect.provideService(ToolOutputStore.Capture, capture),
         Effect.map((output) => ({ output })),

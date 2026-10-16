@@ -11614,6 +11614,11 @@ export type PtyShellsResponses = {
     path: string
     name: string
     acceptable: boolean
+    effective?: boolean
+    version?: string
+    kind?: string
+    source?: string
+    error?: string
   }>
 }
 

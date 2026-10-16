@@ -31,6 +31,19 @@ export function safetyFailure(error: unknown) {
 export function safetyMetadata(metadata: Readonly<Record<string, unknown>> | undefined) {
   if (!metadata) return undefined
   if (
+    metadata.phase === "execution" &&
+    [
+      "shell-unavailable",
+      "environment-changed",
+      "command-not-found",
+      "syntax-incompatible",
+      "timeout",
+      "cancelled",
+      "non-zero-exit",
+    ].includes(String(metadata.reason))
+  )
+    return { phase: "execution", reason: String(metadata.reason) }
+  if (
     metadata.phase === "permission" &&
     (metadata.reason === "PermissionV2.BlockedError" || metadata.reason === "PermissionV2.CorrectedError")
   )

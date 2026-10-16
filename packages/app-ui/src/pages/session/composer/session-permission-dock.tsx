@@ -100,6 +100,14 @@ export function SessionPermissionDock(props: {
           <code class="block break-all py-1">{props.request.permission}</code>
         </details>
       </div>
+      <Show when={props.request.metadata.shell}>
+        <div data-slot="permission-row">
+          <span data-slot="permission-spacer" aria-hidden="true" />
+          <code data-slot="shell-identity" class="min-w-0 text-12-regular break-all">
+            {JSON.stringify(props.request.metadata.shell)}
+          </code>
+        </div>
+      </Show>
       <Show when={typeof props.request.metadata.mcpTool === "string"}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />

@@ -1,3 +1,4 @@
+import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
 import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
@@ -153,7 +154,7 @@ describe("SystemContextBuiltIns", () => {
   )
 })
 
-for (const shell of ["/bin/bash", "/bin/sh"]) {
+for (const shell of process.platform === "win32" ? ["powershell", "cmd"] : ["/bin/bash", "/bin/sh"]) {
   const configured = testEffect(
     AppNodeBuilder.build(builtInsNode, [
       [Location.node, locationLayer],
@@ -172,7 +173,9 @@ for (const shell of ["/bin/bash", "/bin/sh"]) {
   configured.effect(`R2 environment identifies configured shell ${shell}`, () =>
     Effect.gen(function* () {
       const registry = yield* SystemContextRegistry.Service
-      expect((yield* SystemContext.initialize(yield* registry.load())).baseline).toContain(`Execution shell: ${shell}.`)
+      expect((yield* SystemContext.initialize(yield* registry.load())).baseline).toContain(
+        ShellIdentity.guidance(ShellIdentity.resolve(shell, "project")),
+      )
     }),
   )
 }

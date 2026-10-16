@@ -1,3 +1,4 @@
+import { ShellStatus } from "@/components/shell-status"
 import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
 import { Button } from "@zaovra-ai/ui/button"
 import { Icon } from "@zaovra-ai/ui/icon"
@@ -46,6 +47,11 @@ type ThemeOption = {
 type ShellOption = {
   path: string
   name: string
+  effective?: boolean
+  version?: string
+  kind?: string
+  source?: string
+  error?: string
   acceptable: boolean
 }
 
@@ -127,6 +133,7 @@ export const SettingsGeneral: Component = () => {
   const serverSdk = useServerSDK()
 
   const [shells] = createResource(
+    () => ({ sdk: serverSdk(), configured: serverSync().data.config.shell }),
     () =>
       serverSdk()
         .client.pty.shells()
@@ -155,7 +162,7 @@ export const SettingsGeneral: Component = () => {
   const currentShell = createMemo(() => serverSync().data.config.shell ?? "")
 
   const shellOptions = createMemo<ShellSelectOption[]>(() => {
-    const list = shells.latest
+    const list = shells.latest.filter((shell) => shell.path)
     const current = serverSync().data.config.shell
 
     const nameCounts = new Map<string, number>()
@@ -171,8 +178,7 @@ export const SettingsGeneral: Component = () => {
         const label = s.acceptable ? text : `${text} (${language.t("settings.general.row.shell.terminalOnly")})`
         return {
           id: s.path,
-          // Prefer name over path - "bash" is much cleaner than the explicit full route even when it may change due to PATH.
-          value: ambiguousName ? s.path : s.name,
+          value: s.path,
           label,
         }
       }),
@@ -340,7 +346,12 @@ export const SettingsGeneral: Component = () => {
 
         <SettingsRow
           title={language.t("settings.general.row.shell.title")}
-          description={language.t("settings.general.row.shell.description")}
+          description={
+            <>
+              <span>{language.t("settings.general.row.shell.description")}</span>
+              <ShellStatus shells={shells()} />
+            </>
+          }
         >
           <Select
             data-action="settings-shell"

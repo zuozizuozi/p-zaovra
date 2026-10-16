@@ -8,6 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { Flag } from "./flag/flag"
 import { FSUtil } from "./fs-util"
 import { which } from "./util/which"
+import { ShellIdentity } from "./shell-identity"
 
 const SIGKILL_TIMEOUT_MS = 200
 const META: Record<string, { deny?: boolean; login?: boolean; posix?: boolean; ps?: boolean }> = {
@@ -203,9 +204,7 @@ let defaultPreferred: string | undefined
 let defaultAcceptable: string | undefined
 
 export function preferred(configShell?: string) {
-  if (configShell) return select(configShell)
-  defaultPreferred ??= select(process.env.SHELL)
-  return defaultPreferred
+  return ShellIdentity.resolve(configShell).path
 }
 preferred.reset = () => {
   defaultPreferred = undefined

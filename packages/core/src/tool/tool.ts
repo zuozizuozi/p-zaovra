@@ -5,9 +5,11 @@ import { Effect, JsonSchema, Schema } from "effect"
 import type { AgentV2 } from "../agent"
 import type { SessionMessage } from "../session/message"
 import type { SessionSchema } from "../session/schema"
+import type { ShellIdentity } from "../shell-identity"
 
 export interface Context {
   readonly inputModalities?: readonly string[]
+  readonly shell?: ShellIdentity.Snapshot
   readonly sessionID: SessionSchema.ID
   readonly agent: AgentV2.ID
   readonly assistantMessageID: SessionMessage.ID

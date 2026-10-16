@@ -16,6 +16,7 @@ import { RequestExecutor } from "@zaovra-ai/llm/route"
 import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
+import { ShellIdentity } from "../../shell-identity"
 import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
 import { Location } from "../../location"
@@ -321,7 +322,10 @@ const layer = Layer.effect(
         .flatMap((input) => (input.prompt.selection ? [input.prompt.selection] : []))
         .at(-1)
       const selectedAgent = yield* agents.select(selected?.agent ?? placement.agent)
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(selectedAgent), sessionID)
+      const shell = ShellIdentity.snapshot(yield* config.entries(), location)
+      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(selectedAgent), sessionID).pipe(
+        Effect.provideService(ShellIdentity.Current, shell),
+      )
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       const withTool = Semaphore.makeUnsafe(1).withPermit
       let toolsStopped = false
@@ -346,7 +350,9 @@ const layer = Layer.effect(
       const agent = sameAgent ? selectedAgent : yield* agents.select(session.agent)
       const system =
         (sameAgent ? initialized : undefined) ??
-        (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
+        (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id).pipe(
+          Effect.provideService(ShellIdentity.Current, shell),
+        ))
       const model = yield* models.resolve(session)
       yield* checkBudget(session, model, true)
       const repeated = SessionEfficiency.repeatedInspection(yield* getContext(session.id))
@@ -697,6 +703,7 @@ const layer = Layer.effect(
                               assistantMessageID,
                               call: event,
                               inputModalities: model.inputModalities,
+                              shell,
                             }),
                           ),
                         ),

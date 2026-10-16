@@ -1,3 +1,4 @@
+import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
 import fs from "fs/promises"
 import { realpathSync } from "node:fs"
 import path from "path"
@@ -163,6 +164,50 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("rejects a shell changed during approval without running the command", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        afterPermission = () =>
+          Effect.sync(() => {
+            configuredShell = "zaovra-nonexistent-shell"
+          })
+        return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "echo must-not-run" }))).pipe(
+          Effect.tap((settled) =>
+            Effect.sync(() => {
+              expect(settled.result.type).toBe("error")
+              expect(settled.result.value).toContain("Environment changed")
+              expect(settled.errorMetadata).toEqual({ phase: "execution", reason: "environment-changed" })
+              expect(runs).toEqual([])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("rejects an unavailable explicit shell before command execution", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        configuredShell = "zaovra-nonexistent-shell"
+        return withTool(tmp.path, (registry) => settleTool(registry, call({ command: "echo must-not-run" }))).pipe(
+          Effect.tap((settled) =>
+            Effect.sync(() => {
+              expect(settled.result.type).toBe("error")
+              expect(settled.result.value).toContain("Configured shell unavailable")
+              expect(settled.errorMetadata).toEqual({ phase: "execution", reason: "shell-unavailable" })
+              expect(runs).toEqual([])
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
   for (const action of ["bash", "external_directory"]) {
     it.live(`reports ${action} policy denial without executing a command`, () =>
       Effect.acquireUseRelease(
@@ -218,7 +263,7 @@ describe("BashTool", () => {
       ),
     )
 
-  for (const shell of ["/bin/bash", "/bin/sh"])
+  for (const shell of process.platform === "win32" ? ["bash", "powershell"] : ["/bin/bash", "/bin/sh"])
     it.live(`R2 describes the actual configured shell ${shell}`, () =>
       Effect.acquireUseRelease(
         Effect.promise(() => tmpdir()),
@@ -229,10 +274,10 @@ describe("BashTool", () => {
             Effect.gen(function* () {
               const definitions = yield* toolDefinitions(registry)
               expect(definitions.find((tool) => tool.name === "bash")?.description).toContain(
-                `Execution shell: ${shell}`,
+                "current environment context identifies the frozen execution shell",
               )
               yield* settleTool(registry, call({ command: "echo inspection" }))
-              expect(runs[0]?.shell).toBe(shell)
+              expect(runs[0]?.shell || runs[0]?.command).toBe(AppProcess.resolveShell(shell))
             }),
           )
         },
@@ -757,6 +802,7 @@ describe("BashTool", () => {
               },
               output: {
                 structured: {
+                  shell: ShellIdentity.resolve(),
                   exit: 0,
                   truncated: false,
                 },

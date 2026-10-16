@@ -1,3 +1,4 @@
+import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
 import { SessionOwnership } from "@zaovra-ai/core/session/ownership"
 import { describe, expect } from "bun:test"
 import {
@@ -1444,6 +1445,10 @@ describe("SessionRunnerLLM", () => {
       const applicationTools = yield* ApplicationTools.Service
       const session = yield* SessionV2.Service
       const contexts: Tool.Context[] = []
+      const observed: Array<ShellIdentity.Snapshot | undefined> = []
+      systemLoadHook = Effect.gen(function* () {
+        observed.push(yield* ShellIdentity.Current)
+      })
       yield* applicationTools.register({
         application_context: Tool.make({
           description: "Read application context",
@@ -1469,6 +1474,9 @@ describe("SessionRunnerLLM", () => {
 
       yield* session.resume(sessionID)
 
+      expect(observed.length).toBeGreaterThan(0)
+      expect(observed[0]).toEqual(contexts[0]?.shell)
+      expect(observed[0]?.identity?.path).toBeTruthy()
       expect(requests[0]?.tools.map((tool) => tool.name)).toContain("application_context")
       expect(contexts).toEqual([
         {
@@ -1477,6 +1485,15 @@ describe("SessionRunnerLLM", () => {
           assistantMessageID: expect.stringMatching(/^msg_/),
           toolCallID: "call-application",
           inputModalities: ["text", "image"],
+          shell: {
+            configuration: expect.any(String),
+            identity: {
+              path: expect.any(String),
+              type: expect.any(String),
+              version: expect.any(String),
+              source: "auto",
+            },
+          },
         },
       ])
       expect(yield* session.context(sessionID)).toMatchObject([

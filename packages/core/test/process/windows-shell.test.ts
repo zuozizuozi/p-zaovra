@@ -9,6 +9,26 @@ import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(AppProcess.node))
 
+if (process.platform === "win32")
+  it.live(
+    "reports structured PowerShell failure reasons without English-message inference",
+    Effect.gen(function* () {
+      const service = yield* AppProcess.Service
+      const missing = yield* service.run(AppProcess.shellCommand("zaovra_nonexistent_executable_s207", process.cwd()), {
+        combineOutput: true,
+      })
+      expect(missing.reason).toBe("command-not-found")
+      const syntax = yield* service.run(AppProcess.shellCommand("if (", process.cwd()), { combineOutput: true })
+      expect(syntax.reason).toBe("syntax-incompatible")
+      const arbitrary = yield* service.run(
+        AppProcess.shellCommand("Write-Output 'command not found'; exit 7", process.cwd()),
+        { combineOutput: true },
+      )
+      expect(arbitrary.reason).toBe("non-zero-exit")
+    }),
+    15000,
+  )
+
 describe.skipIf(process.platform !== "win32")("Windows shell boundary", () => {
   it.live(
     "flushes formatted objects before exiting and returns human-readable streams",
@@ -119,3 +139,26 @@ describe.skipIf(process.platform !== "win32")("Windows shell boundary", () => {
     15000,
   )
 })
+
+if (process.platform === "win32")
+  it.live(
+    "explicit Windows PowerShell 5.1 keeps Unicode, exit code and syntax identity",
+    Effect.gen(function* () {
+      const service = yield* AppProcess.Service
+      const executable = path.join(
+        process.env.SystemRoot ?? "C:/Windows",
+        "System32/WindowsPowerShell/v1.0/powershell.exe",
+      )
+      const result = yield* service.run(
+        AppProcess.shellCommand("Write-Output '中文🙂'; cmd.exe /d /c exit 7", process.cwd(), executable),
+      )
+      expect(result.stdout.toString()).toContain("中文🙂")
+      expect(result.exitCode).toBe(7)
+      const invalid = yield* service.run(
+        AppProcess.shellCommand("Write-Output first && Write-Output second", process.cwd(), executable),
+      )
+      expect(invalid.reason).toBe("syntax-incompatible")
+      expect(invalid.stdout.toString()).not.toContain("first")
+    }),
+    15000,
+  )

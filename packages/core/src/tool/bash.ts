@@ -5,7 +5,7 @@ import { ToolFailure } from "@zaovra-ai/llm"
 import { DateTime, Duration, Effect, Layer, Schema, Option } from "effect"
 import { Snapshot } from "../snapshot"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
-import { executionIssue, fingerprint, assertionPath, singleCommand } from "../session/outcome"
+import { fingerprint, assertionPath, singleCommand } from "../session/outcome"
 import { ToolOutputStore } from "../tool-output-store"
 import { Config } from "../config"
 import { EventV2 } from "../event"
@@ -15,6 +15,7 @@ import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { Location } from "../location"
 import { AppProcess } from "../process"
+import { ShellIdentity } from "../shell-identity"
 import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
@@ -72,6 +73,10 @@ export const Input = Schema.Struct({
 })
 
 const StructuredOutput = Schema.Struct({
+  shell: Schema.optional(
+    Schema.Struct({ path: Schema.String, type: Schema.String, version: Schema.String, source: Schema.String }),
+  ),
+  reason: Schema.optional(Schema.String),
   verification: Schema.optional(SessionOutcome.Check),
   verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
   job_id: Schema.String.pipe(Schema.optional),
@@ -147,16 +152,17 @@ const layer = Layer.effectDiscard(
     const permission = yield* PermissionV2.Service
     const events = yield* EventV2.Service
     const jobs = yield* BashJob.Service
-    const shell = AppProcess.resolveShell(Config.latest(yield* config.entries(), "shell"))
 
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. Execution shell: ${shell} at tool initialization. Explicit shell configuration takes priority; otherwise prefer available bash on POSIX, falling back to /bin/sh, or Windows PowerShell on Windows (cmd fallback). If configuration changes, the current environment context names the updated effective shell; use its syntax. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
           toStructuredOutput: ({ output }) => ({
+            ...(output.shell ? { shell: output.shell } : {}),
+            ...(output.reason ? { reason: output.reason } : {}),
             ...(output.verification ? { verification: output.verification } : {}),
             ...(output.verifications ? { verifications: output.verifications } : {}),
             truncated: output.truncated,
@@ -170,6 +176,12 @@ const layer = Layer.effectDiscard(
           ],
           execute: (rawInput, context) =>
             Effect.gen(function* () {
+              const frozen = context.shell ?? ShellIdentity.snapshot(yield* config.entries(), location)
+              if (!frozen.identity)
+                return yield* new ToolFailure({
+                  message: frozen.error ?? "Configured shell unavailable",
+                  metadata: { phase: "execution", reason: "shell-unavailable" },
+                })
               let input = rawInput
               const source = {
                 type: "tool" as const,
@@ -200,6 +212,7 @@ const layer = Layer.effectDiscard(
                   `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
               )
               yield* permission.assert({
+                metadata: { shell: frozen.identity },
                 action: name,
                 resources: [input.command],
                 save: [input.command],
@@ -212,7 +225,18 @@ const layer = Layer.effectDiscard(
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
 
               const entries = yield* config.entries()
-              const shell = AppProcess.resolveShell(Config.latest(entries, "shell"))
+              const current = ShellIdentity.snapshot(entries, location)
+              if (
+                !current.identity ||
+                current.configuration !== frozen.configuration ||
+                !ShellIdentity.same(frozen.identity, current.identity)
+              )
+                return yield* new ToolFailure({
+                  message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
+                  metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
+                })
+              const identity = frozen.identity
+              const shell = identity.path
               const command = AppProcess.shellCommand(input.command, target.canonical, shell)
               const timeout = input.timeout ?? (input.run_in_background ? 0 : DEFAULT_TIMEOUT_MS)
               if (timeout === 0 && !input.run_in_background)
@@ -317,6 +341,16 @@ const layer = Layer.effectDiscard(
                   warnings.push(
                     "Verification metadata ignored: a target is missing or unreadable. No check was certified; command execution is unchanged.",
                   )
+                const beforeSpawn = ShellIdentity.snapshot(yield* config.entries(), location)
+                if (
+                  !beforeSpawn.identity ||
+                  beforeSpawn.configuration !== frozen.configuration ||
+                  !ShellIdentity.same(identity, beforeSpawn.identity)
+                )
+                  return yield* new ToolFailure({
+                    message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
+                    metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
+                  })
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
@@ -400,11 +434,9 @@ const layer = Layer.effectDiscard(
                         kind: verification,
                         command: input.command,
                         exit: result.exitCode,
+                        ...(result.reason ? { reason: result.reason } : {}),
                         ...(assertions.length ? { assertions } : {}),
                         ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),
-                        ...(result.exitCode !== 0 && executionIssue(input.command, output)
-                          ? { execution: "not-run" as const }
-                          : {}),
                         callID: context.toolCallID,
                         cwd: target.canonical,
                         ...(targets.length
@@ -447,6 +479,7 @@ const layer = Layer.effectDiscard(
                     return {
                       output: `${output}\nInvalid legacy verification report. Prefer rerunning the ordinary check with verification and verification_requirements, without verification_report; normal stdout is accepted. Existing JSON runners must emit only {"checks":[{"kind":"test","status":"passed"}]} with actual results. Allowed kinds: build, test, lint, typecheck, syntax, smoke, interaction; "acceptance" is not a kind. Status: passed, failed or skipped. Kinds must be distinct. No checks certified.`,
                       exit: result.exitCode,
+                      ...(result.reason ? { reason: result.reason } : {}),
                       truncated: result.outputTruncated === true,
                       verification: {
                         ...record,
@@ -458,6 +491,7 @@ const layer = Layer.effectDiscard(
                   return {
                     output,
                     exit: result.exitCode,
+                    ...(result.reason ? { reason: result.reason } : {}),
                     truncated: false,
                     // The process result is authoritative even if a reporter says passed.
                     verification: report.value.checks.some((check) => check.status === "skipped")
@@ -475,6 +509,7 @@ const layer = Layer.effectDiscard(
                       ...(check.status === "skipped"
                         ? {
                             exit: result.exitCode,
+                            ...(result.reason ? { reason: result.reason } : {}),
                             snapshot: undefined,
                             targets: record.targets?.map((file) => ({ ...file, digest: "" })),
                           }
@@ -486,12 +521,24 @@ const layer = Layer.effectDiscard(
                 return {
                   ...(record ? { verification: record } : {}),
                   exit: result.exitCode,
+                  ...(result.reason ? { reason: result.reason } : {}),
                   output: notice ? `${output}\n\n${notice}` : output,
                   truncated: result.outputTruncated === true,
                   ...(warnings.length ? { warnings } : {}),
                 }
               })
-              if (!input.run_in_background) return yield* run
+              if (!input.run_in_background)
+                return yield* run.pipe(
+                  Effect.map((output) => ({
+                    ...output,
+                    shell: frozen.identity,
+                    ...("timeout" in output
+                      ? { reason: "timeout" }
+                      : "exit" in output && output.exit !== 0
+                        ? { reason: "reason" in output ? output.reason : "non-zero-exit" }
+                        : {}),
+                  })),
+                )
               const job_id = yield* jobs.start(
                 input.command,
                 run.pipe(
@@ -508,6 +555,7 @@ const layer = Layer.effectDiscard(
               )
               return {
                 job_id,
+                shell: frozen.identity,
                 output: "Command log is retained while the job runs.",
                 truncated: false,
                 ...(warnings.length ? { warnings } : {}),
@@ -525,9 +573,12 @@ const layer = Layer.effectDiscard(
                     message: `Command not executed: the permission request was corrected.\n${error.feedback}`,
                     metadata: { phase: "permission", reason: error._tag },
                   })
-                if (error instanceof ToolFailure && error.metadata?.phase === "input") return error
+                if (error instanceof ToolFailure) return error
                 return new ToolFailure({
                   message: `Unable to execute command: ${rawInput.command}\n${error instanceof Error ? error.message : String(error)}`,
+                  ...(error instanceof AppProcess.AppProcessError
+                    ? { metadata: { phase: "execution", reason: error.reason ?? "non-zero-exit" } }
+                    : {}),
                 })
               }),
             ),

@@ -1,3 +1,4 @@
+import { ShellStatus } from "@/components/shell-status"
 import type { ServerConnection } from "@/context/server"
 import { Component, Show, createMemo, createResource, onMount } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -47,6 +48,11 @@ type ThemeOption = {
 type ShellOption = {
   path: string
   name: string
+  effective?: boolean
+  version?: string
+  kind?: string
+  source?: string
+  error?: string
   acceptable: boolean
 }
 
@@ -143,6 +149,7 @@ export const SettingsGeneralV2: Component<{
   const themeOptions = createMemo<ThemeOption[]>(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
 
   const [shells] = createResource(
+    () => ({ sdk: serverSdk(), configured: serverSync().data.config.shell }),
     () =>
       serverSdk()
         .client.pty.shells()
@@ -165,7 +172,7 @@ export const SettingsGeneralV2: Component<{
   const currentShell = createMemo(() => serverSync().data.config.shell ?? "")
 
   const shellOptions = createMemo<ShellSelectOption[]>(() => {
-    const list = shells.latest
+    const list = shells.latest.filter((shell) => shell.path)
     const current = serverSync().data.config.shell
 
     const nameCounts = new Map<string, number>()
@@ -181,8 +188,7 @@ export const SettingsGeneralV2: Component<{
         const label = s.acceptable ? text : `${text} (${language.t("settings.general.row.shell.terminalOnly")})`
         return {
           id: s.path,
-          // Prefer name over path - "bash" is much cleaner than the explicit full route even when it may change due to PATH.
-          value: ambiguousName ? s.path : s.name,
+          value: s.path,
           label,
         }
       }),
@@ -311,7 +317,12 @@ export const SettingsGeneralV2: Component<{
 
         <SettingsRowV2
           title={language.t("settings.general.row.shell.title")}
-          description={language.t("settings.general.row.shell.description")}
+          description={
+            <>
+              <span>{language.t("settings.general.row.shell.description")}</span>
+              <ShellStatus shells={shells()} />
+            </>
+          }
         >
           <SelectV2
             appearance="inline"

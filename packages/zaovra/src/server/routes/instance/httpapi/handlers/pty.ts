@@ -10,6 +10,8 @@ import { LocationServiceMap } from "@zaovra-ai/core/location-services"
 import { Location } from "@zaovra-ai/core/location"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { Shell } from "@zaovra-ai/core/shell"
+import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
+import { Config } from "@zaovra-ai/core/config"
 import { CorsConfig, isAllowedRequestOrigin, type CorsOptions } from "@zaovra-ai/server/cors"
 import {
   PTY_CONNECT_TICKET_QUERY,
@@ -58,7 +60,29 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     })
 
     const shells = Effect.fn("PtyHttpApi.shells")(function* () {
-      return yield* Effect.promise(() => Shell.list())
+      const state = yield* pty(
+        Effect.gen(function* () {
+          const config = yield* Config.Service
+          const location = yield* Location.Service
+          return ShellIdentity.snapshot(yield* config.entries(), location)
+        }),
+      )
+      const list = yield* Effect.promise(() => Shell.list())
+      if (!state.identity)
+        return [{ path: "", name: "Unavailable", acceptable: false, effective: true, error: state.error }, ...list]
+      const identity = state.identity
+      return [
+        {
+          path: identity.path,
+          name: identity.type === "powershell" ? "powershell" : Shell.name(identity.path),
+          acceptable: true,
+          effective: true,
+          version: identity.version,
+          kind: identity.type,
+          source: identity.source,
+        },
+        ...list.filter((item) => item.path !== identity.path),
+      ]
     })
 
     const list = Effect.fn("PtyHttpApi.list")(function* () {

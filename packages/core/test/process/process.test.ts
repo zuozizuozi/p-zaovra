@@ -387,3 +387,20 @@ describe("AppProcess", () => {
     )
   })
 })
+
+it.live(
+  "independent stdout and stderr UTF8 decoders survive interleaved partial characters",
+  Effect.gen(function* () {
+    const service = yield* AppProcess.Service
+    const script =
+      "const a=Buffer.from('中\\n'),b=Buffer.from('文\\n');process.stdout.write(a.subarray(0,1));process.stderr.write(b.subarray(0,1));setTimeout(()=>{process.stdout.write(a.subarray(1));process.stderr.write(b.subarray(1));},20)"
+    const combined = yield* service.run(cmd("-e", script), { combineOutput: true })
+    expect(combined.output?.toString()).toContain("中")
+    expect(combined.output?.toString()).toContain("文")
+    expect(combined.output?.toString()).not.toContain("�")
+    const streamed = yield* service.runStream(cmd("-e", script), { includeStderr: true }).pipe(Stream.runCollect)
+    expect([...streamed].join(" ")).toContain("中")
+    expect([...streamed].join(" ")).toContain("文")
+    expect([...streamed].join(" ")).not.toContain("�")
+  }),
+)

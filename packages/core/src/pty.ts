@@ -9,6 +9,7 @@ import { EventV2 } from "./event"
 import { Location } from "./location"
 import { PtyID } from "./pty/schema"
 import { Shell } from "./shell"
+import { ShellIdentity } from "./shell-identity"
 import { lazy } from "./util/lazy"
 
 const BUFFER_LIMIT = 1024 * 1024 * 2
@@ -164,7 +165,9 @@ const layer = Layer.effect(
 
     const create = Effect.fn("Pty.create")(function* (input: CreateInput) {
       const id = PtyID.ascending()
-      const command = input.command || Shell.preferred(Config.latest(yield* config.entries(), "shell"))
+      const selected = ShellIdentity.snapshot(yield* config.entries(), location)
+      const command = input.command || selected.identity?.path
+      if (!command) return yield* Effect.die(new Error(selected.error ?? "Configured shell unavailable"))
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
       const env = {

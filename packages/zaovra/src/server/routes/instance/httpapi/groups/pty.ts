@@ -24,6 +24,11 @@ export const ShellItem = Schema.Struct({
   path: Schema.String,
   name: Schema.String,
   acceptable: Schema.Boolean,
+  effective: Schema.optional(Schema.Boolean),
+  version: Schema.optional(Schema.String),
+  kind: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
 })
 
 export const PtyPaths = {

@@ -40,11 +40,11 @@ describe("shell", () => {
     expect(Shell.posix("C:/tools/pwsh.exe")).toBe(false)
   })
 
-  test("falls back when configured shell cannot be resolved", async () => {
+  test("rejects unavailable explicit terminal shell without fallback", async () => {
     await withShell(undefined, async () => {
       const preferred = Shell.preferred()
       const acceptable = Shell.acceptable()
-      expect(Shell.preferred("zaovra-missing-shell")).toBe(preferred)
+      expect(() => Shell.preferred("zaovra-missing-shell")).toThrow("Configured shell unavailable")
       expect(Shell.acceptable("zaovra-missing-shell")).toBe(acceptable)
     })
   })
@@ -76,7 +76,7 @@ describe("shell", () => {
       const parsed = path.win32.parse(bash)
       const shell = `/cygdrive/${parsed.root[0].toLowerCase()}/${bash.slice(parsed.root.length).replaceAll("\\", "/")}`
       await withShell(shell, async () => {
-        expect(Shell.preferred()).toBe(FSUtil.windowsPath(shell))
+        expect(Shell.name(Shell.preferred())).toMatch(/pwsh|powershell|cmd/)
       })
     })
 
@@ -85,7 +85,7 @@ describe("shell", () => {
       if (!bash) return
       await withShell("/usr/bin/bash", async () => {
         expect(Shell.acceptable()).toBe(bash)
-        expect(Shell.preferred()).toBe(bash)
+        expect(Shell.name(Shell.preferred())).toMatch(/pwsh|powershell|cmd/)
       })
     })
 
@@ -96,7 +96,7 @@ describe("shell", () => {
       expect(Shell.preferred("bash")).toBe(bash)
       await withShell("bash", async () => {
         expect(Shell.acceptable()).toBe(bash)
-        expect(Shell.preferred()).toBe(bash)
+        expect(Shell.name(Shell.preferred())).toMatch(/pwsh|powershell|cmd/)
       })
     })
 

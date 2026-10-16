@@ -9,7 +9,7 @@ import { SystemContextRegistry } from "./registry"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
 import { Config } from "../config"
-import { AppProcess } from "../process"
+import { ShellIdentity } from "../shell-identity"
 
 const builtIns = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -29,11 +29,8 @@ const builtIns = Layer.effectDiscard(
         key: SystemContext.Key.make("core/environment"),
         codec: Schema.toCodecJson(Schema.String),
         load: Effect.gen(function* () {
-          const shell = AppProcess.resolveShell(Config.latest(yield* config.entries(), "shell"))
-          const powershell = /(?:^|[\\/])powershell(?:\.exe)?$/i.test(shell)
-            ? " Windows PowerShell does not support && or Bash redirection syntax. Use workdir for directories; quote literal @ arguments such as '@e1'."
-            : ""
-          return `${environment}\nExecution shell: ${shell}. Use this shell's syntax, not another shell's quoting or operators.${powershell} For embedded multiline code, write a script file and invoke it. An exit code of 0 only reports process success, not task acceptance.`
+          const snapshot = (yield* ShellIdentity.Current) ?? ShellIdentity.snapshot(yield* config.entries(), location)
+          return `${environment}\n${snapshot.identity ? ShellIdentity.guidance(snapshot.identity) : snapshot.error} An exit code of 0 only reports process success, not task acceptance.`
         }),
         baseline: (environment) =>
           ["Here is some useful information about the environment you are running in:", environment].join("\n"),
