@@ -420,7 +420,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
                   "pt-2": !bottom(),
                   "pb-2": bottom(),
                   "md:pl-2": mac(),
-                  "md:pl-4": !mac(),
+                  "md:pl-4": !mac() && !props.minimal,
                 }}
               >
                 <Show when={props.minimal}>
