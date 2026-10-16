@@ -3,6 +3,7 @@ import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { ScrollView } from "@zaovra-ai/ui/scroll-view"
 import { Dialog, DialogBody } from "@zaovra-ai/ui/v2/dialog-v2"
 import { Icon } from "@zaovra-ai/ui/v2/icon"
+import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
 import { KeybindV2 } from "@zaovra-ai/ui/v2/keybind-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -190,7 +191,7 @@ function CommandPaletteView(props: {
   }
 
   return (
-    <Dialog class="command-palette-v2" size="large">
+    <Dialog class="command-palette-v2" size="large" dismissOnOutside>
       <DialogBody class="command-palette-v2-body">
         <div class="command-palette-v2-search">
           <TextInputV2
@@ -203,6 +204,12 @@ function CommandPaletteView(props: {
             leadingIcon={<Icon name="magnifying-glass" />}
             onInput={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={handleKeyDown}
+          />
+          <IconButtonV2
+            icon={<Icon name="close" />}
+            variant="ghost-muted"
+            aria-label={language.t("common.close")}
+            onClick={props.close}
           />
         </div>
         <ScrollView class="command-palette-v2-scroll" viewportRef={(el) => (resultsRef = el)}>

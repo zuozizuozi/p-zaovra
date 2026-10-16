@@ -9,6 +9,8 @@ export interface DialogProps extends ParentProps {
   containerClass?: ComponentProps<"div">["class"]
   classList?: ComponentProps<"div">["classList"]
   fit?: boolean
+  /** Transient pickers may dismiss on a backdrop click; forms keep their draft. */
+  dismissOnOutside?: boolean
 }
 
 export interface DialogHeaderProps extends ParentProps {
@@ -80,7 +82,16 @@ export function DialogHeader(props: DialogHeaderProps) {
 }
 
 export function Dialog(props: DialogProps) {
-  const [local] = splitProps(props, ["size", "variant", "class", "containerClass", "classList", "fit", "children"])
+  const [local] = splitProps(props, [
+    "size",
+    "variant",
+    "class",
+    "containerClass",
+    "classList",
+    "fit",
+    "children",
+    "dismissOnOutside",
+  ])
 
   return (
     <div
@@ -91,7 +102,10 @@ export function Dialog(props: DialogProps) {
     >
       <div data-slot="dialog-container" class={local.containerClass}>
         <Kobalte.Content
-          onInteractOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => {
+            if (!local.dismissOnOutside) event.preventDefault()
+          }}
+          onFocusOutside={(event) => event.preventDefault()}
           data-slot="dialog-content"
           classList={{
             ...local.classList,
