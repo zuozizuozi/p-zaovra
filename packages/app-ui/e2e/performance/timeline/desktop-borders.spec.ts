@@ -26,6 +26,10 @@ for (const scheme of ["light", "dark"] as const) {
     expect(workspace).not.toBeNull()
     expect(titlebar!.height).toBe(40)
     expect(workspace!.y - titlebar!.y - titlebar!.height).toBe(8)
+    const shellColor = await page
+      .locator('[data-slot="titlebar-v2"]')
+      .evaluate((node) => getComputedStyle(node.parentElement!).backgroundColor)
+    await expect(page.locator('[data-slot="titlebar-v2"]')).toHaveCSS("background-color", shellColor)
     await expect(composer).toHaveCSS("border-radius", "22px")
     await expect(composer).toHaveCSS("border-top-width", "1px")
     const toolbar = composer.locator('[data-slot="prompt-toolbar"]')

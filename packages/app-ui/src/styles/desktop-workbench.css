@@ -200,6 +200,10 @@ html[data-theme="oc-2"] body[data-new-layout] {
   background: var(--zaovra-canvas);
 
   /* The workspace owns the shell boundary; nested session panels do not. */
+  :has(> [data-slot="titlebar-v2"]) {
+    background: var(--zaovra-canvas);
+  }
+
   [data-component="desktop-workspace"] {
     margin: 8px 8px 8px 0;
     border: 1px solid var(--zaovra-line);
