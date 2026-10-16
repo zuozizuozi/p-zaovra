@@ -593,3 +593,28 @@ describe("V2 server session store", () => {
     expect(ctx.store.data.part.msg_002).toMatchObject([{ id: "msg_002:text_1", text: "hello" }])
   })
 })
+
+test("Stop wait settling cannot clear the new task's busy state and its final tail is reconciled", async () => {
+  const old = Promise.withResolvers<void>()
+  const current = Promise.withResolvers<void>()
+  const following = Promise.withResolvers<void>()
+  const waits = [old, current]
+  const ctx = setup({
+    wait: () => {
+      if (waits.length === 1) following.resolve()
+      return waits.shift()!.promise
+    },
+    active: () => (waits.length === 0 ? {} : { ses_child: { type: "running" } }),
+    pages: [{ data: [assistant("msg_new", "NEW_TAIL_中文🙂", 3), user("msg_new_input", "new task", 2)] }],
+  })
+  await ctx.store.resolve("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  const watching = ctx.store.watchExecution("ses_child")
+  old.resolve()
+  await following.promise
+  expect(ctx.store.data.session_working("ses_child")).toBe(true)
+  current.resolve()
+  await watching
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+  expect(ctx.store.data.part.msg_new[0]).toMatchObject({ text: "NEW_TAIL_中文🙂" })
+})
