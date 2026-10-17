@@ -28,11 +28,12 @@ test("Q1 facts retain unknown usage and only explicit budgets produce remaining 
   expect(facts).toContain('"activeMs":50')
   expect(facts).toContain('"unreported":1')
   expect(facts).not.toContain("remaining")
-  expect(facts).not.toContain("最小验收")
+  expect(facts).not.toContain("Preserve the current runnable artifact")
   const limited = SessionProgress.facts({ ...input, budget: 1000, deadline: 200 })
   expect(limited).toContain('"remainingTokenUpperBound":200')
   expect(limited).toContain('"remainingMs":50')
-  expect(limited).toContain("保留当前可运行产物")
+  expect(limited).toContain("Preserve the current runnable artifact")
+  expect(limited).not.toMatch(/[\u3400-\u9fff]/)
 })
 
 test("Q3 closing reopens on changed evidence, not on repeat final answers", () => {
@@ -65,6 +66,26 @@ test("Q4 same cause with changed parameters is observable, unknowns never prove 
   expect(SessionProgress.stagnation(failure, { ...failure, hypothesis: "scope rejected" }).candidate).toBe(false)
   expect(SessionProgress.stagnation(undefined, failure).candidate).toBe(false)
   expect(SessionProgress.stagnation(failure, { ...failure, environment: undefined }).candidate).toBe(false)
+})
+
+test("Q4 repeated evidence without a hypothesis is a candidate with an explicit unknown", () => {
+  const failure = {
+    category: "exit",
+    error: "authentication failed",
+    cwd: "/project",
+    environment: "shell-v1",
+    artifact: "digest",
+    evidence: "401",
+  }
+  expect(SessionProgress.stagnation(failure, failure)).toMatchObject({
+    candidate: true,
+    hypothesisUnknown: true,
+    intervention: false,
+  })
+  expect(SessionProgress.stagnation(undefined, failure).candidate).toBe(false)
+  expect(SessionProgress.stagnation(failure, { ...failure, artifact: "changed" }).candidate).toBe(false)
+  expect(SessionProgress.stagnation(failure, { ...failure, evidence: "403" }).candidate).toBe(false)
+  expect(SessionProgress.stagnation(failure, { ...failure, hypothesis: "new cause" }).candidate).toBe(false)
 })
 
 test("Q5 independent review names original sources, end-to-end evidence and unknowns", () => {

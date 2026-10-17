@@ -83,7 +83,7 @@ export function facts(input: {
         ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
         : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
     ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
-  })}${reminder ? "\n保留当前可运行产物，先补最小验收缺口。Do not omit requirements or necessary validation." : ""}`
+  })}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
 }
 
 export function reviewDecision(input: { key: string; previous: readonly string[]; missing: readonly string[] }) {
@@ -118,10 +118,10 @@ export function stagnation(previous: Failure | undefined, current: Failure) {
   const comparable =
     current.environment !== undefined &&
     current.artifact !== undefined &&
-    current.hypothesis !== undefined &&
     current.evidence !== undefined
   return {
     signature,
+    hypothesisUnknown: current.hypothesis === undefined || (previous !== undefined && previous.hypothesis === undefined),
     candidate:
       comparable &&
       previous !== undefined &&

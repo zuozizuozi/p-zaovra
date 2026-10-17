@@ -6782,7 +6782,7 @@ it.live("Q4 records failures without adding model turns or changing shell recove
     expect(rows).toHaveLength(1)
     expect(rows[0]!.data).toMatchObject({
       category: "stagnation",
-      details: { candidate: false, intervention: false, expectedEvidence: "unknown" },
+      details: { candidate: false, hypothesisUnknown: true, intervention: false, expectedEvidence: "unknown" },
     })
     expect(JSON.stringify(requests)).not.toContain("candidate")
   }),
