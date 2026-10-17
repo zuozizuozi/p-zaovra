@@ -14,6 +14,19 @@ export class Policy extends Schema.Class<Policy>("ConfigV2.Experimental.Policy")
 }) {}
 
 export class Experimental extends Schema.Class<Experimental>("ConfigV2.Experimental")({
+  quality_progress: Schema.optional(
+    Schema.Struct({
+      facts: Schema.optional(Schema.Boolean),
+      silent_command_ms: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+      evidence_closing: Schema.optional(Schema.Boolean),
+      stagnation_log: Schema.optional(Schema.Boolean),
+      independent_review: Schema.optional(Schema.Boolean),
+      deadline: Schema.optional(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))),
+    }),
+  ).annotate({
+    description:
+      "Opt-in quality observations. All five features default off. silent_command_ms enables managed silence yielding (suggested 60000); deadline is an explicit Unix epoch in milliseconds, advisory only. Restart the backend after changing configuration.",
+  }),
   verification: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
       "Opt into strict host verification prompts, review tool and closing review (default false). By default, checks are advisory and do not determine run completion. Execution failures remain failures. Restart the backend after changing this experiment.",

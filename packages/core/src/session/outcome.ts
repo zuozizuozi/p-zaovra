@@ -474,7 +474,7 @@ export function derive(
   for (const message of turn) {
     if (message.type !== "assistant") continue
     for (const part of message.content) {
-      if (part.type !== "tool" || part.name !== "bash" || part.provider?.executed) continue
+      if (part.type !== "tool" || !["bash", "bash_job"].includes(part.name) || part.provider?.executed) continue
       if (
         (part.state.status === "completed" || part.state.status === "error") &&
         (part.state.input.verification_report === true ||
@@ -846,7 +846,8 @@ export function derive(
 
 /** Old single-check records and newer suite records share the same check contract. */
 export function toolChecks(tool: SessionMessage.AssistantTool): SessionOutcome.Check[] {
-  if (tool.name !== "bash" || tool.provider?.executed || tool.state.status !== "completed") return []
+  if (!["bash", "bash_job"].includes(tool.name) || tool.provider?.executed || tool.state.status !== "completed")
+    return []
   const state = tool.state
   return [
     tool.state.structured.verification,

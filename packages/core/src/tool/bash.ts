@@ -2,7 +2,7 @@ export * as BashTool from "./bash"
 
 import path from "path"
 import { ToolFailure } from "@zaovra-ai/llm"
-import { DateTime, Duration, Effect, Layer, Schema, Option } from "effect"
+import { Clock, DateTime, Deferred, Duration, Effect, Layer, Schema, Option } from "effect"
 import { Snapshot } from "../snapshot"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { fingerprint, assertionPath, singleCommand } from "../session/outcome"
@@ -157,7 +157,19 @@ const layer = Layer.effectDiscard(
       .register({
         [name]: Tool.make({
           description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
-          input: Input,
+          input:
+            Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log === true
+              ? Schema.Struct({
+                  ...Input.fields,
+                  progress_hypothesis: Schema.optional(Schema.String).annotate({
+                    description:
+                      "Optional diagnosis being tested; observation only, never changes permissions or retry limits.",
+                  }),
+                  progress_expected_evidence: Schema.optional(Schema.String).annotate({
+                    description: "Optional new evidence this command is expected to produce; not a claim of success.",
+                  }),
+                })
+              : Input,
           output: Output,
           structured: StructuredOutput,
           toStructuredOutput: ({ output }) => ({
@@ -238,8 +250,11 @@ const layer = Layer.effectDiscard(
               const identity = frozen.identity
               const shell = identity.path
               const command = AppProcess.shellCommand(input.command, target.canonical, shell)
-              const timeout = input.timeout ?? (input.run_in_background ? 0 : DEFAULT_TIMEOUT_MS)
-              if (timeout === 0 && !input.run_in_background)
+              const silence = input.run_in_background
+                ? undefined
+                : Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms
+              const timeout = input.timeout ?? (input.run_in_background || silence ? 0 : DEFAULT_TIMEOUT_MS)
+              if (input.timeout === 0 && !input.run_in_background)
                 return yield* new ToolFailure({ message: "A zero timeout requires run_in_background=true" })
               let lastProgress = Number.NEGATIVE_INFINITY
               const capture = Option.getOrUndefined(yield* Effect.serviceOption(ToolOutputStore.Capture))
@@ -328,6 +343,9 @@ const layer = Layer.effectDiscard(
                       }),
                   )
                 : []
+              let lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
+              let partial = ""
+              const started = yield* Deferred.make<void>()
               const run = Effect.gen(function* () {
                 const before = verification ? yield* snapshots.capture() : undefined
                 const filesBefore = yield* fingerprint(fs, targets)
@@ -351,14 +369,21 @@ const layer = Layer.effectDiscard(
                     message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
                     metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
                   })
+                lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
+                yield* Deferred.succeed(started, undefined)
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
                     timeout: timeout === 0 ? undefined : Duration.millis(timeout),
                     maxOutputBytes: MAX_CAPTURE_BYTES,
-                    onChunk: capture?.append,
+                    onChunk: (chunk) =>
+                      Effect.gen(function* () {
+                        lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
+                        if (capture) yield* capture.append(chunk)
+                      }),
                     onOutput: (output, truncated) =>
                       Effect.gen(function* () {
+                        partial = output.subarray(Math.max(0, output.length - 8192)).toString("utf8")
                         const timestamp = yield* DateTime.now
                         const now = DateTime.toEpochMillis(timestamp)
                         if (input.run_in_background || now - lastProgress < 1_000) return
@@ -527,6 +552,50 @@ const layer = Layer.effectDiscard(
                   ...(warnings.length ? { warnings } : {}),
                 }
               })
+              if (silence) {
+                const done = yield* Deferred.make<Output, Effect.Error<typeof run>>()
+                const job_id = yield* jobs.start(
+                  input.command,
+                  run.pipe(
+                    Effect.tap((output) =>
+                      jobs.record(`msg_bash_${context.assistantMessageID}_${context.toolCallID}`, {
+                        verification: "verification" in output ? output.verification : undefined,
+                        verifications: "verifications" in output ? output.verifications : undefined,
+                      }),
+                    ),
+                    Effect.onExit((exit) => Deferred.done(done, exit)),
+                    Effect.flatMap((output) =>
+                      "timeout" in output || output.exit !== 0
+                        ? Effect.fail(new Error(output.output))
+                        : Effect.succeed(output.output),
+                    ),
+                  ),
+                  context,
+                  capture ? capture.append(new Uint8Array()) : Effect.void,
+                  { kind: "task", workdir: target.canonical },
+                  Deferred.succeed(done, {
+                    job_id: `msg_bash_${context.assistantMessageID}_${context.toolCallID}`,
+                    output:
+                      "Existing command retained; inspect its current status with bash_job get/wait/cancel. It was not executed again.",
+                    truncated: false,
+                  }),
+                )
+                const waiting = Effect.gen(function* () {
+                  yield* Deferred.await(started)
+                  while (true) {
+                    const remaining = silence - (Number((yield* Clock.currentTimeNanos) / 1_000_000n) - lastOutput)
+                    if (remaining <= 0)
+                      return {
+                        job_id,
+                        shell: frozen.identity,
+                        output: `${partial || "(no output yet)"}\nCommand is still running under Session ownership. Use bash_job get/wait/cancel. No check has passed yet.`,
+                        truncated: false,
+                      }
+                    yield* Effect.sleep(Duration.millis(remaining))
+                  }
+                })
+                return yield* Effect.raceFirst(Deferred.await(done), waiting)
+              }
               if (!input.run_in_background)
                 return yield* run.pipe(
                   Effect.map((output) => ({

@@ -1,3 +1,7 @@
+import path from "node:path"
+import { createHash } from "node:crypto"
+import { BackgroundJob } from "../../background-job"
+import { EventTable } from "../../event/sql"
 import { SessionOwnership } from "../ownership"
 import {
   LLM,
@@ -13,7 +17,7 @@ import {
   type ProviderErrorEvent,
 } from "@zaovra-ai/llm"
 import { RequestExecutor } from "@zaovra-ai/llm/route"
-import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
+import { Cause, Clock, DateTime, Effect, FiberSet, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { ShellIdentity } from "../../shell-identity"
@@ -53,6 +57,7 @@ import { FSUtil } from "../../fs-util"
 import { SessionMessage } from "../message"
 import { SessionUsageQuery } from "../usage"
 import { SessionEfficiency } from "../efficiency"
+import { SessionProgress } from "../progress"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
 import { and, desc, eq, gt } from "drizzle-orm"
@@ -116,6 +121,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const backgroundJobs = yield* BackgroundJob.Service
     const llm = yield* LLMClient.Service
     const agents = yield* AgentV2.Service
     const tools = yield* ToolRegistry.Service
@@ -298,6 +304,26 @@ const layer = Layer.effect(
         concurrency: "unbounded",
       }).pipe(Effect.map(SystemContext.combine))
 
+    const activeTicks = new Map<string, number>()
+    const progressLock = Semaphore.makeUnsafe(1)
+    const checkpointProgress = (id: SessionSchema.ID, request?: string) =>
+      progressLock.withPermit(
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const previous = Option.getOrUndefined(yield* SessionProgress.read(db, id))
+          const activeNow = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
+          const tick = activeTicks.get(id)
+          const state = SessionProgress.advance(previous, {
+            now,
+            active: tick === undefined ? 0 : activeNow - tick,
+            request: request ?? previous?.request ?? "unknown",
+          })
+          activeTicks.set(id, activeNow)
+          yield* SessionProgress.save(db, id, state)
+          return state
+        }),
+      )
+
     const runTurnAttempt = Effect.fn("SessionRunner.runTurn")(function* (
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
@@ -344,6 +370,18 @@ const layer = Layer.effect(
           currentStep = 1
           toolCallAttempts.clear()
         }
+      }
+      const quality = Config.latest(yield* config.entries(), "experimental")?.quality_progress
+      if (quality?.facts === true) {
+        const latest = yield* db
+          .select({ id: SessionMessageTable.id })
+          .from(SessionMessageTable)
+          .where(and(eq(SessionMessageTable.session_id, sessionID), eq(SessionMessageTable.type, "user")))
+          .orderBy(desc(SessionMessageTable.seq))
+          .limit(1)
+          .get()
+          .pipe(Effect.orDie)
+        yield* checkpointProgress(sessionID, latest?.id)
       }
       const session = promotion ? yield* getSession(sessionID) : placement
       const sameAgent = session.agent === (selected?.agent ?? placement.agent)
@@ -488,6 +526,23 @@ const layer = Layer.effect(
             )
           })
         : undefined
+      const progressUsage =
+        quality?.facts === true
+          ? (yield* SessionUsageQuery.read(session.id).pipe(Effect.provideService(Database.Service, database))).total
+          : undefined
+      const progressFacts = progressUsage
+        ? SessionProgress.facts({
+            now: yield* Clock.currentTimeMillis,
+            state: yield* checkpointProgress(session.id),
+            turns: progressUsage.calls,
+            step: currentStep,
+            limit: Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS),
+            tokens: progressUsage.total,
+            unreported: progressUsage.unreported,
+            budget: Config.latest(yield* config.entries(), "session_token_budget"),
+            deadline: quality?.deadline,
+          })
+        : undefined
       const baseRequest = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
@@ -528,6 +583,16 @@ const layer = Layer.effect(
               ]
             : []),
           ...(evidence ? [evidence] : []),
+          ...(quality?.evidence_closing === true
+            ? [
+                Message.user(
+                  "Continue only for a concrete unmet requirement, new change, new failure or unresolved tool result. Name the requirement and next discriminating check. Reuse current evidence; if there is no gap, finish. Missing or blocked evidence remains unverified; never narrow user requirements.",
+                ),
+              ]
+            : []),
+          ...(quality?.independent_review === true && SessionOutcome.engineeringWork(verificationHistory)
+            ? [Message.user(SessionProgress.independentReview)]
+            : []),
           ...(stopReason
             ? [
                 Message.assistant(
@@ -535,6 +600,7 @@ const layer = Layer.effect(
                 ),
               ]
             : []),
+          ...(progressFacts ? [Message.user(progressFacts)] : []),
         ],
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep || textOnlyRecovery ? "none" : undefined,
@@ -1075,10 +1141,179 @@ const layer = Layer.effect(
               method: "run",
               reason: new InvalidProviderOutputReason({ message: terminalFailure }),
             })
+          if (quality?.stagnation_log === true) {
+            const messages = yield* restore(SessionOutcome.history(db, session.id))
+            const latest = messages.findLast((message) => message.type === "assistant")
+            const failed =
+              latest?.type === "assistant"
+                ? latest.content.filter(
+                    (part) =>
+                      part.type === "tool" &&
+                      (part.state.status === "error" ||
+                        (part.state.status === "completed" &&
+                          (part.state.structured.timeout === true ||
+                            (typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)))),
+                  )
+                : []
+            for (const part of failed) {
+              if (part.type !== "tool" || (part.state.status !== "error" && part.state.status !== "completed")) continue
+              const input = part.state.input
+              const error =
+                part.state.status === "error"
+                  ? part.state.error.message
+                  : part.state.content
+                      .filter((item) => item.type === "text")
+                      .map((item) => (item.type === "text" ? item.text : ""))
+                      .join("\n")
+              const current = {
+                category:
+                  part.state.status === "error"
+                    ? "tool-error"
+                    : part.state.structured.timeout === true
+                      ? "timeout"
+                      : `exit-${part.state.structured.exit}`,
+                error: error.trim().slice(0, 512),
+                cwd:
+                  part.state.status === "completed" && typeof part.state.structured.workdir === "string"
+                    ? part.state.structured.workdir
+                    : typeof input.workdir === "string"
+                      ? input.workdir
+                      : location.directory,
+                environment: shell.identity ? JSON.stringify(shell.identity) : undefined,
+                artifact: (yield* restore(snapshots.capture())) ?? undefined,
+                hypothesis: typeof input.progress_hypothesis === "string" ? input.progress_hypothesis : undefined,
+                expectedEvidence:
+                  typeof input.progress_expected_evidence === "string" ? input.progress_expected_evidence : undefined,
+                evidence: createHash("sha256").update(error).digest("hex"),
+              }
+              const rows = yield* db
+                .select({ data: EventTable.data })
+                .from(EventTable)
+                .where(
+                  and(eq(EventTable.aggregate_id, session.id), eq(EventTable.type, "session.next.quality.progress.1")),
+                )
+                .orderBy(desc(EventTable.seq))
+                .all()
+                .pipe(Effect.orDie)
+              const prior = rows.find((row) => row.data.category === "stagnation")?.data.details
+              const previous =
+                prior && typeof prior === "object" && "observation" in prior
+                  ? Option.getOrUndefined(
+                      Schema.decodeUnknownOption(SessionProgress.FailureObservation)(prior.observation),
+                    )
+                  : undefined
+              const observation = Object.fromEntries(
+                Object.entries(current).filter((entry) => entry[1] !== undefined),
+              ) as Record<string, string>
+              yield* SessionProgress.record(events, session.id, "stagnation", {
+                callID: part.id,
+                observation,
+                ...SessionProgress.stagnation(previous, current),
+              })
+            }
+          }
+          if (
+            quality?.evidence_closing === true &&
+            verificationEnabled &&
+            !needsContinuation &&
+            !recoverText &&
+            !recoverInput &&
+            !isLastStep &&
+            stepSettlement?.finish === "stop"
+          ) {
+            const messages = yield* restore(SessionOutcome.history(db, session.id))
+            if (SessionOutcome.engineeringWork(messages)) {
+              const preliminary = SessionOutcome.derive(
+                messages,
+                false,
+                undefined,
+                [],
+                undefined,
+                undefined,
+                location.directory,
+              )
+              const targets = yield* restore(
+                SessionOutcome.fingerprint(
+                  fs,
+                  preliminary.checks.flatMap((check) =>
+                    [...(check.targets ?? []), ...(check.assertions ?? [])].map((file) => file.path),
+                  ),
+                ),
+              )
+              const snapshot = yield* restore(snapshots.capture())
+              const required = yield* restore(SessionOutcome.requirements(fs, location.directory))
+              const outcome = SessionOutcome.derive(
+                messages,
+                false,
+                snapshot,
+                targets,
+                required,
+                undefined,
+                location.directory,
+                yield* restore(
+                  DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries),
+                ),
+              )
+              const key = createHash("sha256")
+                .update(
+                  JSON.stringify({
+                    requirements: SessionOutcome.requested(messages).entries,
+                    required,
+                    environment: shell,
+                    snapshot,
+                    targets,
+                    checks: outcome.checks,
+                    review: outcome.review,
+                  }),
+                )
+                .digest("hex")
+              const previous = yield* db
+                .select({ data: EventTable.data })
+                .from(EventTable)
+                .where(
+                  and(eq(EventTable.aggregate_id, session.id), eq(EventTable.type, "session.next.quality.progress.1")),
+                )
+                .all()
+                .pipe(Effect.orDie)
+              const keys = previous.flatMap((row) =>
+                row.data.category === "closing" &&
+                row.data.details &&
+                typeof row.data.details === "object" &&
+                "key" in row.data.details &&
+                "decision" in row.data.details &&
+                row.data.details.decision === "review" &&
+                typeof row.data.details.key === "string"
+                  ? [row.data.details.key]
+                  : [],
+              )
+              const decision = outcome.outcomeUnknown
+                ? "pending"
+                : SessionProgress.reviewDecision({ key, previous: keys, missing: outcome.missing })
+              yield* SessionProgress.record(events, session.id, "closing", {
+                key,
+                decision,
+                missing: outcome.missing,
+                requirements: SessionOutcome.requested(messages).entries.map((item) => ({
+                  id: item.id,
+                  sourceMessageID: item.sourceMessageID,
+                })),
+              })
+              if (decision === "review" && !outcome.outcomeUnknown) {
+                yield* events.publish(SessionEvent.Synthetic, {
+                  sessionID: session.id,
+                  timestamp: yield* DateTime.now,
+                  messageID: SessionMessage.ID.create(),
+                  text: `Verification closing review: evidence key ${key}. Missing: ${JSON.stringify(outcome.missing)}. Compare original requirements with current artifacts and actual assertions, including uncovered negative cases. Reopen only checks affected by changed requirements, dependencies, environment or new failures. All green is not proof of full coverage. Preserve failed assertions and report unresolved scope; do not repeat unchanged passing checks.${quality?.independent_review === true ? ` ${SessionProgress.independentReview}` : ""}`,
+                })
+                needsContinuation = true
+              }
+            }
+          }
           // A bounded closing review uses exactly the same evidence evaluator as
           // the UI. Persist it at the tail, never rewrite the cached system prefix.
           if (
             verificationEnabled &&
+            quality?.evidence_closing !== true &&
             !needsContinuation &&
             !recoverText &&
             !recoverInput &&
@@ -1162,7 +1397,7 @@ const layer = Layer.effect(
                       .flatMap((check) => check.requirements ?? []),
                     userRequests: messages.filter((message) => message.type === "user").map((message) => message.text),
                     requirements: SessionOutcome.requested(messages).entries,
-                  })}\nReview the original visible user requirements and their corrections against the final artifacts, even when all existing tests passed. Identify requirements not covered by the tests, including empty/minimum values, negative/error cases and stated invariants. Inspect the actual assertions, add focused checks for uncovered requirements, and correct concrete defects in this same loop. Use ordinary bash commands with verification_requirements to describe requirements actually asserted; identify verification_assertions and include source and assertion files as verification_targets. Do not output report JSON as a shell command. Preserve failed assertions when repairing implementation. If an assertion is wrong, explain the user requirement supporting the correction and report the original failure as requiring review; changing expectations is not proof of a fix. A self-written green test suite is not independent proof of full acceptance. Preserve valid existing checks, do not run unrelated checks or invent extra deliverables. If evidence remains missing, explicitly report unverified scope and known failures. This automatic closing review occurs at most once for this user request.`,
+                  })}\nReview the original visible user requirements and their corrections against the final artifacts, even when all existing tests passed. Identify requirements not covered by the tests, including empty/minimum values, negative/error cases and stated invariants. Inspect the actual assertions, add focused checks for uncovered requirements, and correct concrete defects in this same loop. Use ordinary bash commands with verification_requirements to describe requirements actually asserted; identify verification_assertions and include source and assertion files as verification_targets. Do not output report JSON as a shell command. Preserve failed assertions when repairing implementation. If an assertion is wrong, explain the user requirement supporting the correction and report the original failure as requiring review; changing expectations is not proof of a fix. A self-written green test suite is not independent proof of full acceptance. Preserve valid existing checks, do not run unrelated checks or invent extra deliverables. If evidence remains missing, explicitly report unverified scope and known failures. This automatic closing review occurs at most once for this user request.${quality?.independent_review === true ? ` ${SessionProgress.independentReview}` : ""}`,
                 })
                 needsContinuation = true
               }
@@ -1214,6 +1449,60 @@ const layer = Layer.effect(
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
+      if (Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms) {
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            const pending = (yield* backgroundJobs.list()).filter(
+              (job) =>
+                job.metadata?.sessionID === input.sessionID &&
+                job.metadata.kind !== "preview" &&
+                job.status === "running",
+            )
+            if (pending.length) {
+              const last = (yield* getContext(input.sessionID).pipe(Effect.orDie)).findLast(
+                (message) => message.type === "assistant",
+              )
+              if (last) {
+                yield* events.publish(SessionEvent.Text.Started, {
+                  sessionID: input.sessionID,
+                  assistantMessageID: last.id,
+                  timestamp: yield* DateTime.now,
+                  textID: "pending-jobs",
+                })
+                yield* events.publish(SessionEvent.Text.Ended, {
+                  sessionID: input.sessionID,
+                  assistantMessageID: last.id,
+                  timestamp: yield* DateTime.now,
+                  textID: "pending-jobs",
+                  text: `\nHost observation: unfinished jobs; their checks are NOT verified.\n${pending.map((job) => `${job.id}: ${job.status}; inspect/wait with bash_job, cancel with bash_job {job_id: "${job.id}", action: "cancel"}.`).join("\n")}`,
+                })
+              }
+            }
+          }),
+        )
+      }
+      const factsEnabled = Config.latest(yield* config.entries(), "experimental")?.quality_progress?.facts === true
+      if (factsEnabled) {
+        const saved = Option.getOrUndefined(yield* SessionProgress.read(db, input.sessionID))
+        yield* SessionProgress.save(db, input.sessionID, {
+          ...(saved ?? { activeMs: 0, request: "unknown", requestStarted: yield* Clock.currentTimeMillis }),
+          draining: true,
+          ...(saved?.draining ? { activeTimeUnknown: true } : {}),
+        })
+        activeTicks.set(input.sessionID, Number((yield* Clock.currentTimeNanos) / 1_000_000n))
+        yield* Effect.addFinalizer(() =>
+          checkpointProgress(input.sessionID).pipe(
+            Effect.flatMap((state) => SessionProgress.save(db, input.sessionID, { ...state, draining: false })),
+            Effect.ensuring(Effect.sync(() => activeTicks.delete(input.sessionID))),
+          ),
+        )
+        yield* Effect.gen(function* () {
+          while (true) {
+            yield* Effect.sleep("1 second")
+            yield* checkpointProgress(input.sessionID)
+          }
+        }).pipe(Effect.forkScoped)
+      }
       yield* settleInterruptedTurn(input.sessionID)
       const toolCallAttempts = new Map<string, number>()
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
@@ -1228,11 +1517,46 @@ const layer = Layer.effect(
           step = result.step + 1
           promotion = "steer"
           if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+          if (Config.latest(yield* config.entries(), "experimental")?.quality_progress?.evidence_closing === true) {
+            const messages = yield* SessionOutcome.history(db, input.sessionID)
+            const last = messages.findLast((message) => message.type === "assistant")
+            const toolResults =
+              last?.type === "assistant"
+                ? last.content.flatMap((part) =>
+                    part.type === "tool" ? [{ callID: part.id, tool: part.name, status: part.state.status }] : [],
+                  )
+                : []
+            const queued = !needsContinuation && (yield* SessionInput.hasPending(db, input.sessionID, "queue"))
+            const review = messages.at(-1)
+            yield* SessionProgress.record(events, input.sessionID, "continuation", {
+              step: result.step,
+              continuing: needsContinuation || queued,
+              reason: queued
+                ? "pending-queue"
+                : needsContinuation && !result.needsContinuation
+                  ? "pending-steer"
+                  : review?.type === "synthetic" && review.text.startsWith("Verification closing review:")
+                    ? "evidence-gap"
+                    : result.needsContinuation
+                      ? toolResults.length
+                        ? "tool-result-needs-interpretation"
+                        : "incomplete-provider-output"
+                      : "provider-finished",
+              requirements: SessionOutcome.requested(messages).entries.map((item) => ({
+                id: item.id,
+                sourceMessageID: item.sourceMessageID,
+              })),
+              toolResults,
+              nextCheck: result.needsContinuation
+                ? "See the named evidence gap or retained tool result; model hypothesis not independently verified"
+                : "none",
+            })
+          }
         }
         shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
         promotion = shouldRun ? "queue" : undefined
       }
-    })
+    }, Effect.scoped)
 
     const compact = Effect.fn("SessionRunner.compact")(function* (sessionID: SessionSchema.ID) {
       const session = yield* getSession(sessionID)
@@ -1266,6 +1590,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     EventV2.node,
+    BackgroundJob.node,
     llmClient,
     AgentV2.node,
     ToolRegistry.node,

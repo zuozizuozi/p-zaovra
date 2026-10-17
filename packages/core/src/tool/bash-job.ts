@@ -1,6 +1,7 @@
 export * as BashJob from "./bash-job"
 
 import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { BackgroundJob } from "../background-job"
 import { EventV2 } from "../event"
 import { makeLocationNode } from "../effect/app-node"
@@ -17,12 +18,17 @@ import { Tools } from "./tools"
 export class Service extends Context.Service<
   Service,
   {
+    readonly record: (
+      id: string,
+      result: { verification?: SessionOutcome.Check; verifications?: readonly SessionOutcome.Check[] },
+    ) => Effect.Effect<void>
     readonly start: (
       command: string,
       run: Effect.Effect<string, unknown>,
       context: Tool.Context,
       prepare: Effect.Effect<void, unknown>,
       background?: { kind: "task" | "preview"; workdir: string },
+      onExisting?: Effect.Effect<void>,
     ) => Effect.Effect<string, Tool.Failure>
   }
 >()("@zaovra/BashJob") {}
@@ -38,6 +44,10 @@ const layer = Layer.effect(
     const tools = yield* Tools.Service
     const locks = KeyedMutex.makeUnsafe<string>()
     const owned = new Set<string>()
+    const results = new Map<
+      string,
+      { verification?: SessionOutcome.Check; verifications?: readonly SessionOutcome.Check[] }
+    >()
     yield* Effect.addFinalizer(() => Effect.forEach(owned, (id) => jobs.cancel(id), { discard: true }))
 
     const start = (
@@ -46,6 +56,7 @@ const layer = Layer.effect(
       context: Tool.Context,
       prepare: Effect.Effect<void, unknown>,
       background?: { kind: "task" | "preview"; workdir: string },
+      onExisting?: Effect.Effect<void>,
     ) => {
       const id = `msg_bash_${context.assistantMessageID}_${context.toolCallID}`
       return locks.withLock(id)(
@@ -59,6 +70,7 @@ const layer = Layer.effect(
                 previous.message.command !== command
               )
                 return yield* new Tool.Failure({ message: "Conflicting background command retry" })
+              if (onExisting) yield* onExisting
               return id
             }
             yield* prepare.pipe(Effect.mapError((error) => new Tool.Failure({ message: String(error) })))
@@ -121,15 +133,25 @@ const layer = Layer.effect(
             output: Schema.Struct({
               status: Schema.String,
               output: Schema.String,
+              verification: Schema.optional(SessionOutcome.Check),
+              verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
               kind: Schema.optional(Schema.String),
               workdir: Schema.optional(Schema.String),
             }),
             structured: Schema.Struct({
+              verification: Schema.optional(SessionOutcome.Check),
+              verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
               status: Schema.String,
               kind: Schema.optional(Schema.String),
               workdir: Schema.optional(Schema.String),
             }),
-            toStructuredOutput: ({ output }) => ({ status: output.status, kind: output.kind, workdir: output.workdir }),
+            toStructuredOutput: ({ output }) => ({
+              status: output.status,
+              kind: output.kind,
+              workdir: output.workdir,
+              verification: output.verification,
+              verifications: output.verifications,
+            }),
             toModelOutput: ({ output }) => [
               {
                 type: "text",
@@ -188,7 +210,19 @@ const layer = Layer.effect(
                       ? (yield* jobs.wait({ id: input.job_id, timeout: Math.min(input.timeout ?? 30_000, 60_000) }))
                           .info
                       : job
+                const evidence = result && result.status !== "running" ? results.get(input.job_id) : undefined
                 return {
+                  ...(evidence?.verification
+                    ? { verification: { ...evidence.verification, callID: context.toolCallID } }
+                    : {}),
+                  ...(evidence?.verifications
+                    ? {
+                        verifications: evidence.verifications.map((check) => ({
+                          ...check,
+                          callID: context.toolCallID,
+                        })),
+                      }
+                    : {}),
                   status: result?.status ?? "unavailable",
                   kind: typeof result?.metadata?.kind === "string" ? result.metadata.kind : undefined,
                   workdir: typeof result?.metadata?.workdir === "string" ? result.metadata.workdir : undefined,
@@ -202,7 +236,13 @@ const layer = Layer.effect(
         ),
       })
       .pipe(Effect.orDie)
-    return Service.of({ start })
+    return Service.of({
+      start,
+      record: (id, result) =>
+        Effect.sync(() => {
+          results.set(id, result)
+        }),
+    })
   }),
 )
 

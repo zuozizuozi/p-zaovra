@@ -4,6 +4,7 @@ import { Effect, Layer } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
+import { ConfigExperimental } from "@zaovra-ai/core/config/experimental"
 import { Config } from "@zaovra-ai/core/config"
 import { Global } from "@zaovra-ai/core/global"
 import { Location } from "@zaovra-ai/core/location"
@@ -12,6 +13,9 @@ import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { BackgroundJob } from "@zaovra-ai/core/background-job"
+import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
+import { SessionMessage } from "@zaovra-ai/core/session/message"
+import { DateTime } from "effect"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { location } from "./fixture/location"
@@ -27,6 +31,7 @@ const withRuntime = <A, E, R>(
     registry: ToolRegistry.Interface,
     jobs: BackgroundJob.Interface,
   ) => Effect.Effect<A, E, R>,
+  silent?: number,
 ) =>
   Effect.acquireUseRelease(
     Effect.promise(() => tmpdir()),
@@ -51,7 +56,26 @@ const withRuntime = <A, E, R>(
             [
               [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
               [Global.node, Global.layerWith({ data: tmp.path })],
-              [Config.node, Layer.succeed(Config.Service, { entries: () => Effect.succeed([]) })],
+              [
+                Config.node,
+                Layer.succeed(Config.Service, {
+                  entries: () =>
+                    Effect.succeed(
+                      silent === undefined
+                        ? []
+                        : [
+                            new Config.Document({
+                              type: "document",
+                              info: new Config.Info({
+                                experimental: new ConfigExperimental.Experimental({
+                                  quality_progress: { silent_command_ms: silent },
+                                }),
+                              }),
+                            }),
+                          ],
+                    ),
+                }),
+              ],
               [SessionExecution.node, SessionExecution.noopLayer],
               [
                 ProjectV2.node,
@@ -273,4 +297,149 @@ it.live("Stop preserves explicit previews; archive closes only owned services", 
       expect((yield* jobs.get((second.output?.structured as { job_id: string }).job_id))?.status).toBe("cancelled")
     }),
   ),
+)
+
+it.live("Q2 silence yields a live owned process and never certifies pending checks", () =>
+  withRuntime(
+    (directory, sessions, registry, jobs) =>
+      Effect.gen(function* () {
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const script = path.join(directory, "silent.cjs")
+        const marker = path.join(directory, "finished.txt")
+        yield* Effect.promise(() =>
+          Bun.write(
+            script,
+            "setTimeout(() => { require('fs').writeFileSync('finished.txt', 'once'); console.log('done') }, 1800)",
+          ),
+        )
+        const result = yield* settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: "silent",
+            name: "bash",
+            input: {
+              command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+              verification: "test",
+              verification_targets: [script],
+              verification_requirements: ["writes marker"],
+            },
+          },
+        })
+        const data = result.output?.structured as { job_id?: string; verification?: unknown }
+        expect(data.job_id).toBeString()
+        expect(data.verification).toBeUndefined()
+        expect((yield* jobs.get(data.job_id!))?.status).toBe("running")
+        expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
+        expect((yield* sessions.outcome(session.id)).state).not.toBe("completed_verified")
+        const done = yield* settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: "wait-silent",
+            name: "bash_job",
+            input: { job_id: data.job_id, action: "wait" },
+          },
+        })
+        expect(done.output?.structured).toMatchObject({ status: "completed", verification: { exit: 0 } })
+        expect(yield* Effect.promise(() => Bun.file(marker).text())).toBe("once")
+        const check = SessionOutcome.toolChecks(
+          SessionMessage.AssistantTool.make({
+            type: "tool",
+            id: "wait-silent",
+            name: "bash_job",
+            time: { created: DateTime.nowUnsafe() },
+            state: SessionMessage.ToolStateCompleted.make({
+              status: "completed",
+              input: { job_id: data.job_id, action: "wait" },
+              structured: done.output!.structured as Record<string, unknown>,
+              content: [],
+            }),
+          }),
+        )
+        expect(check).toHaveLength(1)
+        expect(check[0]!.callID).toBe("wait-silent")
+      }),
+    150,
+  ),
+)
+
+it.live(
+  "Q2 fresh output resets silence and explicit timeout remains authoritative",
+  () =>
+    withRuntime(
+      (directory, sessions, registry, jobs) =>
+        Effect.gen(function* () {
+          const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+          const script = path.join(directory, "output.cjs")
+          yield* Effect.promise(() =>
+            Bun.write(
+              script,
+              "let n=0; console.log('start'); const timer=setInterval(() => { console.log(++n); if(n===30) clearInterval(timer) }, 60)",
+            ),
+          )
+          const execute = (id: string, timeout?: number) =>
+            settleTool(registry, {
+              sessionID: session.id,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id,
+                name: "bash",
+                input: {
+                  command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+                  ...(timeout === undefined ? {} : { timeout }),
+                },
+              },
+            })
+          const result = yield* execute("output-reset")
+          expect(result.output?.structured).toMatchObject({ exit: 0 })
+          expect((result.output?.structured as { job_id?: string }).job_id).toBeUndefined()
+          yield* Effect.promise(() => Bun.write(script, "setTimeout(() => {}, 4000)"))
+          const timed = yield* execute("explicit-timeout", 2500)
+          const timedJob = (timed.output?.structured as { job_id?: string }).job_id
+          expect(timedJob).toBeString()
+          expect((yield* jobs.wait({ id: timedJob!, timeout: 5000 })).info?.status).toBe("error")
+        }),
+      1500,
+    ),
+  15000,
+)
+
+it.live(
+  "Q2 exact managed retry returns the original handle without waiting on a new process",
+  () =>
+    withRuntime(
+      (directory, sessions, registry, jobs) =>
+        Effect.gen(function* () {
+          const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+          const script = path.join(directory, "retry.cjs")
+          yield* Effect.promise(() =>
+            Bun.write(script, "require('fs').appendFileSync('runs.txt', 'x'); setTimeout(() => {}, 1800)"),
+          )
+          const invoke = () =>
+            settleTool(registry, {
+              sessionID: session.id,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "same-managed",
+                name: "bash",
+                input: { command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"` },
+              },
+            })
+          const first = yield* invoke()
+          const second = yield* invoke().pipe(Effect.timeout("500 millis"))
+          expect(second.output?.structured).toMatchObject({
+            job_id: (first.output?.structured as { job_id: string }).job_id,
+          })
+          const id = (first.output?.structured as { job_id: string }).job_id
+          yield* jobs.wait({ id, timeout: 5000 })
+          expect(yield* Effect.promise(() => Bun.file(path.join(directory, "runs.txt")).text())).toBe("x")
+        }),
+      100,
+    ),
+  10000,
 )

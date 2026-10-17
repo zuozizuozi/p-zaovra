@@ -522,7 +522,19 @@ export namespace RevertEvent {
   })
 }
 
+// Host diagnostics are durable observations, never added to model message history.
+export const QualityProgress = Event.define({
+  type: "session.next.quality.progress",
+  ...options,
+  schema: {
+    ...Base,
+    category: Schema.Literals(["continuation", "closing", "stagnation"]),
+    details: Schema.Json,
+  },
+})
+
 export const DurableDefinitions = Event.inventory(
+  QualityProgress,
   Created,
   AgentSwitched,
   ModelSwitched,

@@ -1,3 +1,5 @@
+import { BackgroundJob } from "@zaovra-ai/core/background-job"
+import { SessionProgress } from "@zaovra-ai/core/session/progress"
 import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
 import { SessionOwnership } from "@zaovra-ai/core/session/ownership"
 import { describe, expect } from "bun:test"
@@ -284,6 +286,7 @@ const skillGuidance = Layer.mock(SkillGuidance.Service, {
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 let sessionTokenBudget: number | undefined
 let sessionOutput: Config.Info["session_output"]
+let qualityProgress: ConfigExperimental.Experimental["quality_progress"]
 let verificationEnabled: boolean | undefined
 const config = Layer.succeed(
   Config.Service,
@@ -295,7 +298,10 @@ const config = Layer.succeed(
           info: new Config.Info({
             session_token_budget: sessionTokenBudget,
             session_output: sessionOutput,
-            experimental: new ConfigExperimental.Experimental({ verification: verificationEnabled }),
+            experimental: new ConfigExperimental.Experimental({
+              verification: verificationEnabled,
+              quality_progress: qualityProgress,
+            }),
             compaction: new ConfigCompaction.Info({
               buffer: 3_000,
               keep: new ConfigCompaction.Keep({ tokens: 1_000 }),
@@ -346,6 +352,7 @@ const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([
       FSUtil.node,
+      BackgroundJob.node,
       Location.node,
       Database.node,
       EventV2.node,
@@ -412,6 +419,7 @@ const setup = Effect.gen(function* () {
   sessionTokenBudget = undefined
   sessionOutput = undefined
   verificationEnabled = true
+  qualityProgress = undefined
   systemBaseline = "Initial context"
   systemRemoved = false
   systemUnavailable = false
@@ -6643,5 +6651,236 @@ it.effect("authority lost after provider output prevents tool execution and the 
     )
     expect(requests).toHaveLength(1)
     expect(executions).toHaveLength(0)
+  }),
+)
+
+it.live("Q1 snapshots stay at request tail and out of history, usage survives another drain", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { facts: true }
+    const session = yield* SessionV2.Service
+    response = fragmentFixture("text", "facts-final", ["Done"]).completeEvents
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First request" }), resume: false })
+    yield* session.resume(sessionID)
+    const first = JSON.stringify(requests[0]!.messages.at(-1))
+    expect(first).toContain("Current task facts")
+    expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("Current task facts")
+    yield* session.resume(sessionID)
+    expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain("Current task facts")
+    const db = (yield* Database.Service).db
+    const saved = yield* SessionProgress.read(db, sessionID)
+    expect(saved._tag).toBe("Some")
+    expect(requests[0]!.system).toEqual(requests[1]!.system)
+  }),
+)
+
+it.live("Q2 direct model finish lists unfinished owned jobs and cannot verify them", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { silent_command_ms: 150 }
+    const jobs = yield* BackgroundJob.Service
+    const session = yield* SessionV2.Service
+    yield* jobs.start({ id: "pending-check", type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
+    response = fragmentFixture("text", "job-final", ["Done"]).completeEvents
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run checks" }), resume: false })
+    yield* session.resume(sessionID)
+    const messages = yield* session.context(sessionID)
+    expect(JSON.stringify(messages.at(-1))).toContain("pending-check")
+    expect(JSON.stringify(messages.at(-1))).toContain("bash_job")
+    expect(JSON.stringify(messages.at(-1))).toContain("running")
+    expect((yield* session.outcome(sessionID)).state).not.toBe("completed_verified")
+    yield* jobs.cancel("pending-check")
+  }),
+)
+
+it.live("Q3 Q5 evidence review is bounded without new evidence and names independent checks", () =>
+  Effect.gen(function* () {
+    yield* setup
+    qualityProgress = { evidence_closing: true, independent_review: true }
+    const session = yield* SessionV2.Service
+    const registry = yield* ToolRegistry.Service
+    yield* registry.register({
+      bash: Tool.make({
+        description: "actual result",
+        input: Schema.Struct({}),
+        output: Schema.Struct({ exit: Schema.Number }),
+        execute: () => Effect.succeed({ exit: 0 }),
+      }),
+    })
+    yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({ text: "Check empty CSV and malformed CSV" }),
+      resume: false,
+    })
+    const tool = [
+      LLMEvent.stepStart({ index: 0 }),
+      LLMEvent.toolCall({ id: "q-green", name: "bash", input: {} }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      LLMEvent.finish({ reason: "tool-calls" }),
+    ]
+    const stop = fragmentFixture("text", "q-stop", ["Done"]).completeEvents
+    responses = [tool, stop, stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(3)
+    expect(JSON.stringify(requests.at(-1)!.messages)).toContain("original source")
+    expect((yield* session.outcome(sessionID)).state).toBe("completed_unverified")
+    requests.length = 0
+    responses = [stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(1)
+    const db = (yield* Database.Service).db
+    const rows = yield* db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.type, "session.next.quality.progress.1"))
+      .all()
+      .pipe(Effect.orDie)
+    expect(rows.some((row) => row.data.category === "continuation")).toBe(true)
+    expect(rows.some((row) => row.data.category === "closing")).toBe(true)
+    expect(JSON.stringify(yield* session.context(sessionID))).not.toContain('"category":"continuation"')
+  }),
+)
+
+it.live("Q4 records failures without adding model turns or changing shell recovery", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { stagnation_log: true }
+    const session = yield* SessionV2.Service
+    const registry = yield* ToolRegistry.Service
+    yield* registry.register({
+      bash: Tool.make({
+        description: "failure",
+        input: Schema.Struct({}),
+        output: Schema.Struct({ exit: Schema.Number }),
+        structured: Schema.Struct({ exit: Schema.Number }),
+        toStructuredOutput: ({ output }) => output,
+        execute: () => Effect.succeed({ exit: 1 }),
+      }),
+    })
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Diagnose a failure" }), resume: false })
+    responses = [
+      [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "q-fail", name: "bash", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ],
+      fragmentFixture("text", "q-diagnosed", ["Blocked"]).completeEvents,
+    ]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    const db = (yield* Database.Service).db
+    const rows = yield* db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.type, "session.next.quality.progress.1"))
+      .all()
+      .pipe(Effect.orDie)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.data).toMatchObject({
+      category: "stagnation",
+      details: { candidate: false, intervention: false, expectedEvidence: "unknown" },
+    })
+    expect(JSON.stringify(requests)).not.toContain("candidate")
+  }),
+)
+
+it.live("Q1 persisted active time survives compaction and restart without charging offline time", () =>
+  Effect.gen(function* () {
+    yield* setup
+    qualityProgress = { facts: true }
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const db = (yield* Database.Service).db
+    response = fragmentFixture("text", "timer-first", ["Done"]).completeEvents
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+    yield* session.resume(sessionID)
+    const saved = yield* SessionProgress.read(db, sessionID)
+    if (saved._tag !== "Some") throw new Error("missing durable timer")
+    yield* SessionProgress.save(db, sessionID, { ...saved.value, activeMs: 1000, draining: true })
+    const events = yield* EventV2.Service
+    const messageID = SessionMessage.ID.create()
+    yield* events.publish(SessionEvent.Compaction.Started, {
+      sessionID,
+      messageID,
+      timestamp: DateTime.nowUnsafe(),
+      reason: "manual",
+    })
+    yield* events.publish(SessionEvent.Compaction.Ended, {
+      sessionID,
+      messageID,
+      timestamp: DateTime.nowUnsafe(),
+      reason: "manual",
+      text: "Retained work",
+      recent: "",
+    })
+    yield* session.resume(sessionID)
+    const restored = yield* SessionProgress.read(db, sessionID)
+    if (restored._tag !== "Some") throw new Error("missing resumed timer")
+    expect(restored.value.activeMs).toBeGreaterThanOrEqual(1000)
+    expect(restored.value.activeMs).toBeLessThan(5000)
+    expect(restored.value.requestStarted).toBe(saved.value.requestStarted)
+    expect(restored.value.activeTimeUnknown).toBe(true)
+    expect(restored.value.draining).toBe(false)
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
+    yield* session.resume(sessionID)
+    const next = yield* SessionProgress.read(db, sessionID)
+    if (next._tag !== "Some") throw new Error("missing next request timer")
+    expect(next.value.request).not.toBe(saved.value.request)
+    expect(next.value.requestStarted).toBeGreaterThan(saved.value.requestStarted)
+    expect(next.value.activeMs).toBeGreaterThanOrEqual(restored.value.activeMs)
+  }),
+)
+
+it.live("Q3 pending work cannot consume the later terminal evidence review", () =>
+  Effect.gen(function* () {
+    yield* setup
+    qualityProgress = { evidence_closing: true }
+    const session = yield* SessionV2.Service
+    const events = yield* EventV2.Service
+    const registry = yield* ToolRegistry.Service
+    yield* registry.register({
+      bash: Tool.make({
+        description: "start check",
+        input: Schema.Struct({}),
+        output: Schema.Struct({ exit: Schema.Number }),
+        execute: () =>
+          events
+            .publish(SessionEvent.Shell.Started, {
+              sessionID,
+              messageID: SessionMessage.ID.make("msg_q_pending"),
+              callID: "pending",
+              command: "check",
+              timestamp: DateTime.nowUnsafe(),
+            })
+            .pipe(Effect.as({ exit: 0 })),
+      }),
+    })
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Validate pending check" }), resume: false })
+    const tool = [
+      LLMEvent.stepStart({ index: 0 }),
+      LLMEvent.toolCall({ id: "pending-start", name: "bash", input: {} }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      LLMEvent.finish({ reason: "tool-calls" }),
+    ]
+    const stop = fragmentFixture("text", "pending-final", ["Done"]).completeEvents
+    responses = [tool, stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    expect((yield* session.outcome(sessionID)).state).not.toBe("completed_verified")
+    yield* events.publish(SessionEvent.Shell.Ended, {
+      sessionID,
+      callID: "pending",
+      output: "check ended",
+      timestamp: DateTime.nowUnsafe(),
+    })
+    requests.length = 0
+    responses = [stop, stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    expect(JSON.stringify(requests[1]!.messages)).toContain("Verification closing review")
   }),
 )
