@@ -17,6 +17,9 @@ test("alias compaction survives mid-stream and committed crashes without tool or
   await using provider = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    // This stream must remain open until the explicit crash, not end on server idleness.
+    // The test and child execution retain their own bounded timeouts.
+    idleTimeout: 0,
     async fetch(request) {
       const body = (await request.json()) as { model: string; messages: unknown }
       bodies.push(body)
@@ -71,7 +74,8 @@ test("alias compaction survives mid-stream and committed crashes without tool or
       formatter: false,
       lsp: false,
       permission: { "*": "allow" },
-      compaction: { auto: true, keep: { tokens: 20 } },
+      // Fit the ordinary prompt/tool rules; only OLD_OBSERVATIONS should trigger compaction.
+      compaction: { auto: true, buffer: 1024, keep: { tokens: 20 } },
       provider: {
         audit: {
           npm: "@ai-sdk/openai-compatible",
@@ -103,6 +107,8 @@ test("alias compaction survives mid-stream and committed crashes without tool or
     if (!crash) expect(code, `${stdout}\n${stderr}`).toBe(0)
   }
   await settled(run("seed"))
+  expect(summaries).toBe(0)
+  expect(turns).toBe(2)
   const seed = await Bun.file(path.join(dir.path, "seed.json")).json()
   const child = run("partial")
   try {
@@ -117,6 +123,7 @@ test("alias compaction survives mid-stream and committed crashes without tool or
     expect(JSON.stringify(partial.context)).not.toContain("HALF_SUMMARY_MUST_NOT_COMMIT")
     expect(partial.context.filter((message: { type: string }) => message.type === "compaction")).toHaveLength(0)
     expect(partial.usage.total.total).toBe(seed.usage.total.total)
+    expect(child.exitCode).toBeNull()
     child.kill("SIGKILL")
     await settled(child, true)
   } finally {
