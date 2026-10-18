@@ -12,6 +12,7 @@ import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { PluginInternal } from "@zaovra-ai/core/plugin/internal"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Config } from "@zaovra-ai/core/config"
+import { ConfigExperimental } from "@zaovra-ai/core/config/experimental"
 import { Project } from "@zaovra-ai/core/project"
 import { ProjectTable } from "@zaovra-ai/core/project/sql"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
@@ -73,7 +74,24 @@ const models = SessionRunnerModel.layerWith(() => Effect.succeed(model))
 const systemContext = AppNodeBuilder.build(SystemContextRegistry.node)
 const skillGuidance = Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
-const config = Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed([]) }))
+// Keep the historical HTTP cassette byte-stable; default observations are covered
+// by the runner tests without issuing or recording another provider request.
+const config = Layer.succeed(
+  Config.Service,
+  Config.Service.of({
+    entries: () =>
+      Effect.succeed([
+        new Config.Document({
+          type: "document",
+          info: new Config.Info({
+            experimental: new ConfigExperimental.Experimental({
+              quality_progress: { facts: false, stagnation_log: false },
+            }),
+          }),
+        }),
+      ]),
+  }),
+)
 const location = Location.boundNode({ directory: AbsolutePath.make(path.resolve("/project")) })
 const plugins = AppNodeBuilder.build(PluginV2.node, [
   [Config.node, config],

@@ -419,7 +419,9 @@ const setup = Effect.gen(function* () {
   sessionTokenBudget = undefined
   sessionOutput = undefined
   verificationEnabled = true
-  qualityProgress = undefined
+  // Transcript fixtures isolate durable history from request-local observations.
+  // The Q cases below explicitly cover omitted, enabled and disabled observations.
+  qualityProgress = { facts: false, stagnation_log: false }
   systemBaseline = "Initial context"
   systemRemoved = false
   systemUnavailable = false
