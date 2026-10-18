@@ -9,8 +9,8 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(98)
-    expect(EventManifest.Definitions.length).toBe(128)
+    expect(EventManifest.ServerDefinitions.length).toBe(102)
+    expect(EventManifest.Definitions.length).toBe(132)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,8 +23,8 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(128)
-    expect(EventManifest.Durable.size).toBe(75)
+    expect(EventManifest.Latest.size).toBe(132)
+    expect(EventManifest.Durable.size).toBe(80)
   })
 
   test("uses canonical definitions for current public events", () => {
@@ -34,9 +34,15 @@ describe("public event manifest", () => {
     expect(Workspace.Event.Definitions).toBe(WorkspaceEvent.Definitions)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Latest.get("session.next.created")).toBe(SessionEvent.Created)
+    expect(EventManifest.Latest.get("session.next.prompt.cancelled")).toBe(SessionEvent.PromptCancelled)
     expect(EventManifest.Latest.get("session.next.compaction.failed")).toBe(SessionEvent.Compaction.Failed)
     expect(EventManifest.Latest.get("todo.updated")).toBe(SessionTodo.Event.Updated)
     expect(EventManifest.Latest.get("work.goal.created")).toBe(Work.Event.GoalCreated)
+    expect(EventManifest.Latest.get("work.task.merge-reviewed")).toBe(Work.Event.TaskMergeReviewed)
+    expect(EventManifest.Latest.get("work.task.isolation-resolved")).toBe(Work.Event.TaskIsolationResolved)
+    expect(EventManifest.Latest.get("work.task.final-acceptance-repair-requested")).toBe(
+      Work.Event.FinalAcceptanceRepairRequested,
+    )
     expect(EventManifest.Latest.get("work.project-memory.resolved")).toBe(Work.Event.ProjectMemoryResolved)
     expect(EventManifest.Latest.get("work.goal.placement-assigned")).toBe(Work.Event.GoalPlacementAssigned)
     expect(EventManifest.Latest.get("project.updated")).toBe(Project.Event.Updated)
@@ -47,7 +53,7 @@ describe("public event manifest", () => {
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(IdeEvent.Definitions).toEqual([IdeEvent.Installed])
-    expect(EventManifest.Definitions.slice(83, 86)).toEqual([
+    expect(EventManifest.Definitions.slice(87, 90)).toEqual([
       SessionV1.Event.PartDelta,
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
@@ -55,5 +61,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Durable.get("work.goal.created.1")).toBe(Work.Event.GoalCreated)
+    expect(EventManifest.Latest.has("session.next.quality.progress")).toBe(false)
+    expect(EventManifest.Durable.get("session.next.quality.progress.1")).toBe(SessionEvent.QualityProgress)
   })
 })
