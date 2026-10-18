@@ -80,7 +80,7 @@ export const resolveShell = (configured?: string) => {
   return ShellIdentity.resolve(configured).path
 }
 
-export const shellCommand = (command: string, cwd: string, shell?: string) => {
+export const shellCommand = (command: string, cwd: string, shell?: string, env?: NodeJS.ProcessEnv) => {
   const executable = resolveShell(shell)
   const powershell = /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable)
   if (powershell) {
@@ -103,6 +103,7 @@ if (-not $? -and $LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 1 } } | Out-Defau
     )
     return ChildProcess.make(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", diagnosed], {
       cwd,
+      ...(env ? { env, extendEnv: false } : {}),
       stdin: "ignore",
       detached: process.platform !== "win32",
       forceKillAfter: Duration.seconds(3),
@@ -110,6 +111,7 @@ if (-not $? -and $LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 1 } } | Out-Defau
   }
   return ChildProcess.make(command, [], {
     cwd,
+    ...(env ? { env, extendEnv: false } : {}),
     shell: executable,
     stdin: "ignore",
     detached: process.platform !== "win32",

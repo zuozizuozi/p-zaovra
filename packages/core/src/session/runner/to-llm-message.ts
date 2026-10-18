@@ -155,7 +155,18 @@ function toLLMMessage(message: SessionMessage.Message, model: Model, originalReq
         Message.make({
           id: message.id,
           role: "user",
-          content: [{ type: "text", text: message.text }, ...(message.files ?? []).map(media)],
+          content: [
+            { type: "text", text: message.text },
+            ...(message.executionContract
+              ? [
+                  {
+                    type: "text" as const,
+                    text: `User-approved execution contract (version ${message.executionContract.version}): ${JSON.stringify(message.executionContract)}. Unknown required conditions remain unverified; do not infer approval from tool arguments.`,
+                  },
+                ]
+              : []),
+            ...(message.files ?? []).map(media),
+          ],
           metadata: {
             ...message.metadata,
             ...(message.agents?.length ? { agents: message.agents } : {}),

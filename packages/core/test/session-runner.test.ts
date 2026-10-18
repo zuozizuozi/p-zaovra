@@ -2364,13 +2364,26 @@ describe("SessionRunnerLLM", () => {
         fragmentFixture("text", "text-summary", [handoff("Recover overflow")]).completeEvents,
         fragmentFixture("text", "text-final", ["Recovered"]).completeEvents,
       ]
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({
+          text: "Continue",
+          executionContract: { version: 1, environment: { OMP_NUM_THREADS: "2" } },
+        }),
+        resume: false,
+      })
       yield* session.resume(sessionID)
 
       expect(requests).toHaveLength(3)
+      const cache = (yield* SessionUsageQuery.read(sessionID)).cache!
+      expect(cache.points.slice(-3).map((point) => point.purpose)).toEqual(["execution", "summary", "execution"])
+      expect(cache.points.at(-1)?.reason).toBe("compaction")
       expect(userTexts(requests[1])[0]).toContain("## Objective")
       expect(userTexts(requests[2])[0]).toContain(`<summary>\n${handoff("Recover overflow")}\n</summary>`)
       expect(userTexts(requests[2])[0]).toContain("Earlier question ".repeat(700))
+      expect(userTexts(requests[2])[0]).toContain(
+        '"executionContract":{"version":1,"environment":{"OMP_NUM_THREADS":"2"}}',
+      )
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "compaction", summary: handoff("Recover overflow") },
         { type: "assistant", finish: "stop" },
@@ -2796,8 +2809,68 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(run)
 
       expect(requests.map((request) => request.model)).toEqual([model, replacementModel])
+      const cache = (yield* SessionUsageQuery.read(sessionID)).cache!
+      expect(cache.points.map((point) => point.purpose)).toEqual(["execution", "execution"])
+      expect(cache.points[1].reason).toBe("model")
       expect(requests.map((request) => privilegedTexts(request))).toEqual([["Initial context"], ["Initial context"]])
       expect(systemTexts(requests[1]!)).toContain("Replacement context")
+    }),
+  )
+
+  it.effect("K3 replays durable item-done ciphertext despite differing terminal output", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Think then echo" }), resume: false })
+      requests.length = 0
+      const responsesModel = OpenAIResponses.route.with({ auth: Auth.bearer("offline") }).model({ id: "offline" })
+      responseStream = LLMClient.stream(LLM.request({ model: responsesModel, prompt: "offline" })).pipe(
+        Stream.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1", encrypted_content: null } },
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: "item-done-cipher" },
+              },
+              {
+                type: "response.output_item.added",
+                item: { type: "function_call", id: "fc_1", call_id: "echo_1", name: "echo" },
+              },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "function_call",
+                  id: "fc_1",
+                  call_id: "echo_1",
+                  name: "echo",
+                  arguments: '{"text":"hello"}',
+                },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-cipher" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+      responses = [fragmentFixture("text", "done", ["Done"]).completeEvents]
+      yield* session.resume(sessionID)
+      yield* replaySessionProjection(sessionID)
+      const history = JSON.stringify(yield* session.context(sessionID))
+      expect(history).toContain("item-done-cipher")
+      expect(history).not.toContain("terminal-cipher")
+      expect(requests).toHaveLength(2)
+      const prepared = yield* LLMClient.prepare(LLM.updateRequest(requests[1], { model: responsesModel }))
+      expect(JSON.stringify(prepared.body)).toContain('"encrypted_content":"item-done-cipher"')
+      expect(JSON.stringify(prepared.body)).not.toContain("terminal-cipher")
+      const cache = (yield* SessionUsageQuery.read(sessionID)).cache!
+      expect(cache.points[0].attempts).toHaveLength(1)
+      expect(cache.points[0].attempts?.[0].status).toBe(200)
     }),
   )
 
@@ -3822,6 +3895,45 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(second)
       streamGate = undefined
       streamStarted = undefined
+    }),
+  )
+
+  it.effect("K3 cross-session project baselines preserve static wire prefix", () =>
+    Effect.gen(function* () {
+      yield* setup
+      yield* insertSession(otherSessionID)
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Project A task" }), resume: false })
+      response = []
+      yield* session.resume(sessionID)
+      systemBaseline = "Different project location and runtime facts"
+      yield* session.prompt({
+        sessionID: otherSessionID,
+        prompt: Prompt.make({ text: "Project B task" }),
+        resume: false,
+      })
+      yield* session.resume(otherSessionID)
+      expect(requests).toHaveLength(2)
+      expect(requests[0].system.slice(0, -1)).toEqual(requests[1].system.slice(0, -1))
+      expect(requests[0].system.at(-1)?.text).toBe("Initial context")
+      expect(requests[1].system.at(-1)?.text).toBe(systemBaseline)
+      const target = OpenAIResponses.route.with({ auth: Auth.bearer("offline") }).model({ id: "offline" })
+      const first = yield* LLMClient.prepare(LLM.updateRequest(requests[0], { model: target }))
+      const second = yield* LLMClient.prepare(LLM.updateRequest(requests[1], { model: target }))
+      const body = Schema.Struct({
+        input: Schema.Array(Schema.Struct({ content: Schema.Unknown })),
+        prompt_cache_key: Schema.String,
+      })
+      const a = Schema.decodeUnknownSync(body)(first.body)
+      const b = Schema.decodeUnknownSync(body)(second.body)
+      const prefix = requests[0].system
+        .slice(0, -1)
+        .map((part) => part.text)
+        .join("\n")
+      expect(Schema.decodeUnknownSync(Schema.String)(a.input[0].content).startsWith(prefix)).toBe(true)
+      expect(Schema.decodeUnknownSync(Schema.String)(b.input[0].content).startsWith(prefix)).toBe(true)
+      expect(a.prompt_cache_key).not.toBe(b.prompt_cache_key)
+      // This proves wire layout, not gateway routing or cross-project cache hits.
     }),
   )
 

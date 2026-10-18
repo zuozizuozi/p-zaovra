@@ -16,6 +16,9 @@ import { BackgroundJob } from "@zaovra-ai/core/background-job"
 import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { DateTime } from "effect"
+import { Database } from "@zaovra-ai/core/database/database"
+import { EventV2 } from "@zaovra-ai/core/event"
+import { SessionInput } from "@zaovra-ai/core/session/input"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { location } from "./fixture/location"
@@ -52,7 +55,15 @@ const withRuntime = <A, E, R>(
       }).pipe(
         Effect.provide(
           AppNodeBuilder.build(
-            LayerNode.group([SessionV2.node, BashTool.node, AgentV2.node, ToolRegistry.node, BackgroundJob.node]),
+            LayerNode.group([
+              SessionV2.node,
+              BashTool.node,
+              AgentV2.node,
+              ToolRegistry.node,
+              BackgroundJob.node,
+              Database.node,
+              EventV2.node,
+            ]),
             [
               [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
               [Global.node, Global.layerWith({ data: tmp.path })],
@@ -91,6 +102,99 @@ const withRuntime = <A, E, R>(
       ),
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   )
+
+it.live("K3 records the actual explicit launch environment without scanning command comments", () =>
+  withRuntime((directory, sessions, registry) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const script = path.join(directory, "environment.cjs")
+      yield* Effect.promise(() => Bun.write(script, "console.log('threads=' + process.env.OMP_NUM_THREADS)"))
+      const result = yield* settleTool(registry, {
+        sessionID: session.id,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "launch-environment",
+          name: "bash",
+          input: {
+            command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+            environment: { OMP_NUM_THREADS: "2" },
+            verification: "smoke",
+            verification_targets: [script],
+          },
+        },
+      })
+      expect(result.output?.structured).toMatchObject({
+        verification: {
+          exit: 0,
+          executionContext: {
+            environment: {
+              OMP_NUM_THREADS: {
+                requested: { value: "2", source: "diagnostic-temporary" },
+                observed: { value: "2", source: "observed" },
+              },
+            },
+          },
+        },
+      })
+      expect(JSON.stringify(result.output?.content)).toContain("threads=2")
+    }),
+  ),
+)
+
+it.live("K3 user prompt execution contract reaches launch and survives durable promotion", () =>
+  withRuntime((directory, sessions, registry) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const script = path.join(directory, "approved.cjs")
+      yield* Effect.promise(() => Bun.write(script, "console.log(process.env.OMP_NUM_THREADS)"))
+      const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`
+      yield* sessions.prompt({
+        sessionID: session.id,
+        prompt: {
+          text: "Run the approved entry",
+          executionContract: { version: 1, entry: command, environment: { OMP_NUM_THREADS: "2" }, samples: ["first"] },
+        },
+      })
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
+      const result = yield* settleTool(registry, {
+        sessionID: session.id,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "approved-environment",
+          name: "bash",
+          input: {
+            command,
+            environment: { OMP_NUM_THREADS: "2" },
+            verification: "smoke",
+            verification_targets: [script],
+            verification_sample: "first",
+          },
+        },
+      })
+      expect(result.output?.structured).toMatchObject({
+        verification: {
+          executionContext: {
+            entry: { requested: { value: command, source: "user" } },
+            environment: {
+              OMP_NUM_THREADS: {
+                requested: { value: "2", source: "user" },
+                observed: { value: "2", source: "observed" },
+              },
+            },
+            contract: { version: 1, sourceMessageID: expect.stringContaining("msg_") },
+          },
+        },
+      })
+      expect(result.output?.structured).toMatchObject({
+        verification: { sample: { id: "first", planDigest: expect.any(String) }, resultDigest: expect.any(String) },
+      })
+    }),
+  ),
+)
 
 it.live("records real syntax failures and file-bound verification evidence", () =>
   withRuntime((directory, sessions, registry) =>

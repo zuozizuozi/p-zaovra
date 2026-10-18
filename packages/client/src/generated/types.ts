@@ -371,6 +371,12 @@ export type SessionsUsageOutput = {
       readonly points: ReadonlyArray<{
         readonly responseModel?: string | null
         readonly systemFingerprint?: string | null
+        readonly purpose?: "execution" | "summary"
+        readonly attempts?: ReadonlyArray<{
+          readonly id: string
+          readonly phase: "start" | "headers" | "failed"
+          readonly status?: number | "Infinity" | "-Infinity" | "NaN"
+        }>
         readonly requestID: string
         readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
         readonly reason: string
@@ -528,6 +534,22 @@ export type SessionsPromptInput = {
     readonly id?: string | null
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -556,6 +578,22 @@ export type SessionsPromptInput = {
     readonly id?: string | null
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -584,6 +622,22 @@ export type SessionsPromptInput = {
     readonly id?: string | null
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -612,6 +666,22 @@ export type SessionsPromptInput = {
     readonly id?: string | null
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -645,6 +715,22 @@ export type SessionsPromptOutput = {
     readonly sessionID: string
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -683,6 +769,22 @@ export type SessionsPendingInputsOutput = {
     readonly sessionID: string
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -739,6 +841,22 @@ export type SessionsCancelInputOutput = {
     readonly sessionID: string
     readonly prompt: {
       readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -856,6 +974,22 @@ export type SessionsContextOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
         readonly text: string
+        readonly executionContract?: {
+          readonly version: 1
+          readonly entry?: string
+          readonly cwd?: string
+          readonly runtime?: string
+          readonly timeout?: string
+          readonly samples?: ReadonlyArray<string>
+          readonly environment?: {
+            readonly OMP_NUM_THREADS?: string
+            readonly MKL_NUM_THREADS?: string
+            readonly OPENBLAS_NUM_THREADS?: string
+            readonly NUMEXPR_NUM_THREADS?: string
+            readonly VECLIB_MAXIMUM_THREADS?: string
+            readonly BLIS_NUM_THREADS?: string
+          }
+        }
         readonly invocation?: string
         readonly files?: ReadonlyArray<{
           readonly uri: string
@@ -1122,6 +1256,22 @@ export type SessionsHistoryOutput = {
           readonly messageID: string
           readonly prompt: {
             readonly text: string
+            readonly executionContract?: {
+              readonly version: 1
+              readonly entry?: string
+              readonly cwd?: string
+              readonly runtime?: string
+              readonly timeout?: string
+              readonly samples?: ReadonlyArray<string>
+              readonly environment?: {
+                readonly OMP_NUM_THREADS?: string
+                readonly MKL_NUM_THREADS?: string
+                readonly OPENBLAS_NUM_THREADS?: string
+                readonly NUMEXPR_NUM_THREADS?: string
+                readonly VECLIB_MAXIMUM_THREADS?: string
+                readonly BLIS_NUM_THREADS?: string
+              }
+            }
             readonly invocation?: string
             readonly files?: ReadonlyArray<{
               readonly uri: string
@@ -1159,6 +1309,22 @@ export type SessionsHistoryOutput = {
           readonly messageID: string
           readonly prompt: {
             readonly text: string
+            readonly executionContract?: {
+              readonly version: 1
+              readonly entry?: string
+              readonly cwd?: string
+              readonly runtime?: string
+              readonly timeout?: string
+              readonly samples?: ReadonlyArray<string>
+              readonly environment?: {
+                readonly OMP_NUM_THREADS?: string
+                readonly MKL_NUM_THREADS?: string
+                readonly OPENBLAS_NUM_THREADS?: string
+                readonly NUMEXPR_NUM_THREADS?: string
+                readonly VECLIB_MAXIMUM_THREADS?: string
+                readonly BLIS_NUM_THREADS?: string
+              }
+            }
             readonly invocation?: string
             readonly files?: ReadonlyArray<{
               readonly uri: string
@@ -1722,6 +1888,22 @@ export type SessionsEventsOutput =
         readonly messageID: string
         readonly prompt: {
           readonly text: string
+          readonly executionContract?: {
+            readonly version: 1
+            readonly entry?: string
+            readonly cwd?: string
+            readonly runtime?: string
+            readonly timeout?: string
+            readonly samples?: ReadonlyArray<string>
+            readonly environment?: {
+              readonly OMP_NUM_THREADS?: string
+              readonly MKL_NUM_THREADS?: string
+              readonly OPENBLAS_NUM_THREADS?: string
+              readonly NUMEXPR_NUM_THREADS?: string
+              readonly VECLIB_MAXIMUM_THREADS?: string
+              readonly BLIS_NUM_THREADS?: string
+            }
+          }
           readonly invocation?: string
           readonly files?: ReadonlyArray<{
             readonly uri: string
@@ -1759,6 +1941,22 @@ export type SessionsEventsOutput =
         readonly messageID: string
         readonly prompt: {
           readonly text: string
+          readonly executionContract?: {
+            readonly version: 1
+            readonly entry?: string
+            readonly cwd?: string
+            readonly runtime?: string
+            readonly timeout?: string
+            readonly samples?: ReadonlyArray<string>
+            readonly environment?: {
+              readonly OMP_NUM_THREADS?: string
+              readonly MKL_NUM_THREADS?: string
+              readonly OPENBLAS_NUM_THREADS?: string
+              readonly NUMEXPR_NUM_THREADS?: string
+              readonly VECLIB_MAXIMUM_THREADS?: string
+              readonly BLIS_NUM_THREADS?: string
+            }
+          }
           readonly invocation?: string
           readonly files?: ReadonlyArray<{
             readonly uri: string
@@ -2226,6 +2424,8 @@ export type SessionsRecoverOutput = {
       | "interrupted"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
+      readonly resultDigest?: string
+      readonly sample?: { readonly id: string; readonly planDigest: string }
       readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
       readonly command: string
       readonly exit: number | "Infinity" | "-Infinity" | "NaN"
@@ -2239,6 +2439,7 @@ export type SessionsRecoverOutput = {
       readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
       readonly logs?: ReadonlyArray<string>
       readonly executionContext?: {
+        readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
         readonly entry: {
           readonly requested?: {
             readonly value: string | null
@@ -2346,6 +2547,8 @@ export type SessionsRecoverOutput = {
     }>
     readonly recentChecks?: ReadonlyArray<{
       readonly check: {
+        readonly resultDigest?: string
+        readonly sample?: { readonly id: string; readonly planDigest: string }
         readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
         readonly command: string
         readonly exit: number | "Infinity" | "-Infinity" | "NaN"
@@ -2359,6 +2562,7 @@ export type SessionsRecoverOutput = {
         readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
         readonly logs?: ReadonlyArray<string>
         readonly executionContext?: {
+          readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
           readonly entry: {
             readonly requested?: {
               readonly value: string | null
@@ -2504,6 +2708,8 @@ export type SessionsOutcomeOutput = {
       | "interrupted"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
+      readonly resultDigest?: string
+      readonly sample?: { readonly id: string; readonly planDigest: string }
       readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
       readonly command: string
       readonly exit: number | "Infinity" | "-Infinity" | "NaN"
@@ -2517,6 +2723,7 @@ export type SessionsOutcomeOutput = {
       readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
       readonly logs?: ReadonlyArray<string>
       readonly executionContext?: {
+        readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
         readonly entry: {
           readonly requested?: {
             readonly value: string | null
@@ -2624,6 +2831,8 @@ export type SessionsOutcomeOutput = {
     }>
     readonly recentChecks?: ReadonlyArray<{
       readonly check: {
+        readonly resultDigest?: string
+        readonly sample?: { readonly id: string; readonly planDigest: string }
         readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
         readonly command: string
         readonly exit: number | "Infinity" | "-Infinity" | "NaN"
@@ -2637,6 +2846,7 @@ export type SessionsOutcomeOutput = {
         readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
         readonly logs?: ReadonlyArray<string>
         readonly executionContext?: {
+          readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
           readonly entry: {
             readonly requested?: {
               readonly value: string | null
@@ -2798,6 +3008,22 @@ export type SessionsMessageOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
         readonly text: string
+        readonly executionContract?: {
+          readonly version: 1
+          readonly entry?: string
+          readonly cwd?: string
+          readonly runtime?: string
+          readonly timeout?: string
+          readonly samples?: ReadonlyArray<string>
+          readonly environment?: {
+            readonly OMP_NUM_THREADS?: string
+            readonly MKL_NUM_THREADS?: string
+            readonly OPENBLAS_NUM_THREADS?: string
+            readonly NUMEXPR_NUM_THREADS?: string
+            readonly VECLIB_MAXIMUM_THREADS?: string
+            readonly BLIS_NUM_THREADS?: string
+          }
+        }
         readonly invocation?: string
         readonly files?: ReadonlyArray<{
           readonly uri: string
@@ -5556,6 +5782,22 @@ export type MessagesListOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
         readonly text: string
+        readonly executionContract?: {
+          readonly version: 1
+          readonly entry?: string
+          readonly cwd?: string
+          readonly runtime?: string
+          readonly timeout?: string
+          readonly samples?: ReadonlyArray<string>
+          readonly environment?: {
+            readonly OMP_NUM_THREADS?: string
+            readonly MKL_NUM_THREADS?: string
+            readonly OPENBLAS_NUM_THREADS?: string
+            readonly NUMEXPR_NUM_THREADS?: string
+            readonly VECLIB_MAXIMUM_THREADS?: string
+            readonly BLIS_NUM_THREADS?: string
+          }
+        }
         readonly invocation?: string
         readonly files?: ReadonlyArray<{
           readonly uri: string

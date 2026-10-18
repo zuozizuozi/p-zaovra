@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { optional } from "./schema"
 import { statics } from "./schema"
 import { Model } from "./model"
+import { SessionOutcome } from "./session-outcome"
 
 export const Selection = Schema.Struct({ agent: Schema.String, model: Model.Ref }).annotate({
   identifier: "Prompt.Selection",
@@ -48,6 +49,7 @@ export const AgentAttachment = Schema.Struct({
 export interface Prompt extends Schema.Schema.Type<typeof Prompt> {}
 export const Prompt = Schema.Struct({
   text: Schema.String,
+  executionContract: SessionOutcome.ExecutionContract.pipe(optional),
   // Preserve the editable invocation while text contains the expanded model input.
   invocation: Schema.String.pipe(optional),
   files: Schema.Array(FileAttachment).pipe(optional),
@@ -59,9 +61,12 @@ export const Prompt = Schema.Struct({
   .pipe(
     statics((schema) => ({
       equivalence: Schema.toEquivalence(schema),
-      fromUserMessage: (input: Pick<Prompt, "text" | "invocation" | "files" | "agents" | "selection" | "subtask">) =>
+      fromUserMessage: (
+        input: Pick<Prompt, "text" | "invocation" | "files" | "agents" | "selection" | "subtask" | "executionContract">,
+      ) =>
         schema.make({
           text: input.text,
+          ...(input.executionContract === undefined ? {} : { executionContract: input.executionContract }),
           ...(input.invocation === undefined ? {} : { invocation: input.invocation }),
           ...(input.files === undefined ? {} : { files: input.files }),
           ...(input.agents === undefined ? {} : { agents: input.agents }),

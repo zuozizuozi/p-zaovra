@@ -430,7 +430,12 @@ export function checkReferenceProblem(
   if (current?.supersededBy)
     return `check ${id} has been replaced by callID ${current.supersededBy}; reference ${current.supersededBy}`
   if (current) {
-    const freshness = checkFreshness(current, targets, snapshot)
+    const freshness = checkFreshness(
+      current,
+      targets,
+      snapshot,
+      ExecutionContext.current(current.executionContext, ExecutionContext.approved(acceptanceHistory(messages))),
+    )
     if (current.exit === 0 && !current.execution && !freshness.fresh)
       return `stale check ${id}; changed dependencies: ${freshness.changedTargets.join(", ") || "workspace snapshot"}; rerun affected checks and update the review`
     return
@@ -481,7 +486,9 @@ export function derive(
   const checks = new Map<string, SessionOutcome.Check>()
   const failedAssertions = new Map<string, { check: SessionOutcome.Check; digest: string }>()
   const created = taskCreatedFiles(turn, directory)
-  const fresh = (check: SessionOutcome.Check) => checkFreshness(check, targets, snapshot).fresh
+  const contract = ExecutionContext.approved(turn)
+  const fresh = (check: SessionOutcome.Check) =>
+    checkFreshness(check, targets, snapshot, ExecutionContext.current(check.executionContext, contract)).fresh
   for (const message of turn) {
     if (message.type !== "assistant") continue
     for (const part of message.content) {
@@ -583,7 +590,7 @@ export function derive(
           if (
             check.exit === 0 &&
             fresh(check) &&
-            previous.exit !== 0 &&
+            (previous.exit !== 0 || ExecutionContext.problems(previous.executionContext).length > 0) &&
             (["not-run", "invalid-report"].includes(previous.execution ?? "") ||
               (!previous.execution &&
                 (previous.command === check.command ||
@@ -664,9 +671,10 @@ export function derive(
     ...[...checks.values()]
       .filter((check) => !check.supersededBy)
       .flatMap((check) =>
-        ExecutionContext.problems(check.executionContext).map(
-          (problem) => `execution context (${check.callID}): ${problem}`,
-        ),
+        ExecutionContext.problems(
+          check.executionContext,
+          ExecutionContext.current(check.executionContext, contract),
+        ).map((problem) => `execution context (${check.callID}): ${problem}`),
       ),
     ...[...failedAssertions].map(([path, original]) =>
       targets.some((target) => target.path === path && target.digest === original.digest)
@@ -714,6 +722,20 @@ export function derive(
       missing.push(`${check.execution}: ${check.kind} (${check.callID})`)
   }
   const request = requested(turn)
+  if (contract?.value.samples?.length) {
+    const outstanding = [...new Set(contract.value.samples)].filter(
+      (id) =>
+        ![...checks.values()].some(
+          (check) =>
+            check.sample?.id === id &&
+            check.sample.planDigest === ExecutionContext.digest(contract.value) &&
+            check.exit === 0 &&
+            !check.execution &&
+            fresh(check),
+        ),
+    )
+    if (outstanding.length) missing.push(`sampling: pending approved samples ${outstanding.join(", ")}`)
+  }
   if (directory) {
     for (const expected of DeliveryAudit.expected(request.entries)) {
       const current = artifacts.find((item) => item.requirement === expected.requirement)
@@ -896,6 +918,7 @@ function checkKey(check: SessionOutcome.Check, input: Record<string, unknown>) {
     check.command,
     input.workdir ?? "",
     Array.isArray(input.verification_targets) ? [...input.verification_targets].sort() : [],
+    check.sample,
   ])
 }
 

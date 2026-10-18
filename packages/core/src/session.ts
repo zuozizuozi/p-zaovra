@@ -1062,6 +1062,7 @@ const layer = Layer.effect(
 const resolvePrompt = (input: PromptInput.Prompt) =>
   Prompt.make({
     text: input.text,
+    executionContract: input.executionContract,
     invocation: input.invocation,
     agents: input.agents,
     selection: input.selection,

@@ -5,6 +5,7 @@ import { Effect, Option, Schema, Stream } from "effect"
 import { and, desc, eq, sql } from "drizzle-orm"
 import type { LLMEvent, LLMRequest, Usage } from "@zaovra-ai/llm"
 import { ToolDefinition } from "@zaovra-ai/llm"
+import { RequestExecutor } from "@zaovra-ai/llm/route"
 import { SessionUsage } from "@zaovra-ai/schema/session-usage"
 import type { Database } from "../database/database"
 import type { EventV2 } from "../event"
@@ -14,6 +15,12 @@ import type { SessionSchema } from "./schema"
 import { SessionProgress } from "./progress"
 
 export const Snapshot = Schema.Struct({
+  purpose: Schema.optional(Schema.Literals(["execution", "summary"])),
+  durableMessages: Schema.optional(Schema.Number),
+  tailMessages: Schema.optional(Schema.Number),
+  systemSegments: Schema.optional(
+    Schema.Array(Schema.Struct({ index: Schema.Number, hash: Schema.String, bytes: Schema.Number })),
+  ),
   model: Schema.String,
   epoch: Schema.Number,
   segments: Schema.Array(Schema.Struct({ name: Schema.String, hash: Schema.String, bytes: Schema.Number })),
@@ -35,10 +42,26 @@ export function tools(definitions: readonly ToolDefinition[]) {
 
 // Hash only prompt structure; never retain prompts, credentials or reasoning text.
 // These are client-side segments, not an estimate of a provider's tokenizer/cache.
-export function snapshot(request: LLMRequest, epoch: number): typeof Snapshot.Type {
+export function snapshot(
+  request: LLMRequest,
+  epoch: number,
+  boundary: { purpose?: "execution" | "summary"; durableMessages?: number } = {},
+): typeof Snapshot.Type {
   return {
     model: `${request.model.provider}/${request.model.id}/${request.model.route.id}`,
     epoch,
+    purpose: boundary.purpose ?? "execution",
+    ...(boundary.durableMessages === undefined
+      ? {}
+      : {
+          durableMessages: boundary.durableMessages,
+          tailMessages: request.messages.length - boundary.durableMessages,
+        }),
+    systemSegments: request.system.map((part, index) => ({
+      index,
+      hash: createHash("sha256").update(JSON.stringify(part)).digest("hex"),
+      bytes: Buffer.byteLength(JSON.stringify(part)),
+    })),
     segments: [
       { name: "tools", value: request.tools },
       { name: "system", value: request.system },
@@ -59,12 +82,24 @@ export function snapshot(request: LLMRequest, epoch: number): typeof Snapshot.Ty
 
 export function compare(previous: typeof Snapshot.Type | undefined, current: typeof Snapshot.Type) {
   if (!previous) return { reason: "first", firstChanged: null, commonSegments: 0 }
+  if ((previous.purpose ?? "execution") !== (current.purpose ?? "execution"))
+    return { reason: "purpose", firstChanged: "purpose", commonSegments: 0 }
   if (previous.model !== current.model) return { reason: "model", firstChanged: "model", commonSegments: 0 }
   if (previous.epoch !== current.epoch) return { reason: "compaction", firstChanged: "epoch", commonSegments: 0 }
   const index = previous.segments.findIndex((segment, index) => segment.hash !== current.segments[index]?.hash)
   if (index < 0) return { reason: "append", firstChanged: null, commonSegments: previous.segments.length }
   const name = previous.segments[index]!.name
-  return { reason: name.startsWith("message:") ? "history-or-tail" : name, firstChanged: name, commonSegments: index }
+  return {
+    reason: name.startsWith("message:")
+      ? current.durableMessages === undefined
+        ? "history-or-tail"
+        : Number(name.slice(8)) < current.durableMessages
+          ? "durable"
+          : "tail"
+      : name,
+    firstChanged: name,
+    commonSegments: index,
+  }
 }
 
 export function usage(value: Usage | undefined) {
@@ -102,6 +137,21 @@ export function report(
     )
       continue
     const previous = requests.get(details.requestID)
+    if (details.phase === "attempt") {
+      const attempt =
+        "attempt" in details
+          ? Option.getOrUndefined(Schema.decodeUnknownOption(SessionUsage.CacheAttempt)(details.attempt))
+          : undefined
+      if (previous && attempt)
+        requests.set(details.requestID, {
+          ...previous,
+          attempts: [
+            ...(previous.attempts ?? []).filter((item) => item.id !== attempt.id),
+            { ...previous.attempts?.find((item) => item.id === attempt.id), ...attempt },
+          ],
+        })
+      continue
+    }
     const point = Option.getOrUndefined(
       Schema.decodeUnknownOption(SessionUsage.CachePoint)(
         details.phase === "request"
@@ -147,6 +197,8 @@ export function track<E, R>(
   input: {
     request: LLMRequest
     epoch: number
+    purpose?: "execution" | "summary"
+    durableMessages?: number
     sessionID: SessionSchema.ID
     db: Database.Interface["db"]
     events: EventV2.Interface
@@ -163,6 +215,7 @@ export function track<E, R>(
             eq(EventTable.type, "session.next.quality.progress.1"),
             sql`json_extract(${EventTable.data}, '$.category') = 'cache'`,
             sql`json_extract(${EventTable.data}, '$.details.phase') = 'request'`,
+            sql`coalesce(json_extract(${EventTable.data}, '$.details.purpose'), 'execution') = ${input.purpose ?? "execution"}`,
           ),
         )
         .orderBy(desc(EventTable.seq))
@@ -174,18 +227,22 @@ export function track<E, R>(
         details && typeof details === "object" && "snapshot" in details
           ? Option.getOrUndefined(Schema.decodeUnknownOption(Snapshot)(details.snapshot))
           : undefined
-      const current = snapshot(input.request, input.epoch)
+      const current = snapshot(input.request, input.epoch, input)
       const requestID = SessionMessage.ID.create()
       yield* SessionProgress.record(input.events, input.sessionID, "cache", {
         phase: "request",
         requestID,
         snapshot: current,
+        purpose: current.purpose!,
         ...compare(prior, current),
       })
       let reported: Usage | undefined
       let responseModel: string | null = null
       let systemFingerprint: string | null = null
       return stream.pipe(
+        Stream.provideService(RequestExecutor.AttemptObserver, (attempt) =>
+          SessionProgress.record(input.events, input.sessionID, "cache", { phase: "attempt", requestID, attempt }),
+        ),
         Stream.tap((event) =>
           Effect.sync(() => {
             if ("usage" in event && event.usage) reported = event.usage

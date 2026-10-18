@@ -7,6 +7,7 @@ import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionSchema } from "@zaovra-ai/core/session/schema"
+import { ExecutionContext } from "../src/session/execution-context"
 
 const assistant: SessionMessage.Assistant = {
   id: SessionMessage.ID.make("msg_result"),
@@ -18,6 +19,102 @@ const assistant: SessionMessage.Assistant = {
   metadata: { verificationEnabled: true },
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
+
+test("K3 planned samples retain new observations and do not count replay twice", () => {
+  const contract = { version: 1 as const, samples: ["one", "two"] }
+  const user: SessionMessage.User = {
+    type: "user",
+    id: SessionMessage.ID.make("msg_samples"),
+    text: "Measure two planned samples",
+    executionContract: contract,
+    time: assistant.time,
+  }
+  const target = { path: path.resolve("measure.cjs"), digest: "same" }
+  const context = ExecutionContext.bind(
+    ExecutionContext.capture("node measure.cjs", path.dirname(target.path), 5000, false),
+    ExecutionContext.approved([user]),
+  )
+  const run = (callID: string, id: string): SessionMessage.AssistantTool => ({
+    type: "tool",
+    id: callID,
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: {},
+      content: [],
+      structured: {
+        verification: {
+          callID,
+          kind: "smoke",
+          command: "node measure.cjs",
+          exit: 0,
+          targets: [target],
+          executionContext: context,
+          sample: { id, planDigest: ExecutionContext.digest(contract) },
+          resultDigest: "observed-result",
+        },
+      },
+    },
+  })
+  const evaluate = (content: SessionMessage.AssistantTool[]) =>
+    SessionOutcome.derive([user, { ...assistant, content }], false, undefined, [target], [])
+  const one = evaluate([run("first", "one"), run("replay", "one")])
+  expect(one.checks).toHaveLength(1)
+  expect(one.missing.join(" ")).toContain("sampling: pending approved samples two")
+  const two = evaluate([run("first", "one"), run("second", "two")])
+  expect(two.checks).toHaveLength(2)
+  expect(two.missing.join(" ")).not.toContain("sampling:")
+})
+
+test("K3 diagnostic pass is superseded only by fresh formal pass in the same scope", () => {
+  const target = { path: path.resolve("product.js"), digest: "same" }
+  const run = (id: string, exit: number, diagnostic: boolean): SessionMessage.AssistantTool => ({
+    type: "tool",
+    id,
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "completed",
+      input: { verification_replaces: diagnostic ? [] : ["diagnostic"] },
+      content: [],
+      structured: {
+        verification: {
+          kind: "test",
+          command: diagnostic ? "diagnostic runner" : "formal runner",
+          exit,
+          callID: id,
+          cwd: path.dirname(target.path),
+          targets: [target],
+          executionContext: {
+            entry: { observed: { value: "runner", source: "observed" } },
+            cwd: { observed: { value: path.dirname(target.path), source: "observed" } },
+            runtime: { observed: { value: null, source: "unknown" } },
+            timeout: { observed: { value: "5000", source: "default" } },
+            environment: diagnostic
+              ? {
+                  OMP_NUM_THREADS: {
+                    requested: { value: "1", source: "diagnostic-temporary" },
+                    observed: { value: "1", source: "observed" },
+                  },
+                }
+              : {},
+          },
+        },
+      },
+    },
+  })
+  const diagnostic = run("diagnostic", 0, true)
+  const evaluate = (checks: SessionMessage.AssistantTool[]) =>
+    SessionOutcome.derive([{ ...assistant, content: checks }], false, undefined, [target], [])
+  expect(evaluate([diagnostic]).missing.join(" ")).toContain("execution context")
+  const passed = evaluate([diagnostic, run("formal", 0, false)])
+  expect(passed.checks.find((check) => check.callID === "diagnostic")?.supersededBy).toBe("formal")
+  expect(passed.missing.join(" ")).not.toContain("execution context")
+  const failed = evaluate([diagnostic, run("formal", 1, false)])
+  expect(failed.state).toBe("failed")
+  expect(failed.checks.find((check) => check.callID === "diagnostic")?.supersededBy).toBeUndefined()
+})
 
 test("K1 execution contract rejects diagnostic green, wrong entry and changed relevant environment", () => {
   const condition = (requested: string, observed: string, source: "user" | "diagnostic-temporary" = "user") => ({

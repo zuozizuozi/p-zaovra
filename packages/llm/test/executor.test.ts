@@ -253,6 +253,28 @@ describe("RequestExecutor", () => {
       expect(yield* Ref.get(notices)).toEqual([2])
     }),
   )
+  it.effect("K3 observes unique physical attempts across a status retry", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make<RequestExecutor.Attempt[]>([])
+      yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          responsesLayer([
+            new Response("busy", { status: 503, headers: { "retry-after-ms": "0" } }),
+            new Response("ok"),
+          ]),
+        ),
+        Effect.provideService(RequestExecutor.AttemptObserver, (attempt) =>
+          Ref.update(attempts, (values) => [...values, attempt]),
+        ),
+      )
+      const observed = yield* Ref.get(attempts)
+      const starts = observed.filter((item) => item.phase === "start")
+      expect(starts).toHaveLength(2)
+      expect(new Set(starts.map((item) => item.id)).size).toBe(2)
+      expect(observed.filter((item) => item.phase === "headers").map((item) => item.status)).toEqual([503, 200])
+      expect(observed.every((item) => starts.some((start) => start.id === item.id))).toBe(true)
+    }),
+  )
   it.effect("caps a long Retry-After at 30 seconds and exhausts five retries", () =>
     Effect.gen(function* () {
       const attempts = yield* Ref.make(0)

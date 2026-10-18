@@ -3,9 +3,17 @@ export * as SessionUsage from "./session-usage"
 import { Schema } from "effect"
 import { optional } from "./schema"
 
+export const CacheAttempt = Schema.Struct({
+  id: Schema.String,
+  phase: Schema.Literals(["start", "headers", "failed"]),
+  status: Schema.Number.pipe(optional),
+})
+
 export const CachePoint = Schema.Struct({
   responseModel: Schema.NullOr(Schema.String).pipe(optional),
   systemFingerprint: Schema.NullOr(Schema.String).pipe(optional),
+  purpose: Schema.Literals(["execution", "summary"]).pipe(optional),
+  attempts: Schema.Array(CacheAttempt).pipe(optional),
   requestID: Schema.String,
   sequence: Schema.Number,
   reason: Schema.String,

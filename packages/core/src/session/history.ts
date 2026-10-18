@@ -48,6 +48,7 @@ export const originalRequests = Effect.fnUntraced(function* (
             {
               id: message.id,
               text: message.text,
+              ...(message.executionContract ? { executionContract: message.executionContract } : {}),
               ...(message.files?.length
                 ? {
                     files: message.files.map((file) => ({

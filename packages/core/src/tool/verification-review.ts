@@ -28,6 +28,7 @@ import { DeliveryAudit } from "../session/delivery-audit"
 import { FSUtil } from "../fs-util"
 import { Location } from "../location"
 import { Snapshot } from "../snapshot"
+import { ExecutionContext } from "../session/execution-context"
 
 export const name = "verification_review"
 export const Input = Schema.Struct({
@@ -125,7 +126,12 @@ export const layer = Layer.effectDiscard(
                 exit: check.exit,
                 ...(check.supersededBy ? { supersededBy: check.supersededBy } : {}),
                 targets: (check.targets ?? []).map((target) => target.path),
-                ...checkFreshness(check, targets, snapshot),
+                ...checkFreshness(
+                  check,
+                  targets,
+                  snapshot,
+                  ExecutionContext.current(check.executionContext, ExecutionContext.approved(messages)),
+                ),
               }))
               return {
                 facts: deliveryFacts(messages),

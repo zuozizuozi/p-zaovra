@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { Cause, Context, Effect, Layer, Option, Random, Schema, Stream } from "effect"
 import {
   FetchHttpClient,
@@ -36,6 +37,12 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/LLM/
 export const RetryObserver = Context.Reference<
   (input: { attempt: number; delayMs: number; error: LLMError }) => Effect.Effect<void>
 >("@zaovra/LLM/RetryObserver", { defaultValue: () => () => Effect.void })
+
+export type Attempt = { id: string; phase: "start" | "headers" | "failed"; status?: number }
+export const AttemptObserver = Context.Reference<(input: Attempt) => Effect.Effect<void>>(
+  "@zaovra/LLM/AttemptObserver",
+  { defaultValue: () => () => Effect.void },
+)
 
 const BODY_LIMIT = 16_384
 const MAX_RETRIES = 5
@@ -484,6 +491,9 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
       Effect.gen(function* () {
         const redactedNames = yield* Headers.CurrentRedactedNames
         const started = Date.now()
+        const id = randomUUID()
+        const observe = yield* AttemptObserver
+        yield* observe({ id, phase: "start" })
         yield* Effect.logInfo("provider.request.start", { host: new URL(request.url).hostname })
         return yield* http.execute(request).pipe(
           Effect.timeout(REQUEST_TIMEOUT),
@@ -495,7 +505,9 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
               requestID: requestId(normalizedHeaders(response.headers)),
             }),
           ),
+          Effect.tap((response) => observe({ id, phase: "headers", status: response.status })),
           Effect.flatMap(statusError(request, redactedNames)),
+          Effect.tapError(() => observe({ id, phase: "failed" })),
           Effect.tapError((error) =>
             Effect.logInfo("provider.request.failed", {
               category: error.reason._tag,

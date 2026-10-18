@@ -5,6 +5,34 @@ import { SessionOutcome } from "../src/session/outcome"
 import { SessionMessage } from "../src/session/message"
 import { tmpdir } from "./fixture/tmpdir"
 
+test("K3 comments and quoted literals are not observed environment changes", () => {
+  for (const command of ["node cli.js # OMP_NUM_THREADS=1", "node cli.js 'OMP_NUM_THREADS=1'"])
+    expect(ExecutionContext.problems(ExecutionContext.capture(command, "/project", 5000, false))).toEqual([])
+})
+
+test("K3 current approved contract invalidates changed entry or required unknown runtime, not unrelated observations", () => {
+  const approved = {
+    sourceMessageID: "msg_user",
+    value: { version: 1 as const, entry: "node cli.js", environment: { OMP_NUM_THREADS: "2" } },
+  }
+  const captured = ExecutionContext.bind(
+    ExecutionContext.capture("node cli.js", "/project", 5000, false, { OMP_NUM_THREADS: "2" }, ["OMP_NUM_THREADS"]),
+    approved,
+  )
+  expect(ExecutionContext.problems(captured, ExecutionContext.current(captured, approved))).toEqual([])
+  const changed = { ...approved, value: { ...approved.value, entry: "node alternate.js" } }
+  expect(ExecutionContext.problems(captured, ExecutionContext.current(captured, changed)).join(" ")).toContain(
+    "entry: requested condition was not observed",
+  )
+  const requiredRuntime = { ...approved, value: { ...approved.value, runtime: "node 22" } }
+  expect(ExecutionContext.problems(captured, ExecutionContext.current(captured, requiredRuntime)).join(" ")).toContain(
+    "runtime: requested condition was not observed",
+  )
+  expect(
+    ExecutionContext.approved([{ type: "assistant", id: "model", executionContract: approved.value }]),
+  ).toBeUndefined()
+})
+
 test("K1 actual program: diagnostic one-thread success cannot certify the failing agreed entry", async () => {
   await using root = await tmpdir()
   const script = `${root.path}/contract.cjs`
@@ -51,7 +79,9 @@ test("K1 actual program: diagnostic one-thread success cannot certify the failin
 })
 
 test("K1 capture excludes secrets and rejects a rewritten execution certificate", () => {
-  const context = ExecutionContext.capture("env OMP_NUM_THREADS=1 node cli.js", "/project", 5000, true)
+  const context = ExecutionContext.capture("node cli.js", "/project", 5000, true, { OMP_NUM_THREADS: "1" }, [
+    "OMP_NUM_THREADS",
+  ])
   expect(Object.keys(context.environment).sort()).toEqual([
     "BLIS_NUM_THREADS",
     "MKL_NUM_THREADS",

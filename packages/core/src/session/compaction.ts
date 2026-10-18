@@ -343,6 +343,8 @@ export const make = (dependencies: Dependencies) => {
       maxTokens: summaryOutput,
     })
     const summarized = yield* SessionCache.track(dependencies.llm.stream(request), {
+      purpose: "summary",
+      durableMessages: 0,
       request,
       epoch: -sourceSequence - 1,
       sessionID: input.sessionID,

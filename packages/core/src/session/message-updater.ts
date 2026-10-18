@@ -133,6 +133,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             type: "user",
             metadata: event.metadata,
             text: event.data.prompt.text,
+            executionContract: event.data.prompt.executionContract,
             invocation: event.data.prompt.invocation,
             files: event.data.prompt.files,
             agents: event.data.prompt.agents,

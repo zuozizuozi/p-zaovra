@@ -22,7 +22,27 @@ export const ExecutionEnvironment = Schema.Struct({
   BLIS_NUM_THREADS: ExecutionCondition.pipe(optional),
 }).annotate({ identifier: "SessionOutcome.ExecutionEnvironment" })
 export interface ExecutionEnvironment extends Schema.Schema.Type<typeof ExecutionEnvironment> {}
+export const ExecutionContract = Schema.Struct({
+  version: Schema.Literal(1),
+  entry: Schema.String.pipe(optional),
+  cwd: Schema.String.pipe(optional),
+  runtime: Schema.String.pipe(optional),
+  timeout: Schema.String.pipe(optional),
+  samples: Schema.Array(Schema.String).pipe(optional),
+  environment: Schema.Struct({
+    OMP_NUM_THREADS: Schema.String.pipe(optional),
+    MKL_NUM_THREADS: Schema.String.pipe(optional),
+    OPENBLAS_NUM_THREADS: Schema.String.pipe(optional),
+    NUMEXPR_NUM_THREADS: Schema.String.pipe(optional),
+    VECLIB_MAXIMUM_THREADS: Schema.String.pipe(optional),
+    BLIS_NUM_THREADS: Schema.String.pipe(optional),
+  }).pipe(optional),
+}).annotate({ identifier: "SessionOutcome.ExecutionContract" })
+export interface ExecutionContract extends Schema.Schema.Type<typeof ExecutionContract> {}
 export const ExecutionContext = Schema.Struct({
+  contract: Schema.Struct({ version: Schema.Literal(1), sourceMessageID: Schema.String, digest: Schema.String }).pipe(
+    optional,
+  ),
   entry: ExecutionCondition,
   cwd: ExecutionCondition,
   runtime: ExecutionCondition,
@@ -32,6 +52,8 @@ export const ExecutionContext = Schema.Struct({
 export interface ExecutionContext extends Schema.Schema.Type<typeof ExecutionContext> {}
 
 export const Check = Schema.Struct({
+  resultDigest: Schema.String.pipe(optional),
+  sample: Schema.Struct({ id: Schema.String, planDigest: Schema.String }).pipe(optional),
   kind: Schema.Literals(["build", "test", "lint", "typecheck", "syntax", "smoke", "interaction"]),
   command: Schema.String,
   exit: Schema.Number,

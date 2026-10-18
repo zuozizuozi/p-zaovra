@@ -118,6 +118,8 @@ export function closingKey(input: {
       cwd: check.cwd,
       exit: check.exit,
       execution: check.execution,
+      resultDigest: check.exit !== 0 || check.sample ? check.resultDigest : undefined,
+      sample: check.sample,
       targets: check.targets?.toSorted((a, b) => a.path.localeCompare(b.path)),
       assertions: check.assertions?.toSorted((a, b) => a.path.localeCompare(b.path)),
       executionContext: check.executionContext,
@@ -150,12 +152,10 @@ export function closingKey(input: {
         input.missing
           .filter((gap) => !gap.startsWith("requirements review:"))
           .map((gap) =>
-            gap.startsWith("declared unverified:")
-              ? "declared-unverified"
-              : checks
-                  .reduce((text, check) => text.split(check.id).join(check.key), gap)
-                  .replace(/\s+/g, " ")
-                  .trim(),
+            checks
+              .reduce((text, check) => replaceReference(text, check.id, check.key), gap)
+              .replace(/\s+/g, " ")
+              .trim(),
           ),
       ),
     ].sort(),
@@ -190,9 +190,19 @@ export function closingGaps(request: readonly unknown[], outcome: SessionOutcome
           outcome.checks
             .reduce(
               (text, check) =>
-                text
-                  .split(check.callID)
-                  .join(JSON.stringify([check.kind, check.command, check.cwd, check.exit, check.execution])),
+                replaceReference(
+                  text,
+                  check.callID,
+                  JSON.stringify([
+                    check.kind,
+                    check.command,
+                    check.cwd,
+                    check.exit,
+                    check.execution,
+                    check.exit !== 0 || check.sample ? check.resultDigest : undefined,
+                    check.sample,
+                  ]),
+                ),
               gap,
             )
             .replace(/requirements review:.*/, "requirements review")
@@ -367,3 +377,8 @@ export const recentObservations = Effect.fn("SessionProgress.recentObservations"
     return decoded._tag === "Some" ? [decoded.value] : []
   })
 })
+
+// References are tokens; short IDs must not replace letters inside evidence.
+function replaceReference(text: string, id: string, value: string) {
+  return text.replace(new RegExp(`(?<![\\w-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "g"), () => value)
+}

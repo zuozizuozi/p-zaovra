@@ -22,6 +22,9 @@ import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { BashJob } from "./bash-job"
 import { ExecutionContext } from "../session/execution-context"
+import { Database } from "../database/database"
+import { history } from "../session/outcome"
+import { createHash } from "node:crypto"
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -62,6 +65,23 @@ export const Input = Schema.Struct({
       "Actual dependencies of this check: source, assertions, fixtures and runtime/build configuration, relative to workdir or absolute. A changed target invalidates the check. Do not list every deliverable: include documentation only when this command reads or validates it (including doctests/docs builds). Verify documentation separately when independent of code tests. Never omit a real dependency or retroactively narrow a stale check. Required for standalone/external artifacts. HTML acceptance needs syntax, smoke (actual browser startup), and interaction checks. Do not claim a check without executing assertions; an exit code alone is not proof of functionality.",
   }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
+  verification_sample: Schema.String.pipe(Schema.optional).annotate({
+    description:
+      "A sample ID from the user-approved execution contract. The host counts each planned ID once, only after a fresh passing execution. This does not create or approve a sampling plan.",
+  }),
+  environment: Schema.Struct({
+    OMP_NUM_THREADS: Schema.optional(Schema.String),
+    MKL_NUM_THREADS: Schema.optional(Schema.String),
+    OPENBLAS_NUM_THREADS: Schema.optional(Schema.String),
+    NUMEXPR_NUM_THREADS: Schema.optional(Schema.String),
+    VECLIB_MAXIMUM_THREADS: Schema.optional(Schema.String),
+    BLIS_NUM_THREADS: Schema.optional(Schema.String),
+  })
+    .pipe(Schema.optional)
+    .annotate({
+      description:
+        "Optional numeric-library launch environment overrides. The host applies and records these temporary diagnostic conditions; they do not establish user approval or effective worker counts. Prefer this field to inline shell assignments when verifying a result.",
+    }),
   workdir: Schema.String.pipe(Schema.optional).annotate({
     description:
       "Working directory. Defaults to the project directory; prefer relative paths or omit workdir. Relative paths resolve from the active Location.",
@@ -153,6 +173,7 @@ const layer = Layer.effectDiscard(
     const permission = yield* PermissionV2.Service
     const events = yield* EventV2.Service
     const jobs = yield* BashJob.Service
+    const database = yield* Database.Service
 
     yield* tools
       .register({
@@ -250,7 +271,9 @@ const layer = Layer.effectDiscard(
                 })
               const identity = frozen.identity
               const shell = identity.path
-              const command = AppProcess.shellCommand(input.command, target.canonical, shell)
+              const approvedContract = ExecutionContext.approved(yield* history(database.db, context.sessionID))
+              const launchEnvironment = { ...process.env, ...approvedContract?.value.environment, ...input.environment }
+              const command = AppProcess.shellCommand(input.command, target.canonical, shell, launchEnvironment)
               const silence = input.run_in_background
                 ? undefined
                 : Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms
@@ -371,11 +394,16 @@ const layer = Layer.effectDiscard(
                     metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
                   })
                 lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
-                const executionContext = ExecutionContext.capture(
-                  input.command,
-                  target.canonical,
-                  timeout,
-                  input.timeout !== undefined,
+                const executionContext = ExecutionContext.bind(
+                  ExecutionContext.capture(
+                    input.command,
+                    target.canonical,
+                    timeout,
+                    input.timeout !== undefined,
+                    launchEnvironment,
+                    Object.keys(input.environment ?? {}),
+                  ),
+                  approvedContract,
                 )
                 yield* Deferred.succeed(started, undefined)
                 const result = yield* appProcess
@@ -468,6 +496,25 @@ const layer = Layer.effectDiscard(
                         kind: verification,
                         command: input.command,
                         exit: result.exitCode,
+                        resultDigest: createHash("sha256")
+                          .update(
+                            (result.output?.toString("utf8") ?? "")
+                              .replace(/\u001b\[[0-9;]*m/g, "")
+                              .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g, "<timestamp>")
+                              .replace(/\[\d+(?:\.\d+)?ms\]/g, "<duration>")
+                              .replace(/\s+/g, " ")
+                              .trim(),
+                          )
+                          .digest("hex"),
+                        ...(input.verification_sample &&
+                        approvedContract?.value.samples?.includes(input.verification_sample)
+                          ? {
+                              sample: {
+                                id: input.verification_sample,
+                                planDigest: ExecutionContext.digest(approvedContract.value),
+                              },
+                            }
+                          : {}),
                         executionContext,
                         contractDigest: ExecutionContext.digest(executionContext),
                         ...(result.reason ? { reason: result.reason } : {}),
@@ -682,5 +729,6 @@ export const node = makeLocationNode({
     Config.node,
     PermissionV2.node,
     EventV2.node,
+    Database.node,
   ],
 })

@@ -2,6 +2,33 @@ import { expect, test } from "bun:test"
 import { ConfigExperimental } from "../src/config/experimental"
 import { SessionProgress } from "../src/session/progress"
 
+test("K3 closing identity preserves changed failure evidence and specific unresolved reasons", () => {
+  const check = { kind: "test" as const, command: "node check.js", exit: 1, callID: "a", resultDigest: "failure-one" }
+  const input = {
+    requirements: ["original"],
+    required: [],
+    environment: {},
+    targets: [],
+    checks: [check],
+    missing: ["failed: test (a)"],
+  }
+  const key = SessionProgress.closingKey(input)
+  expect(
+    SessionProgress.closingKey({ ...input, checks: [{ ...check, callID: "b" }], missing: ["failed: test (b)"] }),
+  ).toBe(key)
+  expect(SessionProgress.closingKey({ ...input, checks: [{ ...check, resultDigest: "failure-two" }] })).not.toBe(key)
+  expect(SessionProgress.closingKey({ ...input, missing: ["declared unverified: corrupt data"] })).not.toBe(
+    SessionProgress.closingKey({ ...input, missing: ["declared unverified: insufficient latency confidence"] }),
+  )
+  const outcome = { state: "failed" as const, outcomeUnknown: false, checks: [check], missing: input.missing }
+  expect(
+    SessionProgress.closingGaps(input.requirements, {
+      ...outcome,
+      checks: [{ ...check, resultDigest: "failure-two" }],
+    }),
+  ).not.toEqual(SessionProgress.closingGaps(input.requirements, outcome))
+})
+
 test("K2 completion gaps deduplicate independently and waiting never seals", () => {
   const input = {
     key: "new unrelated evidence",

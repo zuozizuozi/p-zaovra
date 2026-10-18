@@ -151,3 +151,62 @@ test("K1 session report exposes the hit-rate curve and interruption as unknown",
   expect(report?.breaks).toEqual([{ reason: "system", count: 1 }])
   expect(report?.points[1]?.output).toBeNull()
 })
+
+test("K3 cache separates summary purpose and durable versus request-local tails", () => {
+  const first = SessionCache.snapshot(request, 1, { purpose: "execution", durableMessages: 1 })
+  const summary = SessionCache.snapshot(request, 1, { purpose: "summary", durableMessages: 0 })
+  expect(SessionCache.compare(first, summary).reason).toBe("purpose")
+  expect(first.systemSegments).toHaveLength(1)
+  expect(first.durableMessages).toBe(1)
+  expect(first.tailMessages).toBe(0)
+  const next = SessionCache.snapshot(LLM.updateRequest(request, { messages: [Message.user("changed task")] }), 1, {
+    durableMessages: 1,
+  })
+  expect(SessionCache.compare(first, next).reason).toBe("durable")
+})
+
+test("K3 physical attempts stay under one logical request without duplicating usage", () => {
+  const base = { category: "cache" }
+  const report = SessionCache.report([
+    {
+      seq: 1,
+      data: {
+        ...base,
+        details: { phase: "request", requestID: "r", reason: "first", firstChanged: null, purpose: "summary" },
+      },
+    },
+    { seq: 2, data: { ...base, details: { phase: "attempt", requestID: "r", attempt: { id: "a", phase: "start" } } } },
+    {
+      seq: 3,
+      data: {
+        ...base,
+        details: { phase: "attempt", requestID: "r", attempt: { id: "a", phase: "headers", status: 503 } },
+      },
+    },
+    {
+      seq: 4,
+      data: {
+        ...base,
+        details: { phase: "attempt", requestID: "r", attempt: { id: "b", phase: "headers", status: 200 } },
+      },
+    },
+    {
+      seq: 5,
+      data: {
+        ...base,
+        details: {
+          phase: "usage",
+          requestID: "r",
+          ...SessionCache.usage(new Usage({ inputTokens: 10, outputTokens: 2 })),
+        },
+      },
+    },
+  ])!
+  expect(report.points).toHaveLength(1)
+  expect(report.points[0].purpose).toBe("summary")
+  expect(report.points[0].attempts).toEqual([
+    { id: "a", phase: "headers", status: 503 },
+    { id: "b", phase: "headers", status: 200 },
+  ])
+  expect(report.versions?.[0].total).toBe(12)
+})
