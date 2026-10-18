@@ -8,6 +8,7 @@ import { Event } from "@zaovra-ai/schema/event"
 import { Database } from "../database/database"
 import { EventTable } from "../event/sql"
 import { Model } from "@zaovra-ai/schema/model"
+import { SessionCache } from "./cache"
 
 const definitions = [
   SessionEvent.Step.Started,
@@ -16,6 +17,7 @@ const definitions = [
   SessionEvent.Compaction.Ended,
   SessionEvent.Compaction.Failed,
   SessionEvent.Prompted,
+  SessionEvent.QualityProgress,
 ]
 const types = definitions.map((item) => Event.versionedType(item.type, item.durable?.version ?? 1))
 
@@ -235,7 +237,8 @@ export function summarize(
   })
   // inputSequence advances after tool calls. The promoted user prompt is the turn boundary.
   const latest = [...rounds.values()].sort((a, b) => b.seq - a.seq)[0]
-  return { ...result, models: [...buckets.values()], lastTurn: latest?.tokens ?? null }
+  const cache = SessionCache.report(rows)
+  return { ...result, ...(cache ? { cache } : {}), models: [...buckets.values()], lastTurn: latest?.tokens ?? null }
 }
 
 export function estimateRequest(tokens: SessionUsage.Totals, costs: readonly Model.Cost[]) {

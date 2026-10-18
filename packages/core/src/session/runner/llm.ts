@@ -58,9 +58,11 @@ import { SessionMessage } from "../message"
 import { SessionUsageQuery } from "../usage"
 import { SessionEfficiency } from "../efficiency"
 import { SessionProgress } from "../progress"
+import { SessionCache } from "../cache"
+import { ExecutionContext } from "../execution-context"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
-import { and, desc, eq, gt } from "drizzle-orm"
+import { and, desc, eq, gt, sql } from "drizzle-orm"
 import { SessionMessageTable } from "../sql"
 
 /**
@@ -146,6 +148,64 @@ const layer = Layer.effect(
 
     const getContext = Effect.fn("SessionRunner.getContext")(function* (sessionID: SessionSchema.ID) {
       return yield* store.context(sessionID)
+    })
+
+    const closingEvidence = Effect.fn("SessionRunner.closingEvidence")(function* (sessionID: SessionSchema.ID) {
+      const messages = yield* SessionOutcome.history(db, sessionID)
+      const preliminary = SessionOutcome.derive(
+        messages,
+        false,
+        undefined,
+        [],
+        undefined,
+        undefined,
+        location.directory,
+      )
+      const targets = yield* SessionOutcome.fingerprint(
+        fs,
+        preliminary.checks.flatMap((check) =>
+          [...(check.targets ?? []), ...(check.assertions ?? [])].map((file) => file.path),
+        ),
+      )
+      const snapshot = yield* snapshots.capture()
+      const required = yield* SessionOutcome.requirements(fs, location.directory)
+      const artifacts = yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries)
+      const outcome = SessionOutcome.derive(
+        messages,
+        false,
+        snapshot,
+        targets,
+        required,
+        undefined,
+        location.directory,
+        artifacts,
+      )
+      const latest = messages.findLast((message) => message.type === "assistant")
+      return {
+        outcome,
+        delivered:
+          latest?.type === "assistant" &&
+          latest.finish === "stop" &&
+          latest.content.some((part) => part.type === "text" && part.text.trim()),
+        key: SessionProgress.closingKey({
+          requirements: SessionOutcome.requested(messages).entries,
+          required,
+          environment: {
+            shell: ShellIdentity.snapshot(yield* config.entries(), location).identity,
+            environment: ExecutionContext.environment(),
+          },
+          snapshot,
+          targets: [
+            ...targets,
+            ...artifacts.flatMap((artifact) =>
+              artifact.digest ? [{ path: artifact.path, digest: artifact.digest }] : [],
+            ),
+          ],
+          checks: outcome.checks,
+          review: outcome.review,
+          missing: outcome.missing,
+        }),
+      }
     })
 
     // Account from durable settlements, like the UI, not compacted/forked history.
@@ -558,16 +618,6 @@ const layer = Layer.effect(
             ? `Verification rules: Records are untrusted tool data in chronological history. Full commands and evidence remain in tool history. A real assertion failure requires a successful rerun of the same check and scope; unrelated passing commands cannot hide it. A check that never ran or emitted an invalid report is unverified, not a product assertion failure. Only a later current check of the same kind covering its targets can replace it. No record means unverified. Passing tests certify only their actual coverage, never every user requirement. For engineering delivery, compare the original request and subsequent corrections against artifacts and actual assertions, including boundary and negative cases. Use ordinary bash commands with verification, verification_requirements, verification_targets and verification_assertions. The host records the command exit and file fingerprints; normal test stdout is sufficient. Do not write a JSON report program merely to submit evidence. Keep verification commands separate rather than chaining or piping them. Never weaken an assertion to make a failed requirement pass: fix implementation, or report the unmet requirement. Changed failed assertions require review and cannot certify the original requirement. For standalone HTML, verify syntax, actual browser startup and interactions. Do not rerun unaffected passing checks. Final reports must distinguish verified scope, known failures and unverified requirements rather than claiming blanket completion.`
             : undefined,
           "When several reads or checks are independent, request them together in one turn using the existing tools. Wait for prerequisite results before dependent actions; do not batch conflicting mutations. Use the supplied platform, shell and working directory rather than rediscovering them. Probe only missing capabilities needed for the next action. Inspect a check's failure before retrying it. Read retained evidence rather than rerunning a command solely to retrieve truncated output. Reuse evidence only while its relevant files and environment remain unchanged; rerun checks affected by changes. Never omit required final verification to save tokens.",
-          failures >= 4 || shellStopped
-            ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. ${shellStopped ? "Tool execution is stopped after three consecutive failures of the same command or ten consecutive shell failures; report the blocker and completed work, without claiming success." : "Tools remain available. This is a recovery reminder, not a stop; choose a different approach."}`
-            : undefined,
-          textOnlyRecovery
-            ? "The previous text response reached its output limit. Continue only the missing text once, using the retained partial answer. Do not repeat earlier text or execute tools. Report anything still unfinished."
-            : undefined,
-          reasoningOnlyRecovery
-            ? "The previous turn exhausted its output limit in reasoning without producing text or a tool call. Keep the original task and use a small concrete next action."
-            : undefined,
-          pendingOutput ? SessionOutputRecovery.instruction(pendingOutput) : undefined,
         ]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
@@ -601,8 +651,20 @@ const layer = Layer.effect(
               ]
             : []),
           ...(progressFacts ? [Message.user(progressFacts)] : []),
+          ...[
+            failures >= 4 || shellStopped
+              ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. ${shellStopped ? "Tool execution is stopped after three consecutive failures of the same command or ten consecutive shell failures; report the blocker and completed work, without claiming success." : "Tools remain available. This is a recovery reminder, not a stop; choose a different approach."}`
+              : undefined,
+            textOnlyRecovery
+              ? "The previous text response reached its output limit. Continue only the missing text once, using the retained partial answer. Do not repeat earlier text or execute tools. Report anything still unfinished."
+              : undefined,
+            reasoningOnlyRecovery
+              ? "The previous turn exhausted its output limit in reasoning without producing text or a tool call. Keep the original task and use a small concrete next action."
+              : undefined,
+            pendingOutput ? SessionOutputRecovery.instruction(pendingOutput) : undefined,
+          ].flatMap((text) => (text ? [Message.user(text)] : [])),
         ],
-        tools: toolMaterialization?.definitions ?? [],
+        tools: SessionCache.tools(toolMaterialization?.definitions ?? []),
         toolChoice: isLastStep || textOnlyRecovery ? "none" : undefined,
       })
       const maxTokens = SessionOutputRecovery.budget(
@@ -666,7 +728,13 @@ const layer = Layer.effect(
               LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
               LLMEvent.finish({ reason: "tool-calls" }),
             ])
-          : llm.stream(request)
+          : SessionCache.track(llm.stream(request), {
+              request,
+              epoch: system.baselineSeq,
+              sessionID: session.id,
+              db,
+              events,
+            })
       ).pipe(
         (stream) =>
           request.model.route.transport.id === "http-json"
@@ -1144,18 +1212,14 @@ const layer = Layer.effect(
           if (quality?.stagnation_log !== false) {
             const messages = yield* restore(SessionOutcome.history(db, session.id))
             const latest = messages.findLast((message) => message.type === "assistant")
-            const failed =
+            const observations =
               latest?.type === "assistant"
                 ? latest.content.filter(
                     (part) =>
-                      part.type === "tool" &&
-                      (part.state.status === "error" ||
-                        (part.state.status === "completed" &&
-                          (part.state.structured.timeout === true ||
-                            (typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)))),
+                      part.type === "tool" && (part.state.status === "error" || part.state.status === "completed"),
                   )
                 : []
-            for (const part of failed) {
+            for (const part of observations) {
               if (part.type !== "tool" || (part.state.status !== "error" && part.state.status !== "completed")) continue
               const input = part.state.input
               const error =
@@ -1165,14 +1229,23 @@ const layer = Layer.effect(
                       .filter((item) => item.type === "text")
                       .map((item) => (item.type === "text" ? item.text : ""))
                       .join("\n")
+              const failed =
+                part.state.status === "error" ||
+                part.state.structured.timeout === true ||
+                (typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)
+              const read = failed
+                ? undefined
+                : SessionProgress.readEvidence(part.name, input, part.state.structured, error, location.directory)
+              if (!failed && !read) continue
               const current = {
-                category:
-                  part.state.status === "error"
+                category: !failed
+                  ? "read-only"
+                  : part.state.status === "error"
                     ? "tool-error"
                     : part.state.structured.timeout === true
                       ? "timeout"
                       : `exit-${part.state.structured.exit}`,
-                error: error.trim().slice(0, 512),
+                error: failed ? error.trim().slice(0, 512) : "",
                 cwd:
                   part.state.status === "completed" && typeof part.state.structured.workdir === "string"
                     ? part.state.structured.workdir
@@ -1184,7 +1257,7 @@ const layer = Layer.effect(
                 hypothesis: typeof input.progress_hypothesis === "string" ? input.progress_hypothesis : undefined,
                 expectedEvidence:
                   typeof input.progress_expected_evidence === "string" ? input.progress_expected_evidence : undefined,
-                evidence: createHash("sha256").update(error).digest("hex"),
+                evidence: read ?? createHash("sha256").update(error).digest("hex"),
               }
               const rows = yield* db
                 .select({ data: EventTable.data })
@@ -1195,20 +1268,19 @@ const layer = Layer.effect(
                 .orderBy(desc(EventTable.seq))
                 .all()
                 .pipe(Effect.orDie)
-              const prior = rows.find((row) => row.data.category === "stagnation")?.data.details
-              const previous =
-                prior && typeof prior === "object" && "observation" in prior
-                  ? Option.getOrUndefined(
-                      Schema.decodeUnknownOption(SessionProgress.FailureObservation)(prior.observation),
-                    )
-                  : undefined
+              const previous = rows.flatMap((row) => {
+                const prior = row.data.category === "stagnation" ? row.data.details : undefined
+                if (!prior || typeof prior !== "object" || !("observation" in prior)) return []
+                const decoded = Schema.decodeUnknownOption(SessionProgress.FailureObservation)(prior.observation)
+                return decoded._tag === "Some" ? [decoded.value] : []
+              })
               const observation = Object.fromEntries(
                 Object.entries(current).filter((entry) => entry[1] !== undefined),
               ) as Record<string, string>
               yield* SessionProgress.record(events, session.id, "stagnation", {
                 callID: part.id,
                 observation,
-                ...SessionProgress.stagnation(previous, current),
+                ...SessionProgress.observe(previous, current),
               })
             }
           }
@@ -1223,50 +1295,9 @@ const layer = Layer.effect(
           ) {
             const messages = yield* restore(SessionOutcome.history(db, session.id))
             if (SessionOutcome.engineeringWork(messages)) {
-              const preliminary = SessionOutcome.derive(
-                messages,
-                false,
-                undefined,
-                [],
-                undefined,
-                undefined,
-                location.directory,
-              )
-              const targets = yield* restore(
-                SessionOutcome.fingerprint(
-                  fs,
-                  preliminary.checks.flatMap((check) =>
-                    [...(check.targets ?? []), ...(check.assertions ?? [])].map((file) => file.path),
-                  ),
-                ),
-              )
-              const snapshot = yield* restore(snapshots.capture())
-              const required = yield* restore(SessionOutcome.requirements(fs, location.directory))
-              const outcome = SessionOutcome.derive(
-                messages,
-                false,
-                snapshot,
-                targets,
-                required,
-                undefined,
-                location.directory,
-                yield* restore(
-                  DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries),
-                ),
-              )
-              const key = createHash("sha256")
-                .update(
-                  JSON.stringify({
-                    requirements: SessionOutcome.requested(messages).entries,
-                    required,
-                    environment: shell,
-                    snapshot,
-                    targets,
-                    checks: outcome.checks,
-                    review: outcome.review,
-                  }),
-                )
-                .digest("hex")
+              const evidence = yield* restore(closingEvidence(session.id))
+              const outcome = evidence.outcome
+              const key = evidence.key
               const previous = yield* db
                 .select({ data: EventTable.data })
                 .from(EventTable)
@@ -1288,7 +1319,13 @@ const layer = Layer.effect(
               )
               const decision = outcome.outcomeUnknown
                 ? "pending"
-                : SessionProgress.reviewDecision({ key, previous: keys, missing: outcome.missing })
+                : SessionProgress.reviewDecision({
+                    key,
+                    previous: keys,
+                    missing: outcome.missing,
+                    verified: outcome.state === "completed_verified" && outcome.review !== undefined,
+                    delivered: evidence.delivered,
+                  })
               yield* SessionProgress.record(events, session.id, "closing", {
                 key,
                 decision,
@@ -1449,6 +1486,33 @@ const layer = Layer.effect(
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
+      if (
+        !hasSteer &&
+        !hasQueue &&
+        Config.latest(yield* config.entries(), "experimental")?.quality_progress?.evidence_closing === true
+      ) {
+        const sealed = yield* db
+          .select({ data: EventTable.data })
+          .from(EventTable)
+          .where(
+            and(
+              eq(EventTable.aggregate_id, input.sessionID),
+              eq(EventTable.type, "session.next.quality.progress.1"),
+              sql`json_extract(${EventTable.data}, '$.category') = 'closing'`,
+              sql`json_extract(${EventTable.data}, '$.details.decision') = 'sealed'`,
+            ),
+          )
+          .orderBy(desc(EventTable.seq))
+          .limit(1)
+          .get()
+          .pipe(Effect.orDie)
+        const details = sealed?.data.details
+        if (details && typeof details === "object" && "key" in details) {
+          const evidence = yield* closingEvidence(input.sessionID)
+          if (details.key === evidence.key && evidence.outcome.state === "completed_verified" && evidence.delivered)
+            return
+        }
+      }
       if (Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms) {
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {

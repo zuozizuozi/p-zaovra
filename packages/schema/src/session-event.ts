@@ -528,7 +528,7 @@ export const QualityProgress = Event.define({
   ...options,
   schema: {
     ...Base,
-    category: Schema.Literals(["continuation", "closing", "stagnation"]),
+    category: Schema.Literals(["continuation", "closing", "stagnation", "cache"]),
     details: Schema.Json,
   },
 })

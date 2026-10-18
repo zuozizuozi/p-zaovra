@@ -12,6 +12,7 @@ import type { Database } from "../database/database"
 import type { SessionSchema } from "./schema"
 import { SessionMessageTable } from "./sql"
 import { DeliveryAudit } from "./delivery-audit"
+import { ExecutionContext } from "./execution-context"
 
 export const RECOVERY_PROMPT =
   "核对现场后继续上一项任务：先检查保留的日志、当前工作区和仍在运行的预览，确认已完成的部分与结果不明的操作。不要假定未结束的命令已经成功，也不要重复执行已完成的操作；未验证的结果需明确说明。"
@@ -363,6 +364,7 @@ export function checkFreshness(
   check: SessionOutcome.Check,
   targets: readonly { path: string; digest: string }[],
   snapshot?: string,
+  executionContext?: SessionOutcome.ExecutionContext,
 ) {
   const changedTargets = (check.targets ?? [])
     .filter(
@@ -370,9 +372,18 @@ export function checkFreshness(
         !target.digest || !targets.some((current) => current.path === target.path && current.digest === target.digest),
     )
     .map((target) => target.path)
+  const contextProblems = ExecutionContext.problems(check.executionContext, executionContext)
+  if (
+    check.contractDigest &&
+    check.executionContext &&
+    check.contractDigest !== ExecutionContext.digest(check.executionContext)
+  )
+    contextProblems.push("execution contract digest changed")
   return {
-    fresh: check.targets?.length ? changedTargets.length === 0 : !!snapshot && check.snapshot === snapshot,
-    changedTargets,
+    fresh:
+      !contextProblems.length &&
+      (check.targets?.length ? changedTargets.length === 0 : !!snapshot && check.snapshot === snapshot),
+    changedTargets: [...changedTargets, ...contextProblems],
     snapshotBased: !check.targets?.length,
   }
 }
@@ -650,6 +661,13 @@ export function derive(
     ),
   ]
   const missing = [
+    ...[...checks.values()]
+      .filter((check) => !check.supersededBy)
+      .flatMap((check) =>
+        ExecutionContext.problems(check.executionContext).map(
+          (problem) => `execution context (${check.callID}): ${problem}`,
+        ),
+      ),
     ...[...failedAssertions].map(([path, original]) =>
       targets.some((target) => target.path === path && target.digest === original.digest)
         ? `Failed assertion not reverified by an unchanged passing execution: ${path}`
@@ -855,14 +873,17 @@ export function toolChecks(tool: SessionMessage.AssistantTool): SessionOutcome.C
   ].flatMap((value) => {
     const check = Schema.decodeUnknownOption(SessionOutcome.Check)(value)
     if (Option.isNone(check) || check.value.callID !== tool.id) return []
+    const output = state.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+    const empty =
+      check.value.kind === "test" &&
+      check.value.exit === 0 &&
+      (/\bcollected 0 items\b/i.test(output) ||
+        (/^\s*0 pass\b/m.test(output) && !/^\s*[1-9]\d* pass\b/m.test(output)) ||
+        /Tests:\s+(\d+) skipped,\s+\1 total\b/.test(output) ||
+        /^(?:echo|printf|Write-Output)\s/i.test(check.value.command.trim()))
     const execution =
       check.value.execution ??
-      (check.value.exit !== 0
-        ? executionIssue(
-            check.value.command,
-            state.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
-          )
-        : undefined)
+      (empty ? "invalid-report" : check.value.exit !== 0 ? executionIssue(check.value.command, output) : undefined)
     // supersededBy is derived by the host, never accepted from a tool report.
     return [{ ...check.value, execution, supersededBy: undefined }]
   })

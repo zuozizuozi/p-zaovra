@@ -21,6 +21,7 @@ import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { BashJob } from "./bash-job"
+import { ExecutionContext } from "../session/execution-context"
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -370,6 +371,12 @@ const layer = Layer.effectDiscard(
                     metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
                   })
                 lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
+                const executionContext = ExecutionContext.capture(
+                  input.command,
+                  target.canonical,
+                  timeout,
+                  input.timeout !== undefined,
+                )
                 yield* Deferred.succeed(started, undefined)
                 const result = yield* appProcess
                   .run(command, {
@@ -421,6 +428,8 @@ const layer = Layer.effectDiscard(
                             exit: -1,
                             execution: "timeout" as const,
                             callID: context.toolCallID,
+                            executionContext,
+                            contractDigest: ExecutionContext.digest(executionContext),
                           },
                         }
                       : {}),
@@ -459,6 +468,8 @@ const layer = Layer.effectDiscard(
                         kind: verification,
                         command: input.command,
                         exit: result.exitCode,
+                        executionContext,
+                        contractDigest: ExecutionContext.digest(executionContext),
                         ...(result.reason ? { reason: result.reason } : {}),
                         ...(assertions.length ? { assertions } : {}),
                         ...(input.verification_requirements ? { requirements: input.verification_requirements } : {}),

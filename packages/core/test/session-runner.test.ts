@@ -4634,7 +4634,7 @@ describe("SessionRunnerLLM", () => {
         expect(result._tag).toBe(scenario.stop ? "Failure" : "Success")
         expect(requests).toHaveLength(scenario.commands.length + 1)
         expect(requests.at(-1)!.tools.length === 0).toBe(scenario.stop)
-        if (scenario.commands.length >= 4) expect(JSON.stringify(requests[4]!.system)).toContain("Change approach")
+        if (scenario.commands.length >= 4) expect(JSON.stringify(requests[4]!.messages)).toContain("Change approach")
         if (!scenario.stop) expect(JSON.stringify(requests.at(-1)!.system)).not.toContain("Tool execution is stopped")
         const database = yield* Database.Service
         const before = SessionOutcome.shellRecovery(yield* SessionOutcome.history(database.db, sessionID))
@@ -4696,7 +4696,7 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(11)
       expect(requests[10]!.tools).toEqual([])
       expect(requests[10]!.toolChoice).toMatchObject({ type: "none" })
-      expect(JSON.stringify(requests[4]!.system)).toContain("Change approach")
+      expect(JSON.stringify(requests[4]!.messages)).toContain("Change approach")
       expect(JSON.stringify(requests[10]!.messages)).toContain("Repeated shell failures stopped tool execution")
       expect(JSON.stringify(requests[10]!.messages)).not.toContain("CRITICAL - MAXIMUM STEPS REACHED")
       expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
@@ -5525,7 +5525,10 @@ describe("SessionRunnerLLM", () => {
       expect(requests[1].model).toEqual(requests[0].model)
       expect(requests[1].generation).toEqual(requests[0].generation)
       expect(userTexts(requests[1])).toContain("Build the requested game")
-      expect(requests[1].system.some((part) => part.text.includes("Output recovery"))).toBe(true)
+      expect(JSON.stringify(requests[1].system)).toBe(JSON.stringify(requests[0].system))
+      expect(JSON.stringify(requests[1].tools)).toBe(JSON.stringify(requests[0].tools))
+      expect(JSON.stringify(requests[1].messages[0])).toBe(JSON.stringify(requests[0].messages[0]))
+      expect(userTexts(requests[1]).some((text) => text.includes("Output recovery"))).toBe(true)
       expect(executions).toEqual(["small action"])
       expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({
         total: 16529,
@@ -6677,6 +6680,10 @@ for (const setting of [undefined, {}, { facts: true }]) {
         const saved = yield* SessionProgress.read(db, sessionID)
         expect(saved._tag).toBe("Some")
         expect(requests[0]!.system).toEqual(requests[1]!.system)
+        const cache = (yield* SessionUsageQuery.read(sessionID)).cache
+        expect(cache?.points).toHaveLength(2)
+        expect(cache?.points[0]?.reason).toBe("first")
+        expect(JSON.stringify(cache)).not.toContain("Current task facts")
       }),
   )
 }
@@ -6788,9 +6795,10 @@ for (const setting of [undefined, {}, { stagnation_log: true }, { stagnation_log
           .where(eq(EventTable.type, "session.next.quality.progress.1"))
           .all()
           .pipe(Effect.orDie)
-        expect(rows).toHaveLength(setting?.stagnation_log === false ? 0 : 1)
+        const observations = rows.filter((row) => row.data.category === "stagnation")
+        expect(observations).toHaveLength(setting?.stagnation_log === false ? 0 : 1)
         if (setting?.stagnation_log === false) return
-        expect(rows[0]!.data).toMatchObject({
+        expect(observations[0]!.data).toMatchObject({
           category: "stagnation",
           details: { candidate: false, hypothesisUnknown: true, intervention: false, expectedEvidence: "unknown" },
         })
@@ -6798,6 +6806,62 @@ for (const setting of [undefined, {}, { stagnation_log: true }, { stagnation_log
       }),
   )
 }
+
+it.live("K1 read grep cat shadow records successful evidence without adding turns", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { stagnation_log: true }
+    const session = yield* SessionV2.Service
+    const registry = yield* ToolRegistry.Service
+    for (const name of ["read", "grep", "bash"])
+      yield* registry.register({
+        [name]: Tool.make({
+          description: "fixed file observation",
+          input: Schema.Struct({ path: Schema.optional(Schema.String), command: Schema.optional(Schema.String) }),
+          output: Schema.Struct({ content: Schema.String }),
+          execute: () => Effect.succeed({ content: "const answer = 42;" }),
+          toModelOutput: () => [
+            {
+              type: "text",
+              text: name === "grep" ? "Found 1 matches\na.ts:\n  Line 1: const answer = 42;" : "const answer = 42;",
+            },
+          ],
+        }),
+      })
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Read the file" }), resume: false })
+    responses = ["read", "grep", "bash"].map((name) => [
+      LLMEvent.stepStart({ index: 0 }),
+      LLMEvent.toolCall({
+        id: `shadow-${name}`,
+        name,
+        input: name === "bash" ? { command: "cat a.ts" } : { path: "a.ts" },
+      }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      LLMEvent.finish({ reason: "tool-calls" }),
+    ])
+    responses.push(fragmentFixture("text", "shadow-finished", ["Done"]).completeEvents)
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(4)
+    const database = yield* Database.Service
+    const rows = yield* database.db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.type, "session.next.quality.progress.1"))
+      .all()
+      .pipe(Effect.orDie)
+    const observations = rows.filter((row) => row.data.category === "stagnation")
+    expect(observations).toHaveLength(3)
+    for (const row of observations)
+      expect(row.data.details).toMatchObject({
+        intervention: false,
+        candidate: false,
+        observation: { category: "read-only" },
+      })
+    // The fixture has no artifact snapshot, so the host must retain unknown.
+    expect(JSON.stringify(requests)).not.toContain("candidate")
+  }),
+)
 
 it.live("Q1 persisted active time survives compaction and restart without charging offline time", () =>
   Effect.gen(function* () {
@@ -6843,6 +6907,73 @@ it.live("Q1 persisted active time survives compaction and restart without chargi
     expect(next.value.request).not.toBe(saved.value.request)
     expect(next.value.requestStarted).toBeGreaterThan(saved.value.requestStarted)
     expect(next.value.activeMs).toBeGreaterThanOrEqual(restored.value.activeMs)
+  }),
+)
+
+it.live("K1 seals verified delivery across resume and reopens changed artifacts", () =>
+  Effect.gen(function* () {
+    yield* setup
+    qualityProgress = { evidence_closing: true }
+    yield* Layer.build(
+      VerificationReviewTool.layer.pipe(Layer.provide(Layer.mock(PermissionV2.Service, { assert: () => Effect.void }))),
+    )
+    const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
+      Effect.promise(() => dir[Symbol.asyncDispose]()),
+    )
+    const file = `${dir.path}/source.js`
+    yield* Effect.promise(() => Bun.write(file, "export const result = 1"))
+    const fs = yield* FSUtil.Service
+    const registry = yield* ToolRegistry.Service
+    const session = yield* SessionV2.Service
+    yield* registry.register({
+      bash: Tool.make({
+        description: "Observed check",
+        input: Schema.Struct({}),
+        output: Schema.Struct({ verification: Schema.Unknown }),
+        execute: (_input, context) =>
+          Effect.gen(function* () {
+            return {
+              verification: {
+                kind: "test",
+                command: "node verify.js",
+                exit: 0,
+                callID: context.toolCallID,
+                targets: yield* SessionOutcome.fingerprint(fs, [file]),
+                requirements: ["Verify the function"],
+              },
+            }
+          }),
+      }),
+    })
+    const call = (id: string, name: string, input: Record<string, unknown>) => [
+      LLMEvent.stepStart({ index: 0 }),
+      LLMEvent.toolCall({ id, name, input }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      LLMEvent.finish({ reason: "tool-calls" }),
+    ]
+    const stop = fragmentFixture("text", "delivered", ["Verified function delivered."]).completeEvents
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Verify the function." }), resume: false })
+    responses = [
+      call("check", "bash", {}),
+      call("review", "verification_review", {
+        items: [{ requirement: 1, evidence: ["check"], status: "verified", note: "Observed check" }],
+        unverified: [],
+      }),
+      stop,
+    ]
+    yield* session.resume(sessionID)
+    expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed_verified", missing: [] })
+    expect(requests).toHaveLength(3)
+    expect((yield* session.outcome(sessionID)).state).toBe("completed_verified")
+    requests.length = 0
+    responses = [stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(0)
+    yield* Effect.promise(() => Bun.write(file, "export const result = 'changed'"))
+    responses = [stop, stop]
+    yield* session.resume(sessionID)
+    expect(requests.length).toBeGreaterThan(0)
+    expect((yield* session.outcome(sessionID)).state).not.toBe("completed_verified")
   }),
 )
 
@@ -6916,6 +7047,7 @@ it.live("Q defaults respect explicit false and keep behavioral features opt-in",
       .where(eq(EventTable.type, "session.next.quality.progress.1"))
       .all()
       .pipe(Effect.orDie)
-    expect(rows).toHaveLength(0)
+    expect(rows.filter((row) => row.data.category !== "cache")).toHaveLength(0)
+    expect(rows.filter((row) => row.data.category === "cache")).toHaveLength(2)
   }),
 )

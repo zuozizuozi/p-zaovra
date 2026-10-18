@@ -20,6 +20,7 @@ import {
 } from "../schema"
 import { isRecord, JsonObject, optionalArray, optionalNull, ProviderShared } from "./shared"
 import { OpenAIOptions } from "./utils/openai-options"
+import { DeepSeekOptions } from "./utils/deepseek-options"
 import { Lifecycle } from "./utils/lifecycle"
 import { ToolSchemaProjection } from "./utils/tool-schema"
 import { ToolStream } from "./utils/tool-stream"
@@ -97,7 +98,8 @@ export const bodyFields = {
   stream: Schema.Literal(true),
   stream_options: Schema.optional(Schema.Struct({ include_usage: Schema.Boolean })),
   store: Schema.optional(Schema.Boolean),
-  reasoning_effort: Schema.optional(OpenAIOptions.OpenAIReasoningEffort),
+  reasoning_effort: Schema.optional(Schema.Union([OpenAIOptions.OpenAIReasoningEffort, DeepSeekOptions.Effort])),
+  thinking: Schema.optional(DeepSeekOptions.Thinking),
   max_tokens: Schema.optional(Schema.Number),
   max_completion_tokens: Schema.optional(Schema.Number),
   temperature: Schema.optional(Schema.Number),
@@ -120,6 +122,8 @@ const OpenAIChatUsage = Schema.Struct({
   prompt_tokens: Schema.optional(Schema.Number),
   completion_tokens: Schema.optional(Schema.Number),
   total_tokens: Schema.optional(Schema.Number),
+  prompt_cache_hit_tokens: Schema.optional(Schema.Number),
+  prompt_cache_miss_tokens: Schema.optional(Schema.Number),
   prompt_tokens_details: optionalNull(
     Schema.Struct({
       cached_tokens: Schema.optional(Schema.Number),
@@ -335,6 +339,11 @@ const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: 
 
 const lowerOptions = Effect.fn("OpenAIChat.lowerOptions")(function* (request: LLMRequest) {
   const store = OpenAIOptions.store(request)
+  if (
+    request.providerOptions?.deepseek !== undefined &&
+    DeepSeekOptions.matches(request.model.provider, request.model.id)
+  )
+    return { ...(store !== undefined ? { store } : {}), ...(yield* DeepSeekOptions.lower(request)) }
   const reasoningEffort = OpenAIOptions.reasoningEffort(request)
   if (reasoningEffort && !OpenAIOptions.isReasoningEffort(reasoningEffort))
     return yield* invalid(`OpenAI Chat does not support reasoning effort ${reasoningEffort}`)
@@ -397,16 +406,26 @@ const mapFinishReason = (reason: string | null | undefined): FinishReason => {
 // satisfied on both sides.
 const mapUsage = (usage: OpenAIChatEvent["usage"]): Usage | undefined => {
   if (!usage) return undefined
-  const cached = usage.prompt_tokens_details?.cached_tokens
+  const input =
+    usage.prompt_tokens ??
+    (usage.prompt_cache_hit_tokens !== undefined && usage.prompt_cache_miss_tokens !== undefined
+      ? usage.prompt_cache_hit_tokens + usage.prompt_cache_miss_tokens
+      : undefined)
+  const cached =
+    usage.prompt_tokens_details?.cached_tokens ??
+    usage.prompt_cache_hit_tokens ??
+    (usage.prompt_cache_miss_tokens === undefined
+      ? undefined
+      : ProviderShared.subtractTokens(input, usage.prompt_cache_miss_tokens))
   const reasoning = usage.completion_tokens_details?.reasoning_tokens
-  const nonCached = ProviderShared.subtractTokens(usage.prompt_tokens, cached)
+  const nonCached = input === undefined ? usage.prompt_cache_miss_tokens : ProviderShared.subtractTokens(input, cached)
   return new Usage({
-    inputTokens: usage.prompt_tokens,
+    inputTokens: input,
     outputTokens: usage.completion_tokens,
     nonCachedInputTokens: nonCached,
     cacheReadInputTokens: cached,
     reasoningTokens: reasoning,
-    totalTokens: ProviderShared.totalTokens(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens),
+    totalTokens: ProviderShared.totalTokens(input, usage.completion_tokens, usage.total_tokens),
     providerMetadata: { openai: usage },
   })
 }

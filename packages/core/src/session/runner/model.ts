@@ -3,7 +3,7 @@ export * as SessionRunnerModel from "./model"
 import { makeLocationNode } from "../../effect/app-node"
 import { GenerationOptions, type Model } from "@zaovra-ai/llm"
 import * as AnthropicMessages from "@zaovra-ai/llm/protocols/anthropic-messages"
-import * as OpenAICompatibleChat from "@zaovra-ai/llm/protocols/openai-compatible-chat"
+import { OpenAICompatibleChat, DeepSeekOptions } from "@zaovra-ai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@zaovra-ai/llm/protocols/openai-responses"
 import { Gemini } from "@zaovra-ai/llm/protocols/gemini"
 import { OpenRouter } from "@zaovra-ai/llm/providers/openrouter"
@@ -109,6 +109,7 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
 
 const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
   const body = model.request.body
+  const deepseek = route.id === "openai-compatible-chat" && DeepSeekOptions.matches(model.providerID, model.api.id)
   const generationKeys: Record<string, string> = {
     temperature: "temperature",
     max_tokens: "maxTokens",
@@ -149,6 +150,7 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
     Object.entries(body).filter(
       ([key]) =>
         key !== "apiKey" &&
+        !(deepseek && (key === "thinking" || key === "reasoning_effort")) &&
         !(generation && Object.hasOwn(generationKeys, key)) &&
         !(key === "thinking" && thinking !== undefined),
     ),
@@ -159,6 +161,9 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
     headers: model.request.headers,
     generation,
     providerOptions: {
+      ...(deepseek
+        ? { deepseek: { thinking: body.thinking ?? { type: "enabled" }, reasoningEffort: body.reasoning_effort } }
+        : {}),
       ...(thinking === undefined ? {} : { anthropic: { thinking } }),
       ...(model.api.settings?.maxTokensParameter !== undefined || Object.hasOwn(body, "max_completion_tokens")
         ? { openai: { maxTokensParameter: model.api.settings?.maxTokensParameter ?? "max_completion_tokens" } }

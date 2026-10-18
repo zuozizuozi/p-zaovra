@@ -3,6 +3,34 @@ export * as SessionOutcome from "./session-outcome"
 import { Schema } from "effect"
 import { optional } from "./schema"
 
+export const ExecutionValue = Schema.Struct({
+  value: Schema.NullOr(Schema.String),
+  source: Schema.Literals(["user", "observed", "default", "diagnostic-temporary", "unknown"]),
+}).annotate({ identifier: "SessionOutcome.ExecutionValue" })
+export interface ExecutionValue extends Schema.Schema.Type<typeof ExecutionValue> {}
+export const ExecutionCondition = Schema.Struct({
+  requested: ExecutionValue.pipe(optional),
+  observed: ExecutionValue,
+}).annotate({ identifier: "SessionOutcome.ExecutionCondition" })
+export interface ExecutionCondition extends Schema.Schema.Type<typeof ExecutionCondition> {}
+export const ExecutionEnvironment = Schema.Struct({
+  OMP_NUM_THREADS: ExecutionCondition.pipe(optional),
+  MKL_NUM_THREADS: ExecutionCondition.pipe(optional),
+  OPENBLAS_NUM_THREADS: ExecutionCondition.pipe(optional),
+  NUMEXPR_NUM_THREADS: ExecutionCondition.pipe(optional),
+  VECLIB_MAXIMUM_THREADS: ExecutionCondition.pipe(optional),
+  BLIS_NUM_THREADS: ExecutionCondition.pipe(optional),
+}).annotate({ identifier: "SessionOutcome.ExecutionEnvironment" })
+export interface ExecutionEnvironment extends Schema.Schema.Type<typeof ExecutionEnvironment> {}
+export const ExecutionContext = Schema.Struct({
+  entry: ExecutionCondition,
+  cwd: ExecutionCondition,
+  runtime: ExecutionCondition,
+  timeout: ExecutionCondition,
+  environment: ExecutionEnvironment,
+}).annotate({ identifier: "SessionOutcome.ExecutionContext" })
+export interface ExecutionContext extends Schema.Schema.Type<typeof ExecutionContext> {}
+
 export const Check = Schema.Struct({
   kind: Schema.Literals(["build", "test", "lint", "typecheck", "syntax", "smoke", "interaction"]),
   command: Schema.String,
@@ -16,6 +44,8 @@ export const Check = Schema.Struct({
   cwd: Schema.String.pipe(optional),
   targets: Schema.Array(Schema.Struct({ path: Schema.String, digest: Schema.String })).pipe(optional),
   logs: Schema.Array(Schema.String).pipe(optional),
+  executionContext: ExecutionContext.pipe(optional),
+  contractDigest: Schema.String.pipe(optional),
 }).annotate({ identifier: "SessionOutcome.Check" })
 export interface Check extends Schema.Schema.Type<typeof Check> {}
 export const Review = Schema.Struct({

@@ -1,6 +1,7 @@
 import { Route, type RouteRoutedModelInput } from "../route/client"
 import { Endpoint } from "../route/endpoint"
 import * as OpenAIChat from "./openai-chat"
+export { DeepSeekOptions } from "./utils/deepseek-options"
 
 const ADAPTER = "openai-compatible-chat"
 

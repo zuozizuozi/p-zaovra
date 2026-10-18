@@ -8,6 +8,8 @@ import { Project } from "../src/project"
 import { Pty } from "../src/pty"
 import { Question } from "../src/question"
 import { Session } from "../src/session"
+import { SessionOutcome } from "../src/session-outcome"
+import { SessionUsage } from "../src/session-usage"
 import { SessionTodo } from "../src/session-todo"
 import { Work } from "../src/work"
 import { optional } from "../src/schema"
@@ -54,6 +56,12 @@ describe("contract hygiene", () => {
       Project.Info,
       Pty.Info,
       Session.ListAnchor,
+      SessionOutcome.ExecutionValue,
+      SessionOutcome.ExecutionCondition,
+      SessionOutcome.ExecutionEnvironment,
+      SessionOutcome.ExecutionContext,
+      SessionUsage.CachePoint,
+      SessionUsage.CacheReport,
       Work.GoalStatus,
       Work.TaskStatus,
       Work.AttemptStatus,

@@ -1,6 +1,9 @@
 export * as SessionProgress from "./progress"
 
 import { DateTime, Effect, Schema } from "effect"
+import { createHash } from "node:crypto"
+import path from "node:path"
+import type { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { eq, sql } from "drizzle-orm"
 import type { Database } from "../database/database"
 import { SessionTable } from "./sql"
@@ -86,7 +89,86 @@ export function facts(input: {
   })}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
 }
 
-export function reviewDecision(input: { key: string; previous: readonly string[]; missing: readonly string[] }) {
+export function closingKey(input: {
+  requirements: readonly unknown[]
+  required: readonly string[]
+  environment: unknown
+  targets: readonly { path: string; digest: string }[]
+  snapshot?: string
+  checks: readonly SessionOutcome.Check[]
+  review?: SessionOutcome.Review
+  missing: readonly string[]
+}) {
+  const hash = (value: unknown) =>
+    createHash("sha256")
+      .update(
+        JSON.stringify(value, (_key, value: unknown) =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+            : value,
+        ),
+      )
+      .digest("hex")
+  const checks = input.checks.map((check) => ({
+    id: check.callID,
+    key: hash({
+      kind: check.kind,
+      command: check.command,
+      cwd: check.cwd,
+      exit: check.exit,
+      execution: check.execution,
+      targets: check.targets?.toSorted((a, b) => a.path.localeCompare(b.path)),
+      assertions: check.assertions?.toSorted((a, b) => a.path.localeCompare(b.path)),
+      executionContext: check.executionContext,
+      contractDigest: check.contractDigest,
+      superseded: Boolean(check.supersededBy),
+    }),
+  }))
+  return hash({
+    requirements: input.requirements,
+    required: [...input.required].sort(),
+    environment: input.environment,
+    targets: input.targets.toSorted((a, b) => a.path.localeCompare(b.path)),
+    snapshot: input.checks.some((check) => !check.targets?.length) ? input.snapshot : undefined,
+    checks: [...new Set(checks.map((check) => check.key))].sort(),
+    conclusions: input.review?.items
+      .map((item) => ({
+        requirement: item.requirement,
+        status: item.status,
+        kind: item.kind ?? "result",
+        evidence: [
+          ...new Set(item.evidence.map((id) => checks.find((check) => check.id === id)?.key ?? "unresolved")),
+        ].sort(),
+        history: item.history?.map((item) => ({ exit: item.exit, ordered: Boolean(item.before) })),
+      }))
+      .sort((a, b) => a.requirement - b.requirement),
+    // Asking for the first review is not new evidence; absence of conclusions
+    // already represents it. Otherwise the reminder itself reopens closing.
+    gaps: [
+      ...new Set(
+        input.missing
+          .filter((gap) => !gap.startsWith("requirements review:"))
+          .map((gap) =>
+            gap.startsWith("declared unverified:")
+              ? "declared-unverified"
+              : checks
+                  .reduce((text, check) => text.split(check.id).join(check.key), gap)
+                  .replace(/\s+/g, " ")
+                  .trim(),
+          ),
+      ),
+    ].sort(),
+  })
+}
+
+export function reviewDecision(input: {
+  key: string
+  previous: readonly string[]
+  missing: readonly string[]
+  verified?: boolean
+  delivered?: boolean
+}) {
+  if (input.verified && input.delivered && !input.missing.length) return "sealed"
   if (!input.previous.includes(input.key)) return "review"
   return input.missing.length ? "unverified" : "finish"
 }
@@ -116,12 +198,11 @@ export type Failure = {
 export function stagnation(previous: Failure | undefined, current: Failure) {
   const signature = JSON.stringify([current.category, current.error, current.cwd, current.environment ?? null])
   const comparable =
-    current.environment !== undefined &&
-    current.artifact !== undefined &&
-    current.evidence !== undefined
+    current.environment !== undefined && current.artifact !== undefined && current.evidence !== undefined
   return {
     signature,
-    hypothesisUnknown: current.hypothesis === undefined || (previous !== undefined && previous.hypothesis === undefined),
+    hypothesisUnknown:
+      current.hypothesis === undefined || (previous !== undefined && previous.hypothesis === undefined),
     candidate:
       comparable &&
       previous !== undefined &&
@@ -134,13 +215,69 @@ export function stagnation(previous: Failure | undefined, current: Failure) {
   }
 }
 
+// Only recognized file reads are comparable. Job polling, test output and
+// arbitrary successful commands may be making progress without changing files.
+export function readEvidence(
+  tool: string,
+  input: Record<string, unknown>,
+  structured: Record<string, unknown>,
+  text: string,
+  cwd = ".",
+) {
+  const command =
+    typeof input.command === "string"
+      ? /^(?:cat|type|Get-Content)\s+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s;&|<>`$]+))\s*$/i.exec(input.command)
+      : null
+  const lines = text.replace(/\r\n/g, "\n").split("\n")
+  const paths =
+    tool === "grep"
+      ? lines.filter((line) => line.endsWith(":") && !line.startsWith("  ")).map((line) => line.slice(0, -1))
+      : []
+  const file =
+    tool === "read" && typeof input.path === "string"
+      ? input.path
+      : tool === "grep" && paths.length === 1
+        ? paths[0]
+        : tool === "bash" && command
+          ? (command[1] ?? command[2] ?? command[3])
+          : undefined
+  const content =
+    tool === "read" && typeof structured.content === "string"
+      ? structured.content
+      : tool === "grep"
+        ? lines
+            .filter((line) => /^  Line \d+: /.test(line))
+            .map((line) => line.replace(/^  Line \d+: /, ""))
+            .join("\n")
+        : tool === "bash" && command
+          ? text
+          : undefined
+  if (!file || !content?.trim()) return undefined
+  return createHash("sha256")
+    .update(JSON.stringify([path.resolve(cwd, file), content.replace(/\r\n/g, "\n").trimEnd()]))
+    .digest("hex")
+}
+
+// History is newest first. A successful unrelated command cannot erase a
+// recurring failure; successful reads need three consecutive equal facts.
+export function observe(history: readonly Failure[], current: Failure) {
+  const relevant = history.filter(
+    (item) => item.category === current.category && item.error === current.error && item.cwd === current.cwd,
+  )
+  const result = stagnation(relevant[0], current)
+  return {
+    ...result,
+    candidate: result.candidate && (current.category !== "read-only" || stagnation(relevant[1], current).candidate),
+  }
+}
+
 export const independentReview =
   "Identify the original source for each critical assumption. Check the actual end-to-end result against that source. State unverified scope and why; self-written tests or another model's agreement are not independent proof."
 
 export const record = Effect.fn("SessionProgress.record")(function* (
   events: EventV2.Interface,
   sessionID: SessionSchema.ID,
-  category: "continuation" | "closing" | "stagnation",
+  category: "continuation" | "closing" | "stagnation" | "cache",
   details: Schema.Json,
 ) {
   yield* events.publish(SessionEvent.QualityProgress, { sessionID, timestamp: yield* DateTime.now, category, details })

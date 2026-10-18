@@ -29,6 +29,50 @@ const request = LLM.request({
 })
 
 describe("OpenAI Chat route", () => {
+  it.effect("K1 maps DeepSeek cache hit/miss without double counting reasoning or inventing missing usage", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              deltaChunk({ content: "OK" }, "stop"),
+              usageChunk({
+                prompt_tokens: 100,
+                completion_tokens: 30,
+                total_tokens: 130,
+                prompt_cache_hit_tokens: 80,
+                prompt_cache_miss_tokens: 20,
+                completion_tokens_details: { reasoning_tokens: 24 },
+              }),
+            ),
+          ),
+        ),
+      )
+      expect(response.usage?.cacheReadInputTokens).toBe(80)
+      expect(response.usage?.nonCachedInputTokens).toBe(20)
+      expect(response.usage?.visibleOutputTokens).toBe(6)
+      expect(response.usage?.reasoningTokens).toBe(24)
+      expect(
+        response.usage!.nonCachedInputTokens! +
+          response.usage!.cacheReadInputTokens! +
+          response.usage!.visibleOutputTokens +
+          response.usage!.reasoningTokens!,
+      ).toBe(response.usage!.totalTokens!)
+      const absent = yield* LLMClient.generate(request).pipe(
+        Effect.provide(fixedResponse(sseEvents(deltaChunk({ content: "OK" }, "stop")))),
+      )
+      expect(absent.usage).toBeUndefined()
+      const partial = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(deltaChunk({ content: "OK" }, "stop"), usageChunk({ prompt_tokens: 100, completion_tokens: 30 })),
+          ),
+        ),
+      )
+      expect(partial.usage?.cacheReadInputTokens).toBeUndefined()
+      expect(partial.usage?.reasoningTokens).toBeUndefined()
+    }),
+  )
   it.effect("selects the configured output parameter without changing the token ceiling", () =>
     Effect.gen(function* () {
       for (const parameter of ["max_tokens", "max_completion_tokens"] as const) {

@@ -1,5 +1,6 @@
 import { SessionOwnership } from "./ownership"
 export * as SessionCompaction from "./compaction"
+import { SessionCache } from "./cache"
 
 import { LLM, LLMError, LLMEvent, Message, SystemPart, type LLMRequest, type Model, type Usage } from "@zaovra-ai/llm"
 import { usageTokens, usageReported } from "./usage-tokens"
@@ -336,41 +337,44 @@ export const make = (dependencies: Dependencies) => {
     let failure: string | undefined
     let finished = false
     yield* SessionOwnership.check
-    const summarized = yield* dependencies.llm
-      .stream(
-        summaryRequest({
-          model: input.model,
-          prompt: prepared.prompt,
-          maxTokens: summaryOutput,
-        }),
-      )
-      .pipe(
-        Stream.runForEach((event) => {
-          if (LLMEvent.is.providerError(event)) failure = event.message
-          if (LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputStart(event))
-            failure = "Compaction attempted a tool call; no tool was executed"
-          if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
-          if (LLMEvent.is.stepFinish(event)) {
-            usage = event.usage
-            finished = event.reason === "stop"
-          }
-          if (LLMEvent.is.finish(event)) {
-            usage = event.usage ?? usage
-            finished = event.reason === "stop"
-          }
-          return Effect.void
-        }),
-        Effect.as(true),
-        Effect.timeout("2 minutes"),
-        Effect.catchTag("TimeoutError", () => {
-          failure = "Compaction exceeded its 2 minute deadline"
-          return Effect.succeed(false)
-        }),
-        Effect.catchTag("LLM.Error", (error) => {
-          failure = error.reason.message
-          return Effect.succeed(false)
-        }),
-      )
+    const request = summaryRequest({
+      model: input.model,
+      prompt: prepared.prompt,
+      maxTokens: summaryOutput,
+    })
+    const summarized = yield* SessionCache.track(dependencies.llm.stream(request), {
+      request,
+      epoch: -sourceSequence - 1,
+      sessionID: input.sessionID,
+      db: dependencies.db,
+      events: dependencies.events,
+    }).pipe(
+      Stream.runForEach((event) => {
+        if (LLMEvent.is.providerError(event)) failure = event.message
+        if (LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputStart(event))
+          failure = "Compaction attempted a tool call; no tool was executed"
+        if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+        if (LLMEvent.is.stepFinish(event)) {
+          usage = event.usage
+          finished = event.reason === "stop"
+        }
+        if (LLMEvent.is.finish(event)) {
+          usage = event.usage ?? usage
+          finished = event.reason === "stop"
+        }
+        return Effect.void
+      }),
+      Effect.as(true),
+      Effect.timeout("2 minutes"),
+      Effect.catchTag("TimeoutError", () => {
+        failure = "Compaction exceeded its 2 minute deadline"
+        return Effect.succeed(false)
+      }),
+      Effect.catchTag("LLM.Error", (error) => {
+        failure = error.reason.message
+        return Effect.succeed(false)
+      }),
+    )
     const summary = chunks.join("")
     failure ??= invalidSummary(summary)
     if (!summarized || failure || !finished || !summary.trim()) {

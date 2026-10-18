@@ -50,6 +50,50 @@ test("Q3 closing reopens on changed evidence, not on repeat final answers", () =
   ).toBe("review")
 })
 
+test("K1 closing key ignores call IDs and review prose but retains counterexamples and contract changes", () => {
+  const check = {
+    kind: "test" as const,
+    command: "node verify.js",
+    exit: 0,
+    callID: "first",
+    targets: [{ path: "app.js", digest: "v1" }],
+  }
+  const input = {
+    requirements: [{ id: "r1", text: "Deliver app" }],
+    required: ["test"],
+    environment: "runtime1",
+    targets: check.targets,
+    checks: [check],
+    missing: [],
+    review: {
+      userMessageID: "u1",
+      items: [{ requirement: 1, status: "verified" as const, evidence: ["first"], note: "passed" }],
+      unverified: [],
+    },
+  }
+  const key = SessionProgress.closingKey(input)
+  expect(
+    SessionProgress.closingKey({
+      ...input,
+      checks: [{ ...check, callID: "second" }],
+      review: {
+        ...input.review,
+        items: [{ ...input.review.items[0], evidence: ["second"], note: "looks good with different words" }],
+      },
+    }),
+  ).toBe(key)
+  expect(SessionProgress.closingKey({ ...input, checks: [{ ...check, exit: 1 }] })).not.toBe(key)
+  expect(SessionProgress.closingKey({ ...input, targets: [{ path: "app.js", digest: "v2" }] })).not.toBe(key)
+  expect(SessionProgress.closingKey({ ...input, environment: "runtime2" })).not.toBe(key)
+  expect(SessionProgress.closingKey({ ...input, requirements: [{ id: "r2", text: "Changed task" }] })).not.toBe(key)
+  expect(SessionProgress.reviewDecision({ key, previous: [], missing: [], verified: true, delivered: true })).toBe(
+    "sealed",
+  )
+  expect(SessionProgress.reviewDecision({ key, previous: [], missing: [], verified: false, delivered: true })).toBe(
+    "review",
+  )
+})
+
 test("Q4 same cause with changed parameters is observable, unknowns never prove stagnation", () => {
   const failure = {
     category: "exit",
@@ -93,6 +137,45 @@ test("Q5 independent review names original sources, end-to-end evidence and unkn
   expect(SessionProgress.independentReview).toContain("end-to-end")
   expect(SessionProgress.independentReview).toContain("unverified")
   expect(SessionProgress.independentReview).toContain("not independent proof")
+})
+
+test("K1 shadow observes cross-tool repetition and preserves failures across unrelated success", () => {
+  const read = SessionProgress.readEvidence("read", { path: "a.ts" }, { content: "const answer = 42;\n" }, "")
+  const grep = SessionProgress.readEvidence(
+    "grep",
+    { path: "a.ts" },
+    {},
+    "Found 1 matches\na.ts:\n  Line 1: const answer = 42;",
+  )
+  const cat = SessionProgress.readEvidence("bash", { command: "cat a.ts" }, { exit: 0 }, "const answer = 42;\n")
+  expect(read).toBeDefined()
+  expect(grep).toBe(read)
+  expect(cat).toBe(read)
+  const observation = {
+    category: "read-only",
+    error: "",
+    cwd: "/project",
+    environment: "shell",
+    artifact: "v1",
+    evidence: read,
+  }
+  expect(SessionProgress.observe([observation, observation], observation)).toMatchObject({
+    candidate: true,
+    intervention: false,
+  })
+  expect(SessionProgress.observe([observation], observation).candidate).toBe(false)
+  expect(
+    SessionProgress.observe([observation, observation], { ...observation, evidence: "new information" }).candidate,
+  ).toBe(false)
+  expect(SessionProgress.observe([observation, observation], { ...observation, artifact: "v2" }).candidate).toBe(false)
+  const failure = { ...observation, category: "exit-1", error: "same failure" }
+  expect(SessionProgress.observe([observation, failure], failure)).toMatchObject({
+    candidate: true,
+    intervention: false,
+  })
+  expect(SessionProgress.readEvidence("bash_job", { operation: "wait" }, { exit: 0 }, "growing output")).toBeUndefined()
+  expect(SessionProgress.readEvidence("bash", { command: "bun test" }, { exit: 0 }, "growing output")).toBeUndefined()
+  expect(SessionProgress.readEvidence("bash", { command: "cat a.ts; run.exe" }, { exit: 0 }, "same")).toBeUndefined()
 })
 
 test("quality configuration preserves omissions for runtime defaults", () => {

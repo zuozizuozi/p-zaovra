@@ -358,6 +358,26 @@ export type SessionsUsageInput = { readonly sessionID?: { readonly sessionID?: s
 
 export type SessionsUsageOutput = {
   readonly data: {
+    readonly cache?: {
+      readonly points: ReadonlyArray<{
+        readonly requestID: string
+        readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+        readonly reason: string
+        readonly firstChanged: string | null
+        readonly input: number | null
+        readonly output: number | null
+        readonly hit: number | null
+        readonly miss: number | null
+        readonly hitRate: number | null
+        readonly reasoning: number | null
+        readonly visible: number | null
+        readonly total: number | null
+      }>
+      readonly breaks: ReadonlyArray<{
+        readonly reason: string
+        readonly count: number | "Infinity" | "-Infinity" | "NaN"
+      }>
+    }
     readonly models: ReadonlyArray<{
       readonly providerID: string | null
       readonly modelID: string | null
@@ -995,7 +1015,7 @@ export type SessionsHistoryOutput = {
         readonly data: {
           readonly timestamp: number
           readonly sessionID: string
-          readonly category: "continuation" | "closing" | "stagnation"
+          readonly category: "continuation" | "closing" | "stagnation" | "cache"
           readonly details: JsonValue
         }
       }
@@ -1595,7 +1615,7 @@ export type SessionsEventsOutput =
       readonly data: {
         readonly timestamp: number
         readonly sessionID: string
-        readonly category: "continuation" | "closing" | "stagnation"
+        readonly category: "continuation" | "closing" | "stagnation" | "cache"
         readonly details: JsonValue
       }
     }
@@ -2207,6 +2227,111 @@ export type SessionsRecoverOutput = {
       readonly cwd?: string
       readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
       readonly logs?: ReadonlyArray<string>
+      readonly executionContext?: {
+        readonly entry: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly cwd: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly runtime: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly timeout: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly environment: {
+          readonly OMP_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly MKL_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly OPENBLAS_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly NUMEXPR_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly VECLIB_MAXIMUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly BLIS_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+        }
+      }
+      readonly contractDigest?: string
     }>
     readonly recentChecks?: ReadonlyArray<{
       readonly check: {
@@ -2222,6 +2347,111 @@ export type SessionsRecoverOutput = {
         readonly cwd?: string
         readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
         readonly logs?: ReadonlyArray<string>
+        readonly executionContext?: {
+          readonly entry: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly cwd: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly runtime: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly timeout: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly environment: {
+            readonly OMP_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly MKL_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly OPENBLAS_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly NUMEXPR_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly VECLIB_MAXIMUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly BLIS_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+          }
+        }
+        readonly contractDigest?: string
       }
       readonly userMessageID: string
       readonly turn: number
@@ -2275,6 +2505,111 @@ export type SessionsOutcomeOutput = {
       readonly cwd?: string
       readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
       readonly logs?: ReadonlyArray<string>
+      readonly executionContext?: {
+        readonly entry: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly cwd: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly runtime: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly timeout: {
+          readonly requested?: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+          readonly observed: {
+            readonly value: string | null
+            readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+          }
+        }
+        readonly environment: {
+          readonly OMP_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly MKL_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly OPENBLAS_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly NUMEXPR_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly VECLIB_MAXIMUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly BLIS_NUM_THREADS?: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+        }
+      }
+      readonly contractDigest?: string
     }>
     readonly recentChecks?: ReadonlyArray<{
       readonly check: {
@@ -2290,6 +2625,111 @@ export type SessionsOutcomeOutput = {
         readonly cwd?: string
         readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
         readonly logs?: ReadonlyArray<string>
+        readonly executionContext?: {
+          readonly entry: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly cwd: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly runtime: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly timeout: {
+            readonly requested?: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+            readonly observed: {
+              readonly value: string | null
+              readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+            }
+          }
+          readonly environment: {
+            readonly OMP_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly MKL_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly OPENBLAS_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly NUMEXPR_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly VECLIB_MAXIMUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly BLIS_NUM_THREADS?: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+          }
+        }
+        readonly contractDigest?: string
       }
       readonly userMessageID: string
       readonly turn: number

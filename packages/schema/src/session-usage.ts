@@ -1,6 +1,29 @@
 export * as SessionUsage from "./session-usage"
 
 import { Schema } from "effect"
+import { optional } from "./schema"
+
+export const CachePoint = Schema.Struct({
+  requestID: Schema.String,
+  sequence: Schema.Number,
+  reason: Schema.String,
+  firstChanged: Schema.NullOr(Schema.String),
+  input: Schema.NullOr(Schema.Finite),
+  output: Schema.NullOr(Schema.Finite),
+  hit: Schema.NullOr(Schema.Finite),
+  miss: Schema.NullOr(Schema.Finite),
+  hitRate: Schema.NullOr(Schema.Finite),
+  reasoning: Schema.NullOr(Schema.Finite),
+  visible: Schema.NullOr(Schema.Finite),
+  total: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "SessionUsage.CachePoint" })
+export interface CachePoint extends Schema.Schema.Type<typeof CachePoint> {}
+
+export const CacheReport = Schema.Struct({
+  points: Schema.Array(CachePoint),
+  breaks: Schema.Array(Schema.Struct({ reason: Schema.String, count: Schema.Number })),
+}).annotate({ identifier: "SessionUsage.CacheReport" })
+export interface CacheReport extends Schema.Schema.Type<typeof CacheReport> {}
 
 export const Totals = Schema.Struct({
   input: Schema.Finite,
@@ -35,6 +58,7 @@ export const Bucket = Schema.Struct({
 export interface Bucket extends Schema.Schema.Type<typeof Bucket> {}
 
 export const Summary = Schema.Struct({
+  cache: CacheReport.pipe(optional),
   models: Schema.Array(Bucket),
   total: Totals,
   own: Totals,

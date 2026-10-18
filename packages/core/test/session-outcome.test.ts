@@ -19,6 +19,68 @@ const assistant: SessionMessage.Assistant = {
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
 
+test("K1 execution contract rejects diagnostic green, wrong entry and changed relevant environment", () => {
+  const condition = (requested: string, observed: string, source: "user" | "diagnostic-temporary" = "user") => ({
+    requested: { value: requested, source },
+    observed: { value: observed, source: "observed" as const },
+  })
+  const context = {
+    entry: condition("node cli.js", "node cli.js"),
+    cwd: condition("/project", "/project"),
+    runtime: condition("node 22", "node 22"),
+    timeout: condition("30000", "30000"),
+    environment: { OMP_NUM_THREADS: condition("8", "1", "diagnostic-temporary") },
+  }
+  const check = {
+    kind: "test" as const,
+    command: "node cli.js",
+    exit: 0,
+    callID: "contract",
+    targets: [{ path: "cli.js", digest: "same" }],
+    executionContext: context,
+  }
+  expect(SessionOutcome.checkFreshness(check, check.targets).fresh).toBe(false)
+  const agreed = { ...context, environment: { OMP_NUM_THREADS: condition("1", "1") } }
+  expect(
+    SessionOutcome.checkFreshness({ ...check, executionContext: agreed }, check.targets, undefined, agreed).fresh,
+  ).toBe(true)
+  expect(
+    SessionOutcome.checkFreshness(
+      { ...check, executionContext: { ...agreed, entry: condition("node cli.js", "node unit.test.js") } },
+      check.targets,
+    ).fresh,
+  ).toBe(false)
+  expect(
+    SessionOutcome.checkFreshness({ ...check, executionContext: agreed }, check.targets, undefined, {
+      ...agreed,
+      environment: { OMP_NUM_THREADS: condition("1", "8") },
+    }).fresh,
+  ).toBe(false)
+  expect(
+    SessionOutcome.checkFreshness(
+      { ...check, executionContext: agreed },
+      [...check.targets, { path: "unrelated.md", digest: "new" }],
+      undefined,
+      agreed,
+    ).fresh,
+  ).toBe(true)
+  expect(
+    SessionOutcome.checkFreshness(
+      {
+        ...check,
+        executionContext: {
+          ...agreed,
+          runtime: {
+            requested: { value: "node 22", source: "user" as const },
+            observed: { value: null, source: "unknown" as const },
+          },
+        },
+      },
+      check.targets,
+    ).fresh,
+  ).toBe(false)
+})
+
 test("historical checks retain their source without affecting the current verdict and become stale after edits", () => {
   const target = { path: path.resolve("product.js"), digest: "tested" }
   const user = (id: string): SessionMessage.User => ({
