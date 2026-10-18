@@ -16,8 +16,9 @@ export const lower = Effect.fn("DeepSeekOptions.lower")(function* (request: LLMR
     return yield* ProviderShared.invalidRequest(
       "DeepSeek thinking accepts only type enabled or disabled; token budgets are unsupported",
     )
-  const effort =
+  const requested =
     options?.reasoningEffort ?? request.providerOptions?.openai?.reasoningEffort ?? request.http?.body?.reasoning_effort
+  const effort = requested === "xhigh" ? "high" : requested
   if (effort !== undefined && !Schema.is(Effort)(effort))
     return yield* ProviderShared.invalidRequest("DeepSeek reasoning_effort must be low, high or max")
   if (thinking.type === "disabled" && effort !== undefined)

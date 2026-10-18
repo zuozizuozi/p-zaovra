@@ -54,7 +54,10 @@ describe("work contracts", () => {
   test("work events use the goal as durable aggregate", () => {
     expect(Work.Event.GoalCreated.durable).toEqual({ aggregate: "goalID", version: 1 })
     expect(Work.Event.AttemptSettled.durable).toEqual({ aggregate: "goalID", version: 1 })
-    expect(Work.Event.DurableDefinitions).toHaveLength(36)
+    expect(Work.Event.DurableDefinitions).toHaveLength(39)
+    expect(Work.Event.DurableDefinitions).toContain(Work.Event.FinalAcceptanceRepairRequested)
+    expect(Work.Event.DurableDefinitions).toContain(Work.Event.TaskMergeReviewed)
+    expect(Work.Event.DurableDefinitions).toContain(Work.Event.TaskIsolationResolved)
   })
 
   test("Worker pull contracts expose credential metadata without storing the credential", () => {

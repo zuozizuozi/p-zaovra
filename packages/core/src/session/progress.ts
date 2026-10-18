@@ -4,11 +4,12 @@ import { DateTime, Effect, Schema } from "effect"
 import { createHash } from "node:crypto"
 import path from "node:path"
 import type { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
-import { eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import type { Database } from "../database/database"
 import { SessionTable } from "./sql"
 import { SessionSchema } from "./schema"
 import { EventV2 } from "../event"
+import { EventTable } from "../event/sql"
 import { SessionEvent } from "./event"
 
 export const State = Schema.Struct({
@@ -281,4 +282,24 @@ export const record = Effect.fn("SessionProgress.record")(function* (
   details: Schema.Json,
 ) {
   yield* events.publish(SessionEvent.QualityProgress, { sessionID, timestamp: yield* DateTime.now, category, details })
+})
+
+export const recentObservations = Effect.fn("SessionProgress.recentObservations")(function* (
+  db: Database.Interface["db"],
+  id: SessionSchema.ID,
+) {
+  const rows = yield* db
+    .select({ data: EventTable.data })
+    .from(EventTable)
+    .where(and(eq(EventTable.aggregate_id, id), eq(EventTable.type, "session.next.quality.progress.1")))
+    .orderBy(desc(EventTable.seq))
+    .limit(50)
+    .all()
+    .pipe(Effect.orDie)
+  return rows.flatMap((row) => {
+    const prior = row.data.category === "stagnation" ? row.data.details : undefined
+    if (!prior || typeof prior !== "object" || !("observation" in prior)) return []
+    const decoded = Schema.decodeUnknownOption(FailureObservation)(prior.observation)
+    return decoded._tag === "Some" ? [decoded.value] : []
+  })
 })

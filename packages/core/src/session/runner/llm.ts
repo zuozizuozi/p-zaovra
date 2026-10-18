@@ -1259,21 +1259,7 @@ const layer = Layer.effect(
                   typeof input.progress_expected_evidence === "string" ? input.progress_expected_evidence : undefined,
                 evidence: read ?? createHash("sha256").update(error).digest("hex"),
               }
-              const rows = yield* db
-                .select({ data: EventTable.data })
-                .from(EventTable)
-                .where(
-                  and(eq(EventTable.aggregate_id, session.id), eq(EventTable.type, "session.next.quality.progress.1")),
-                )
-                .orderBy(desc(EventTable.seq))
-                .all()
-                .pipe(Effect.orDie)
-              const previous = rows.flatMap((row) => {
-                const prior = row.data.category === "stagnation" ? row.data.details : undefined
-                if (!prior || typeof prior !== "object" || !("observation" in prior)) return []
-                const decoded = Schema.decodeUnknownOption(SessionProgress.FailureObservation)(prior.observation)
-                return decoded._tag === "Some" ? [decoded.value] : []
-              })
+              const previous = yield* SessionProgress.recentObservations(db, session.id)
               const observation = Object.fromEntries(
                 Object.entries(current).filter((entry) => entry[1] !== undefined),
               ) as Record<string, string>

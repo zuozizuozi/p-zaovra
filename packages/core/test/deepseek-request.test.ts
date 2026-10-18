@@ -42,7 +42,7 @@ const session = SessionV2.Info.make({
   location: { directory: AbsolutePath.make("/project") },
 })
 
-for (const effort of [undefined, "low", "high", "max", "disabled"]) {
+for (const effort of [undefined, "low", "high", "max", "xhigh", "disabled"]) {
   it.effect(`DeepSeek K1 wire ${effort ?? "default"} survives tool history and compacted history`, () =>
     Effect.gen(function* () {
       const received: Record<string, unknown>[] = []
@@ -126,7 +126,7 @@ for (const effort of [undefined, "low", "high", "max", "disabled"]) {
           max_tokens: 32000,
         })
         if (effort === "disabled") expect(body).not.toHaveProperty("reasoning_effort")
-        else expect(body).toHaveProperty("reasoning_effort", effort ?? "high")
+        else expect(body).toHaveProperty("reasoning_effort", effort === "xhigh" ? "high" : (effort ?? "high"))
         for (const key of ["max_completion_tokens", "max_output_tokens", "budget_tokens", "reasoning"])
           expect(body).not.toHaveProperty(key)
       }

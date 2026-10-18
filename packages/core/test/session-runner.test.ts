@@ -6850,6 +6850,7 @@ it.live("K1 read grep cat shadow records successful evidence without adding turn
       .where(eq(EventTable.type, "session.next.quality.progress.1"))
       .all()
       .pipe(Effect.orDie)
+    expect(rows).toHaveLength(11) // Four request/usage pairs and three read observations.
     const observations = rows.filter((row) => row.data.category === "stagnation")
     expect(observations).toHaveLength(3)
     for (const row of observations)
@@ -7049,5 +7050,28 @@ it.live("Q defaults respect explicit false and keep behavioral features opt-in",
       .pipe(Effect.orDie)
     expect(rows.filter((row) => row.data.category !== "cache")).toHaveLength(0)
     expect(rows.filter((row) => row.data.category === "cache")).toHaveLength(2)
+  }),
+)
+
+it.live("K1b stagnation history reads only the latest 50 quality events newest first", () =>
+  Effect.gen(function* () {
+    yield* setup
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Observe" }), resume: false })
+    const events = yield* EventV2.Service
+    for (const index of Array.from({ length: 55 }, (_, index) => index))
+      yield* SessionProgress.record(events, sessionID, "stagnation", {
+        observation: { category: "read-only", error: "", cwd: "/fixture", evidence: String(index) },
+      })
+    const db = (yield* Database.Service).db
+    const previous = yield* SessionProgress.recentObservations(db, sessionID)
+    expect(previous).toHaveLength(50)
+    expect(previous[0]?.evidence).toBe("54")
+    expect(previous.at(-1)?.evidence).toBe("5")
+    // Other quality categories consume the bounded window, but are not observations.
+    yield* SessionProgress.record(events, sessionID, "cache", { phase: "request" })
+    const mixed = yield* SessionProgress.recentObservations(db, sessionID)
+    expect(mixed).toHaveLength(49)
+    expect(mixed.at(-1)?.evidence).toBe("6")
   }),
 )
