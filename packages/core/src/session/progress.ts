@@ -168,10 +168,39 @@ export function reviewDecision(input: {
   missing: readonly string[]
   verified?: boolean
   delivered?: boolean
+  pending?: boolean
+  gaps?: readonly string[]
+  reviewed?: readonly string[]
 }) {
+  if (input.pending) return "pending"
   if (input.verified && input.delivered && !input.missing.length) return "sealed"
+  if (input.gaps?.length && input.gaps.every((gap) => input.reviewed?.includes(gap))) return "unverified"
   if (!input.previous.includes(input.key)) return "review"
   return input.missing.length ? "unverified" : "finish"
+}
+
+// A reminder belongs to a requirement and a concrete defect, not the whole
+// workspace. Unrelated new passing checks must not buy another reminder.
+export function closingGaps(request: readonly unknown[], outcome: SessionOutcome.Info) {
+  return (outcome.missing.length ? outcome.missing : ["requirements review: submit verification_review"]).map((gap) =>
+    createHash("sha256")
+      .update(
+        JSON.stringify([
+          request,
+          outcome.checks
+            .reduce(
+              (text, check) =>
+                text
+                  .split(check.callID)
+                  .join(JSON.stringify([check.kind, check.command, check.cwd, check.exit, check.execution])),
+              gap,
+            )
+            .replace(/requirements review:.*/, "requirements review")
+            .replace(/\s+/g, " "),
+        ]),
+      )
+      .digest("hex"),
+  )
 }
 
 export const FailureObservation = Schema.Struct({
@@ -272,6 +301,35 @@ export function observe(history: readonly Failure[], current: Failure) {
   }
 }
 
+// The 224 replay has no known hypotheses and cannot fit a precision threshold.
+// Keep the existing three-observation read floor; this opt-in diagnostic is
+// deliberately stricter and cannot treat unknowns or polling as evidence.
+export function diagnostic(history: readonly Failure[], current: Failure) {
+  if (!current.hypothesis?.trim() || history.length < 2) return
+  if (
+    !history.slice(0, 2).every((prior) => {
+      const result = stagnation(prior, current)
+      return result.candidate && !result.hypothesisUnknown
+    })
+  )
+    return
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        current.category,
+        current.error,
+        current.cwd,
+        current.environment,
+        current.artifact,
+        current.hypothesis,
+        current.evidence,
+      ]),
+    )
+    .digest("hex")
+}
+
+export const diagnosticReminder = "下一步要区分哪两个仍成立的解释？看到什么会改变决策？"
+
 export const independentReview =
   "Identify the original source for each critical assumption. Check the actual end-to-end result against that source. State unverified scope and why; self-written tests or another model's agreement are not independent proof."
 
@@ -291,7 +349,13 @@ export const recentObservations = Effect.fn("SessionProgress.recentObservations"
   const rows = yield* db
     .select({ data: EventTable.data })
     .from(EventTable)
-    .where(and(eq(EventTable.aggregate_id, id), eq(EventTable.type, "session.next.quality.progress.1")))
+    .where(
+      and(
+        eq(EventTable.aggregate_id, id),
+        eq(EventTable.type, "session.next.quality.progress.1"),
+        sql`json_extract(${EventTable.data}, '$.category') = 'stagnation'`,
+      ),
+    )
     .orderBy(desc(EventTable.seq))
     .limit(50)
     .all()

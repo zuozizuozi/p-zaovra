@@ -115,11 +115,31 @@ export function report(
   }
   if (!requests.size) return
   const points = [...requests.values()]
+  const versions = new Map<string, NonNullable<SessionUsage.CacheReport["versions"]>[number]>()
+  for (const point of points) {
+    const responseModel = point.responseModel ?? null
+    const systemFingerprint = point.systemFingerprint ?? null
+    const key = JSON.stringify([responseModel, systemFingerprint])
+    const previous = versions.get(key)
+    versions.set(key, {
+      responseModel,
+      systemFingerprint,
+      calls: (previous?.calls ?? 0) + 1,
+      input: (previous?.input ?? 0) + (point.input ?? 0),
+      output: (previous?.output ?? 0) + (point.output ?? 0),
+      total: (previous?.total ?? 0) + (point.total ?? 0),
+      unreported: (previous?.unreported ?? 0) + Number(point.total === null),
+    })
+  }
   const counts = new Map<string, number>()
   for (const point of points)
     if (point.reason !== "first" && point.reason !== "append")
       counts.set(point.reason, (counts.get(point.reason) ?? 0) + 1)
-  return { points, breaks: [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count) }
+  return {
+    points,
+    versions: [...versions.values()],
+    breaks: [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count),
+  }
 }
 
 export function track<E, R>(
@@ -163,10 +183,21 @@ export function track<E, R>(
         ...compare(prior, current),
       })
       let reported: Usage | undefined
+      let responseModel: string | null = null
+      let systemFingerprint: string | null = null
       return stream.pipe(
         Stream.tap((event) =>
           Effect.sync(() => {
             if ("usage" in event && event.usage) reported = event.usage
+            if ("providerMetadata" in event) {
+              const metadata =
+                event.providerMetadata?.openai ?? event.providerMetadata?.anthropic ?? event.providerMetadata?.google
+              if (metadata && typeof metadata === "object") {
+                if ("model" in metadata && typeof metadata.model === "string") responseModel = metadata.model
+                if ("system_fingerprint" in metadata && typeof metadata.system_fingerprint === "string")
+                  systemFingerprint = metadata.system_fingerprint
+              }
+            }
           }),
         ),
         Stream.ensuring(
@@ -175,6 +206,8 @@ export function track<E, R>(
               phase: "usage",
               requestID,
               ...usage(reported),
+              responseModel,
+              systemFingerprint,
             }),
           ),
         ),

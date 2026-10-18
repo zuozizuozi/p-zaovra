@@ -6,6 +6,45 @@ import { SessionCache } from "../src/session/cache"
 const model = Model.make({ id: "fixture", provider: "fixture", route: OpenAICompatibleChat.route })
 const request = LLM.request({ model, system: "Stable rules", messages: [Message.user("original task")] })
 
+test("K2 usage reports separate response snapshots, fingerprints and unknown versions", () => {
+  const versions = [
+    { responseModel: "1016", systemFingerprint: "a" },
+    { responseModel: "1017", systemFingerprint: "a" },
+    { responseModel: "1017", systemFingerprint: "b" },
+    {},
+  ]
+  const rows = versions.flatMap((version, index) => [
+    {
+      seq: index * 2,
+      data: {
+        category: "cache",
+        details: { phase: "request", requestID: `request-${index}`, reason: "first", firstChanged: null },
+      },
+    },
+    {
+      seq: index * 2 + 1,
+      data: {
+        category: "cache",
+        details: {
+          phase: "usage",
+          requestID: `request-${index}`,
+          ...SessionCache.usage(new Usage({ inputTokens: 10, outputTokens: 2 })),
+          ...version,
+        },
+      },
+    },
+  ])
+  const report = SessionCache.report(rows)!
+  expect(report.versions).toHaveLength(4)
+  expect(report.versions?.map((item) => [item.responseModel, item.systemFingerprint, item.calls, item.total])).toEqual([
+    ["1016", "a", 1, 12],
+    ["1017", "a", 1, 12],
+    ["1017", "b", 1, 12],
+    [null, null, 1, 12],
+  ])
+  expect(report.points[0].responseModel).toBe("1016")
+})
+
 test("K1 tool ordering and nested JSON keys are deterministic", () => {
   const first = [
     ToolDefinition.make({

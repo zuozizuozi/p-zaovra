@@ -288,6 +288,14 @@ let sessionTokenBudget: number | undefined
 let sessionOutput: Config.Info["session_output"]
 let qualityProgress: ConfigExperimental.Experimental["quality_progress"]
 let verificationEnabled: boolean | undefined
+let fixtureSnapshot: Snapshot.ID | undefined
+const testSnapshots = Layer.effect(
+  Snapshot.Service,
+  Effect.gen(function* () {
+    const snapshots = yield* Snapshot.Service
+    return { ...snapshots, capture: () => Effect.succeed(fixtureSnapshot) }
+  }),
+).pipe(Layer.provide(Snapshot.noopLayer))
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
@@ -320,7 +328,7 @@ const plugins = Layer.succeed(
   }),
 )
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
-  [Snapshot.node, Snapshot.noopLayer],
+  [Snapshot.node, testSnapshots],
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
   [SystemContextRegistry.node, systemContext],
@@ -383,7 +391,7 @@ const it = testEffect(
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
       [SkillGuidance.node, skillGuidance],
       [ReferenceGuidance.node, referenceGuidance],
-      [Snapshot.node, Snapshot.noopLayer],
+      [Snapshot.node, testSnapshots],
       [SessionExecution.node, execution],
       [Config.node, config],
     ],
@@ -419,6 +427,7 @@ const setup = Effect.gen(function* () {
   sessionTokenBudget = undefined
   sessionOutput = undefined
   verificationEnabled = true
+  fixtureSnapshot = undefined
   // Transcript fixtures isolate durable history from request-local observations.
   // The Q cases below explicitly cover omitted, enabled and disabled observations.
   qualityProgress = { facts: false, stagnation_log: false }
@@ -6970,6 +6979,24 @@ it.live("K1 seals verified delivery across resume and reopens changed artifacts"
     responses = [stop]
     yield* session.resume(sessionID)
     expect(requests).toHaveLength(0)
+    const jobs = yield* BackgroundJob.Service
+    yield* jobs.start({ id: "late-check", type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
+    responses = [stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(1)
+    const pending = yield* (yield* Database.Service).db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.aggregate_id, sessionID))
+      .all()
+      .pipe(Effect.orDie)
+    expect(
+      pending.some(
+        (row) => row.data.category === "closing" && JSON.stringify(row.data.details).includes('"reason":"waiting"'),
+      ),
+    ).toBe(true)
+    yield* jobs.cancel("late-check")
+    requests.length = 0
     yield* Effect.promise(() => Bun.write(file, "export const result = 'changed'"))
     responses = [stop, stop]
     yield* session.resume(sessionID)
@@ -7068,10 +7095,130 @@ it.live("K1b stagnation history reads only the latest 50 quality events newest f
     expect(previous).toHaveLength(50)
     expect(previous[0]?.evidence).toBe("54")
     expect(previous.at(-1)?.evidence).toBe("5")
-    // Other quality categories consume the bounded window, but are not observations.
+    // Cache traffic must not evict stagnation observations.
     yield* SessionProgress.record(events, sessionID, "cache", { phase: "request" })
     const mixed = yield* SessionProgress.recentObservations(db, sessionID)
-    expect(mixed).toHaveLength(49)
-    expect(mixed.at(-1)?.evidence).toBe("6")
+    expect(mixed).toHaveLength(50)
+    expect(mixed.at(-1)?.evidence).toBe("5")
   }),
 )
+
+it.live("K2 wire response versions survive durable usage reports across sessions", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    for (const version of ["1016", "1017"]) {
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: `Reply ${version}` }), resume: false })
+      responseStream = LLMClient.stream(
+        LLM.request({
+          model: OpenAIChat.route.with({ auth: Auth.bearer("fixture") }).model({ id: "alias" }),
+          prompt: "fixture",
+        }),
+      ).pipe(
+        Stream.provide(
+          fixedResponse(
+            sseEvents(
+              { ...deltaChunk({ content: "OK" }, "stop"), model: version, system_fingerprint: "fp" },
+              usageChunk({ prompt_tokens: 10, completion_tokens: 2 }),
+            ),
+          ),
+        ),
+      )
+      yield* session.resume(sessionID)
+    }
+    const usage = yield* SessionUsageQuery.read(sessionID)
+    expect(usage.cache?.versions?.map((item) => item.responseModel)).toEqual(["1016", "1017"])
+    expect(usage.cache?.points.map((item) => item.systemFingerprint)).toEqual(["fp", "fp"])
+    expect((yield* SessionUsageQuery.read()).cache?.versions).toEqual(usage.cache?.versions)
+  }),
+)
+
+it.live("K2 a new failure reminder omits gaps already explained on an earlier close", () =>
+  Effect.gen(function* () {
+    yield* setup
+    qualityProgress = { evidence_closing: true }
+    fixtureSnapshot = Snapshot.ID.make("stable")
+    const registry = yield* ToolRegistry.Service
+    yield* registry.register({
+      bash: Tool.make({
+        description: "observed test",
+        input: Schema.Struct({ exit: Schema.Number }),
+        output: Schema.Struct({ verification: Schema.Unknown }),
+        execute: (input, context) =>
+          Effect.succeed({
+            verification: {
+              kind: "test",
+              command: `node check-${input.exit}.js`,
+              exit: input.exit,
+              callID: context.toolCallID,
+              snapshot: "stable",
+              requirements: ["Verify the function"],
+            },
+          }),
+      }),
+    })
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Verify the function" }), resume: false })
+    const call = (exit: number) => [
+      LLMEvent.stepStart({ index: 0 }),
+      LLMEvent.toolCall({ id: `check-${exit}`, name: "bash", input: { exit } }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      LLMEvent.finish({ reason: "tool-calls" }),
+    ]
+    const stop = fragmentFixture("text", "complete", ["Done"]).completeEvents
+    responses = [call(0), stop, stop]
+    yield* session.resume(sessionID)
+    requests.length = 0
+    responses = [call(1), stop, stop]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(3)
+    const last = (yield* session.context(sessionID))
+      .filter((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
+      .at(-1)
+    expect(JSON.stringify(last)).toContain("failed")
+    expect(JSON.stringify(last)).not.toContain("requirements review:")
+    expect((yield* session.outcome(sessionID)).state).toBe("failed")
+  }),
+)
+
+for (const enabled of [false, true])
+  it.live(`K2 diagnostic enabled=${enabled} only adds one tail reminder without extra turns`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      qualityProgress = { facts: false, stagnation_reminder: enabled }
+      fixtureSnapshot = Snapshot.ID.make("unchanged")
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        bash: Tool.make({
+          description: "read fixture",
+          input: Schema.Struct({ command: Schema.String, progress_hypothesis: Schema.String }),
+          output: Schema.Struct({ exit: Schema.Number }),
+          execute: () => Effect.succeed({ exit: 0 }),
+          toModelOutput: () => [{ type: "text", text: "same source" }],
+        }),
+      })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Inspect the source" }), resume: false })
+      responses = Array.from({ length: 5 }, (_, index) => [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({
+          id: `read-${index}`,
+          name: "bash",
+          input: { command: `cat ${" ".repeat(index)}source.ts`, progress_hypothesis: "entry mismatch" },
+        }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ])
+      responses.push(fragmentFixture("text", "done", ["Done"]).completeEvents)
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(6)
+      const history = yield* session.context(sessionID)
+      expect(
+        history.filter((message) => message.type === "synthetic" && message.text.startsWith("Stagnation diagnostic")),
+      ).toHaveLength(enabled ? 1 : 0)
+      expect(JSON.stringify(requests[2])).not.toContain(SessionProgress.diagnosticReminder)
+      expect(JSON.stringify(requests[3]).includes(SessionProgress.diagnosticReminder)).toBe(enabled)
+    }),
+  )

@@ -778,6 +778,7 @@ export function derive(
   }
   const observed = executions(turn)
   if (
+    review !== undefined ||
     (start > 0 && engineeringWork(turn)) ||
     latest.some((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
   ) {

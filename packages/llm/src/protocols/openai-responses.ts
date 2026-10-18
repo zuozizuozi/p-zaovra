@@ -879,10 +879,13 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
     reason: mapFinishReason(event, state.hasFunctionCall),
     usage: mapUsage(event.response?.usage),
     providerMetadata:
-      event.response?.id || event.response?.service_tier
+      event.response?.id || event.response?.service_tier || event.response?.model
         ? openaiMetadata({
             responseId: event.response.id,
             serviceTier: event.response.service_tier,
+            model: typeof event.response.model === "string" ? event.response.model : undefined,
+            system_fingerprint:
+              typeof event.response.system_fingerprint === "string" ? event.response.system_fingerprint : undefined,
           })
         : undefined,
   })

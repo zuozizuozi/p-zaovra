@@ -4,6 +4,8 @@ import { Schema } from "effect"
 import { optional } from "./schema"
 
 export const CachePoint = Schema.Struct({
+  responseModel: Schema.NullOr(Schema.String).pipe(optional),
+  systemFingerprint: Schema.NullOr(Schema.String).pipe(optional),
   requestID: Schema.String,
   sequence: Schema.Number,
   reason: Schema.String,
@@ -20,6 +22,17 @@ export const CachePoint = Schema.Struct({
 export interface CachePoint extends Schema.Schema.Type<typeof CachePoint> {}
 
 export const CacheReport = Schema.Struct({
+  versions: Schema.Array(
+    Schema.Struct({
+      responseModel: Schema.NullOr(Schema.String),
+      systemFingerprint: Schema.NullOr(Schema.String),
+      calls: Schema.Finite,
+      input: Schema.Finite,
+      output: Schema.Finite,
+      total: Schema.Finite,
+      unreported: Schema.Finite,
+    }),
+  ).pipe(optional),
   points: Schema.Array(CachePoint),
   breaks: Schema.Array(Schema.Struct({ reason: Schema.String, count: Schema.Number })),
 }).annotate({ identifier: "SessionUsage.CacheReport" })

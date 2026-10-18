@@ -160,6 +160,8 @@ const OpenAIChatChoice = Schema.Struct({
 })
 
 export const OpenAIChatEvent = Schema.Struct({
+  model: optionalNull(Schema.String),
+  system_fingerprint: optionalNull(Schema.String),
   choices: Schema.Array(OpenAIChatChoice),
   usage: optionalNull(OpenAIChatUsage),
 })
@@ -167,6 +169,8 @@ type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>
 type OpenAIChatRequestMessage = LLMRequest["messages"][number]
 
 interface ParserState {
+  readonly model?: string
+  readonly systemFingerprint?: string
   readonly tools: ToolStream.State<number>
   readonly toolCallEvents: ReadonlyArray<LLMEvent>
   readonly usage?: Usage
@@ -497,6 +501,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         usage,
         finishReason,
         rawFinishReason: choice?.finish_reason ?? state.rawFinishReason,
+        model: event.model ?? state.model,
+        systemFingerprint: event.system_fingerprint ?? state.systemFingerprint,
         lifecycle,
       },
       events,
@@ -513,7 +519,13 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
     Lifecycle.finish(lifecycle, events, {
       reason,
       usage: state.usage,
-      providerMetadata: { openai: { finishReason: state.rawFinishReason } },
+      providerMetadata: {
+        openai: {
+          finishReason: state.rawFinishReason,
+          model: state.model,
+          system_fingerprint: state.systemFingerprint,
+        },
+      },
     })
   return events
 }

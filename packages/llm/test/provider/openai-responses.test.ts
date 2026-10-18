@@ -26,6 +26,26 @@ const request = LLM.request({
 
 const configEnv = (env: Record<string, string>) => Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))
 
+it.effect("K2 retains Responses model and fingerprint", () =>
+  Effect.gen(function* () {
+    const events = yield* LLMClient.stream(request).pipe(
+      Stream.runCollect,
+      Effect.provide(
+        fixedResponse(
+          sseEvents({
+            type: "response.completed",
+            response: { id: "r1", model: "responses-snapshot", system_fingerprint: "fp1" },
+          }),
+        ),
+      ),
+    )
+    expect(events.find((event) => event.type === "step-finish")?.providerMetadata?.openai).toMatchObject({
+      model: "responses-snapshot",
+      system_fingerprint: "fp1",
+    })
+  }),
+)
+
 type OpenAIToolOutput = Extract<
   OpenAIResponses.OpenAIResponsesBody["input"][number],
   { readonly type: "function_call_output" }

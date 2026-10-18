@@ -130,12 +130,14 @@ const GeminiCandidate = Schema.Struct({
 })
 
 const GeminiEvent = Schema.Struct({
+  modelVersion: Schema.optional(Schema.String),
   candidates: optionalArray(GeminiCandidate),
   usageMetadata: Schema.optional(GeminiUsage),
 })
 type GeminiEvent = Schema.Schema.Type<typeof GeminiEvent>
 
 interface ParserState {
+  readonly model?: string
   readonly finishReason?: string
   readonly hasToolCalls: boolean
   readonly nextToolCallId: number
@@ -391,6 +393,7 @@ const finish = (state: ParserState): ReadonlyArray<LLMEvent> =>
         Lifecycle.finish(lifecycle, events, {
           reason: mapFinishReason(state.finishReason, state.hasToolCalls),
           usage: state.usage,
+          providerMetadata: state.model ? googleMetadata({ model: state.model }) : undefined,
         })
         return events
       })()
@@ -399,6 +402,7 @@ const finish = (state: ParserState): ReadonlyArray<LLMEvent> =>
 const step = (state: ParserState, event: GeminiEvent) => {
   const nextState = {
     ...state,
+    model: event.modelVersion ?? state.model,
     usage: event.usageMetadata ? (mapUsage(event.usageMetadata) ?? state.usage) : state.usage,
   }
   const candidate = event.candidates?.[0]

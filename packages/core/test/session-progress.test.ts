@@ -2,6 +2,69 @@ import { expect, test } from "bun:test"
 import { ConfigExperimental } from "../src/config/experimental"
 import { SessionProgress } from "../src/session/progress"
 
+test("K2 completion gaps deduplicate independently and waiting never seals", () => {
+  const input = {
+    key: "new unrelated evidence",
+    previous: [],
+    missing: ["test missing"],
+    gaps: ["test"],
+    reviewed: ["test"],
+  }
+  expect(SessionProgress.reviewDecision(input)).toBe("unverified")
+  expect(SessionProgress.reviewDecision({ ...input, gaps: ["test", "new counterexample"] })).toBe("review")
+  expect(
+    SessionProgress.reviewDecision({ ...input, missing: [], verified: true, delivered: true, pending: true }),
+  ).toBe("pending")
+})
+
+test("K2 diagnostic requires three consecutive known same-family observations and is once per evidence", () => {
+  const current = {
+    category: "exit-1",
+    error: "missing entry",
+    cwd: "/app",
+    environment: "shell",
+    artifact: "v1",
+    evidence: "same",
+    hypothesis: "entry mismatch",
+  }
+  expect(SessionProgress.diagnostic([current], current)).toBeUndefined()
+  const key = SessionProgress.diagnostic([current, current], current)
+  expect(key).toBeDefined()
+  expect(SessionProgress.diagnostic([current, current], { ...current, hypothesis: undefined })).toBeUndefined()
+  expect(SessionProgress.diagnostic([current, current], { ...current, hypothesis: " " })).toBeUndefined()
+  expect(SessionProgress.diagnostic([current, current], { ...current, artifact: undefined })).toBeUndefined()
+  expect(SessionProgress.diagnostic([{ ...current, evidence: "new" }, current], current)).toBeUndefined()
+  expect(SessionProgress.diagnostic([current, current], { ...current, hypothesis: "other cause" })).toBeUndefined()
+  expect(SessionProgress.diagnostic([current, current], current)).toBe(key)
+})
+
+test("K2 gap identity ignores unrelated checks and call IDs, but distinguishes a concrete failure", () => {
+  const check = { kind: "test" as const, command: "test relevant", exit: 1, callID: "c1" }
+  const outcome = {
+    state: "completed_unverified" as const,
+    outcomeUnknown: false,
+    checks: [check],
+    missing: ["failed: test (c1)"],
+  }
+  const key = SessionProgress.closingGaps(["original requirement"], outcome)
+  expect(
+    SessionProgress.closingGaps(["original requirement"], {
+      ...outcome,
+      checks: [
+        { ...check, callID: "c2" },
+        { ...check, command: "unrelated pass", exit: 0, callID: "other" },
+      ],
+      missing: ["failed: test (c2)"],
+    }),
+  ).toEqual(key)
+  expect(
+    SessionProgress.closingGaps(["original requirement"], {
+      ...outcome,
+      checks: [{ ...check, command: "new counterexample" }],
+    }),
+  ).not.toEqual(key)
+})
+
 test("Q1 active accounting excludes idle and never charges a restart gap", () => {
   const first = SessionProgress.advance(undefined, { now: 100, active: 0, request: "one" })
   const checkpoint = SessionProgress.advance(first, { now: 150, active: 50, request: "one" })

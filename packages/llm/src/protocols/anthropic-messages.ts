@@ -206,7 +206,9 @@ const AnthropicStreamDelta = Schema.Struct({
 const AnthropicEvent = Schema.Struct({
   type: Schema.String,
   index: Schema.optional(Schema.Number),
-  message: Schema.optional(Schema.Struct({ usage: Schema.optional(AnthropicUsage) })),
+  message: Schema.optional(
+    Schema.Struct({ usage: Schema.optional(AnthropicUsage), model: Schema.optional(Schema.String) }),
+  ),
   content_block: Schema.optional(AnthropicStreamBlock),
   delta: Schema.optional(AnthropicStreamDelta),
   usage: Schema.optional(AnthropicUsage),
@@ -221,6 +223,7 @@ const AnthropicEvent = Schema.Struct({
 type AnthropicEvent = Schema.Schema.Type<typeof AnthropicEvent>
 
 interface ParserState {
+  readonly model?: string
   readonly tools: ToolStream.State<number>
   readonly usage?: Usage
   readonly lifecycle: Lifecycle.State
@@ -658,7 +661,7 @@ const NO_EVENTS: StepResult["1"] = []
 
 const onMessageStart = (state: ParserState, event: AnthropicEvent): StepResult => {
   const usage = mapUsage(event.message?.usage)
-  return [usage ? { ...state, usage: mergeUsage(state.usage, usage) } : state, NO_EVENTS]
+  return [{ ...state, model: event.message?.model ?? state.model, usage: mergeUsage(state.usage, usage) }, NO_EVENTS]
 }
 
 const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepResult => {
@@ -792,9 +795,10 @@ const onMessageDelta = (state: ParserState, event: AnthropicEvent): StepResult =
   const lifecycle = Lifecycle.finish(state.lifecycle, events, {
     reason: mapFinishReason(event.delta?.stop_reason),
     usage,
-    providerMetadata: event.delta?.stop_sequence
-      ? anthropicMetadata({ stopSequence: event.delta.stop_sequence })
-      : undefined,
+    providerMetadata:
+      event.delta?.stop_sequence || state.model
+        ? anthropicMetadata({ stopSequence: event.delta?.stop_sequence, model: state.model })
+        : undefined,
   })
   return [{ ...state, lifecycle, usage }, events]
 }

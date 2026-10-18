@@ -711,11 +711,12 @@ test("closing review gates every original clause, known gaps and stale evidence"
     current = targets,
     userMessageID: string = user.id,
     notes: { text: string; requirements: number[] }[] = [],
+    withMarker = true,
   ) =>
     SessionOutcome.derive(
       [
         user,
-        marker,
+        ...(withMarker ? [marker] : []),
         {
           ...assistant,
           content: [
@@ -741,6 +742,10 @@ test("closing review gates every original clause, known gaps and stale evidence"
       [],
     )
   expect(evaluate().state).toBe("completed_verified")
+  expect(evaluate(items.slice(0, 1), [], targets, user.id, [], false).state).toBe("completed_unverified")
+  expect(
+    evaluate(items, [], targets, user.id, [{ text: "Prefer a different style", requirements: [] }], false).state,
+  ).toBe("completed_verified")
   expect(evaluate(items, ["Only enumerable keys supported"]).state).toBe("completed_unverified")
   expect(evaluate(items.slice(0, 1)).missing.join(" ")).toContain("requirement 2 unverified")
   expect(evaluate([...items, items[0]]).state).toBe("completed_unverified")

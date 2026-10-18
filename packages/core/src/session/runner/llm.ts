@@ -170,19 +170,44 @@ const layer = Layer.effect(
       const snapshot = yield* snapshots.capture()
       const required = yield* SessionOutcome.requirements(fs, location.directory)
       const artifacts = yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries)
-      const outcome = SessionOutcome.derive(
+      const background = (yield* backgroundJobs.list()).filter(
+        (job) => job.status === "running" && job.metadata?.sessionID === sessionID,
+      )
+      const pending = background.filter((job) => job.type !== "bash" || job.metadata?.kind !== "preview")
+      const evaluated = SessionOutcome.derive(
         messages,
         false,
         snapshot,
         targets,
         required,
-        undefined,
+        new Set(
+          background.filter((job) => job.type === "bash" && job.metadata?.kind === "preview").map((job) => job.id),
+        ),
         location.directory,
         artifacts,
       )
+      const outcome = {
+        ...evaluated,
+        state:
+          !evaluated.review && evaluated.state === "completed_verified"
+            ? ("completed_unverified" as const)
+            : evaluated.state,
+        missing: [
+          ...evaluated.missing,
+          ...evaluated.checks
+            .filter((check) => check.exit !== 0 && !check.execution && !check.supersededBy)
+            .map((check) => `failed: ${check.kind} (${check.callID})`),
+          ...(!evaluated.review
+            ? [
+                "requirements review: submit verification_review with evidence or an explicit unverified reason for every original requirement",
+              ]
+            : []),
+        ],
+      }
       const latest = messages.findLast((message) => message.type === "assistant")
       return {
         outcome,
+        pending: pending.map((job) => job.id),
         delivered:
           latest?.type === "assistant" &&
           latest.finish === "stop" &&
@@ -1209,7 +1234,7 @@ const layer = Layer.effect(
               method: "run",
               reason: new InvalidProviderOutputReason({ message: terminalFailure }),
             })
-          if (quality?.stagnation_log !== false) {
+          if (quality?.stagnation_log !== false || quality?.stagnation_reminder === true) {
             const messages = yield* restore(SessionOutcome.history(db, session.id))
             const latest = messages.findLast((message) => message.type === "assistant")
             const observations =
@@ -1260,6 +1285,35 @@ const layer = Layer.effect(
                 evidence: read ?? createHash("sha256").update(error).digest("hex"),
               }
               const previous = yield* SessionProgress.recentObservations(db, session.id)
+              const diagnostic =
+                quality?.stagnation_reminder === true && needsContinuation && !isLastStep
+                  ? SessionProgress.diagnostic(previous, current)
+                  : undefined
+              const prefix = `Stagnation diagnostic ${messages.findLast((message) => message.type === "user")?.id}:${diagnostic}:`
+              const reminded =
+                diagnostic &&
+                (yield* db
+                  .select({ seq: EventTable.seq })
+                  .from(EventTable)
+                  .where(
+                    and(
+                      eq(EventTable.aggregate_id, session.id),
+                      eq(EventTable.type, "session.next.quality.progress.1"),
+                      sql`json_extract(${EventTable.data}, '$.category') = 'stagnation'`,
+                      sql`json_extract(${EventTable.data}, '$.details.diagnosticKey') = ${prefix}`,
+                      sql`json_extract(${EventTable.data}, '$.details.intervention') = 1`,
+                    ),
+                  )
+                  .limit(1)
+                  .get()
+                  .pipe(Effect.orDie))
+              if (diagnostic && !reminded)
+                yield* events.publish(SessionEvent.Synthetic, {
+                  sessionID: session.id,
+                  timestamp: yield* DateTime.now,
+                  messageID: SessionMessage.ID.create(),
+                  text: `${prefix} ${SessionProgress.diagnosticReminder}`,
+                })
               const observation = Object.fromEntries(
                 Object.entries(current).filter((entry) => entry[1] !== undefined),
               ) as Record<string, string>
@@ -1267,6 +1321,8 @@ const layer = Layer.effect(
                 callID: part.id,
                 observation,
                 ...SessionProgress.observe(previous, current),
+                intervention: Boolean(diagnostic && !reminded),
+                ...(diagnostic ? { diagnosticKey: prefix } : {}),
               })
             }
           }
@@ -1303,18 +1359,36 @@ const layer = Layer.effect(
                   ? [row.data.details.key]
                   : [],
               )
-              const decision = outcome.outcomeUnknown
-                ? "pending"
-                : SessionProgress.reviewDecision({
-                    key,
-                    previous: keys,
-                    missing: outcome.missing,
-                    verified: outcome.state === "completed_verified" && outcome.review !== undefined,
-                    delivered: evidence.delivered,
-                  })
+              const gaps = SessionProgress.closingGaps(SessionOutcome.requested(messages).entries, outcome)
+              const reviewed = previous.flatMap((row) => {
+                const details = row.data.details
+                return row.data.category === "closing" &&
+                  details &&
+                  typeof details === "object" &&
+                  "decision" in details &&
+                  details.decision === "review" &&
+                  "gaps" in details &&
+                  Array.isArray(details.gaps)
+                  ? details.gaps.filter((gap): gap is string => typeof gap === "string")
+                  : []
+              })
+              const decision = SessionProgress.reviewDecision({
+                key,
+                previous: keys,
+                missing: outcome.missing,
+                verified: outcome.state === "completed_verified" && outcome.review !== undefined,
+                delivered: evidence.delivered,
+                pending: outcome.outcomeUnknown || evidence.pending.length > 0,
+                gaps,
+                reviewed,
+              })
               yield* SessionProgress.record(events, session.id, "closing", {
                 key,
                 decision,
+                reason:
+                  decision === "pending" ? "waiting" : decision === "unverified" ? "blocked" : "candidate-complete",
+                pending: evidence.pending,
+                gaps,
                 missing: outcome.missing,
                 requirements: SessionOutcome.requested(messages).entries.map((item) => ({
                   id: item.id,
@@ -1326,7 +1400,7 @@ const layer = Layer.effect(
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
-                  text: `Verification closing review: evidence key ${key}. Missing: ${JSON.stringify(outcome.missing)}. Compare original requirements with current artifacts and actual assertions, including uncovered negative cases. Reopen only checks affected by changed requirements, dependencies, environment or new failures. All green is not proof of full coverage. Preserve failed assertions and report unresolved scope; do not repeat unchanged passing checks.${quality?.independent_review === true ? ` ${SessionProgress.independentReview}` : ""}`,
+                  text: `Verification closing review: evidence key ${key}. Missing: ${JSON.stringify(outcome.missing.filter((_gap, index) => !reviewed.includes(gaps[index])))}. Compare original requirements with current artifacts and actual assertions, including uncovered negative cases. Reopen only checks affected by changed requirements, dependencies, environment or new failures. All green is not proof of full coverage. Preserve failed assertions and report unresolved scope; do not repeat unchanged passing checks.${quality?.independent_review === true ? ` ${SessionProgress.independentReview}` : ""}`,
                 })
                 needsContinuation = true
               }
@@ -1495,7 +1569,12 @@ const layer = Layer.effect(
         const details = sealed?.data.details
         if (details && typeof details === "object" && "key" in details) {
           const evidence = yield* closingEvidence(input.sessionID)
-          if (details.key === evidence.key && evidence.outcome.state === "completed_verified" && evidence.delivered)
+          if (
+            !evidence.pending.length &&
+            details.key === evidence.key &&
+            evidence.outcome.state === "completed_verified" &&
+            evidence.delivered
+          )
             return
         }
       }
@@ -1581,6 +1660,7 @@ const layer = Layer.effect(
             yield* SessionProgress.record(events, input.sessionID, "continuation", {
               step: result.step,
               continuing: needsContinuation || queued,
+              phase: needsContinuation || queued ? "working" : "candidate-complete",
               reason: queued
                 ? "pending-queue"
                 : needsContinuation && !result.needsContinuation

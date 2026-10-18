@@ -29,6 +29,25 @@ const request = LLM.request({
 })
 
 describe("OpenAI Chat route", () => {
+  it.effect("K2 retains response model and fingerprint even when trailing usage omits them", () =>
+    Effect.gen(function* () {
+      const events = yield* LLMClient.stream(request).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { ...deltaChunk({ content: "OK" }, "stop"), model: "deepseek-v4.1-1017", system_fingerprint: "fp_a" },
+              usageChunk({ prompt_tokens: 10, completion_tokens: 2 }),
+            ),
+          ),
+        ),
+      )
+      expect(events.find((event) => event.type === "step-finish")?.providerMetadata?.openai).toMatchObject({
+        model: "deepseek-v4.1-1017",
+        system_fingerprint: "fp_a",
+      })
+    }),
+  )
   it.effect("K1 maps DeepSeek cache hit/miss without double counting reasoning or inventing missing usage", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(

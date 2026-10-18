@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { HttpClientRequest } from "effect/unstable/http"
 import { CacheHint, LLM, LLMError, Message, ToolCallPart, Usage } from "../../src"
 import { Auth, LLMClient } from "../../src/route"
@@ -27,6 +27,25 @@ const request = LLM.request({
   cache: "none",
   generation: { maxTokens: 20, temperature: 0 },
 })
+
+it.effect("K2 retains Anthropic response model", () =>
+  Effect.gen(function* () {
+    const events = yield* LLMClient.stream(request).pipe(
+      Stream.runCollect,
+      Effect.provide(
+        fixedResponse(
+          sseEvents(
+            { type: "message_start", message: { model: "claude-snapshot" } },
+            { type: "message_delta", delta: { stop_reason: "end_turn" } },
+          ),
+        ),
+      ),
+    )
+    expect(events.find((event) => event.type === "step-finish")?.providerMetadata?.anthropic).toMatchObject({
+      model: "claude-snapshot",
+    })
+  }),
+)
 
 type AnthropicToolResult = Extract<
   AnthropicMessages.AnthropicMessagesBody["messages"][number]["content"][number],

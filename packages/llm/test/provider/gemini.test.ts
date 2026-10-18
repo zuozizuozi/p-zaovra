@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { LLM, LLMError, Message, ToolCallPart, Usage } from "../../src"
 import { Auth, LLMClient } from "../../src/route"
 import * as Gemini from "../../src/protocols/gemini"
@@ -24,6 +24,24 @@ const request = LLM.request({
 })
 
 describe("Gemini route", () => {
+  it.effect("K2 retains Gemini response modelVersion", () =>
+    Effect.gen(function* () {
+      const events = yield* LLMClient.stream(request).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          fixedResponse(
+            sseEvents({
+              modelVersion: "gemini-snapshot",
+              candidates: [{ content: { role: "model", parts: [{ text: "OK" }] }, finishReason: "STOP" }],
+            }),
+          ),
+        ),
+      )
+      expect(events.find((event) => event.type === "step-finish")?.providerMetadata?.google).toMatchObject({
+        model: "gemini-snapshot",
+      })
+    }),
+  )
   it.effect("prepares Gemini target", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare(request)

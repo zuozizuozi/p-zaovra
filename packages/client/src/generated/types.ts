@@ -359,7 +359,18 @@ export type SessionsUsageInput = { readonly sessionID?: { readonly sessionID?: s
 export type SessionsUsageOutput = {
   readonly data: {
     readonly cache?: {
+      readonly versions?: ReadonlyArray<{
+        readonly responseModel: string | null
+        readonly systemFingerprint: string | null
+        readonly calls: number
+        readonly input: number
+        readonly output: number
+        readonly total: number
+        readonly unreported: number
+      }>
       readonly points: ReadonlyArray<{
+        readonly responseModel?: string | null
+        readonly systemFingerprint?: string | null
         readonly requestID: string
         readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
         readonly reason: string
