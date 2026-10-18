@@ -443,3 +443,14 @@ it.live(
     ),
   10000,
 )
+
+it.live("Q4 default bash schema exposes optional observation fields without enabling silence", () =>
+  withRuntime((_directory, _sessions, registry) =>
+    Effect.gen(function* () {
+      const snapshot = yield* registry.materialize()
+      const bash = snapshot.definitions.find((tool) => tool.name === "bash")
+      expect(JSON.stringify(bash?.inputSchema)).toContain("progress_hypothesis")
+      expect(JSON.stringify(bash?.inputSchema)).toContain("progress_expected_evidence")
+    }),
+  ),
+)

@@ -6654,26 +6654,30 @@ it.effect("authority lost after provider output prevents tool execution and the 
   }),
 )
 
-it.live("Q1 snapshots stay at request tail and out of history, usage survives another drain", () =>
-  Effect.gen(function* () {
-    yield* setup
-    verificationEnabled = false
-    qualityProgress = { facts: true }
-    const session = yield* SessionV2.Service
-    response = fragmentFixture("text", "facts-final", ["Done"]).completeEvents
-    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First request" }), resume: false })
-    yield* session.resume(sessionID)
-    const first = JSON.stringify(requests[0]!.messages.at(-1))
-    expect(first).toContain("Current task facts")
-    expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("Current task facts")
-    yield* session.resume(sessionID)
-    expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain("Current task facts")
-    const db = (yield* Database.Service).db
-    const saved = yield* SessionProgress.read(db, sessionID)
-    expect(saved._tag).toBe("Some")
-    expect(requests[0]!.system).toEqual(requests[1]!.system)
-  }),
-)
+for (const setting of [undefined, {}, { facts: true }]) {
+  it.live(
+    `Q1 facts ${JSON.stringify(setting)} stay at request tail and out of history, usage survives another drain`,
+    () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        qualityProgress = setting
+        const session = yield* SessionV2.Service
+        response = fragmentFixture("text", "facts-final", ["Done"]).completeEvents
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First request" }), resume: false })
+        yield* session.resume(sessionID)
+        const first = JSON.stringify(requests[0]!.messages.at(-1))
+        expect(first).toContain("Current task facts")
+        expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("Current task facts")
+        yield* session.resume(sessionID)
+        expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain("Current task facts")
+        const db = (yield* Database.Service).db
+        const saved = yield* SessionProgress.read(db, sessionID)
+        expect(saved._tag).toBe("Some")
+        expect(requests[0]!.system).toEqual(requests[1]!.system)
+      }),
+  )
+}
 
 it.live("Q2 direct model finish lists unfinished owned jobs and cannot verify them", () =>
   Effect.gen(function* () {
@@ -6743,50 +6747,55 @@ it.live("Q3 Q5 evidence review is bounded without new evidence and names indepen
   }),
 )
 
-it.live("Q4 records failures without adding model turns or changing shell recovery", () =>
-  Effect.gen(function* () {
-    yield* setup
-    verificationEnabled = false
-    qualityProgress = { stagnation_log: true }
-    const session = yield* SessionV2.Service
-    const registry = yield* ToolRegistry.Service
-    yield* registry.register({
-      bash: Tool.make({
-        description: "failure",
-        input: Schema.Struct({}),
-        output: Schema.Struct({ exit: Schema.Number }),
-        structured: Schema.Struct({ exit: Schema.Number }),
-        toStructuredOutput: ({ output }) => output,
-        execute: () => Effect.succeed({ exit: 1 }),
+for (const setting of [undefined, {}, { stagnation_log: true }, { stagnation_log: false }]) {
+  it.live(
+    `Q4 observation ${JSON.stringify(setting)} records failures without adding model turns or changing shell recovery`,
+    () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        qualityProgress = setting
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        yield* registry.register({
+          bash: Tool.make({
+            description: "failure",
+            input: Schema.Struct({}),
+            output: Schema.Struct({ exit: Schema.Number }),
+            structured: Schema.Struct({ exit: Schema.Number }),
+            toStructuredOutput: ({ output }) => output,
+            execute: () => Effect.succeed({ exit: 1 }),
+          }),
+        })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Diagnose a failure" }), resume: false })
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "q-fail", name: "bash", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "q-diagnosed", ["Blocked"]).completeEvents,
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(2)
+        const db = (yield* Database.Service).db
+        const rows = yield* db
+          .select()
+          .from(EventTable)
+          .where(eq(EventTable.type, "session.next.quality.progress.1"))
+          .all()
+          .pipe(Effect.orDie)
+        expect(rows).toHaveLength(setting?.stagnation_log === false ? 0 : 1)
+        if (setting?.stagnation_log === false) return
+        expect(rows[0]!.data).toMatchObject({
+          category: "stagnation",
+          details: { candidate: false, hypothesisUnknown: true, intervention: false, expectedEvidence: "unknown" },
+        })
+        expect(JSON.stringify(requests)).not.toContain("candidate")
       }),
-    })
-    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Diagnose a failure" }), resume: false })
-    responses = [
-      [
-        LLMEvent.stepStart({ index: 0 }),
-        LLMEvent.toolCall({ id: "q-fail", name: "bash", input: {} }),
-        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
-        LLMEvent.finish({ reason: "tool-calls" }),
-      ],
-      fragmentFixture("text", "q-diagnosed", ["Blocked"]).completeEvents,
-    ]
-    yield* session.resume(sessionID)
-    expect(requests).toHaveLength(2)
-    const db = (yield* Database.Service).db
-    const rows = yield* db
-      .select()
-      .from(EventTable)
-      .where(eq(EventTable.type, "session.next.quality.progress.1"))
-      .all()
-      .pipe(Effect.orDie)
-    expect(rows).toHaveLength(1)
-    expect(rows[0]!.data).toMatchObject({
-      category: "stagnation",
-      details: { candidate: false, hypothesisUnknown: true, intervention: false, expectedEvidence: "unknown" },
-    })
-    expect(JSON.stringify(requests)).not.toContain("candidate")
-  }),
-)
+  )
+}
 
 it.live("Q1 persisted active time survives compaction and restart without charging offline time", () =>
   Effect.gen(function* () {
@@ -6882,5 +6891,29 @@ it.live("Q3 pending work cannot consume the later terminal evidence review", () 
     yield* session.resume(sessionID)
     expect(requests).toHaveLength(2)
     expect(JSON.stringify(requests[1]!.messages)).toContain("Verification closing review")
+  }),
+)
+
+it.live("Q defaults respect explicit false and keep behavioral features opt-in", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { facts: false, stagnation_log: false }
+    const session = yield* SessionV2.Service
+    response = fragmentFixture("text", "quality-disabled", ["Done"]).completeEvents
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Check this program" }), resume: false })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(1)
+    expect(JSON.stringify(requests)).not.toContain("Current task facts")
+    expect(JSON.stringify(requests)).not.toContain("Independent review")
+    const db = (yield* Database.Service).db
+    expect((yield* SessionProgress.read(db, sessionID))._tag).toBe("None")
+    const rows = yield* db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.type, "session.next.quality.progress.1"))
+      .all()
+      .pipe(Effect.orDie)
+    expect(rows).toHaveLength(0)
   }),
 )

@@ -372,7 +372,7 @@ const layer = Layer.effect(
         }
       }
       const quality = Config.latest(yield* config.entries(), "experimental")?.quality_progress
-      if (quality?.facts === true) {
+      if (quality?.facts !== false) {
         const latest = yield* db
           .select({ id: SessionMessageTable.id })
           .from(SessionMessageTable)
@@ -527,7 +527,7 @@ const layer = Layer.effect(
           })
         : undefined
       const progressUsage =
-        quality?.facts === true
+        quality?.facts !== false
           ? (yield* SessionUsageQuery.read(session.id).pipe(Effect.provideService(Database.Service, database))).total
           : undefined
       const progressFacts = progressUsage
@@ -1141,7 +1141,7 @@ const layer = Layer.effect(
               method: "run",
               reason: new InvalidProviderOutputReason({ message: terminalFailure }),
             })
-          if (quality?.stagnation_log === true) {
+          if (quality?.stagnation_log !== false) {
             const messages = yield* restore(SessionOutcome.history(db, session.id))
             const latest = messages.findLast((message) => message.type === "assistant")
             const failed =
@@ -1481,7 +1481,7 @@ const layer = Layer.effect(
           }),
         )
       }
-      const factsEnabled = Config.latest(yield* config.entries(), "experimental")?.quality_progress?.facts === true
+      const factsEnabled = Config.latest(yield* config.entries(), "experimental")?.quality_progress?.facts !== false
       if (factsEnabled) {
         const saved = Option.getOrUndefined(yield* SessionProgress.read(db, input.sessionID))
         yield* SessionProgress.save(db, input.sessionID, {

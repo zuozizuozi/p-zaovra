@@ -95,7 +95,7 @@ test("Q5 independent review names original sources, end-to-end evidence and unkn
   expect(SessionProgress.independentReview).toContain("not independent proof")
 })
 
-test("all five quality features are disabled when omitted", () => {
+test("quality configuration preserves omissions for runtime defaults", () => {
   expect(new ConfigExperimental.Experimental({}).quality_progress).toBeUndefined()
   const config = new ConfigExperimental.Experimental({ quality_progress: {} }).quality_progress
   expect(config?.facts).not.toBe(true)
