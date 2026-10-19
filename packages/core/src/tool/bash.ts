@@ -271,10 +271,11 @@ const layer = Layer.effectDiscard(
                 })
               const identity = yield* Effect.try({
                 try: () => ShellIdentity.resolve(frozen.identity!.path, frozen.identity!.source),
-                catch: (error) => new ToolFailure({
-                  message: String(error),
-                  metadata: { phase: "execution", reason: "shell-unavailable" },
-                }),
+                catch: (error) =>
+                  new ToolFailure({
+                    message: String(error),
+                    metadata: { phase: "execution", reason: "shell-unavailable" },
+                  }),
               })
               const shell = identity.path
               const approvedContract = ExecutionContext.approved(yield* history(database.db, context.sessionID))
@@ -393,7 +394,7 @@ const layer = Layer.effectDiscard(
                 if (
                   !beforeSpawn.identity ||
                   beforeSpawn.configuration !== frozen.configuration ||
-                  !ShellIdentity.same(frozen.identity, beforeSpawn.identity)
+                  !ShellIdentity.same(frozen.identity!, beforeSpawn.identity)
                 )
                   return yield* new ToolFailure({
                     message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
@@ -408,6 +409,7 @@ const layer = Layer.effectDiscard(
                     input.timeout !== undefined,
                     launchEnvironment,
                     Object.keys(input.environment ?? {}),
+                    identity.type,
                   ),
                   approvedContract,
                 )

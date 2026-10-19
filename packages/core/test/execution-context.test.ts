@@ -5,9 +5,111 @@ import { SessionOutcome } from "../src/session/outcome"
 import { SessionMessage } from "../src/session/message"
 import { tmpdir } from "./fixture/tmpdir"
 
+for (const [command, shell, value] of [
+  ["OMP_NUM_THREADS=1 node test.js", "bash", "1"],
+  ["env OMP_NUM_THREADS='1' node test.js", "posix", "1"],
+  ["OMP_NUM_THREADS=$VALUE node test.js", "bash", null],
+  ["env -i node test.js", "bash", null],
+  ["bash -c 'node test.js'", "bash", null],
+  ["$env:OMP_NUM_THREADS='1'; node test.js", "powershell", "1"],
+  ["$env:OMP_NUM_THREADS=$other; node test.js", "powershell", null],
+  ["set OMP_NUM_THREADS=1 & node test.js", "cmd", null],
+] as const) {
+  test(`N1 command environment cannot certify inherited 8: ${command}`, () => {
+    const approved = {
+      sourceMessageID: "msg_user",
+      value: { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } },
+    }
+    const captured = ExecutionContext.bind(
+      ExecutionContext.capture(command, "/project", 5000, false, { OMP_NUM_THREADS: "8" }, [], shell),
+      approved,
+    )
+    expect(captured.environment.OMP_NUM_THREADS?.observed.value).toBe(value)
+    expect(ExecutionContext.problems(captured, ExecutionContext.current(captured, approved))).toContain(
+      "OMP_NUM_THREADS: requested condition was not observed",
+    )
+    const check = {
+      kind: "test" as const,
+      command,
+      exit: 0,
+      callID: "inline",
+      snapshot: "same",
+      executionContext: captured,
+      contractDigest: ExecutionContext.digest(captured),
+    }
+    expect(SessionOutcome.checkFreshness(check, [], "same").fresh).toBe(false)
+    const restored = JSON.parse(JSON.stringify(check))
+    expect(
+      SessionOutcome.checkFreshness(restored, [], "same", ExecutionContext.current(captured, approved)).fresh,
+    ).toBe(false)
+  })
+}
+
+for (const shell of ["bash", "powershell"] as const)
+  for (const suffix of ["", " # OMP_NUM_THREADS=1", " 'OMP_NUM_THREADS=1'", ' "OMP_NUM_THREADS=1"'])
+    test(`N1 literal and comment control ${shell}: ${suffix}`, () => {
+      const approved = {
+        sourceMessageID: "user",
+        value: { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } },
+      }
+      const captured = ExecutionContext.bind(
+        ExecutionContext.capture(`node test.js${suffix}`, "/project", 5000, false, { OMP_NUM_THREADS: "8" }, [], shell),
+        approved,
+      )
+      expect(captured.environment.OMP_NUM_THREADS?.observed.value).toBe("8")
+      expect(ExecutionContext.problems(captured, captured)).toEqual([])
+    })
+
 test("K3 comments and quoted literals are not observed environment changes", () => {
   for (const command of ["node cli.js # OMP_NUM_THREADS=1", "node cli.js 'OMP_NUM_THREADS=1'"])
     expect(ExecutionContext.problems(ExecutionContext.capture(command, "/project", 5000, false))).toEqual([])
+})
+
+test("N1 legacy inline certificate cannot become fresh after reloading", async () => {
+  const contract = { sourceMessageID: "user", value: { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } } }
+  const context = ExecutionContext.bind(
+    ExecutionContext.capture("node test.js", "/project", 5000, false, { OMP_NUM_THREADS: "8" }),
+    contract,
+  )
+  const command = "OMP_NUM_THREADS=1 node test.js"
+  const legacy = { ...context, entry: { observed: { value: command, source: "observed" as const } } }
+  const check = {
+    kind: "test" as const,
+    command,
+    exit: 0,
+    callID: "legacy",
+    snapshot: "same",
+    executionContext: legacy,
+    contractDigest: ExecutionContext.digest(legacy),
+  }
+  expect(
+    SessionOutcome.checkFreshness(
+      JSON.parse(JSON.stringify(check)),
+      [],
+      "same",
+      ExecutionContext.current(legacy, contract),
+    ).fresh,
+  ).toBe(false)
+  await using directory = await tmpdir()
+  const file = `${directory.path}/certificate.json`
+  await Bun.write(file, JSON.stringify({ check, contract }))
+  const restarted = Bun.spawnSync(
+    [
+      process.execPath,
+      "-e",
+      `
+    import { ExecutionContext } from "./src/session/execution-context";
+    import { SessionOutcome } from "./src/session/outcome";
+    const {check, contract} = await Bun.file(${JSON.stringify(file)}).json();
+    const result = SessionOutcome.checkFreshness(check, [], "same", ExecutionContext.current(check.executionContext, contract));
+    console.log(JSON.stringify(result));
+    process.exitCode = result.fresh ? 1 : 0;
+  `,
+    ],
+    { cwd: process.cwd(), env: process.env },
+  )
+  expect(restarted.exitCode).toBe(0)
+  expect(JSON.parse(restarted.stdout.toString()).fresh).toBe(false)
 })
 
 test("K3 current approved contract invalidates changed entry or required unknown runtime, not unrelated observations", () => {

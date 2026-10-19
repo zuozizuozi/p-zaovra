@@ -2,6 +2,8 @@ export * as ExecutionContext from "./execution-context"
 
 import { createHash } from "node:crypto"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
+import type { ShellIdentity } from "../shell-identity"
+import { commandEnvironment } from "./command-environment"
 
 const names = Object.keys(SessionOutcome.ExecutionEnvironment.fields)
 
@@ -87,8 +89,10 @@ export function capture(
   explicitTimeout: boolean,
   launchEnvironment: NodeJS.ProcessEnv = process.env,
   temporary: readonly string[] = [],
+  shell: ShellIdentity.Identity["type"] = process.platform === "win32" ? "powershell" : "posix",
 ): SessionOutcome.ExecutionContext {
   const inherited = environment(launchEnvironment)
+  const inline = commandEnvironment(command, shell)
   return {
     entry: { observed: { value: command, source: "observed" } },
     cwd: { observed: { value: cwd, source: "observed" } },
@@ -101,12 +105,22 @@ export function capture(
       names.map((name) => {
         return [
           name,
-          !temporary.includes(name)
-            ? inherited[name as keyof SessionOutcome.ExecutionEnvironment]
-            : {
-                requested: { value: launchEnvironment[name] ?? null, source: "diagnostic-temporary" as const },
-                observed: { value: launchEnvironment[name] ?? null, source: "observed" as const },
-              },
+          !inline || name in inline
+            ? {
+                observed: {
+                  value: inline?.[name] ?? null,
+                  source:
+                    inline?.[name] === undefined || inline[name] === null
+                      ? ("unknown" as const)
+                      : ("diagnostic-temporary" as const),
+                },
+              }
+            : !temporary.includes(name)
+              ? inherited[name as keyof SessionOutcome.ExecutionEnvironment]
+              : {
+                  requested: { value: launchEnvironment[name] ?? null, source: "diagnostic-temporary" as const },
+                  observed: { value: launchEnvironment[name] ?? null, source: "observed" as const },
+                },
         ]
       }),
     ),
@@ -131,6 +145,12 @@ export function problems(
 ) {
   if (!context) return current?.contract ? ["approved execution contract was not observed"] : []
   const now = current?.environment ?? environment()
+  // Old certificates predate command-prefix capture. Revalidate their entry on
+  // every read, including after restart or history compaction. Shell provenance
+  // is absent in these records, so either supported syntax may reveal an override.
+  const prefixes = (["posix", "powershell"] as const)
+    .map((shell) => commandEnvironment(context.entry.observed.value ?? "", shell))
+    .filter((value) => value !== undefined)
   const entries = [
     ...(["entry", "cwd", "runtime", "timeout"] as const).map((name) => ({
       name,
@@ -150,6 +170,12 @@ export function problems(
     ...entries.flatMap(({ name, condition, current }) => {
       if (!condition) return []
       const requested = current?.requested ?? condition.requested
+      if (
+        names.includes(name) &&
+        requested?.value != null &&
+        (!prefixes.length || prefixes.some((prefix) => name in prefix && prefix[name] !== requested.value))
+      )
+        return [`${name}: requested condition was not observed`]
       if (requested?.source === "diagnostic-temporary")
         return [`${name}: diagnostic temporary condition is not the agreed execution contract`]
       if (condition.observed.source === "diagnostic-temporary" && requested?.source !== "user")

@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
 import path from "path"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -19,6 +19,11 @@ import { DateTime } from "effect"
 import { Database } from "@zaovra-ai/core/database/database"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { SessionInput } from "@zaovra-ai/core/session/input"
+import { ExecutionContext } from "@zaovra-ai/core/session/execution-context"
+import { SessionEvent } from "@zaovra-ai/core/session/event"
+import { SessionMessageTable } from "@zaovra-ai/core/session/sql"
+import { ModelV2 } from "@zaovra-ai/core/model"
+import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { location } from "./fixture/location"
@@ -35,6 +40,7 @@ const withRuntime = <A, E, R>(
     jobs: BackgroundJob.Interface,
   ) => Effect.Effect<A, E, R>,
   silent?: number,
+  shell: string = process.platform === "win32" ? "powershell" : "bash",
 ) =>
   Effect.acquireUseRelease(
     Effect.promise(() => tmpdir()),
@@ -72,12 +78,13 @@ const withRuntime = <A, E, R>(
                 Layer.succeed(Config.Service, {
                   entries: () =>
                     Effect.succeed(
-                      silent === undefined
+                      silent === undefined && !shell
                         ? []
                         : [
                             new Config.Document({
                               type: "document",
                               info: new Config.Info({
+                                shell,
                                 experimental: new ConfigExperimental.Experimental({
                                   quality_progress: { silent_command_ms: silent },
                                 }),
@@ -103,6 +110,196 @@ const withRuntime = <A, E, R>(
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   )
 
+for (const prefix of ["OMP_NUM_THREADS=1 ", "env OMP_NUM_THREADS=1 ", "", "#literal"])
+  it.live(`N1 actual BashTool contract cannot bless inline overrides: ${prefix}`, () =>
+    withRuntime(
+      (directory, sessions, registry) =>
+        Effect.gen(function* () {
+          const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+          const script = path.join(directory, "inline.cjs")
+          yield* Effect.promise(() => Bun.write(script, "console.log('actual=' + process.env.OMP_NUM_THREADS)"))
+          const command = `${prefix === "#literal" ? "" : prefix}'${process.execPath.replaceAll("\\", "/")}' '${script.replaceAll("\\", "/")}'${prefix === "#literal" ? " 'OMP_NUM_THREADS=1' # OMP_NUM_THREADS=1" : ""}`
+          const contract = { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } }
+          yield* sessions.prompt({
+            sessionID: session.id,
+            prompt: { text: "Check under approved environment", executionContract: contract },
+          })
+          const database = yield* Database.Service
+          const events = yield* EventV2.Service
+          yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
+          const result = yield* settleTool(registry, {
+            sessionID: session.id,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "inline-check",
+              name: "bash",
+              input: { command, verification: "smoke", verification_targets: [script] },
+            },
+          })
+          const overridden = prefix !== "" && prefix !== "#literal"
+          expect(JSON.stringify(result.output?.content)).toContain(`actual=${overridden ? "1" : "8"}`)
+          const checks = result.output?.structured as {
+            verification: Parameters<typeof SessionOutcome.checkFreshness>[0]
+          }
+          expect(checks.verification.exit).toBe(0)
+          expect(checks.verification.executionContext?.environment.OMP_NUM_THREADS?.observed.value).toBe(
+            overridden ? "1" : "8",
+          )
+          expect(
+            SessionOutcome.checkFreshness(
+              checks.verification,
+              checks.verification.targets ?? [],
+              undefined,
+              ExecutionContext.current(checks.verification.executionContext, {
+                sourceMessageID: "new-user",
+                value: contract,
+              }),
+            ).fresh,
+          ).toBe(!overridden)
+          // A persisted certificate must remain invalid when read again for a later request.
+          const restored = JSON.parse(JSON.stringify(checks.verification))
+          expect(
+            SessionOutcome.checkFreshness(
+              restored,
+              restored.targets,
+              undefined,
+              ExecutionContext.current(restored.executionContext, { sourceMessageID: "new-user", value: contract }),
+            ).fresh,
+          ).toBe(!overridden)
+          const message: SessionMessage.Assistant = {
+            id: SessionMessage.ID.create(),
+            type: "assistant",
+            agent: "build",
+            finish: "stop",
+            model: { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") },
+            time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+            content: [
+              {
+                type: "tool",
+                id: "inline-check",
+                name: "bash",
+                time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+                state: {
+                  status: "completed",
+                  input: { command },
+                  content: [],
+                  structured: { verification: checks.verification },
+                },
+              },
+            ],
+          }
+          yield* database.db
+            .insert(SessionMessageTable)
+            .values({
+              id: message.id,
+              session_id: session.id,
+              type: "assistant",
+              seq: 1_000_000,
+              data: Schema.encodeSync(SessionMessage.Message)(message),
+            })
+            .run()
+            .pipe(Effect.orDie)
+          const messageID = SessionMessage.ID.create()
+          yield* events.publish(SessionEvent.Compaction.Started, {
+            sessionID: session.id,
+            messageID,
+            timestamp: DateTime.makeUnsafe(3),
+            reason: "manual",
+          })
+          yield* events.publish(SessionEvent.Compaction.Ended, {
+            sessionID: session.id,
+            messageID,
+            timestamp: DateTime.makeUnsafe(4),
+            reason: "manual",
+            text: "All checks passed",
+            recent: "",
+          })
+          const durable = yield* SessionOutcome.history(database.db, session.id)
+          const persisted = durable.flatMap((item) =>
+            item.type === "assistant"
+              ? item.content.flatMap((part) => (part.type === "tool" ? SessionOutcome.toolChecks(part) : []))
+              : [],
+          )
+          expect(persisted).toHaveLength(1)
+          expect(
+            SessionOutcome.checkFreshness(
+              persisted[0],
+              checks.verification.targets ?? [],
+              undefined,
+              ExecutionContext.current(persisted[0].executionContext, ExecutionContext.approved(durable)),
+            ).fresh,
+          ).toBe(!overridden)
+        }),
+      undefined,
+      "bash",
+    ),
+  )
+
+if (process.platform === "win32")
+  for (const mode of ["inline", "explicit-conflict", "approved", "inherited"])
+    it.live(`N1 real PowerShell and explicit contract control: ${mode}`, () =>
+      withRuntime(
+        (directory, sessions, registry) =>
+          Effect.gen(function* () {
+            const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+            const script = path.join(directory, "powershell.cjs")
+            yield* Effect.promise(() => Bun.write(script, "console.log('actual=' + process.env.OMP_NUM_THREADS)"))
+            const command = `${mode === "inline" ? "$env:OMP_NUM_THREADS='1'; " : ""}& '${process.execPath}' '${script}'`
+            const contract = { version: 1 as const, environment: { OMP_NUM_THREADS: mode === "approved" ? "1" : "8" } }
+            yield* sessions.prompt({
+              sessionID: session.id,
+              prompt: { text: "Check approved environment", executionContract: contract },
+            })
+            const database = yield* Database.Service
+            const events = yield* EventV2.Service
+            yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
+            const result = yield* settleTool(registry, {
+              sessionID: session.id,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: mode,
+                name: "bash",
+                input: {
+                  command,
+                  verification: "smoke",
+                  verification_targets: [script],
+                  ...(mode === "explicit-conflict" || mode === "approved"
+                    ? { environment: { OMP_NUM_THREADS: "1" } }
+                    : {}),
+                },
+              },
+            })
+            expect(JSON.stringify(result.output?.content)).toContain(`actual=${mode === "inherited" ? "8" : "1"}`)
+            const output = result.output?.structured as {
+              exit: number
+              verification?: Parameters<typeof SessionOutcome.checkFreshness>[0]
+            }
+            expect(output.exit).toBe(0)
+            if (mode === "inline") {
+              // Compound PowerShell commands are deliberately not certified at all.
+              expect(output.verification).toBeUndefined()
+              return
+            }
+            expect(output.verification).toBeDefined()
+            expect(
+              SessionOutcome.checkFreshness(
+                output.verification!,
+                output.verification!.targets ?? [],
+                undefined,
+                ExecutionContext.current(output.verification!.executionContext, {
+                  sourceMessageID: "user",
+                  value: contract,
+                }),
+              ).fresh,
+            ).toBe(mode !== "explicit-conflict")
+          }),
+        undefined,
+        "powershell",
+      ),
+    )
+
 it.live("K3 records the actual explicit launch environment without scanning command comments", () =>
   withRuntime((directory, sessions, registry) =>
     Effect.gen(function* () {
@@ -124,6 +321,7 @@ it.live("K3 records the actual explicit launch environment without scanning comm
           },
         },
       })
+      if (result.result.type === "error") throw new Error(JSON.stringify(result))
       expect(result.output?.structured).toMatchObject({
         verification: {
           exit: 0,
