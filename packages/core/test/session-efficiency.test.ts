@@ -38,6 +38,48 @@ test("interleaved repeated probes are advisory, preserve history, and ignore lab
   expect(JSON.stringify(history)).toBe(before)
 })
 
+test("O6 efficiency ignores only root observation fields and retains actual inputs", () => {
+  const history = (change: Record<string, unknown> = {}): SessionMessage.Assistant => ({
+    ...calls([]),
+    content: calls(["bash", "bash"]).content.map((part, index) => {
+      if (part.type !== "tool" || part.state.status !== "completed") return part
+      return {
+        ...part,
+        state: {
+          ...part.state,
+          input: {
+            command: "printf ok",
+            progress_hypothesis: `hypothesis ${index}`,
+            progress_expected_evidence: `evidence ${index}`,
+            ...(index ? change : {}),
+          },
+        },
+      }
+    }),
+  })
+  expect(SessionEfficiency.repeatedInspection([history()])).toHaveLength(1)
+  for (const change of [
+    { command: "printf changed" },
+    { workdir: "other" },
+    { timeout: 123 },
+    { environment: { OMP_NUM_THREADS: "1" } },
+  ]) {
+    expect(SessionEfficiency.repeatedInspection([history(change)])).toEqual([])
+  }
+})
+
+test("O6 identity retains nested fields and unknown tool semantics", () => {
+  expect(SessionEfficiency.fingerprint("bash", { command: "ok", description: "a" })).toBe(
+    SessionEfficiency.fingerprint("bash", { description: "b", command: "ok" }),
+  )
+  expect(SessionEfficiency.fingerprint("custom", { description: "a" })).not.toBe(
+    SessionEfficiency.fingerprint("custom", { description: "b" }),
+  )
+  expect(SessionEfficiency.fingerprint("bash", { environment: { description: "a" } })).not.toBe(
+    SessionEfficiency.fingerprint("bash", { environment: { description: "b" } }),
+  )
+})
+
 test("edits reset probe history and one durable review suppresses further reminders", () => {
   expect(SessionEfficiency.repeatedInspection([calls(["bash", "write", "bash"])])).toEqual([])
   expect(

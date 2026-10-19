@@ -62,6 +62,7 @@ import { ConfigExperimental } from "@zaovra-ai/core/config/experimental"
 import { Tool } from "@zaovra-ai/core/tool/tool"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
 import { VerificationReviewTool } from "@zaovra-ai/core/tool/verification-review"
+import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { CommandV2 } from "@zaovra-ai/core/command"
 import {
   SessionContextEpochTable,
@@ -6199,6 +6200,73 @@ describe("SessionRunnerLLM", () => {
       ])
     }),
   )
+
+  for (const field of [
+    "fixed",
+    "progress_hypothesis",
+    "progress_expected_evidence",
+    "command",
+    "workdir",
+    "timeout",
+    "environment",
+  ])
+    it.effect(`O6 runner counts execution parameters, not observation text: ${field}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        qualityProgress = { facts: false }
+        const ran: string[] = []
+        const registry = yield* ToolRegistry.Service
+        yield* registry.register({
+          bash: Tool.make({
+            description: "Controlled execution leaf with public Bash parameters",
+            input: Schema.Struct({
+              ...BashTool.Input.fields,
+              progress_hypothesis: Schema.optional(Schema.String),
+              progress_expected_evidence: Schema.optional(Schema.String),
+            }),
+            output: Schema.Struct({ exit: Schema.Number }),
+            execute: (input) =>
+              Effect.sync(() => {
+                ran.push(input.command)
+                return { exit: 0 }
+              }),
+          }),
+        })
+        const session = yield* SessionV2.Service
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Inspect without repeating effects" }),
+          resume: false,
+        })
+        responses = Array.from({ length: 4 }, (_, index) => [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({
+            id: `o6-${index}`,
+            name: "bash",
+            input: {
+              command: field === "command" ? `printf ${index}` : "printf ok",
+              workdir: field === "workdir" ? `dir-${index}` : ".",
+              timeout: field === "timeout" ? 1000 + index : 1000,
+              environment: { OMP_NUM_THREADS: field === "environment" ? String(index + 1) : "8" },
+              progress_hypothesis: field === "progress_hypothesis" ? `hypothesis ${index}` : "fixed",
+              progress_expected_evidence: field === "progress_expected_evidence" ? `evidence ${index}` : "fixed",
+            },
+          }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ])
+        responses.push(fragmentFixture("text", "done", ["Done"]).completeEvents)
+        yield* session.resume(sessionID)
+        const repeated = ["fixed", "progress_hypothesis", "progress_expected_evidence"].includes(field)
+        expect(ran).toHaveLength(repeated ? 3 : 4)
+        expect(requests).toHaveLength(5)
+        const tools = (yield* session.context(sessionID)).flatMap((message) =>
+          message.type === "assistant" ? message.content.filter((part) => part.type === "tool") : [],
+        )
+        expect(tools.filter((part) => part.state.status === "error")).toHaveLength(repeated ? 1 : 0)
+      }),
+    )
 
   it.effect("blocks repeated identical tool side effects after three attempts", () =>
     Effect.gen(function* () {

@@ -815,11 +815,7 @@ const layer = Layer.effect(
               )
               return
             }
-            const fingerprint = `${event.name}:${JSON.stringify(event.input, (_key, value: unknown) =>
-              value && typeof value === "object" && !Array.isArray(value)
-                ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
-                : value,
-            )}`
+            const fingerprint = SessionEfficiency.fingerprint(event.name, event.input)
             // Only consecutive repetition is suspicious; editing between test runs is normal work.
             if (!toolCallAttempts.has(fingerprint)) toolCallAttempts.clear()
             const attempts = (toolCallAttempts.get(fingerprint) ?? 0) + 1
