@@ -269,7 +269,13 @@ const layer = Layer.effectDiscard(
                   message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
                   metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
                 })
-              const identity = frozen.identity
+              const identity = yield* Effect.try({
+                try: () => ShellIdentity.resolve(frozen.identity!.path, frozen.identity!.source),
+                catch: (error) => new ToolFailure({
+                  message: String(error),
+                  metadata: { phase: "execution", reason: "shell-unavailable" },
+                }),
+              })
               const shell = identity.path
               const approvedContract = ExecutionContext.approved(yield* history(database.db, context.sessionID))
               const launchEnvironment = { ...process.env, ...approvedContract?.value.environment, ...input.environment }
@@ -387,7 +393,7 @@ const layer = Layer.effectDiscard(
                 if (
                   !beforeSpawn.identity ||
                   beforeSpawn.configuration !== frozen.configuration ||
-                  !ShellIdentity.same(identity, beforeSpawn.identity)
+                  !ShellIdentity.same(frozen.identity, beforeSpawn.identity)
                 )
                   return yield* new ToolFailure({
                     message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
@@ -645,7 +651,7 @@ const layer = Layer.effectDiscard(
                     if (remaining <= 0)
                       return {
                         job_id,
-                        shell: frozen.identity,
+                        shell: identity,
                         output: `${partial || "(no output yet)"}\nCommand is still running under Session ownership. Use bash_job get/wait/cancel. No check has passed yet.`,
                         truncated: false,
                       }
@@ -658,7 +664,7 @@ const layer = Layer.effectDiscard(
                 return yield* run.pipe(
                   Effect.map((output) => ({
                     ...output,
-                    shell: frozen.identity,
+                    shell: identity,
                     ...("timeout" in output
                       ? { reason: "timeout" }
                       : "exit" in output && output.exit !== 0
@@ -682,7 +688,7 @@ const layer = Layer.effectDiscard(
               )
               return {
                 job_id,
-                shell: frozen.identity,
+                shell: identity,
                 output: "Command log is retained while the job runs.",
                 truncated: false,
                 ...(warnings.length ? { warnings } : {}),

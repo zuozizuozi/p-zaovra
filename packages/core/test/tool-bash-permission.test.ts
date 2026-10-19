@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
+import fs from "node:fs/promises"
 import { Effect, Layer } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Config } from "@zaovra-ai/core/config"
@@ -19,12 +20,16 @@ import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
+import { probeShell } from "./fixture/probe-shell"
 import { settleTool, toolIdentity } from "./lib/tool"
 
 test("real Bash permission denial prevents a process while allowed success and nonzero exits still execute", async () => {
   await using root = await tmpdir()
   const sessionID = SessionV2.ID.make("ses_real_bash_permission")
   const marker = path.join(root.path, "executed.txt")
+  const probe = await probeShell(root.path)
+  const configPath = path.join(root.path, "zaovra.json")
+  await Bun.write(configPath, JSON.stringify({ shell: probe.executable }))
   await Bun.write(
     path.join(root.path, "probe.mjs"),
     "import { writeFileSync } from 'node:fs'; writeFileSync('executed.txt', process.argv[2]); process.exitCode = Number(process.argv[2]);",
@@ -70,6 +75,8 @@ test("real Bash permission denial prevents a process while allowed success and n
       expect(denied.result.type).toBe("error")
       expect(denied.result.value).toContain("Command not executed: permission policy blocked")
       expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
+      expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
+      yield* Effect.promise(() => fs.unlink(configPath))
       const permission = yield* PermissionV2.Service
       expect(yield* permission.list()).toEqual([])
 

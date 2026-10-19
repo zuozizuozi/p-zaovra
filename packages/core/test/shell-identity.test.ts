@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "./fixture/tmpdir"
+import { probeShell } from "./fixture/probe-shell"
 import { Config } from "@zaovra-ai/core/config"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { describe, expect, test } from "bun:test"
@@ -10,6 +11,15 @@ import { AppProcess } from "@zaovra-ai/core/process"
 import { Effect, Stream } from "effect"
 
 describe("shared shell identity", () => {
+  test("O1 runner context snapshot never executes a project shell", async () => {
+    await using dir = await tmpdir()
+    const probe = await probeShell(dir.path)
+    await Bun.write(path.join(dir.path, "zaovra.json"), JSON.stringify({ shell: probe.executable }))
+    const snapshot = ShellIdentity.snapshot([], { directory: dir.path, project: { directory: dir.path } })
+    expect(snapshot.identity?.path).toBe(probe.executable)
+    expect(snapshot.identity?.source).toBe("project")
+    expect(await Bun.file(probe.marker).exists()).toBe(false)
+  })
   test("terminal, process and environment resolve the same absolute executable", () => {
     const identity = ShellIdentity.resolve()
     expect(identity.path).toBe(Shell.preferred())

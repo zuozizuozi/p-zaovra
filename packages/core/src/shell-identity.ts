@@ -82,7 +82,7 @@ export function snapshot(
   const source =
     relative !== undefined && !path.isAbsolute(relative) && !relative.startsWith("..") ? "global" : "project"
   try {
-    return { identity: resolve(selected?.shell, source), configuration }
+    return { identity: resolve(selected?.shell, source, false), configuration }
   } catch (error) {
     if (!(error instanceof Unavailable)) throw error
     return { error: error.message, configuration }
@@ -100,7 +100,11 @@ export function gitBash() {
   return candidates.find((file): file is string => !!file && !!statSync(file, { throwIfNoEntry: false })?.isFile())
 }
 
-export function resolve(configured?: string, source: Identity["source"] = configured ? "global" : "auto"): Identity {
+export function resolve(
+  configured?: string,
+  source: Identity["source"] = configured ? "global" : "auto",
+  inspect = true,
+): Identity {
   const windows = process.platform === "win32"
   const system = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe")
   const candidates = configured
@@ -112,7 +116,7 @@ export function resolve(configured?: string, source: Identity["source"] = config
           : [which("powershell") ?? system]
       : [path.isAbsolute(configured) ? configured : which(configured)]
     : windows
-      ? [...powershells(), system, process.env.COMSPEC ?? which("cmd")]
+      ? [...powershells(inspect), system, process.env.COMSPEC ?? which("cmd")]
       : [which("bash"), "/bin/sh"]
   for (const candidate of candidates) {
     if (!candidate || !statSync(candidate, { throwIfNoEntry: false })?.isFile()) continue
@@ -129,19 +133,20 @@ export function resolve(configured?: string, source: Identity["source"] = config
           : name === "bash"
             ? "bash"
             : "posix"
-    const version = probe(executable, type)
+    // Context construction and approval metadata must never execute the selected program.
+    const version = inspect ? probe(executable, type) : "unknown"
     if (!version) {
       if (configured) throw new Unavailable(configured)
       continue
     }
-    if (!configured && windows && type === "powershell" && name === "pwsh" && Number(version.split(".")[0]) < 7)
+    if (inspect && !configured && windows && type === "powershell" && name === "pwsh" && Number(version.split(".")[0]) < 7)
       continue
     return { path: executable, type, version, source: configured ? source : "auto" }
   }
   throw new Unavailable(configured ?? "auto")
 }
 
-function powershells() {
+function powershells(inspect: boolean) {
   const directory = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "PowerShell")
   const installed = statSync(directory, { throwIfNoEntry: false })?.isDirectory()
     ? readdirSync(directory, { withFileTypes: true })
@@ -150,8 +155,8 @@ function powershells() {
     : []
   return [...new Set([which("pwsh"), ...installed])]
     .filter((file): file is string => !!file && !!statSync(file, { throwIfNoEntry: false })?.isFile())
-    .map((file) => ({ file, version: probe(file, "powershell") }))
-    .filter((item) => !!item.version && Number(item.version.split(".")[0]) >= 7)
+    .map((file) => ({ file, version: inspect ? probe(file, "powershell") : "unknown" }))
+    .filter((item) => !inspect || (!!item.version && Number(item.version.split(".")[0]) >= 7))
     .sort((left, right) => right.version!.localeCompare(left.version!, undefined, { numeric: true }))
     .map((item) => item.file)
 }

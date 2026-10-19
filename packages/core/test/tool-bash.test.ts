@@ -29,6 +29,7 @@ import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
+import { probeShell } from "./fixture/probe-shell"
 import { testEffect } from "./lib/effect"
 import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/tool"
 
@@ -164,6 +165,27 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  for (const changed of [false, true])
+    it.live(`O1 project shell cannot probe before authorization (changed=${changed})`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.gen(function* () {
+          reset()
+          const probe = yield* Effect.promise(() => probeShell(tmp.path))
+          if (changed) afterPermission = () => Effect.sync(() => { configuredShell = probe.executable })
+          if (!changed) {
+            configuredShell = probe.executable
+            denyAction = "bash"
+          }
+          const settled = yield* withTool(tmp.path, (registry) => settleTool(registry, call({ command: "echo forbidden" })))
+          expect(settled.result.type).toBe("error")
+          expect(settled.result.value).toContain(changed ? "Environment changed" : "permission policy blocked")
+          expect(runs).toEqual([])
+          expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
+        }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
   it.live("rejects a shell changed during approval without running the command", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
