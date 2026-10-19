@@ -110,7 +110,15 @@ const withRuntime = <A, E, R>(
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   )
 
-for (const prefix of ["OMP_NUM_THREADS=1 ", "env OMP_NUM_THREADS=1 ", "", "#literal"])
+for (const prefix of [
+  "OMP_NUM_THREADS=1 ",
+  "env OMP_NUM_THREADS=1 ",
+  "OMP_NUM_THREADS+=1 ",
+  "time OMP_NUM_THREADS=1 ",
+  "timeout 60 env OMP_NUM_THREADS=1 ",
+  "",
+  "#literal",
+])
   it.live(`N1 actual BashTool contract cannot bless inline overrides: ${prefix}`, () =>
     withRuntime(
       (directory, sessions, registry) =>
@@ -118,7 +126,7 @@ for (const prefix of ["OMP_NUM_THREADS=1 ", "env OMP_NUM_THREADS=1 ", "", "#lite
           const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
           const script = path.join(directory, "inline.cjs")
           yield* Effect.promise(() => Bun.write(script, "console.log('actual=' + process.env.OMP_NUM_THREADS)"))
-          const command = `${prefix === "#literal" ? "" : prefix}'${process.execPath.replaceAll("\\", "/")}' '${script.replaceAll("\\", "/")}'${prefix === "#literal" ? " 'OMP_NUM_THREADS=1' # OMP_NUM_THREADS=1" : ""}`
+          const command = `${prefix === "#literal" ? "" : prefix}'${process.execPath.replaceAll("\\", "/")}' '${script.replaceAll("\\", "/")}'${prefix === "#literal" ? " 'ordinary-argument' # OMP_NUM_THREADS=1" : ""}`
           const contract = { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } }
           yield* sessions.prompt({
             sessionID: session.id,
@@ -138,13 +146,15 @@ for (const prefix of ["OMP_NUM_THREADS=1 ", "env OMP_NUM_THREADS=1 ", "", "#lite
             },
           })
           const overridden = prefix !== "" && prefix !== "#literal"
-          expect(JSON.stringify(result.output?.content)).toContain(`actual=${overridden ? "1" : "8"}`)
+          expect(JSON.stringify(result.output?.content)).toContain(
+            `actual=${prefix.includes("+=") ? "81" : overridden ? "1" : "8"}`,
+          )
           const checks = result.output?.structured as {
             verification: Parameters<typeof SessionOutcome.checkFreshness>[0]
           }
           expect(checks.verification.exit).toBe(0)
           expect(checks.verification.executionContext?.environment.OMP_NUM_THREADS?.observed.value).toBe(
-            overridden ? "1" : "8",
+            prefix.includes("+=") || prefix.startsWith("time") ? null : overridden ? "1" : "8",
           )
           expect(
             SessionOutcome.checkFreshness(
@@ -230,6 +240,22 @@ for (const prefix of ["OMP_NUM_THREADS=1 ", "env OMP_NUM_THREADS=1 ", "", "#lite
               ExecutionContext.current(persisted[0].executionContext, ExecutionContext.approved(durable)),
             ).fresh,
           ).toBe(!overridden)
+          if (overridden) {
+            const outcome = SessionOutcome.derive(
+              durable,
+              false,
+              undefined,
+              checks.verification.targets ?? [],
+              ["smoke"],
+              new Set(),
+              directory,
+              [],
+              true,
+              true,
+            )
+            expect(outcome.state).not.toBe("completed_verified")
+            expect(outcome.missing.join(" ")).toContain("OMP_NUM_THREADS: requested condition was not observed")
+          }
         }),
       undefined,
       "bash",

@@ -4,9 +4,60 @@ import { ExecutionContext } from "../src/session/execution-context"
 import { SessionOutcome } from "../src/session/outcome"
 import { SessionMessage } from "../src/session/message"
 import { tmpdir } from "./fixture/tmpdir"
+import { commandEnvironment } from "../src/session/command-environment"
+
+for (const wrapper of [
+  "time",
+  "timeout",
+  "nice",
+  "ionice",
+  "stdbuf",
+  "taskset",
+  "numactl",
+  "chrt",
+  "setsid",
+  "xargs",
+  "watch",
+  "strace",
+  "ltrace",
+  "valgrind",
+  "perf",
+  "systemd-run",
+  "script",
+  "unbuffer",
+  "doas",
+  "su",
+  "runuser",
+])
+  test(`N1 wrapper is unknown even without visible assignments: ${wrapper}`, () => {
+    expect(commandEnvironment(`${wrapper} node test.js`, "bash")).toBeUndefined()
+    expect(commandEnvironment(`/usr/bin/${wrapper} node test.js`, "posix")).toBeUndefined()
+  })
+
+test("N1 protected assignment arguments are unknown, including quoted and append forms", () => {
+  for (const name of [
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "BLIS_NUM_THREADS",
+  ])
+    for (const operator of ["=", "+="])
+      for (const quote of ["", "'", '"'])
+        expect(
+          commandEnvironment(`custom-wrapper ${quote}${name}${operator}1${quote} node test.js`, "bash"),
+        ).toBeUndefined()
+  expect(commandEnvironment("OTHER+=1 node test.js", "bash")).toBeUndefined()
+  expect(commandEnvironment("OTHER=1 node test.js", "bash")).toEqual({ OTHER: "1" })
+})
 
 for (const [command, shell, value] of [
   ["OMP_NUM_THREADS=1 node test.js", "bash", "1"],
+  ["OMP_NUM_THREADS+=1 node test.js", "bash", null],
+  ["time OMP_NUM_THREADS=1 node test.js", "bash", null],
+  ["timeout 60 env OMP_NUM_THREADS=1 node test.js", "bash", null],
+  ["custom-wrapper OMP_NUM_THREADS=1 node test.js", "bash", null],
   ["env OMP_NUM_THREADS='1' node test.js", "posix", "1"],
   ["OMP_NUM_THREADS=$VALUE node test.js", "bash", null],
   ["env -i node test.js", "bash", null],
@@ -46,7 +97,7 @@ for (const [command, shell, value] of [
 }
 
 for (const shell of ["bash", "powershell"] as const)
-  for (const suffix of ["", " # OMP_NUM_THREADS=1", " 'OMP_NUM_THREADS=1'", ' "OMP_NUM_THREADS=1"'])
+  for (const suffix of ["", " # OMP_NUM_THREADS=1", " 'ordinary-argument'"])
     test(`N1 literal and comment control ${shell}: ${suffix}`, () => {
       const approved = {
         sourceMessageID: "user",
@@ -65,39 +116,44 @@ test("K3 comments and quoted literals are not observed environment changes", () 
     expect(ExecutionContext.problems(ExecutionContext.capture(command, "/project", 5000, false))).toEqual([])
 })
 
-test("N1 legacy inline certificate cannot become fresh after reloading", async () => {
-  const contract = { sourceMessageID: "user", value: { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } } }
-  const context = ExecutionContext.bind(
-    ExecutionContext.capture("node test.js", "/project", 5000, false, { OMP_NUM_THREADS: "8" }),
-    contract,
-  )
-  const command = "OMP_NUM_THREADS=1 node test.js"
-  const legacy = { ...context, entry: { observed: { value: command, source: "observed" as const } } }
-  const check = {
-    kind: "test" as const,
-    command,
-    exit: 0,
-    callID: "legacy",
-    snapshot: "same",
-    executionContext: legacy,
-    contractDigest: ExecutionContext.digest(legacy),
-  }
-  expect(
-    SessionOutcome.checkFreshness(
-      JSON.parse(JSON.stringify(check)),
-      [],
-      "same",
-      ExecutionContext.current(legacy, contract),
-    ).fresh,
-  ).toBe(false)
-  await using directory = await tmpdir()
-  const file = `${directory.path}/certificate.json`
-  await Bun.write(file, JSON.stringify({ check, contract }))
-  const restarted = Bun.spawnSync(
-    [
-      process.execPath,
-      "-e",
-      `
+for (const command of [
+  "OMP_NUM_THREADS=1 node test.js",
+  "OMP_NUM_THREADS+=1 node test.js",
+  "time OMP_NUM_THREADS=1 node test.js",
+  "timeout 60 env OMP_NUM_THREADS=1 node test.js",
+])
+  test(`N1 legacy inline certificate cannot become fresh after reloading: ${command}`, async () => {
+    const contract = { sourceMessageID: "user", value: { version: 1 as const, environment: { OMP_NUM_THREADS: "8" } } }
+    const context = ExecutionContext.bind(
+      ExecutionContext.capture("node test.js", "/project", 5000, false, { OMP_NUM_THREADS: "8" }),
+      contract,
+    )
+    const legacy = { ...context, entry: { observed: { value: command, source: "observed" as const } } }
+    const check = {
+      kind: "test" as const,
+      command,
+      exit: 0,
+      callID: "legacy",
+      snapshot: "same",
+      executionContext: legacy,
+      contractDigest: ExecutionContext.digest(legacy),
+    }
+    expect(
+      SessionOutcome.checkFreshness(
+        JSON.parse(JSON.stringify(check)),
+        [],
+        "same",
+        ExecutionContext.current(legacy, contract),
+      ).fresh,
+    ).toBe(false)
+    await using directory = await tmpdir()
+    const file = `${directory.path}/certificate.json`
+    await Bun.write(file, JSON.stringify({ check, contract }))
+    const restarted = Bun.spawnSync(
+      [
+        process.execPath,
+        "-e",
+        `
     import { ExecutionContext } from "./src/session/execution-context";
     import { SessionOutcome } from "./src/session/outcome";
     const {check, contract} = await Bun.file(${JSON.stringify(file)}).json();
@@ -105,12 +161,12 @@ test("N1 legacy inline certificate cannot become fresh after reloading", async (
     console.log(JSON.stringify(result));
     process.exitCode = result.fresh ? 1 : 0;
   `,
-    ],
-    { cwd: process.cwd(), env: process.env },
-  )
-  expect(restarted.exitCode).toBe(0)
-  expect(JSON.parse(restarted.stdout.toString()).fresh).toBe(false)
-})
+      ],
+      { cwd: process.cwd(), env: process.env },
+    )
+    expect(restarted.exitCode).toBe(0)
+    expect(JSON.parse(restarted.stdout.toString()).fresh).toBe(false)
+  })
 
 test("K3 current approved contract invalidates changed entry or required unknown runtime, not unrelated observations", () => {
   const approved = {

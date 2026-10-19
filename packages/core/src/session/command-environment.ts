@@ -1,4 +1,5 @@
 import path from "node:path"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import type { ShellIdentity } from "../shell-identity"
 
 // This recognizes only a literal command prefix, not arbitrary shell programs.
@@ -28,6 +29,16 @@ export function commandEnvironment(command: string, shell: ShellIdentity.Identit
     // A newline starts another command, not another argument.
     if (/^[ \t]*[\r\n]/.test(token.rest)) return undefined
     rest = token.rest.trimStart()
+    // Assignment-like arguments may belong to an unrecognized wrapper. Quotes
+    // do not make them safe: env and other wrappers receive the unquoted text.
+    if (
+      (!executable && /^[a-zA-Z_][a-zA-Z0-9_]*[^a-zA-Z0-9_=]+=/.test(token.text)) ||
+      (executable &&
+        Object.keys(SessionOutcome.ExecutionEnvironment.fields).some(
+          (name) => token.text.startsWith(`${name}=`) || token.text.startsWith(`${name}+=`),
+        ))
+    )
+      return undefined
     if (!executable && shell !== "powershell") {
       const assignment = (env ? token.text : token.raw).match(/^([a-zA-Z_][a-zA-Z0-9_]*)=/)
       if (assignment) {
@@ -65,6 +76,27 @@ export function commandEnvironment(command: string, shell: ShellIdentity.Identit
           "command",
           "builtin",
           "nohup",
+          "time",
+          "timeout",
+          "nice",
+          "ionice",
+          "stdbuf",
+          "taskset",
+          "numactl",
+          "chrt",
+          "setsid",
+          "xargs",
+          "watch",
+          "strace",
+          "ltrace",
+          "valgrind",
+          "perf",
+          "systemd-run",
+          "script",
+          "unbuffer",
+          "doas",
+          "su",
+          "runuser",
           "sudo",
           "source",
           ".",
