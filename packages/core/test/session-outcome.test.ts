@@ -297,6 +297,87 @@ test("fresh HTML interaction covers HTML syntax but does not waive explicit synt
   )
 })
 
+for (const [label, metadata] of [
+  ["policy deny", { phase: "permission", reason: "BlockedError" }],
+  ["user correction", { phase: "permission", reason: "CorrectedError" }],
+  ["invalid input", { phase: "input" }],
+  ["missing workdir", { phase: "input", reason: "missing-directory" }],
+  ["no shell", { phase: "execution", reason: "shell-unavailable" }],
+  ["environment changed", { phase: "execution", reason: "environment-changed" }],
+] as const)
+  test(`N2 host ${label} remains not-run with scope and does not count as shell failure`, () => {
+    const directory = path.resolve("workspace")
+    const tool: SessionMessage.AssistantTool = {
+      id: "not-run",
+      type: "tool",
+      name: "bash",
+      time: assistant.time,
+      state: {
+        status: "error",
+        input: { command: "npm run lint", verification: "lint", workdir: "src", verification_targets: ["source.ts"] },
+        content: [],
+        structured: {},
+        error: { type: "unknown", message: "Host refused this invocation", metadata },
+      },
+    }
+    const history = [{ ...assistant, content: [tool] }]
+    const result = SessionOutcome.derive(history, false, undefined, [], [], undefined, directory)
+    expect(result.state).toBe("completed_unverified")
+    expect(result.checks).toMatchObject([
+      {
+        exit: -1,
+        execution: "not-run",
+        cwd: path.join(directory, "src"),
+        targets: [{ path: path.join(directory, "src/source.ts"), digest: "" }],
+      },
+    ])
+    expect(SessionOutcome.shellRecovery(history).failures).toBe(0)
+    expect(
+      SessionOutcome.derive(
+        [{ ...assistant, metadata: { verificationEnabled: false }, content: [tool] }],
+        false,
+        undefined,
+        [],
+        [],
+      ).state,
+    ).toBe("completed")
+  })
+
+test("N2 actual execution failure cannot be relabeled by diagnostic text", () => {
+  const tool: SessionMessage.AssistantTool = {
+    id: "failed",
+    type: "tool",
+    name: "bash",
+    time: assistant.time,
+    state: {
+      status: "error",
+      input: { command: "npm run lint", verification: "lint" },
+      content: [],
+      structured: {},
+      error: {
+        type: "unknown",
+        message: "No command was executed is text printed by a failing test",
+        metadata: { phase: "execution", reason: "non-zero-exit" },
+      },
+    },
+  }
+  const history = [{ ...assistant, content: [tool] }]
+  const result = SessionOutcome.derive(history, false, undefined, [], [])
+  expect(result.state).toBe("failed")
+  expect(result.checks[0].execution).toBeUndefined()
+  expect(SessionOutcome.shellRecovery(history).failures).toBe(1)
+  const completed: SessionMessage.AssistantTool = {
+    ...tool,
+    state: {
+      status: "completed",
+      input: { command: "npm run lint", verification: "lint" },
+      content: [{ type: "text", text: "Command not executed" }],
+      structured: { exit: 7, verification: { callID: "failed", kind: "lint", command: "npm run lint", exit: 7 } },
+    },
+  }
+  expect(SessionOutcome.derive([{ ...assistant, content: [completed] }], false, undefined, [], []).state).toBe("failed")
+})
+
 test("invalid assertion input remains an input rejection rather than a projected verification check", () => {
   const tool: SessionMessage.AssistantTool = {
     id: "bad-path",

@@ -228,10 +228,18 @@ export function singleCommand(command: string) {
 }
 
 function rejected(tool: SessionMessage.AssistantTool) {
+  if (tool.state.status !== "error") return false
+  const metadata = tool.state.error.metadata
+  // Host phases outrank diagnostic text, which may quote a failing program.
+  if (metadata?.phase)
+    return (
+      metadata.phase === "permission" ||
+      metadata.phase === "input" ||
+      (metadata.phase === "execution" && ["shell-unavailable", "environment-changed"].includes(metadata.reason ?? ""))
+    )
   return (
-    tool.state.status === "error" &&
-    (tool.provider?.resultMetadata?.zaovra?.inputRejected === true ||
-      /^(?:Invalid tool input:)|No command was executed|Nothing was executed/i.test(tool.state.error.message))
+    tool.provider?.resultMetadata?.zaovra?.inputRejected === true ||
+    /^(?:Invalid tool input:)|No command was executed|Nothing was executed/i.test(tool.state.error.message)
   )
 }
 

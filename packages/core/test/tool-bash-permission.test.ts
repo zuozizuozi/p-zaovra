@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import fs from "node:fs/promises"
-import { Effect, Layer } from "effect"
+import { DateTime, Effect, Layer } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Config } from "@zaovra-ai/core/config"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -14,6 +14,10 @@ import { Project } from "@zaovra-ai/core/project"
 import { ProjectTable } from "@zaovra-ai/core/project/sql"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionV2 } from "@zaovra-ai/core/session"
+import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
+import { SessionMessage } from "@zaovra-ai/core/session/message"
+import { ModelV2 } from "@zaovra-ai/core/model"
+import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { SessionTable } from "@zaovra-ai/core/session/sql"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
@@ -70,12 +74,47 @@ test("real Bash permission denial prevents a process while allowed success and n
       const denied = yield* settleTool(registry, {
         sessionID,
         ...toolIdentity,
-        call: { type: "tool-call", id: "denied", name: "bash", input: { command: "bun probe.mjs 0" } },
+        call: {
+          type: "tool-call",
+          id: "denied",
+          name: "bash",
+          input: { command: "bun probe.mjs 0", verification: "lint" },
+        },
       })
       expect(denied.result.type).toBe("error")
       expect(denied.result.value).toContain("Command not executed: permission policy blocked")
       expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
       expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
+      if (denied.result.type !== "error") throw new Error("expected denied tool")
+      const message: SessionMessage.Assistant = {
+        id: SessionMessage.ID.create(),
+        type: "assistant",
+        agent: "build",
+        finish: "stop",
+        metadata: { verificationEnabled: true },
+        model: { id: ModelV2.ID.make("offline"), providerID: ProviderV2.ID.make("offline") },
+        time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+        content: [
+          {
+            type: "tool",
+            id: "denied",
+            name: "bash",
+            time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+            state: {
+              status: "error",
+              input: { command: "bun probe.mjs 0", verification: "lint" },
+              content: [],
+              structured: {},
+              error: { type: "unknown", message: denied.result.value, metadata: denied.errorMetadata },
+            },
+          },
+        ],
+      }
+      expect(SessionOutcome.derive([message], false, undefined, [], [], undefined, root.path)).toMatchObject({
+        state: "completed_unverified",
+        checks: [{ execution: "not-run", cwd: root.path }],
+      })
+      expect(SessionOutcome.shellRecovery([message]).failures).toBe(0)
       yield* Effect.promise(() => fs.unlink(configPath))
       const permission = yield* PermissionV2.Service
       expect(yield* permission.list()).toEqual([])
