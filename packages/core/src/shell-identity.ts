@@ -82,7 +82,9 @@ export function snapshot(
   const source =
     relative !== undefined && !path.isAbsolute(relative) && !relative.startsWith("..") ? "global" : "project"
   try {
-    return { identity: resolve(selected?.shell, source, false), configuration }
+    // Only project-provided programs need execution authorization. Preserve
+    // trusted automatic/global discovery's version filtering and guidance.
+    return { identity: resolve(selected?.shell, source, !selected?.shell || source === "global"), configuration }
   } catch (error) {
     if (!(error instanceof Unavailable)) throw error
     return { error: error.message, configuration }

@@ -11,6 +11,46 @@ import { AppProcess } from "@zaovra-ai/core/process"
 import { Effect, Stream } from "effect"
 
 describe("shared shell identity", () => {
+  test("O1 trusted global shell retains version and syntax guidance", async () => {
+    await using dir = await tmpdir()
+    const probe = await probeShell(dir.path)
+    await Bun.write(path.join(dir.path, "zaovra.json"), JSON.stringify({ shell: probe.executable }))
+    const snapshot = ShellIdentity.snapshot([
+      new Config.Directory({ type: "directory", path: AbsolutePath.make(dir.path) }),
+    ])
+    expect(snapshot.identity).toMatchObject({ source: "global", version: "1.0.0" })
+    expect(await Bun.file(probe.marker).exists()).toBe(true)
+  })
+  if (process.platform === "win32")
+    for (const version of ["5.1", "7.4"])
+      test(`O1 trusted auto discovery applies version filter: ${version}`, async () => {
+        await using dir = await tmpdir()
+        const probe = await probeShell(dir.path, version, "pwsh")
+        const result = Bun.spawnSync(
+          [
+            process.execPath,
+            "-e",
+            'import { ShellIdentity } from "./src/shell-identity"; const value = ShellIdentity.snapshot([]); console.log(JSON.stringify({ ...value, guidance: value.identity && ShellIdentity.guidance(value.identity) }));',
+          ],
+          {
+            cwd: process.cwd(),
+            env: { ...process.env, PATH: dir.path, Path: dir.path, ProgramFiles: dir.path },
+          },
+        )
+        expect(result.exitCode).toBe(0)
+        const snapshot = JSON.parse(result.stdout.toString())
+        expect(snapshot.identity.source).toBe("auto")
+        expect(snapshot.identity.version).toStartWith(version === "5.1" ? "5.1" : "7.4")
+        if (version === "5.1") {
+          expect(snapshot.identity.path).not.toBe(probe.executable)
+          expect(snapshot.guidance).toContain("Does not support &&")
+        }
+        if (version === "7.4") {
+          expect(snapshot.identity.path.toLowerCase()).toBe(probe.executable.toLowerCase())
+          expect(snapshot.guidance).toContain("Supports &&")
+        }
+        expect(await Bun.file(probe.marker).exists()).toBe(true)
+      }, 15000)
   test("O1 runner context snapshot never executes a project shell", async () => {
     await using dir = await tmpdir()
     const probe = await probeShell(dir.path)
