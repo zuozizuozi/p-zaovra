@@ -23,8 +23,10 @@ import { Tools } from "./tools"
 import { BashJob } from "./bash-job"
 import { ExecutionContext } from "../session/execution-context"
 import { Database } from "../database/database"
-import { history } from "../session/outcome"
-import { createHash } from "node:crypto"
+import { history, latestExecutionSequence } from "../session/outcome"
+import { createHash, randomUUID } from "node:crypto"
+
+let executionSequence = 0
 
 export const name = "bash"
 export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
@@ -94,6 +96,7 @@ export const Input = Schema.Struct({
 })
 
 const StructuredOutput = Schema.Struct({
+  executionRecord: Schema.optional(SessionOutcome.ExecutionRecord),
   shell: Schema.optional(
     Schema.Struct({ path: Schema.String, type: Schema.String, version: Schema.String, source: Schema.String }),
   ),
@@ -197,6 +200,7 @@ const layer = Layer.effectDiscard(
           toStructuredOutput: ({ output }) => ({
             ...(output.shell ? { shell: output.shell } : {}),
             ...(output.reason ? { reason: output.reason } : {}),
+            ...(output.executionRecord ? { executionRecord: output.executionRecord } : {}),
             ...(output.verification ? { verification: output.verification } : {}),
             ...(output.verifications ? { verifications: output.verifications } : {}),
             truncated: output.truncated,
@@ -278,7 +282,8 @@ const layer = Layer.effectDiscard(
                   }),
               })
               const shell = identity.path
-              const approvedContract = ExecutionContext.approved(yield* history(database.db, context.sessionID))
+              const previousExecutions = yield* history(database.db, context.sessionID, true)
+              const approvedContract = ExecutionContext.approved(previousExecutions)
               const launchEnvironment = { ...process.env, ...approvedContract?.value.environment, ...input.environment }
               const command = AppProcess.shellCommand(input.command, target.canonical, shell, launchEnvironment)
               const silence = input.run_in_background
@@ -413,6 +418,28 @@ const layer = Layer.effectDiscard(
                   ),
                   approvedContract,
                 )
+                const executionStart = Date.now()
+                executionSequence = Math.max(
+                  executionSequence + 1,
+                  executionStart * 1000,
+                  latestExecutionSequence(previousExecutions) + 1,
+                )
+                const executionIdentity = {
+                  scope: {
+                    cwd: target.canonical,
+                    command: input.command,
+                    targets: [...new Set(targets)].sort(),
+                    kind: verification,
+                    sample: input.verification_sample,
+                  },
+                  id: randomUUID(),
+                  originCallID: context.toolCallID,
+                  sequence: executionSequence,
+                  started: executionStart,
+                  ...(silence || input.run_in_background
+                    ? { jobID: "msg_bash_" + context.assistantMessageID + "_" + context.toolCallID }
+                    : {}),
+                }
                 yield* Deferred.succeed(started, undefined)
                 const result = yield* appProcess
                   .run(command, {
@@ -451,11 +478,17 @@ const layer = Layer.effectDiscard(
                       isTimeout(error) ? Effect.succeed(error) : Effect.fail(error),
                     ),
                   )
+                const executionRecord = {
+                  ...executionIdentity,
+                  completed: Date.now(),
+                  ...(result instanceof AppProcess.AppProcessError ? {} : { exit: result.exitCode }),
+                }
                 if (result instanceof AppProcess.AppProcessError) {
                   return {
                     output: `${result.output || "(no output)"}${result.outputTruncated ? "\n[in-memory preview truncated; consult the command log for captured bytes]" : ""}\nCommand exceeded timeout of ${timeout} ms. Inspect the output before deciding whether to change the command or allow more time.`,
                     truncated: result.outputTruncated === true,
                     timeout: true,
+                    executionRecord,
                     ...(verification && targetsValid
                       ? {
                           verification: {
@@ -501,6 +534,7 @@ const layer = Layer.effectDiscard(
                 const record =
                   verification && targetsValid
                     ? {
+                        executionRecord,
                         kind: verification,
                         command: input.command,
                         exit: result.exitCode,
@@ -569,6 +603,7 @@ const layer = Layer.effectDiscard(
                   )
                     return {
                       output: `${output}\nInvalid legacy verification report. Prefer rerunning the ordinary check with verification and verification_requirements, without verification_report; normal stdout is accepted. Existing JSON runners must emit only {"checks":[{"kind":"test","status":"passed"}]} with actual results. Allowed kinds: build, test, lint, typecheck, syntax, smoke, interaction; "acceptance" is not a kind. Status: passed, failed or skipped. Kinds must be distinct. No checks certified.`,
+                      executionRecord,
                       exit: result.exitCode,
                       ...(result.reason ? { reason: result.reason } : {}),
                       truncated: result.outputTruncated === true,
@@ -581,6 +616,7 @@ const layer = Layer.effectDiscard(
                     }
                   return {
                     output,
+                    executionRecord,
                     exit: result.exitCode,
                     ...(result.reason ? { reason: result.reason } : {}),
                     truncated: false,
@@ -610,6 +646,7 @@ const layer = Layer.effectDiscard(
                   }
                 }
                 return {
+                  executionRecord,
                   ...(record ? { verification: record } : {}),
                   exit: result.exitCode,
                   ...(result.reason ? { reason: result.reason } : {}),
@@ -625,6 +662,7 @@ const layer = Layer.effectDiscard(
                   run.pipe(
                     Effect.tap((output) =>
                       jobs.record(`msg_bash_${context.assistantMessageID}_${context.toolCallID}`, {
+                        executionRecord: output.executionRecord,
                         verification: "verification" in output ? output.verification : undefined,
                         verifications: "verifications" in output ? output.verifications : undefined,
                       }),
@@ -677,6 +715,13 @@ const layer = Layer.effectDiscard(
               const job_id = yield* jobs.start(
                 input.command,
                 run.pipe(
+                  Effect.tap((output) =>
+                    jobs.record("msg_bash_" + context.assistantMessageID + "_" + context.toolCallID, {
+                      executionRecord: output.executionRecord,
+                      verification: "verification" in output ? output.verification : undefined,
+                      verifications: "verifications" in output ? output.verifications : undefined,
+                    }),
+                  ),
                   Effect.flatMap((output) => {
                     const text = `${output.output}\n${modelOutput(output)}`
                     return "timeout" in output || output.exit !== 0

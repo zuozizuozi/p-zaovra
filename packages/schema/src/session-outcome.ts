@@ -51,7 +51,26 @@ export const ExecutionContext = Schema.Struct({
 }).annotate({ identifier: "SessionOutcome.ExecutionContext" })
 export interface ExecutionContext extends Schema.Schema.Type<typeof ExecutionContext> {}
 
+export const ExecutionRecord = Schema.Struct({
+  scope: Schema.Struct({
+    cwd: Schema.String,
+    command: Schema.String,
+    targets: Schema.Array(Schema.String),
+    kind: Schema.String.pipe(optional),
+    sample: Schema.String.pipe(optional),
+  }),
+  id: Schema.String,
+  originCallID: Schema.String,
+  jobID: Schema.String.pipe(optional),
+  sequence: Schema.Number,
+  started: Schema.Number,
+  completed: Schema.Number.pipe(optional),
+  exit: Schema.Number.pipe(optional),
+}).annotate({ identifier: "SessionOutcome.ExecutionRecord" })
+export interface ExecutionRecord extends Schema.Schema.Type<typeof ExecutionRecord> {}
+
 export const Check = Schema.Struct({
+  executionRecord: ExecutionRecord.pipe(optional),
   resultDigest: Schema.String.pipe(optional),
   sample: Schema.Struct({ id: Schema.String, planDigest: Schema.String }).pipe(optional),
   kind: Schema.Literals(["build", "test", "lint", "typecheck", "syntax", "smoke", "interaction"]),

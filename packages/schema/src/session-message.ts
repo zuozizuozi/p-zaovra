@@ -1,6 +1,7 @@
 export * as SessionMessage from "./session-message"
 
 import { Schema } from "effect"
+import { SessionOutcome } from "./session-outcome"
 import { optional } from "./schema"
 import { ProviderMetadata, ToolContent } from "./llm"
 import { Model } from "./model"
@@ -74,6 +75,8 @@ export interface Shell extends Schema.Schema.Type<typeof Shell> {}
 export const Shell = Schema.Struct({
   ...Base,
   type: Schema.Literal("shell"),
+  executionRecord: SessionOutcome.ExecutionRecord.pipe(optional),
+  checks: Schema.Array(SessionOutcome.Check).pipe(optional),
   callID: Schema.String,
   command: Schema.String,
   output: Schema.String,

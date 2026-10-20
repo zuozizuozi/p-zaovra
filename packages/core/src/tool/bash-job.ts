@@ -20,7 +20,11 @@ export class Service extends Context.Service<
   {
     readonly record: (
       id: string,
-      result: { verification?: SessionOutcome.Check; verifications?: readonly SessionOutcome.Check[] },
+      result: {
+        executionRecord?: SessionOutcome.ExecutionRecord
+        verification?: SessionOutcome.Check
+        verifications?: readonly SessionOutcome.Check[]
+      },
     ) => Effect.Effect<void>
     readonly start: (
       command: string,
@@ -46,7 +50,11 @@ const layer = Layer.effect(
     const owned = new Set<string>()
     const results = new Map<
       string,
-      { verification?: SessionOutcome.Check; verifications?: readonly SessionOutcome.Check[] }
+      {
+        executionRecord?: SessionOutcome.ExecutionRecord
+        verification?: SessionOutcome.Check
+        verifications?: readonly SessionOutcome.Check[]
+      }
     >()
     yield* Effect.addFinalizer(() => Effect.forEach(owned, (id) => jobs.cancel(id), { discard: true }))
 
@@ -104,6 +112,10 @@ const layer = Layer.effect(
                         ? "Background command cancelled. Its effects may be partial; inspect the command log before retrying."
                         : `Background command failed: ${Cause.pretty(exit.cause)}`,
                     timestamp: DateTime.nowUnsafe(),
+                    executionRecord: results.get(id)?.executionRecord,
+                    checks:
+                      results.get(id)?.verifications ??
+                      (results.get(id)?.verification ? [results.get(id)!.verification!] : []),
                   }),
                 ),
                 Effect.ensuring(
@@ -131,6 +143,7 @@ const layer = Layer.effect(
               timeout: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)).pipe(Schema.optional),
             }),
             output: Schema.Struct({
+              executionRecord: Schema.optional(SessionOutcome.ExecutionRecord),
               status: Schema.String,
               output: Schema.String,
               verification: Schema.optional(SessionOutcome.Check),
@@ -141,11 +154,13 @@ const layer = Layer.effect(
             structured: Schema.Struct({
               verification: Schema.optional(SessionOutcome.Check),
               verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
+              executionRecord: Schema.optional(SessionOutcome.ExecutionRecord),
               status: Schema.String,
               kind: Schema.optional(Schema.String),
               workdir: Schema.optional(Schema.String),
             }),
             toStructuredOutput: ({ output }) => ({
+              executionRecord: output.executionRecord,
               status: output.status,
               kind: output.kind,
               workdir: output.workdir,
@@ -198,6 +213,8 @@ const layer = Layer.effect(
                 if (!job)
                   return {
                     status: record.message.time.completed ? "finished" : "unavailable",
+                    executionRecord: record.message.executionRecord,
+                    verifications: record.message.checks,
                     output:
                       notice +
                       (record.message.output ||
@@ -212,14 +229,13 @@ const layer = Layer.effect(
                       : job
                 const evidence = result && result.status !== "running" ? results.get(input.job_id) : undefined
                 return {
-                  ...(evidence?.verification
-                    ? { verification: { ...evidence.verification, callID: context.toolCallID } }
-                    : {}),
+                  executionRecord: evidence?.executionRecord,
+                  ...(evidence?.verification ? { verification: evidence.verification } : {}),
                   ...(evidence?.verifications
                     ? {
                         verifications: evidence.verifications.map((check) => ({
                           ...check,
-                          callID: context.toolCallID,
+                          callID: check.callID,
                         })),
                       }
                     : {}),

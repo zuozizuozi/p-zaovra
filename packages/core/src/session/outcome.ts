@@ -304,34 +304,90 @@ export function requested(messages: readonly SessionMessage.Message[]) {
   }
 }
 
-/** Host-observed execution order. Rejected, timed-out and provider-owned calls are not evidence. */
-export function executions(messages: readonly SessionMessage.Message[]) {
-  return acceptanceHistory(messages)
-    .flatMap((message) =>
-      message.type === "assistant"
-        ? message.content.filter(
-            (part): part is SessionMessage.AssistantTool => part.type === "tool" && !part.provider?.executed,
-          )
-        : [],
-    )
-    .flatMap((part, order) => {
-      if (part.state.status !== "completed" || part.state.structured.timeout) return []
-      const checks = toolChecks(part)
-      if (checks.some((check) => check.execution)) return []
-      const exit = part.state.structured.exit ?? checks[0]?.exit
-      if (part.name === "bash" && (typeof exit !== "number" || !Number.isFinite(exit))) return []
+// Shell completion records are durable execution evidence, independent of observers.
+function executionTools(messages: readonly SessionMessage.Message[]): SessionMessage.AssistantTool[] {
+  return messages
+    .flatMap((message): SessionMessage.AssistantTool[] => {
+      if (message.type === "assistant")
+        return message.content.filter(
+          (part): part is SessionMessage.AssistantTool => part.type === "tool" && !part.provider?.executed,
+        )
+      if (message.type !== "shell" || !message.executionRecord) return []
+      const execution = message.executionRecord
       return [
         {
-          callID: part.id,
-          tool: part.name,
-          order,
-          command: typeof part.state.input.command === "string" ? part.state.input.command : "",
-          ...(typeof exit === "number" ? { exit } : {}),
-          ...(part.time.ran ? { started: DateTime.toEpochMillis(part.time.ran) } : {}),
-          ...(part.time.completed ? { completed: DateTime.toEpochMillis(part.time.completed) } : {}),
+          type: "tool",
+          id: execution.originCallID,
+          name: "bash",
+          time: {
+            created: DateTime.makeUnsafe(execution.started),
+            ran: DateTime.makeUnsafe(execution.started),
+            ...(execution.completed === undefined ? {} : { completed: DateTime.makeUnsafe(execution.completed) }),
+          },
+          state: {
+            status: "completed",
+            input: { command: message.command },
+            content: [{ type: "text", text: message.output }],
+            structured: { executionRecord: execution, exit: execution.exit, verifications: message.checks ?? [] },
+          },
         },
       ]
     })
+    .sort((a, b) => {
+      const left = executionRecord(a),
+        right = executionRecord(b)
+      if (left && right) return left.sequence - right.sequence
+      return (
+        (left?.started ?? DateTime.toEpochMillis(a.time.ran ?? a.time.created)) -
+        (right?.started ?? DateTime.toEpochMillis(b.time.ran ?? b.time.created))
+      )
+    })
+}
+
+export function latestExecutionSequence(messages: readonly SessionMessage.Message[]) {
+  return executionTools(messages).reduce(
+    (sequence, part) => Math.max(sequence, executionRecord(part)?.sequence ?? 0),
+    0,
+  )
+}
+
+function executionRecord(part: SessionMessage.AssistantTool) {
+  if (part.state.status !== "completed") return undefined
+  const decoded = Schema.decodeUnknownOption(SessionOutcome.ExecutionRecord)(
+    part.state.structured.executionRecord ?? toolChecks(part)[0]?.executionRecord,
+  )
+  return Option.getOrUndefined(decoded)
+}
+
+/** Host-observed execution order. Rejected, timed-out and provider-owned calls are not evidence. */
+export function executions(messages: readonly SessionMessage.Message[]) {
+  const seen = new Set<string>()
+  return executionTools(acceptanceHistory(messages)).flatMap((part, order) => {
+    if (part.state.status !== "completed" || part.state.structured.timeout) return []
+    const checks = toolChecks(part)
+    if (checks.some((check) => check.execution)) return []
+    const record = executionRecord(part)
+    if (record && seen.has(record.id)) return []
+    if (record) seen.add(record.id)
+    const exit = record?.exit ?? part.state.structured.exit ?? checks[0]?.exit
+    if (part.name === "bash" && (typeof exit !== "number" || !Number.isFinite(exit))) return []
+    return [
+      {
+        callID: record?.originCallID ?? part.id,
+        tool: record ? "bash" : part.name,
+        order,
+        immutable: !!record,
+        command: typeof part.state.input.command === "string" ? part.state.input.command : "",
+        ...(typeof exit === "number" ? { exit } : {}),
+        ...(record
+          ? { started: record.started, completed: record.completed }
+          : {
+              ...(part.time.ran ? { started: DateTime.toEpochMillis(part.time.ran) } : {}),
+              ...(part.time.completed ? { completed: DateTime.toEpochMillis(part.time.completed) } : {}),
+            }),
+      },
+    ]
+  })
 }
 
 export function historicalEvidence(
@@ -354,7 +410,7 @@ export function historicalEvidenceProblem(
   const before = observed.find((entry) => entry.callID === reference.before)
   if (!before) return "before callID is not in the current request's observed executions"
   if (
-    execution.order >= before.order ||
+    (!execution.immutable && execution.order >= before.order) ||
     execution.completed === undefined ||
     before.started === undefined ||
     execution.completed > before.started
@@ -497,12 +553,13 @@ export function derive(
   const contract = ExecutionContext.approved(turn)
   const fresh = (check: SessionOutcome.Check) =>
     checkFreshness(check, targets, snapshot, ExecutionContext.current(check.executionContext, contract)).fresh
-  for (const message of turn) {
-    if (message.type !== "assistant") continue
-    for (const part of message.content) {
+  const seenExecutions = new Set<string>()
+  for (const part of executionTools(turn)) {
+    {
       if (part.type !== "tool" || !["bash", "bash_job"].includes(part.name) || part.provider?.executed) continue
       if (
         (part.state.status === "completed" || part.state.status === "error") &&
+        !executionRecord(part) &&
         (part.state.input.verification_report === true ||
           (part.state.status === "completed" && Array.isArray(part.state.structured.verifications)))
       ) {
@@ -562,6 +619,11 @@ export function derive(
       }
       if (part.state.status !== "completed") continue
       for (const check of toolChecks(part)) {
+        const identity = check.executionRecord
+          ? JSON.stringify([check.executionRecord.id, check.kind, check.sample])
+          : undefined
+        if (identity && seenExecutions.has(identity)) continue
+        if (identity) seenExecutions.add(identity)
         if (check.exit !== 0 && !check.execution)
           for (const assertion of check.assertions ??
             check.targets?.filter((target) => assertionPath(target.path)) ??
@@ -573,7 +635,9 @@ export function derive(
         if (check.exit === 0 && !check.execution)
           for (const [file, original] of failedAssertions) {
             if (
+              newerExecution(check, original.check, part) &&
               original.check.kind === check.kind &&
+              JSON.stringify(original.check.sample) === JSON.stringify(check.sample) &&
               original.check.cwd === check.cwd &&
               (original.check.command === check.command ||
                 (Array.isArray(part.state.input.verification_replaces) &&
@@ -597,6 +661,7 @@ export function derive(
         for (const [key, previous] of checks) {
           if (
             check.exit === 0 &&
+            newerExecution(check, previous, part) &&
             fresh(check) &&
             (previous.exit !== 0 || ExecutionContext.problems(previous.executionContext).length > 0) &&
             (["not-run", "invalid-report"].includes(previous.execution ?? "") ||
@@ -615,7 +680,7 @@ export function derive(
                     ),
                 ))) &&
             previous.kind === check.kind &&
-            previous.cwd &&
+            JSON.stringify(previous.sample) === JSON.stringify(check.sample) &&
             previous.cwd === check.cwd &&
             previous.targets?.length &&
             previous.targets.every((target) => check.targets?.some((current) => current.path === target.path))
@@ -633,6 +698,7 @@ export function derive(
           !check.execution &&
           fresh(check) &&
           previous.kind === check.kind &&
+          JSON.stringify(previous.sample) === JSON.stringify(check.sample) &&
           previous.cwd === check.cwd &&
           previous.targets?.length &&
           previous.targets.every((target) =>
@@ -651,7 +717,13 @@ export function derive(
           }
         }
         checks.set(
-          previous && previous.exit !== 0 && !previous.execution && check.execution ? `${key}:${part.id}` : key,
+          previous &&
+            previous.exit !== 0 &&
+            !previous.supersededBy &&
+            ((check.exit === 0 && (!!check.executionRecord || part.name === "bash_job")) ||
+              (!previous.execution && check.execution))
+            ? key + ":" + (check.executionRecord?.id ?? part.id)
+            : key,
           { ...check, logs: check.logs ?? part.state.outputPaths ?? [] },
         )
       }
@@ -898,12 +970,22 @@ export function toolChecks(tool: SessionMessage.AssistantTool): SessionOutcome.C
   if (!["bash", "bash_job"].includes(tool.name) || tool.provider?.executed || tool.state.status !== "completed")
     return []
   const state = tool.state
-  return [
-    tool.state.structured.verification,
-    ...(Array.isArray(tool.state.structured.verifications) ? tool.state.structured.verifications : []),
-  ].flatMap((value) => {
+  const reports =
+    Array.isArray(state.structured.verifications) && state.structured.verifications.length
+      ? state.structured.verifications
+      : [state.structured.verification]
+  return reports.flatMap((value) => {
     const check = Schema.decodeUnknownOption(SessionOutcome.Check)(value)
-    if (Option.isNone(check) || check.value.callID !== tool.id) return []
+    if (Option.isNone(check)) return []
+    if (
+      check.value.callID !== tool.id &&
+      !(
+        tool.name === "bash_job" &&
+        check.value.executionRecord?.originCallID === check.value.callID &&
+        check.value.executionRecord.jobID === state.input.job_id
+      )
+    )
+      return []
     const output = state.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
     const empty =
       check.value.kind === "test" &&
@@ -920,13 +1002,42 @@ export function toolChecks(tool: SessionMessage.AssistantTool): SessionOutcome.C
   })
 }
 
+function newerExecution(
+  check: SessionOutcome.Check,
+  previous: SessionOutcome.Check,
+  part: SessionMessage.AssistantTool,
+) {
+  if (check.executionRecord && previous.executionRecord)
+    return (
+      check.executionRecord.id !== previous.executionRecord.id &&
+      check.executionRecord.sequence > previous.executionRecord.sequence &&
+      check.executionRecord.completed !== undefined &&
+      previous.executionRecord.completed !== undefined &&
+      check.executionRecord.completed >= previous.executionRecord.completed
+    )
+  // Legacy managed observations cannot establish execution chronology.
+  return part.name !== "bash_job" && !previous.executionRecord
+}
+
 function checkKey(check: SessionOutcome.Check, input: Record<string, unknown>) {
+  const cwd =
+    check.executionRecord?.scope.cwd ??
+    check.cwd ??
+    check.executionContext?.cwd.observed.value ??
+    (typeof input.workdir === "string" ? input.workdir : undefined)
+  const targets =
+    check.executionRecord?.scope.targets ??
+    check.targets?.map((target) => target.path) ??
+    (Array.isArray(input.verification_targets)
+      ? input.verification_targets.filter((target): target is string => typeof target === "string")
+      : undefined)
   return JSON.stringify([
     check.kind,
     check.command,
-    input.workdir ?? "",
-    Array.isArray(input.verification_targets) ? [...input.verification_targets].sort() : [],
+    cwd,
+    targets ? [...new Set(targets)].sort() : undefined,
     check.sample,
+    !cwd && !targets?.length ? (check.executionRecord?.id ?? (input.job_id ? check.callID : undefined)) : undefined,
   ])
 }
 

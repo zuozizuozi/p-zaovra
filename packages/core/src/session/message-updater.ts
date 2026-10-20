@@ -182,12 +182,13 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
         return Effect.gen(function* () {
           const currentShell = yield* adapter.getCurrentShell(event.data.callID)
           if (currentShell) {
-            yield* adapter.updateShell(
-              produce(currentShell, (draft) => {
-                draft.output = event.data.output
-                draft.time.completed = event.data.timestamp
-              }),
-            )
+            yield* adapter.updateShell({
+              ...currentShell,
+              output: event.data.output,
+              executionRecord: event.data.executionRecord,
+              checks: event.data.checks,
+              time: { ...currentShell.time, completed: event.data.timestamp },
+            })
           }
         })
       },

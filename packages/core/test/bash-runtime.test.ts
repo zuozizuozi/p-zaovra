@@ -688,7 +688,53 @@ it.live("Q2 silence yields a live owned process and never certifies pending chec
           }),
         )
         expect(check).toHaveLength(1)
-        expect(check[0]!.callID).toBe("wait-silent")
+        expect(check[0]!.callID).toBe("silent")
+        expect(check[0]!.executionRecord?.originCallID).toBe("silent")
+        const persisted = yield* sessions.message({
+          sessionID: session.id,
+          messageID: SessionMessage.ID.make(data.job_id!),
+        })
+        expect(persisted?.type === "shell" && persisted.executionRecord?.id).toBe(check[0]!.executionRecord?.id)
+        const database = yield* Database.Service
+        const durable = yield* SessionOutcome.history(database.db, session.id)
+        expect(SessionOutcome.historyCandidates(SessionOutcome.executions(durable))).toContainEqual({
+          callID: "silent",
+          exit: 0,
+        })
+        // Restore a durable completion without a process-local job/result cache.
+        const events = yield* EventV2.Service
+        const restoredID = SessionMessage.ID.make("msg_bash_restored_silent")
+        const execution = check[0]!.executionRecord!
+        yield* events.publish(SessionEvent.Shell.Started, {
+          sessionID: session.id,
+          messageID: restoredID,
+          callID: restoredID,
+          command: check[0]!.command,
+          timestamp: DateTime.makeUnsafe(execution.started),
+        })
+        yield* events.publish(SessionEvent.Shell.Ended, {
+          sessionID: session.id,
+          callID: restoredID,
+          output: "done",
+          executionRecord: { ...execution, jobID: restoredID },
+          checks: [{ ...check[0]!, executionRecord: { ...execution, jobID: restoredID } }],
+          timestamp: DateTime.makeUnsafe(execution.completed!),
+        })
+        const restored = yield* settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: "read-restored",
+            name: "bash_job",
+            input: { job_id: restoredID, action: "get" },
+          },
+        })
+        expect(restored.output?.structured).toMatchObject({
+          status: "finished",
+          executionRecord: { id: execution.id },
+          verifications: [{ callID: "silent", executionRecord: { id: execution.id } }],
+        })
       }),
     150,
   ),

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { DateTime } from "effect"
+import { DateTime, Schema } from "effect"
 import { RelativePath } from "@zaovra-ai/schema/schema"
 import path from "node:path"
 import { ModelV2 } from "@zaovra-ai/core/model"
@@ -1773,7 +1773,6 @@ test("successful reruns inherit explicit replacement chains without weakening th
     SessionOutcome.derive([{ ...assistant, content: [a, b, c] }], false, undefined, targets, [])
   expect(derive(check("c", "replacement", 0)).checks.find((c) => c.callID === "a")?.supersededBy).toBe("c")
   for (const extra of [
-    { targets: [targets[1]] },
     { assertions: [{ ...targets[1], digest: "changed" }] },
     { targets: [{ ...targets[0], digest: "stale" }, targets[1]] },
   ]) {
@@ -1900,4 +1899,203 @@ test("shell recovery resets on real progress without merging different quoted li
       tool("bad"),
     ]),
   ).toMatchObject({ failures: 1, repeated: 1 })
+})
+
+function evidence302(
+  id: string,
+  exit: number,
+  cwd: string,
+  targets: string[],
+  sequence: number,
+  observed = id,
+): SessionMessage.AssistantTool {
+  return {
+    type: "tool",
+    id: observed,
+    name: "bash_job",
+    time: { created: DateTime.makeUnsafe(100), ran: DateTime.makeUnsafe(100), completed: DateTime.makeUnsafe(101) },
+    state: {
+      status: "completed",
+      input: { job_id: `job-${id}`, action: "wait" },
+      content: [],
+      structured: {
+        verification: {
+          callID: id,
+          kind: "test",
+          command: "node check.cjs",
+          exit,
+          cwd,
+          targets: targets.map((path) => ({ path, digest: "same" })),
+          assertions: targets.map((path) => ({ path, digest: "same" })),
+          executionRecord: {
+            scope: { cwd, command: "node check.cjs", targets, kind: "test" },
+            id,
+            originCallID: id,
+            jobID: `job-${id}`,
+            sequence,
+            started: sequence * 10,
+            completed: sequence * 10 + 1,
+            exit,
+          },
+        },
+      },
+    },
+  }
+}
+for (const different of ["cwd", "target"])
+  test(`302 O2 separate ${different} failures survive managed success`, () => {
+    const a = path.resolve("a"),
+      b = different === "cwd" ? path.resolve("b") : a
+    const targets = [path.join(a, "one.cjs"), path.join(b, "two.cjs")]
+    const result = SessionOutcome.derive(
+      [{ ...assistant, content: [evidence302("a", 1, a, [targets[0]], 1), evidence302("b", 0, b, [targets[1]], 2)] }],
+      false,
+      undefined,
+      targets.map((path) => ({ path, digest: "same" })),
+      [],
+    )
+    expect(result.checks).toHaveLength(2)
+    expect(result.state).toBe("failed")
+  })
+test("302 O2 target ordering is scope-independent and a new run repairs the same scope", () => {
+  const cwd = path.resolve("a"),
+    targets = [path.join(cwd, "one.cjs"), path.join(cwd, "two.cjs")]
+  const result = SessionOutcome.derive(
+    [
+      {
+        ...assistant,
+        content: [evidence302("a", 1, cwd, targets, 1), evidence302("b", 0, cwd, [...targets].reverse(), 2)],
+      },
+    ],
+    false,
+    undefined,
+    targets.map((path) => ({ path, digest: "same" })),
+    [],
+  )
+  expect(result.checks.filter((check) => !check.supersededBy)).toHaveLength(1)
+  expect(result.missing).toEqual([])
+  expect(result.state).toBe("completed_verified")
+})
+for (const order of [
+  ["a", "b", "a"],
+  ["b", "a", "a"],
+  ["a", "b", "a", "a"],
+])
+  test(`302 O3 old success observations never erase new assertion failure ${order}`, () => {
+    const cwd = path.resolve("a"),
+      target = path.join(cwd, "one.cjs")
+    const content = order.map((id, index) =>
+      evidence302(id, id === "a" ? 0 : 1, cwd, [target], id === "a" ? 1 : 2, `observation-${index}`),
+    )
+    const result = SessionOutcome.derive(
+      [{ ...assistant, content }],
+      false,
+      undefined,
+      [{ path: target, digest: "same" }],
+      [],
+    )
+    expect(result.state).toBe("failed")
+    expect(result.checks.filter((check) => !check.supersededBy).some((check) => check.exit === 1)).toBe(true)
+    const repaired = SessionOutcome.derive(
+      [{ ...assistant, content: [...content, evidence302("c", 0, cwd, [target], 3)] }],
+      false,
+      undefined,
+      [{ path: target, digest: "same" }],
+      [],
+    )
+    expect(repaired.state).toBe("completed_verified")
+  })
+for (const started of [15, 25])
+  test(`302 O4 uses execution completion instead of observation order ${started}`, () => {
+    const edit: SessionMessage.AssistantTool = {
+      type: "tool",
+      id: "edit",
+      name: "edit",
+      time: {
+        created: DateTime.makeUnsafe(started),
+        ran: DateTime.makeUnsafe(started),
+        completed: DateTime.makeUnsafe(started + 1),
+      },
+      state: { status: "completed", input: {}, content: [], structured: {} },
+    }
+    const red = evidence302("red", 1, path.resolve("a"), [], 2, "late-observation")
+    const history = SessionOutcome.executions([{ ...assistant, content: [edit, red] }])
+    expect(SessionOutcome.historyCandidates(history)).toContainEqual({ callID: "red", exit: 1 })
+    expect(SessionOutcome.historicalEvidence({ callID: "red", exit: 1, before: "edit" }, history)).toBe(started > 21)
+  })
+
+test("302 O3 suite categories survive idempotent observations without summary masking", () => {
+  const cwd = path.resolve("suite"),
+    target = path.join(cwd, "test.cjs")
+  const part = evidence302("suite", 0, cwd, [target], 1)
+  if (part.state.status !== "completed") throw Error("fixture")
+  const base = part.state.structured.verification as Record<string, unknown>
+  const suite = {
+    ...part,
+    state: {
+      ...part.state,
+      structured: {
+        verification: base,
+        verifications: [
+          { ...base, kind: "test", exit: 1 },
+          { ...base, kind: "lint", exit: 0 },
+        ],
+      },
+    },
+  }
+  const result = SessionOutcome.derive(
+    [{ ...assistant, content: [suite, suite] }],
+    false,
+    undefined,
+    [{ path: target, digest: "same" }],
+    [],
+  )
+  expect(result.checks).toHaveLength(2)
+  expect(result.state).toBe("failed")
+})
+test("302 O4 durable shell completion survives serialization without any observation", () => {
+  const record = {
+    scope: { cwd: path.resolve("a"), command: "node check.cjs", targets: [] },
+    id: "red-id",
+    originCallID: "red",
+    jobID: "job-red",
+    sequence: 1,
+    started: 10,
+    completed: 20,
+    exit: 1,
+  }
+  const shell: SessionMessage.Shell = {
+    id: SessionMessage.ID.make("msg_shell"),
+    type: "shell",
+    callID: "job-red",
+    command: "node check.cjs",
+    output: "failed",
+    executionRecord: record,
+    time: { created: DateTime.makeUnsafe(10), completed: DateTime.makeUnsafe(50) },
+  }
+  const edit: SessionMessage.AssistantTool = {
+    type: "tool",
+    id: "edit",
+    name: "edit",
+    time: { created: DateTime.makeUnsafe(30), ran: DateTime.makeUnsafe(30), completed: DateTime.makeUnsafe(31) },
+    state: { status: "completed", input: {}, content: [], structured: {} },
+  }
+  const restored = Schema.decodeUnknownSync(SessionMessage.Message)(
+    JSON.parse(JSON.stringify(Schema.encodeSync(SessionMessage.Message)(shell))),
+  )
+  expect(
+    SessionOutcome.historicalEvidence(
+      { callID: "red", exit: 1, before: "edit" },
+      SessionOutcome.executions([restored, { ...assistant, content: [edit] }]),
+    ),
+  ).toBe(true)
+  expect(
+    SessionOutcome.historicalEvidence(
+      { callID: "red", exit: 1, before: "edit" },
+      SessionOutcome.executions([
+        { ...shell, executionRecord: { ...record, completed: undefined } },
+        { ...assistant, content: [edit] },
+      ]),
+    ),
+  ).toBe(false)
 })

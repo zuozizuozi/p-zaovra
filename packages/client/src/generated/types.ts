@@ -1033,6 +1033,160 @@ export type SessionsContextOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "shell"
+        readonly executionRecord?: {
+          readonly scope: {
+            readonly cwd: string
+            readonly command: string
+            readonly targets: ReadonlyArray<string>
+            readonly kind?: string
+            readonly sample?: string
+          }
+          readonly id: string
+          readonly originCallID: string
+          readonly jobID?: string
+          readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+          readonly started: number | "Infinity" | "-Infinity" | "NaN"
+          readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+        }
+        readonly checks?: ReadonlyArray<{
+          readonly executionRecord?: {
+            readonly scope: {
+              readonly cwd: string
+              readonly command: string
+              readonly targets: ReadonlyArray<string>
+              readonly kind?: string
+              readonly sample?: string
+            }
+            readonly id: string
+            readonly originCallID: string
+            readonly jobID?: string
+            readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+            readonly started: number | "Infinity" | "-Infinity" | "NaN"
+            readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+            readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+          }
+          readonly resultDigest?: string
+          readonly sample?: { readonly id: string; readonly planDigest: string }
+          readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+          readonly command: string
+          readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+          readonly execution?: "not-run" | "invalid-report" | "timeout"
+          readonly requirements?: ReadonlyArray<string>
+          readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly supersededBy?: string
+          readonly snapshot?: string
+          readonly callID: string
+          readonly cwd?: string
+          readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly logs?: ReadonlyArray<string>
+          readonly executionContext?: {
+            readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
+            readonly entry: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly cwd: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly runtime: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly timeout: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly environment: {
+              readonly OMP_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly MKL_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly OPENBLAS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly NUMEXPR_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly VECLIB_MAXIMUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly BLIS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+            }
+          }
+          readonly contractDigest?: string
+        }>
         readonly callID: string
         readonly command: string
         readonly output: string
@@ -1409,6 +1563,160 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly callID: string
           readonly output: string
+          readonly executionRecord?: {
+            readonly scope: {
+              readonly cwd: string
+              readonly command: string
+              readonly targets: ReadonlyArray<string>
+              readonly kind?: string
+              readonly sample?: string
+            }
+            readonly id: string
+            readonly originCallID: string
+            readonly jobID?: string
+            readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+            readonly started: number | "Infinity" | "-Infinity" | "NaN"
+            readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+            readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+          }
+          readonly checks?: ReadonlyArray<{
+            readonly executionRecord?: {
+              readonly scope: {
+                readonly cwd: string
+                readonly command: string
+                readonly targets: ReadonlyArray<string>
+                readonly kind?: string
+                readonly sample?: string
+              }
+              readonly id: string
+              readonly originCallID: string
+              readonly jobID?: string
+              readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+              readonly started: number | "Infinity" | "-Infinity" | "NaN"
+              readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+              readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+            }
+            readonly resultDigest?: string
+            readonly sample?: { readonly id: string; readonly planDigest: string }
+            readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+            readonly command: string
+            readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+            readonly execution?: "not-run" | "invalid-report" | "timeout"
+            readonly requirements?: ReadonlyArray<string>
+            readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+            readonly supersededBy?: string
+            readonly snapshot?: string
+            readonly callID: string
+            readonly cwd?: string
+            readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+            readonly logs?: ReadonlyArray<string>
+            readonly executionContext?: {
+              readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
+              readonly entry: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly cwd: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly runtime: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly timeout: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly environment: {
+                readonly OMP_NUM_THREADS?: {
+                  readonly requested?: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                  readonly observed: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                }
+                readonly MKL_NUM_THREADS?: {
+                  readonly requested?: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                  readonly observed: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                }
+                readonly OPENBLAS_NUM_THREADS?: {
+                  readonly requested?: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                  readonly observed: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                }
+                readonly NUMEXPR_NUM_THREADS?: {
+                  readonly requested?: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                  readonly observed: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                }
+                readonly VECLIB_MAXIMUM_THREADS?: {
+                  readonly requested?: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                  readonly observed: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                }
+                readonly BLIS_NUM_THREADS?: {
+                  readonly requested?: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                  readonly observed: {
+                    readonly value: string | null
+                    readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                  }
+                }
+              }
+            }
+            readonly contractDigest?: string
+          }>
         }
       }
     | {
@@ -2041,6 +2349,160 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly callID: string
         readonly output: string
+        readonly executionRecord?: {
+          readonly scope: {
+            readonly cwd: string
+            readonly command: string
+            readonly targets: ReadonlyArray<string>
+            readonly kind?: string
+            readonly sample?: string
+          }
+          readonly id: string
+          readonly originCallID: string
+          readonly jobID?: string
+          readonly sequence: number
+          readonly started: number
+          readonly completed?: number
+          readonly exit?: number
+        }
+        readonly checks?: ReadonlyArray<{
+          readonly executionRecord?: {
+            readonly scope: {
+              readonly cwd: string
+              readonly command: string
+              readonly targets: ReadonlyArray<string>
+              readonly kind?: string
+              readonly sample?: string
+            }
+            readonly id: string
+            readonly originCallID: string
+            readonly jobID?: string
+            readonly sequence: number
+            readonly started: number
+            readonly completed?: number
+            readonly exit?: number
+          }
+          readonly resultDigest?: string
+          readonly sample?: { readonly id: string; readonly planDigest: string }
+          readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+          readonly command: string
+          readonly exit: number
+          readonly execution?: "not-run" | "invalid-report" | "timeout"
+          readonly requirements?: ReadonlyArray<string>
+          readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly supersededBy?: string
+          readonly snapshot?: string
+          readonly callID: string
+          readonly cwd?: string
+          readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly logs?: ReadonlyArray<string>
+          readonly executionContext?: {
+            readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
+            readonly entry: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly cwd: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly runtime: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly timeout: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly environment: {
+              readonly OMP_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly MKL_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly OPENBLAS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly NUMEXPR_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly VECLIB_MAXIMUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly BLIS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+            }
+          }
+          readonly contractDigest?: string
+        }>
       }
     }
   | {
@@ -2424,6 +2886,22 @@ export type SessionsRecoverOutput = {
       | "interrupted"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
+      readonly executionRecord?: {
+        readonly scope: {
+          readonly cwd: string
+          readonly command: string
+          readonly targets: ReadonlyArray<string>
+          readonly kind?: string
+          readonly sample?: string
+        }
+        readonly id: string
+        readonly originCallID: string
+        readonly jobID?: string
+        readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+        readonly started: number | "Infinity" | "-Infinity" | "NaN"
+        readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+        readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+      }
       readonly resultDigest?: string
       readonly sample?: { readonly id: string; readonly planDigest: string }
       readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
@@ -2547,6 +3025,22 @@ export type SessionsRecoverOutput = {
     }>
     readonly recentChecks?: ReadonlyArray<{
       readonly check: {
+        readonly executionRecord?: {
+          readonly scope: {
+            readonly cwd: string
+            readonly command: string
+            readonly targets: ReadonlyArray<string>
+            readonly kind?: string
+            readonly sample?: string
+          }
+          readonly id: string
+          readonly originCallID: string
+          readonly jobID?: string
+          readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+          readonly started: number | "Infinity" | "-Infinity" | "NaN"
+          readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+        }
         readonly resultDigest?: string
         readonly sample?: { readonly id: string; readonly planDigest: string }
         readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
@@ -2708,6 +3202,22 @@ export type SessionsOutcomeOutput = {
       | "interrupted"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
+      readonly executionRecord?: {
+        readonly scope: {
+          readonly cwd: string
+          readonly command: string
+          readonly targets: ReadonlyArray<string>
+          readonly kind?: string
+          readonly sample?: string
+        }
+        readonly id: string
+        readonly originCallID: string
+        readonly jobID?: string
+        readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+        readonly started: number | "Infinity" | "-Infinity" | "NaN"
+        readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+        readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+      }
       readonly resultDigest?: string
       readonly sample?: { readonly id: string; readonly planDigest: string }
       readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
@@ -2831,6 +3341,22 @@ export type SessionsOutcomeOutput = {
     }>
     readonly recentChecks?: ReadonlyArray<{
       readonly check: {
+        readonly executionRecord?: {
+          readonly scope: {
+            readonly cwd: string
+            readonly command: string
+            readonly targets: ReadonlyArray<string>
+            readonly kind?: string
+            readonly sample?: string
+          }
+          readonly id: string
+          readonly originCallID: string
+          readonly jobID?: string
+          readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+          readonly started: number | "Infinity" | "-Infinity" | "NaN"
+          readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+        }
         readonly resultDigest?: string
         readonly sample?: { readonly id: string; readonly planDigest: string }
         readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
@@ -3067,6 +3593,160 @@ export type SessionsMessageOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "shell"
+        readonly executionRecord?: {
+          readonly scope: {
+            readonly cwd: string
+            readonly command: string
+            readonly targets: ReadonlyArray<string>
+            readonly kind?: string
+            readonly sample?: string
+          }
+          readonly id: string
+          readonly originCallID: string
+          readonly jobID?: string
+          readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+          readonly started: number | "Infinity" | "-Infinity" | "NaN"
+          readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+        }
+        readonly checks?: ReadonlyArray<{
+          readonly executionRecord?: {
+            readonly scope: {
+              readonly cwd: string
+              readonly command: string
+              readonly targets: ReadonlyArray<string>
+              readonly kind?: string
+              readonly sample?: string
+            }
+            readonly id: string
+            readonly originCallID: string
+            readonly jobID?: string
+            readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+            readonly started: number | "Infinity" | "-Infinity" | "NaN"
+            readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+            readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+          }
+          readonly resultDigest?: string
+          readonly sample?: { readonly id: string; readonly planDigest: string }
+          readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+          readonly command: string
+          readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+          readonly execution?: "not-run" | "invalid-report" | "timeout"
+          readonly requirements?: ReadonlyArray<string>
+          readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly supersededBy?: string
+          readonly snapshot?: string
+          readonly callID: string
+          readonly cwd?: string
+          readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly logs?: ReadonlyArray<string>
+          readonly executionContext?: {
+            readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
+            readonly entry: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly cwd: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly runtime: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly timeout: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly environment: {
+              readonly OMP_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly MKL_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly OPENBLAS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly NUMEXPR_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly VECLIB_MAXIMUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly BLIS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+            }
+          }
+          readonly contractDigest?: string
+        }>
         readonly callID: string
         readonly command: string
         readonly output: string
@@ -5841,6 +6521,160 @@ export type MessagesListOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "shell"
+        readonly executionRecord?: {
+          readonly scope: {
+            readonly cwd: string
+            readonly command: string
+            readonly targets: ReadonlyArray<string>
+            readonly kind?: string
+            readonly sample?: string
+          }
+          readonly id: string
+          readonly originCallID: string
+          readonly jobID?: string
+          readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+          readonly started: number | "Infinity" | "-Infinity" | "NaN"
+          readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+        }
+        readonly checks?: ReadonlyArray<{
+          readonly executionRecord?: {
+            readonly scope: {
+              readonly cwd: string
+              readonly command: string
+              readonly targets: ReadonlyArray<string>
+              readonly kind?: string
+              readonly sample?: string
+            }
+            readonly id: string
+            readonly originCallID: string
+            readonly jobID?: string
+            readonly sequence: number | "Infinity" | "-Infinity" | "NaN"
+            readonly started: number | "Infinity" | "-Infinity" | "NaN"
+            readonly completed?: number | "Infinity" | "-Infinity" | "NaN"
+            readonly exit?: number | "Infinity" | "-Infinity" | "NaN"
+          }
+          readonly resultDigest?: string
+          readonly sample?: { readonly id: string; readonly planDigest: string }
+          readonly kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+          readonly command: string
+          readonly exit: number | "Infinity" | "-Infinity" | "NaN"
+          readonly execution?: "not-run" | "invalid-report" | "timeout"
+          readonly requirements?: ReadonlyArray<string>
+          readonly assertions?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly supersededBy?: string
+          readonly snapshot?: string
+          readonly callID: string
+          readonly cwd?: string
+          readonly targets?: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+          readonly logs?: ReadonlyArray<string>
+          readonly executionContext?: {
+            readonly contract?: { readonly version: 1; readonly sourceMessageID: string; readonly digest: string }
+            readonly entry: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly cwd: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly runtime: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly timeout: {
+              readonly requested?: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+              readonly observed: {
+                readonly value: string | null
+                readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+              }
+            }
+            readonly environment: {
+              readonly OMP_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly MKL_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly OPENBLAS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly NUMEXPR_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly VECLIB_MAXIMUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+              readonly BLIS_NUM_THREADS?: {
+                readonly requested?: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+                readonly observed: {
+                  readonly value: string | null
+                  readonly source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+                }
+              }
+            }
+          }
+          readonly contractDigest?: string
+        }>
         readonly callID: string
         readonly command: string
         readonly output: string

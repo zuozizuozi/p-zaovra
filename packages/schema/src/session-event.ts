@@ -1,6 +1,7 @@
 export * as SessionEvent from "./session-event"
 
 import { Schema } from "effect"
+import { SessionOutcome } from "./session-outcome"
 import { optional } from "./schema"
 import { Event } from "./event"
 import { ProviderMetadata, ToolContent } from "./llm"
@@ -185,6 +186,8 @@ export namespace Shell {
       ...Base,
       callID: Schema.String,
       output: Schema.String,
+      executionRecord: SessionOutcome.ExecutionRecord.pipe(optional),
+      checks: Schema.Array(SessionOutcome.Check).pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type
