@@ -589,3 +589,45 @@ it.effect("retains an explicit model endpoint after its protocol override is rem
     expect(entry.api).toMatchObject({ package: "@ai-sdk/openai-compatible", url: "https://gateway.test/model-api" })
   }),
 )
+
+for (const configured of [true, false, undefined])
+  it.effect("306 explicit model capability overrides catalog: " + configured, () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const providerID = ProviderV2.ID.make("capability306")
+      const modelID = ModelV2.ID.make("alias306")
+      yield* catalog.transform((editor) =>
+        editor.model.update(providerID, modelID, (model) => {
+          Object.assign(model.capabilities, { interleavedThinking: configured !== true })
+        }),
+      )
+      yield* addPlugin(
+        Config.Service.of({
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({
+                type: "document",
+                info: decode({
+                  providers: {
+                    capability306: {
+                      models: {
+                        alias306: {
+                          capabilities: {
+                            tools: true,
+                            input: ["text"],
+                            output: ["text"],
+                            ...(configured === undefined ? {} : { interleavedThinking: configured }),
+                          },
+                        },
+                      },
+                    },
+                  },
+                }),
+              }),
+            ]),
+        }),
+      )
+      const projected = required(yield* catalog.model.get(providerID, modelID))
+      expect(projected.capabilities).toMatchObject({ interleavedThinking: configured ?? true })
+    }),
+  )

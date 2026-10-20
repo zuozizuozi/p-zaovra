@@ -118,6 +118,8 @@ function applyModel(
       }
   draft.capabilities = {
     tools: model.tool_call,
+    // Field-based reasoning transport is not a declaration of native manual interleaved thinking.
+    interleavedThinking: model.interleaved === true,
     input: [...(model.modalities?.input ?? [])],
     output: [...(model.modalities?.output ?? [])],
   }

@@ -648,6 +648,7 @@ export type Part =
 
 export type Prompt = {
   text: string
+  executionContract?: SessionOutcomeExecutionContract
   invocation?: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
@@ -964,6 +965,8 @@ export type GlobalEvent = {
           sessionID: string
           callID: string
           output: string
+          executionRecord?: SessionOutcomeExecutionRecord
+          checks?: Array<SessionOutcomeCheck>
         }
       }
     | {
@@ -2969,6 +2972,7 @@ export type SessionNotFoundError = {
 
 export type PromptInput = {
   text: string
+  executionContract?: SessionOutcomeExecutionContract
   invocation?: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
@@ -3002,6 +3006,7 @@ export type UnknownError1 = {
 }
 
 export type SessionDurableEvent =
+  | SessionNextQualityProgress
   | SessionNextCreated
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
@@ -3432,6 +3437,23 @@ export type LocationRef = {
   workspaceID?: string
 }
 
+export type SessionOutcomeExecutionContract = {
+  version: 1
+  entry?: string
+  cwd?: string
+  runtime?: string
+  timeout?: string
+  samples?: Array<string>
+  environment?: {
+    OMP_NUM_THREADS?: string
+    MKL_NUM_THREADS?: string
+    OPENBLAS_NUM_THREADS?: string
+    NUMEXPR_NUM_THREADS?: string
+    VECLIB_MAXIMUM_THREADS?: string
+    BLIS_NUM_THREADS?: string
+  }
+}
+
 export type PromptSource = {
   start: number
   end: number
@@ -3460,6 +3482,84 @@ export type PromptSubtask = {
   command: string
   agent: string
   model: ModelRef
+}
+
+export type SessionOutcomeExecutionRecord = {
+  scope: {
+    cwd: string
+    command: string
+    targets: Array<string>
+    kind?: string
+    sample?: string
+  }
+  id: string
+  originCallID: string
+  jobID?: string
+  sequence: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  started: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  completed?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  exit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type SessionOutcomeExecutionValue = {
+  value: string
+  source: "user" | "observed" | "default" | "diagnostic-temporary" | "unknown"
+}
+
+export type SessionOutcomeExecutionCondition = {
+  requested?: SessionOutcomeExecutionValue
+  observed: SessionOutcomeExecutionValue
+}
+
+export type SessionOutcomeExecutionEnvironment = {
+  OMP_NUM_THREADS?: SessionOutcomeExecutionCondition
+  MKL_NUM_THREADS?: SessionOutcomeExecutionCondition
+  OPENBLAS_NUM_THREADS?: SessionOutcomeExecutionCondition
+  NUMEXPR_NUM_THREADS?: SessionOutcomeExecutionCondition
+  VECLIB_MAXIMUM_THREADS?: SessionOutcomeExecutionCondition
+  BLIS_NUM_THREADS?: SessionOutcomeExecutionCondition
+}
+
+export type SessionOutcomeExecutionContext = {
+  contract?: {
+    version: 1
+    sourceMessageID: string
+    digest: string
+  }
+  entry: SessionOutcomeExecutionCondition
+  cwd: SessionOutcomeExecutionCondition
+  runtime: SessionOutcomeExecutionCondition
+  timeout: SessionOutcomeExecutionCondition
+  environment: SessionOutcomeExecutionEnvironment
+}
+
+export type SessionOutcomeCheck = {
+  executionRecord?: SessionOutcomeExecutionRecord
+  resultDigest?: string
+  sample?: {
+    id: string
+    planDigest: string
+  }
+  kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+  command: string
+  exit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  execution?: "not-run" | "invalid-report" | "timeout"
+  requirements?: Array<string>
+  assertions?: Array<{
+    path: string
+    digest: string
+  }>
+  supersededBy?: string
+  snapshot?: string
+  callID: string
+  cwd?: string
+  targets?: Array<{
+    path: string
+    digest: string
+  }>
+  logs?: Array<string>
+  executionContext?: SessionOutcomeExecutionContext
+  contractDigest?: string
 }
 
 export type SessionErrorUnknown = {
@@ -4200,6 +4300,8 @@ export type SyncEventSessionNextShellEnded = {
       sessionID: string
       callID: string
       output: string
+      executionRecord?: SessionOutcomeExecutionRecord
+      checks?: Array<SessionOutcomeCheck>
     }
   }
 }
@@ -5397,6 +5499,46 @@ export type SessionV2Info = {
   revert?: RevertState
 }
 
+export type SessionUsageCachePoint = {
+  responseModel?: string
+  systemFingerprint?: string
+  purpose?: "execution" | "summary"
+  attempts?: Array<{
+    id: string
+    phase: "start" | "headers" | "failed"
+    status?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }>
+  requestID: string
+  sequence: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  reason: string
+  firstChanged: string
+  input: number
+  output: number
+  hit: number
+  miss: number
+  hitRate: number
+  reasoning: number
+  visible: number
+  total: number
+}
+
+export type SessionUsageCacheReport = {
+  versions?: Array<{
+    responseModel: string
+    systemFingerprint: string
+    calls: number
+    input: number
+    output: number
+    total: number
+    unreported: number
+  }>
+  points: Array<SessionUsageCachePoint>
+  breaks: Array<{
+    reason: string
+    count: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }>
+}
+
 export type PromptInputFileAttachment = {
   uri: string
   name?: string
@@ -5448,6 +5590,7 @@ export type SessionMessageUser = {
     created: number
   }
   text: string
+  executionContract?: SessionOutcomeExecutionContract
   invocation?: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
@@ -5491,6 +5634,8 @@ export type SessionMessageShell = {
     completed?: number
   }
   type: "shell"
+  executionRecord?: SessionOutcomeExecutionRecord
+  checks?: Array<SessionOutcomeCheck>
   callID: string
   command: string
   output: string
@@ -5635,6 +5780,26 @@ export type SessionMessage =
   | SessionMessageShell
   | SessionMessageAssistant
   | SessionMessageCompaction
+
+export type SessionNextQualityProgress = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.quality.progress"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    category: "continuation" | "closing" | "stagnation" | "cache"
+    details: unknown
+  }
+}
 
 export type SessionNextCreated = {
   id: string
@@ -5900,6 +6065,8 @@ export type SessionNextShellEnded = {
     sessionID: string
     callID: string
     output: string
+    executionRecord?: SessionOutcomeExecutionRecord
+    checks?: Array<SessionOutcomeCheck>
   }
 }
 
@@ -6386,10 +6553,50 @@ export type SessionNextRevertCommitted = {
   }
 }
 
-export type SessionOutcomeCheck = {
+export type SessionOutcomeExecutionRecord3 = {
+  scope: {
+    cwd: string
+    command: string
+    targets: Array<string>
+    kind?: string
+    sample?: string
+  }
+  id: string
+  originCallID: string
+  jobID?: string
+  sequence: number | "NaN" | "Infinity" | "-Infinity"
+  started: number | "NaN" | "Infinity" | "-Infinity"
+  completed?: number | "NaN" | "Infinity" | "-Infinity"
+  exit?: number | "NaN" | "Infinity" | "-Infinity"
+}
+
+export type SessionOutcomeExecutionRecord4 = {
+  scope: {
+    cwd: string
+    command: string
+    targets: Array<string>
+    kind?: string
+    sample?: string
+  }
+  id: string
+  originCallID: string
+  jobID?: string
+  sequence: number | "NaN" | "Infinity" | "-Infinity"
+  started: number | "NaN" | "Infinity" | "-Infinity"
+  completed?: number | "NaN" | "Infinity" | "-Infinity"
+  exit?: number | "NaN" | "Infinity" | "-Infinity"
+}
+
+export type SessionOutcomeCheck1 = {
+  executionRecord?: SessionOutcomeExecutionRecord4
+  resultDigest?: string
+  sample?: {
+    id: string
+    planDigest: string
+  }
   kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
   command: string
-  exit: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  exit: number | "NaN" | "Infinity" | "-Infinity"
   execution?: "not-run" | "invalid-report" | "timeout"
   requirements?: Array<string>
   assertions?: Array<{
@@ -6405,6 +6612,8 @@ export type SessionOutcomeCheck = {
     digest: string
   }>
   logs?: Array<string>
+  executionContext?: SessionOutcomeExecutionContext
+  contractDigest?: string
 }
 
 export type SessionOutcomeReview = {
@@ -6505,6 +6714,7 @@ export type ModelApi =
 
 export type ModelCapabilities = {
   tools: boolean
+  interleavedThinking?: boolean
   input: Array<string>
   output: Array<string>
 }
@@ -8927,6 +9137,69 @@ export type EventSessionNextShellStarted = {
   }
 }
 
+export type SessionOutcomeExecutionRecord5 = {
+  scope: {
+    cwd: string
+    command: string
+    targets: Array<string>
+    kind?: string
+    sample?: string
+  }
+  id: string
+  originCallID: string
+  jobID?: string
+  sequence: number | "NaN" | "Infinity" | "-Infinity"
+  started: number | "NaN" | "Infinity" | "-Infinity"
+  completed?: number | "NaN" | "Infinity" | "-Infinity"
+  exit?: number | "NaN" | "Infinity" | "-Infinity"
+}
+
+export type SessionOutcomeExecutionRecord6 = {
+  scope: {
+    cwd: string
+    command: string
+    targets: Array<string>
+    kind?: string
+    sample?: string
+  }
+  id: string
+  originCallID: string
+  jobID?: string
+  sequence: number | "NaN" | "Infinity" | "-Infinity"
+  started: number | "NaN" | "Infinity" | "-Infinity"
+  completed?: number | "NaN" | "Infinity" | "-Infinity"
+  exit?: number | "NaN" | "Infinity" | "-Infinity"
+}
+
+export type SessionOutcomeCheck2 = {
+  executionRecord?: SessionOutcomeExecutionRecord6
+  resultDigest?: string
+  sample?: {
+    id: string
+    planDigest: string
+  }
+  kind: "build" | "test" | "lint" | "typecheck" | "syntax" | "smoke" | "interaction"
+  command: string
+  exit: number | "NaN" | "Infinity" | "-Infinity"
+  execution?: "not-run" | "invalid-report" | "timeout"
+  requirements?: Array<string>
+  assertions?: Array<{
+    path: string
+    digest: string
+  }>
+  supersededBy?: string
+  snapshot?: string
+  callID: string
+  cwd?: string
+  targets?: Array<{
+    path: string
+    digest: string
+  }>
+  logs?: Array<string>
+  executionContext?: SessionOutcomeExecutionContext
+  contractDigest?: string
+}
+
 export type EventSessionNextShellEnded = {
   id: string
   type: "session.next.shell.ended"
@@ -8935,6 +9208,8 @@ export type EventSessionNextShellEnded = {
     sessionID: string
     callID: string
     output: string
+    executionRecord?: SessionOutcomeExecutionRecord5
+    checks?: Array<SessionOutcomeCheck2>
   }
 }
 
@@ -12795,6 +13070,7 @@ export type V2SessionUsageResponses = {
    */
   200: {
     data: {
+      cache?: SessionUsageCacheReport
       models: Array<{
         providerID: string
         modelID: string

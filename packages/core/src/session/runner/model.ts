@@ -164,7 +164,15 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
       ...(deepseek
         ? { deepseek: { thinking: body.thinking ?? { type: "enabled" }, reasoningEffort: body.reasoning_effort } }
         : {}),
-      ...(thinking === undefined ? {} : { anthropic: { thinking, thinkingModes: model.api.settings?.thinkingModes } }),
+      ...(model.api.type === "aisdk" && model.api.package === "@ai-sdk/anthropic"
+        ? {
+            anthropic: {
+              ...(thinking === undefined ? {} : { thinking }),
+              thinkingModes: model.api.settings?.thinkingModes,
+              interleavedThinking: model.capabilities.interleavedThinking === true,
+            },
+          }
+        : {}),
       ...(model.api.settings?.maxTokensParameter !== undefined || Object.hasOwn(body, "max_completion_tokens")
         ? { openai: { maxTokensParameter: model.api.settings?.maxTokensParameter ?? "max_completion_tokens" } }
         : {}),

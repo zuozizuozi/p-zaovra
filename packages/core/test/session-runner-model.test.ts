@@ -671,3 +671,37 @@ for (const maxTokens of [512, 1024, 1025, 1280, 4096, 16000])
       }
     }),
   )
+
+for (const capability of [true, false, undefined])
+  it.effect("306 catalog interleaved capability reaches protocol: " + capability, () =>
+    Effect.gen(function* () {
+      const base = model({ type: "aisdk", package: "@ai-sdk/anthropic", url: "https://offline.invalid" })
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...base,
+          capabilities: {
+            ...base.capabilities,
+            ...(capability === undefined ? {} : { interleavedThinking: capability }),
+          },
+          request: {
+            headers: { "anthropic-beta": "interleaved-thinking-2025-05-14" },
+            body: { thinking: { type: "enabled", budget_tokens: 12000 } },
+          },
+        }),
+      )
+      expect(resolved.route.defaults.providerOptions?.anthropic?.interleavedThinking).toBe(capability === true)
+      const request = LLM.request({
+        model: resolved,
+        prompt: "hi",
+        generation: { maxTokens: 4096 },
+        tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object" } }],
+      })
+      if (capability === true) {
+        const prepared = yield* LLMClient.prepare(request)
+        expect(prepared.body).toMatchObject({ thinking: { budget_tokens: 12000 } })
+        return
+      }
+      const failure = yield* LLMClient.prepare(request).pipe(Effect.flip)
+      expect(failure.reason._tag).toBe("InvalidRequest")
+    }),
+  )

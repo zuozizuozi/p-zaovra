@@ -24,6 +24,10 @@ export type Family = typeof Family.Type
 export interface Capabilities extends Schema.Schema.Type<typeof Capabilities> {}
 export const Capabilities = Schema.Struct({
   tools: Schema.Boolean,
+  interleavedThinking: Schema.Boolean.pipe(optional).annotate({
+    description:
+      "Supports manual interleaved thinking. Unknown means unsupported; explicit user configuration overrides the catalog.",
+  }),
   input: Schema.Array(Schema.String),
   output: Schema.Array(Schema.String),
 }).annotate({ identifier: "Model.Capabilities" })

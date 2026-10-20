@@ -1100,7 +1100,7 @@ it.effect("304 interleaved tool thinking allows large budgets only with the effe
     const configured = AnthropicMessages.route
       .with({
         headers: { "anthropic-beta": "other-beta, interleaved-thinking-2025-05-14" },
-        providerOptions: { anthropic: { thinkingModes: ["enabled", "disabled"] } },
+        providerOptions: { anthropic: { thinkingModes: ["enabled", "disabled"], interleavedThinking: true } },
       })
       .model({ id: "declared-offline-model" })
     const input = {
@@ -1132,3 +1132,22 @@ it.effect("304 interleaved tool thinking allows large budgets only with the effe
     }
   }),
 )
+
+for (const capability of [undefined, false])
+  it.effect("306 undeclared or unsupported interleaved capability rejects large budgets: " + capability, () =>
+    Effect.gen(function* () {
+      const failure = yield* LLMClient.prepare(
+        LLM.request({
+          model,
+          prompt: "hello",
+          generation: { maxTokens: 4096 },
+          http: { headers: { "anthropic-beta": "interleaved-thinking-2025-05-14" } },
+          providerOptions: {
+            anthropic: { interleavedThinking: capability, thinking: { type: "enabled", budgetTokens: 12000 } },
+          },
+          tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.flip)
+      expect(failure.reason.message).toContain("interleavedThinking")
+    }),
+  )

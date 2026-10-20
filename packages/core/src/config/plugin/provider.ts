@@ -67,6 +67,10 @@ export const Plugin = define({
                 if (config.api !== undefined) model.api = { ...model.api, ...config.api }
                 if (config.capabilities !== undefined) {
                   model.capabilities = {
+                    ...model.capabilities,
+                    ...(config.capabilities.interleavedThinking === undefined
+                      ? {}
+                      : { interleavedThinking: config.capabilities.interleavedThinking }),
                     tools: config.capabilities.tools,
                     input: [...config.capabilities.input],
                     output: [...config.capabilities.output],

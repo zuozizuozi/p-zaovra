@@ -6819,6 +6819,7 @@ export type ModelsListOutput = {
         }
     readonly capabilities: {
       readonly tools: boolean
+      readonly interleavedThinking?: boolean
       readonly input: ReadonlyArray<string>
       readonly output: ReadonlyArray<string>
     }

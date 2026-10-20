@@ -528,14 +528,19 @@ const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (re
   // Resolved HTTP options include route/model defaults and per-request overrides.
   // The beta opt-in permits a tool loop's total thinking budget to exceed one turn's output cap.
   const interleaved =
+    anthropicOptions(request)?.interleavedThinking === true &&
     request.tools.length > 0 &&
     request.toolChoice?.type !== "none" &&
     new Headers(request.http?.headers)
       .get("anthropic-beta")
       ?.split(",")
       .some((beta) => beta.trim() === "interleaved-thinking-2025-05-14")
-  if (!Number.isInteger(budget) || budget < 1024 || (!interleaved && budget >= maxTokens))
-    return yield* invalid("Anthropic enabled thinking budget must be an integer >= 1024 and less than max_tokens")
+  if (!Number.isInteger(budget) || budget < 1024)
+    return yield* invalid("Anthropic enabled thinking budget must be an integer >= 1024")
+  if (!interleaved && budget >= maxTokens)
+    return yield* invalid(
+      "Anthropic thinking budget must be less than max_tokens unless the model declares interleavedThinking support, the interleaved-thinking beta header is enabled, and tools are sent. For a supported custom model, declare capabilities.interleavedThinking: true in model configuration (or providerOptions.anthropic.interleavedThinking in the LLM API).",
+    )
   if (
     thinking.budgetTokens !== undefined &&
     thinking.budget_tokens !== undefined &&
