@@ -2099,3 +2099,19 @@ test("302 O4 durable shell completion survives serialization without any observa
     ),
   ).toBe(false)
 })
+
+test("302 O4 observation call IDs resolve the immutable execution without changing chronology", () => {
+  const red = evidence302("red", 1, path.resolve("a"), [], 2, "observation-one")
+  const repeat = evidence302("red", 1, path.resolve("a"), [], 2, "observation-two")
+  const edit: SessionMessage.AssistantTool = {
+    type: "tool",
+    id: "edit",
+    name: "edit",
+    time: { created: DateTime.makeUnsafe(30), ran: DateTime.makeUnsafe(30), completed: DateTime.makeUnsafe(31) },
+    state: { status: "completed", input: {}, content: [], structured: {} },
+  }
+  const observed = SessionOutcome.executions([{ ...assistant, content: [edit, red, repeat] }])
+  expect(SessionOutcome.historyCandidates(observed)).toEqual([{ callID: "red", exit: 1 }])
+  expect(SessionOutcome.historicalEvidence({ callID: "observation-one", exit: 1, before: "edit" }, observed)).toBe(true)
+  expect(SessionOutcome.historicalEvidence({ callID: "observation-two", exit: 1, before: "edit" }, observed)).toBe(true)
+})

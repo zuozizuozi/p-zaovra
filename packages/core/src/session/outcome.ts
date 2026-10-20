@@ -362,7 +362,13 @@ function executionRecord(part: SessionMessage.AssistantTool) {
 /** Host-observed execution order. Rejected, timed-out and provider-owned calls are not evidence. */
 export function executions(messages: readonly SessionMessage.Message[]) {
   const seen = new Set<string>()
-  return executionTools(acceptanceHistory(messages)).flatMap((part, order) => {
+  const tools = executionTools(acceptanceHistory(messages))
+  const observations = new Map<string, string[]>()
+  for (const part of tools) {
+    const record = executionRecord(part)
+    if (record) observations.set(record.id, [...(observations.get(record.id) ?? []), part.id])
+  }
+  return tools.flatMap((part, order) => {
     if (part.state.status !== "completed" || part.state.structured.timeout) return []
     const checks = toolChecks(part)
     if (checks.some((check) => check.execution)) return []
@@ -374,10 +380,12 @@ export function executions(messages: readonly SessionMessage.Message[]) {
     return [
       {
         callID: record?.originCallID ?? part.id,
+        observations: record ? (observations.get(record.id) ?? []) : [],
         tool: record ? "bash" : part.name,
         order,
         immutable: !!record,
-        command: typeof part.state.input.command === "string" ? part.state.input.command : "",
+        command:
+          record?.scope.command ?? (typeof part.state.input.command === "string" ? part.state.input.command : ""),
         ...(typeof exit === "number" ? { exit } : {}),
         ...(record
           ? { started: record.started, completed: record.completed }
@@ -401,13 +409,17 @@ export function historicalEvidenceProblem(
   reference: { callID: string; exit: number; before?: string },
   observed: ReturnType<typeof executions>,
 ) {
-  const execution = observed.find((entry) => entry.callID === reference.callID)
+  const execution = observed.find(
+    (entry) => entry.callID === reference.callID || entry.observations.includes(reference.callID),
+  )
   if (!execution) return "callID is not in the current request's observed executions"
   if (execution.tool !== "bash")
     return "only bash executions can be history evidence; other tools may only be before targets"
   if (execution.exit !== reference.exit) return `exit does not match the observed exit ${execution.exit}`
   if (reference.before === undefined) return
-  const before = observed.find((entry) => entry.callID === reference.before)
+  const before = observed.find(
+    (entry) => entry.callID === reference.before || entry.observations.includes(reference.before!),
+  )
   if (!before) return "before callID is not in the current request's observed executions"
   if (
     (!execution.immutable && execution.order >= before.order) ||
