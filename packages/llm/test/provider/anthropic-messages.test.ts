@@ -1094,3 +1094,41 @@ it.effect("302 N8 unsigned interrupted reasoning is not replayable", () =>
     expect(failure.reason.message).toContain("original signature")
   }),
 )
+
+it.effect("304 interleaved tool thinking allows large budgets only with the effective beta header", () =>
+  Effect.gen(function* () {
+    const configured = AnthropicMessages.route
+      .with({
+        headers: { "anthropic-beta": "other-beta, interleaved-thinking-2025-05-14" },
+        providerOptions: { anthropic: { thinkingModes: ["enabled", "disabled"] } },
+      })
+      .model({ id: "declared-offline-model" })
+    const input = {
+      model: configured,
+      prompt: "hello",
+      generation: { maxTokens: 4096 },
+      providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 12000 } } },
+      tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object" } }],
+    }
+    const prepared = yield* LLMClient.prepare(LLM.request(input))
+    expect(prepared.body).toMatchObject({
+      max_tokens: 4096,
+      thinking: { type: "enabled", budget_tokens: 12000 },
+      tools: [{ name: "lookup" }],
+    })
+    for (const patch of [
+      { http: { headers: { "anthropic-beta": "other-beta" } } },
+      { tools: [] },
+      { toolChoice: { type: "none" as const } },
+      { providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 1000 } } } },
+      {
+        providerOptions: {
+          anthropic: { thinkingModes: ["adaptive"], thinking: { type: "enabled", budgetTokens: 12000 } },
+        },
+      },
+    ]) {
+      const failure = yield* LLMClient.prepare(LLM.request({ ...input, ...patch })).pipe(Effect.flip)
+      expect(failure.reason._tag).toBe("InvalidRequest")
+    }
+  }),
+)

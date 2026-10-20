@@ -2115,3 +2115,68 @@ test("302 O4 observation call IDs resolve the immutable execution without changi
   expect(SessionOutcome.historicalEvidence({ callID: "observation-one", exit: 1, before: "edit" }, observed)).toBe(true)
   expect(SessionOutcome.historicalEvidence({ callID: "observation-two", exit: 1, before: "edit" }, observed)).toBe(true)
 })
+
+test("304 new identified suite replaces coverage once across durable and repeated observations", () => {
+  const cwd = path.resolve("suite304")
+  const target = { path: path.join(cwd, "game.html"), digest: "same" }
+  const suite = (
+    id: string,
+    sequence: number,
+    kinds: string[],
+    directory = cwd,
+    sample?: string,
+    file = target.path,
+  ) => {
+    const part = evidence302(id, 0, directory, [file], sequence)
+    if (part.state.status !== "completed") throw Error("fixture")
+    const base = part.state.structured.verification as Record<string, unknown>
+    return {
+      ...part,
+      state: {
+        ...part.state,
+        structured: {
+          verifications: kinds.map((kind) => ({
+            ...base,
+            kind,
+            ...(sample ? { sample: { id: sample, planDigest: "plan" } } : {}),
+          })),
+        },
+      },
+    }
+  }
+  const full = suite("full304", 1, ["syntax", "smoke", "interaction"])
+  const reduced = suite("reduced304", 2, ["syntax", "smoke"])
+  const restored = suite("restored304", 3, ["syntax", "smoke", "interaction"])
+  const derive = (content: SessionMessage.AssistantTool[], shells: SessionMessage.Shell[] = []) =>
+    SessionOutcome.derive([{ ...assistant, content }, ...shells], false, undefined, [target], [])
+  expect(derive([full]).state).toBe("completed_verified")
+  expect(derive([full, reduced])).toMatchObject({
+    state: "completed_unverified",
+    missing: ["interaction: " + target.path],
+  })
+  expect(derive([full, reduced, full, { ...full, id: "get-full" }]).state).toBe("completed_unverified")
+  const checks = SessionOutcome.toolChecks(reduced)
+  const shell: SessionMessage.Shell = {
+    id: SessionMessage.ID.make("msg_suite304"),
+    type: "shell",
+    callID: "job-reduced304",
+    command: "node check.cjs",
+    output: "done",
+    checks,
+    executionRecord: checks[0]!.executionRecord,
+    time: { created: DateTime.makeUnsafe(20), completed: DateTime.makeUnsafe(21) },
+  }
+  const persisted = Schema.decodeUnknownSync(SessionMessage.Shell)(Schema.encodeSync(SessionMessage.Shell)(shell))
+  expect(derive([full, reduced, reduced], [persisted, persisted]).state).toBe("completed_unverified")
+  expect(derive([full, reduced, restored, full, reduced], [shell]).state).toBe("completed_verified")
+  expect(derive([full, suite("other-cwd", 2, ["syntax", "smoke"], path.resolve("elsewhere"))]).state).toBe(
+    "completed_verified",
+  )
+  expect(
+    derive([
+      full,
+      suite("other-target", 2, ["syntax", "smoke"], cwd, undefined, path.join(cwd, "other.html")),
+    ]).checks.some((check) => check.kind === "interaction" && check.callID === "full304"),
+  ).toBe(true)
+  expect(derive([full, suite("other-sample", 2, ["syntax", "smoke"], cwd, "mobile")]).state).toBe("completed_verified")
+})

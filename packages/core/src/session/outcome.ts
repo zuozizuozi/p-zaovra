@@ -566,22 +566,29 @@ export function derive(
   const fresh = (check: SessionOutcome.Check) =>
     checkFreshness(check, targets, snapshot, ExecutionContext.current(check.executionContext, contract)).fresh
   const seenExecutions = new Set<string>()
+  const seenSuites = new Set<string>()
   for (const part of executionTools(turn)) {
     {
       if (part.type !== "tool" || !["bash", "bash_job"].includes(part.name) || part.provider?.executed) continue
+      const record = executionRecord(part)
       if (
         (part.state.status === "completed" || part.state.status === "error") &&
-        !executionRecord(part) &&
+        (!record || !seenSuites.has(record.id)) &&
         (part.state.input.verification_report === true ||
           (part.state.status === "completed" && Array.isArray(part.state.structured.verifications)))
       ) {
+        const input = part.state.input
+        if (record) seenSuites.add(record.id)
         // A new suite replaces this exact suite's previous coverage. Missing
         // categories must not inherit old passing records.
         for (const [key, check] of checks) {
           if (
             check.exit === 0 &&
-            check.command === part.state.input.command &&
-            key === checkKey(check, part.state.input)
+            (record
+              ? toolChecks(part).some(
+                  (next) => newerExecution(next, check, part) && key === checkKey({ ...next, kind: check.kind }, input),
+                )
+              : check.command === part.state.input.command && key === checkKey(check, part.state.input))
           )
             checks.delete(key)
         }
