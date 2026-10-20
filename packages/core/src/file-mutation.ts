@@ -1,7 +1,7 @@
 export * as FileMutation from "./file-mutation"
 
 import { makeLocationNode } from "./effect/app-node"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema, Option } from "effect"
 import { dirname } from "path"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { FSUtil } from "./fs-util"
@@ -13,12 +13,14 @@ export interface Target {
 }
 
 export interface WriteInput {
+  readonly validate?: Effect.Effect<void, TargetChangedError | FSUtil.Error>
   readonly target: Target
   readonly content: string | Uint8Array
   readonly format?: boolean
 }
 
 export interface TextWriteInput {
+  readonly validate?: Effect.Effect<void, TargetChangedError | FSUtil.Error>
   readonly target: Target
   readonly content: string
   readonly format?: boolean
@@ -33,6 +35,11 @@ export interface ConditionalWriteInput extends WriteInput {
 export interface RemoveInput {
   readonly target: Target
 }
+
+export class TargetChangedError extends Schema.TaggedErrorClass<TargetChangedError>()(
+  "FileMutation.TargetChangedError",
+  { path: Schema.String },
+) {}
 
 export class StaleContentError extends Schema.TaggedErrorClass<StaleContentError>()("FileMutation.StaleContentError", {
   path: Schema.String,
@@ -61,12 +68,14 @@ export interface RemoveResult {
 
 export interface Interface {
   /** Create without replacing an existing target. */
-  readonly create: (input: WriteInput) => Effect.Effect<WriteResult, TargetExistsError | FSUtil.Error>
+  readonly create: (
+    input: WriteInput,
+  ) => Effect.Effect<WriteResult, TargetExistsError | TargetChangedError | FSUtil.Error>
   readonly write: (input: WriteInput) => Effect.Effect<WriteResult, FSUtil.Error>
   /** Write text while retaining an existing UTF-8 BOM and emitting at most one BOM. */
   readonly writeTextPreservingBom: (
     input: TextWriteInput,
-  ) => Effect.Effect<WriteResult, TargetExistsError | StaleContentError | FSUtil.Error>
+  ) => Effect.Effect<WriteResult, TargetExistsError | StaleContentError | TargetChangedError | FSUtil.Error>
   /** Commit only if an existing target still has the expected bytes. */
   readonly writeIfUnchanged: (
     input: ConditionalWriteInput,
@@ -128,12 +137,14 @@ const layer = Layer.effect(
     )
 
     const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")(function* (input: TextWriteInput) {
+      if (input.validate) yield* input.validate
       if (input.expected === null) {
         const next = splitBom(input.content)
         return yield* create({ ...input, content: joinBom(next.text, next.bom) })
       }
       return yield* withTargetLock(input.target)(
         Effect.gen(function* () {
+          if (input.validate) yield* input.validate
           const next = splitBom(input.content)
           const current = yield* fs
             .readFile(input.target.canonical)
@@ -144,10 +155,43 @@ const layer = Layer.effect(
               splitBom(new TextDecoder().decode(current)).text !== splitBom(input.expected).text)
           )
             return yield* new StaleContentError({ path: input.target.canonical })
-          yield* fs.writeWithDirs(
-            input.target.canonical,
+          const bytes = new TextEncoder().encode(
             joinBom(next.text, Boolean(current && hasUtf8Bom(current)) || next.bom),
           )
+          if (input.validate && current !== undefined) {
+            // Open without truncation, verify the opened object, then use that same
+            // descriptor for compare/write. A later symlink swap cannot redirect it.
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                const handle = yield* fs.open(input.target.canonical, { flag: "r+" })
+                const opened = yield* handle.stat
+                yield* input.validate!
+                const named = yield* fs.stat(input.target.canonical)
+                if (
+                  opened.type !== "File" ||
+                  opened.dev !== named.dev ||
+                  Option.getOrNull(opened.ino) !== Option.getOrNull(named.ino)
+                )
+                  return yield* new TargetChangedError({ path: input.target.canonical })
+                const chunks: Uint8Array[] = []
+                while (true) {
+                  const chunk = yield* handle.readAlloc(65536)
+                  if (Option.isNone(chunk)) break
+                  chunks.push(chunk.value)
+                }
+                if (!sameBytes(Buffer.concat(chunks), current))
+                  return yield* new StaleContentError({ path: input.target.canonical })
+                yield* input.validate!
+                yield* handle.seek(0, "start")
+                yield* handle.writeAll(bytes)
+                yield* handle.truncate(bytes.length)
+                yield* handle.sync
+              }),
+            )
+          } else {
+            yield* fs.writeWithDirs(input.target.canonical, bytes)
+          }
+          if (input.validate) yield* input.validate
           return yield* formattedResult(input, current !== undefined)
         }),
       )
@@ -156,6 +200,7 @@ const layer = Layer.effect(
     const create = Effect.fn("FileMutation.create")((input: WriteInput) =>
       withTargetLock(input.target)(
         Effect.gen(function* () {
+          if (input.validate) yield* input.validate
           const write =
             typeof input.content === "string"
               ? fs.writeFileString(input.target.canonical, input.content, { flag: "wx" })

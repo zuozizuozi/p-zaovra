@@ -2,7 +2,7 @@ export * as LocationMutation from "./location-mutation"
 
 import { makeLocationNode } from "./effect/app-node"
 import path from "path"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema, Option } from "effect"
 import { FSUtil } from "./fs-util"
 import { Location } from "./location"
 
@@ -42,6 +42,8 @@ export const externalDirectoryPermission = (input: ExternalDirectoryAuthorizatio
 })
 
 export interface Target {
+  /** Identity of the resolved object and its existing directory at approval time. */
+  readonly identity?: string
   /** Canonical existing path, or missing path below a canonical directory. */
   readonly canonical: string
   /** Permission resource: Location-relative for internal paths, canonical for external paths. */
@@ -136,7 +138,18 @@ const layer = Layer.effect(
       const externalDirectory =
         input.kind === "directory" && resolved.type === "Directory" ? resolved.canonical : resolved.directory
       const externalResource = slash(path.join(externalDirectory, "*"))
+      const directoryIdentity = yield* fs.stat(resolved.directory)
+      const fileIdentity = resolved.type === "File" ? yield* fs.stat(resolved.canonical) : undefined
       return {
+        identity: JSON.stringify([
+          resolved.directory,
+          directoryIdentity.dev,
+          Option.getOrNull(directoryIdentity.ino),
+          Option.getOrNull(directoryIdentity.birthtime),
+          fileIdentity
+            ? [fileIdentity.dev, Option.getOrNull(fileIdentity.ino), Option.getOrNull(fileIdentity.birthtime)]
+            : null,
+        ]),
         canonical: resolved.canonical,
         resource,
         externalDirectory: external

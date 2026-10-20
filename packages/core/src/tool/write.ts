@@ -93,7 +93,21 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
+                const validate = Effect.gen(function* () {
+                  const current = yield* mutation
+                    .resolve({ path: input.path, kind: "file" })
+                    .pipe(Effect.mapError(() => new FileMutation.TargetChangedError({ path: input.path })))
+                  if (
+                    current.canonical !== target.canonical ||
+                    current.identity !== target.identity ||
+                    current.resource !== target.resource ||
+                    JSON.stringify(current.externalDirectory) !== JSON.stringify(target.externalDirectory)
+                  )
+                    return yield* new FileMutation.TargetChangedError({ path: input.path })
+                })
+                yield* validate
                 const result = yield* files.writeTextPreservingBom({
+                  validate,
                   target,
                   content: input.content,
                   expected: input.expectedContent ?? null,

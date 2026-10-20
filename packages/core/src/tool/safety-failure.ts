@@ -15,6 +15,12 @@ export function safetyFailure(error: unknown) {
       message: `Tool not executed: the permission request was corrected.\n${error.feedback}`,
       metadata: { phase: "permission", reason: error._tag },
     })
+  if (error instanceof FileMutation.TargetChangedError)
+    return new ToolFailure({
+      message:
+        "File target identity changed. Write stopped; resolve the target and request permission again. Inspect any partial effects before retrying.",
+      metadata: { phase: "mutation", reason: "target-changed" },
+    })
   if (error instanceof FileMutation.StaleContentError)
     return new ToolFailure({
       message:
@@ -50,9 +56,14 @@ export function safetyMetadata(metadata: Readonly<Record<string, unknown>> | und
     return { phase: "permission", reason: metadata.reason }
   if (
     metadata.phase === "mutation" &&
-    ["stale-content", "target-exists", "match-failed", "patch-failed", "partial-application"].includes(
-      String(metadata.reason),
-    )
+    [
+      "target-changed",
+      "stale-content",
+      "target-exists",
+      "match-failed",
+      "patch-failed",
+      "partial-application",
+    ].includes(String(metadata.reason))
   )
     return {
       phase: "mutation",
