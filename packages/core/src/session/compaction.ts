@@ -2,9 +2,20 @@ import { SessionOwnership } from "./ownership"
 export * as SessionCompaction from "./compaction"
 import { SessionCache } from "./cache"
 
-import { LLM, LLMError, LLMEvent, Message, SystemPart, type LLMRequest, type Model, type Usage } from "@zaovra-ai/llm"
+import {
+  AnthropicThinking,
+  mergeProviderOptions,
+  LLM,
+  LLMError,
+  LLMEvent,
+  Message,
+  SystemPart,
+  type LLMRequest,
+  type Model,
+  type Usage,
+} from "@zaovra-ai/llm"
 import { usageTokens, usageReported } from "./usage-tokens"
-import { DateTime, Effect, Stream } from "effect"
+import { DateTime, Effect, Stream, Schema } from "effect"
 import type { Config } from "../config"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
@@ -62,14 +73,37 @@ const SUMMARY_SYSTEM = `You are the conversation summarizer, not the task execut
 ${SUMMARY_TEMPLATE}`
 
 /** Shared by actual compaction and read-only request replay diagnostics. */
-export const summaryRequest = (input: { model: Model; prompt: string; maxTokens: number }) =>
-  LLM.request({
+export const summaryRequest = (input: { model: Model; prompt: string; maxTokens: number }) => {
+  const options = mergeProviderOptions(
+    input.model.route.defaults.providerOptions,
+    input.model.defaults?.providerOptions,
+  )?.anthropic
+  const thinking = options?.thinking
+  const modes = options?.thinkingModes
+  const budget =
+    Schema.is(AnthropicThinking)(thinking) && thinking.type === "enabled"
+      ? (thinking.budgetTokens ?? thinking.budget_tokens)
+      : undefined
+  const summaryThinking =
+    budget === undefined
+      ? undefined
+      : input.maxTokens >= 1280
+        ? { type: "enabled", budgetTokens: Math.min(budget, Math.max(1024, input.maxTokens - 256)) }
+        : {
+            type:
+              Array.isArray(modes) && !modes.includes("disabled") && modes.includes("adaptive")
+                ? "adaptive"
+                : "disabled",
+          }
+  return LLM.request({
     model: input.model,
     system: [SystemPart.make(SUMMARY_SYSTEM)],
     messages: [Message.user(input.prompt)],
     tools: [],
     generation: { maxTokens: input.maxTokens },
+    ...(summaryThinking ? { providerOptions: { anthropic: { thinking: summaryThinking } } } : {}),
   })
+}
 
 /** Validate the handoff format, not the truth of model-written claims. */
 export function invalidSummary(text: string) {

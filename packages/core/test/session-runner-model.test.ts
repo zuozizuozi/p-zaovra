@@ -1,3 +1,4 @@
+import { SessionCompaction } from "../src/session/compaction"
 import { describe, expect } from "bun:test"
 import { LLM, Message } from "@zaovra-ai/llm"
 import { LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
@@ -477,7 +478,9 @@ describe("SessionRunnerModel", () => {
       expect(resolved.route.defaults.http?.body).toEqual({
         custom_extension: { enabled: true },
       })
-      const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "Hello" }))
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({ model: resolved, prompt: "Hello", generation: { maxTokens: 16000 } }),
+      )
       expect(prepared.body).toMatchObject({ thinking: { type: "enabled", budget_tokens: 12000 } })
     }),
   )
@@ -614,3 +617,57 @@ it.effect("retains the official OpenAI default endpoint only for the canonical p
     expect(error).toBeInstanceOf(SessionRunnerModel.MissingEndpointError)
   }),
 )
+
+for (const thinking of [{ type: "adaptive" }, { type: "disabled" }, { type: "enabled", budget_tokens: 12000 }]) {
+  it.effect(`302 N7 catalog thinking reaches wire: ${thinking.type}`, () =>
+    Effect.gen(function* () {
+      const catalog = ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/anthropic", url: "https://offline.invalid" }),
+        limit: { context: 200000, output: 16000 },
+        request: { headers: {}, body: { thinking } },
+      })
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(catalog, { type: "key", key: "offline" })
+      const prepared = yield* LLMClient.prepare(LLM.request({ model: resolved, prompt: "hello" }))
+      expect(prepared.body).toMatchObject({ thinking })
+    }),
+  )
+  it.effect(`302 N9 summary thinking budget is legal: ${thinking.type}`, () =>
+    Effect.gen(function* () {
+      const catalog = ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/anthropic", url: "https://offline.invalid" }),
+        limit: { context: 200000, output: 16000 },
+        request: { headers: {}, body: { thinking } },
+      })
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(catalog, { type: "key", key: "offline" })
+      const prepared = yield* LLMClient.prepare(
+        SessionCompaction.summaryRequest({ model: resolved, prompt: "summarize", maxTokens: 4096 }),
+      )
+      const body = prepared.body as { max_tokens: number; thinking?: { type: string; budget_tokens?: number } }
+      expect(body.max_tokens).toBe(4096)
+      expect(body.thinking?.type).toBe(thinking.type)
+      if (body.thinking?.type === "enabled") expect(body.thinking.budget_tokens).toBeLessThan(4096)
+    }),
+  )
+}
+
+for (const maxTokens of [512, 1024, 1025, 1280, 4096, 16000])
+  it.effect(`302 N9 summary cap ${maxTokens} leaves answer space`, () =>
+    Effect.gen(function* () {
+      const catalog = ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/anthropic", url: "https://offline.invalid" }),
+        limit: { context: 200000, output: 16000 },
+        request: { headers: {}, body: { thinking: { type: "enabled", budget_tokens: 12000 } } },
+      })
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(catalog, { type: "key", key: "offline" })
+      const prepared = yield* LLMClient.prepare(
+        SessionCompaction.summaryRequest({ model: resolved, prompt: "summary", maxTokens }),
+      )
+      const body = prepared.body as { max_tokens: number; thinking: { type: string; budget_tokens?: number } }
+      expect(body.max_tokens).toBe(maxTokens)
+      if (maxTokens < 1280) expect(body.thinking.type).toBe("disabled")
+      else {
+        expect(body.thinking.budget_tokens).toBeGreaterThanOrEqual(1024)
+        expect(body.thinking.budget_tokens).toBeLessThanOrEqual(maxTokens - 256)
+      }
+    }),
+  )

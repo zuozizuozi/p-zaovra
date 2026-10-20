@@ -1,7 +1,7 @@
 export * as SessionRunnerModel from "./model"
 
 import { makeLocationNode } from "../../effect/app-node"
-import { GenerationOptions, type Model } from "@zaovra-ai/llm"
+import { AnthropicThinking, GenerationOptions, type Model } from "@zaovra-ai/llm"
 import * as AnthropicMessages from "@zaovra-ai/llm/protocols/anthropic-messages"
 import { OpenAICompatibleChat, DeepSeekOptions } from "@zaovra-ai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@zaovra-ai/llm/protocols/openai-responses"
@@ -141,7 +141,7 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
   const thinking =
     model.api.type === "aisdk" &&
     model.api.package === "@ai-sdk/anthropic" &&
-    Schema.is(Schema.Struct({ type: Schema.Literals(["enabled", "disabled"]) }))(body.thinking)
+    Schema.is(AnthropicThinking)(body.thinking)
       ? body.thinking
       : undefined
   // Invalid generation values remain in the overlay so request validation rejects
@@ -164,7 +164,7 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
       ...(deepseek
         ? { deepseek: { thinking: body.thinking ?? { type: "enabled" }, reasoningEffort: body.reasoning_effort } }
         : {}),
-      ...(thinking === undefined ? {} : { anthropic: { thinking } }),
+      ...(thinking === undefined ? {} : { anthropic: { thinking, thinkingModes: model.api.settings?.thinkingModes } }),
       ...(model.api.settings?.maxTokensParameter !== undefined || Object.hasOwn(body, "max_completion_tokens")
         ? { openai: { maxTokensParameter: model.api.settings?.maxTokensParameter ?? "max_completion_tokens" } }
         : {}),

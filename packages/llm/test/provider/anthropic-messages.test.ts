@@ -990,3 +990,107 @@ describe("Anthropic Messages route", () => {
     }),
   )
 })
+
+it.effect("302 N8 empty signed thinking blocks retain identity through tools and replay", () =>
+  Effect.gen(function* () {
+    const response = yield* LLMClient.generate(request).pipe(
+      Effect.provide(
+        fixedResponse(
+          sseEvents(
+            { type: "message_start", message: {} },
+            { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
+            { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-" } },
+            { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "one" } },
+            { type: "content_block_stop", index: 0 },
+            {
+              type: "content_block_start",
+              index: 1,
+              content_block: { type: "thinking", thinking: "", signature: "sig-two" },
+            },
+            { type: "content_block_stop", index: 1 },
+            { type: "content_block_start", index: 2, content_block: { type: "tool_use", id: "call", name: "lookup" } },
+            { type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: "{}" } },
+            { type: "content_block_stop", index: 2 },
+            { type: "message_delta", delta: { stop_reason: "tool_use" } },
+            { type: "message_stop" },
+          ),
+        ),
+      ),
+    )
+    expect(response.message.content.filter((part) => part.type === "reasoning")).toEqual([
+      { type: "reasoning", text: "", providerMetadata: { anthropic: { signature: "sig-one" } } },
+      { type: "reasoning", text: "", providerMetadata: { anthropic: { signature: "sig-two" } } },
+    ])
+    expect(response.events.filter((event) => event.type === "reasoning-end")).toHaveLength(2)
+    const replay = yield* LLMClient.prepare(
+      LLM.request({
+        model,
+        messages: [response.message, Message.tool({ id: "call", name: "lookup", result: { ok: true } })],
+      }),
+    )
+    expect((replay.body as AnthropicMessages.AnthropicMessagesBody).messages[0]).toMatchObject({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: "sig-one" },
+        { type: "thinking", thinking: "", signature: "sig-two" },
+        { type: "tool_use", id: "call" },
+      ],
+    })
+  }),
+)
+
+for (const thinking of [
+  { type: "adaptive", budgetTokens: 1024 },
+  { type: "enabled", budgetTokens: 999 },
+  { type: "enabled", budgetTokens: 4096 },
+  { type: "enabled", budgetTokens: 2048, budget_tokens: 1024 },
+  { type: "unknown" },
+])
+  it.effect(`302 N7 rejects illegal thinking ${JSON.stringify(thinking)}`, () =>
+    Effect.gen(function* () {
+      const failure = yield* LLMClient.prepare(
+        LLM.request({
+          model,
+          prompt: "hello",
+          generation: { maxTokens: 4096 },
+          providerOptions: { anthropic: { thinking } },
+        }),
+      ).pipe(Effect.flip)
+      expect(failure.reason._tag).toBe("InvalidRequest")
+    }),
+  )
+it.effect("302 N7 declared unsupported modes fail locally, explicit disabled clears inherited budget", () =>
+  Effect.gen(function* () {
+    const configured = AnthropicMessages.route
+      .with({
+        providerOptions: {
+          anthropic: { thinking: { type: "enabled", budget_tokens: 2048 }, thinkingModes: ["enabled", "disabled"] },
+        },
+      })
+      .model({ id: "offline" })
+    const failure = yield* LLMClient.prepare(
+      LLM.request({
+        model: configured,
+        prompt: "hello",
+        providerOptions: { anthropic: { thinking: { type: "adaptive" } } },
+      }),
+    ).pipe(Effect.flip)
+    expect(failure.reason.message).toContain("does not support")
+    const disabled = yield* LLMClient.prepare(
+      LLM.request({
+        model: configured,
+        prompt: "hello",
+        providerOptions: { anthropic: { thinking: { type: "disabled" } } },
+      }),
+    )
+    expect(disabled.body).toMatchObject({ thinking: { type: "disabled" } })
+  }),
+)
+it.effect("302 N8 unsigned interrupted reasoning is not replayable", () =>
+  Effect.gen(function* () {
+    const failure = yield* LLMClient.prepare(
+      LLM.request({ model, messages: [Message.assistant([{ type: "reasoning", text: "" }])] }),
+    ).pipe(Effect.flip)
+    expect(failure.reason.message).toContain("original signature")
+  }),
+)

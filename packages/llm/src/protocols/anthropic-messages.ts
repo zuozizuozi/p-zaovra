@@ -1,3 +1,4 @@
+import { AnthropicThinking } from "../schema/options"
 import { Effect, Schema } from "effect"
 import { Route } from "../route/client"
 import { Auth } from "../route/auth"
@@ -148,10 +149,11 @@ const AnthropicToolChoice = Schema.Union([
   Schema.Struct({ type: Schema.tag("tool"), name: Schema.String }),
 ])
 
-const AnthropicThinking = Schema.Struct({
-  type: Schema.tag("enabled"),
-  budget_tokens: Schema.Number,
-})
+const AnthropicThinkingBody = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("enabled"), budget_tokens: Schema.Number }),
+  Schema.Struct({ type: Schema.Literal("disabled") }),
+  Schema.Struct({ type: Schema.Literal("adaptive") }),
+])
 
 const AnthropicBodyFields = {
   model: Schema.String,
@@ -165,7 +167,7 @@ const AnthropicBodyFields = {
   top_p: Schema.optional(Schema.Number),
   top_k: Schema.optional(Schema.Number),
   stop_sequences: optionalArray(Schema.String),
-  thinking: Schema.optional(AnthropicThinking),
+  thinking: Schema.optional(AnthropicThinkingBody),
 }
 const AnthropicMessagesBody = Schema.Struct(AnthropicBodyFields)
 export type AnthropicMessagesBody = Schema.Schema.Type<typeof AnthropicMessagesBody>
@@ -227,6 +229,7 @@ interface ParserState {
   readonly tools: ToolStream.State<number>
   readonly usage?: Usage
   readonly lifecycle: Lifecycle.State
+  readonly signatures?: Readonly<Record<number, string>>
 }
 
 const invalid = ProviderShared.invalidRequest
@@ -457,10 +460,12 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
           continue
         }
         if (part.type === "reasoning") {
+          const signature = part.encrypted ?? signatureFromMetadata(part.providerMetadata)
+          if (!signature) return yield* invalid("Cannot replay Anthropic thinking without its original signature")
           content.push({
             type: "thinking",
             thinking: part.text,
-            signature: part.encrypted ?? signatureFromMetadata(part.providerMetadata),
+            signature,
           })
           continue
         }
@@ -500,9 +505,19 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
 
 const anthropicOptions = (request: LLMRequest) => request.providerOptions?.anthropic
 
-const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (request: LLMRequest) {
+const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (request: LLMRequest, maxTokens: number) {
   const thinking = anthropicOptions(request)?.thinking
-  if (!ProviderShared.isRecord(thinking) || thinking.type !== "enabled") return undefined
+  if (thinking === undefined) return undefined
+  if (!Schema.is(AnthropicThinking)(thinking))
+    return yield* invalid("Anthropic thinking must be enabled, disabled or adaptive")
+  const modes = anthropicOptions(request)?.thinkingModes
+  if (Array.isArray(modes) && !modes.includes(thinking.type))
+    return yield* invalid("This model does not support Anthropic thinking mode: " + thinking.type)
+  if (thinking.type !== "enabled") {
+    if ("budgetTokens" in thinking || "budget_tokens" in thinking)
+      return yield* invalid("Only enabled thinking accepts a manual budget")
+    return { type: thinking.type }
+  }
   const budget =
     typeof thinking.budgetTokens === "number"
       ? thinking.budgetTokens
@@ -510,6 +525,14 @@ const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (re
         ? thinking.budget_tokens
         : undefined
   if (budget === undefined) return yield* invalid("Anthropic thinking provider option requires budgetTokens")
+  if (!Number.isInteger(budget) || budget < 1024 || budget >= maxTokens)
+    return yield* invalid("Anthropic enabled thinking budget must be an integer >= 1024 and less than max_tokens")
+  if (
+    thinking.budgetTokens !== undefined &&
+    thinking.budget_tokens !== undefined &&
+    thinking.budgetTokens !== thinking.budget_tokens
+  )
+    return yield* invalid("Conflicting Anthropic thinking budgets")
   return { type: "enabled" as const, budget_tokens: budget }
 })
 
@@ -558,7 +581,7 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
     top_p: generation?.topP,
     top_k: generation?.topK,
     stop_sequences: generation?.stop,
-    thinking: yield* lowerThinking(request),
+    thinking: yield* lowerThinking(request, generation?.maxTokens ?? outputLimit),
   }
 })
 
@@ -693,12 +716,18 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
     ]
   }
 
-  if (block.type === "thinking" && block.thinking) {
+  if (block.type === "thinking") {
     const events: LLMEvent[] = []
     return [
       {
         ...state,
-        lifecycle: Lifecycle.reasoningDelta(state.lifecycle, events, `reasoning-${event.index ?? 0}`, block.thinking),
+        signatures: { ...state.signatures, [event.index ?? 0]: block.signature ?? "" },
+        lifecycle: Lifecycle.reasoningDelta(
+          state.lifecycle,
+          events,
+          `reasoning-${event.index ?? 0}`,
+          block.thinking ?? "",
+        ),
       },
       events,
     ]
@@ -736,18 +765,15 @@ const onContentBlockDelta = Effect.fn("AnthropicMessages.onContentBlockDelta")(f
   }
 
   if (delta?.type === "signature_delta" && delta.signature) {
-    const events: LLMEvent[] = []
     return [
       {
         ...state,
-        lifecycle: Lifecycle.reasoningEnd(
-          state.lifecycle,
-          events,
-          `reasoning-${event.index ?? 0}`,
-          anthropicMetadata({ signature: delta.signature }),
-        ),
+        signatures: {
+          ...state.signatures,
+          [event.index ?? 0]: (state.signatures?.[event.index ?? 0] ?? "") + delta.signature,
+        },
       },
-      events,
+      NO_EVENTS,
     ] satisfies StepResult
   }
 
@@ -784,6 +810,7 @@ const onContentBlockStop = Effect.fn("AnthropicMessages.onContentBlockStop")(fun
         Lifecycle.textEnd(state.lifecycle, events, `text-${event.index}`),
         events,
         `reasoning-${event.index}`,
+        state.signatures?.[event.index] ? anthropicMetadata({ signature: state.signatures[event.index] }) : undefined,
       )
   events.push(...resultEvents)
   return [{ ...state, lifecycle, tools: result.tools }, events] satisfies StepResult

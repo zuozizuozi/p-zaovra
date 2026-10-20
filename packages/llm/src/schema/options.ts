@@ -33,6 +33,18 @@ const mergeStringRecords = (
   return Object.keys(result).length === 0 ? undefined : result
 }
 
+// Shared catalog/provider contract. Enabled supports the SDK and wire budget spelling.
+export const AnthropicThinking = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("enabled"),
+    budgetTokens: Schema.optional(Schema.Number),
+    budget_tokens: Schema.optional(Schema.Number),
+  }),
+  Schema.Struct({ type: Schema.Literal("disabled") }),
+  Schema.Struct({ type: Schema.Literal("adaptive") }),
+])
+export type AnthropicThinking = Schema.Schema.Type<typeof AnthropicThinking>
+
 export const ProviderOptions = Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown))
 export type ProviderOptions = Schema.Schema.Type<typeof ProviderOptions>
 
@@ -44,7 +56,11 @@ export const mergeProviderOptions = (
     if (!item) continue
     for (const [provider, options] of Object.entries(item)) {
       const merged = mergeJsonRecords(result[provider], options)
-      if (merged) result[provider] = merged
+      if (merged) {
+        // Thinking is a tagged choice, not a recursively mergeable dictionary.
+        if (provider === "anthropic" && options.thinking !== undefined) merged.thinking = options.thinking
+        result[provider] = merged
+      }
     }
   }
   return Object.keys(result).length === 0 ? undefined : result
