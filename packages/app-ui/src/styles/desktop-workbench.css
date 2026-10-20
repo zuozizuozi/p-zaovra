@@ -125,9 +125,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   [data-component="session-turn-diffs-group"] {
     padding: 12px;
-    border: 1px solid var(--zaovra-line);
-    border-radius: var(--zaovra-radius-panel);
-    background: var(--zaovra-surface);
+    background: transparent;
 
     [data-slot="session-turn-diffs-header"] {
       position: static;
@@ -141,6 +139,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
 
   :is([data-component="dialog"], [data-component="dialog-v2"]) {
     [data-slot="dialog-content"] {
+      border: 0;
       border-radius: var(--zaovra-radius-panel);
       background: var(--zaovra-raised);
       box-shadow:
@@ -343,7 +342,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="desktop-sidebar-v2"] {
-    width: 256px;
+    width: calc(var(--desktop-sidebar-width) - 8px);
     height: calc(100% - 16px);
     margin: 8px 8px 8px 0;
     border: 1px solid var(--zaovra-line);
@@ -769,7 +768,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: var(--zaovra-canvas);
+    background: var(--zaovra-surface);
     > .settings-v2 {
       flex: 1;
       min-height: 0;
@@ -803,8 +802,8 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   [data-component="settings-v2-list"] {
-    background: var(--zaovra-surface);
-    border-radius: var(--zaovra-radius-panel);
+    background: transparent;
+    border-radius: 0;
     padding-inline: 18px;
     box-shadow: none;
   }
@@ -955,11 +954,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
   }
 
   @media (max-width: 1000px) {
-    [data-component="desktop-sidebar-v2"] {
-      width: 220px;
-    }
-
-    [data-slot="new-session-position"] {
+[data-slot="new-session-position"] {
       padding-inline: 24px;
     }
 
@@ -1150,4 +1145,21 @@ html[data-theme="oc-2"]
   [data-component="prompt-input-v2"]:has(:focus-visible) {
   outline: 1px solid color-mix(in srgb, var(--zaovra-accent) 35%, transparent);
   outline-offset: 2px;
+}
+
+[data-component="empty-binary-background"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  color: var(--zaovra-ink, var(--text-base));
+  opacity: 0.055;
+  mask-image: radial-gradient(ellipse 68% 52% at 50% 48%, transparent 58%, #000 100%);
+}
+
+/* Native drag regions do not dispatch outside-pointer events to the menu. */
+html:has(.desktop-app-menu[data-expanded]) [data-tauri-drag-region] {
+  app-region: no-drag;
 }

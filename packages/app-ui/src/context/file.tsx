@@ -25,6 +25,7 @@ import { createFileViewCache } from "./file/view-cache"
 import { useServerSDK } from "./server-sdk"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
 import { createFileTreeStore } from "./file/tree-store"
+import { createFileReadQueue } from "./file/read-queue"
 import { invalidateFromWatcher } from "./file/watcher"
 import {
   selectionFromLines,
@@ -69,7 +70,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       SessionStateKey.from(serverSDK().scope, SessionRouteKey.fromRoute(base64Encode(sdk().directory), params.id)),
     )
 
-    const inflight = new Map<string, Promise<void>>()
+    const inflight = createFileReadQueue()
     const [store, setStore] = createStore<{
       file: Record<string, FileState>
     }>({
@@ -108,6 +109,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
 
     createEffect(() => {
       scope()
+      serverSDK().scope
       inflight.clear()
       resetFileContentLru()
       batch(() => {
@@ -154,6 +156,8 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         file,
         produce((draft) => {
           draft.loading = false
+          draft.loaded = false
+          draft.content = undefined
           draft.error = message
         }),
       )
@@ -175,32 +179,25 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       const current = store.file[file]
       if (!options?.force && current?.loaded) return Promise.resolve()
 
-      const pending = inflight.get(key)
-      if (pending) return pending
-
+      const client = sdk().client
       setLoading(file)
-
-      const promise = sdk()
-        .client.file.read({ path: file })
-        .then((x) => {
+      return inflight.run(
+        key,
+        !!options?.force,
+        () => client.file.read({ path: file }),
+        (x) => {
           if (scope() !== directory) return
           const content = x.data
           setLoaded(file, content)
-
           if (!content) return
           touchFileContent(file, approxBytes(content))
           evictContent(new Set([file]))
-        })
-        .catch((e) => {
+        },
+        (e) => {
           if (scope() !== directory) return
           setLoadError(file, errorMessage(e, language.t("error.chain.unknown")))
-        })
-        .finally(() => {
-          inflight.delete(key)
-        })
-
-      inflight.set(key, promise)
-      return promise
+        },
+      )
     }
 
     const search = (query: string, dirs: "true" | "false", options?: { limit?: number; signal?: AbortSignal }) =>
@@ -256,6 +253,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
 
     onCleanup(() => {
       stop()
+      inflight.clear()
       viewCache.clear()
     })
 

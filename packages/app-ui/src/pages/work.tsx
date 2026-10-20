@@ -186,8 +186,11 @@ export default function WorkPage() {
   })
 
   return (
-    <div data-component="work-page" class="flex h-full min-h-0 w-full bg-v2-background-bg-base text-v2-text-text-base">
-      <aside class="flex w-[300px] shrink-0 flex-col border-r border-v2-border-border-muted bg-v2-background-bg-deep">
+    <div
+      data-component="work-page"
+      class="flex h-full min-h-0 w-full flex-col bg-v2-background-bg-base text-v2-text-text-base lg:flex-row"
+    >
+      <aside class="flex max-h-[40%] w-full shrink-0 flex-col border-b border-v2-border-border-muted bg-v2-background-bg-deep lg:max-h-full lg:w-[300px] lg:border-r lg:border-b-0">
         <div class="flex min-h-20 shrink-0 items-center justify-between gap-2 border-b border-v2-border-border-muted px-4 py-2">
           <div class="min-w-0">
             <div class="text-[13px] font-semibold">{language.t("work.experimental")}</div>
@@ -204,10 +207,10 @@ export default function WorkPage() {
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto p-2">
-          <Show when={!goals.loading} fallback={<Empty label={language.t("work.ui.loading.goals")} />}>
+          <Show when={!goals.loading} fallback={<Empty compact label={language.t("work.ui.loading.goals")} />}>
             <Show
               when={(goals.latest?.length ?? 0) > 0}
-              fallback={<Empty label={language.t("work.ui.no.durable.goals.yet")} />}
+              fallback={<Empty compact label={language.t("work.ui.no.durable.goals.yet")} />}
             >
               <For each={goals.latest}>
                 {(goal) => (
@@ -233,7 +236,7 @@ export default function WorkPage() {
             </Show>
           </Show>
           <Show when={goals.error}>
-            <div data-work-tone="error" class="m-2 rounded-md border p-3 text-[12px]">
+            <div data-work-tone="error" class="m-2 p-3 text-[12px]">
               {String(goals.error)}
             </div>
           </Show>
@@ -338,7 +341,7 @@ export default function WorkPage() {
                   <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                     <For each={current().roles}>
                       {(role) => (
-                        <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
+                        <div class="py-3">
                           <div class="flex items-start justify-between gap-3">
                             <div>
                               <div class="text-[12px] font-semibold text-v2-text-text-strong">{role.title}</div>
@@ -370,7 +373,7 @@ export default function WorkPage() {
                   subtitle={language.t("work.ui.planner.parallel.executor.verifier.reviewer.merge.repair")}
                 >
                   <Show when={["active", "paused"].includes(current().goal.status)}>
-                    <div class="mb-3 flex flex-col gap-3 rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
+                    <div class="mb-3 flex flex-col gap-3 py-3">
                       <div class="flex items-center justify-between gap-3">
                         <div class="text-[11px] text-v2-text-text-muted">
                           {language.t("work.ui.extend.the.live.dag.without.restarting.completed.tasks")}
@@ -517,7 +520,7 @@ export default function WorkPage() {
                     <div class="flex max-h-[560px] flex-col gap-3 overflow-y-auto">
                       <For each={current().memory.entries}>
                         {(entry) => (
-                          <article class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
+                          <article class="py-3">
                             <div class="flex items-center justify-between gap-3">
                               <div class="truncate font-mono text-[11px] text-v2-text-text-strong">{entry.key}</div>
                               <div class="flex items-center gap-2">
@@ -580,7 +583,7 @@ export default function WorkPage() {
                               )}
                             </Show>
                             <Show when={entry.resolution?.action === "replace" && entry.resolution.value}>
-                              <div data-work-tone="success" class="mt-3 rounded border p-3">
+                              <div data-work-tone="success" class="mt-3 p-3">
                                 <div class="text-[9px] font-medium uppercase tracking-wide">
                                   {language.t("work.ui.user.correction")}
                                   {entry.resolution?.value?.kind}
@@ -600,7 +603,7 @@ export default function WorkPage() {
                             </Show>
                             <Show when={state.memoryEdit.key === entry.key}>
                               <form
-                                class="mt-3 grid gap-2 rounded border border-v2-border-border-muted bg-v2-background-bg-layer-02 p-3"
+                                class="mt-3 grid gap-2 py-3"
                                 onSubmit={(event) => {
                                   event.preventDefault()
                                   const text = state.memoryEdit.text.trim()
@@ -689,10 +692,7 @@ export default function WorkPage() {
                                     entry.resolution?.handoffID === candidate.handoffID &&
                                     entry.resolution.itemDigest === candidate.itemDigest
                                   return (
-                                    <div
-                                      class="rounded border border-v2-border-border-muted bg-v2-background-bg-layer-02 p-3"
-                                      classList={{ "border-emerald-500/60": selected() }}
-                                    >
+                                    <div class="py-3" classList={{ "border-emerald-500/60": selected() }}>
                                       <div class="flex items-center justify-between gap-2">
                                         <Status value={candidate.item.kind} />
                                         <details>
@@ -772,7 +772,7 @@ export default function WorkPage() {
                     <div class="grid max-h-[520px] gap-3 overflow-y-auto xl:grid-cols-2">
                       <For each={current().handoffs.slice().reverse()}>
                         {(handoff) => (
-                          <article class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
+                          <article class="py-3">
                             <div class="mb-2 flex items-center justify-between gap-3">
                               <Status value={handoff.producer} />
                               <details>
@@ -846,7 +846,7 @@ export default function WorkPage() {
                       <div class="flex max-h-[420px] flex-col gap-2 overflow-y-auto">
                         <For each={current().evidence.slice().reverse()}>
                           {(item) => (
-                            <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
+                            <div class="py-3">
                               <div class="mb-2 flex items-center justify-between text-[11px] text-v2-text-text-muted">
                                 <Show
                                   when={
@@ -890,7 +890,7 @@ export default function WorkPage() {
                       <div class="flex max-h-[420px] flex-col gap-2 overflow-y-auto">
                         <For each={current().evaluations.slice().reverse()}>
                           {(item) => (
-                            <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">
+                            <div class="py-3">
                               <div class="flex items-center justify-between gap-3">
                                 <Status value={item.verdict} />
                                 <span class="truncate text-[11px] text-v2-text-text-muted">{item.evaluator}</span>
@@ -935,7 +935,7 @@ function CreateGoal(props: {
   return (
     <div class="mx-auto flex min-h-full w-full max-w-[760px] items-center p-6">
       <form
-        class="flex w-full flex-col gap-5 rounded-lg border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-6"
+        class="flex w-full flex-col gap-5 py-6"
         onSubmit={(event) => {
           event.preventDefault()
           if (!valid()) return
@@ -971,13 +971,13 @@ function CreateGoal(props: {
             onInput={(event) => props.onDirectory(event.currentTarget.value)}
           />
         </label>
-        <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-02 p-3 text-[11px] leading-5 text-v2-text-text-muted">
+        <div class="p-3 text-[11px] leading-5 text-v2-text-text-muted">
           {language.t(
             "work.ui.default.guardrails.up.to.8.attempts.per.task.3.repair.passes.and.3.concurrent.isolated.tasks.the.reviewer.must.explicitly.pass.the.objective.before.completion",
           )}
         </div>
         <Show when={props.error}>
-          <div data-work-tone="error" class="rounded-md border p-3 text-[12px]">
+          <div data-work-tone="error" class="p-3 text-[12px]">
             {props.error}
           </div>
         </Show>
@@ -1010,7 +1010,7 @@ function GoalHeader(props: {
   const disabled = (command: string) => workGoalControlDisabled({ busy: props.busy, commands: props.commands, command })
 
   return (
-    <header class="flex flex-col gap-4 rounded-lg border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-5">
+    <header class="flex flex-col gap-4 py-5">
       <div class="flex items-start justify-between gap-5">
         <div class="min-w-0">
           <div class="mb-2 flex items-center gap-2">
@@ -1050,7 +1050,7 @@ function GoalHeader(props: {
         </div>
       </div>
       <Show when={props.error}>
-        <div data-work-tone="error" class="rounded-md border p-3 text-[12px]">
+        <div data-work-tone="error" class="p-3 text-[12px]">
           {props.error}
         </div>
       </Show>
@@ -1066,7 +1066,7 @@ function TaskCard(props: { task: WorkDetail["tasks"][number]; detail: WorkDetail
   const role = () => props.detail.roles.find((item) => item.id === props.task.role)
 
   return (
-    <article class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-4">
+    <article class="py-4">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <h3 class="text-[13px] font-semibold text-v2-text-text-strong">{props.task.title}</h3>
@@ -1140,7 +1140,7 @@ function AttemptRow(props: {
     },
   )
   return (
-    <div class="flex flex-wrap items-center gap-3 rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 px-3 py-2.5">
+    <div class="flex flex-wrap items-center gap-3 py-2.5">
       <div class="w-16 shrink-0 font-mono text-[11px] uppercase text-v2-text-text-muted">
         <Status value={props.attempt.kind} />
       </div>
@@ -1199,7 +1199,7 @@ function AttemptRow(props: {
 
 function Section(props: ParentProps<{ title: string; subtitle: string }>) {
   return (
-    <section class="rounded-lg border border-v2-border-border-muted bg-v2-background-bg-layer-02 p-4">
+    <section class="py-4">
       <div class="mb-3">
         <h2 class="text-[13px] font-semibold text-v2-text-text-strong">{props.title}</h2>
         <p class="mt-0.5 text-[11px] text-v2-text-text-muted">{props.subtitle}</p>
@@ -1211,7 +1211,7 @@ function Section(props: ParentProps<{ title: string; subtitle: string }>) {
 
 function Metric(props: { label: string; value: string }) {
   return (
-    <div class="rounded-md border border-v2-border-border-muted bg-v2-background-bg-layer-01 px-4 py-3">
+    <div class="py-3">
       <div class="text-[11px] text-v2-text-text-muted">{props.label}</div>
       <div class="mt-1 text-[18px] font-semibold text-v2-text-text-strong">{props.value}</div>
     </div>

@@ -1,3 +1,4 @@
+import { createSettingsShells } from "@/utils/settings-shells"
 import { ShellStatus } from "@/components/shell-status"
 import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
 import { Button } from "@zaovra-ai/ui/button"
@@ -132,14 +133,16 @@ export const SettingsGeneral: Component = () => {
   const serverSync = useServerSync()
   const serverSdk = useServerSDK()
 
-  const [shells] = createResource(
-    () => ({ sdk: serverSdk(), configured: serverSync().data.config.shell }),
-    () =>
-      serverSdk()
-        .client.pty.shells()
-        .then((res) => res.data ?? [])
-        .catch(() => [] as ShellOption[]),
-    { initialValue: [] as ShellOption[] },
+  const [shells] = createSettingsShells<ShellOption>(
+    () => {
+      const client = serverSdk().client
+      return {
+        directory: dir(),
+        configured: serverSync().data.config.shell,
+        read: (directory: string) => client.pty.shells({ directory }, { throwOnError: true }).then((res) => res.data ?? []),
+      }
+    },
+    () => language.t("settings.shell.queryFailed"),
   )
 
   const [displayBackend, { refetch: refetchDisplayBackend }] = createResource(
@@ -162,7 +165,7 @@ export const SettingsGeneral: Component = () => {
   const currentShell = createMemo(() => serverSync().data.config.shell ?? "")
 
   const shellOptions = createMemo<ShellSelectOption[]>(() => {
-    const list = shells.latest.filter((shell) => shell.path)
+    const list = (shells.loading ? [] : shells().items).filter((shell) => shell.path)
     const current = serverSync().data.config.shell
 
     const nameCounts = new Map<string, number>()
@@ -349,7 +352,9 @@ export const SettingsGeneral: Component = () => {
           description={
             <>
               <span>{language.t("settings.general.row.shell.description")}</span>
-              <ShellStatus shells={shells()} />
+              <Show when={!dir()}><span>{language.t("settings.shell.globalOnly")}</span></Show>
+              <Show when={!shells.loading && shells().error}><span role="alert">{shells().error}</span></Show>
+              <ShellStatus shells={shells.loading ? [] : shells().items} />
             </>
           }
         >

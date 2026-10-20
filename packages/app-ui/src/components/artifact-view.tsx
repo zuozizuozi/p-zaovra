@@ -1,3 +1,5 @@
+import { createArtifactAction } from "@/utils/artifact-action"
+import { showToast } from "@/utils/toast"
 import { createEffect, createResource, onCleanup, onMount, Show, lazy, Suspense } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
@@ -24,6 +26,7 @@ type Props = {
 export function ArtifactView(props: Props) {
   const language = useLanguage()
   const platform = usePlatform()
+  const reveal = createArtifactAction(platform, () => showToast({ title: language.t("artifact.externalError") }))
   return (
     <Show when={artifactViewer(props.target) === "pdf"} fallback={<ArtifactBrowserView {...props} />}>
       <div class="flex h-full min-h-0 flex-col" aria-label={language.t("artifact.pdf")}>
@@ -32,15 +35,9 @@ export function ArtifactView(props: Props) {
             <span class="min-w-0 truncate">{props.target}</span>
             <button
               class="h-10 shrink-0 px-2"
-              onClick={() => {
-                const target = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
-                  ? props.target
-                  : `${props.directory}/${props.target}`
-                if (/^https?:/.test(props.target)) platform.openLink(props.target)
-                else void platform.openPath?.(target)
-              }}
+              onClick={() => void reveal(props.target, props.directory)}
             >
-              {language.t("artifact.external")}
+              {language.t(/^https?:\/\//i.test(props.target) ? "artifact.external" : "artifact.reveal")}
             </button>
           </div>
         </Show>
@@ -79,6 +76,7 @@ function ArtifactBrowserView(props: Props) {
     },
   )
   const platform = usePlatform()
+  const reveal = createArtifactAction(platform, () => showToast({ title: language.t("artifact.externalError") }))
   const dialog = useDialog()
   const api = platform.artifactPreview
   const id = crypto.randomUUID()
@@ -195,18 +193,9 @@ function ArtifactBrowserView(props: Props) {
           <button
             class={button}
             disabled={!state.url}
-            onClick={() => {
-              if (/^https?:\/\//i.test(props.target)) {
-                platform.openLink(state.url)
-                return
-              }
-              const path = /^(?:[A-Za-z]:[\\/]|\/)/.test(props.target)
-                ? props.target
-                : `${props.directory}/${props.target}`
-              void platform.openPath?.(path).catch(() => setState("error", language.t("artifact.externalError")))
-            }}
+            onClick={() => void reveal(props.target, props.directory)}
           >
-            {language.t("artifact.external")}
+            {language.t(/^https?:\/\//i.test(props.target) ? "artifact.external" : "artifact.reveal")}
           </button>
         </div>
       </Show>

@@ -1,4 +1,8 @@
 export const dict = {
+  "desktop.onboarding.choose": "默认项目目录不可用。请选择文件夹，或稍后从主页添加项目。",
+  "desktop.onboarding.fallback": "文档目录不可用，默认项目已创建于 {{path}}。",
+  "desktop.onboarding.later": "稍后",
+  "desktop.onboarding.dismiss": "知道了",
   "desktop.server.exited":
     "本地服务已停止（退出码 {{code}}），当前任务状态无法确认。请关闭并重新打开 Zaovra 恢复连接，核对任务后再继续；命令不会自动重跑。",
   "desktop.menu.checkForUpdates": "检查更新...",

@@ -4,6 +4,20 @@ import { createStore } from "solid-js/store"
 import { createEmbeddedSettings } from "../src/pages/layout/embedded-settings"
 import { handleNotificationClick, setNavigate } from "../src/utils/notification-click"
 
+test("embedded settings retain the explicitly selected project directory", () => {
+  createRoot((dispose) => {
+    const settings = createEmbeddedSettings(() => true, () => "/new-session")
+    try {
+      window.dispatchEvent(new CustomEvent("zaovra:settings-open", { detail: { directory: "/project-a" } }))
+      expect(Reflect.get(settings, "directory")).toBe("/project-a")
+      window.dispatchEvent(new CustomEvent("zaovra:settings-open", { detail: {} }))
+      expect(Reflect.get(settings, "directory")).toBeUndefined()
+    } finally {
+      dispose()
+    }
+  })
+})
+
 test("embedded settings keep their captured server while background selection changes", () => {
   createRoot((dispose) => {
     const [selection, setSelection] = createStore({ serverKey: "http://127.0.0.1:4592" })

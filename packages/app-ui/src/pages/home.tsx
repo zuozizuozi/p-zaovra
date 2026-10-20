@@ -669,10 +669,7 @@ export function NewHome() {
   }
 
   return (
-    <div
-      data-component="home-workbench"
-      class="rounded-[10px] border border-v2-border-border-muted m-2 min-h-0 overflow-hidden bg-v2-background-bg-base self-stretch flex-1"
-    >
+    <div data-component="home-workbench" class="min-h-0 overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
       <ScrollView
         class="h-full [container-type:size]"
         thumbContainer={sessionThumbTrack}
@@ -689,9 +686,6 @@ export function NewHome() {
         }}
       >
         <Show when={searchParams.view === "projects" || !newSessionProject()}>
-          <header class="mx-auto w-full max-w-[1080px] px-6 pt-8">
-            <h1 class="text-20-medium text-v2-text-text-base">{language.t("home.projects")}</h1>
-          </header>
           <div class="home-library mx-auto grid min-h-full w-full max-w-[1080px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6">
             <HomeProjectColumn
               projects={projects()}
@@ -729,7 +723,7 @@ export function NewHome() {
               aria-label={language.t("sidebar.project.recentSessions")}
             >
               <div
-                class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6 lg:pt-12"
+                class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6"
                 onWheel={(event) => {
                   if (sessionViewport) containHomeWheel(event, sessionViewport)
                 }}
@@ -752,7 +746,7 @@ export function NewHome() {
                   onSelect={selectSearchSession}
                 />
                 <Show when={groups().length > 0 && newSessionProject()}>
-                  <div class="pointer-events-none absolute right-0 top-[84px] z-20 flex lg:top-[108px]">
+                  <div class="pointer-events-none absolute right-0 top-[72px] z-20 flex">
                     <ButtonV2
                       data-action="home-new-session"
                       variant="ghost-muted"
@@ -767,14 +761,17 @@ export function NewHome() {
                 </Show>
               </div>
               {/* Sticky chrome for the portaled session scrollbar — matches old sessions ScrollView bounds */}
-              <div class="pointer-events-none sticky top-[84px] z-40 h-0 -mr-3 lg:top-[108px]">
+              <div
+                class="pointer-events-none sticky top-[72px] z-40 h-0 -mr-3"
+                classList={{ hidden: groups().length === 0 }}
+              >
                 <div
                   ref={setSessionThumbTrack}
                   data-component="home-session-scroll-track"
-                  class="relative ml-auto h-[calc(100cqh-84px)] w-3 lg:h-[calc(100cqh-108px)]"
+                  class="relative ml-auto h-[calc(100cqh-72px)] w-3"
                 />
               </div>
-              <div class="-mr-3 min-h-[calc(100cqh-72px)] lg:min-h-[calc(100cqh-96px)]">
+              <div class="-mr-3 min-h-0">
                 <Show
                   when={!sessionLoad.isLoading}
                   fallback={
@@ -867,18 +864,16 @@ function HomeProjectColumn(props: {
 
   return (
     <aside
-      class="mt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden lg:sticky lg:top-14 lg:mt-14 lg:h-[calc(100cqh-56px)] lg:self-start lg:pt-[52px]"
+      class="pt-6 flex min-h-0 min-w-0 flex-col gap-4 overflow-hidden lg:sticky lg:top-0 lg:max-h-[100cqh] lg:self-start"
       aria-label={props.language.t("home.projects")}
       onWheel={(event) => {
         if (event.target === event.currentTarget) return
         props.onWheel(event)
       }}
     >
-      <div class="flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-3">
-        <div class="text-v2-text-text-muted [font-weight:530]">{props.language.t("home.projects")}</div>
-        <Show
-          when={global.servers.list().length === 1 && !(props.projects.length === 0 && props.recentlyClosed.length > 0)}
-        >
+      <div class="flex h-9 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-3">
+        <h1 class="text-16-medium text-v2-text-text-base">{props.language.t("home.projects")}</h1>
+        <Show when={global.servers.list().length === 1}>
           <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
             <IconButtonV2
               data-action="home-add-project"
@@ -905,7 +900,6 @@ function HomeProjectColumn(props: {
                     server={global.servers.list()[0]!}
                     recentlyClosed={props.recentlyClosed}
                     homedir={props.homedir}
-                    chooseProject={props.chooseProject}
                     openRecentProject={props.openRecentProject}
                     language={props.language}
                   />
@@ -1126,24 +1120,11 @@ function HomeProjectEmpty(props: {
   server: ServerConnection.Any
   recentlyClosed: LocalProject[]
   homedir: string
-  chooseProject: (server: ServerConnection.Any) => void
   openRecentProject: (server: ServerConnection.Any, directory: string) => void
   language: ReturnType<typeof useLanguage>
 }) {
-  const global = useGlobal()
-  const unreachable = () => global.servers.health[ServerConnection.key(props.server)]?.healthy === false
   return (
     <div class="flex min-w-0 flex-col gap-1">
-      <button
-        type="button"
-        data-action="home-add-project-row"
-        class={`${HOME_PROJECT_NAV_ROW} disabled:opacity-60 [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
-        disabled={unreachable()}
-        onClick={() => props.chooseProject(props.server)}
-      >
-        <IconV2 name="folder-add-left" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.project.add")}</span>
-      </button>
       <Show when={props.recentlyClosed.length > 0}>
         <div class="mt-3 flex h-7 min-w-0 shrink-0 items-center pl-1.5 pr-3">
           <div class="text-v2-text-text-faint [font-weight:530]">{props.language.t("home.recentlyClosed")}</div>

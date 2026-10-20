@@ -71,7 +71,9 @@ type Deps = {
   getDefaultServerUrl: () => Promise<string | null> | string | null
   setDefaultServerUrl: (url: string | null) => Promise<void> | void
   isFirstLaunchOnboardingPending: () => Promise<boolean> | boolean
-  finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null> | string | null
+  finishFirstLaunchOnboarding: (
+    createDefaultProject: boolean,
+  ) => Promise<null | { directory: string; fallback: boolean } | { needsDirectory: true }> | null
   isOldLayoutEligible: () => Promise<boolean> | boolean
   getDisplayBackend: () => Promise<LinuxDisplayBackend | null>
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void> | void

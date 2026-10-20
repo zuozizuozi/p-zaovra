@@ -57,7 +57,9 @@ export type ElectronAPI = {
   getDefaultServerUrl: () => Promise<string | null>
   setDefaultServerUrl: (url: string | null) => Promise<void>
   isFirstLaunchOnboardingPending: () => Promise<boolean>
-  finishFirstLaunchOnboarding: (createDefaultProject: boolean) => Promise<string | null>
+  finishFirstLaunchOnboarding: (
+    createDefaultProject: boolean,
+  ) => Promise<null | { directory: string; fallback: boolean } | { needsDirectory: true }>
   isOldLayoutEligible: () => Promise<boolean>
   getDisplayBackend: () => Promise<LinuxDisplayBackend | null>
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void>

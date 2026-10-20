@@ -20,6 +20,7 @@ import { SettingsAbout } from "./about"
 export const DialogSettings: Component<{
   serverKey?: ServerConnection.Key
   serverLabel?: string
+  directory?: string
   sessionID?: string
   defaultValue?: string
   embedded?: boolean
@@ -151,19 +152,19 @@ export const DialogSettings: Component<{
           </div>
         </TabsV2.List>
         <TabsV2.Content value="general" class="settings-v2-panel">
-          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="general" />
+          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="general" />
         </TabsV2.Content>
         <TabsV2.Content value="permissions" class="settings-v2-panel">
-          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="permissions" />
+          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="permissions" />
         </TabsV2.Content>
         <TabsV2.Content value="appearance" class="settings-v2-panel">
-          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="appearance" />
+          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="appearance" />
         </TabsV2.Content>
         <TabsV2.Content value="privacy" class="settings-v2-panel">
-          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="privacy" />
+          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="privacy" />
         </TabsV2.Content>
         <TabsV2.Content value="experiments" class="settings-v2-panel">
-          <SettingsGeneralV2 serverKey={props.serverKey} sessionID={props.sessionID} section="experiments" />
+          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="experiments" />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

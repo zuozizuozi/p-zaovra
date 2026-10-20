@@ -1,3 +1,4 @@
+import { createSettingsShells } from "@/utils/settings-shells"
 import { ShellStatus } from "@/components/shell-status"
 import type { ServerConnection } from "@/context/server"
 import { Component, Show, createMemo, createResource, onMount } from "solid-js"
@@ -91,6 +92,7 @@ const playDemoSound = (id: string | undefined) => {
 
 export const SettingsGeneralV2: Component<{
   serverKey?: ServerConnection.Key
+  directory?: string
   sessionID?: string
   section?: "general" | "appearance" | "privacy" | "experiments" | "permissions"
 }> = (props) => {
@@ -124,7 +126,7 @@ export const SettingsGeneralV2: Component<{
   )
 
   const dir = createMemo(() => {
-    if (!props.sessionID) return undefined
+    if (!props.sessionID) return props.directory
     return serverSync().session.lineage.peek(props.sessionID)?.session.directory
   })
   const accepting = createMemo(() => {
@@ -148,14 +150,16 @@ export const SettingsGeneralV2: Component<{
 
   const themeOptions = createMemo<ThemeOption[]>(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
 
-  const [shells] = createResource(
-    () => ({ sdk: serverSdk(), configured: serverSync().data.config.shell }),
-    () =>
-      serverSdk()
-        .client.pty.shells()
-        .then((res) => res.data ?? [])
-        .catch(() => [] as ShellOption[]),
-    { initialValue: [] as ShellOption[] },
+  const [shells] = createSettingsShells<ShellOption>(
+    () => {
+      const client = serverSdk().client
+      return {
+        directory: dir(),
+        configured: serverSync().data.config.shell,
+        read: (directory: string) => client.pty.shells({ directory }, { throwOnError: true }).then((res) => res.data ?? []),
+      }
+    },
+    () => language.t("settings.shell.queryFailed"),
   )
 
   const [pinchZoom, { mutate: setPinchZoom }] = createResource(
@@ -172,7 +176,7 @@ export const SettingsGeneralV2: Component<{
   const currentShell = createMemo(() => serverSync().data.config.shell ?? "")
 
   const shellOptions = createMemo<ShellSelectOption[]>(() => {
-    const list = shells.latest.filter((shell) => shell.path)
+    const list = (shells.loading ? [] : shells().items).filter((shell) => shell.path)
     const current = serverSync().data.config.shell
 
     const nameCounts = new Map<string, number>()
@@ -320,7 +324,9 @@ export const SettingsGeneralV2: Component<{
           description={
             <>
               <span>{language.t("settings.general.row.shell.description")}</span>
-              <ShellStatus shells={shells()} />
+              <Show when={!dir()}><span>{language.t("settings.shell.globalOnly")}</span></Show>
+              <Show when={!shells.loading && shells().error}><span role="alert">{shells().error}</span></Show>
+              <ShellStatus shells={shells.loading ? [] : shells().items} />
             </>
           }
         >

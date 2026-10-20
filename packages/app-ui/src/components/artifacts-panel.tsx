@@ -1,3 +1,5 @@
+import { createArtifactAction } from "@/utils/artifact-action"
+import { showToast } from "@/utils/toast"
 import { useLanguage } from "@/context/language"
 import { Persist, persisted } from "@/utils/persist"
 import { useSessionLayout } from "@/pages/session/session-layout"
@@ -17,6 +19,7 @@ import { Icon } from "@zaovra-ai/ui/icon"
 export function ArtifactsPanel(props: { active: boolean; target?: { path: string }; onReview?: () => void }) {
   const language = useLanguage()
   const platform = usePlatform()
+  const reveal = createArtifactAction(platform, () => showToast({ title: language.t("artifact.externalError") }))
   const [controls, setControls] = createStore<{ current?: ArtifactControls }>({})
   let panel: HTMLDivElement | undefined
   const sdk = useSDK()
@@ -228,18 +231,9 @@ export function ArtifactsPanel(props: { active: boolean; target?: { path: string
           type="button"
           class="size-8 shrink-0"
           disabled={!state.active}
-          aria-label={language.t("artifact.external")}
-          title={language.t("artifact.external")}
-          onClick={() => {
-            if (/^https?:\/\//i.test(state.active)) {
-              platform.openLink(state.active)
-              return
-            }
-            const target = /^(?:[A-Za-z]:[\\/]|\/)/.test(state.active)
-              ? state.active
-              : `${sdk().directory}/${state.active}`
-            void platform.openPath?.(target)
-          }}
+          aria-label={language.t(/^https?:\/\//i.test(state.active) ? "artifact.external" : "artifact.reveal")}
+          title={language.t(/^https?:\/\//i.test(state.active) ? "artifact.external" : "artifact.reveal")}
+          onClick={() => void reveal(state.active, sdk().directory)}
         >
           <Icon name="square-arrow-top-right" />
         </button>

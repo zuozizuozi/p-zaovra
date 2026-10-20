@@ -1,3 +1,4 @@
+import { useTabs } from "@/context/tabs"
 import { useLocation, useParams } from "@solidjs/router"
 import { onCleanup } from "solid-js"
 import { useLayout } from "@/context/layout"
@@ -10,6 +11,7 @@ import { useDialog } from "@zaovra-ai/ui/context/dialog"
 export function useSettingsDialog(defaultValue?: string) {
   const dialog = useDialog()
   const layout = useLayout()
+  const tabs = useTabs()
   const sdk = useServerSDK()
   const location = useLocation()
   const params = useParams<{ id?: string }>()
@@ -26,16 +28,19 @@ export function useSettingsDialog(defaultValue?: string) {
     const serverKey =
       (location.pathname === "/" ? layout.home.selection().server : route.type === "home" ? undefined : route.server) ??
       ServerConnection.key(sdk().server)
+    const directory = route.type === "draft"
+      ? tabs.draft(route.draftID).directory
+      : location.pathname === "/" ? layout.home.selection().directory : undefined
     const sessionID = route.type === "session" ? route.sessionId : params.id
     const event = new CustomEvent("zaovra:settings-open", {
       cancelable: true,
-      detail: { serverKey, sessionID, defaultValue },
+      detail: { serverKey, sessionID, directory, defaultValue },
     })
     if (!window.dispatchEvent(event)) return
     const current = ++run
     void import("@/components/settings-v2").then((module) => {
       if (dead || run !== current) return
-      void dialog.show(() => <module.DialogSettings sessionID={sessionID} defaultValue={defaultValue} />)
+      void dialog.show(() => <module.DialogSettings directory={directory} sessionID={sessionID} defaultValue={defaultValue} />)
     })
   }
 }

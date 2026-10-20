@@ -197,6 +197,7 @@ export default function NewLayout(props: ParentProps) {
                             embedded
                             serverKey={settingsPage.serverKey}
                             serverLabel={global.servers.list().length > 1 ? serverName(connection) : undefined}
+                            directory={settingsPage.directory}
                             sessionID={settingsPage.sessionID}
                             defaultValue={settingsPage.defaultValue}
                             onClose={() => window.dispatchEvent(new CustomEvent("zaovra:settings-close"))}

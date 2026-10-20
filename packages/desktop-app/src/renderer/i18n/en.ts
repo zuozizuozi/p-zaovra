@@ -1,4 +1,9 @@
 export const dict = {
+  "desktop.onboarding.choose":
+    "The default project folder is unavailable. Choose a folder, or add a project from the home page later.",
+  "desktop.onboarding.fallback": "Documents was unavailable. Your default project was created in {{path}}.",
+  "desktop.onboarding.later": "Later",
+  "desktop.onboarding.dismiss": "Dismiss",
   "desktop.server.exited":
     "The local service stopped (code {{code}}). Task status cannot be confirmed. Close and reopen Zaovra to reconnect, then inspect the task before continuing. Commands will not be replayed automatically.",
   "desktop.menu.checkForUpdates": "Check for Updates...",

@@ -9,6 +9,7 @@ export function createEmbeddedSettings(desktop: () => boolean, route: () => stri
     open: boolean
     serverKey?: ServerConnection.Key
     sessionID?: string
+    directory?: string
     defaultValue?: string
   }>({ open: false })
   makeEventListener(window, "zaovra:settings-open", (event) => {
@@ -18,6 +19,7 @@ export function createEmbeddedSettings(desktop: () => boolean, route: () => stri
       open: true,
       serverKey: event.detail?.serverKey,
       sessionID: event.detail?.sessionID,
+      directory: typeof event.detail?.directory === "string" ? event.detail.directory : undefined,
       defaultValue: event.detail?.defaultValue,
     })
   })
