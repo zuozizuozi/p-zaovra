@@ -84,6 +84,35 @@ export function SessionOutcomeDock() {
   const abandoned = () =>
     !!sync().session.get(params.id ?? "")?.time.archived ||
     (recover.isSuccess && recover.variables?.sessionID === params.id && recover.variables.action === "abandon")
+  const [budget, setBudget] = createStore({ tokens: "", minutes: "" })
+  const updateBudget = useMutation(() => ({
+    mutationFn: async (remove: boolean) => {
+      const tokens = remove || !budget.tokens.trim() ? null : Number(budget.tokens)
+      const durationMs = remove || !budget.minutes.trim() ? null : Number(budget.minutes) * 60_000
+      if ([tokens, durationMs].some((value) => value !== null && (!Number.isSafeInteger(value) || value <= 0)))
+        throw new Error(language.t("session.budget.invalid"))
+      const sessionID = params.id!
+      await sdk().client.v2.session.update(
+        {
+          sessionID,
+          budget: { ...(tokens === null ? {} : { tokens }), ...(durationMs === null ? {} : { durationMs }) },
+        },
+        { throwOnError: true },
+      )
+      const terminal = outcome()
+      if (terminal?.state === "stopped" && terminal.messageID)
+        await sdk().client.v2.session.recover(
+          { sessionID, messageID: terminal.messageID, action: "continue" },
+          { throwOnError: true },
+        )
+    },
+    onSuccess: () => void query.refetch(),
+    onError: (error: unknown) =>
+      showToast({
+        title: language.t("common.requestFailed"),
+        description: error instanceof Error ? error.message : String(error),
+      }),
+  }))
   const [display, setDisplay] = createStore<{ target?: HTMLElement }>({})
   createEffect(() => {
     const messageID = outcome()?.messageID
@@ -103,6 +132,47 @@ export function SessionOutcomeDock() {
   })
   return (
     <>
+      <Show when={params.id && !abandoned()}>
+        <details data-component="session-budget" class="px-1 py-2 text-12-regular text-text-weak">
+          <summary>{language.t("session.budget.title")}</summary>
+          <p>{language.t("session.budget.hint")}</p>
+          <label>
+            {language.t("session.budget.tokens")}
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={budget.tokens}
+              onInput={(event) => setBudget("tokens", event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            {language.t("session.budget.minutes")}
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={budget.minutes}
+              onInput={(event) => setBudget("minutes", event.currentTarget.value)}
+            />
+          </label>
+          <Button
+            size="small"
+            disabled={updateBudget.isPending || recover.isPending}
+            onClick={() => updateBudget.mutate(false)}
+          >
+            {language.t("session.budget.apply")}
+          </Button>
+          <Button
+            size="small"
+            variant="ghost"
+            disabled={updateBudget.isPending || recover.isPending}
+            onClick={() => updateBudget.mutate(true)}
+          >
+            {language.t("session.budget.remove")}
+          </Button>
+        </details>
+      </Show>
       <Show when={progress().visible}>
         <div data-component="session-live-progress" role="status" class="px-1 py-2 text-12-regular text-text-weak">
           <p class="break-words">
@@ -180,6 +250,11 @@ export function SessionOutcomeDock() {
             role="status"
             aria-busy={recover.isPending}
           >
+            <Show when={outcome()?.termination}>
+              <p data-component="session-termination">
+                {language.t(`session.outcome.${outcome()!.state}`)} · {outcome()!.termination!.message}
+              </p>
+            </Show>
             <Show when={outcome()?.outcomeUnknown && !abandoned()}>
               <span role="alert" class="text-icon-critical-base font-medium">
                 {language.t("session.outcome.unknown")}
@@ -387,17 +462,22 @@ export function SessionOutcomeDock() {
               <Dynamic component={display.target ? Portal : "div"} mount={display.target}>
                 <div class="flex flex-wrap items-center gap-1" data-component="session-recovery-actions">
                   <Show
-                    when={outcome()?.messageID && (outcome()?.state === "interrupted" || outcome()?.state === "failed")}
+                    when={
+                      outcome()?.messageID &&
+                      (outcome()?.state === "interrupted" ||
+                        outcome()?.state === "failed" ||
+                        outcome()?.state === "stopped")
+                    }
                   >
                     <ButtonV2
                       size="small"
                       variant="outline"
                       disabled={recover.isPending}
                       onClick={() =>
-                        recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action: "retry" })
+                        recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action: "continue" })
                       }
                     >
-                      {language.t("session.outcome.retry")}
+                      {language.t("session.outcome.continue")}
                     </ButtonV2>
                     <MenuV2>
                       <MenuV2.Trigger
@@ -411,7 +491,7 @@ export function SessionOutcomeDock() {
                       </MenuV2.Trigger>
                       <MenuV2.Portal>
                         <MenuV2.Content>
-                          <For each={["continue", "abandon"] as const}>
+                          <For each={["retry", "abandon"] as const}>
                             {(action) => (
                               <MenuV2.Item
                                 disabled={recover.isPending}

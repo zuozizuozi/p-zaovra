@@ -3,6 +3,23 @@ import { replayLocalRows, replaySession } from "@/cli/cmd/run/session-replay"
 import type { SessionMessages } from "@/cli/cmd/run/session.shared"
 import type { RunProvider } from "@/cli/cmd/run/types"
 
+test("S1 replay preserves stopped and interrupted turn summaries", () => {
+  for (const finish of ["stopped", "interrupted"]) {
+    const message = assistantMessage("msg-1", "Work remains")
+    if (message.info.role !== "assistant") throw new Error("assistant fixture")
+    message.info.finish = finish
+    const out = replaySession({
+      messages: [userMessage("msg-user-1", "Task"), message],
+      permissions: [],
+      questions: [],
+      thinking: true,
+      limits: {},
+    })
+    expect(out.commits.find((commit) => commit.summary)?.text).toContain(finish)
+    expect(out.commits.find((commit) => commit.summary)?.summary).toMatchObject({ state: finish })
+  }
+})
+
 function userMessage(id: string, text: string): SessionMessages[number] {
   return {
     info: {

@@ -801,10 +801,29 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
       return out(data, commits)
     }
 
+    if (
+      (event.properties.finish === "stopped" || event.properties.finish === "interrupted") &&
+      !data.ids.has(`terminal:${event.properties.assistantMessageID}`)
+    ) {
+      data.ids.add(`terminal:${event.properties.assistantMessageID}`)
+      commits.push({
+        kind: "system",
+        text: `${event.properties.finish}: ${event.properties.termination?.message ?? event.properties.finish}`,
+        phase: "final",
+        source: "system",
+        messageID: event.properties.assistantMessageID,
+      })
+    }
+
     if (event.properties.error && !data.ids.has(msgErr(event.properties.assistantMessageID))) {
       data.ids.add(msgErr(event.properties.assistantMessageID))
-      commits.push({ kind: "error", text: event.properties.error.message, phase: "start", source: "system",
-        messageID: event.properties.assistantMessageID })
+      commits.push({
+        kind: "error",
+        text: event.properties.error.message,
+        phase: "start",
+        source: "system",
+        messageID: event.properties.assistantMessageID,
+      })
     }
     const usage = formatUsage(
       event.properties.tokens,
@@ -1030,7 +1049,11 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
       return out(data, commits)
     }
 
-    return out(data, commits, patch({ status: `retrying (${event.properties.attempt})` }))
+    return out(
+      data,
+      commits,
+      patch({ status: `retrying (${event.properties.attempt}): ${event.properties.error.message}` }),
+    )
   }
 
   if (event.type === "permission.v2.replied") {

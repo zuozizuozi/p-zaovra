@@ -119,6 +119,7 @@ export type TurnSummary = {
   agent: string
   model: string
   duration: string
+  state?: "stopped" | "interrupted"
 }
 
 export type ScrollbackOptions = {

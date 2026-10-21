@@ -6,17 +6,19 @@ export function turnSummaryCommit(input: {
   agent: string
   model: string
   duration: string
+  state?: "stopped" | "interrupted"
   messageID?: string
 }): StreamCommit {
   return {
     kind: "system",
-    text: `▣ ${input.agent} · ${input.model} · ${input.duration}`,
+    text: `▣ ${input.agent} · ${input.model} · ${input.duration}${input.state ? ` · ${input.state}` : ""}`,
     phase: "final",
     source: "system",
     summary: {
       agent: input.agent,
       model: input.model,
       duration: input.duration,
+      ...(input.state ? { state: input.state } : {}),
     },
     messageID: input.messageID,
   }
@@ -43,5 +45,11 @@ export function messageTurnSummaryCommit(
     model: model ?? info.modelID,
     duration: Locale.duration(completed - info.time.created),
     messageID: info.id,
+    state:
+      info.finish === "stopped"
+        ? "stopped"
+        : info.finish === "interrupted" || info.error?.name === "MessageAbortedError"
+          ? "interrupted"
+          : undefined,
   })
 }

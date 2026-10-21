@@ -37,7 +37,11 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   session_token_budget: PositiveInt.pipe(Schema.optional).annotate({
     description:
-      "Optional cumulative reported token limit per session, including cache and compaction. Checked between provider requests; an in-flight request may exceed it. Not a monetary or cross-session budget. Loaded with the Location configuration; restart the backend after changing it.",
+      "Optional cumulative reported token limit per session, including cache and compaction. Unreported in-flight usage may exceed it. Not a monetary or cross-session budget. Session budget updates replace these defaults without restarting.",
+  }),
+  session_duration_ms: PositiveInt.pipe(Schema.optional).annotate({
+    description:
+      "Optional session wall-clock limit in milliseconds since creation, also checked during provider and tool waits. Session budget updates replace defaults; an empty budget object removes both limits.",
   }),
   session_output: Schema.Record(
     Schema.String,

@@ -6,6 +6,10 @@ import { LayerNode } from "../effect/layer-node"
 import { Node } from "../effect/app-node"
 import { SessionRunner } from "./runner/index"
 import { SessionSchema } from "./schema"
+import { EventV2 } from "../event"
+
+/** Advisory, process-local wake after a durable background completion input. Never replayed. */
+export const Wake = EventV2.define({ type: "session.execution.wake", schema: { sessionID: SessionSchema.ID } })
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */

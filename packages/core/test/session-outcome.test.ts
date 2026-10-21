@@ -2180,3 +2180,20 @@ test("304 new identified suite replaces coverage once across durable and repeate
   ).toBe(true)
   expect(derive([full, suite("other-sample", 2, ["syntax", "smoke"], cwd, "mobile")]).state).toBe("completed_verified")
 })
+
+test("S1 runtime and verification are independent and old finishes retain interpretation", () => {
+  expect(SessionOutcome.derive([assistant], false)).toMatchObject({ runtime: "completed", verification: "unverified" })
+  expect(
+    SessionOutcome.derive(
+      [{ ...assistant, finish: "stopped", termination: { category: "budget", message: "limit" } }],
+      false,
+    ),
+  ).toMatchObject({
+    state: "stopped",
+    runtime: "stopped",
+    verification: "unverified",
+    termination: { category: "budget" },
+  })
+  expect(SessionOutcome.derive([{ ...assistant, finish: "max-steps" }], false).state).toBe("failed")
+  expect(SessionOutcome.derive([{ ...assistant, finish: "interrupted" }], false).runtime).toBe("interrupted")
+})

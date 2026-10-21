@@ -761,6 +761,12 @@ export const RunCommand = effectCmd({
                 continue
               }
               if (terminal) {
+                if (outcome.state === "stopped") {
+                  process.exitCode = 2
+                  const message = outcome.termination?.message ?? "Session stopped; inspect and continue"
+                  if (!emit("stopped", { reason: outcome.termination, message })) UI.println(message)
+                  return
+                }
                 if (outcome.state === "failed" && !error) {
                   error = "Session execution failed"
                   if (!emit("error", { error: { message: error } })) UI.error(error)
@@ -813,7 +819,8 @@ export const RunCommand = effectCmd({
               : Promise.resolve(undefined),
           ]).catch((error) => ({ error }))
           if ("error" in selected) {
-            if (!emit("error", { error: selected.error })) UI.error(formatRunError(selected.error))
+            if (!emit("error", { error: { message: formatRunError(selected.error) } }))
+              UI.error(formatRunError(selected.error))
             process.exitCode = 1
             return
           }
@@ -827,7 +834,8 @@ export const RunCommand = effectCmd({
             delivery: "steer",
           })
           if (result.error) {
-            if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
+            if (!emit("error", { error: { message: formatRunError(result.error) } }))
+              UI.error(formatRunError(result.error))
             process.exitCode = 1
             return
           }
@@ -840,7 +848,7 @@ export const RunCommand = effectCmd({
           }
           const executionError = await follow(client, promptID).catch((error) => {
             const message = formatRunError(error)
-            if (!emit("error", { error })) UI.error(message)
+            if (!emit("error", { error: { message } })) UI.error(message)
             return message
           })
           if (executionError) process.exitCode = 1

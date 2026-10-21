@@ -1,5 +1,61 @@
 import { expect, test } from "@playwright/test"
-import { assistantMessage, setupTimeline, textPart, userMessage } from "./fixture"
+import { assistantID, assistantMessage, sessionID, setupTimeline, textPart, userMessage } from "./fixture"
+
+test("S1 stopped budget offers inspect and continue without claiming success", async ({ page }) => {
+  const assistant = assistantMessage([textPart("prt_stopped", "Budget reached; work remains.")])
+  await setupTimeline(page, {
+    messages: [userMessage(), { ...assistant, info: { ...assistant.info, finish: "stopped" } }],
+  })
+  await page.route("**/session/*/outcome*", (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          state: "stopped",
+          runtime: "stopped",
+          verification: "unverified",
+          messageID: assistantID,
+          termination: { category: "budget", message: "Budget reached; work remains." },
+          outcomeUnknown: false,
+          checks: [],
+          missing: [],
+        },
+      },
+    }),
+  )
+  await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+  await page.reload()
+  await expect(
+    page
+      .locator('[data-component="session-recovery-actions"]')
+      .getByRole("button", { name: "Inspect and continue", exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('[data-component="session-termination"]')).toContainText("Budget reached")
+  await expect(page.getByText("Stopped", { exact: true }).first()).toBeVisible()
+  await page.locator('[data-component="session-budget"] > summary').click()
+  await expect(page.getByRole("button", { name: "Remove limits and continue", exact: true })).toBeVisible()
+  const requests: { kind: string; body: unknown }[] = []
+  await page.route(`**/api/session/${sessionID}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback()
+    requests.push({ kind: "update", body: route.request().postDataJSON() })
+    await route.fulfill({ json: { data: {} } })
+  })
+  await page.route(`**/api/session/${sessionID}/recover`, async (route) => {
+    requests.push({ kind: "recover", body: route.request().postDataJSON() })
+    await route.fulfill({ json: { data: { state: "running" } } })
+  })
+  await page.getByLabel("Total tokens", { exact: true }).fill("10000")
+  await page.getByLabel("Total minutes", { exact: true }).fill("60")
+  await page.getByRole("button", { name: "Apply limits and continue", exact: true }).click()
+  await expect.poll(() => requests.length).toBe(2)
+  expect(requests).toEqual([
+    { kind: "update", body: { budget: { tokens: 10000, durationMs: 3600000 } } },
+    { kind: "recover", body: { messageID: assistantID, action: "continue" } },
+  ])
+  await page.getByRole("button", { name: "Remove limits and continue", exact: true }).click()
+  await expect.poll(() => requests.length).toBe(4)
+  expect(requests[2]).toEqual({ kind: "update", body: { budget: {} } })
+  expect(requests[3]).toEqual({ kind: "recover", body: { messageID: assistantID, action: "continue" } })
+})
 
 test("keeps host verification incomplete even when the assistant claims all tests passed", async ({ page }) => {
   await setupTimeline(page, {

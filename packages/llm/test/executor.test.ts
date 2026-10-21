@@ -72,6 +72,27 @@ const expectLLMError = (error: unknown) => {
 
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
 
+for (const status of [401, 402, 403])
+  it.effect(`S1 HTTP ${status} transient body is retried`, () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const result = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          countedResponsesLayer(attempts, [
+            new Response('{"error":{"code":"rate_limit_exceeded","message":"Too many requests"}}', {
+              status,
+              headers: { "retry-after-ms": "0" },
+            }),
+            new Response("ok"),
+          ]),
+        ),
+        Effect.exit,
+      )
+      expect(result._tag).toBe("Success")
+      expect(yield* Ref.get(attempts)).toBe(2)
+    }),
+  )
+
 for (const [status, message] of [
   [401, "Invalid API key"],
   [402, "Insufficient balance"],
@@ -275,7 +296,7 @@ describe("RequestExecutor", () => {
       expect(observed.every((item) => starts.some((start) => start.id === item.id))).toBe(true)
     }),
   )
-  it.effect("caps a long Retry-After at 30 seconds and exhausts five retries", () =>
+  it.effect("S1 honors a long Retry-After without truncating its delay", () =>
     Effect.gen(function* () {
       const attempts = yield* Ref.make(0)
       const run = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
@@ -290,11 +311,11 @@ describe("RequestExecutor", () => {
         Effect.flip,
         Effect.forkChild,
       )
-      yield* TestClock.adjust(29_999)
+      yield* TestClock.adjust(59_999)
       expect(yield* Ref.get(attempts)).toBe(1)
       yield* TestClock.adjust(1)
       expect(yield* Ref.get(attempts)).toBe(2)
-      yield* TestClock.adjust(120_000)
+      yield* TestClock.adjust(240_000)
       const error = yield* Fiber.join(run)
       expect(error.retryAfterMs).toBe(60_000)
       expect(yield* Ref.get(attempts)).toBe(6)

@@ -885,6 +885,7 @@ export type GlobalEvent = {
           sessionID: string
           title?: string
           archived?: boolean
+          budget?: SessionOutcomeBudget
         }
       }
     | {
@@ -993,6 +994,7 @@ export type GlobalEvent = {
           sessionID: string
           assistantMessageID: string
           finish: string
+          termination?: SessionOutcomeTermination
           error?: SessionErrorUnknown
           cost: number
           usageReported?: boolean
@@ -1018,6 +1020,7 @@ export type GlobalEvent = {
           sessionID: string
           assistantMessageID: string
           error: SessionErrorUnknown
+          termination?: SessionOutcomeTermination
         }
       }
     | {
@@ -3437,6 +3440,11 @@ export type LocationRef = {
   workspaceID?: string
 }
 
+export type SessionOutcomeBudget = {
+  tokens?: number
+  durationMs?: number
+}
+
 export type SessionOutcomeExecutionContract = {
   version: 1
   entry?: string
@@ -3560,6 +3568,28 @@ export type SessionOutcomeCheck = {
   logs?: Array<string>
   executionContext?: SessionOutcomeExecutionContext
   contractDigest?: string
+}
+
+export type SessionOutcomeTermination = {
+  category:
+    | "provider-turn-limit"
+    | "budget"
+    | "output-exhausted"
+    | "text-truncation"
+    | "auth"
+    | "quota"
+    | "rate_limit"
+    | "overload"
+    | "network"
+    | "request"
+    | "provider_output"
+    | "internal"
+    | "content_filter"
+    | "interrupted"
+  message: string
+  statusCode?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  provider?: string
+  source?: "user" | "permission" | "process-exit" | "placement-change"
 }
 
 export type SessionErrorUnknown = {
@@ -4164,6 +4194,7 @@ export type SyncEventSessionNextUpdated = {
       sessionID: string
       title?: string
       archived?: boolean
+      budget?: SessionOutcomeBudget
     }
   }
 }
@@ -4342,6 +4373,7 @@ export type SyncEventSessionNextStepEnded = {
       sessionID: string
       assistantMessageID: string
       finish: string
+      termination?: SessionOutcomeTermination
       error?: SessionErrorUnknown
       cost: number
       usageReported?: boolean
@@ -4374,6 +4406,7 @@ export type SyncEventSessionNextStepFailed = {
       sessionID: string
       assistantMessageID: string
       error: SessionErrorUnknown
+      termination?: SessionOutcomeTermination
     }
   }
 }
@@ -5744,6 +5777,7 @@ export type SessionMessageAssistant = {
     files?: Array<string>
   }
   finish?: string
+  termination?: SessionOutcomeTermination
   cost?: number
   tokens?: {
     input: number
@@ -5905,6 +5939,7 @@ export type SessionNextUpdated = {
     sessionID: string
     title?: string
     archived?: boolean
+    budget?: SessionOutcomeBudget
   }
 }
 
@@ -6113,6 +6148,7 @@ export type SessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    termination?: SessionOutcomeTermination
     error?: SessionErrorUnknown
     cost: number
     usageReported?: boolean
@@ -6148,6 +6184,7 @@ export type SessionNextStepFailed = {
     sessionID: string
     assistantMessageID: string
     error: SessionErrorUnknown
+    termination?: SessionOutcomeTermination
   }
 }
 
@@ -6616,6 +6653,50 @@ export type SessionOutcomeCheck1 = {
   contractDigest?: string
 }
 
+export type SessionOutcomeTermination3 = {
+  category:
+    | "provider-turn-limit"
+    | "budget"
+    | "output-exhausted"
+    | "text-truncation"
+    | "auth"
+    | "quota"
+    | "rate_limit"
+    | "overload"
+    | "network"
+    | "request"
+    | "provider_output"
+    | "internal"
+    | "content_filter"
+    | "interrupted"
+  message: string
+  statusCode?: number | "NaN" | "Infinity" | "-Infinity"
+  provider?: string
+  source?: "user" | "permission" | "process-exit" | "placement-change"
+}
+
+export type SessionOutcomeTermination4 = {
+  category:
+    | "provider-turn-limit"
+    | "budget"
+    | "output-exhausted"
+    | "text-truncation"
+    | "auth"
+    | "quota"
+    | "rate_limit"
+    | "overload"
+    | "network"
+    | "request"
+    | "provider_output"
+    | "internal"
+    | "content_filter"
+    | "interrupted"
+  message: string
+  statusCode?: number | "NaN" | "Infinity" | "-Infinity"
+  provider?: string
+  source?: "user" | "permission" | "process-exit" | "placement-change"
+}
+
 export type SessionOutcomeReview = {
   userMessageID: string
   items: Array<{
@@ -6638,7 +6719,18 @@ export type SessionOutcomeReview = {
 }
 
 export type SessionOutcomeInfo = {
-  state: "idle" | "running" | "completed" | "completed_verified" | "completed_unverified" | "failed" | "interrupted"
+  state:
+    | "idle"
+    | "running"
+    | "completed"
+    | "completed_verified"
+    | "completed_unverified"
+    | "failed"
+    | "interrupted"
+    | "stopped"
+  termination?: SessionOutcomeTermination
+  runtime?: "idle" | "running" | "completed" | "stopped" | "interrupted" | "failed"
+  verification?: "verified" | "unverified" | "failed"
   outcomeUnknown: boolean
   checks: Array<SessionOutcomeCheck>
   recentChecks?: Array<{
@@ -9057,6 +9149,7 @@ export type EventSessionNextUpdated = {
     sessionID: string
     title?: string
     archived?: boolean
+    budget?: SessionOutcomeBudget
   }
 }
 
@@ -9230,6 +9323,28 @@ export type EventSessionNextStepStarted = {
   }
 }
 
+export type SessionOutcomeTermination6 = {
+  category:
+    | "provider-turn-limit"
+    | "budget"
+    | "output-exhausted"
+    | "text-truncation"
+    | "auth"
+    | "quota"
+    | "rate_limit"
+    | "overload"
+    | "network"
+    | "request"
+    | "provider_output"
+    | "internal"
+    | "content_filter"
+    | "interrupted"
+  message: string
+  statusCode?: number | "NaN" | "Infinity" | "-Infinity"
+  provider?: string
+  source?: "user" | "permission" | "process-exit" | "placement-change"
+}
+
 export type EventSessionNextStepEnded = {
   id: string
   type: "session.next.step.ended"
@@ -9238,6 +9353,7 @@ export type EventSessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    termination?: SessionOutcomeTermination6
     error?: SessionErrorUnknown
     cost: number
     usageReported?: boolean
@@ -9256,6 +9372,28 @@ export type EventSessionNextStepEnded = {
   }
 }
 
+export type SessionOutcomeTermination7 = {
+  category:
+    | "provider-turn-limit"
+    | "budget"
+    | "output-exhausted"
+    | "text-truncation"
+    | "auth"
+    | "quota"
+    | "rate_limit"
+    | "overload"
+    | "network"
+    | "request"
+    | "provider_output"
+    | "internal"
+    | "content_filter"
+    | "interrupted"
+  message: string
+  statusCode?: number | "NaN" | "Infinity" | "-Infinity"
+  provider?: string
+  source?: "user" | "permission" | "process-exit" | "placement-change"
+}
+
 export type EventSessionNextStepFailed = {
   id: string
   type: "session.next.step.failed"
@@ -9264,6 +9402,7 @@ export type EventSessionNextStepFailed = {
     sessionID: string
     assistantMessageID: string
     error: SessionErrorUnknown
+    termination?: SessionOutcomeTermination7
   }
 }
 
@@ -13262,6 +13401,7 @@ export type V2SessionUpdateData = {
   body: {
     title?: string
     archived?: boolean
+    budget?: SessionOutcomeBudget
   }
   path: {
     sessionID: string

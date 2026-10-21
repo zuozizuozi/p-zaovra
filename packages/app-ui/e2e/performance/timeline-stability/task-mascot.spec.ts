@@ -11,6 +11,31 @@ import {
   sessionID,
 } from "./fixture"
 
+for (const finish of ["stopped", "interrupted"])
+  test(`S1 ${finish} settles without a success animation`, async ({ page }) => {
+    const timeline = await setupTimeline(page, {
+      messages: [userMessage(), assistantMessage([], { completed: false })],
+      reducedMotion: false,
+    })
+    let running = true
+    await page.route("**/api/session/active", (route) =>
+      route.fulfill({ json: { data: running ? { [sessionID]: true } : {} } }),
+    )
+    await timeline.send(status("busy"))
+    await timeline.send(partUpdated(textPart("prt_terminal", "Work remains")))
+    await expect(page.locator('[data-component="task-mascot"][data-state="thinking"]').first()).toBeVisible()
+    const message = assistantMessage([textPart("prt_terminal", "Work remains")]).info
+    await timeline.send(messageUpdated({ ...message, finish }))
+    running = false
+    await timeline.send(status("idle"))
+    // The settled thinking row is removed; stopped turns must not add a success mascot.
+    await expect(page.locator('[data-component="task-mascot"][data-state="thinking"]')).toHaveCount(0)
+    await expect(page.locator('[data-component="task-mascot"][data-state="success"]')).toHaveCount(0)
+    await expect(
+      page.getByText(finish === "stopped" ? "Stopped" : "Interrupted", { exact: true }).first(),
+    ).toBeVisible()
+  })
+
 test("historical completed messages stay static after reload", async ({ page }) => {
   await setupTimeline(page, {
     messages: [userMessage(), assistantMessage([textPart("prt_history", "Already finished")])],

@@ -17,7 +17,7 @@ export type TimelineRowMap = {
   }
   TurnDivider: {
     userMessageID: string
-    label: "compaction" | "interrupted"
+    label: "compaction" | "interrupted" | "stopped"
   }
   AssistantPart: {
     userMessageID: string
@@ -48,7 +48,9 @@ export namespace Timeline {
     const userParts = getMessageParts(userMessage.id)
     const comments = userParts.flatMap((p) => MessageComment.fromPart(p) ?? [])
     const compaction = userParts.some((p) => p.type === "compaction")
-    const interruptedMessageIndex = assistantMessages.findIndex((m) => m.error?.name === "MessageAbortedError")
+    const interruptedMessageIndex = assistantMessages.findIndex(
+      (m) => m.error?.name === "MessageAbortedError" || m.finish === "interrupted" || m.finish === "stopped",
+    )
     const interrupted = interruptedMessageIndex !== -1
     const error = assistantMessages.find((m) => m.error && m.error.name !== "MessageAbortedError")?.error
 
@@ -106,7 +108,7 @@ export namespace Timeline {
         rows.push(
           new TimelineRow.TurnDivider({
             userMessageID: userMessage.id,
-            label: "interrupted",
+            label: assistantMessages[interruptedMessageIndex]?.finish === "stopped" ? "stopped" : "interrupted",
           }),
         )
         return

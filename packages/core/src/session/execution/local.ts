@@ -1,5 +1,5 @@
 import { SessionOwnership } from "../ownership"
-import { Cause, DateTime, Effect, Layer } from "effect"
+import { Cause, DateTime, Effect, Layer, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import { EventV2 } from "../../event"
 import { SessionEvent } from "../event"
@@ -33,6 +33,13 @@ const layer = Layer.effect(
         )
       }),
     })
+
+    const unsubscribe = yield* events.listen((event) =>
+      event.type === SessionExecution.Wake.type
+        ? coordinator.wake(Schema.decodeUnknownSync(SessionExecution.Wake.data)(event.data).sessionID)
+        : Effect.void,
+    )
+    yield* Effect.addFinalizer(() => unsubscribe)
 
     return SessionExecution.Service.of({
       active: coordinator.active,
@@ -129,6 +136,7 @@ export const reportFailure = Effect.fn("SessionExecution.reportFailure")(functio
     timestamp,
     assistantMessageID,
     error: { type: "unknown", message: `${reason}。本次执行已停止，原始记录保留。ref=${ref}`, metadata: { ref } },
+    termination: { category: "internal", message: `${reason}。ref=${ref}` },
   })
 })
 

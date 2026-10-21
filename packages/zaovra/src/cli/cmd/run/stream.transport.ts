@@ -16,7 +16,15 @@
 // The tick counter prevents stale idle events from resolving the wrong turn.
 // We also re-check live session status before resolving an idle event so a
 // delayed idle from an older turn cannot complete a newer busy turn.
-import type { Event, GlobalEvent, Message, Part, PermissionView, PermissionV2Request, ZaovraClient } from "@zaovra-ai/sdk/v2"
+import type {
+  Event,
+  GlobalEvent,
+  Message,
+  Part,
+  PermissionView,
+  PermissionV2Request,
+  ZaovraClient,
+} from "@zaovra-ai/sdk/v2"
 import { Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import {
@@ -148,7 +156,11 @@ function permission(request: PermissionV2Request): PermissionView {
 type LegacyMessage = { info: Message; parts: Part[] }
 type V2Message = NonNullable<Awaited<ReturnType<ZaovraClient["v2"]["session"]["messages"]>>["data"]>["data"][number]
 
-function projectedMessage(message: V2Message, sessionID: string, directory: string | undefined): LegacyMessage | undefined {
+function projectedMessage(
+  message: V2Message,
+  sessionID: string,
+  directory: string | undefined,
+): LegacyMessage | undefined {
   if (message.type === "user") {
     return {
       info: {
@@ -206,9 +218,7 @@ function projectedMessage(message: V2Message, sessionID: string, directory: stri
       tokens,
       variant: message.model.variant,
       finish: message.finish,
-      error: message.error
-        ? { name: "UnknownError", data: { message: message.error.message } }
-        : undefined,
+      error: message.error ? { name: "UnknownError", data: { message: message.error.message } } : undefined,
     },
     parts: message.content.map((part) => {
       if (part.type === "text") {
@@ -234,11 +244,12 @@ function projectedMessage(message: V2Message, sessionID: string, directory: stri
         }
       }
 
-      const content = "content" in part.state
-        ? part.state.content
-            .map((item) => (item.type === "text" ? item.text : item.name ? `${item.name}: ${item.uri}` : item.uri))
-            .join("\n")
-        : ""
+      const content =
+        "content" in part.state
+          ? part.state.content
+              .map((item) => (item.type === "text" ? item.text : item.name ? `${item.name}: ${item.uri}` : item.uri))
+              .join("\n")
+          : ""
       const state =
         part.state.status === "pending"
           ? { status: "pending" as const, input: {}, raw: part.state.input }
@@ -1019,6 +1030,15 @@ function createLayer(input: StreamInput) {
             return
           }
 
+          const settled = yield* Effect.tryPromise({
+            try: (signal) => input.sdk.v2.session.wait({ sessionID: input.sessionID }, { signal, throwOnError: true }),
+            catch: (error) => error,
+          }).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          )
+          if (!settled || state.wait !== next || !(yield* idle(false))) return
+
           state.tick = next.tick + 1
           state.wait = undefined
           yield* Deferred.succeed(next.done, undefined).pipe(Effect.ignore)
@@ -1508,9 +1528,9 @@ function createLayer(input: StreamInput) {
                     }
 
                     if (status === "abort") {
-                      yield* Effect.promise(() =>
-                        input.sdk.v2.session.interrupt({ sessionID: input.sessionID }),
-                      ).pipe(Effect.ignore)
+                      yield* Effect.promise(() => input.sdk.v2.session.interrupt({ sessionID: input.sessionID })).pipe(
+                        Effect.ignore,
+                      )
                       flush("turn.abort")
                     }
                   }),

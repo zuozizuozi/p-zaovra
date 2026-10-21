@@ -402,7 +402,9 @@ export function MessageTimeline(props: {
         setMascot("settled", latest.id)
         setMascot(
           "terminal",
-          latest?.error?.name === "MessageAbortedError"
+          latest?.error?.name === "MessageAbortedError" ||
+            latest?.finish === "interrupted" ||
+            latest?.finish === "stopped"
             ? "idle"
             : latest?.error
               ? "error"
@@ -1323,7 +1325,11 @@ export function MessageTimeline(props: {
               <div data-slot="session-turn-compaction">
                 <MessageDivider
                   label={language.t(
-                    turnDividerRow().label === "compaction" ? "ui.messagePart.compaction" : "ui.message.interrupted",
+                    turnDividerRow().label === "compaction"
+                      ? "ui.messagePart.compaction"
+                      : turnDividerRow().label === "stopped"
+                        ? "session.outcome.stopped"
+                        : "ui.message.interrupted",
                   )}
                 />
               </div>
@@ -2111,4 +2117,3 @@ export function MessageTimeline(props: {
     </div>
   )
 }
-

@@ -5,6 +5,7 @@ import { EventTable } from "../../event/sql"
 import { SessionOwnership } from "../ownership"
 import {
   LLM,
+  ToolOutput,
   LLMClient,
   LLMError,
   InvalidProviderOutputReason,
@@ -17,7 +18,7 @@ import {
   type ProviderErrorEvent,
 } from "@zaovra-ai/llm"
 import { RequestExecutor } from "@zaovra-ai/llm/route"
-import { Cause, Clock, DateTime, Effect, FiberSet, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import { Cause, Clock, DateTime, Effect, Fiber, FiberSet, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { ShellIdentity } from "../../shell-identity"
@@ -114,10 +115,6 @@ import { SessionMessageTable } from "../sql"
  * provider turn. Registry definitions are advertised, local tool calls are settled durably, and an
  * explicit loop starts the next provider turn after local settlement. Configured agent step limits bound the loop.
  */
-
-const DEFAULT_MAX_PROVIDER_TURNS = 150
-const HARD_MAX_PROVIDER_TURNS = 300
-const MAX_IDENTICAL_TOOL_CALLS = 3
 
 const layer = Layer.effect(
   Service,
@@ -233,18 +230,49 @@ const layer = Layer.effect(
       }
     })
 
+    const readBudget = Effect.fn("SessionRunner.readBudget")(function* (sessionID: SessionSchema.ID) {
+      const adjustment = yield* db
+        .select({ data: EventTable.data })
+        .from(EventTable)
+        .where(
+          and(
+            eq(EventTable.aggregate_id, sessionID),
+            eq(
+              EventTable.type,
+              EventV2.versionedType(SessionEvent.Updated.type, SessionEvent.Updated.durable?.version ?? 1),
+            ),
+            sql`json_type(${EventTable.data}, '$.budget') = 'object'`,
+          ),
+        )
+        .orderBy(desc(EventTable.seq))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      const budget = adjustment
+        ? Schema.decodeUnknownSync(SessionEvent.Updated.data)(adjustment.data).budget
+        : undefined
+      const limit = budget
+        ? (budget.tokens ?? undefined)
+        : Config.latest(yield* config.entries(), "session_token_budget")
+      const duration = budget
+        ? (budget.durationMs ?? undefined)
+        : Config.latest(yield* config.entries(), "session_duration_ms")
+      return { limit, duration }
+    })
+
     // Account from durable settlements, like the UI, not compacted/forked history.
-    // Stop at a provider boundary; never interrupt a tool to enforce this limit.
     const checkBudget = Effect.fn("SessionRunner.checkBudget")(function* (
       session: SessionSchema.Info,
       model: { readonly id: string; readonly provider: string },
       notify = false,
     ) {
-      const limit = Config.latest(yield* config.entries(), "session_token_budget")
-      if (limit === undefined) return
+      const { limit, duration } = yield* readBudget(session.id)
+      const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
+      const expired = duration !== undefined && elapsed >= duration
+      if (limit === undefined && !expired) return
       const usage = (yield* SessionUsageQuery.read(session.id).pipe(Effect.provideService(Database.Service, database)))
         .total
-      if (usage.total < limit) {
+      if (!expired && limit !== undefined && usage.total < limit) {
         if (!notify || usage.total < limit * 0.75) return
         const prefix = `Session token budget notice (limit=${limit}):`
         const context = yield* getContext(session.id)
@@ -257,10 +285,10 @@ const layer = Layer.effect(
         })
         return
       }
-      const message = `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}继续前请提高 session_token_budget 或移除该限制，并重启后端以重新加载配置；这不是任务完成。`
+      const message = `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}可在会话界面提高或移除预算后直接继续，无需重启；这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
       const context = yield* getContext(session.id)
       const last = context.at(-1)
-      if (last?.type !== "assistant" || last.finish !== "budget-exhausted") {
+      if (last?.type !== "assistant" || last.finish !== "stopped" || last.termination?.category !== "budget") {
         yield* Effect.uninterruptible(
           Effect.gen(function* () {
             const assistantMessageID = SessionMessage.ID.create()
@@ -288,7 +316,8 @@ const layer = Layer.effect(
               sessionID: session.id,
               assistantMessageID,
               timestamp: yield* DateTime.now,
-              finish: "budget-exhausted",
+              finish: "stopped",
+              termination: { category: "budget", message },
               cost: 0,
               requestPerformed: false,
               tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -296,20 +325,29 @@ const layer = Layer.effect(
           }),
         )
       }
-      return yield* new LLMError({
-        module: "SessionRunner",
-        method: "budget",
-        reason: new InvalidRequestReason({ message }),
-      })
+      return true
     })
     const settleInterruptedTurn = Effect.fn("SessionRunner.settleInterruptedTurn")(function* (
       sessionID: SessionSchema.ID,
-      current?: { publisher: ReturnType<typeof createLLMEventPublisher>; requestPerformed: boolean },
+      current?: {
+        publisher: ReturnType<typeof createLLMEventPublisher>
+        requestPerformed: boolean
+        source?: "permission"
+        budget?: boolean
+      },
     ) {
       // Cancellation can precede the provider's first event. Still record the
       // attempted turn so Stop cannot expose the previous turn as its outcome
       // or silently omit the request from incomplete-usage accounting.
       if (current) yield* current.publisher.startAssistant()
+      const placement = yield* getSession(sessionID)
+      const source =
+        current?.source ??
+        (placement.location.directory !== location.directory || placement.location.workspaceID !== location.workspaceID
+          ? "placement-change"
+          : current
+            ? "user"
+            : "process-exit")
       const settlement = current?.publisher.stepSettlement()
       const reported =
         current && settlement
@@ -340,7 +378,10 @@ const layer = Layer.effect(
           sessionID,
           timestamp: yield* DateTime.now,
           assistantMessageID: message.id,
-          finish: "interrupted",
+          finish: current?.budget ? "stopped" : "interrupted",
+          termination: current?.budget
+            ? { category: "budget", message: "达到会话预算，当前等待已取消；已完成的操作保留，请核对现场后继续。" }
+            : { category: "interrupted", source, message: "执行已中断；请核对现场后继续。" },
           cost: 0,
           // The provider can finish before a long-running local tool. Preserve
           // its reported usage when cancellation interrupts tool settlement.
@@ -416,6 +457,7 @@ const layer = Layer.effect(
       toolCallAttempts: Map<string, number>,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
       allowCompaction = true,
+      budgetStop?: { expired: boolean; model?: { id: string; provider: string } },
     ) {
       yield* plugins.wait(PluginInternal.readyID)
       const placement = yield* getSession(sessionID)
@@ -442,7 +484,6 @@ const layer = Layer.effect(
       let toolsStopped = false
       let providerStopped = false
       let needsContinuation = false
-      let loopStopped = false
       let currentStep = step
       if (promotion) {
         let promoted = 0
@@ -477,7 +518,8 @@ const layer = Layer.effect(
           Effect.provideService(ShellIdentity.Current, shell),
         ))
       const model = yield* models.resolve(session)
-      yield* checkBudget(session, model, true)
+      if (budgetStop) budgetStop.model = model
+      if (yield* checkBudget(session, model, true)) return { needsContinuation: false, step: currentStep }
       const repeated = SessionEfficiency.repeatedInspection(yield* getContext(session.id))
       if (repeated.length)
         yield* events.publish(SessionEvent.Synthetic, {
@@ -509,7 +551,6 @@ const layer = Layer.effect(
       const durableHistory = yield* SessionOutcome.history(db, session.id)
       const recovery = SessionOutcome.shellRecovery(durableHistory)
       const failures = recovery.failures
-      const shellStopped = failures >= 10 || recovery.repeated >= 3
       const inputRejections = SessionOutcome.consecutiveInputRejections(durableHistory)
       const previous = context.at(-1)
       const outputState = yield* SessionOutputRecovery.read(db, session.id)
@@ -557,11 +598,9 @@ const layer = Layer.effect(
         )
       const stopReason = subtask
         ? undefined
-        : shellStopped
-          ? "Repeated shell failures stopped tool execution"
-          : currentStep >= Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS)
-            ? "Maximum agent steps reached before completion"
-            : undefined
+        : agent.info?.steps !== undefined && currentStep >= agent.info.steps
+          ? "Maximum agent steps reached before completion"
+          : undefined
       const isLastStep = stopReason !== undefined
       const toolMaterialization =
         isLastStep || textOnlyRecovery ? undefined : yield* tools.materialize(agent.info?.permissions)
@@ -621,10 +660,10 @@ const layer = Layer.effect(
             state: yield* checkpointProgress(session.id),
             turns: progressUsage.calls,
             step: currentStep,
-            limit: Math.min(agent.info?.steps ?? DEFAULT_MAX_PROVIDER_TURNS, HARD_MAX_PROVIDER_TURNS),
+            limit: agent.info?.steps,
             tokens: progressUsage.total,
             unreported: progressUsage.unreported,
-            budget: Config.latest(yield* config.entries(), "session_token_budget"),
+            budget: (yield* readBudget(session.id)).limit,
             deadline: quality?.deadline,
           })
         : undefined
@@ -678,8 +717,8 @@ const layer = Layer.effect(
             : []),
           ...(progressFacts ? [Message.user(progressFacts)] : []),
           ...[
-            failures >= 4 || shellStopped
-              ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. ${shellStopped ? "Tool execution is stopped after three consecutive failures of the same command or ten consecutive shell failures; report the blocker and completed work, without claiming success." : "Tools remain available. This is a recovery reminder, not a stop; choose a different approach."}`
+            failures >= 4 || recovery.repeated >= 3
+              ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. Tools remain available. ${failures >= 10 ? "Strong recovery reminder: inspect the environment and actual error before another attempt; state a concrete new hypothesis." : "Recovery reminder: choose a different approach."}`
               : undefined,
             textOnlyRecovery
               ? "The previous text response reached its output limit. Continue only the missing text once, using the retained partial answer. Do not repeat earlier text or execute tools. Report anything still unfinished."
@@ -703,7 +742,8 @@ const layer = Layer.effect(
       if (allowCompaction && (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request })))
         return yield* Effect.die(continueAfterCompaction(currentStep))
       // A failed compaction can still consume tokens before falling back to the original request.
-      if (allowCompaction) yield* checkBudget(session, model)
+      if (allowCompaction && (yield* checkBudget(session, model)))
+        return { needsContinuation: false, step: currentStep }
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         catalogModel: model.catalogModel,
@@ -800,36 +840,14 @@ const layer = Layer.effect(
             }
             yield* publish(event)
             if (event.type !== "tool-call" || event.providerExecuted) return
-            if (!toolMaterialization || loopStopped) {
+            if (!toolMaterialization) {
               yield* publish(
                 LLMEvent.toolResult({
                   id: event.id,
                   name: event.name,
                   result: {
                     type: "error",
-                    value: loopStopped
-                      ? "Repeated tool loop stopped"
-                      : "Tools are disabled after the maximum agent steps",
-                  },
-                }),
-              )
-              return
-            }
-            const fingerprint = SessionEfficiency.fingerprint(event.name, event.input)
-            // Only consecutive repetition is suspicious; editing between test runs is normal work.
-            if (!toolCallAttempts.has(fingerprint)) toolCallAttempts.clear()
-            const attempts = (toolCallAttempts.get(fingerprint) ?? 0) + 1
-            toolCallAttempts.set(fingerprint, attempts)
-            if (attempts > MAX_IDENTICAL_TOOL_CALLS) {
-              needsContinuation = true
-              loopStopped = attempts > MAX_IDENTICAL_TOOL_CALLS + 1
-              yield* publish(
-                LLMEvent.toolResult({
-                  id: event.id,
-                  name: event.name,
-                  result: {
-                    type: "error",
-                    value: `Identical tool call blocked after ${MAX_IDENTICAL_TOOL_CALLS} attempts. Inspect the previous result and use a different approach; repeating this call again will stop execution.`,
+                    value: "Tools are disabled for the final summary",
                   },
                 }),
               )
@@ -867,19 +885,56 @@ const layer = Layer.effect(
                         ),
                       ).pipe(
                         Effect.flatMap((settlement) =>
-                          publish(
-                            LLMEvent.toolResult({
-                              id: event.id,
-                              name: event.name,
-                              result: settlement.result,
-                              output: settlement.output,
-                              ...(settlement.inputRejected
-                                ? { providerMetadata: { zaovra: { inputRejected: true } } }
-                                : {}),
-                            }),
-                            settlement.outputPaths ?? [],
-                            settlement.errorMetadata,
-                          ),
+                          Effect.gen(function* () {
+                            const waiting =
+                              event.name === "bash_job" &&
+                              event.input !== null &&
+                              typeof event.input === "object" &&
+                              "action" in event.input &&
+                              (event.input.action === "get" || event.input.action === "wait")
+                            const fingerprint = waiting
+                              ? undefined
+                              : SessionEfficiency.fingerprint(event.name, {
+                                  input: SessionEfficiency.fingerprint(event.name, event.input),
+                                  result: settlement.result,
+                                  snapshot: yield* snapshots.capture(),
+                                  jobs: (yield* backgroundJobs.list())
+                                    .filter((job) => job.metadata?.sessionID === session.id)
+                                    .map((job) => ({ id: job.id, status: job.status, output: job.output })),
+                                })
+                            if (fingerprint && !toolCallAttempts.has(fingerprint)) toolCallAttempts.clear()
+                            const attempts = fingerprint ? (toolCallAttempts.get(fingerprint) ?? 0) + 1 : 0
+                            if (fingerprint) toolCallAttempts.set(fingerprint, attempts)
+                            const reminder =
+                              attempts >= 3
+                                ? `Repeated result (${attempts}): inputs, output and observed workspace/process state match. ${attempts >= 10 ? "Strong reminder: inspect the error and environment, state a new hypothesis and change approach." : "Inspect the retained result and choose a concrete change before retrying."} Tools remain available.`
+                                : undefined
+                            const output =
+                              reminder && settlement.output
+                                ? {
+                                    ...settlement.output,
+                                    content: [...settlement.output.content, { type: "text" as const, text: reminder }],
+                                  }
+                                : settlement.output
+                            yield* publish(
+                              LLMEvent.toolResult({
+                                id: event.id,
+                                name: event.name,
+                                result:
+                                  reminder && settlement.result.type === "error"
+                                    ? { type: "error", value: String(settlement.result.value) + "\n" + reminder }
+                                    : output
+                                      ? ToolOutput.toResultValue(output)
+                                      : settlement.result,
+                                output,
+                                ...(settlement.inputRejected
+                                  ? { providerMetadata: { zaovra: { inputRejected: true } } }
+                                  : {}),
+                              }),
+                              settlement.outputPaths ?? [],
+                              settlement.errorMetadata,
+                            )
+                          }),
                         ),
                       ),
                     ),
@@ -976,6 +1031,9 @@ const layer = Layer.effect(
                   : llmFailure.reason.message,
                 {
                   category: llmFailure.reason._tag,
+                  ...("http" in llmFailure.reason && llmFailure.reason.http?.response
+                    ? { statusCode: String(llmFailure.reason.http.response.status) }
+                    : {}),
                   diagnostics: JSON.stringify({
                     ...(llmFailure.reason._tag === "Transport" ? llmFailure.reason.diagnostics : {}),
                     ...("http" in llmFailure.reason && llmFailure.reason.http?.response
@@ -998,7 +1056,11 @@ const layer = Layer.effect(
           ) {
             // Unexpected exceptions may contain payloads or credentials. The
             // original cause still propagates to the existing drain logger.
-            yield* withPublication(publisher.failAssistant("Provider stream failed unexpectedly before completion"))
+            yield* withPublication(
+              publisher.failAssistant("Provider stream failed unexpectedly before completion", {
+                category: "Internal",
+              }),
+            )
           }
           const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
           // A protocol parse failure can leave local input-start records even
@@ -1017,6 +1079,7 @@ const layer = Layer.effect(
             yield* withPublication(
               settleInterruptedTurn(session.id, {
                 publisher,
+                source: "permission",
                 requestPerformed: !(subtask?.type === "user" && subtask.subtask),
               }),
             )
@@ -1031,6 +1094,7 @@ const layer = Layer.effect(
             yield* withPublication(
               settleInterruptedTurn(session.id, {
                 publisher,
+                budget: budgetStop?.expired,
                 requestPerformed: !(subtask?.type === "user" && subtask.subtask),
               }),
             )
@@ -1055,13 +1119,12 @@ const layer = Layer.effect(
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
-                finish: isLastStep ? "max-steps" : stepSettlement.finish,
+                finish: isLastStep ? "stopped" : stepSettlement.finish,
                 ...(stopReason
                   ? {
-                      error: {
-                        type: "unknown" as const,
+                      termination: {
+                        category: "provider-turn-limit" as const,
                         message: stopReason,
-                        metadata: { reason: shellStopped ? "repeated-shell-failures" : "maximum-provider-turns" },
                       },
                     }
                   : {}),
@@ -1089,7 +1152,6 @@ const layer = Layer.effect(
           const recoverInput =
             stepSettlement?.finish !== "length" &&
             rejectedInput &&
-            inputRejections === 0 &&
             !isLastStep &&
             stream._tag === "Success" &&
             !publisher.hasProviderError() &&
@@ -1105,7 +1167,6 @@ const layer = Layer.effect(
             (receivedTool || !receivedText) &&
             !receivedHostedTool &&
             !isLastStep &&
-            !loopStopped &&
             stream._tag === "Success" &&
             settled._tag === "Success" &&
             !publisher.hasProviderError()
@@ -1167,7 +1228,7 @@ const layer = Layer.effect(
               timestamp: yield* DateTime.now,
               attempt: 1,
               error: {
-                message: "工具参数未通过校验，未执行该调用；正在请求模型纠正一次。",
+                message: `工具参数连续 ${inputRejections + 1} 次未通过校验，未执行该调用；${inputRejections >= 3 ? "请先读取参数定义，缩小调用并更换纠正方法。" : "请根据校验错误修正参数后继续。"}`,
                 isRetryable: true,
                 metadata: { phase: "tool-input-correction", delayMs: "0", category: stepSettlement!.finish },
               },
@@ -1185,22 +1246,53 @@ const layer = Layer.effect(
                 },
               }),
             )
-          const incomplete = loopStopped
-            ? "Stopped after repeated identical tool calls without a change of approach"
-            : rejectedInput && !recoverInput && !recoverOutput
-              ? "Tool arguments were rejected; automatic correction exhausted or provider cannot continue. No rejected call was executed."
-              : stepSettlement?.finish === "length" && !recoverText && !recoverInput && !recoverOutput
-                ? `Model output limit reached before the turn completed (${outputCategory}); no further automatic recovery is available within the configured limits. Completed tool results are retained.`
-                : stepSettlement?.finish === "content-filter"
-                  ? "Model output was blocked by the provider content filter"
-                  : stepSettlement?.finish === "error" || stepSettlement?.finish === "unknown"
-                    ? `Provider ended the turn with ${stepSettlement.finish}`
-                    : !stepSettlement && publisher.hasAssistantStarted()
-                      ? "Provider stream ended without completing the turn"
-                      : undefined
+          const exhausted = stepSettlement?.finish === "length" && !recoverText && !recoverInput && !recoverOutput
+          if (exhausted && stream._tag === "Success" && !publisher.hasProviderError()) {
+            const message =
+              "输出恢复额度已用完；已完成的操作和输出已保留。可核对现场后继续，尚未验证的结果不能视为成功。"
+            yield* withPublication(publisher.failUnsettledTools(message))
+            yield* withPublication(
+              events.publish(SessionEvent.Synthetic, {
+                sessionID: session.id,
+                timestamp: yield* DateTime.now,
+                messageID: SessionMessage.ID.create(),
+                text:
+                  message +
+                  "\n现场摘要：" +
+                  JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id))),
+              }),
+            )
+            yield* withPublication(
+              events.publish(SessionEvent.Step.Ended, {
+                sessionID: session.id,
+                timestamp: yield* DateTime.now,
+                assistantMessageID: yield* publisher.startAssistant(),
+                finish: "stopped",
+                termination: {
+                  category: receivedText && !receivedTool ? "text-truncation" : "output-exhausted",
+                  message,
+                },
+                cost: 0,
+                tokens: stepSettlement.tokens,
+                usageReported: stepSettlement.usageReported,
+              }),
+            )
+          }
+          const incomplete =
+            stepSettlement?.finish === "content-filter"
+              ? "Model output was blocked by the provider content filter"
+              : stepSettlement?.finish === "error" || stepSettlement?.finish === "unknown"
+                ? `Provider ended the turn with ${stepSettlement.finish}`
+                : !stepSettlement && publisher.hasAssistantStarted()
+                  ? "Provider stream ended without completing the turn"
+                  : undefined
           if (incomplete && stream._tag === "Success" && !publisher.hasProviderError()) {
             yield* withPublication(publisher.failUnsettledTools(incomplete))
-            yield* withPublication(publisher.failAssistant(incomplete))
+            yield* withPublication(
+              publisher.failAssistant(incomplete, {
+                category: stepSettlement?.finish === "content-filter" ? "ContentPolicy" : "InvalidProviderOutput",
+              }),
+            )
           }
           if (rollback) {
             // The rejected request produced no output or tool side effect. Persist
@@ -1226,7 +1318,7 @@ const layer = Layer.effect(
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
-          const terminalFailure = publisher.failureMessage() ?? stopReason
+          const terminalFailure = publisher.failureMessage()
           if (terminalFailure)
             return yield* new LLMError({
               module: "SessionRunner",
@@ -1502,6 +1594,7 @@ const layer = Layer.effect(
           return {
             needsContinuation:
               !isLastStep &&
+              !exhausted &&
               !incomplete &&
               !publisher.hasProviderError() &&
               (needsContinuation || recoverText || recoverInput || recoverOutput),
@@ -1518,7 +1611,26 @@ const layer = Layer.effect(
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
     const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
-      return yield* runTurnAttempt(sessionID, promotion, step, toolCallAttempts, compaction.compactAfterOverflow).pipe(
+      const budgetStop: { expired: boolean; model?: { id: string; provider: string } } = { expired: false }
+      const deadline = Effect.gen(function* () {
+        while (true) {
+          yield* Effect.sleep("100 millis")
+          const session = yield* getSession(sessionID)
+          if (!budgetStop.model) continue
+          if (!(yield* checkBudget(session, budgetStop.model))) continue
+          budgetStop.expired = true
+          return { needsContinuation: false, step }
+        }
+      })
+      return yield* runTurnAttempt(
+        sessionID,
+        promotion,
+        step,
+        toolCallAttempts,
+        compaction.compactAfterOverflow,
+        true,
+        budgetStop,
+      ).pipe(
         Effect.catchDefect(
           Effect.fnUntraced(function* (defect) {
             if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
@@ -1531,9 +1643,16 @@ const layer = Layer.effect(
               toolCallAttempts,
               undefined,
               false,
+              budgetStop,
             )
           }),
         ),
+        (turn) =>
+          Effect.acquireUseRelease(
+            Effect.forkChild(turn, { startImmediately: true }),
+            (fiber) => Effect.raceFirst(Fiber.join(fiber), deadline),
+            (fiber) => Fiber.interrupt(fiber),
+          ),
       )
     })
 
@@ -1696,7 +1815,7 @@ const layer = Layer.effect(
       const system =
         initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
       const model = yield* models.resolve(session)
-      yield* checkBudget(session, model)
+      if (yield* checkBudget(session, model)) return false
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       return yield* compaction.compactAfterOverflow({
         sessionID: session.id,

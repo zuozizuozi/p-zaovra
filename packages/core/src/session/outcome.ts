@@ -955,6 +955,12 @@ export function derive(
           ))),
   )
   const base = {
+    termination: last?.termination,
+    verification: [...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution)
+      ? ("failed" as const)
+      : !active && observationsComplete && checks.size > 0 && missing.length === 0
+        ? ("verified" as const)
+        : ("unverified" as const),
     outcomeUnknown: !active && unknown,
     checks: [...checks.values()],
     // Running previews and concurrent history changes have no coherent file
@@ -973,15 +979,18 @@ export function derive(
     ...(review ? { review } : {}),
     messageID: turn.at(-1)?.id,
   }
-  if (active) return { ...base, state: "running" }
-  if (unknown || last?.finish === "interrupted") return { ...base, state: "interrupted" }
-  if (!last) return { ...base, state: start >= 0 ? "interrupted" : "idle" }
-  if (last.error || last.finish !== "stop") return { ...base, state: "failed" }
+  if (active) return { ...base, state: "running", runtime: "running" }
+  if (last?.finish === "stopped")
+    return { ...base, state: "stopped", runtime: "stopped", termination: last.termination }
+  if (unknown || last?.finish === "interrupted") return { ...base, state: "interrupted", runtime: "interrupted" }
+  if (!last)
+    return { ...base, state: start >= 0 ? "interrupted" : "idle", runtime: start >= 0 ? "interrupted" : "idle" }
+  if (last.error || last.finish !== "stop") return { ...base, state: "failed", runtime: "failed" }
   // Advisory checks describe the workspace, not whether the runner finished.
-  if (!verificationEnabled) return { ...base, state: "completed" }
+  if (!verificationEnabled) return { ...base, state: "completed", runtime: "completed" }
   if ([...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution))
-    return { ...base, state: "failed" }
-  return { ...base, state: base.missing.length ? "completed_unverified" : "completed_verified" }
+    return { ...base, state: "failed", runtime: "completed" }
+  return { ...base, state: base.missing.length ? "completed_unverified" : "completed_verified", runtime: "completed" }
 }
 
 /** Old single-check records and newer suite records share the same check contract. */

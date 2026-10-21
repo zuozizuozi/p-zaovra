@@ -1,5 +1,6 @@
 import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue } from "@zaovra-ai/llm"
 import { DateTime, Effect } from "effect"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { EventV2 } from "../../event"
 import { ModelV2 } from "../../model"
 import { SessionEvent } from "../event"
@@ -194,6 +195,21 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
 
   const failAssistant = Effect.fnUntraced(function* (message: string, metadata?: Record<string, string>) {
     if (assistantFailed) return
+    const categories: Record<string, SessionOutcome.Termination["category"]> = {
+      Authentication: "auth",
+      QuotaExceeded: "quota",
+      RateLimit: "rate_limit",
+      ProviderInternal: "overload",
+      Transport: "network",
+      InvalidRequest: "request",
+      NoRoute: "request",
+      ContentPolicy: "content_filter",
+      InvalidProviderOutput: "provider_output",
+      Internal: "internal",
+    }
+    const category = categories[metadata?.category ?? ""] ?? "provider_output"
+    if (category === "auth" || category === "quota")
+      message = `提供商 ${input.model.providerID}：${category === "auth" ? "鉴权失败，请检查 API 密钥或访问权限" : "额度或余额不足，请检查余额或服务套餐"}，也可切换模型或提供商后继续。\n${message}`
     failureMessage = message
     yield* flush()
     const assistantMessageID = yield* startAssistant()
@@ -214,6 +230,12 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       timestamp: yield* timestamp,
       assistantMessageID,
       error: { type: "unknown", message, ...(metadata ? { metadata } : {}) },
+      termination: {
+        category,
+        message,
+        provider: input.model.providerID,
+        ...(metadata?.statusCode ? { statusCode: Number(metadata.statusCode) } : {}),
+      },
     })
   })
 

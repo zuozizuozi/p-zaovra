@@ -299,11 +299,12 @@ type Endpoint3_25Input = {
   readonly sessionID: Endpoint3_25Request["params"]["sessionID"]
   readonly title?: Endpoint3_25Request["payload"]["title"]
   readonly archived?: Endpoint3_25Request["payload"]["archived"]
+  readonly budget?: Endpoint3_25Request["payload"]["budget"]
 }
 const Endpoint3_25 = (raw: RawClient["server.session"]) => (input: Endpoint3_25Input) =>
   raw["session.update"]({
     params: { sessionID: input["sessionID"] },
-    payload: { title: input["title"], archived: input["archived"] },
+    payload: { title: input["title"], archived: input["archived"], budget: input["budget"] },
   }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),

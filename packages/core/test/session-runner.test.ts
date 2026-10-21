@@ -3,6 +3,7 @@ import { SessionProgress } from "@zaovra-ai/core/session/progress"
 import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
 import { SessionOwnership } from "@zaovra-ai/core/session/ownership"
 import { describe, expect } from "bun:test"
+import { adjust, setTime } from "effect/testing/TestClock"
 import {
   LLM,
   LLMClient,
@@ -834,6 +835,7 @@ const verifyPartialFlushOnFailure = (kind: FragmentKind) =>
         type: "assistant",
         finish: "error",
         error: { type: "unknown", message: "Provider unavailable" },
+        termination: { category: "network", provider: "fake" },
         content: [
           kind === "tool input"
             ? { type: "tool", id: fragmentID(kind, "partial"), state: { status: "error" } }
@@ -888,7 +890,11 @@ describe("SessionRunnerLLM", () => {
       yield* Deferred.await(started)
       yield* Fiber.interrupt(fiber)
       expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 1 })
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ type: "assistant", finish: "interrupted" })
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+        type: "assistant",
+        finish: "interrupted",
+        termination: { category: "interrupted", source: "user" },
+      })
       expect((yield* session.outcome(sessionID)).state).toBe("interrupted")
     }),
   )
@@ -1211,9 +1217,10 @@ describe("SessionRunnerLLM", () => {
       }),
     )
   }
-  it.effect("stops after a second rejected-input turn without dispatching either call", () =>
+  it.effect("S1 repeated input correction keeps invalid calls unexecuted", () =>
     Effect.gen(function* () {
       yield* setup
+      verificationEnabled = false
       const session = yield* SessionV2.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Write safely" }), resume: false })
       requests.length = 0
@@ -1226,10 +1233,13 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ])
+      responses.push(
+        fragmentFixture("text", "corrected", ["Invalid calls were not executed; inspected the schema."]).completeEvents,
+      )
       yield* session.resume(sessionID).pipe(Effect.exit)
-      expect(requests).toHaveLength(2)
+      expect(requests).toHaveLength(3)
       expect(executions).toHaveLength(0)
-      expect(SessionOutcome.derive(yield* session.context(sessionID), false).state).toBe("failed")
+      expect(SessionOutcome.derive(yield* session.context(sessionID), false).state).not.toBe("failed")
     }),
   )
 
@@ -1284,12 +1294,12 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.stepFinish({ index: 0, reason: "length" }),
         LLMEvent.finish({ reason: "length" }),
       ]
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(2)
       expect(executions).toEqual([])
       expect(requests[1].tools.length).toBeGreaterThan(0)
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
-        finish: "error",
+      expect((yield* session.context(sessionID)).findLast((message) => message.type === "assistant")).toMatchObject({
+        finish: "stopped",
         content: [{ id: "partial-tool", state: { status: "error" } }],
       })
     }),
@@ -2154,8 +2164,8 @@ describe("SessionRunnerLLM", () => {
           response = stop
           responses = undefined
           yield* session.resume(sessionID).pipe(Effect.exit)
-          expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Repeated shell failures")
-          expect(requests.at(-1)?.tools).toEqual([])
+          expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Change approach")
+          expect(requests.at(-1)?.tools.length).toBeGreaterThan(0)
           yield* replaySessionProjection(sessionID)
           expect(SessionOutcome.recoveryFailures(yield* SessionOutcome.history(database.db, sessionID))).toBe(count)
           yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New user direction" }), resume: false })
@@ -4192,7 +4202,7 @@ describe("SessionRunnerLLM", () => {
           ]).completeEvents,
         ]
         const result = yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(Exit.isFailure(result)).toBe(mode === "limit")
+        expect(Exit.isFailure(result)).toBe(false)
         expect(requests).toHaveLength(3)
         const closing = requests[2].messages
           .flatMap((message) => message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])))
@@ -4753,9 +4763,9 @@ describe("SessionRunnerLLM", () => {
           fragmentFixture("text", "end", ["Observed results and remaining work."]).completeEvents,
         ]
         const result = yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(result._tag).toBe(scenario.stop ? "Failure" : "Success")
+        expect(result._tag).toBe("Success")
         expect(requests).toHaveLength(scenario.commands.length + 1)
-        expect(requests.at(-1)!.tools.length === 0).toBe(scenario.stop)
+        expect(requests.at(-1)!.tools.length).toBeGreaterThan(0)
         if (scenario.commands.length >= 4) expect(JSON.stringify(requests[4]!.messages)).toContain("Change approach")
         if (!scenario.stop) expect(JSON.stringify(requests.at(-1)!.system)).not.toContain("Tool execution is stopped")
         const database = yield* Database.Service
@@ -4780,13 +4790,14 @@ describe("SessionRunnerLLM", () => {
         requests.length = 0
         responses = [fragmentFixture("text", "restarted", ["Report remaining failure."]).completeEvents]
         yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(requests[0].tools.length === 0).toBe(scenario.stop)
+        expect(requests[0].tools.length).toBeGreaterThan(0)
       }),
     )
 
-  it.effect("stops varied failed shell attempts with a final report instead of spending more tool turns", () =>
+  it.effect("S1 twenty shell failures retain tools and recovery reminders", () =>
     Effect.gen(function* () {
       yield* setup
+      verificationEnabled = false
       const session = yield* SessionV2.Service
       const registry = yield* ToolRegistry.Service
       yield* registry.register({
@@ -4800,7 +4811,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Verify the artifact" }), resume: false })
       requests.length = 0
       responses = [
-        ...Array.from({ length: 10 }, (_, index) => [
+        ...Array.from({ length: 20 }, (_, index) => [
           LLMEvent.stepStart({ index: 0 }),
           LLMEvent.toolCall({ id: `failed-shell-${index}`, name: "bash", input: { command: `bad-command-${index}` } }),
           LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
@@ -4812,34 +4823,21 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.finish({ reason: "stop" }),
         ],
       ]
-      const error = yield* session.resume(sessionID).pipe(Effect.flip)
-      expect(error).toBeInstanceOf(LLMError)
-      expect(error.message).toContain("Repeated shell failures stopped tool execution")
-      expect(requests).toHaveLength(11)
-      expect(requests[10]!.tools).toEqual([])
-      expect(requests[10]!.toolChoice).toMatchObject({ type: "none" })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(21)
+      expect(requests[20]!.tools.length).toBeGreaterThan(0)
       expect(JSON.stringify(requests[4]!.messages)).toContain("Change approach")
-      expect(JSON.stringify(requests[10]!.messages)).toContain("Repeated shell failures stopped tool execution")
-      expect(JSON.stringify(requests[10]!.messages)).not.toContain("CRITICAL - MAXIMUM STEPS REACHED")
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
-      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "failed", outcomeUnknown: false })
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
     }),
   )
 
-  for (const limit of [150, 300])
+  for (const limit of [500])
     it.effect(
-      `R3 bounds provider turns at ${limit}`,
+      `S1 default permits ${limit} provider turns`,
       () =>
         Effect.gen(function* () {
           yield* setup
           verificationEnabled = false
-          const agents = yield* AgentV2.Service
-          if (limit === 300)
-            yield* agents.transform((draft) =>
-              draft.update(AgentV2.ID.make("build"), (agent) => {
-                agent.steps = 1000
-              }),
-            )
           const session = yield* SessionV2.Service
           yield* session.prompt({
             sessionID,
@@ -4856,20 +4854,18 @@ describe("SessionRunnerLLM", () => {
             ]),
             fragmentFixture("text", "closing", ["Work remains at the limit."]).completeEvents,
           ]
-          const error = yield* session.resume(sessionID).pipe(Effect.flip)
-          expect(error.message).toContain("Maximum agent steps reached")
+          yield* session.resume(sessionID)
           expect(requests).toHaveLength(limit)
           expect(requests.at(-2)!.tools.length).toBeGreaterThan(0)
-          expect(requests.at(-1)!.tools).toEqual([])
+          expect(requests.at(-1)!.tools.length).toBeGreaterThan(0)
           expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
-            finish: "max-steps",
-            error: { metadata: { reason: "maximum-provider-turns" } },
+            finish: "stop",
           })
         }),
       60000,
     )
 
-  it.effect("R4 closing request retains explicit constraint checks from the default agent", () =>
+  it.effect("S1 explicit steps stop with summary and preserved constraints", () =>
     Effect.gen(function* () {
       yield* setup
       verificationEnabled = false
@@ -4896,7 +4892,8 @@ describe("SessionRunnerLLM", () => {
         ],
         fragmentFixture("text", "closing", ["Some constraints remain unchecked."]).completeEvents,
       ]
-      yield* session.resume(sessionID).pipe(Effect.exit)
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Success")
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(2)
       expect(requests.at(-1)!.tools).toEqual([])
       expect(JSON.stringify(requests.at(-1)!.system)).toContain("explicit constraints")
@@ -4949,22 +4946,19 @@ describe("SessionRunnerLLM", () => {
           .completeEvents,
       ]
       const result = yield* Context.get(runtime, SessionExecution.Service).resume(sessionID).pipe(Effect.exit)
-      expect(result._tag).toBe("Failure")
+      expect(result._tag).toBe("Success")
       expect(requests).toHaveLength(2)
       const before = yield* session.context(sessionID)
       expect(before.filter((message) => message.type === "assistant")).toHaveLength(2)
       expect(before.at(-1)).toMatchObject({
-        finish: "max-steps",
-        error: {
-          message: "Maximum agent steps reached before completion",
-          metadata: { reason: "maximum-provider-turns" },
-        },
+        finish: "stopped",
+        termination: { category: "provider-turn-limit" },
       })
       expect((yield* SessionUsageQuery.read(sessionID)).total.calls).toBe(requests.length)
       yield* replaySessionProjection(sessionID)
       expect(yield* session.context(sessionID)).toEqual(before)
       expect((yield* SessionUsageQuery.read(sessionID)).total.calls).toBe(2)
-      expect((yield* session.outcome(sessionID)).state).toBe("failed")
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
     }),
   )
   it.effect("retains a passed check at the turn limit without claiming overall completion", () =>
@@ -5001,17 +4995,16 @@ describe("SessionRunnerLLM", () => {
         fragmentFixture("text", "report", ["The observed check passed; the turn limit stopped further work."])
           .completeEvents,
       ]
-      const error = yield* session.resume(sessionID).pipe(Effect.flip)
-      expect(error.message).toContain("Maximum agent steps reached before completion")
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(2)
       expect(requests[1]!.tools).toEqual([])
       expect(requests[1]!.toolChoice).toMatchObject({ type: "none" })
       expect(JSON.stringify(requests[1]!.messages)).toContain("passed-before-limit")
       expect(JSON.stringify(requests[1]!.messages)).toContain("Do not invent pending checks")
       const context = yield* session.context(sessionID)
-      expect(context.at(-1)).toMatchObject({ finish: "max-steps" })
+      expect(context.at(-1)).toMatchObject({ finish: "stopped", termination: { category: "provider-turn-limit" } })
       const outcome = SessionOutcome.derive(context, false)
-      expect(outcome.state).toBe("failed")
+      expect(outcome.state).toBe("stopped")
       expect(outcome.checks).toContainEqual(expect.objectContaining({ callID: "passed-before-limit", exit: 0 }))
     }),
   )
@@ -5413,7 +5406,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("increases a soft output budget within known capacity and stops repeated exhaustion", () =>
+  it.effect("S1 output exhaustion preserves recovery then stops with a summary", () =>
     Effect.gen(function* () {
       yield* setup
       currentModel = Model.make({
@@ -5428,9 +5421,13 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Complete the change" }), resume: false })
       requests.length = 0
       response = reasoningLimitResponse()
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(false)
       expect(requests.map((request) => request.generation?.maxTokens)).toEqual([16000, 32000, 64000])
       expect(requests.every((request) => request.tools.length > 0)).toBe(true)
+      expect(yield* session.outcome(sessionID)).toMatchObject({
+        state: "stopped",
+        termination: { category: "output-exhausted" },
+      })
     }),
   )
 
@@ -5486,7 +5483,7 @@ describe("SessionRunnerLLM", () => {
               ? [reasoningLimitResponse(), reasoningLimitResponse(), stop]
               : [reasoningLimitResponse(), stop]
         const result = yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(Exit.isFailure(result)).toBe(scenario === "other-error" || scenario === "repeated")
+        expect(Exit.isFailure(result)).toBe(scenario === "other-error")
         expect(requests.map((request) => request.generation?.maxTokens)).toEqual(
           scenario === "rejected"
             ? [16000, 32000, 16000]
@@ -5568,7 +5565,8 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Complete the change" }), resume: false })
       requests.length = 0
       response = reasoningLimitResponse()
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests.map((request) => request.generation?.maxTokens)).toEqual([16000, 16000])
     }),
   )
@@ -5606,7 +5604,8 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.stepFinish({ index: 0, reason: "length" }),
         LLMEvent.finish({ reason: "length" }),
       ]
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(1)
     }),
   )
@@ -5687,7 +5686,8 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First task" }), resume: false })
       requests.length = 0
       response = reasoningLimitResponse()
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(2)
       const messageID = SessionMessage.ID.create()
       yield* events.publish(SessionEvent.Compaction.Started, {
@@ -5706,11 +5706,13 @@ describe("SessionRunnerLLM", () => {
       })
       yield* replaySessionProjection(sessionID)
       requests.length = 0
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(1)
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New task" }), resume: false })
       requests.length = 0
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(2)
     }),
   )
@@ -5908,7 +5910,8 @@ describe("SessionRunnerLLM", () => {
       streamGate = undefined
       streamStarted = undefined
       requests.length = 0
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(1)
     }),
   )
@@ -5926,7 +5929,8 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Bounded task" }), resume: false })
       requests.length = 0
       response = reasoningLimitResponse()
-      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      yield* session.resume(sessionID)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
       expect(requests).toHaveLength(1)
     }),
   )
@@ -5965,12 +5969,14 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.finish({ reason }),
         ]
         const exit = yield* session.resume(sessionID).pipe(Effect.exit)
-        expect(Exit.isFailure(exit)).toBe(true)
+        expect(Exit.isFailure(exit)).toBe(reason !== "length")
         expect(requests).toHaveLength(reason === "length" ? 2 : 1)
-        expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+        expect((yield* session.context(sessionID)).findLast((message) => message.type === "assistant")).toMatchObject({
           type: "assistant",
-          finish: "error",
-          error: { message: expect.any(String) },
+          finish: reason === "length" ? "stopped" : "error",
+          ...(reason === "length"
+            ? { termination: { category: "text-truncation" } }
+            : { error: { message: expect.any(String) } }),
         })
       }),
     )
@@ -6047,9 +6053,10 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("settles tools before budget stop, does not bill the notice, and keeps the limit on resume", () =>
+  it.effect("S1 token budget stops without failure and supports live adjustment", () =>
     Effect.gen(function* () {
       yield* setup
+      qualityProgress = { facts: true }
       sessionTokenBudget = 100
       const session = yield* SessionV2.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Budgeted task" }), resume: false })
@@ -6071,40 +6078,24 @@ describe("SessionRunnerLLM", () => {
         }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ]
-      const started = yield* DateTime.now
-      const failure = yield* session.resume(sessionID).pipe(Effect.flip)
-      expect(failure).toBeInstanceOf(LLMError)
-      const store = yield* SessionStore.Service
-      const events = yield* EventV2.Service
-      const info = (yield* store.get(sessionID))!
-      const beforeReport = yield* session.context(sessionID)
-      yield* SessionExecutionLocal.reportFailure(store, events, info, started, Cause.fail(failure))
-      expect(yield* session.context(sessionID)).toEqual(beforeReport)
-      yield* SessionExecutionLocal.reportFailure(
-        store,
-        events,
-        info,
-        DateTime.makeUnsafe(Date.now() + 1000),
-        Cause.fail(failure),
-      )
-      expect(yield* session.context(sessionID)).toEqual(beforeReport)
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(1)
       expect(executions).toEqual(["retained"])
       const context = yield* session.context(sessionID)
       expect(context.at(-1)).toMatchObject({
-        finish: "budget-exhausted",
+        finish: "stopped",
         content: [{ text: expect.stringContaining("达到配置预算 100") }],
       })
-      expect(SessionOutcome.derive(context, false)).toMatchObject({ state: "failed", outcomeUnknown: false })
+      expect(SessionOutcome.derive(context, false)).toMatchObject({ state: "stopped", outcomeUnknown: false })
       expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ total: 120, calls: 1, unreported: 0 })
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(1)
       expect(yield* session.context(sessionID)).toHaveLength(context.length)
       // A fresh prompt does not reset the cumulative session budget.
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(1)
-      sessionTokenBudget = 300
+      yield* session.update({ sessionID, budget: { tokens: 300 } })
       response = [
         LLMEvent.stepStart({ index: 0 }),
         LLMEvent.stepFinish({ index: 0, reason: "stop" }),
@@ -6112,10 +6103,69 @@ describe("SessionRunnerLLM", () => {
       ]
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(2)
-      sessionTokenBudget = 100
-      yield* session.resume(sessionID).pipe(Effect.flip)
-      yield* SessionExecutionLocal.reportFailure(store, events, info, started, Cause.die(new RangeError("unrelated")))
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "error", error: { type: "unknown" } })
+      expect(JSON.stringify(requests.at(-1)?.messages)).toMatch(/remainingTokens\\?":180/)
+    }),
+  )
+
+  it.effect("S1 wall clock budget stops and removing it permits continuation", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Timed task" }), resume: false })
+      yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created) + 2000)
+      requests.length = 0
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(0)
+      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "stopped", termination: { category: "budget" } })
+      yield* session.update({ sessionID, budget: {} })
+      responses = [fragmentFixture("text", "continued", ["Resumed"]).completeEvents]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("S1 wall deadline interrupts an in-flight provider without waiting for output", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Bound waiting" }), resume: false })
+      const stored = yield* session.get(sessionID)
+      yield* setTime(DateTime.toEpochMillis(stored.time.created))
+      yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* adjust(1500)
+      yield* Effect.yieldNow
+      expect(run.pollUnsafe()).toBeDefined()
+      expect(yield* session.outcome(sessionID)).toMatchObject({ state: "stopped", termination: { category: "budget" } })
+    }),
+  )
+
+  it.effect("S1 raising and removing a deadline takes effect while a provider is waiting", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Adjust while waiting" }), resume: false })
+      yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
+      yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* adjust(500)
+      yield* session.update({ sessionID, budget: { durationMs: 5000 } })
+      yield* adjust(1000)
+      expect(run.pollUnsafe()).toBeUndefined()
+      yield* session.update({ sessionID, budget: {} })
+      yield* adjust(5000)
+      expect(run.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(streamGate, undefined)
+      yield* Fiber.join(run)
+      expect((yield* session.outcome(sessionID)).state).not.toBe("stopped")
     }),
   )
 
@@ -6140,10 +6190,10 @@ describe("SessionRunnerLLM", () => {
         },
       })
       requests.length = 0
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(0)
       const runner = yield* SessionRunner.Service
-      expect(yield* runner.compact(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      expect(yield* runner.compact(sessionID)).toBe(false)
       expect(requests).toHaveLength(0)
       expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ total: 110, calls: 1 })
     }),
@@ -6178,7 +6228,7 @@ describe("SessionRunnerLLM", () => {
         ],
       ]
 
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* session.resume(sessionID)
 
       expect(requests).toHaveLength(2)
       expect(requests[0]?.toolChoice).toBeUndefined()
@@ -6194,7 +6244,7 @@ describe("SessionRunnerLLM", () => {
         { type: "assistant", content: [{ type: "tool", id: "call-terminal", state: { status: "completed" } }] },
         {
           type: "assistant",
-          finish: "max-steps",
+          finish: "stopped",
           content: [{ type: "tool", id: "call-forbidden", state: { status: "error" } }],
         },
       ])
@@ -6258,81 +6308,73 @@ describe("SessionRunnerLLM", () => {
         ])
         responses.push(fragmentFixture("text", "done", ["Done"]).completeEvents)
         yield* session.resume(sessionID)
-        const repeated = ["fixed", "progress_hypothesis", "progress_expected_evidence"].includes(field)
-        expect(ran).toHaveLength(repeated ? 3 : 4)
+        expect(ran).toHaveLength(4)
         expect(requests).toHaveLength(5)
         const tools = (yield* session.context(sessionID)).flatMap((message) =>
           message.type === "assistant" ? message.content.filter((part) => part.type === "tool") : [],
         )
-        expect(tools.filter((part) => part.state.status === "error")).toHaveLength(repeated ? 1 : 0)
+        expect(tools.filter((part) => part.state.status === "error")).toHaveLength(0)
       }),
     )
 
-  it.effect("blocks repeated identical tool side effects after three attempts", () =>
+  it.effect("S1 identical calls remain available for twenty turns", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Do not loop forever" }), resume: false })
-
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue the task" }), resume: false })
       requests.length = 0
       executions.length = 0
-      responses = Array.from({ length: 4 }, (_, index) => [
+      responses = Array.from({ length: 20 }, (_, index) => [
         LLMEvent.stepStart({ index: 0 }),
-        LLMEvent.toolCall({ id: `call-repeat-${index}`, name: "echo", input: { text: "same" } }),
+        LLMEvent.toolCall({ id: `repeat-${index}`, name: "echo", input: { text: "same" } }),
         LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ])
-
       yield* session.resume(sessionID)
-
-      expect(executions).toEqual(["same", "same", "same"])
-      expect(yield* session.context(sessionID)).toMatchObject([
-        { type: "user", text: "Do not loop forever" },
-        { type: "assistant", content: [{ type: "tool", state: { status: "completed" } }] },
-        { type: "assistant", content: [{ type: "tool", state: { status: "completed" } }] },
-        { type: "assistant", content: [{ type: "tool", state: { status: "completed" } }] },
-        {
-          type: "assistant",
-          content: [
-            {
-              type: "tool",
-              state: {
-                status: "error",
-                error: { message: expect.stringContaining("Identical tool call blocked after 3 attempts") },
-              },
-            },
-          ],
-        },
-      ])
+      expect(executions).toEqual(Array(20).fill("same"))
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("Repeated result (20)")
+      expect(
+        (yield* session.context(sessionID)).some(
+          (message) => message.type === "assistant" && message.finish === "error",
+        ),
+      ).toBe(false)
     }),
   )
 
-  it.effect("stops a repeated tool loop after one corrective response", () =>
-    Effect.gen(function* () {
-      yield* setup
-      const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Avoid a loop" }), resume: false })
-      requests.length = 0
-      executions.length = 0
-      responses = Array.from({ length: 6 }, (_, index) => [
-        LLMEvent.stepStart({ index: 0 }),
-        LLMEvent.toolCall({
-          id: `repeat-${index}`,
-          name: "echo",
-          input: index % 2 ? { text: "same", extra: 1 } : { extra: 1, text: "same" },
-        }),
-        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
-        LLMEvent.finish({ reason: "tool-calls" }),
-      ])
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
-      expect(requests).toHaveLength(5)
-      expect(executions).toEqual(["same", "same", "same"])
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
-        finish: "error",
-        error: { message: expect.stringContaining("repeated identical tool calls") },
-      })
-    }),
-  )
+  for (const mode of ["wait", "get", "output", "files"])
+    it.effect(`S1 progress or waiting never receives stagnant-call advice: ${mode}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        let calls = 0
+        yield* registry.register({
+          bash_job: Tool.make({
+            description: "Fixed observation",
+            input: Schema.Struct({ action: Schema.String }),
+            output: Schema.Struct({ output: Schema.String }),
+            execute: () =>
+              Effect.sync(() => {
+                calls++
+                if (mode === "files") fixtureSnapshot = Snapshot.ID.make(`snapshot-${calls}`)
+                return { output: mode === "output" ? `changed-${calls}` : "unchanged" }
+              }),
+          }),
+        })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Observe progress" }), resume: false })
+        responses = Array.from({ length: 12 }, (_, index) => [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: `observe-${index}`, name: "bash_job", input: { action: mode } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ])
+        responses.push(fragmentFixture("text", "done", ["Done"]).completeEvents)
+        yield* session.resume(sessionID)
+        expect(calls).toBe(12)
+        expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("Repeated result (")
+      }),
+    )
 
   it.effect("enforces the turn budget even when the final call repeats a blocked tool", () =>
     Effect.gen(function* () {
@@ -6353,10 +6395,10 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ])
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* session.resume(sessionID)
       expect(requests).toHaveLength(5)
-      expect(executions).toHaveLength(3)
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "max-steps" })
+      expect(executions).toHaveLength(4)
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stopped" })
     }),
   )
 
@@ -6455,7 +6497,7 @@ describe("SessionRunnerLLM", () => {
       yield* Deferred.await(streamStarted)
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Change direction" }) })
       yield* Deferred.succeed(streamGate, undefined)
-      expect(yield* Fiber.join(run).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      yield* Fiber.join(run)
       streamGate = undefined
       streamStarted = undefined
 

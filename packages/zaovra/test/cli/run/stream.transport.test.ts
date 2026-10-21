@@ -434,7 +434,10 @@ function sdk(
     globalStream?: GlobalEventStream
     subscribe?: ZaovraClient["event"]["subscribe"]
     globalEvent?: ZaovraClient["global"]["event"]
-    promptAsync?: (input: { sessionID: string; messageID?: string; parts?: Array<{ type: string; [key: string]: unknown }> }, options?: { signal?: AbortSignal | null }) => Promise<ReturnTypeData<void>>
+    promptAsync?: (
+      input: { sessionID: string; messageID?: string; parts?: Array<{ type: string; [key: string]: unknown }> },
+      options?: { signal?: AbortSignal | null },
+    ) => Promise<ReturnTypeData<void>>
     status?: () => Promise<ReturnTypeData<SessionStatusMap>>
     messages?: (input: { sessionID: string; limit?: number }) => Promise<ReturnTypeData<SessionMessage[]>>
     children?: (input: { sessionID: string }) => Promise<ReturnTypeData<SessionChild[]>>
@@ -493,6 +496,7 @@ function sdk(
   spyOn(client.v2.session, "switchAgent").mockImplementation(async () => (await ok(undefined)) as never)
   spyOn(client.v2.session, "switchModel").mockImplementation(async () => (await ok(undefined)) as never)
   spyOn(client.v2.session, "interrupt").mockImplementation(async () => (await ok(undefined)) as never)
+  spyOn(client.v2.session, "wait").mockImplementation(async () => (await ok(undefined)) as never)
   spyOn(client.v2.session, "messages").mockImplementation(async (next) => {
     const result = await messages({ sessionID: next.sessionID, limit: next.limit })
     return (await ok({
@@ -515,44 +519,46 @@ function sdk(
               time: message.info.time,
               cost: message.info.cost,
               tokens: message.info.tokens,
-              content: message.parts.map((part) => {
-                if (part.type === "text" || part.type === "reasoning") {
-                  return { type: part.type, id: part.id, text: part.text }
-                }
-                if (part.type !== "tool") return undefined
-                const state =
-                  part.state.status === "completed"
-                    ? {
-                        status: "completed" as const,
-                        input: part.state.input,
-                        content: [{ type: "text" as const, text: part.state.output }],
-                        structured: part.state.metadata,
-                      }
-                    : part.state.status === "error"
+              content: message.parts
+                .map((part) => {
+                  if (part.type === "text" || part.type === "reasoning") {
+                    return { type: part.type, id: part.id, text: part.text }
+                  }
+                  if (part.type !== "tool") return undefined
+                  const state =
+                    part.state.status === "completed"
                       ? {
-                          status: "error" as const,
+                          status: "completed" as const,
                           input: part.state.input,
-                          content: [],
-                          structured: part.state.metadata ?? {},
-                          error: { type: "unknown" as const, message: part.state.error },
+                          content: [{ type: "text" as const, text: part.state.output }],
+                          structured: part.state.metadata,
                         }
-                      : {
-                          status: "running" as const,
-                          input: part.state.input,
-                          content: [],
-                          structured: "metadata" in part.state ? (part.state.metadata ?? {}) : {},
-                        }
-                return {
-                  type: "tool" as const,
-                  id: part.callID,
-                  name: part.tool,
-                  state,
-                  time: {
-                    created: "time" in part.state ? part.state.time.start : 1,
-                    completed: "time" in part.state && "end" in part.state.time ? part.state.time.end : undefined,
-                  },
-                }
-              }).filter((part) => part !== undefined) as never,
+                      : part.state.status === "error"
+                        ? {
+                            status: "error" as const,
+                            input: part.state.input,
+                            content: [],
+                            structured: part.state.metadata ?? {},
+                            error: { type: "unknown" as const, message: part.state.error },
+                          }
+                        : {
+                            status: "running" as const,
+                            input: part.state.input,
+                            content: [],
+                            structured: "metadata" in part.state ? (part.state.metadata ?? {}) : {},
+                          }
+                  return {
+                    type: "tool" as const,
+                    id: part.callID,
+                    name: part.tool,
+                    state,
+                    time: {
+                      created: "time" in part.state ? part.state.time.start : 1,
+                      completed: "time" in part.state && "end" in part.state.time ? part.state.time.end : undefined,
+                    },
+                  }
+                })
+                .filter((part) => part !== undefined) as never,
             },
       ),
       cursor: {},
@@ -2162,7 +2168,7 @@ describe("run stream transport", () => {
       type: "file",
       url: "file:///tmp/a.ts",
       filename: "a.ts",
-          mime: "application/octet-stream",
+      mime: "application/octet-stream",
     }
 
     const transport = await createSessionTransport({
@@ -2345,6 +2351,61 @@ describe("run stream transport", () => {
         expect.objectContaining({ kind: "assistant", text: "hello from v2", partID: "text-1" }),
       )
     } finally {
+      src.close()
+      await transport.close()
+    }
+  })
+
+  test("S1 keeps the turn busy until host wait settles", async () => {
+    const src = eventFeed()
+    const seen = defer()
+    const release = defer()
+    const ui = footer()
+    const client = sdk({
+      stream: src.stream,
+      promptAsync: async () => {
+        queueMicrotask(() => {
+          src.push(busy())
+          src.push(assistant("msg-1"))
+          src.push(idle())
+        })
+        return ok(undefined)
+      },
+    })
+    spyOn(client.v2.session, "wait").mockImplementation(async () => {
+      seen.resolve()
+      await release.promise
+      return (await ok(undefined)) as never
+    })
+    const transport = await createSessionTransport({
+      sdk: client,
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: ui.api,
+    })
+    let finished = false
+    try {
+      const task = transport
+        .runPromptTurn({
+          agent: undefined,
+          model: undefined,
+          variant: undefined,
+          prompt: { text: "hello", parts: [] },
+          files: [],
+          includeFiles: false,
+          signal: new AbortController().signal,
+        })
+        .then(() => {
+          finished = true
+        })
+      await Promise.race([seen.promise, task])
+      expect(finished).toBe(false)
+      release.resolve()
+      await task
+      expect(finished).toBe(true)
+    } finally {
+      release.resolve()
       src.close()
       await transport.close()
     }

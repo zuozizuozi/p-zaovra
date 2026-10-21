@@ -184,6 +184,7 @@ export const Assistant = Schema.Struct({
     files: Schema.Array(RelativePath).pipe(optional),
   }).pipe(optional),
   finish: Schema.String.pipe(optional),
+  termination: SessionOutcome.Termination.pipe(optional),
   cost: Schema.Finite.pipe(optional),
   tokens: Schema.Struct({
     input: Schema.Finite,

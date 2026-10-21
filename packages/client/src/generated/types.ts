@@ -1272,6 +1272,27 @@ export type SessionsContextOutput = {
         >
         readonly snapshot?: { readonly start?: string; readonly end?: string; readonly files?: ReadonlyArray<string> }
         readonly finish?: string
+        readonly termination?: {
+          readonly category:
+            | "provider-turn-limit"
+            | "budget"
+            | "output-exhausted"
+            | "text-truncation"
+            | "auth"
+            | "quota"
+            | "rate_limit"
+            | "overload"
+            | "network"
+            | "request"
+            | "provider_output"
+            | "internal"
+            | "content_filter"
+            | "interrupted"
+          readonly message: string
+          readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly provider?: string
+          readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+        }
         readonly cost?: number
         readonly tokens?: {
           readonly input: number
@@ -1388,6 +1409,7 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly title?: string
           readonly archived?: boolean
+          readonly budget?: { readonly tokens?: number; readonly durationMs?: number }
         }
       }
     | {
@@ -1749,6 +1771,27 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly assistantMessageID: string
           readonly finish: string
+          readonly termination?: {
+            readonly category:
+              | "provider-turn-limit"
+              | "budget"
+              | "output-exhausted"
+              | "text-truncation"
+              | "auth"
+              | "quota"
+              | "rate_limit"
+              | "overload"
+              | "network"
+              | "request"
+              | "provider_output"
+              | "internal"
+              | "content_filter"
+              | "interrupted"
+            readonly message: string
+            readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+            readonly provider?: string
+            readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+          }
           readonly error?: {
             readonly type: "unknown"
             readonly message: string
@@ -1781,6 +1824,27 @@ export type SessionsHistoryOutput = {
             readonly type: "unknown"
             readonly message: string
             readonly metadata?: { readonly [x: string]: string }
+          }
+          readonly termination?: {
+            readonly category:
+              | "provider-turn-limit"
+              | "budget"
+              | "output-exhausted"
+              | "text-truncation"
+              | "auth"
+              | "quota"
+              | "rate_limit"
+              | "overload"
+              | "network"
+              | "request"
+              | "provider_output"
+              | "internal"
+              | "content_filter"
+              | "interrupted"
+            readonly message: string
+            readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+            readonly provider?: string
+            readonly source?: "user" | "permission" | "process-exit" | "placement-change"
           }
         }
       }
@@ -2174,6 +2238,7 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly title?: string
         readonly archived?: boolean
+        readonly budget?: { readonly tokens?: number; readonly durationMs?: number }
       }
     }
   | {
@@ -2535,6 +2600,27 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly assistantMessageID: string
         readonly finish: string
+        readonly termination?: {
+          readonly category:
+            | "provider-turn-limit"
+            | "budget"
+            | "output-exhausted"
+            | "text-truncation"
+            | "auth"
+            | "quota"
+            | "rate_limit"
+            | "overload"
+            | "network"
+            | "request"
+            | "provider_output"
+            | "internal"
+            | "content_filter"
+            | "interrupted"
+          readonly message: string
+          readonly statusCode?: number
+          readonly provider?: string
+          readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+        }
         readonly error?: {
           readonly type: "unknown"
           readonly message: string
@@ -2567,6 +2653,27 @@ export type SessionsEventsOutput =
           readonly type: "unknown"
           readonly message: string
           readonly metadata?: { readonly [x: string]: string }
+        }
+        readonly termination?: {
+          readonly category:
+            | "provider-turn-limit"
+            | "budget"
+            | "output-exhausted"
+            | "text-truncation"
+            | "auth"
+            | "quota"
+            | "rate_limit"
+            | "overload"
+            | "network"
+            | "request"
+            | "provider_output"
+            | "internal"
+            | "content_filter"
+            | "interrupted"
+          readonly message: string
+          readonly statusCode?: number
+          readonly provider?: string
+          readonly source?: "user" | "permission" | "process-exit" | "placement-change"
         }
       }
     }
@@ -2884,6 +2991,30 @@ export type SessionsRecoverOutput = {
       | "completed_unverified"
       | "failed"
       | "interrupted"
+      | "stopped"
+    readonly termination?: {
+      readonly category:
+        | "provider-turn-limit"
+        | "budget"
+        | "output-exhausted"
+        | "text-truncation"
+        | "auth"
+        | "quota"
+        | "rate_limit"
+        | "overload"
+        | "network"
+        | "request"
+        | "provider_output"
+        | "internal"
+        | "content_filter"
+        | "interrupted"
+      readonly message: string
+      readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+      readonly provider?: string
+      readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+    }
+    readonly runtime?: "idle" | "running" | "completed" | "stopped" | "interrupted" | "failed"
+    readonly verification?: "verified" | "unverified" | "failed"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
       readonly executionRecord?: {
@@ -3200,6 +3331,30 @@ export type SessionsOutcomeOutput = {
       | "completed_unverified"
       | "failed"
       | "interrupted"
+      | "stopped"
+    readonly termination?: {
+      readonly category:
+        | "provider-turn-limit"
+        | "budget"
+        | "output-exhausted"
+        | "text-truncation"
+        | "auth"
+        | "quota"
+        | "rate_limit"
+        | "overload"
+        | "network"
+        | "request"
+        | "provider_output"
+        | "internal"
+        | "content_filter"
+        | "interrupted"
+      readonly message: string
+      readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+      readonly provider?: string
+      readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+    }
+    readonly runtime?: "idle" | "running" | "completed" | "stopped" | "interrupted" | "failed"
+    readonly verification?: "verified" | "unverified" | "failed"
     readonly outcomeUnknown: boolean
     readonly checks: ReadonlyArray<{
       readonly executionRecord?: {
@@ -3832,6 +3987,27 @@ export type SessionsMessageOutput = {
         >
         readonly snapshot?: { readonly start?: string; readonly end?: string; readonly files?: ReadonlyArray<string> }
         readonly finish?: string
+        readonly termination?: {
+          readonly category:
+            | "provider-turn-limit"
+            | "budget"
+            | "output-exhausted"
+            | "text-truncation"
+            | "auth"
+            | "quota"
+            | "rate_limit"
+            | "overload"
+            | "network"
+            | "request"
+            | "provider_output"
+            | "internal"
+            | "content_filter"
+            | "interrupted"
+          readonly message: string
+          readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly provider?: string
+          readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+        }
         readonly cost?: number
         readonly tokens?: {
           readonly input: number
@@ -3858,8 +4034,21 @@ export type SessionsMessageOutput = {
 
 export type SessionsUpdateInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
-  readonly title?: { readonly title?: string | undefined; readonly archived?: boolean | undefined }["title"]
-  readonly archived?: { readonly title?: string | undefined; readonly archived?: boolean | undefined }["archived"]
+  readonly title?: {
+    readonly title?: string | null
+    readonly archived?: boolean | null
+    readonly budget?: { readonly tokens?: number; readonly durationMs?: number } | null
+  }["title"]
+  readonly archived?: {
+    readonly title?: string | null
+    readonly archived?: boolean | null
+    readonly budget?: { readonly tokens?: number; readonly durationMs?: number } | null
+  }["archived"]
+  readonly budget?: {
+    readonly title?: string | null
+    readonly archived?: boolean | null
+    readonly budget?: { readonly tokens?: number; readonly durationMs?: number } | null
+  }["budget"]
 }
 
 export type SessionsUpdateOutput = {
@@ -6760,6 +6949,27 @@ export type MessagesListOutput = {
         >
         readonly snapshot?: { readonly start?: string; readonly end?: string; readonly files?: ReadonlyArray<string> }
         readonly finish?: string
+        readonly termination?: {
+          readonly category:
+            | "provider-turn-limit"
+            | "budget"
+            | "output-exhausted"
+            | "text-truncation"
+            | "auth"
+            | "quota"
+            | "rate_limit"
+            | "overload"
+            | "network"
+            | "request"
+            | "provider_output"
+            | "internal"
+            | "content_filter"
+            | "interrupted"
+          readonly message: string
+          readonly statusCode?: number | "Infinity" | "-Infinity" | "NaN"
+          readonly provider?: string
+          readonly source?: "user" | "permission" | "process-exit" | "placement-change"
+        }
         readonly cost?: number
         readonly tokens?: {
           readonly input: number

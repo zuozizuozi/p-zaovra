@@ -648,7 +648,7 @@ export function make(options: ClientOptions) {
           {
             method: "PATCH",
             path: `/api/session/${encodeURIComponent(input.sessionID)}`,
-            body: { title: input["title"], archived: input["archived"] },
+            body: { title: input["title"], archived: input["archived"], budget: input["budget"] },
             successStatus: 200,
             declaredStatuses: [404, 401, 400],
             empty: false,

@@ -91,7 +91,7 @@ export const Input = Schema.Struct({
   timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
     .annotate({
-      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Background defaults to no timeout; 0 explicitly selects no timeout for background only.`,
+      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Timeout hands the live process to a background job; it never kills it. Background execution has no deadline.`,
     }),
 })
 
@@ -181,7 +181,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Background commands default to no timeout; timeout 0 is supported only in background mode. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it never kills the command. Only explicit cancellation stops a background command. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input:
             Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log !== false
               ? Schema.Struct({
@@ -436,7 +436,7 @@ const layer = Layer.effectDiscard(
                   originCallID: context.toolCallID,
                   sequence: executionSequence,
                   started: executionStart,
-                  ...(silence || input.run_in_background
+                  ...(silence || timeout || input.run_in_background
                     ? { jobID: "msg_bash_" + context.assistantMessageID + "_" + context.toolCallID }
                     : {}),
                 }
@@ -444,7 +444,6 @@ const layer = Layer.effectDiscard(
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
-                    timeout: timeout === 0 ? undefined : Duration.millis(timeout),
                     maxOutputBytes: MAX_CAPTURE_BYTES,
                     onChunk: (chunk) =>
                       Effect.gen(function* () {
@@ -655,7 +654,7 @@ const layer = Layer.effectDiscard(
                   ...(warnings.length ? { warnings } : {}),
                 }
               })
-              if (silence) {
+              if (!input.run_in_background && (silence || timeout)) {
                 const done = yield* Deferred.make<Output, Effect.Error<typeof run>>()
                 const job_id = yield* jobs.start(
                   input.command,
@@ -686,15 +685,22 @@ const layer = Layer.effectDiscard(
                 )
                 const waiting = Effect.gen(function* () {
                   yield* Deferred.await(started)
+                  const began = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
                   while (true) {
-                    const remaining = silence - (Number((yield* Clock.currentTimeNanos) / 1_000_000n) - lastOutput)
-                    if (remaining <= 0)
+                    const now = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
+                    const remaining = Math.min(
+                      silence ? silence - (now - lastOutput) : Infinity,
+                      timeout ? timeout - (now - began) : Infinity,
+                    )
+                    if (remaining <= 0) {
+                      yield* jobs.watch(job_id)
                       return {
                         job_id,
                         shell: identity,
-                        output: `${partial || "(no output yet)"}\nCommand is still running under Session ownership. Use bash_job get/wait/cancel. No check has passed yet.`,
+                        output: `${partial || "(no output yet)"}\nCommand moved to the background under Session ownership; completion will notify this Session. Use bash_job get/wait/cancel when needed. No check has passed yet.`,
                         truncated: false,
                       }
+                    }
                     yield* Effect.sleep(Duration.millis(remaining))
                   }
                 })
@@ -733,6 +739,7 @@ const layer = Layer.effectDiscard(
                 capture ? capture.append(new Uint8Array()) : Effect.void,
                 { kind: input.background_kind ?? "task", workdir: target.canonical },
               )
+              if (input.background_kind !== "preview") yield* jobs.watch(job_id)
               return {
                 job_id,
                 shell: identity,

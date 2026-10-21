@@ -286,10 +286,33 @@ const statusReason = (input: {
   readonly rateLimit?: HttpRateLimitDetails | undefined
   readonly http: HttpContext
 }) => {
-  const body = input.http.body ?? ""
+  const body = `${input.http.body ?? ""} ${input.message}`
   if (/content[-_\s]?policy|content_filter|safety/i.test(body)) {
     return new ContentPolicyReason({ message: input.message, http: input.http })
   }
+  if (
+    /insufficient[-_\s]?(?:quota|balance|credits)|quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|余额不足|额度不足/i.test(
+      body,
+    )
+  )
+    return new QuotaExceededReason({ message: input.message, http: input.http })
+  if ([401, 402, 403].includes(input.status)) {
+    if (/rate[-_\s]?limit|too many requests|throttl|请求频率|限流/i.test(body))
+      return new RateLimitReason({
+        message: input.message,
+        retryAfterMs: input.retryAfterMs,
+        rateLimit: input.rateLimit,
+        http: input.http,
+      })
+    if (/overload|over capacity|temporarily unavailable|过载|暂时不可用/i.test(body))
+      return new ProviderInternalReason({
+        message: input.message,
+        status: input.status,
+        retryAfterMs: input.retryAfterMs,
+        http: input.http,
+      })
+  }
+  if (input.status === 402) return new QuotaExceededReason({ message: input.message, http: input.http })
   if (input.status === 401) {
     return new AuthenticationReason({ message: input.message, kind: "invalid", http: input.http })
   }
@@ -404,7 +427,7 @@ const toHttpError = (redactedNames: ReadonlyArray<string | RegExp>) => (error: u
 }
 
 const retryDelay = (error: LLMError, attempt: number) => {
-  if (error.retryAfterMs !== undefined) return Effect.succeed(Math.min(error.retryAfterMs, MAX_DELAY_MS))
+  if (error.retryAfterMs !== undefined) return Effect.succeed(Math.max(0, error.retryAfterMs))
   return Random.nextBetween(
     Math.min(BASE_DELAY_MS * 2 ** attempt * 0.8, MAX_DELAY_MS),
     Math.min(BASE_DELAY_MS * 2 ** attempt * 1.2, MAX_DELAY_MS),

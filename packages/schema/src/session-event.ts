@@ -112,6 +112,7 @@ export const Updated = Event.define({
     ...Base,
     title: Schema.String.pipe(optional),
     archived: Schema.Boolean.pipe(optional),
+    budget: SessionOutcome.Budget.pipe(optional),
   },
 })
 export type Updated = typeof Updated.Type
@@ -218,6 +219,7 @@ export namespace Step {
       ...Base,
       assistantMessageID: SessionMessage.ID,
       finish: Schema.String,
+      termination: SessionOutcome.Termination.pipe(optional),
       error: UnknownError.pipe(optional),
       cost: Schema.Finite,
       usageReported: Schema.Boolean.pipe(optional),
@@ -244,6 +246,7 @@ export namespace Step {
       ...Base,
       assistantMessageID: SessionMessage.ID,
       error: UnknownError,
+      termination: SessionOutcome.Termination.pipe(optional),
     },
   })
   export type Failed = typeof Failed.Type

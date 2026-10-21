@@ -107,6 +107,35 @@ export const Review = Schema.Struct({
   notes: Schema.Array(Schema.Struct({ text: Schema.String, requirements: Schema.Array(Schema.Int) })).pipe(optional),
 }).annotate({ identifier: "SessionOutcome.Review" })
 export interface Review extends Schema.Schema.Type<typeof Review> {}
+export const Budget = Schema.Struct({
+  // An explicitly supplied object replaces both limits; omitted fields remove limits.
+  tokens: Schema.Int.check(Schema.isGreaterThan(0)).pipe(optional),
+  durationMs: Schema.Int.check(Schema.isGreaterThan(0)).pipe(optional),
+}).annotate({ identifier: "SessionOutcome.Budget" })
+export interface Budget extends Schema.Schema.Type<typeof Budget> {}
+export const Termination = Schema.Struct({
+  category: Schema.Literals([
+    "provider-turn-limit",
+    "budget",
+    "output-exhausted",
+    "text-truncation",
+    "auth",
+    "quota",
+    "rate_limit",
+    "overload",
+    "network",
+    "request",
+    "provider_output",
+    "internal",
+    "content_filter",
+    "interrupted",
+  ]),
+  message: Schema.String,
+  statusCode: Schema.Number.pipe(optional),
+  provider: Schema.String.pipe(optional),
+  source: Schema.Literals(["user", "permission", "process-exit", "placement-change"]).pipe(optional),
+}).annotate({ identifier: "SessionOutcome.Termination" })
+export interface Termination extends Schema.Schema.Type<typeof Termination> {}
 export const Info = Schema.Struct({
   state: Schema.Literals([
     "idle",
@@ -116,7 +145,11 @@ export const Info = Schema.Struct({
     "completed_unverified",
     "failed",
     "interrupted",
+    "stopped",
   ]),
+  termination: Termination.pipe(optional),
+  runtime: Schema.Literals(["idle", "running", "completed", "stopped", "interrupted", "failed"]).pipe(optional),
+  verification: Schema.Literals(["verified", "unverified", "failed"]).pipe(optional),
   outcomeUnknown: Schema.Boolean,
   checks: Schema.Array(Check),
   recentChecks: Schema.Array(

@@ -512,6 +512,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         payload: Schema.Struct({
           title: Schema.String.pipe(Schema.optional),
           archived: Schema.Boolean.pipe(Schema.optional),
+          budget: SessionOutcome.Budget.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: Session.Info }),
         error: SessionNotFoundError,

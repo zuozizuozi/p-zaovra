@@ -1,6 +1,8 @@
 import { expect } from "bun:test"
 import path from "path"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Fiber, Layer, Schema } from "effect"
+import { adjust } from "effect/testing/TestClock"
+import { BashJob } from "@zaovra-ai/core/tool/bash-job"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -64,6 +66,7 @@ const withRuntime = <A, E, R>(
             LayerNode.group([
               SessionV2.node,
               BashTool.node,
+              BashJob.node,
               AgentV2.node,
               ToolRegistry.node,
               BackgroundJob.node,
@@ -525,7 +528,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
         status: "completed",
       })
       expect(JSON.stringify(finished.output?.content)).toContain("finished")
-      expect(JSON.stringify(finished.output?.content)).toContain("clamped to 60000ms")
+      expect(JSON.stringify(finished.output?.content)).not.toContain("clamped to 60000ms")
       expect(yield* Effect.promise(() => Bun.file(first.outputPaths![0]).text())).toBe("finished")
       expect(
         (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell"),
@@ -560,14 +563,11 @@ it.live("background commands settle durably, enforce ownership, and stop with th
           type: "tool-call",
           id: "timed",
           name: "bash_job",
-          input: { job_id: (bounded.output?.structured as { job_id: string }).job_id, action: "wait" },
+          input: { job_id: (bounded.output?.structured as { job_id: string }).job_id, action: "wait", timeout: 500 },
         },
       })
-      expect(timed.output?.structured).toMatchObject({ status: "error" })
-      expect(timed.output?.content[0]).toMatchObject({
-        type: "text",
-        text: expect.stringContaining("timeout of 300 ms"),
-      })
+      expect(timed.output?.structured).toMatchObject({ status: "running" })
+      yield* sessions.interrupt(session.id)
     }),
   ),
 )
@@ -741,7 +741,7 @@ it.live("Q2 silence yields a live owned process and never certifies pending chec
 )
 
 it.live(
-  "Q2 fresh output resets silence and explicit timeout remains authoritative",
+  "S1 fresh output resets silence and timeout hands ownership to background",
   () =>
     withRuntime(
       (directory, sessions, registry, jobs) =>
@@ -775,7 +775,7 @@ it.live(
           const timed = yield* execute("explicit-timeout", 2500)
           const timedJob = (timed.output?.structured as { job_id?: string }).job_id
           expect(timedJob).toBeString()
-          expect((yield* jobs.wait({ id: timedJob!, timeout: 5000 })).info?.status).toBe("error")
+          expect((yield* jobs.wait({ id: timedJob!, timeout: 5000 })).info?.status).toBe("completed")
         }),
       1500,
     ),
@@ -825,6 +825,87 @@ it.live("Q4 default bash schema exposes optional observation fields without enab
       const bash = snapshot.definitions.find((tool) => tool.name === "bash")
       expect(JSON.stringify(bash?.inputSchema)).toContain("progress_hypothesis")
       expect(JSON.stringify(bash?.inputSchema)).toContain("progress_expected_evidence")
+    }),
+  ),
+)
+
+it.live("S1 foreground timeout retains process and completion", () =>
+  withRuntime((directory, sessions, registry) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const script = path.join(directory, "survive.cjs")
+      yield* Effect.promise(() => Bun.write(script, "setTimeout(() => console.log('survived'), 1500)"))
+      const first = yield* settleTool(registry, {
+        sessionID: session.id,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "survive",
+          name: "bash",
+          input: {
+            command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+            timeout: 300,
+          },
+        },
+      })
+      const job = (first.output?.structured as { job_id?: string })?.job_id
+      expect(job).toBeDefined()
+      const done = yield* settleTool(registry, {
+        sessionID: session.id,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "wait-survive",
+          name: "bash_job",
+          input: { job_id: job, action: "wait", timeout: 120000 },
+        },
+      })
+      expect(done.output?.structured).toMatchObject({ status: "completed" })
+      expect(JSON.stringify(done.output?.content)).toContain("survived")
+      expect(JSON.stringify(done.output?.content)).not.toContain("clamped")
+      const database = yield* Database.Service
+      const notification = yield* SessionInput.find(database.db, SessionMessage.ID.make(`${job}_completed`))
+      expect(notification?.delivery).toBe("queue")
+      expect(notification?.prompt.text).toContain(job!)
+    }),
+  ),
+)
+
+it.effect("S1 twenty minute job supports twelve waits and one durable completion", () =>
+  withRuntime((directory, sessions, registry, jobs) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const bash = yield* BashJob.Service
+      const id = yield* bash.start(
+        "simulated long command",
+        Effect.sleep("20 minutes").pipe(Effect.as("done")),
+        { sessionID: session.id, ...toolIdentity, toolCallID: "twenty-minutes" },
+        Effect.void,
+      )
+      yield* bash.watch(id)
+      for (let index = 0; index < 12; index++) {
+        const wait = yield* settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: `wait-${index}`,
+            name: "bash_job",
+            input: { job_id: id, action: "wait", timeout: 90000 },
+          },
+        }).pipe(Effect.forkChild)
+        yield* adjust(90000)
+        expect((yield* Fiber.join(wait)).output?.structured).toMatchObject({ status: "running" })
+      }
+      yield* adjust("2 minutes")
+      expect((yield* jobs.get(id))?.status).toBe("completed")
+      const database = yield* Database.Service
+      const notification = yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))
+      expect(notification?.delivery).toBe("queue")
+      yield* bash.watch(id)
+      expect(
+        (yield* SessionInput.pending(database.db, session.id)).filter((input) => input.id === `${id}_completed`),
+      ).toHaveLength(1)
     }),
   ),
 )

@@ -3,6 +3,9 @@ export * as BashJob from "./bash-job"
 import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { BackgroundJob } from "../background-job"
+import { Database } from "../database/database"
+import { SessionInput } from "../session/input"
+import { SessionExecution } from "../session/execution"
 import { EventV2 } from "../event"
 import { makeLocationNode } from "../effect/app-node"
 import { KeyedMutex } from "../effect/keyed-mutex"
@@ -18,6 +21,7 @@ import { Tools } from "./tools"
 export class Service extends Context.Service<
   Service,
   {
+    readonly watch: (id: string) => Effect.Effect<void>
     readonly record: (
       id: string,
       result: {
@@ -41,6 +45,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const jobs = yield* BackgroundJob.Service
+    const database = yield* Database.Service
     const events = yield* EventV2.Service
     const sessions = yield* SessionStore.Service
     const location = yield* Location.Service
@@ -48,6 +53,30 @@ const layer = Layer.effect(
     const tools = yield* Tools.Service
     const locks = KeyedMutex.makeUnsafe<string>()
     const owned = new Set<string>()
+    const watched = new Set<string>()
+    const notify = (id: string) =>
+      locks.withLock(id)(
+        Effect.gen(function* () {
+          if (!watched.has(id)) return
+          const job = yield* jobs.get(id)
+          if (!job || job.status === "cancelled") {
+            watched.delete(id)
+            return
+          }
+          const record = yield* sessions.message(SessionMessage.ID.make(id))
+          if (!record || record.message.type !== "shell" || !record.message.time.completed) return
+          yield* SessionInput.admit(database.db, events, {
+            id: SessionMessage.ID.make(`${id}_completed`),
+            sessionID: record.sessionID,
+            delivery: "queue",
+            prompt: {
+              text: `后台命令 ${id} 已结束。请用 bash_job get 核对输出和验证结果，再继续任务；不要重新执行原命令。`,
+            },
+          })
+          watched.delete(id)
+          yield* events.publish(SessionExecution.Wake, { sessionID: record.sessionID })
+        }),
+      )
     const results = new Map<
       string,
       {
@@ -103,20 +132,32 @@ const layer = Layer.effect(
               },
               run: restore(run).pipe(
                 Effect.onExit((exit) =>
-                  events.publish(SessionEvent.Shell.Ended, {
-                    sessionID: context.sessionID,
-                    callID: id,
-                    output: Exit.isSuccess(exit)
-                      ? exit.value
-                      : Cause.hasInterrupts(exit.cause)
-                        ? "Background command cancelled. Its effects may be partial; inspect the command log before retrying."
-                        : `Background command failed: ${Cause.pretty(exit.cause)}`,
-                    timestamp: DateTime.nowUnsafe(),
-                    executionRecord: results.get(id)?.executionRecord,
-                    checks:
-                      results.get(id)?.verifications ??
-                      (results.get(id)?.verification ? [results.get(id)!.verification!] : []),
-                  }),
+                  events
+                    .publish(SessionEvent.Shell.Ended, {
+                      sessionID: context.sessionID,
+                      callID: id,
+                      output: Exit.isSuccess(exit)
+                        ? exit.value
+                        : Cause.hasInterrupts(exit.cause)
+                          ? "Background command cancelled. Its effects may be partial; inspect the command log before retrying."
+                          : `Background command failed: ${Cause.pretty(exit.cause)}`,
+                      timestamp: DateTime.nowUnsafe(),
+                      executionRecord: results.get(id)?.executionRecord,
+                      checks:
+                        results.get(id)?.verifications ??
+                        (results.get(id)?.verification ? [results.get(id)!.verification!] : []),
+                    })
+                    .pipe(
+                      Effect.andThen(
+                        Effect.gen(function* () {
+                          if (Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)) {
+                            watched.delete(id)
+                            return
+                          }
+                          yield* notify(id)
+                        }),
+                      ),
+                    ),
                 ),
                 Effect.ensuring(
                   Effect.sync(() => {
@@ -136,7 +177,7 @@ const layer = Layer.effect(
         bash_job: withPermission(
           Tool.make({
             description:
-              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Waiting is bounded and does not cancel the command. Completion is recorded in Session history; use wait to collect the result. Jobs are process-local and never automatically rerun after restart.",
+              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Completion durably notifies the Session and wakes it. Jobs are process-local and never automatically rerun after restart.",
             input: Schema.Struct({
               job_id: Schema.String,
               action: Schema.Literals(["get", "wait", "cancel"]),
@@ -206,26 +247,20 @@ const layer = Layer.effect(
                     source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                   })
                   .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
-                const notice =
-                  input.action === "wait" && (input.timeout ?? 0) > 60_000
-                    ? `Requested wait timeout ${input.timeout}ms was clamped to 60000ms.\n`
-                    : ""
                 if (!job)
                   return {
                     status: record.message.time.completed ? "finished" : "unavailable",
                     executionRecord: record.message.executionRecord,
                     verifications: record.message.checks,
                     output:
-                      notice +
-                      (record.message.output ||
-                        "The owning process is unavailable. Do not assume completion or retry automatically; inspect the command log and workspace."),
+                      record.message.output ||
+                      "The owning process is unavailable. Do not assume completion or retry automatically; inspect the command log and workspace.",
                   }
                 const result =
                   input.action === "cancel"
                     ? yield* jobs.cancel(input.job_id)
                     : input.action === "wait"
-                      ? (yield* jobs.wait({ id: input.job_id, timeout: Math.min(input.timeout ?? 30_000, 60_000) }))
-                          .info
+                      ? (yield* jobs.wait({ id: input.job_id, timeout: input.timeout ?? 600_000 })).info
                       : job
                 const evidence = result && result.status !== "running" ? results.get(input.job_id) : undefined
                 return {
@@ -243,8 +278,7 @@ const layer = Layer.effect(
                   kind: typeof result?.metadata?.kind === "string" ? result.metadata.kind : undefined,
                   workdir: typeof result?.metadata?.workdir === "string" ? result.metadata.workdir : undefined,
                   output:
-                    notice +
-                    (result?.output ?? result?.error ?? "Still running. Read the command log or wait for completion."),
+                    result?.output ?? result?.error ?? "Still running. Read the command log or wait for completion.",
                 }
               }),
           }),
@@ -254,6 +288,10 @@ const layer = Layer.effect(
       .pipe(Effect.orDie)
     return Service.of({
       start,
+      watch: (id) =>
+        Effect.sync(() => {
+          watched.add(id)
+        }).pipe(Effect.andThen(notify(id))),
       record: (id, result) =>
         Effect.sync(() => {
           results.set(id, result)
@@ -265,5 +303,13 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Location.node, BackgroundJob.node, EventV2.node, SessionStore.node, PermissionV2.node, ToolRegistry.node],
+  deps: [
+    Location.node,
+    BackgroundJob.node,
+    EventV2.node,
+    SessionStore.node,
+    PermissionV2.node,
+    ToolRegistry.node,
+    Database.node,
+  ],
 })

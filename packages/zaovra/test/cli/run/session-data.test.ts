@@ -3,6 +3,37 @@ import type { Event } from "@zaovra-ai/sdk/v2"
 import { createSessionData, flushInterrupted, reduceSessionData } from "@/cli/cmd/run/session-data"
 import type { StreamCommit } from "@/cli/cmd/run/types"
 
+test("S1 retry status retains the provider wait duration", () => {
+  const result = reduce(createSessionData(), {
+    type: "session.next.retried",
+    properties: {
+      sessionID: "session-1",
+      timestamp: 1000,
+      attempt: 3,
+      error: { message: "等待 240 秒后重试", isRetryable: true, metadata: { delayMs: "240000" } },
+    },
+  })
+  expect(result.footer?.patch?.status).toContain("240")
+})
+
+test("S1 stopped and interrupted terminal reasons remain neutral and replay once", () => {
+  for (const finish of ["stopped", "interrupted"]) {
+    const data = createSessionData()
+    const event = {
+      type: "session.next.step.ended",
+      properties: {
+        sessionID: "session-1",
+        assistantMessageID: "assistant-1",
+        finish,
+        termination: { category: finish === "stopped" ? "budget" : "interrupted", message: "Work remains" },
+      },
+    }
+    const result = reduce(data, event)
+    expect(result.commits).toContainEqual(expect.objectContaining({ kind: "system", text: `${finish}: Work remains` }))
+    expect(reduce(data, event).commits).toHaveLength(0)
+  }
+})
+
 function reduce(data: ReturnType<typeof createSessionData>, event: unknown, thinking = true) {
   return reduceSessionData({
     data,

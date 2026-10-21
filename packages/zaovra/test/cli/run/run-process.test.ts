@@ -11,6 +11,38 @@ import { testProviderConfig } from "../../lib/test-provider"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2"
 
 describe("zaovra run (non-interactive subprocess)", () => {
+  cliIt.live(
+    "S1 background completion wakes the same session and continues once",
+    ({ home, llm, zaovra }) =>
+      Effect.gen(function* () {
+        const script = `${home}/background.cjs`
+        yield* Effect.promise(() => Bun.write(script, 'setTimeout(() => console.log("background-complete"), 2000)'))
+        yield* llm.push(
+          reply().tool("bash", {
+            command: `bun "${script}"`,
+            description: "Fixed background fixture",
+            run_in_background: true,
+          }),
+          reply().text("Waiting for the background job.").stop(),
+          reply().text("Continued after durable completion notification.").stop(),
+        )
+        const result = yield* zaovra.run("Run once and continue when the job ends", {
+          format: "json",
+          extraArgs: ["--dangerously-skip-permissions"],
+          env: {
+            ZAOVRA_CONFIG_CONTENT: JSON.stringify({
+              ...testProviderConfig(llm.url),
+              snapshot: false,
+              experimental: { verification: false },
+            }),
+          },
+        })
+        expect(result.exitCode, result.stderr + result.stdout).toBe(0)
+        expect(yield* llm.calls).toBe(3)
+        expect(result.stdout).toContain("Continued after durable completion notification")
+      }),
+    60_000,
+  )
   for (const mode of ["queue", "interrupt"] as const)
     cliIt.live(
       `V5 attached CLI observes host ${mode} before exit`,
@@ -127,7 +159,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
   )
 
   cliIt.live(
-    "V5 max steps emits final report and failure exit",
+    "S1 max steps emits final report and stopped exit 2",
     ({ llm, zaovra }) =>
       Effect.gen(function* () {
         yield* llm.push(
@@ -135,6 +167,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
           reply().text("max-steps-final-report").stop(),
         )
         const result = yield* zaovra.run("Inspect a file", {
+          printLogs: true,
           format: "json",
           extraArgs: ["--dangerously-skip-permissions"],
           env: {
@@ -145,7 +178,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
             }),
           },
         })
-        expect(result.exitCode).not.toBe(0)
+        expect(result.exitCode, result.stderr + result.stdout).toBe(2)
         expect(result.stdout).toContain("max-steps-final-report")
         expect(yield* llm.calls).toBe(2)
       }),

@@ -63,7 +63,7 @@ export function facts(input: {
   state: typeof State.Type
   turns: number
   step: number
-  limit: number
+  limit?: number
   tokens: number
   unreported: number
   budget?: number

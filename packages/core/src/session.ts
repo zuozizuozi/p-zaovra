@@ -111,6 +111,7 @@ type UpdateInput = {
   sessionID: SessionSchema.ID
   title?: string
   archived?: boolean
+  budget?: { tokens?: number; durationMs?: number }
 }
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Session.NotFoundError", {
@@ -426,7 +427,7 @@ const layer = Layer.effect(
                   )
                   if (
                     previous.messageID !== input.messageID ||
-                    (previous.state !== "interrupted" && previous.state !== "failed") ||
+                    (previous.state !== "interrupted" && previous.state !== "failed" && previous.state !== "stopped") ||
                     background.some((job) => job.type !== "bash" || job.metadata?.kind !== "preview")
                   )
                     return yield* new OperationUnavailableError({ operation: "recover" })
@@ -605,6 +606,7 @@ const layer = Layer.effect(
               timestamp: yield* DateTime.now,
               title: input.title,
               archived: input.archived,
+              budget: input.budget,
             },
             { location: session.location },
           )

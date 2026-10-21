@@ -12,6 +12,7 @@ test("unknown future config fields are ignored across shared dev/prod configs", 
 test("legacy bootstrap accepts validated native settings without mutating authored config", () => {
   const authored = {
     session_token_budget: 160000,
+    session_duration_ms: 3600000,
     session_output: { provider: { model: { initial: 16000, maximum: 64000 } } },
     permissions: [{ action: "*", resource: "*", effect: "allow" }],
     model: "provider/model",
