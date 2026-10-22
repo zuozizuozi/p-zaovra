@@ -244,6 +244,33 @@ const layer = Layer.effect(
       const { limit, duration } = yield* readBudget(session.id)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
       const expired = duration !== undefined && elapsed >= duration
+      const checkpoint = notify ? AccuracyGuidance.checkpoint({ elapsed, limit: duration }) : undefined
+      if (checkpoint) {
+        // Durable events survive compaction and explicit resumes: one notice per Session.
+        const previous = yield* db
+          .select({ seq: EventTable.seq })
+          .from(EventTable)
+          .where(
+            and(
+              eq(EventTable.aggregate_id, session.id),
+              eq(
+                EventTable.type,
+                EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
+              ),
+              sql`json_extract(${EventTable.data}, '$.text') like 'Wall-clock delivery checkpoint:%'`,
+            ),
+          )
+          .limit(1)
+          .get()
+          .pipe(Effect.orDie)
+        if (!previous)
+          yield* events.publish(SessionEvent.Synthetic, {
+            sessionID: session.id,
+            timestamp: yield* DateTime.now,
+            messageID: SessionMessage.ID.create(),
+            text: checkpoint,
+          })
+      }
       if (limit === undefined && !expired) return
       const usage = yield* SessionUsageQuery.readTotal(session.id).pipe(
         Effect.provideService(Database.Service, database),
@@ -641,6 +668,7 @@ const layer = Layer.effect(
         quality?.facts !== false
           ? (yield* SessionUsageQuery.read(session.id).pipe(Effect.provideService(Database.Service, database))).total
           : undefined
+      const progressBudget = progressUsage ? yield* readBudget(session.id) : undefined
       const progressFacts = progressUsage
         ? SessionProgress.facts({
             now: yield* Clock.currentTimeMillis,
@@ -650,8 +678,11 @@ const layer = Layer.effect(
             limit: agent.info?.steps,
             tokens: progressUsage.total,
             unreported: progressUsage.unreported,
-            budget: (yield* readBudget(session.id)).limit,
-            deadline: quality?.deadline,
+            budget: progressBudget?.limit,
+            deadline:
+              progressBudget?.duration === undefined
+                ? undefined
+                : DateTime.toEpochMillis(session.time.created) + progressBudget.duration,
           })
         : undefined
       const durableMessages = toLLMMessages(context, model, originalRequests)

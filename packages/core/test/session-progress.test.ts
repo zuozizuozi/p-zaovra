@@ -3,7 +3,7 @@ import { ConfigExperimental } from "../src/config/experimental"
 import { SessionProgress } from "../src/session/progress"
 import { evidenceScope } from "./fixture/evidence-scope"
 
-test("331 deadline facts give a delivery checkpoint only after half of the explicit window", () => {
+test("339 facts retain remaining time without repeating the durable delivery checkpoint", () => {
   const input = {
     now: 149,
     state: { activeMs: 0, request: "one", requestStarted: 100 },
@@ -14,7 +14,8 @@ test("331 deadline facts give a delivery checkpoint only after half of the expli
     unreported: 0,
   }
   expect(SessionProgress.facts({ ...input, deadline: 200 })).not.toContain("Wall-clock delivery checkpoint")
-  expect(SessionProgress.facts({ ...input, now: 150, deadline: 200 })).toContain("50ms remain")
+  expect(SessionProgress.facts({ ...input, now: 150, deadline: 200 })).toContain('"remainingMs":50')
+  expect(SessionProgress.facts({ ...input, now: 150, deadline: 200 })).not.toContain("Wall-clock delivery checkpoint")
   expect(SessionProgress.facts({ ...input, now: 150 })).not.toContain("Wall-clock delivery checkpoint")
 })
 

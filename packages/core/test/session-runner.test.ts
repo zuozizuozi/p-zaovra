@@ -291,6 +291,7 @@ const skillGuidance = Layer.mock(SkillGuidance.Service, {
 })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 let sessionTokenBudget: number | undefined
+let sessionDuration: number | null | undefined
 let sessionOutput: Config.Info["session_output"]
 let qualityProgress: ConfigExperimental.Experimental["quality_progress"]
 let verificationEnabled: boolean | undefined
@@ -319,6 +320,7 @@ const config = Layer.succeed(
           type: "document",
           info: new Config.Info({
             session_token_budget: sessionTokenBudget,
+            session_duration_ms: sessionDuration,
             session_output: sessionOutput,
             experimental: new ConfigExperimental.Experimental({
               verification: verificationEnabled,
@@ -441,6 +443,7 @@ const setup = Effect.gen(function* () {
   replayProvider = false
   replayBodies.length = 0
   sessionTokenBudget = undefined
+  sessionDuration = undefined
   sessionOutput = undefined
   verificationEnabled = true
   fixtureSnapshot = undefined
@@ -521,6 +524,51 @@ for (const enabled of [false, true])
         expect(rules.includes(AccuracyGuidance.evidence)).toBe(enabled)
         expect(JSON.stringify(yield* session.context(sessionID))).not.toContain(AccuracyGuidance.general)
       }),
+  )
+
+for (const budget of ["default", "global", "session", "unlimited"] as const)
+  it.effect(`339 effective ${budget} wall budget sends one delivery checkpoint across turns and resumes`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      sessionDuration = budget === "global" ? 2000 : budget === "unlimited" ? null : undefined
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Deliver a working version" }), resume: false })
+      if (budget === "session") yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      const created = DateTime.toEpochMillis((yield* session.get(sessionID)).time.created)
+      const half = budget === "default" || budget === "unlimited" ? 21_600_000 : budget === "global" ? 1000 : 500
+      response = fragmentFixture("text", "before-checkpoint", ["Before threshold"]).completeEvents
+      yield* setTime(created + half - 1)
+      yield* session.resume(sessionID)
+      expect(JSON.stringify(requests[0].messages)).not.toContain("Wall-clock delivery checkpoint")
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* setTime(created + half)
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "checkpoint-echo", name: "echo", input: { text: "Save the first version" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "after-checkpoint", ["Version saved"]).completeEvents,
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(3)
+      expect(JSON.stringify(requests[1].messages).includes("Wall-clock delivery checkpoint")).toBe(
+        budget !== "unlimited",
+      )
+      if (budget !== "unlimited") expect(JSON.stringify(requests[1].messages)).toContain(`${half}ms remain`)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      responses = undefined
+      response = fragmentFixture("text", "resumed-checkpoint", ["Continued"]).completeEvents
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(4)
+      const notices = (yield* session.context(sessionID)).filter(
+        (message) => message.type === "synthetic" && message.text.startsWith("Wall-clock delivery checkpoint"),
+      )
+      expect(notices).toHaveLength(budget === "unlimited" ? 0 : 1)
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "user")).toHaveLength(3)
+    }),
   )
 
 it.effect("persists unexpected drain failures once with a safe reason and replayable reference", () =>

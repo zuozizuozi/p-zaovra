@@ -11,7 +11,6 @@ import { SessionSchema } from "./schema"
 import { EventV2 } from "../event"
 import { EventTable } from "../event/sql"
 import { SessionEvent } from "./event"
-import { AccuracyGuidance } from "../system-context/accuracy"
 
 export const State = Schema.Struct({
   activeMs: Schema.Number,
@@ -73,10 +72,6 @@ export function facts(input: {
   const reminder =
     (input.budget !== undefined && input.tokens >= input.budget * 0.75) ||
     (input.deadline !== undefined && input.deadline - input.now <= 60_000)
-  const checkpoint = AccuracyGuidance.checkpoint({
-    elapsed: input.now - input.state.requestStarted,
-    limit: input.deadline === undefined ? undefined : input.deadline - input.state.requestStarted,
-  })
   return `Current task facts (host observations, not new requirements): ${JSON.stringify({
     requestElapsedMs: Math.max(0, input.now - input.state.requestStarted),
     activeMs: input.state.activeMs,
@@ -92,7 +87,7 @@ export function facts(input: {
         ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
         : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
     ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
-  })}${checkpoint ? `\n${checkpoint}` : ""}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
+  })}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
 }
 
 export function closingKey(input: {

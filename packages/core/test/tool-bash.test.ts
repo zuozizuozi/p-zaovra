@@ -191,20 +191,27 @@ describe("BashTool", () => {
     it.live(`O1 project shell cannot probe before authorization (changed=${changed})`, () =>
       Effect.acquireUseRelease(
         Effect.promise(() => tmpdir()),
-        (tmp) => Effect.gen(function* () {
-          reset()
-          const probe = yield* Effect.promise(() => probeShell(tmp.path))
-          if (changed) afterPermission = () => Effect.sync(() => { configuredShell = probe.executable })
-          if (!changed) {
-            configuredShell = probe.executable
-            denyAction = "bash"
-          }
-          const settled = yield* withTool(tmp.path, (registry) => settleTool(registry, call({ command: "echo forbidden" })))
-          expect(settled.result.type).toBe("error")
-          expect(settled.result.value).toContain(changed ? "Environment changed" : "permission policy blocked")
-          expect(runs).toEqual([])
-          expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
-        }),
+        (tmp) =>
+          Effect.gen(function* () {
+            reset()
+            const probe = yield* Effect.promise(() => probeShell(tmp.path))
+            if (changed)
+              afterPermission = () =>
+                Effect.sync(() => {
+                  configuredShell = probe.executable
+                })
+            if (!changed) {
+              configuredShell = probe.executable
+              denyAction = "bash"
+            }
+            const settled = yield* withTool(tmp.path, (registry) =>
+              settleTool(registry, call({ command: "echo forbidden" })),
+            )
+            expect(settled.result.type).toBe("error")
+            expect(settled.result.value).toContain(changed ? "Environment changed" : "permission policy blocked")
+            expect(runs).toEqual([])
+            expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
+          }),
         (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
       ),
     )
@@ -587,9 +594,7 @@ describe("BashTool", () => {
                 check.targets ?? [],
                 [],
               )
-              expect(outcome.state).toBe(
-                stage === "fixed" ? "completed_verified" : "failed",
-              )
+              expect(outcome.state).toBe(stage === "fixed" ? "completed_verified" : "failed")
             }
           }),
         (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
@@ -752,7 +757,7 @@ describe("BashTool", () => {
   }
 
   it.live(
-    "preserves real command output and bounded progress when a command times out",
+    "preserves real command output and bounded progress when the foreground window expires",
     () =>
       Effect.acquireUseRelease(
         Effect.promise(() => tmpdir()),
@@ -776,11 +781,16 @@ describe("BashTool", () => {
                 ),
               LayerNode.compile(AppProcess.node),
             )
-            expect(settled.output?.structured).toMatchObject({ timeout: true, truncated: false })
+            expect(settled.output?.structured).toMatchObject({
+              job_id: "msg_bash_msg_tool_test_call-bash",
+              truncated: false,
+            })
+            expect(settled.output?.structured).not.toHaveProperty("exit")
+            expect(settled.output?.structured).not.toHaveProperty("timeout")
             expect(settled.output?.content[0]).toMatchObject({
               text: expect.stringContaining("diagnostic before timeout"),
             })
-            expect(progress).toMatchObject([
+            expect(progress.filter((event) => event.type === "session.next.tool.progress")).toMatchObject([
               {
                 type: "session.next.tool.progress",
                 data: { callID: "call-bash", content: [{ text: "diagnostic before timeout" }] },
@@ -836,20 +846,21 @@ describe("BashTool", () => {
             )
             expect(definitions.find((tool) => tool.name === "bash")?.outputSchema).not.toHaveProperty("properties.cwd")
             expect(yield* toolDefinitions(registry, [{ action: "bash", resource: "*", effect: "deny" }])).toEqual([])
-            expect(yield* settleTool(registry, call({ command: "pwd" }))).toEqual({
+            expect(yield* settleTool(registry, call({ command: "pwd" }))).toMatchObject({
               result: {
                 type: "content",
                 value: [
                   { type: "text", text: "hello\n" },
                   { type: "text", text: "Command exited with code 0." },
+                  { type: "text", text: expect.stringContaining("Command log:") },
                 ],
               },
               output: {
                 structured: {
-                  shell: ShellIdentity.resolve(),
                   executionRecord: {
                     id: expect.any(String),
                     originCallID: "call-bash",
+                    jobID: "msg_bash_msg_tool_test_call-bash",
                     sequence: expect.any(Number),
                     started: expect.any(Number),
                     completed: expect.any(Number),
@@ -862,8 +873,10 @@ describe("BashTool", () => {
                 content: [
                   { type: "text", text: "hello\n" },
                   { type: "text", text: "Command exited with code 0." },
+                  { type: "text", text: expect.stringContaining("Command log:") },
                 ],
               },
+              outputPaths: [expect.any(String)],
             })
             expect(runs).toMatchObject([
               {
