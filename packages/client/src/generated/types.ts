@@ -754,6 +754,7 @@ export type SessionsPromptOutput = {
       }
     }
     readonly delivery: "steer" | "queue"
+    readonly completion?: { readonly type: "bash-completion"; readonly sourceMessageID: string; readonly jobID: string }
     readonly timeCreated: number
     readonly promotedSeq?: number
     readonly cancelledSeq?: number
@@ -808,6 +809,7 @@ export type SessionsPendingInputsOutput = {
       }
     }
     readonly delivery: "steer" | "queue"
+    readonly completion?: { readonly type: "bash-completion"; readonly sourceMessageID: string; readonly jobID: string }
     readonly timeCreated: number
     readonly promotedSeq?: number
     readonly cancelledSeq?: number
@@ -880,6 +882,7 @@ export type SessionsCancelInputOutput = {
       }
     }
     readonly delivery: "steer" | "queue"
+    readonly completion?: { readonly type: "bash-completion"; readonly sourceMessageID: string; readonly jobID: string }
     readonly timeCreated: number
     readonly promotedSeq?: number
     readonly cancelledSeq?: number
@@ -1019,6 +1022,11 @@ export type SessionsContextOutput = {
         readonly time: { readonly created: number }
         readonly sessionID: string
         readonly text: string
+        readonly completion?: {
+          readonly type: "bash-completion"
+          readonly sourceMessageID: string
+          readonly jobID: string
+        }
         readonly type: "synthetic"
       }
     | {
@@ -1471,6 +1479,11 @@ export type SessionsHistoryOutput = {
             }
           }
           readonly delivery: "steer" | "queue"
+          readonly completion?: {
+            readonly type: "bash-completion"
+            readonly sourceMessageID: string
+            readonly jobID: string
+          }
         }
       }
     | {
@@ -1524,6 +1537,11 @@ export type SessionsHistoryOutput = {
             }
           }
           readonly delivery: "steer" | "queue"
+          readonly completion?: {
+            readonly type: "bash-completion"
+            readonly sourceMessageID: string
+            readonly jobID: string
+          }
         }
       }
     | {
@@ -2300,6 +2318,11 @@ export type SessionsEventsOutput =
           }
         }
         readonly delivery: "steer" | "queue"
+        readonly completion?: {
+          readonly type: "bash-completion"
+          readonly sourceMessageID: string
+          readonly jobID: string
+        }
       }
     }
   | {
@@ -2353,6 +2376,11 @@ export type SessionsEventsOutput =
           }
         }
         readonly delivery: "steer" | "queue"
+        readonly completion?: {
+          readonly type: "bash-completion"
+          readonly sourceMessageID: string
+          readonly jobID: string
+        }
       }
     }
   | {
@@ -3744,6 +3772,11 @@ export type SessionsMessageOutput = {
         readonly time: { readonly created: number }
         readonly sessionID: string
         readonly text: string
+        readonly completion?: {
+          readonly type: "bash-completion"
+          readonly sourceMessageID: string
+          readonly jobID: string
+        }
         readonly type: "synthetic"
       }
     | {
@@ -6706,6 +6739,11 @@ export type MessagesListOutput = {
         readonly time: { readonly created: number }
         readonly sessionID: string
         readonly text: string
+        readonly completion?: {
+          readonly type: "bash-completion"
+          readonly sourceMessageID: string
+          readonly jobID: string
+        }
         readonly type: "synthetic"
       }
     | {

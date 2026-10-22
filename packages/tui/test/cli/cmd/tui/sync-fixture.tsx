@@ -6,7 +6,7 @@ import { KVProvider, useKV } from "../../../../src/context/kv"
 import { ProjectProvider, useProject } from "../../../../src/context/project"
 import { SDKProvider } from "../../../../src/context/sdk"
 import { SyncProvider, useSync } from "../../../../src/context/sync"
-import { DataProvider } from "../../../../src/context/data"
+import { DataProvider, useData } from "../../../../src/context/data"
 import { PermissionProvider, usePermission } from "../../../../src/context/permission"
 import { ExitProvider } from "../../../../src/context/exit"
 import { createEventSource, createFetch, type FetchHandler, directory } from "../../../fixture/tui-sdk"
@@ -22,6 +22,7 @@ export async function wait(fn: () => boolean, timeout = 2000) {
 }
 
 type Ctx = {
+  data: ReturnType<typeof useData>
   kv: ReturnType<typeof useKV>
   permission: ReturnType<typeof usePermission>
   project: ReturnType<typeof useProject>
@@ -32,6 +33,7 @@ export async function mount(override?: FetchHandler, state?: string) {
   const calls = createFetch(override)
   const events = createEventSource()
   let sync!: ReturnType<typeof useSync>
+  let data!: ReturnType<typeof useData>
   let project!: ReturnType<typeof useProject>
   let permission!: ReturnType<typeof usePermission>
   let kv!: ReturnType<typeof useKV>
@@ -41,8 +43,15 @@ export async function mount(override?: FetchHandler, state?: string) {
   })
 
   function Probe() {
-    const ctx: Ctx = { kv: useKV(), permission: usePermission(), project: useProject(), sync: useSync() }
+    const ctx: Ctx = {
+      data: useData(),
+      kv: useKV(),
+      permission: usePermission(),
+      project: useProject(),
+      sync: useSync(),
+    }
     onMount(() => {
+      data = ctx.data
       sync = ctx.sync
       project = ctx.project
       permission = ctx.permission
@@ -76,5 +85,5 @@ export async function mount(override?: FetchHandler, state?: string) {
 
   await ready
   await wait(() => sync.status === "complete")
-  return { app, emit: events.emit, kv, permission, project, sync, session: calls.session }
+  return { app, emit: events.emit, data, kv, permission, project, sync, session: calls.session }
 }

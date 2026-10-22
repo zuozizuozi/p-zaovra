@@ -21,6 +21,8 @@ import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { SessionInput } from "@zaovra-ai/core/session/input"
+import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
+import { ExecutionContext } from "@zaovra-ai/core/session/execution-context"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@zaovra-ai/core/session/sql"
 import { SessionStore } from "@zaovra-ai/core/session/store"
 import { testEffect } from "./lib/effect"
@@ -104,6 +106,100 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  it.effect("S1 host completion preserves original clauses, authorization and durable evidence", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const store = yield* SessionStore.Service
+      const original = yield* sessions.prompt({
+        sessionID,
+        prompt: Prompt.make({
+          text: "实现首页；添加交互；验证空输入。",
+          executionContract: { version: 1, samples: ["one"] },
+        }),
+        resume: false,
+      })
+      yield* SessionInput.promoteNextQueued(database.db, events, sessionID)
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, original.admittedSeq)
+      const shellID = SessionMessage.ID.create()
+      yield* events.publish(SessionEvent.Shell.Started, {
+        sessionID,
+        messageID: shellID,
+        callID: "existing-evidence",
+        command: "original command",
+        timestamp: yield* DateTime.now,
+      })
+      yield* events.publish(SessionEvent.Shell.Ended, {
+        sessionID,
+        callID: "existing-evidence",
+        output: "already done",
+        timestamp: yield* DateTime.now,
+      })
+      const before = yield* store.context(sessionID)
+      const completion = { type: "bash-completion" as const, sourceMessageID: original.id, jobID: shellID }
+      const notification = yield* SessionInput.admit(database.db, events, {
+        id: SessionMessage.ID.create(),
+        sessionID,
+        prompt: Prompt.make({ text: "Read the existing result; do not rerun." }),
+        delivery: "queue",
+        completion,
+      })
+      expect((yield* SessionInput.find(database.db, notification.id))?.completion).toEqual(completion)
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(true)
+      const after = yield* store.context(sessionID)
+      expect(after.at(-1)).toMatchObject({ type: "synthetic", completion })
+      expect(SessionOutcome.requested(after)).toEqual(SessionOutcome.requested(before))
+      expect(SessionOutcome.requested(after).sourceMessageID).toBe(original.id)
+      expect(SessionOutcome.requested(after).clauses).toHaveLength(3)
+      expect(SessionOutcome.acceptanceHistory(after).some((message) => message.id === shellID)).toBe(true)
+      expect(ExecutionContext.approved(after)).toEqual(ExecutionContext.approved(before))
+      const recorded = yield* database.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, sessionID))
+        .orderBy(asc(EventTable.seq))
+        .all()
+        .pipe(Effect.orDie)
+      yield* events.remove(sessionID)
+      yield* database.db
+        .delete(SessionMessageTable)
+        .where(eq(SessionMessageTable.session_id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* database.db
+        .delete(SessionInputTable)
+        .where(eq(SessionInputTable.session_id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* events.replayAll(
+        recorded.map((row) => ({
+          id: row.id,
+          type: row.type,
+          data: row.data,
+          aggregateID: row.aggregate_id,
+          seq: row.seq,
+        })),
+      )
+      const replayed = yield* store.context(sessionID)
+      expect(replayed.at(-1)).toMatchObject({ type: "synthetic", completion })
+      expect(SessionOutcome.requested(replayed)).toEqual(SessionOutcome.requested(before))
+      expect(SessionInput.equivalent(notification, { sessionID, prompt: notification.prompt, delivery: "queue" })).toBe(
+        false,
+      )
+      const next = yield* sessions.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Build a different task" }),
+        resume: false,
+      })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, next.admittedSeq)
+      expect(SessionOutcome.requested(yield* store.context(sessionID)).sourceMessageID).toBe(next.id)
+      expect(
+        SessionOutcome.acceptanceHistory(yield* store.context(sessionID)).some((message) => message.id === shellID),
+      ).toBe(false)
+    }),
+  )
   it.effect("titles the first admitted requirement once without running a model", () =>
     Effect.gen(function* () {
       yield* setup

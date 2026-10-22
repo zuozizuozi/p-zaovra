@@ -35,6 +35,55 @@ import { testEffect } from "./lib/effect"
 import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
+it.effect("S1 completion keeps durable task identity and never notifies a replacement task", () =>
+  withRuntime((directory, sessions) =>
+    Effect.gen(function* () {
+      const bash = yield* BashJob.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const original = yield* sessions.prompt({
+        sessionID: session.id,
+        prompt: { text: "First；Second；Third。" },
+        resume: false,
+      })
+      yield* SessionInput.promoteSteers(database.db, events, session.id, original.admittedSeq)
+      const gate = yield* Deferred.make<void>()
+      const id = yield* bash.start(
+        "once",
+        Deferred.await(gate).pipe(Effect.as("done")),
+        { sessionID: session.id, ...toolIdentity, toolCallID: "typed" },
+        Effect.void,
+      )
+      yield* bash.watch(id)
+      yield* Deferred.succeed(gate, undefined)
+      yield* Effect.yieldNow
+      yield* bash.watch(id)
+      const input = yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))
+      expect(input?.completion).toEqual({ type: "bash-completion", sourceMessageID: original.id, jobID: id })
+      yield* SessionInput.promoteNextQueued(database.db, events, session.id)
+      expect(SessionOutcome.requested(yield* sessions.context(session.id)).sourceMessageID).toBe(original.id)
+      const late = yield* Deferred.make<void>()
+      const old = yield* bash.start(
+        "old task",
+        Deferred.await(late).pipe(Effect.as("done")),
+        { sessionID: session.id, ...toolIdentity, toolCallID: "late" },
+        Effect.void,
+      )
+      yield* bash.watch(old)
+      const next = yield* sessions.prompt({
+        sessionID: session.id,
+        prompt: { text: "Replacement task" },
+        resume: false,
+      })
+      yield* SessionInput.promoteSteers(database.db, events, session.id, next.admittedSeq)
+      yield* Deferred.succeed(late, undefined)
+      yield* Effect.yieldNow
+      yield* bash.watch(old)
+      expect(yield* SessionInput.find(database.db, SessionMessage.ID.make(`${old}_completed`))).toBeUndefined()
+    }),
+  ),
+)
 it.effect("S1 completion races notify once, previews stay quiet, and Stop suppresses wake", () =>
   withRuntime((directory, sessions) =>
     Effect.gen(function* () {

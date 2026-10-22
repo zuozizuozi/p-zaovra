@@ -27,7 +27,7 @@ import { useTuiStartup } from "./runtime"
 import { createSimpleContext } from "./helper"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
-import { batch, onMount } from "solid-js"
+import { batch, onCleanup, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
@@ -145,6 +145,41 @@ export const {
     const sdk = useSDK()
     const data = useData()
 
+    const executionWaits = new Map<string, AbortController>()
+    const cancelExecutionWaits = () => {
+      executionWaits.forEach((controller) => controller.abort())
+      executionWaits.clear()
+    }
+    onCleanup(cancelExecutionWaits)
+    const watchExecution = (sessionID: string) => {
+      if (executionWaits.has(sessionID)) return
+      const controller = new AbortController()
+      const client = sdk.client
+      executionWaits.set(sessionID, controller)
+      void (async () => {
+        while (!controller.signal.aborted) {
+          const failure = await client.v2.session
+            .wait({ sessionID }, { signal: controller.signal, throwOnError: true })
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            )
+          if (controller.signal.aborted) return
+          const response = await client.v2.session.active({ signal: controller.signal, throwOnError: true })
+          if (controller.signal.aborted) return
+          if (!(sessionID in (response.data?.data ?? {}))) {
+            setStore("session_status", sessionID, { type: "idle" })
+            return
+          }
+          if (failure) throw failure
+        }
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          if (executionWaits.get(sessionID) === controller) executionWaits.delete(sessionID)
+        })
+    }
+
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
     const hydratingSessions = new Map<string, { messages: Set<string>; parts: Set<string> }>()
@@ -205,23 +240,21 @@ export const {
       if (event.type.startsWith("session.next.") && "sessionID" in event.properties) {
         const sessionID = event.properties.sessionID
         if (typeof sessionID === "string") {
+          if (event.type === "session.next.deleted") {
+            executionWaits.get(sessionID)?.abort()
+            executionWaits.delete(sessionID)
+            return
+          }
           queueMicrotask(() => void projectV2Session(sessionID))
           if (event.type === "session.next.step.started") setStore("session_status", sessionID, { type: "busy" })
           if (event.type === "session.next.step.ended" || event.type === "session.next.step.failed") {
-            setTimeout(() => {
-              void sdk.client.v2.session.active().then((response) => {
-                setStore(
-                  "session_status",
-                  sessionID,
-                  sessionID in (response.data?.data ?? {}) ? { type: "busy" } : { type: "idle" },
-                )
-              })
-            }, 100)
+            watchExecution(sessionID)
           }
         }
       }
       switch (event.type) {
         case "server.instance.disposed":
+          cancelExecutionWaits()
           void bootstrap()
           break
         case "permission.replied": {
@@ -316,6 +349,8 @@ export const {
           break
 
         case "session.deleted": {
+          executionWaits.get(event.properties.info.id)?.abort()
+          executionWaits.delete(event.properties.info.id)
           const result = search(store.session, event.properties.info.id, (s) => s.id)
           if (result.found) {
             setStore(

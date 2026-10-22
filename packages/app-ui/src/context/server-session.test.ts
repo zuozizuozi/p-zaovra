@@ -79,6 +79,53 @@ const assistant = (id: string, text: string, created: number): Extract<SessionMe
 })
 
 describe("V2 server session store", () => {
+  test("host completion events reconcile as synthetic history without a transient user prompt", async () => {
+    const completion = { type: "bash-completion" as const, sourceMessageID: "msg_user", jobID: "job_task" }
+    const entered = Promise.withResolvers<void>()
+    const returned = Promise.withResolvers<void>()
+    const ctx = setup({
+      pages: [
+        { data: [user("msg_user", "Original task", 1)] },
+        {
+          data: [
+            {
+              id: "msg_host",
+              type: "synthetic",
+              sessionID: "ses_child",
+              text: "Task completed",
+              completion,
+              time: { created: 2 },
+            },
+            user("msg_user", "Original task", 1),
+          ],
+        },
+      ],
+      pageWait: () => {
+        if (ctx.requests.messages.length < 2) return Promise.resolve()
+        entered.resolve()
+        return returned.promise
+      },
+    })
+    await ctx.store.sync("ses_child")
+    ctx.store.apply({
+      type: "session.next.prompted",
+      properties: {
+        sessionID: "ses_child",
+        messageID: "msg_host",
+        timestamp: 2,
+        prompt: { text: "Task completed" },
+        delivery: "queue",
+        completion,
+      },
+    })
+    expect(ctx.store.data.message.ses_child.map((item) => item.id)).toEqual(["msg_user"])
+    await entered.promise
+    expect(ctx.store.data.part.msg_host).toBeUndefined()
+    returned.resolve()
+    for (let index = 0; index < 50 && !ctx.store.data.part.msg_host; index++) await Bun.sleep(10)
+    expect(ctx.store.data.part.msg_host).toMatchObject([{ text: "Task completed", synthetic: true }])
+    expect(ctx.store.data.part.msg_user).toMatchObject([{ text: "Original task" }])
+  })
   test("reconciles the completed transcript when all completion events are missed", async () => {
     const initial = { ...assistant("msg_answer", "", 2), time: { created: 2 } }
     const completed = { ...assistant("msg_answer", "READY", 2), finish: "stop" as const }

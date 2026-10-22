@@ -409,6 +409,7 @@ export const dict = {
   "session.budget.apply": "Apply limits and continue",
   "session.budget.remove": "Remove limits and continue",
   "session.budget.invalid": "Enter a positive whole number, or leave blank for no limit.",
+  "session.budget.updatedWithoutContinue": "Budget updated; session was not continued.",
   "session.outcome.unknown":
     "Some operations have no recorded result. Inspect the logs and workspace before repeating them.",
   "session.outcome.checks": "Verification information",

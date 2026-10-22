@@ -8,6 +8,8 @@ import { Project } from "../src/project"
 import { Pty } from "../src/pty"
 import { Question } from "../src/question"
 import { Session } from "../src/session"
+import { SessionInput } from "../src/session-input"
+import { SessionMessage } from "../src/session-message"
 import { SessionOutcome } from "../src/session-outcome"
 import { SessionUsage } from "../src/session-usage"
 import { SessionTodo } from "../src/session-todo"
@@ -15,6 +17,23 @@ import { Work } from "../src/work"
 import { optional } from "../src/schema"
 
 describe("contract hygiene", () => {
+  test("host completion is optional and preserves its validated task identity on the wire", () => {
+    const completion = { type: "bash-completion" as const, sourceMessageID: "msg_original", jobID: "job_task" }
+    const decode = Schema.decodeUnknownSync(SessionInput.Admitted)
+    const input = {
+      admittedSeq: 1,
+      id: "msg_host",
+      sessionID: "ses_task",
+      prompt: { text: "Task completed" },
+      delivery: "queue",
+      timeCreated: 2,
+    }
+    expect(Schema.encodeSync(SessionInput.Admitted)(decode(input))).not.toHaveProperty("completion")
+    expect(Schema.encodeSync(SessionInput.Admitted)(decode({ ...input, completion })).completion).toEqual(completion)
+    expect(() =>
+      Schema.decodeUnknownSync(SessionMessage.HostCompletion)({ ...completion, sourceMessageID: "invalid" }),
+    ).toThrow()
+  })
   test("optional properties preserve transformations and omit undefined while encoding", () => {
     const Value = Schema.Struct({ value: optional(Schema.FiniteFromString) })
     expect(Schema.decodeUnknownSync(Value)({ value: "1" })).toEqual({ value: 1 })
@@ -56,6 +75,7 @@ describe("contract hygiene", () => {
       Project.Info,
       Pty.Info,
       Session.ListAnchor,
+      SessionMessage.HostCompletion,
       SessionOutcome.ExecutionValue,
       SessionOutcome.ExecutionCondition,
       SessionOutcome.ExecutionEnvironment,

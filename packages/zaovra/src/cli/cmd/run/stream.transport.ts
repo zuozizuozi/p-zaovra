@@ -1021,50 +1021,33 @@ function createLayer(input: StreamInput) {
           next.live = true
         }
 
-        const complete = Effect.fn("RunStreamTransport.complete")(function* (next: Wait, fallback: boolean) {
+        const complete = Effect.fn("RunStreamTransport.complete")(function* (next: Wait, signal: AbortSignal) {
           if (state.wait !== next || !next.armed || !next.live) {
             return
           }
 
-          if (!(yield* idle(fallback)) || state.wait !== next) {
+          if (!(yield* idle(false)) || state.wait !== next) {
             return
           }
 
           const settled = yield* Effect.tryPromise({
-            try: (signal) => input.sdk.v2.session.wait({ sessionID: input.sessionID }, { signal, throwOnError: true }),
+            try: () => input.sdk.v2.session.wait({ sessionID: input.sessionID }, { signal, throwOnError: true }),
             catch: (error) => error,
           }).pipe(
             Effect.as(true),
             Effect.orElseSucceed(() => false),
           )
-          if (!settled || state.wait !== next || !(yield* idle(false))) return
+          if (!settled || signal.aborted || state.wait !== next || !(yield* idle(false))) return
 
           state.tick = next.tick + 1
           state.wait = undefined
           yield* Deferred.succeed(next.done, undefined).pipe(Effect.ignore)
         })
 
-        const mark = Effect.fn("RunStreamTransport.mark")(function* (event: Event) {
-          const terminal =
-            (event.type === "session.status" && event.properties.status.type === "idle") ||
-            event.type === "session.next.step.ended" ||
-            event.type === "session.next.step.failed"
-          if (!terminal || sid(event) !== input.sessionID) {
-            return
-          }
-
-          const next = state.wait
-          if (!next) {
-            return
-          }
-
-          yield* complete(next, event.type === "session.status")
-        })
-
         const poll = Effect.fn("RunStreamTransport.poll")(function* (next: Wait, signal: AbortSignal) {
           while (state.wait === next && !signal.aborted && !input.footer.isClosed && !closed) {
             yield* Effect.sleep("250 millis")
-            yield* complete(next, false)
+            yield* complete(next, signal)
           }
         })
 
@@ -1144,7 +1127,6 @@ function createLayer(input: StreamInput) {
           syncFooter(next.commits, next.footer?.patch, changed ? currentSubagentState() : undefined)
 
           touch(event)
-          yield* mark(event)
         })
 
         const drainBuffered = Effect.fn("RunStreamTransport.drainBuffered")(function* () {
@@ -1565,6 +1547,7 @@ function createLayer(input: StreamInput) {
                 })
                 next.signal?.removeEventListener("abort", stop)
                 abort.signal.removeEventListener("abort", stop)
+                turn.abort()
               }),
             ),
           )

@@ -160,6 +160,7 @@ export default {
           \`session_id\` text NOT NULL,
           \`prompt\` text NOT NULL,
           \`delivery\` text NOT NULL,
+          \`completion\` text,
           \`admitted_seq\` integer NOT NULL,
           \`promoted_seq\` integer,
           \`cancelled_seq\` integer,

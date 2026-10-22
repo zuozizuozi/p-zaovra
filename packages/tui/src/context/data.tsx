@@ -151,6 +151,17 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           break
         case "session.next.prompted": {
           message.update(event.data.sessionID, (draft) => {
+            if (event.data.completion) {
+              message.prepend(draft, {
+                id: event.data.messageID,
+                type: "synthetic",
+                sessionID: event.data.sessionID,
+                text: event.data.prompt.text,
+                completion: event.data.completion,
+                time: { created: event.data.timestamp },
+              })
+              return
+            }
             message.prepend(draft, {
               id: event.data.messageID,
               type: "user",

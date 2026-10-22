@@ -5,6 +5,65 @@ import { testEffect } from "./lib/effect"
 
 const it = testEffect(Layer.empty)
 
+it.effect("S1 Stop freezes wakes during cleanup and after ownership is removed until explicit resume", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const cleaning = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const runs: boolean[] = []
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({
+        drain: (_key, force) =>
+          Effect.sync(() => runs.push(force)).pipe(
+            Effect.andThen(
+              Effect.suspend(() =>
+                runs.length === 1
+                  ? Deferred.succeed(started, undefined).pipe(
+                      Effect.andThen(Effect.never),
+                      Effect.ensuring(
+                        Deferred.succeed(cleaning, undefined).pipe(Effect.andThen(Deferred.await(release))),
+                      ),
+                    )
+                  : Effect.void,
+              ),
+            ),
+          ),
+      })
+      yield* coordinator.wake("session")
+      yield* Deferred.await(started)
+      const stop = yield* coordinator.interrupt("session").pipe(Effect.forkChild)
+      yield* Deferred.await(cleaning)
+      yield* coordinator.wake("session")
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(stop)
+      yield* coordinator.wait("session")
+      yield* coordinator.wake("session")
+      yield* Effect.yieldNow
+      expect(runs).toEqual([false])
+      expect((yield* coordinator.active).size).toBe(0)
+      yield* coordinator.run("session")
+      expect(runs).toEqual([false, true])
+    }),
+  ),
+)
+
+it.effect("S1 a queued completion whose wake arrives after idle Stop cannot start a drain", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const runs: boolean[] = []
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({
+        drain: (_key, force) => Effect.sync(() => runs.push(force)),
+      })
+      yield* coordinator.interrupt("session")
+      yield* coordinator.wake("session")
+      yield* Effect.yieldNow
+      expect(runs).toEqual([])
+      yield* coordinator.run("session")
+      expect(runs).toEqual([true])
+    }),
+  ),
+)
+
 describe("SessionRunCoordinator", () => {
   it.effect("completes observers when execution interrupts without interrupting the observer", () =>
     Effect.scoped(
@@ -343,13 +402,12 @@ describe("SessionRunCoordinator", () => {
     ),
   )
 
-  it.effect("runs a wake registered during interruption cleanup", () =>
+  it.effect("drops automatic wakes registered during interruption cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const firstStarted = yield* Deferred.make<void>()
         const cleanupStarted = yield* Deferred.make<void>()
         const cleanupGate = yield* Deferred.make<void>()
-        const secondStarted = yield* Deferred.make<void>()
         let runs = 0
         const coordinator = yield* SessionRunCoordinator.make({
           drain: () =>
@@ -362,7 +420,7 @@ describe("SessionRunCoordinator", () => {
                         Deferred.succeed(cleanupStarted, undefined).pipe(Effect.andThen(Deferred.await(cleanupGate))),
                       ),
                     )
-                  : Deferred.succeed(secondStarted, undefined),
+                  : Effect.void,
               ),
             ),
         })
@@ -374,9 +432,8 @@ describe("SessionRunCoordinator", () => {
         yield* coordinator.wake("session")
         yield* Deferred.succeed(cleanupGate, undefined)
         yield* Fiber.join(interrupt)
-        yield* Deferred.await(secondStarted)
-
-        expect(runs).toBe(2)
+        yield* Effect.yieldNow
+        expect(runs).toBe(1)
       }),
     ),
   )

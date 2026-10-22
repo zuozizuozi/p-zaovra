@@ -16,6 +16,13 @@ export const ID = Schema.String.check(Schema.isStartsWith("msg_")).pipe(
 )
 export type ID = typeof ID.Type
 
+export const HostCompletion = Schema.Struct({
+  type: Schema.Literal("bash-completion"),
+  sourceMessageID: ID,
+  jobID: Schema.String,
+}).annotate({ identifier: "Session.HostCompletion" })
+export interface HostCompletion extends Schema.Schema.Type<typeof HostCompletion> {}
+
 export interface UnknownError extends Schema.Schema.Type<typeof UnknownError> {}
 export const UnknownError = Schema.Struct({
   type: Schema.Literal("unknown"),
@@ -61,6 +68,7 @@ export const Synthetic = Schema.Struct({
   ...Base,
   sessionID: SessionID,
   text: Schema.String,
+  completion: HostCompletion.pipe(optional),
   type: Schema.Literal("synthetic"),
 }).annotate({ identifier: "Session.Message.Synthetic" })
 

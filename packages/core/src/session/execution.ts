@@ -34,6 +34,8 @@ export interface Interface {
   readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   /** Interrupt active work owned by this process. Idle interruption is a no-op. */
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  /** Freeze automatic wakes before publishing Stop or awaiting cleanup. */
+  readonly freezeWake?: (sessionID: SessionSchema.ID) => Effect.Effect<void>
 }
 
 /** Routes execution from a Session ID to the runner owned by that Session's Location. */

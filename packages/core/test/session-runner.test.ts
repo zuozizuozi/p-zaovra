@@ -4970,6 +4970,72 @@ describe("SessionRunnerLLM", () => {
       expect((yield* session.outcome(sessionID)).state).toBe("stopped")
     }),
   )
+
+  it.effect("S1 production Stop freezes a durably admitted host completion until manual resume without rerunning", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      executions.length = 0
+      const sessions = yield* SessionV2.Service
+      const store = yield* SessionStore.Service
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const runner = yield* SessionRunner.Service
+      const placements = yield* LayerMap.make(() => Layer.succeed(SessionRunner.Service, runner))
+      const runtime = yield* Layer.build(
+        AppNodeBuilder.build(SessionExecutionLocal.node, [
+          [SessionStore.node, Layer.succeed(SessionStore.Service, store)],
+          [EventV2.node, Layer.succeed(EventV2.Service, events)],
+          [
+            LocationServiceMap.node,
+            Layer.succeed(
+              LocationServiceMap.Service,
+              placements as unknown as Context.Service.Shape<typeof LocationServiceMap.Service>,
+            ),
+          ],
+        ]),
+      )
+      const execution = Context.get(runtime, SessionExecution.Service)
+      const original = yield* sessions.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Original task" }),
+        resume: false,
+      })
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "once", name: "echo", input: { text: "original result" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "initial-done", ["Initial task done"]).completeEvents,
+      ]
+      yield* execution.resume(sessionID)
+      expect(executions).toEqual(["original result"])
+      const count = requests.length
+      yield* SessionInput.admit(database.db, events, {
+        id: SessionMessage.ID.create(),
+        sessionID,
+        delivery: "queue",
+        prompt: Prompt.make({ text: "Read original result; do not rerun" }),
+        completion: { type: "bash-completion", sourceMessageID: original.id, jobID: "existing-job" },
+      })
+      yield* execution.freezeWake!(sessionID)
+      yield* events.publish(SessionExecution.Stopped, { sessionID })
+      yield* execution.interrupt(sessionID)
+      yield* events.publish(SessionExecution.Wake, { sessionID })
+      yield* Effect.yieldNow
+      expect(requests).toHaveLength(count)
+      expect((yield* execution.active).size).toBe(0)
+      expect(yield* SessionInput.pending(database.db, sessionID)).toHaveLength(1)
+      responses = [fragmentFixture("text", "read-existing", ["Read the existing output"]).completeEvents]
+      yield* execution.resume(sessionID)
+      expect(executions).toEqual(["original result"])
+      expect(requests).toHaveLength(count + 1)
+      expect(JSON.stringify(requests.at(-1)!.messages)).toContain("Read original result; do not rerun")
+      expect(SessionOutcome.requested(yield* sessions.context(sessionID)).sourceMessageID).toBe(original.id)
+    }),
+  )
   it.effect("retains a passed check at the turn limit without claiming overall completion", () =>
     Effect.gen(function* () {
       yield* setup
@@ -6349,7 +6415,11 @@ describe("SessionRunnerLLM", () => {
       const jobs = yield* BackgroundJob.Service
       const database = yield* Database.Service
       const events = yield* EventV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Interpret completion" }), resume: false })
+      const original = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Interpret completion" }),
+        resume: false,
+      })
       yield* jobs.start({
         type: "bash",
         metadata: { sessionID, kind: "task" },
@@ -6359,6 +6429,7 @@ describe("SessionRunnerLLM", () => {
               id: SessionMessage.ID.create(),
               sessionID,
               delivery: "queue",
+              completion: { type: "bash-completion", sourceMessageID: original.id, jobID: "existing-job" },
               prompt: Prompt.make({ text: "Background completed" }),
             }),
           ),
@@ -6375,12 +6446,67 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(2)
       expect(
         (yield* session.context(sessionID)).filter(
-          (message) => message.type === "user" && message.text === "Background completed",
+          (message) => message.type === "synthetic" && message.text === "Background completed",
         ),
       ).toHaveLength(1)
+      expect(SessionOutcome.requested(yield* session.context(sessionID)).sourceMessageID).toBe(original.id)
       expect(yield* SessionInput.pending(database.db, sessionID)).toHaveLength(0)
     }),
   )
+
+  for (const delivery of ["steer", "queue"] as const)
+    it.effect(`S1 host completion ${delivery} remains visible without resetting provider turn allowance`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        executions.length = 0
+        verificationEnabled = false
+        const agents = yield* AgentV2.Service
+        yield* agents.transform((draft) =>
+          draft.update(AgentV2.ID.make("build"), (agent) => {
+            agent.steps = 2
+          }),
+        )
+        const sessions = yield* SessionV2.Service
+        const database = yield* Database.Service
+        const events = yield* EventV2.Service
+        const original = yield* sessions.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Do the original task" }),
+          resume: false,
+        })
+        responseStream = Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "original-once", name: "echo", input: { text: "one execution" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ]).pipe(
+          Stream.tap((event) =>
+            event.type === "finish"
+              ? SessionInput.admit(database.db, events, {
+                  id: SessionMessage.ID.create(),
+                  sessionID,
+                  delivery,
+                  prompt: Prompt.make({ text: "Host result available" }),
+                  completion: { type: "bash-completion", sourceMessageID: original.id, jobID: "original-job" },
+                }).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      responseStream = undefined
+                    }),
+                  ),
+                  Effect.asVoid,
+                )
+              : Effect.void,
+          ),
+        )
+        yield* sessions.resume(sessionID)
+        expect(requests).toHaveLength(delivery === "queue" ? 3 : 2)
+        expect(requests.slice(1).every((request) => request.tools?.length === 0)).toBe(true)
+        expect(JSON.stringify(requests.at(-1)!.messages)).toContain("Host result available")
+        expect(executions).toEqual(["one execution"])
+        expect(SessionOutcome.requested(yield* sessions.context(sessionID)).sourceMessageID).toBe(original.id)
+      }),
+    )
 
   it.effect("S1 raising and removing a deadline takes effect while a provider is waiting", () =>
     Effect.gen(function* () {

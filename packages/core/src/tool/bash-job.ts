@@ -2,6 +2,7 @@ export * as BashJob from "./bash-job"
 
 import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
+import { history, requested } from "../session/outcome"
 import { BackgroundJob } from "../background-job"
 import { Database } from "../database/database"
 import { SessionInput } from "../session/input"
@@ -62,8 +63,7 @@ const layer = Layer.effect(
           stopped.add(Schema.decodeUnknownSync(SessionExecution.Stopped.data)(event.data).sessionID)
         if (event.type === SessionEvent.PromptAdmitted.type) {
           const input = Schema.decodeUnknownSync(SessionEvent.PromptAdmitted.data)(event.data)
-          if (!(input.messageID.startsWith("msg_bash_") && input.messageID.endsWith("_completed")))
-            stopped.delete(input.sessionID)
+          if (!input.completion) stopped.delete(input.sessionID)
         }
       }),
     )
@@ -92,12 +92,24 @@ const layer = Layer.effect(
             notified.add(id)
             return
           }
+          const source = requested(yield* history(database.db, record.sessionID)).sourceMessageID
+          if (source && job.metadata?.sourceMessageID && source !== job.metadata.sourceMessageID) {
+            watched.delete(id)
+            return
+          }
           yield* SessionInput.admit(database.db, events, {
             id: SessionMessage.ID.make(`${id}_completed`),
             sessionID: record.sessionID,
             delivery: "queue",
+            completion: {
+              type: "bash-completion",
+              sourceMessageID: SessionMessage.ID.make(
+                typeof job.metadata?.sourceMessageID === "string" ? job.metadata.sourceMessageID : id,
+              ),
+              jobID: id,
+            },
             prompt: {
-              text: `后台命令 ${id} 已结束。完成通知身份：${id}_completed。请用 bash_job get 核对输出和验证结果，再继续任务；不要重新执行原命令。`,
+              text: `后台命令 ${id} 已结束，属于原任务 ${job.metadata?.sourceMessageID ?? id}。这是宿主完成通知，保留原任务要求和授权。完成通知身份：${id}_completed。请用 bash_job get 核对输出和验证结果，再继续原任务；不要重新执行原命令。`,
             },
           })
           watched.delete(id)
@@ -155,12 +167,14 @@ const layer = Layer.effect(
               timestamp: yield* DateTime.now,
             })
             owned.add(id)
+            const source = requested(yield* history(database.db, context.sessionID)).sourceMessageID
             yield* jobs.start({
               id,
               type: "bash",
               title: command,
               metadata: {
                 sessionID: context.sessionID,
+                sourceMessageID: source ?? context.assistantMessageID,
                 directory: location.directory,
                 workspaceID: location.workspaceID,
                 kind: background?.kind ?? "task",

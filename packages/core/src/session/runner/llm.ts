@@ -470,13 +470,14 @@ const layer = Layer.effect(
       let needsContinuation = false
       let currentStep = step
       if (promotion) {
+        const previousUser = SessionOutcome.requested(yield* store.context(sessionID)).userMessageID
         let promoted = 0
         if (promotion === "steer") promoted = yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         if (promotion === "queue") {
           promoted += Number(yield* SessionInput.promoteNextQueued(db, events, sessionID))
           promoted += yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         }
-        if (promoted > 0) {
+        if (promoted > 0 && SessionOutcome.requested(yield* store.context(sessionID)).userMessageID !== previousUser) {
           currentStep = 1
           toolCallAttempts.input = undefined
           toolCallAttempts.count = 0
@@ -1764,9 +1765,9 @@ const layer = Layer.effect(
       const toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number } = { count: 0 }
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
+      let step = 1
       while (shouldRun) {
         let needsContinuation = true
-        let step = 1
         while (needsContinuation) {
           if ((yield* getSession(input.sessionID)).time.archived) return
           const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts)

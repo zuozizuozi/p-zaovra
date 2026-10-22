@@ -842,6 +842,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     if (event.type === "session.next.prompted" || event.type === "session.next.prompt.admitted") {
       const props = event.properties as {
         delivery?: "steer" | "queue"
+        completion?: SessionInputAdmitted["completion"]
         timestamp: number
         sessionID: string
         messageID: string
@@ -863,6 +864,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           v2Info.delete(props.sessionID)
           void resolve(props.sessionID, { force: true }).catch(() => {})
         }
+      }
+      if (props.completion) {
+        refreshV2(props.sessionID)
+        return
       }
       const session = data.info[props.sessionID]
       if (!session) return refreshV2(props.sessionID)

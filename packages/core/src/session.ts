@@ -989,7 +989,8 @@ const layer = Layer.effect(
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
         Effect.uninterruptible(
-          events.publish(SessionExecution.Stopped, { sessionID }).pipe(
+          (execution.freezeWake?.(sessionID) ?? Effect.void).pipe(
+            Effect.andThen(events.publish(SessionExecution.Stopped, { sessionID })),
             Effect.andThen(execution.interrupt(sessionID)),
             Effect.andThen(
               Effect.all(

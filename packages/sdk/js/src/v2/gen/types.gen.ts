@@ -905,6 +905,7 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
+          completion?: SessionHostCompletion
         }
       }
     | {
@@ -916,6 +917,7 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
+          completion?: SessionHostCompletion
         }
       }
     | {
@@ -3494,6 +3496,12 @@ export type PromptSubtask = {
   model: ModelRef
 }
 
+export type SessionHostCompletion = {
+  type: "bash-completion"
+  sourceMessageID: string
+  jobID: string
+}
+
 export type SessionOutcomeExecutionRecord = {
   scope: {
     cwd: string
@@ -4230,6 +4238,7 @@ export type SyncEventSessionNextPrompted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
+      completion?: SessionHostCompletion
     }
   }
 }
@@ -4248,6 +4257,7 @@ export type SyncEventSessionNextPromptAdmitted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
+      completion?: SessionHostCompletion
     }
   }
 }
@@ -5587,6 +5597,7 @@ export type SessionInputAdmitted = {
   sessionID: string
   prompt: Prompt
   delivery: "steer" | "queue"
+  completion?: SessionHostCompletion
   timeCreated: number
   promotedSeq?: number
   cancelledSeq?: number
@@ -5644,6 +5655,7 @@ export type SessionMessageSynthetic = {
   }
   sessionID: string
   text: string
+  completion?: SessionHostCompletion
   type: "synthetic"
 }
 
@@ -5981,6 +5993,7 @@ export type SessionNextPrompted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    completion?: SessionHostCompletion
   }
 }
 
@@ -6002,6 +6015,7 @@ export type SessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    completion?: SessionHostCompletion
   }
 }
 
@@ -9182,6 +9196,7 @@ export type EventSessionNextPrompted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    completion?: SessionHostCompletion
   }
 }
 
@@ -9194,6 +9209,7 @@ export type EventSessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    completion?: SessionHostCompletion
   }
 }
 

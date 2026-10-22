@@ -19,6 +19,10 @@ export interface Coordinator<Key, E> {
   readonly wake: (key: Key) => Effect.Effect<void>
   /** Stops active execution and waits for its cleanup. */
   readonly interrupt: (key: Key) => Effect.Effect<void>
+  /** Freeze automatic wakes synchronously before publishing Stop. */
+  readonly freezeWake: (key: Key) => Effect.Effect<void>
+  /** Explicit input admission permits future advisory wakes again. */
+  readonly allowWake: (key: Key) => Effect.Effect<void>
 }
 
 type Entry<E> = {
@@ -35,6 +39,7 @@ export const make = <Key, E>(options: {
 }): Effect.Effect<Coordinator<Key, E>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const active = new Map<Key, Entry<E>>()
+    const stopped = new Set<Key>()
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
 
     const makeEntry = (): Entry<E> => ({
@@ -65,13 +70,14 @@ export const make = <Key, E>(options: {
     }
 
     const settle = (key: Key, entry: Entry<E>, exit: Exit.Exit<void, E>) => {
-      if (Exit.isSuccess(exit) && !entry.stopping && entry.pendingWake) {
+      if (Exit.isSuccess(exit) && !entry.stopping && !stopped.has(key) && entry.pendingWake) {
         entry.pendingWake = false
         start(key, entry, false, true)
         return
       }
 
-      const successor = entry.pendingWake && !entry.claim ? makeEntry() : undefined
+      const successor =
+        entry.pendingWake && !entry.stopping && !stopped.has(key) && !entry.claim ? makeEntry() : undefined
       if (successor === undefined) active.delete(key)
       else {
         active.set(key, successor)
@@ -90,6 +96,7 @@ export const make = <Key, E>(options: {
         }
 
         const next = makeEntry()
+        stopped.delete(key)
         active.set(key, next)
         start(key, next, true)
         return restore(Deferred.await(next.done))
@@ -102,6 +109,7 @@ export const make = <Key, E>(options: {
           // Never adopt a different drain by Session ID, even if its owner label matches.
           if (active.has(key)) return yield* Effect.die("Session already has an active execution owner")
           const entry = makeEntry()
+          stopped.delete(key)
           entry.claim = claim
           active.set(key, entry)
           start(key, entry, true)
@@ -146,8 +154,10 @@ export const make = <Key, E>(options: {
 
     const wake = (key: Key) =>
       Effect.sync(() => {
+        if (stopped.has(key)) return
         const entry = active.get(key)
         if (entry !== undefined) {
+          if (entry.stopping) return
           entry.pendingWake = true
           return
         }
@@ -157,14 +167,37 @@ export const make = <Key, E>(options: {
         start(key, next, false)
       })
 
-    const interrupt = (key: Key): Effect.Effect<void> =>
-      Effect.suspend(() => {
+    const freezeWake = (key: Key) =>
+      Effect.sync(() => {
+        stopped.add(key)
         const entry = active.get(key)
-        if (entry?.owner === undefined) return Effect.void
+        if (!entry) return
         entry.stopping = true
         entry.pendingWake = false
-        return Fiber.interrupt(entry.owner)
       })
 
-    return { active: Effect.sync(() => new Set(active.keys())), run, owned, wait, exclusive, wake, interrupt }
+    const interrupt = (key: Key): Effect.Effect<void> =>
+      freezeWake(key).pipe(
+        Effect.andThen(
+          Effect.suspend(() => {
+            const entry = active.get(key)
+            return entry?.owner ? Fiber.interrupt(entry.owner) : Effect.void
+          }),
+        ),
+      )
+
+    return {
+      active: Effect.sync(() => new Set(active.keys())),
+      run,
+      owned,
+      wait,
+      exclusive,
+      wake,
+      interrupt,
+      freezeWake,
+      allowWake: (key) =>
+        Effect.sync(() => {
+          stopped.delete(key)
+        }),
+    }
   })

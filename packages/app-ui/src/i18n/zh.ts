@@ -390,6 +390,7 @@ export const dict = {
   "session.budget.apply": "应用预算并继续",
   "session.budget.remove": "取消预算并继续",
   "session.budget.invalid": "请输入正整数，或留空取消上限。",
+  "session.budget.updatedWithoutContinue": "预算已更新，未继续",
   "session.outcome.unknown": "部分操作没有结束记录，请先检查日志与工作区，再决定是否重复执行。",
   "session.outcome.checks": "验证信息",
   "session.outcome.latestCount": "最新检查：{{count}} 项通过",

@@ -1004,7 +1004,7 @@ describe("run stream transport", () => {
     }
   })
 
-  test("keeps coalescing resize requests while buffered events drain", async () => {
+  test("keeps coalescing resize requests while replay snapshots load", async () => {
     const src = eventFeed()
     const ui = footer()
     const firstReset = defer()
@@ -1018,6 +1018,13 @@ describe("run stream transport", () => {
     const transport = await createSessionTransport({
       sdk: sdk({
         stream: src.stream,
+        messages: async () => {
+          if (blockStatus) {
+            statusStarted.resolve()
+            await statusGate.promise
+          }
+          return ok([])
+        },
         status: async () => {
           if (blockStatus) {
             statusStarted.resolve()
@@ -1073,9 +1080,10 @@ describe("run stream transport", () => {
           }),
         ]),
       ).toBe(true)
-      expect(resetB).not.toHaveBeenCalled()
+      expect(resetB).toHaveBeenCalledTimes(1)
       expect(resetC).toHaveBeenCalledTimes(1)
     } finally {
+      statusGate.resolve()
       src.close()
       await transport.close()
       await turn
@@ -2406,6 +2414,163 @@ describe("run stream transport", () => {
       expect(finished).toBe(true)
     } finally {
       release.resolve()
+      src.close()
+      await transport.close()
+    }
+  })
+
+  test("S1 host wait never blocks question or permission events and duplicate terminals settle once", async () => {
+    const src = eventFeed()
+    const seen = defer()
+    const release = defer()
+    const ui = footer()
+    let waits = 0
+    const client = sdk({
+      stream: src.stream,
+      promptAsync: async () => {
+        queueMicrotask(() => {
+          src.push(busy())
+          src.push(assistant("msg-1"))
+          src.push(idle())
+        })
+        return ok(undefined)
+      },
+    })
+    spyOn(client.v2.session, "wait").mockImplementation(async () => {
+      waits++
+      seen.resolve()
+      await release.promise
+      return (await ok(undefined)) as never
+    })
+    const transport = await createSessionTransport({
+      sdk: client,
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: ui.api,
+    })
+    let settled = 0
+    try {
+      const task = transport
+        .runPromptTurn({
+          agent: undefined,
+          model: undefined,
+          variant: undefined,
+          prompt: { text: "hello", parts: [] },
+          files: [],
+          includeFiles: false,
+        })
+        .then(() => {
+          settled++
+        })
+      await seen.promise
+      src.push(busy())
+      src.push({
+        id: "evt-question",
+        type: "question.asked",
+        properties: {
+          id: "q-host",
+          sessionID: "session-1",
+          questions: [{ question: "Continue?", header: "Next", options: [{ label: "Yes", description: "Continue" }] }],
+        },
+      })
+      await waitFor(() =>
+        ui.events.some((event) => event.type === "stream.view" && event.view.type === "question") ? true : undefined,
+      )
+      expect(settled).toBe(0)
+      src.push({
+        id: "evt-answer",
+        type: "question.replied",
+        properties: { sessionID: "session-1", requestID: "q-host", answers: [["Yes"]] },
+      })
+      src.push({
+        id: "evt-permission",
+        type: "permission.asked",
+        properties: {
+          id: "p-host",
+          sessionID: "session-1",
+          permission: "edit",
+          patterns: ["*"],
+          always: [],
+          metadata: {},
+        },
+      })
+      await waitFor(() =>
+        ui.events.some((event) => event.type === "stream.view" && event.view.type === "permission") ? true : undefined,
+      )
+      expect(settled).toBe(0)
+      src.push({
+        id: "evt-allow",
+        type: "permission.replied",
+        properties: { sessionID: "session-1", requestID: "p-host", reply: "once" },
+      })
+      src.push(idle())
+      src.push(idle())
+      src.push(idle())
+      release.resolve()
+      await task
+      expect(settled).toBe(1)
+      expect(waits).toBe(1)
+    } finally {
+      release.resolve()
+      src.close()
+      await transport.close()
+    }
+  })
+
+  test("S1 disconnect cancels a pending host wait", async () => {
+    const src = eventFeed()
+    const seen = defer()
+    const canceled = defer()
+    const client = sdk({
+      stream: src.stream,
+      promptAsync: async () => {
+        queueMicrotask(() => {
+          src.push(busy())
+          src.push(assistant("msg-1"))
+          src.push(idle())
+        })
+        return ok(undefined)
+      },
+    })
+    spyOn(client.v2.session, "wait").mockImplementation(
+      (_input, options) =>
+        new Promise<never>((_resolve, reject) => {
+          seen.resolve()
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              canceled.resolve()
+              reject(new Error("aborted"))
+            },
+            { once: true },
+          )
+        }),
+    )
+    const transport = await createSessionTransport({
+      sdk: client,
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: footer().api,
+    })
+    try {
+      const task = transport
+        .runPromptTurn({
+          agent: undefined,
+          model: undefined,
+          variant: undefined,
+          prompt: { text: "hello", parts: [] },
+          files: [],
+          includeFiles: false,
+        })
+        .catch(() => undefined)
+      await seen.promise
+      src.close()
+      await transport.close()
+      await canceled.promise
+      await task
+    } finally {
       src.close()
       await transport.close()
     }

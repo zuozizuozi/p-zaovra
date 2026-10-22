@@ -25,6 +25,7 @@ const fromRow = (row: typeof SessionInputTable.$inferSelect): Admitted =>
     sessionID: SessionSchema.ID.make(row.session_id),
     prompt: decodePrompt(row.prompt),
     delivery: row.delivery,
+    ...(row.completion ? { completion: row.completion } : {}),
     timeCreated: DateTime.makeUnsafe(row.time_created),
     ...(row.promoted_seq === null ? {} : { promotedSeq: row.promoted_seq }),
     ...(row.cancelled_seq === null ? {} : { cancelledSeq: row.cancelled_seq }),
@@ -47,6 +48,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly completion?: SessionMessage.HostCompletion
   },
 ) {
   const existing = yield* find(db, input.id)
@@ -59,6 +61,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
       timestamp,
       prompt: input.prompt,
       delivery: input.delivery,
+      completion: input.completion,
     })
     .pipe(
       Effect.flatMap((event) =>
@@ -71,6 +74,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
                 sessionID: input.sessionID,
                 prompt: input.prompt,
                 delivery: input.delivery,
+                completion: input.completion,
                 timeCreated: timestamp,
               }),
             ),
@@ -89,6 +93,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly completion?: SessionMessage.HostCompletion
     readonly timeCreated: DateTime.Utc
   },
 ) {
@@ -107,6 +112,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
       admitted_seq: input.admittedSeq,
       prompt: encodePrompt(input.prompt),
       delivery: input.delivery,
+      completion: input.completion,
       time_created: DateTime.toEpochMillis(input.timeCreated),
     })
     .onConflictDoNothing()
@@ -123,6 +129,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly completion?: SessionMessage.HostCompletion
     readonly timeCreated: DateTime.Utc
     readonly promotedSeq: number
   },
@@ -161,6 +168,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
       session_id: input.sessionID,
       prompt: encodePrompt(input.prompt),
       delivery: input.delivery,
+      completion: input.completion,
       admitted_seq: input.promotedSeq,
       promoted_seq: input.promotedSeq,
       time_created: DateTime.toEpochMillis(input.timeCreated),
@@ -240,8 +248,12 @@ export const equivalent = (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly completion?: SessionMessage.HostCompletion
   },
-) => input.delivery === expected.delivery && matchesPrompt(input, expected)
+) =>
+  input.delivery === expected.delivery &&
+  JSON.stringify(input.completion) === JSON.stringify(expected.completion) &&
+  matchesPrompt(input, expected)
 
 const matchesPrompt = (input: Admitted, expected: { readonly sessionID: SessionSchema.ID; readonly prompt: Prompt }) =>
   input.sessionID === expected.sessionID &&
@@ -253,6 +265,7 @@ const matchesProjection = (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly completion?: SessionMessage.HostCompletion
     readonly timeCreated: DateTime.Utc
   },
 ) =>
@@ -275,6 +288,7 @@ const publish = Effect.fn("SessionInput.publish")(function* (
         messageID: id,
         prompt: decodePrompt(row.prompt),
         delivery: row.delivery,
+        completion: row.completion ?? undefined,
       })
       .pipe(
         Effect.as(true),

@@ -36,6 +36,7 @@ const PromptFields = {
   messageID: SessionMessage.ID,
   prompt: Prompt,
   delivery: Delivery,
+  completion: SessionMessage.HostCompletion.pipe(optional),
 }
 
 const options = {

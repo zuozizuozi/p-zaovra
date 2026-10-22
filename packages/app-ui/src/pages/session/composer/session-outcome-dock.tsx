@@ -25,6 +25,11 @@ export function SessionOutcomeDock() {
   const sync = useServerSync()
   const language = useLanguage()
   const prompt = usePrompt()
+  const selection = createMemo(() => ({ client: sdk().client, scope: server().scope, sessionID: params.id }))
+  let disposed = false
+  onCleanup(() => {
+    disposed = true
+  })
   const progress = createMemo(() =>
     visibleProgress({
       sessionID: params.id ?? "",
@@ -84,17 +89,24 @@ export function SessionOutcomeDock() {
   const abandoned = () =>
     !!sync().session.get(params.id ?? "")?.time.archived ||
     (recover.isSuccess && recover.variables?.sessionID === params.id && recover.variables.action === "abandon")
-  const budgetQuery = createQuery(() => ({
-    queryKey: ["session-budget", server().scope, params.id],
-    enabled: !!params.id,
-    queryFn: () =>
-      sdk()
-        .client.v2.session.budget({ sessionID: params.id! }, { throwOnError: true })
-        .then((result) => result.data.data),
-    refetchInterval: progress().visible ? 1000 : false,
-    retry: false,
-  }))
+  const budgetQuery = createQuery(() => {
+    const current = selection()
+    return {
+      queryKey: ["session-budget", current.scope, current.sessionID],
+      enabled: !!current.sessionID,
+      queryFn: () =>
+        current.client.v2.session
+          .budget({ sessionID: current.sessionID! }, { throwOnError: true })
+          .then((result) => result.data.data),
+      refetchInterval: progress().visible ? 1000 : false,
+      retry: false,
+    }
+  })
   const [budget, setBudget] = createStore({ tokens: "", minutes: "", dirty: false })
+  createEffect(() => {
+    selection()
+    setBudget({ tokens: "", minutes: "", dirty: false })
+  })
   createEffect(() => {
     const current = budgetQuery.data
     if (!current || budget.dirty) return
@@ -105,26 +117,31 @@ export function SessionOutcomeDock() {
   })
   const updateBudget = useMutation(() => ({
     mutationFn: async (remove: boolean) => {
+      const current = selection()
+      const terminal = outcome()
+      const messageID = terminal?.state === "stopped" ? terminal.messageID : undefined
       const tokens = remove || !budget.tokens.trim() ? null : Number(budget.tokens)
       const durationMs = remove || !budget.minutes.trim() ? null : Number(budget.minutes) * 60_000
       if ([tokens, durationMs].some((value) => value !== null && (!Number.isSafeInteger(value) || value <= 0)))
         throw new Error(language.t("session.budget.invalid"))
-      const sessionID = params.id!
-      await sdk().client.v2.session.update(
+      const sessionID = current.sessionID!
+      await current.client.v2.session.update(
         {
           sessionID,
           budget: { ...(tokens === null ? {} : { tokens }), ...(durationMs === null ? {} : { durationMs }) },
         },
         { throwOnError: true },
       )
-      const terminal = outcome()
-      if (terminal?.state === "stopped" && terminal.messageID)
-        await sdk().client.v2.session.recover(
-          { sessionID, messageID: terminal.messageID, action: "continue" },
-          { throwOnError: true },
-        )
+      if (disposed || selection() !== current) {
+        showToast({ title: language.t("session.budget.updatedWithoutContinue") })
+        return current
+      }
+      if (messageID)
+        await current.client.v2.session.recover({ sessionID, messageID, action: "continue" }, { throwOnError: true })
+      return current
     },
-    onSuccess: () => {
+    onSuccess: (current) => {
+      if (disposed || selection() !== current) return
       setBudget("dirty", false)
       void budgetQuery.refetch()
       void query.refetch()

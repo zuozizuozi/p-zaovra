@@ -18,6 +18,7 @@ export const Admitted = Schema.Struct({
   sessionID: SessionID,
   prompt: Prompt,
   delivery: Delivery,
+  completion: SessionMessage.HostCompletion.pipe(optional),
   timeCreated: DateTimeUtcFromMillis,
   promotedSeq: NonNegativeInt.pipe(optional),
   cancelledSeq: NonNegativeInt.pipe(optional),

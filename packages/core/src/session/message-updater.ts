@@ -127,6 +127,17 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.next.updated": () => Effect.void,
       "session.next.deleted": () => Effect.void,
       "session.next.prompted": (event) => {
+        if (event.data.completion)
+          return adapter.appendMessage(
+            SessionMessage.Synthetic.make({
+              id: event.data.messageID,
+              sessionID: event.data.sessionID,
+              type: "synthetic",
+              text: event.data.prompt.text,
+              completion: event.data.completion,
+              time: { created: event.data.timestamp },
+            }),
+          )
         return adapter.appendMessage(
           SessionMessage.User.make({
             id: event.data.messageID,
