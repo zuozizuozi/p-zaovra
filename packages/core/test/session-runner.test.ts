@@ -75,6 +75,7 @@ import {
 import { SessionStore } from "@zaovra-ai/core/session/store"
 import { SystemContext } from "@zaovra-ai/core/system-context"
 import { SystemContextRegistry } from "@zaovra-ai/core/system-context/registry"
+import { AccuracyGuidance } from "@zaovra-ai/core/system-context/accuracy"
 import { SkillGuidance } from "@zaovra-ai/core/skill/guidance"
 import { ReferenceGuidance } from "@zaovra-ai/core/reference/guidance"
 import { ModelV2 } from "@zaovra-ai/core/model"
@@ -494,6 +495,33 @@ const setupOverflowRecovery = Effect.gen(function* () {
   requests.length = 0
   return session
 })
+
+for (const enabled of [false, true])
+  it.effect(
+    `331 accuracy guidance reaches the provider without extra calls or fabricated history: verification=${enabled}`,
+    () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = enabled
+        const session = yield* SessionV2.Service
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Inspect database evidence and check units before drawing a conclusion." }),
+          resume: false,
+        })
+        response = [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+          LLMEvent.finish({ reason: "stop" }),
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(1)
+        const rules = requests[0].system.map((part) => part.text)
+        expect(rules).toContain(AccuracyGuidance.general)
+        expect(rules.includes(AccuracyGuidance.evidence)).toBe(enabled)
+        expect(JSON.stringify(yield* session.context(sessionID))).not.toContain(AccuracyGuidance.general)
+      }),
+  )
 
 it.effect("persists unexpected drain failures once with a safe reason and replayable reference", () =>
   Effect.gen(function* () {

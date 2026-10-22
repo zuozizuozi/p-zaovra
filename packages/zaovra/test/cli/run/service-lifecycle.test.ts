@@ -97,6 +97,11 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
         })
         zaovra.expectExit(result, 0)
         expect(yield* llm.calls).toBe(2)
+        const until = Date.now() + 5000
+        while (owner !== "local" && !(yield* Effect.promise(() => Bun.file(identity).exists())) && Date.now() < until)
+          yield* Effect.sleep("100 millis")
+        if (!(yield* Effect.promise(() => Bun.file(identity).exists())))
+          throw new Error(`Business service never became ready:\n${result.stdout}\n${result.stderr}`)
         const record = yield* Effect.promise(() => Bun.file(identity).json())
         expect(record.nonce).toBe(nonce)
         const observe = () =>
@@ -115,6 +120,15 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
             return { exit: await child.exited, stdout: await stdout, stderr: await stderr }
           })
         const afterCli = yield* observe()
+        console.info(
+          JSON.stringify({
+            owner,
+            cliExit: result.exitCode,
+            businessPID: record.pid,
+            nonce,
+            afterCli: { exit: afterCli.exit, response: afterCli.stdout.trim() },
+          }),
+        )
         expect(afterCli.exit).toBe(owner === "local" ? 3 : 0)
         if (owner === "local") return
         expect(JSON.parse(afterCli.stdout)).toEqual({ nonce, pid: record.pid, value: 42 })
@@ -124,6 +138,12 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
           client!.v2.session.update({ sessionID: session!.id, archived: true }, { throwOnError: true }),
         )
         const afterCleanup = yield* observe()
+        console.info(
+          JSON.stringify({
+            owner,
+            cleanup: { type: "exact-session-archive", sessionID: session!.id, observerExit: afterCleanup.exit },
+          }),
+        )
         expect(afterCleanup.exit).toBe(3)
         if (owner === "desktop" && server && "stop" in server) {
           yield* server.stop
@@ -148,7 +168,11 @@ const desktopOwner = Effect.fn("lifecycle.desktopOwner")(function* (home: string
   const child = yield* Effect.acquireRelease(
     Effect.sync(() =>
       Bun.spawn(
-        [path.resolve(import.meta.dirname, "../../../../desktop-app/node_modules/electron/dist/electron.exe"), build],
+        [
+          process.env.ZAOVRA_LIFECYCLE_ELECTRON ??
+            path.resolve(import.meta.dirname, "../../../../desktop-app/node_modules/electron/dist/electron.exe"),
+          build,
+        ],
         {
           cwd: home,
           env: {
@@ -189,8 +213,11 @@ const desktopOwner = Effect.fn("lifecycle.desktopOwner")(function* (home: string
   const stdout = new Response(child.stdout).text()
   const errors: string[] = []
   const stderr = (async () => {
-    for await (const chunk of child.stderr) {
-      errors.push(Buffer.from(chunk).toString())
+    const reader = child.stderr.getReader()
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      errors.push(Buffer.from(next.value).toString())
     }
     return errors.join("")
   })()

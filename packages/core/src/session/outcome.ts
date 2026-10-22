@@ -1109,7 +1109,21 @@ export function reviewContinuityProblems(
         ...(item.conditions ?? [])
           .filter((condition) => condition.status === "unmet")
           .flatMap((condition) =>
-            reruns.length && current?.conditions?.some((next) => next.text === condition.text && next.status === "met")
+            reruns.some((check) =>
+              tools
+                .slice(0, index)
+                .flatMap(toolChecks)
+                .some(
+                  (original) =>
+                    item.evidence.includes(original.callID) &&
+                    original.kind === check.kind &&
+                    original.command === check.command &&
+                    original.cwd === check.cwd &&
+                    (original.targets ?? []).every((target) =>
+                      check.targets?.some((next) => next.path === target.path),
+                    ),
+                ),
+            ) && current?.conditions?.some((next) => next.text === condition.text && next.status === "met")
               ? []
               : [
                   `requirement ${item.requirement}: unmet condition ${condition.text} needs a fresh check and an updated condition result`,

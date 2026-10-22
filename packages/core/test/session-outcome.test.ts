@@ -1060,6 +1060,7 @@ test("historical execution proves process facts, never substitutes for current f
                         requirement: 1,
                         kind,
                         history,
+                        conditions: [],
                         evidence: [],
                         status: "verified",
                         note: "Original test failed before repair",
