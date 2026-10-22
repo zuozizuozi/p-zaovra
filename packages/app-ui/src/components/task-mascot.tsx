@@ -19,7 +19,7 @@ const pictures = {
   awaiting: [awaiting, awaiting2x],
 }
 
-export function TaskMascot(props: { state: MascotState; size?: "large" }) {
+export function TaskMascot(props: { state: MascotState; size?: "large"; animated?: boolean }) {
   let element!: HTMLSpanElement
   const [motion, setMotion] = createStore({ visible: false, reduced: true, blink: "" })
   onMount(() => {
@@ -41,7 +41,7 @@ export function TaskMascot(props: { state: MascotState; size?: "large" }) {
     })
   })
   createEffect(() => {
-    if (!motion.visible || motion.reduced) {
+    if (!motion.visible || motion.reduced || props.animated === false) {
       setMotion("blink", "")
       return
     }
@@ -68,7 +68,7 @@ export function TaskMascot(props: { state: MascotState; size?: "large" }) {
       data-component="task-mascot"
       data-state={props.state}
       data-size={props.size}
-      data-motion={motion.visible && !motion.reduced ? "running" : "paused"}
+      data-motion={motion.visible && !motion.reduced && props.animated !== false ? "running" : "paused"}
       data-blink={motion.blink}
       aria-hidden="true"
     >

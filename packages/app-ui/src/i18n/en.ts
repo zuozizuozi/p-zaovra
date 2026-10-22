@@ -4,6 +4,7 @@ export const dict = {
   "session.progress.tool": "Waiting for tool or background task results",
   "session.progress.running": "Working",
   "session.progress.unverified": "Background job status unverified",
+  "session.progress.disconnected": "Connection interrupted · execution status unverified",
   "session.progress.preview": "Preview service running",
   "session.progress.idle": "Waiting for evidence",
   "session.progress.returned": "{{tool}} returned a result",

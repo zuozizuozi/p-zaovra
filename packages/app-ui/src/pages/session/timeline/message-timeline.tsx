@@ -39,9 +39,10 @@ import {
 import { DiffChanges } from "@zaovra-ai/ui/diff-changes"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
-import { TaskMascot, type MascotState } from "@/components/task-mascot"
+import { type MascotState } from "@/components/task-mascot"
 import { TaskActivity } from "@/components/task-activity"
 import { runningTool } from "@/utils/running-tool"
+import { recoveredToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
@@ -141,8 +142,6 @@ const markBoundaryGesture = (input: {
 }
 
 function TimelineThinkingRow(props: {
-  state: MascotState
-  activity?: ReturnType<typeof runningTool>
   reasoningHeading?: string
   showReasoningSummaries: boolean
   reviewing?: boolean
@@ -151,11 +150,6 @@ function TimelineThinkingRow(props: {
 
   return (
     <div data-slot="session-turn-thinking">
-      <TaskActivity
-        state={props.state}
-        tool={props.state === "working" ? props.activity?.label : undefined}
-        started={props.state === "working" ? props.activity?.started : undefined}
-      />
       <Show when={props.reviewing}>
         <span>{language.t("session.status.verifying")}</span>
       </Show>
@@ -372,6 +366,9 @@ export function MessageTimeline(props: {
   const activeMessageID = projection.activeMessageID
   const [turns, setTurns] = createStore<Record<string, boolean>>({})
   const assistantMessagesByParent = projection.assistantMessagesByParent
+  const displayTurns = projection.displayTurns
+  const displayTurn = (id: string) => displayTurns().get(id) ?? id
+  const assistantMessagesByTurn = projection.assistantMessagesByTurn
   const lastAssistantGroupKey = projection.lastAssistantGroupKey
   const messageByID = projection.messageByID
   const [mascot, setMascot] = createStore<{ session?: string; user?: string; settled?: string; terminal: MascotState }>(
@@ -382,16 +379,29 @@ export function MessageTimeline(props: {
   let mascotTimer: ReturnType<typeof setTimeout> | undefined
   createEffect(
     on(
-      () =>
-        [
+      () => {
+        const latest = assistantMessagesByTurn()
+          .get(mascot.user ?? "")
+          ?.at(-1)
+        const terminal: MascotState | undefined =
+          latest?.error?.name === "MessageAbortedError" ||
+          latest?.finish === "interrupted" ||
+          latest?.finish === "stopped"
+            ? "idle"
+            : latest?.error || (sessionStatus().type === "idle" && mascot.user && unresolvedTools(mascot.user))
+              ? "error"
+              : typeof latest?.time.completed === "number"
+                ? "success"
+                : undefined
+        return [
           sessionID(),
           sessionStatus().type,
-          activeMessageID(),
-          assistantMessagesByParent()
-            .get(mascot.user ?? "")
-            ?.at(-1),
-        ] as const,
-      ([session, status, user, latest], previous) => {
+          activeMessageID() ? displayTurn(activeMessageID()!) : undefined,
+          latest?.id,
+          terminal,
+        ] as const
+      },
+      ([session, status, user, messageID, terminal], previous) => {
         if (session !== previous?.[0]) {
           clearTimeout(mascotTimer)
           setMascot({ session, user: status !== "idle" ? user : undefined, settled: undefined, terminal: "idle" })
@@ -402,24 +412,13 @@ export function MessageTimeline(props: {
           setMascot({ user: user ?? mascot.user, settled: undefined, terminal: "idle" })
           return
         }
-        // Idle can arrive before the completed assistant projection. Observe both,
-        // and consume each completion once so later row updates cannot replay it.
-        if (!mascot.user || !latest || mascot.settled === latest.id || (!latest.error && !latest.time.completed)) return
-        setMascot("settled", latest.id)
-        setMascot(
-          "terminal",
-          latest?.error?.name === "MessageAbortedError" ||
-            latest?.finish === "interrupted" ||
-            latest?.finish === "stopped"
-            ? "idle"
-            : latest?.error
-              ? "error"
-              : latest?.time.completed
-                ? "success"
-                : "idle",
-        )
+        // Correct late terminal evidence for the same message without replaying unchanged completion on every delta.
+        if (!mascot.user || !messageID || !terminal) return
+        const settled = `${messageID}:${terminal}`
+        if (mascot.settled === settled) return
+        setMascot({ settled, terminal })
         clearTimeout(mascotTimer)
-        mascotTimer = setTimeout(() => setMascot("terminal", "idle"), 5000)
+        if (terminal !== "idle") mascotTimer = setTimeout(() => setMascot("terminal", "idle"), 5000)
       },
     ),
   )
@@ -431,16 +430,42 @@ export function MessageTimeline(props: {
   )
   const mascotState = (user: string): MascotState => {
     const id = sessionID()
-    if (sessionStatus().type !== "idle" && activeMessageID() === user) {
+    if (sessionStatus().type !== "idle" && activeMessageID() && displayTurn(activeMessageID()!) === displayTurn(user)) {
       if (
         id &&
         ((serverSync().session.data.permission[id]?.length ?? 0) > 0 ||
           (serverSync().session.data.question[id]?.length ?? 0) > 0)
       )
         return "awaiting"
-      return activeTool() ? "working" : "thinking"
+      if (activeTool()) return "working"
+      const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
+      const latest = messages.at(-1)
+      if (latest?.error && latest.error.name !== "MessageAbortedError") return "error"
+      const tool = messages.flatMap((message) => getMsgParts(message.id)).findLast((part) => part.type === "tool")
+      if (tool?.type === "tool" && tool.state.status === "error") return "error"
+      return "thinking"
     }
     return mascot.session === id && mascot.user === user ? mascot.terminal : "idle"
+  }
+  const unresolvedTools = (user: string) => {
+    const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
+    const latest = messages.at(-1)
+    if (!latest) return false
+    const recovered = recoveredToolFailures({
+      message: latest,
+      messages: sessionMessages(),
+      parts: sync().data.part,
+      working:
+        sessionStatus().type !== "idle" &&
+        activeMessageID() !== undefined &&
+        displayTurn(activeMessageID()!) === displayTurn(user),
+    })
+    return messages
+      .flatMap((message) => getMsgParts(message.id))
+      .some(
+        (part) =>
+          part.type === "tool" && part.state.status === "error" && !recovered.some((item) => item.id === part.id),
+      )
   }
   const messageLastRowIndex = projection.messageLastRowIndex
   const messageRowIndex = projection.messageRowIndex
@@ -1065,28 +1090,14 @@ export function MessageTimeline(props: {
     )
   }
 
-  // Synthetic continuation inputs are transcript boundaries, not a new human turn.
-  const displayTurns = createMemo(() => {
-    const owners = new Map<string, string>()
-    props.userMessages.reduce<string | undefined>((previous, message) => {
-      const parts = getMsgParts(message.id)
-      const continuation =
-        parts.length > 0 &&
-        parts.every(
-          (part) =>
-            part.type === "step-start" || part.type === "compaction" || (part.type === "text" && part.synthetic),
-        )
-      const owner = continuation && previous ? previous : message.id
-      owners.set(message.id, owner)
-      return owner
-    }, undefined)
-    return owners
-  })
-  const displayTurn = (id: string) => displayTurns().get(id) ?? id
   const firstDisplayPart = (id: string) =>
     projection.rows().find((row) => row._tag === "AssistantPart" && displayTurn(row.userMessageID) === displayTurn(id))
 
   const workingTurn = (userMessageID: string) => sessionStatus().type !== "idle" && activeMessageID() === userMessageID
+  const workingDisplayTurn = (userMessageID: string) =>
+    sessionStatus().type !== "idle" &&
+    activeMessageID() !== undefined &&
+    displayTurn(activeMessageID()!) === displayTurn(userMessageID)
   const waitingToJoin = (userMessageID: string) =>
     sessionStatus().type !== "idle" &&
     (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0 &&
@@ -1349,10 +1360,44 @@ export function MessageTimeline(props: {
           </TimelineRowFrame>
         )
       }
+      case "AssistantHeading": {
+        const headingRow = row as Accessor<TimelineRowByTag<"AssistantHeading">>
+        const folded = () => turns[headingRow().userMessageID] ?? true
+        const elapsed = createMemo(() => {
+          const start = messageByID().get(headingRow().userMessageID)?.time.created
+          const ends = (assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages).flatMap(
+            (message) => (message.time.completed === undefined ? [] : [message.time.completed]),
+          )
+          return start && ends.length ? Math.max(0, Math.round((Math.max(...ends) - start) / 1000)) : undefined
+        })
+        return (
+          <TimelineRowFrame row={headingRow}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <div data-slot="assistant-heading">
+                <TaskActivity
+                  state={mascotState(headingRow().userMessageID)}
+                  tool={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.label : undefined}
+                  started={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.started : undefined}
+                />
+                <Show when={elapsed() !== undefined && !workingDisplayTurn(headingRow().userMessageID)}>
+                  <button
+                    type="button"
+                    class="shrink-0 text-xs text-text-weak"
+                    aria-expanded={!folded()}
+                    onClick={() => setTurns(headingRow().userMessageID, !folded())}
+                  >
+                    {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "›" : "⌄"}
+                  </button>
+                </Show>
+              </div>
+            </div>
+          </TimelineRowFrame>
+        )
+      }
       case "AssistantPart": {
         const assistantPartRow = row as Accessor<TimelineRowByTag<"AssistantPart">>
         const folded = () =>
-          !workingTurn(assistantPartRow().userMessageID) &&
+          !workingDisplayTurn(assistantPartRow().userMessageID) &&
           (turns[displayTurn(assistantPartRow().userMessageID)] ?? true)
         const foldable = () => {
           const group = assistantPartRow().group
@@ -1363,15 +1408,6 @@ export function MessageTimeline(props: {
           })
         }
         const first = () => firstDisplayPart(assistantPartRow().userMessageID) === assistantPartRow()
-        const elapsed = () => {
-          const owner = displayTurn(assistantPartRow().userMessageID)
-          const start = messageByID().get(owner)?.time.created
-          const ends = props.userMessages
-            .filter((m) => displayTurn(m.id) === owner)
-            .flatMap((m) => assistantMessagesByParent().get(m.id) ?? [])
-            .flatMap((m) => (m.time.completed === undefined ? [] : [m.time.completed]))
-          return start && ends.length ? Math.max(0, Math.round((Math.max(...ends) - start) / 1000)) : undefined
-        }
         const modelName = createMemo(() => {
           const group = assistantPartRow().group
           const ref = group.type === "part" ? group.ref : group.refs[0]
@@ -1405,24 +1441,6 @@ export function MessageTimeline(props: {
                 <Show when={modelChanged() && !assistantPartRow().previousAssistantPart}>
                   <div data-slot="model-change-divider">{modelName()}</div>
                 </Show>
-                <Show when={first()}>
-                  <div data-slot="assistant-heading">
-                    <Show when={mascotState(assistantPartRow().userMessageID) === "success"}>
-                      <TaskMascot state="success" />
-                      <span role="status">{language.t("session.activity.success")}</span>
-                    </Show>
-                    <Show when={elapsed() !== undefined && !workingTurn(assistantPartRow().userMessageID)}>
-                      <button
-                        type="button"
-                        class="text-xs text-text-weak"
-                        aria-expanded={!folded()}
-                        onClick={() => setTurns(displayTurn(assistantPartRow().userMessageID), !folded())}
-                      >
-                        {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "›" : "⌄"}
-                      </button>
-                    </Show>
-                  </div>
-                </Show>
                 <Show when={!folded() || !foldable()}>{renderAssistantPartGroup(assistantPartRow, onSizeChange)}</Show>
               </div>
             </div>
@@ -1435,8 +1453,6 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <TimelineThinkingRow
-                state={mascotState(thinkingRow().userMessageID)}
-                activity={activeTool()}
                 reasoningHeading={thinkingRow().reasoningHeading}
                 reviewing={thinkingRow().reviewing}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
@@ -1491,6 +1507,7 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <ExecutionErrorCard
+                mascot={false}
                 detail={errorRow().text}
                 recoveryID={errorRow().userMessageID}
                 onConfigure={openProviderSettings}

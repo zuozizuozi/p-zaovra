@@ -120,13 +120,16 @@ test("inserts a completed question between stable rows", async ({ page }, testIn
   await reportVisualStability(testInfo, "question-insert", trace, stablePairPlan(regions, 0))
 })
 
-test("replaces thinking with an assistant error without a blank turn", async ({ page }, testInfo) => {
+test("keeps the resident heading when an assistant error arrives without a blank turn", async ({ page }, testInfo) => {
   const assistant = assistantMessage([], { completed: false })
   const timeline = await setupTimeline(page, { messages: [userMessage(), assistant], cpuRate: 4 })
   await timeline.send(status("busy"), 150)
-  await expect(page.locator('[data-timeline-row="Thinking"]')).toBeVisible()
+  await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveAttribute(
+    "data-state",
+    "thinking",
+  )
   const regions = defineVisualRegions({
-    thinking: { selector: '[data-timeline-row="Thinking"]' },
+    thinking: { selector: '[data-timeline-row="AssistantHeading"]' },
     error: { selector: '[data-timeline-row="Error"]' },
   })
   await startVisualProbe(page, regions)
@@ -137,7 +140,10 @@ test("replaces thinking with an assistant error without a blank turn", async ({ 
     }),
     500,
   )
-  await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
+  await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveAttribute(
+    "data-state",
+    "error",
+  )
   await expect(page.locator('[data-timeline-row="Error"]')).toContainText("Provider failed visibly")
   const trace = await stopVisualProbe<keyof typeof regions>(page)
   await reportVisualStability(

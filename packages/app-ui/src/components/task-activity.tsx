@@ -21,7 +21,7 @@ export function TaskActivity(props: { state: MascotState; tool?: string; started
   const seconds = () => Math.max(0, Math.floor((clock.now - clock.started) / 1000))
   return (
     <div data-component="task-activity" data-state={props.state}>
-      <TaskMascot state={props.state} size="large" />
+      <TaskMascot state={props.state} size="large" animated={props.state !== "idle"} />
       <span data-slot="activity-label" role="status" aria-live="polite">
         {language.t(`session.activity.${props.state}`)}
       </span>

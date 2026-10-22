@@ -285,4 +285,47 @@ test("a live preview is separate from task activity and loses liveness on reconn
   expect(visibleProgress(input).visible).toBe(true)
   expect(visibleProgress({ ...input, liveShell: {}, busy: true }).state).toBe("unverified")
   expect(visibleProgress({ ...input, liveShell: {} }).preview).toBe(false)
+  expect(visibleProgress(input).updating).toBe(false)
+  const disconnected = visibleProgress({ ...input, transportConnected: false })
+  expect(disconnected.state).toBe("disconnected")
+  expect(disconnected.preview).toBe(false)
+  expect(disconnected.updating).toBe(false)
+  expect(disconnected.visible).toBe(true)
+  expect(visibleProgress({ ...input, liveShell: {} }).updating).toBe(false)
+})
+
+test("an observed job is live only on its current connected transport", () => {
+  const rows = adaptSessionMessages(session, [
+    { id: "live-goal", type: "user", text: "Run validation", time: { created: 1 } },
+    { id: "live-job", type: "shell", callID: "job", command: "validate", output: "", time: { created: 2 } },
+  ])
+  const input = {
+    sessionID: session.id,
+    messages: rows.map((row) => row.message),
+    parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])),
+    busy: false,
+    waiting: false,
+    liveShell: { "live-job": true as const },
+    transportConnected: true,
+  }
+  expect(visibleProgress(input).state).toBe("tool")
+  expect(visibleProgress(input).updating).toBe(true)
+  expect(visibleProgress({ ...input, transportConnected: false }).state).toBe("disconnected")
+  expect(visibleProgress({ ...input, transportConnected: false }).updating).toBe(false)
+  expect(visibleProgress({ ...input, liveShell: {} }).state).toBe("unverified")
+})
+
+test.each(["pending", "running"] as const)("idle persisted %s tools do not claim evidence is updating", (status) => {
+  const rows = adaptSessionMessages(session, [
+    { id: "stale-goal", type: "user", text: "Check evidence", time: { created: 1 } },
+    { id: "stale-answer", type: "assistant", agent: "build", model: { id: "m", providerID: "p" },
+      time: { created: 2 }, content: [{ id: "stale-call", type: "tool", name: "bash", time: { created: 2 },
+        state: status === "pending" ? { status, input: "{}" } : { status, input: {}, content: [], structured: {} } }] },
+  ])
+  const input = { sessionID: session.id, messages: rows.map((row) => row.message),
+    parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])), busy: false, waiting: false,
+    transportConnected: true }
+  expect(visibleProgress(input).state).toBe("unverified")
+  expect(visibleProgress(input).visible).toBe(true)
+  expect(visibleProgress(input).updating).toBe(false)
 })

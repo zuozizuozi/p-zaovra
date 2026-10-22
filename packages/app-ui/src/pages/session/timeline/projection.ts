@@ -17,6 +17,23 @@ export function createTimelineProjection(input: {
   inlineComments: Accessor<boolean>
 }) {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
+  // Host completion and synthetic continuation keep the preceding human turn's heading.
+  const displayTurns = createMemo(() => {
+    const owners = new Map<string, string>()
+    input.userMessages().reduce<string | undefined>((previous, message) => {
+      const parts = input.parts(message.id)
+      const continuation =
+        parts.length > 0 &&
+        parts.every(
+          (part) =>
+            part.type === "step-start" || part.type === "compaction" || (part.type === "text" && part.synthetic),
+        )
+      const owner = continuation && previous ? previous : message.id
+      owners.set(message.id, owner)
+      return owner
+    }, undefined)
+    return owners
+  })
   const assistantMessagesByParent = createMemo(() => {
     const result = new Map<string, AssistantMessage[]>()
     input.messages().forEach((message) => {
@@ -27,6 +44,20 @@ export function createTimelineProjection(input: {
         return
       }
       result.set(message.parentID, [message])
+    })
+    return result
+  })
+  const assistantMessagesByTurn = createMemo(() => {
+    const result = new Map<string, AssistantMessage[]>()
+    input.messages().forEach((message) => {
+      if (message.role !== "assistant") return
+      const owner = displayTurns().get(message.parentID) ?? message.parentID
+      const messages = result.get(owner)
+      if (messages) {
+        messages.push(message)
+        return
+      }
+      result.set(owner, [message])
     })
     return result
   })
@@ -66,12 +97,23 @@ export function createTimelineProjection(input: {
       ),
     ),
   )
-  const rows = createMemo((previous: TimelineRow.TimelineRow[] | undefined) =>
-    reuseTimelineRows(
+  const rows = createMemo((previous: TimelineRow.TimelineRow[] | undefined) => {
+    const projected = messageRowMemos().flatMap((memo) => memo())
+    const headings = new Set(
+      projected.flatMap((row) =>
+        row._tag === "AssistantHeading" ? [displayTurns().get(row.userMessageID) ?? row.userMessageID] : [],
+      ),
+    )
+    return reuseTimelineRows(
       previous,
-      messageRowMemos().flatMap((memo) => memo()),
-    ),
-  )
+      projected.flatMap<TimelineRow.TimelineRow>((row) => {
+        if (row._tag === "AssistantHeading") return []
+        if (row._tag === "UserMessage" && headings.has(row.userMessageID))
+          return [row, new TimelineRow.AssistantHeading({ userMessageID: row.userMessageID })]
+        return [row]
+      }),
+    )
+  })
   const rowByKey = createMemo(() => new Map(rows().map((row) => [TimelineRow.key(row), row] as const)))
   const messageRowIndex = createMemo(() => {
     const result = new Map<string, number>()
@@ -99,6 +141,8 @@ export function createTimelineProjection(input: {
   return {
     activeMessageID,
     assistantMessagesByParent,
+    assistantMessagesByTurn,
+    displayTurns,
     lastAssistantGroupKey,
     messageByID,
     messageRowIndex,

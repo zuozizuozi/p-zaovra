@@ -1,5 +1,79 @@
 import { expect, test } from "@playwright/test"
-import { setupTimeline } from "../performance/timeline-stability/fixture"
+import {
+  assistantMessage,
+  directory,
+  sessionID,
+  setupTimeline,
+  toolPart,
+  userMessage,
+} from "../performance/timeline-stability/fixture"
+
+for (const scenario of ["task", "preview", "unknown", "disconnect"] as const) {
+  test(`live progress consumes connection-local shell evidence: ${scenario}`, async ({ page }, testInfo) => {
+    const errors: string[] = []
+    page.on("pageerror", (error) => errors.push(error.message))
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text())
+    })
+    const jobID = `job_dock_${scenario}`
+    const timeline = await setupTimeline(page, {
+      locale: "en",
+      settings: { newLayoutDesigns: true },
+      messages: [
+        userMessage(),
+        assistantMessage([
+          toolPart(
+            `prt_dock_${scenario}`,
+            "bash",
+            "completed",
+            { command: "echo fixture", background: true, background_kind: scenario === "preview" ? "preview" : "task" },
+            { metadata: { job_id: jobID }, output: "Started fixture job" },
+          ),
+        ]),
+      ],
+    })
+    // V2 active reports execution ownership; an idle V1 status object is truthy.
+    await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+    await page.reload()
+    await timeline.transport.waitForConnection()
+    const send = (type: string, properties: Record<string, unknown>) =>
+      timeline.transport.writeRaw(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
+    await send("server.connected", {})
+    const progress = page.locator('[data-component="session-live-progress"]')
+    await expect(progress).toBeVisible()
+    await expect(progress.locator(":scope > p").first()).toContainText("Background job status unverified")
+    await expect(progress).not.toContainText("Evidence updating")
+    if (scenario !== "unknown") {
+      await send("session.next.shell.started", {
+        sessionID,
+        messageID: jobID,
+        callID: jobID,
+        command: "echo fixture",
+        timestamp: 1700000003000,
+      })
+      await expect(progress.locator(":scope > p").first()).toContainText(
+        scenario === "preview" ? "Preview service running" : "Waiting for tool or background task results",
+      )
+      if (scenario === "preview") await expect(progress).not.toContainText("Evidence updating")
+      else await expect(progress).toContainText("Evidence updating · remaining checks not yet confirmed")
+    }
+    if (scenario === "disconnect") {
+      const first = await timeline.transport.waitForConnection()
+      await timeline.transport.close()
+      await expect(progress.locator(":scope > p").first()).toContainText(
+        "Connection interrupted · execution status unverified",
+      )
+      await expect(progress).not.toContainText("Evidence updating")
+      await expect(progress).not.toContainText("Waiting for tool or background task results")
+      await timeline.transport.waitForConnection({ after: first.id })
+      await send("server.connected", {})
+      await expect(progress.locator(":scope > p").first()).toContainText("Background job status unverified")
+      await expect(progress).not.toContainText("Evidence updating")
+    }
+    await testInfo.attach("browser-errors", { body: JSON.stringify(errors), contentType: "application/json" })
+    expect(errors.filter((error) => !error.includes("ResizeObserver loop"))).toEqual([])
+  })
+}
 
 test("uses host replacement markers and keeps unresolved checks visible", async ({ page }) => {
   await setupTimeline(page, { locale: "en", settings: { newLayoutDesigns: true } })
@@ -140,25 +214,27 @@ test("failed execution keeps retry and more actions without empty verification",
       },
     }),
   )
-  const requests: unknown[] = []
+  const requests: { url: string; body: unknown }[] = []
   await page.route("**/api/session/*/recover**", async (route) => {
-    requests.push(route.request().postDataJSON())
+    requests.push({ url: route.request().url(), body: route.request().postDataJSON() })
     await route.fulfill({ json: { data: {} } })
   })
   await page.reload()
   const dock = page
     .locator('[role="status"]')
-    .filter({ has: page.getByRole("button", { name: "Retry original request", exact: true }) })
+    .filter({ has: page.getByRole("button", { name: "Inspect and continue", exact: true }) })
   await expect(dock).toBeVisible()
   await expect(dock.getByRole("alert")).toBeVisible()
   await expect(page.locator('[data-component="verification-summary"]')).toHaveCount(0)
   await expect(dock.getByText("No current checks", { exact: true })).toHaveCount(0)
   await dock.getByRole("button", { name: "More options", exact: true }).click()
-  await expect(page.getByRole("menuitem", { name: "Inspect and continue", exact: true })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Retry original request", exact: true })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Abandon and archive", exact: true })).toBeVisible()
   await page.keyboard.press("Escape")
   expect(requests).toEqual([])
-  await dock.getByRole("button", { name: "Retry original request", exact: true }).click()
+  await dock.getByRole("button", { name: "More options", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Retry original request", exact: true }).click()
   await expect.poll(() => requests.length).toBe(1)
-  expect(requests[0]).toMatchObject({ messageID: "msg_original", action: "retry" })
+  expect(new URL(requests[0]!.url).pathname).toBe(`/api/session/${sessionID}/recover`)
+  expect(requests[0]!.body).toMatchObject({ messageID: "msg_original", action: "retry" })
 })

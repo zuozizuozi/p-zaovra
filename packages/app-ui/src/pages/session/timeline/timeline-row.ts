@@ -15,6 +15,9 @@ export namespace TimelineRow {
     userMessageID: string
     anchor: boolean
   }> {}
+  export class AssistantHeading extends Data.TaggedClass("AssistantHeading")<{
+    userMessageID: string
+  }> {}
   export class TurnDivider extends Data.TaggedClass("TurnDivider")<{
     userMessageID: string
     label: "compaction" | "interrupted" | "stopped"
@@ -45,6 +48,7 @@ export namespace TimelineRow {
     | TurnGap
     | CommentStrip
     | UserMessage
+    | AssistantHeading
     | TurnDivider
     | AssistantPart
     | Thinking
@@ -60,6 +64,8 @@ export namespace TimelineRow {
         return `comment-strip:${row.userMessageID}`
       case "UserMessage":
         return `user-message:${row.userMessageID}`
+      case "AssistantHeading":
+        return `assistant-heading:${row.userMessageID}`
       case "TurnDivider":
         return `turn-divider:${row.userMessageID}:${row.label}`
       case "AssistantPart":

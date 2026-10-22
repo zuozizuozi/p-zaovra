@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { assistantMessage, setupTimeline, shell, userMessage } from "./fixture"
+import { assistantMessage, setupTimeline, shell, userMessage, userID } from "./fixture"
 
 test("long tool feedback stays bounded and animated scrolling matches reduced motion", async ({ page }, testInfo) => {
   await setupTimeline(page, {
@@ -9,7 +9,9 @@ test("long tool feedback stays bounded and animated scrolling matches reduced mo
       assistantMessage([shell("prt_activity", "running", "", "npm test")], { completed: false }),
     ],
   })
-  const activity = page.locator('[data-component="task-activity"]')
+  const activity = page.locator(
+    `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="task-activity"]`,
+  )
   await expect(activity).toHaveAttribute("data-state", "working")
   await expect(activity.locator('[data-slot="activity-command"]')).toHaveText("npm test", { timeout: 15000 })
   const height = await activity.evaluate((element) => element.getBoundingClientRect().height)

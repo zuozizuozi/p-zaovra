@@ -16,6 +16,9 @@
     "../src/updater.ts",
     "./regression/new-session-panel-corner.spec.ts",
     "./regression/session-timeline-context-resize.spec.ts",
+    "./regression/session-outcome-dock.spec.ts",
+    "./regression/session-timeline-lifecycle-state.spec.ts",
+    "./regression/session-timeline-reasoning-projection.spec.ts",
     "./utils/**/*.ts"
   ]
 }

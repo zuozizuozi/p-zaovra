@@ -18,6 +18,7 @@ import {
   shell,
   status,
   textPart,
+  userID,
   userMessage,
   waitForVisualSettle,
 } from "./fixture"
@@ -64,8 +65,6 @@ test.describe("timeline visual lifecycle stability", () => {
       { event: partUpdated(shell(ids[1]!, "completed", lines(2))), delay: 260 },
       { event: partUpdated(shell(ids[2]!, "running", lines(50))), delay: 100 },
       { event: partUpdated(shell(ids[2]!, "completed", lines(50))), delay: 450 },
-      { event: messageUpdated(completedAssistantInfo(assistant.info)), delay: 100 },
-      { event: status("idle"), delay: 700 },
     ])
     const trace = await stopVisualProbe<keyof typeof regions>(page)
     await reportVisualStability(
@@ -88,6 +87,39 @@ test.describe("timeline visual lifecycle stability", () => {
         { perMarker: true },
       ),
     )
+    // Terminal folding contracts the process area; measure it separately from monotonic live growth.
+    const terminalRegions = defineVisualRegions({
+      heading: { selector: `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"]` },
+      following: shellRegion(followingID),
+    })
+    const following = page.locator(`[data-timeline-part-id="${followingID}"]`)
+    const resident = await following.elementHandle()
+    await startVisualProbe(page, terminalRegions)
+    await timeline.send(messageUpdated(completedAssistantInfo(assistant.info)), 100)
+    await timeline.send(status("idle"), 700)
+    const terminal = await stopVisualProbe<keyof typeof terminalRegions>(page)
+    await reportVisualStability(
+      testInfo,
+      "parallel-shells-terminal-fold",
+      terminal,
+      visualPlan(terminalRegions, [
+        { type: "required", regions: ["heading", "following"] },
+        { type: "unique", regions: ["heading", "following"] },
+        { type: "stable", regions: ["heading", "following"] },
+        { type: "opacity", regions: "all" },
+        { type: "continuity", regions: "all" },
+        { type: "label-stability", regions: "all" },
+        { type: "preserve-bottom-anchor" },
+        { type: "flow", regions: ["heading", "following"] },
+      ]),
+    )
+    expect(await following.evaluate((element, previous) => element === previous, resident)).toBe(true)
+    await expect(following).toContainText("Following all parallel shells.")
+    const heading = page.locator(`[data-timeline-row="AssistantHeading"][data-message-id="${userID}"]`)
+    await expect(heading.locator('[data-component="task-mascot"]')).toHaveCount(1)
+    await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "false")
+    await heading.locator("button[aria-expanded]").click()
+    await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "true")
     await expect(page.locator(`[data-timeline-part-id="${ids[2]}"] [data-slot="bash-pre"]`)).toContainText("line 50")
 
     const short = page.locator(`[data-timeline-part-id="${ids[1]}"]`)
@@ -109,10 +141,13 @@ test.describe("timeline visual lifecycle stability", () => {
       cpuRate: 4,
     })
     await timeline.send(status("busy"), 120)
-    await expect(page.locator('[data-timeline-row="Thinking"]')).toBeVisible()
+    await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveAttribute(
+      "data-state",
+      "thinking",
+    )
 
     const regions = defineVisualRegions({
-      thinking: { selector: '[data-timeline-row="Thinking"]' },
+      thinking: { selector: '[data-timeline-row="AssistantHeading"]' },
       reasoning: {
         selector: `[data-timeline-part-id="${reasoningID}"]`,
         closest: '[data-timeline-row="AssistantPart"]',
@@ -124,7 +159,10 @@ test.describe("timeline visual lifecycle stability", () => {
     await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(0)
     await timeline.send(partUpdated(reasoningPart(reasoningID, "## Planning\n\nChecking the visible timeline.")), 160)
     await timeline.waitForPart(reasoningID)
-    await expect(page.locator('[data-timeline-row="Thinking"]')).toBeVisible()
+    await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveAttribute(
+      "data-state",
+      "thinking",
+    )
     await timeline.send(partUpdated(textPart(textID, "Starting")), 100)
     await timeline.send(partDelta(textID, " **stable"), 90)
     await timeline.send(partDelta(textID, " output** with `code` and [a link"), 130)

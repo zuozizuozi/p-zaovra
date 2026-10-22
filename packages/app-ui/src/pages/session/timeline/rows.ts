@@ -15,6 +15,7 @@ export type TimelineRowMap = {
     userMessageID: string
     anchor: boolean
   }
+  AssistantHeading: { userMessageID: string }
   TurnDivider: {
     userMessageID: string
     label: "compaction" | "interrupted" | "stopped"
@@ -93,6 +94,9 @@ export namespace Timeline {
       }),
     )
 
+    if (assistantMessages.length || (isActive && status !== "idle"))
+      rows.push(new TimelineRow.AssistantHeading({ userMessageID: userMessage.id }))
+
     if (compaction) {
       rows.push(
         new TimelineRow.TurnDivider({
@@ -132,16 +136,18 @@ export namespace Timeline {
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
         .find((value): value is string => !!value)
-
-      rows.push(
-        new TimelineRow.Thinking({
-          userMessageID: userMessage.id,
-          reasoningHeading: heading,
-          reviewing: userParts.some(
-            (part) => part.type === "text" && part.synthetic && part.text.startsWith("Verification closing review:"),
-          ),
-        }),
+      const reviewing = userParts.some(
+        (part) => part.type === "text" && part.synthetic && part.text.startsWith("Verification closing review:"),
       )
+      // Activity lives in the resident heading; this row only carries extra reasoning or review text.
+      if (reviewing || (!showReasoning && heading))
+        rows.push(
+          new TimelineRow.Thinking({
+            userMessageID: userMessage.id,
+            reasoningHeading: heading,
+            reviewing,
+          }),
+        )
     }
 
     if (isActive && status === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { Effect, Layer, LayerMap, ManagedRuntime, Option } from "effect"
+import { Context, Effect, Layer, LayerMap, ManagedRuntime, Option } from "effect"
 import { Location } from "@zaovra-ai/core/location"
 import { Database } from "@zaovra-ai/core/database/database"
 import { Project } from "@zaovra-ai/core/project"
@@ -76,9 +76,12 @@ test("actual screenshot HTTP handler returns PNG JSON and rejects foreign refere
   )
   const server = HttpRouter.toWebHandler(routes(root, database), { disableLogger: true })
   try {
-    // Production requests carry middleware context; dependencies must be captured
-    // by the handler layer rather than supplied again by each request.
-    const response = await server.handler(new Request(`http://offline/api/session/ses_http/screenshot/${id}`))
+    // S1 budget routes require per-request Database. Screenshot storage must
+    // still capture Global from its layer without a per-request Global value.
+    const response = await server.handler(
+      new Request(`http://offline/api/session/ses_http/screenshot/${id}`),
+      Context.make(Database.Service, database),
+    )
     expect(response.status).toBe(200)
     const image = await response.json()
     expect(image).toEqual({ data: png.toString("base64"), mime: "image/png" })
@@ -109,7 +112,7 @@ test("actual screenshot HTTP handler returns PNG JSON and rejects foreign refere
     }))
     const otherServer = HttpRouter.toWebHandler(routes(path.join(root, "other-server"), otherDatabase), { disableLogger: true })
     try {
-      const otherContext = await otherRuntime.runPromise(Effect.context<Global.Service>())
+      const otherContext = await otherRuntime.runPromise(Effect.context<Global.Service | Database.Service>())
       const isolated = await otherServer.handler(
         new Request(`http://offline/api/session/ses_http/screenshot/${id}`),
         otherContext,

@@ -36,6 +36,8 @@ export function SessionOutcomeDock() {
       messages: sync().session.data.message[params.id ?? ""] ?? [],
       parts: sync().session.data.part,
       busy: !!params.id && sync().session.data.session_working(params.id),
+      liveShell: sync().session.data.live_shell[params.id ?? ""],
+      transportConnected: server().transportConnected(),
       waiting:
         (sync().session.data.permission[params.id ?? ""]?.length ?? 0) > 0 ||
         (sync().session.data.question[params.id ?? ""]?.length ?? 0) > 0,
@@ -247,13 +249,20 @@ export function SessionOutcomeDock() {
         <div data-component="session-live-progress" role="status" class="px-1 py-2 text-12-regular text-text-weak">
           <p class="break-words">
             <Show when={progress().target}>{progress().target} · </Show>
-            {language.t(`session.progress.${progress().state}`)}
+            {language.t(
+              `session.progress.${progress().state === "idle" && progress().preview ? "preview" : progress().state}`,
+            )}
             <Show when={progress().tool}> · {progress().tool}</Show>
           </p>
-          <p>
-            <Show when={progress().fact}>{language.t("session.progress.returned", { tool: progress().fact! })} · </Show>
-            {language.t("session.progress.updating")}
-          </p>
+          <Show when={progress().fact || progress().updating}>
+            <p>
+              <Show when={progress().fact}>{language.t("session.progress.returned", { tool: progress().fact! })}</Show>
+              <Show when={progress().updating}>
+                <Show when={progress().fact}> · </Show>
+                {language.t("session.progress.updating")}
+              </Show>
+            </p>
+          </Show>
           <details>
             <summary>{language.t("session.progress.details")}</summary>
             <p>{language.t("session.progress.usageUnknown")}</p>

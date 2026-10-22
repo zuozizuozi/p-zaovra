@@ -7,6 +7,7 @@ export function visibleProgress(input: {
   parts: Readonly<Record<string, Part[]>>
   busy: boolean
   liveShell?: Readonly<Record<string, true>>
+  transportConnected?: boolean
   waiting: boolean
 }) {
   const messages = input.messages
@@ -79,24 +80,34 @@ export function visibleProgress(input: {
     }
   }
   const pending = [...jobs].filter(([, status]) => status === "running" || status === "unavailable")
-  const unknown = pending.some(([id]) => !input.liveShell?.[id])
-  const pendingJob = pending.some(([id]) => input.liveShell?.[id] && kinds.get(id) !== "preview")
-  const preview = pending.some(([id]) => input.liveShell?.[id] && kinds.get(id) === "preview")
+  const liveShell = input.transportConnected === false ? undefined : input.liveShell
+  const unknown = pending.some(([id]) => !liveShell?.[id])
+  const pendingJob = pending.some(([id]) => liveShell?.[id] && kinds.get(id) !== "preview")
+  const preview = pending.some(([id]) => liveShell?.[id] && kinds.get(id) === "preview")
   const target = (user ? (input.parts[user.id] ?? []) : []).find((part) => part.type === "text")
   return {
     target: target?.type === "text" ? target.text.slice(0, 160) : "",
-    state: input.waiting
-      ? "waiting"
-      : error
-        ? "blocked"
-        : unknown || (!input.busy && active)
-          ? "unverified"
-          : active || pendingJob
-            ? "tool"
-            : input.busy
-              ? "running"
-              : "idle",
+    state:
+      input.transportConnected === false && (input.busy || input.waiting || active || pending.length)
+        ? "disconnected"
+        : input.waiting
+          ? "waiting"
+          : error
+            ? "blocked"
+            : unknown || (!input.busy && active)
+              ? "unverified"
+              : active || pendingJob
+                ? "tool"
+                : input.busy
+                  ? "running"
+                  : "idle",
     preview,
+    updating:
+      input.transportConnected !== false &&
+      !unknown &&
+      !error &&
+      (input.busy || !active || input.waiting) &&
+      (input.busy || input.waiting || !!active || pendingJob),
     tool: active?.tool,
     fact: returned?.tool,
     facts: tools

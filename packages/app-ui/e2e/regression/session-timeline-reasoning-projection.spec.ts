@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import {
+  assistantID,
   assistantMessage,
   reasoningPart,
   setupTimeline,
@@ -10,7 +11,7 @@ import {
 } from "../performance/timeline-stability/fixture"
 
 const profiles = [
-  { name: "summaries off no reasoning", summaries: false, reasoning: "", other: false, thinking: true, body: false },
+  { name: "summaries off no reasoning", summaries: false, reasoning: "", other: false, thinking: false, body: false },
   {
     name: "summaries off reasoning heading",
     summaries: false,
@@ -27,13 +28,13 @@ const profiles = [
     thinking: true,
     body: false,
   },
-  { name: "summaries on no content", summaries: true, reasoning: "", other: false, thinking: true, body: false },
+  { name: "summaries on no content", summaries: true, reasoning: "", other: false, thinking: false, body: false },
   {
     name: "summaries on blank reasoning",
     summaries: true,
     reasoning: "   ",
     other: false,
-    thinking: true,
+    thinking: false,
     body: false,
   },
   {
@@ -68,9 +69,11 @@ for (const profile of profiles) {
       settings: { showReasoningSummaries: profile.summaries },
     })
     await timeline.send(status("busy"), 150)
-
+    await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveCount(1)
     await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(profile.thinking ? 1 : 0)
-    await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(profile.body ? 1 : 0)
+    const reasoning = page.locator(`[data-timeline-part-id="${assistantID}:${reasoningID}"]`)
+    await expect(reasoning).toHaveCount(profile.body ? 1 : 0)
+    if (profile.body) await expect(reasoning).toContainText("Inspecting stability")
     if (!profile.summaries && profile.reasoning.trim()) {
       await expect(page.getByText("Inspecting stability", { exact: true })).toBeVisible()
     }
@@ -86,8 +89,10 @@ test("does not infer reasoning visibility from provider identity", async ({ page
     settings: { showReasoningSummaries: true },
   })
   await timeline.send(status("busy"), 150)
-
+  await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveCount(1)
   await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
   await expect(page.locator('[data-timeline-part-id*="reasoning"]')).toHaveCount(0)
-  await expect(page.locator('[data-timeline-part-id="prt_provider_text"]')).toBeVisible()
+  const text = page.locator(`[data-timeline-part-id="${assistantID}:prt_provider_text"]`)
+  await expect(text).toBeVisible()
+  await expect(text).toHaveText("No reasoning payload")
 })

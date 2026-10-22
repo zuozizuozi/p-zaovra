@@ -8,6 +8,7 @@ export function ExecutionErrorCard(props: {
   detail: string
   onConfigure?: () => void
   recoveryID?: string
+  mascot?: boolean
   children?: import("solid-js").JSX.Element
 }) {
   const language = useLanguage()
@@ -15,7 +16,9 @@ export function ExecutionErrorCard(props: {
   return (
     <section data-component="execution-error-card" role="alert">
       <div class="flex items-center gap-2">
-        <TaskMascot state="error" />
+        <Show when={props.mascot !== false}>
+          <TaskMascot state="error" />
+        </Show>
         <h3>{kind() ? language.t(`error.title.${kind()!}`) : language.t("common.requestFailed")}</h3>
       </div>
       <p>{kind() ? language.t(`error.execution.${kind()!}`) : language.t("error.execution.unknown")}</p>
