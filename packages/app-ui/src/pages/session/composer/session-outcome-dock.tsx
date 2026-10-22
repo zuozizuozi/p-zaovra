@@ -89,19 +89,22 @@ export function SessionOutcomeDock() {
   const abandoned = () =>
     !!sync().session.get(params.id ?? "")?.time.archived ||
     (recover.isSuccess && recover.variables?.sessionID === params.id && recover.variables.action === "abandon")
-  const budgetQuery = createQuery(() => {
-    const current = selection()
-    return {
-      queryKey: ["session-budget", current.scope, current.sessionID],
-      enabled: !!current.sessionID,
-      queryFn: () =>
-        current.client.v2.session
-          .budget({ sessionID: current.sessionID! }, { throwOnError: true })
-          .then((result) => result.data.data),
-      refetchInterval: progress().visible ? 1000 : false,
-      retry: false,
-    }
-  })
+  const budgetQuery = createQuery(
+    () => {
+      const current = selection()
+      return {
+        queryKey: ["session-budget", current.scope, current.sessionID],
+        enabled: !!current.sessionID,
+        queryFn: () =>
+          current.client.v2.session
+            .budget({ sessionID: current.sessionID! }, { throwOnError: true })
+            .then((result) => result.data.data),
+        refetchInterval: progress().visible ? 1000 : false,
+        retry: false,
+      }
+    },
+    () => sync().queryClient,
+  )
   const [budget, setBudget] = createStore({ tokens: "", minutes: "", dirty: false })
   createEffect(() => {
     selection()

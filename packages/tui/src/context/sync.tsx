@@ -146,6 +146,7 @@ export const {
     const data = useData()
 
     const executionWaits = new Map<string, AbortController>()
+    const executionGenerations = new Map<string, number>()
     const cancelExecutionWaits = () => {
       executionWaits.forEach((controller) => controller.abort())
       executionWaits.clear()
@@ -155,6 +156,7 @@ export const {
       if (executionWaits.has(sessionID)) return
       const controller = new AbortController()
       const client = sdk.client
+      const generation = executionGenerations.get(sessionID) ?? 0
       executionWaits.set(sessionID, controller)
       void (async () => {
         while (!controller.signal.aborted) {
@@ -167,6 +169,7 @@ export const {
           if (controller.signal.aborted) return
           const response = await client.v2.session.active({ signal: controller.signal, throwOnError: true })
           if (controller.signal.aborted) return
+          if (generation !== (executionGenerations.get(sessionID) ?? 0)) return
           if (!(sessionID in (response.data?.data ?? {}))) {
             setStore("session_status", sessionID, { type: "idle" })
             return
@@ -246,7 +249,12 @@ export const {
             return
           }
           queueMicrotask(() => void projectV2Session(sessionID))
-          if (event.type === "session.next.step.started") setStore("session_status", sessionID, { type: "busy" })
+          if (event.type === "session.next.step.started") {
+            executionGenerations.set(sessionID, (executionGenerations.get(sessionID) ?? 0) + 1)
+            executionWaits.get(sessionID)?.abort()
+            executionWaits.delete(sessionID)
+            setStore("session_status", sessionID, { type: "busy" })
+          }
           if (event.type === "session.next.step.ended" || event.type === "session.next.step.failed") {
             watchExecution(sessionID)
           }

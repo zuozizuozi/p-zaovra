@@ -38,6 +38,64 @@ test("S1 displays effective default limits and keeps edits stable during live re
   await expect(page.getByLabel("Total tokens", { exact: true })).toHaveValue("")
 })
 
+for (const unlimited of [false, true]) {
+  test(`S1 idle session budget refreshes default settings while explicit unlimited ${unlimited}`, async ({ page }) => {
+    await setupTimeline(page, {
+      settings: { newLayoutDesigns: true },
+      messages: [userMessage(), assistantMessage([textPart("prt_idle_budget", "Finished")])],
+    })
+    let tokens = 30_000_000
+    let durationMs = 43_200_000
+    let polls = 0
+    let updates = 0
+    await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: {} } }))
+    await page.route("**/session/*/outcome*", (route) =>
+      route.fulfill({
+        json: { data: { state: "completed_unverified", outcomeUnknown: false, checks: [], missing: [] } },
+      }),
+    )
+    await page.route(/\/api\/session\/[^/]+\/budget(?:\?|$)/, (route) => {
+      polls++
+      return route.fulfill({
+        json: {
+          data: {
+            limits: unlimited ? {} : { tokens, durationMs },
+            used: { tokens: 1200, durationMs: 60000 },
+            unreported: 0,
+          },
+        },
+      })
+    })
+    await page.route("**/global/config", async (route) => {
+      if (route.request().method() !== "PATCH")
+        return route.fulfill({ json: { session_token_budget: tokens, session_duration_ms: durationMs } })
+      const body = route.request().postDataJSON()
+      tokens = body.session_token_budget
+      durationMs = body.session_duration_ms
+      updates++
+      return route.fulfill({ json: body })
+    })
+    await page.reload()
+    const usage = page.locator('[data-component="session-budget-usage"]')
+    await expect(usage).toContainText(unlimited ? "No limit" : "30,000,000")
+    await page.locator('[data-component="session-budget"] > summary').click()
+    await expect(page.getByLabel("Total tokens", { exact: true })).toHaveValue(unlimited ? "" : "30000000")
+    const before = polls
+    await page.keyboard.press("Control+,")
+    const settings = page.locator('[data-component="settings-session-budget"]')
+    await expect(settings).toBeVisible()
+    await settings.getByLabel("Total tokens", { exact: true }).fill("40000000")
+    await settings.getByLabel("Total minutes", { exact: true }).fill("1440")
+    await settings.getByRole("button", { name: "Save default limits", exact: true }).click()
+    await expect.poll(() => updates).toBe(1)
+    await expect.poll(() => polls).toBeGreaterThan(before)
+    await page.keyboard.press("Escape")
+    await expect(usage).toContainText(unlimited ? "No limit" : "40,000,000")
+    await expect(page.getByLabel("Total tokens", { exact: true })).toHaveValue(unlimited ? "" : "40000000")
+    await expect(page.getByLabel("Total minutes", { exact: true })).toHaveValue(unlimited ? "" : "1440")
+  })
+}
+
 test("S1 default settings save explicit unlimited and retain finite limits", async ({ page }, info) => {
   await setupTimeline(page, { settings: { newLayoutDesigns: true } })
   const bodies: unknown[] = []

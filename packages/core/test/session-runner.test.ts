@@ -363,6 +363,8 @@ const execution = Layer.effect(
       resume: coordinator.run,
       wake: coordinator.wake,
       interrupt: coordinator.interrupt,
+      freezeWake: coordinator.freezeWake,
+      prepareWake: coordinator.prepareWake,
     })
   }),
 ).pipe(Layer.provide(runnerLayer))
@@ -4871,7 +4873,7 @@ describe("SessionRunnerLLM", () => {
             finish: "stop",
           })
         }),
-      60000,
+      180000,
     )
 
   it.effect("S1 explicit steps stop with summary and preserved constraints", () =>
@@ -4971,6 +4973,47 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("S1 SessionV2 prompt during Stop tail cleanup drains all admitted inputs after cleanup", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const execution = yield* SessionExecution.Service
+      const jobs = yield* BackgroundJob.Service
+      const started = yield* Deferred.make<void>()
+      const cleaning = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      const job = yield* jobs.start({
+        type: "bash",
+        metadata: { sessionID, kind: "task" },
+        run: Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Deferred.succeed(cleaning, undefined).pipe(Effect.andThen(Deferred.await(gate)))),
+        ),
+      })
+      yield* Deferred.await(started)
+      const stop = yield* sessions.interrupt(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(cleaning)
+      const before = requests.length
+      const inputs = yield* Effect.forEach(["New explicit task one", "New explicit task two"], (text) =>
+        sessions.prompt({ sessionID, prompt: Prompt.make({ text }) }),
+      )
+      expect(yield* SessionInput.pending(database.db, sessionID)).toHaveLength(2)
+      expect(requests).toHaveLength(before)
+      responses = [fragmentFixture("text", "new-intent", ["New explicit task handled"]).completeEvents]
+      yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(stop)
+      yield* execution.wait!(sessionID)
+      expect((yield* jobs.get(job.id))?.status).toBe("cancelled")
+      expect(yield* SessionInput.pending(database.db, sessionID)).toEqual([])
+      expect(requests).toHaveLength(before + 1)
+      expect(
+        (yield* sessions.context(sessionID)).filter((message) => message.type === "user").map((message) => message.id),
+      ).toEqual(inputs.map((input) => input.id))
+    }),
+  )
+
   it.effect("S1 production Stop freezes a durably admitted host completion until manual resume without rerunning", () =>
     Effect.gen(function* () {
       yield* setup
@@ -5034,6 +5077,47 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(count + 1)
       expect(JSON.stringify(requests.at(-1)!.messages)).toContain("Read original result; do not rerun")
       expect(SessionOutcome.requested(yield* sessions.context(sessionID)).sourceMessageID).toBe(original.id)
+      // Exercise the production local service, including three independently settling tail resources.
+      const cleaning = yield* Deferred.make<void>()
+      const gates = yield* Effect.forEach([0, 1, 2], () => Deferred.make<void>())
+      const stop = yield* execution
+        .interrupt(
+          sessionID,
+          Deferred.succeed(cleaning, undefined).pipe(
+            Effect.andThen(Effect.all(gates.map(Deferred.await), { concurrency: "unbounded", discard: true })),
+          ),
+        )
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(cleaning)
+      const before = requests.length
+      const inputs = yield* Effect.forEach(["Fresh task one", "Fresh task two"], (text) =>
+        Effect.gen(function* () {
+          const wake = yield* execution.prepareWake!(sessionID)
+          const input = yield* SessionInput.admit(database.db, events, {
+            id: SessionMessage.ID.create(),
+            sessionID,
+            delivery: "steer",
+            prompt: Prompt.make({ text }),
+          })
+          yield* wake
+          return input
+        }),
+      )
+      for (const gate of gates.slice(0, 2)) {
+        yield* Deferred.succeed(gate, undefined)
+        yield* Effect.yieldNow
+        expect(requests).toHaveLength(before)
+      }
+      yield* events.publish(SessionExecution.Wake, { sessionID })
+      responses = [fragmentFixture("text", "fresh-done", ["Fresh task handled"]).completeEvents]
+      yield* Deferred.succeed(gates[2], undefined)
+      yield* Fiber.join(stop)
+      yield* execution.wait!(sessionID)
+      expect(requests).toHaveLength(before + 1)
+      expect(yield* SessionInput.pending(database.db, sessionID)).toEqual([])
+      expect(
+        (yield* sessions.context(sessionID)).filter((message) => inputs.some((input) => input.id === message.id)),
+      ).toHaveLength(2)
     }),
   )
   it.effect("retains a passed check at the turn limit without claiming overall completion", () =>

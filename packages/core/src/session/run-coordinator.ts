@@ -18,11 +18,11 @@ export interface Coordinator<Key, E> {
   /** Registers one coalesced follow-up after newly recorded work. */
   readonly wake: (key: Key) => Effect.Effect<void>
   /** Stops active execution and waits for its cleanup. */
-  readonly interrupt: (key: Key) => Effect.Effect<void>
+  readonly interrupt: (key: Key, cleanup?: Effect.Effect<void>) => Effect.Effect<void>
   /** Freeze automatic wakes synchronously before publishing Stop. */
   readonly freezeWake: (key: Key) => Effect.Effect<void>
-  /** Explicit input admission permits future advisory wakes again. */
-  readonly allowWake: (key: Key) => Effect.Effect<void>
+  /** Captures explicit intent before admission; a later Stop invalidates it. */
+  readonly prepareWake: (key: Key) => Effect.Effect<Effect.Effect<void>>
 }
 
 type Entry<E> = {
@@ -40,6 +40,11 @@ export const make = <Key, E>(options: {
   Effect.gen(function* () {
     const active = new Map<Key, Entry<E>>()
     const stopped = new Set<Key>()
+    const generations = new Map<Key, number>()
+    const stopping = new Map<
+      Key,
+      { done: Deferred.Deferred<void>; started: boolean; intent: boolean; resume: boolean; successor?: Entry<E> }
+    >()
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
 
     const makeEntry = (): Entry<E> => ({
@@ -89,9 +94,18 @@ export const make = <Key, E>(options: {
 
     const run = (key: Key): Effect.Effect<void, E> =>
       Effect.uninterruptibleMask((restore) => {
+        const stop = stopping.get(key)
+        if (stop) {
+          stop.resume = true
+          return restore(
+            Deferred.await(stop.done).pipe(
+              Effect.andThen(Effect.suspend(() => (stop.successor ? Deferred.await(stop.successor.done) : run(key)))),
+            ),
+          )
+        }
         const entry = active.get(key)
         if (entry !== undefined) {
-          if (entry.stopping) return restore(Deferred.await(entry.done).pipe(Effect.andThen(run(key))))
+          if (entry.stopping) return restore(wait(key).pipe(Effect.andThen(run(key))))
           return restore(Deferred.await(entry.done))
         }
 
@@ -105,6 +119,9 @@ export const make = <Key, E>(options: {
     const owned = (key: Key, claim: SessionOwnership.Claim): Effect.Effect<void, E> =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
+          yield* restore(claim.check)
+          const stop = stopping.get(key)
+          if (stop) yield* restore(Deferred.await(stop.done))
           yield* restore(claim.check)
           // Never adopt a different drain by Session ID, even if its owner label matches.
           if (active.has(key)) return yield* Effect.die("Session already has an active execution owner")
@@ -128,6 +145,8 @@ export const make = <Key, E>(options: {
 
     const wait = (key: Key): Effect.Effect<void, E> =>
       Effect.suspend(() => {
+        const stop = stopping.get(key)
+        if (stop) return Deferred.await(stop.done)
         const entry = active.get(key)
         // Observers receive interruption as a completed result, while cancellation
         // of the observer itself still interrupts its own Deferred.await.
@@ -142,6 +161,8 @@ export const make = <Key, E>(options: {
 
     const exclusive = (key: Key, operation: Effect.Effect<void, E>): Effect.Effect<void, E> =>
       Effect.uninterruptibleMask((restore) => {
+        const stop = stopping.get(key)
+        if (stop) return restore(Deferred.await(stop.done).pipe(Effect.andThen(exclusive(key, operation))))
         const entry = active.get(key)
         if (entry !== undefined)
           return restore(Deferred.await(entry.done).pipe(Effect.andThen(exclusive(key, operation))))
@@ -169,6 +190,9 @@ export const make = <Key, E>(options: {
 
     const freezeWake = (key: Key) =>
       Effect.sync(() => {
+        if (stopping.has(key)) return
+        generations.set(key, (generations.get(key) ?? 0) + 1)
+        stopping.set(key, { done: Deferred.makeUnsafe<void>(), started: false, intent: false, resume: false })
         stopped.add(key)
         const entry = active.get(key)
         if (!entry) return
@@ -176,18 +200,39 @@ export const make = <Key, E>(options: {
         entry.pendingWake = false
       })
 
-    const interrupt = (key: Key): Effect.Effect<void> =>
-      freezeWake(key).pipe(
-        Effect.andThen(
-          Effect.suspend(() => {
-            const entry = active.get(key)
-            return entry?.owner ? Fiber.interrupt(entry.owner) : Effect.void
-          }),
+    const interrupt = (key: Key, cleanup = Effect.void): Effect.Effect<void> =>
+      Effect.uninterruptible(
+        freezeWake(key).pipe(
+          Effect.andThen(
+            Effect.suspend(() => {
+              const stop = stopping.get(key)!
+              if (stop.started) return Deferred.await(stop.done)
+              stop.started = true
+              const entry = active.get(key)
+              return (entry?.owner ? Fiber.interrupt(entry.owner) : Effect.void).pipe(
+                Effect.andThen(cleanup),
+                Effect.onExit((exit) =>
+                  Effect.sync(() => {
+                    stopping.delete(key)
+                    if (Exit.isSuccess(exit) && (stop.intent || stop.resume)) {
+                      stopped.delete(key)
+                      const next = makeEntry()
+                      stop.successor = next
+                      active.set(key, next)
+                      start(key, next, stop.resume, true)
+                    }
+                    Deferred.doneUnsafe(stop.done, exit)
+                  }),
+                ),
+                Effect.asVoid,
+              )
+            }),
+          ),
         ),
       )
 
     return {
-      active: Effect.sync(() => new Set(active.keys())),
+      active: Effect.sync(() => new Set([...active.keys(), ...stopping.keys()])),
       run,
       owned,
       wait,
@@ -195,9 +240,19 @@ export const make = <Key, E>(options: {
       wake,
       interrupt,
       freezeWake,
-      allowWake: (key) =>
+      prepareWake: (key) =>
         Effect.sync(() => {
-          stopped.delete(key)
+          const generation = generations.get(key) ?? 0
+          return Effect.suspend(() => {
+            if (generation !== (generations.get(key) ?? 0)) return Effect.void
+            const stop = stopping.get(key)
+            if (stop)
+              return Effect.sync(() => {
+                stop.intent = true
+              })
+            stopped.delete(key)
+            return wake(key)
+          })
         }),
     }
   })

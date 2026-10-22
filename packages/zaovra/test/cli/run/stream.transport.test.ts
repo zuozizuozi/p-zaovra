@@ -2419,6 +2419,85 @@ describe("run stream transport", () => {
     }
   })
 
+  test("S1 canceled turn final idle response cannot settle a replacement turn", async () => {
+    const src = eventFeed()
+    const finalRequested = defer()
+    const oldIdle = defer()
+    const newWait = defer()
+    const newRelease = defer()
+    const ui = footer()
+    let waits = 0
+    let held = false
+    let prompts = 0
+    const client = sdk({
+      stream: src.stream,
+      promptAsync: async () => {
+        prompts++
+        queueMicrotask(() => {
+          src.push(busy())
+          src.push(assistant(`msg-${prompts}`))
+          src.push(idle())
+        })
+        return ok(undefined)
+      },
+    })
+    spyOn(client.v2.session, "active").mockImplementation(async () => {
+      if (waits === 1 && !held) {
+        held = true
+        finalRequested.resolve()
+        await oldIdle.promise
+      }
+      return (await ok({ data: {} })) as never
+    })
+    spyOn(client.v2.session, "wait").mockImplementation(async () => {
+      waits++
+      if (waits === 2) {
+        newWait.resolve()
+        await newRelease.promise
+      }
+      return (await ok(undefined)) as never
+    })
+    const transport = await createSessionTransport({
+      sdk: client,
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: ui.api,
+    })
+    const signal = new AbortController()
+    const input = {
+      agent: undefined,
+      model: undefined,
+      variant: undefined,
+      prompt: { text: "hello", parts: [] },
+      files: [],
+      includeFiles: false,
+    }
+    try {
+      const first = transport.runPromptTurn({ ...input, signal: signal.signal })
+      await finalRequested.promise
+      signal.abort()
+      await first
+      let settled = false
+      const second = transport.runPromptTurn({ ...input, signal: new AbortController().signal }).then(() => {
+        settled = true
+      })
+      await newWait.promise
+      oldIdle.resolve()
+      await Bun.sleep(30)
+      expect(settled).toBe(false)
+      newRelease.resolve()
+      await second
+      expect(settled).toBe(true)
+      expect(prompts).toBe(2)
+    } finally {
+      oldIdle.resolve()
+      newRelease.resolve()
+      src.close()
+      await transport.close()
+    }
+  })
+
   test("S1 host wait never blocks question or permission events and duplicate terminals settle once", async () => {
     const src = eventFeed()
     const seen = defer()

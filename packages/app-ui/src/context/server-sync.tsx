@@ -479,6 +479,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     onSuccess: (result) => {
       // Publish the acknowledged values before dialogs close or reopen.
       if (result.data) setGlobalStore("config", reconcile(result.data, { merge: false }))
+      void queryClient.invalidateQueries({ queryKey: ["session-budget", serverSDK.scope] })
       bootstrap.refetch()
       // A model selector filters against the resolved project config as well as
       // the catalog. The refresh queue is paused inside this mutation callback.

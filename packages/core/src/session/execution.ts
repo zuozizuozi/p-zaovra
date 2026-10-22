@@ -33,7 +33,9 @@ export interface Interface {
   /** Registers newly recorded work. Repeated wakeups may coalesce. */
   readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   /** Interrupt active work owned by this process. Idle interruption is a no-op. */
-  readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly interrupt: (sessionID: SessionSchema.ID, cleanup?: Effect.Effect<void>) => Effect.Effect<void>
+  /** Capture an explicit prompt's Stop generation before durable admission. */
+  readonly prepareWake?: (sessionID: SessionSchema.ID) => Effect.Effect<Effect.Effect<void>>
   /** Freeze automatic wakes before publishing Stop or awaiting cleanup. */
   readonly freezeWake?: (sessionID: SessionSchema.ID) => Effect.Effect<void>
 }
@@ -52,6 +54,6 @@ export const noopLayer = Layer.succeed(
     wait: () => Effect.void,
     compact: () => Effect.succeed(false),
     wake: () => Effect.void,
-    interrupt: () => Effect.void,
+    interrupt: (_sessionID, cleanup) => cleanup ?? Effect.void,
   }),
 )

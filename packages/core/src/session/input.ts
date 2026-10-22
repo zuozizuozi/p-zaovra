@@ -9,6 +9,7 @@ import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { Prompt } from "./prompt"
 import { SessionSchema } from "./schema"
+import { SessionOutcome } from "./outcome"
 import { SessionInputTable, SessionMessageTable } from "./sql"
 
 type DatabaseService = Database.Interface["db"]
@@ -37,6 +38,10 @@ export const find = Effect.fn("SessionInput.find")(function* (db: DatabaseServic
 })
 
 export class LifecycleConflict extends Schema.TaggedErrorClass<LifecycleConflict>()("SessionInput.LifecycleConflict", {
+  id: SessionMessage.ID,
+}) {}
+
+export class CompletionExpired extends Schema.TaggedErrorClass<CompletionExpired>()("SessionInput.CompletionExpired", {
   id: SessionMessage.ID,
 }) {}
 
@@ -151,6 +156,13 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
   if (updated) {
     const stored = fromRow(updated)
     if (!matchesProjection(stored, input)) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+    // The event transaction rolls back this promotion if a newer User changed the task root.
+    if (
+      input.completion &&
+      SessionOutcome.requested(yield* SessionOutcome.history(db, input.sessionID)).sourceMessageID !==
+        input.completion.sourceMessageID
+    )
+      return yield* Effect.die(new CompletionExpired({ id: input.id }))
     return
   }
 
@@ -161,6 +173,12 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     return
   }
 
+  if (
+    input.completion &&
+    SessionOutcome.requested(yield* SessionOutcome.history(db, input.sessionID)).sourceMessageID !==
+      input.completion.sourceMessageID
+  )
+    return yield* Effect.die(new CompletionExpired({ id: input.id }))
   yield* db
     .insert(SessionInputTable)
     .values({
@@ -293,6 +311,13 @@ const publish = Effect.fn("SessionInput.publish")(function* (
       .pipe(
         Effect.as(true),
         Effect.catchDefect((defect) =>
+          defect instanceof CompletionExpired
+            ? events
+                .publish(SessionEvent.PromptCancelled, { sessionID, messageID: id, timestamp: DateTime.nowUnsafe() })
+                .pipe(Effect.as(false))
+            : Effect.die(defect),
+        ),
+        Effect.catchDefect((defect) =>
           defect instanceof LifecycleConflict
             ? find(db, id).pipe(
                 Effect.flatMap((stored) => {
@@ -338,6 +363,7 @@ export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(fun
   events: EventV2.Interface,
   sessionID: SessionSchema.ID,
 ) {
+  let promoted = 0
   while (true) {
     const row = yield* db
       .select()
@@ -354,7 +380,9 @@ export const promoteNextQueued = Effect.fn("SessionInput.promoteNextQueued")(fun
       .limit(1)
       .get()
       .pipe(Effect.orDie)
-    if (row === undefined) return false
+    if (row === undefined) return promoted > 0
+    // A queued host result cannot overtake a newly admitted steer at this idle boundary.
+    if (row.completion) promoted += yield* promoteSteers(db, events, sessionID, Number.MAX_SAFE_INTEGER)
     if ((yield* publish(db, events, sessionID, [row])) > 0) return true
   }
 })

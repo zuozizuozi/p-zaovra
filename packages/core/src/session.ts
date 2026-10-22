@@ -736,6 +736,8 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           Effect.gen(function* () {
             yield* result.get(input.sessionID)
+            const wake = yield* execution.prepareWake?.(input.sessionID) ??
+              Effect.succeed(execution.wake(input.sessionID))
             const prompt = resolvePrompt(input.prompt)
             const messageID = input.id ?? SessionMessage.ID.create()
             const delivery = input.delivery ?? "steer"
@@ -804,7 +806,7 @@ const layer = Layer.effect(
                 )
               }),
             )
-            if (input.resume !== false && admitted.cancelledSeq === undefined) yield* execution.wake(admitted.sessionID)
+            if (input.resume !== false && admitted.cancelledSeq === undefined) yield* wake
             return admitted
           }),
         ),
@@ -991,39 +993,41 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           (execution.freezeWake?.(sessionID) ?? Effect.void).pipe(
             Effect.andThen(events.publish(SessionExecution.Stopped, { sessionID })),
-            Effect.andThen(execution.interrupt(sessionID)),
             Effect.andThen(
-              Effect.all(
-                [
-                  interruptShells(sessionID),
-                  Effect.gen(function* () {
-                    const session = yield* store.get(sessionID)
-                    if (!session || !(yield* RcMap.has(locations.rcMap, session.location))) return
-                    yield* BrowserSession.Service.pipe(
-                      Effect.flatMap((browser) => browser.close(sessionID)),
-                      Effect.provide(locations.get(session.location)),
-                    )
-                  }).pipe(Effect.orDie),
-                  jobs.list().pipe(
-                    Effect.flatMap((items) =>
-                      Effect.forEach(
-                        items.filter(
-                          (job) =>
-                            job.type === "bash" &&
-                            job.metadata?.sessionID === sessionID &&
-                            job.status === "running" &&
-                            job.metadata?.kind !== "preview",
+              execution.interrupt(
+                sessionID,
+                Effect.all(
+                  [
+                    interruptShells(sessionID),
+                    Effect.gen(function* () {
+                      const session = yield* store.get(sessionID)
+                      if (!session || !(yield* RcMap.has(locations.rcMap, session.location))) return
+                      yield* BrowserSession.Service.pipe(
+                        Effect.flatMap((browser) => browser.close(sessionID)),
+                        Effect.provide(locations.get(session.location)),
+                      )
+                    }).pipe(Effect.orDie),
+                    jobs.list().pipe(
+                      Effect.flatMap((items) =>
+                        Effect.forEach(
+                          items.filter(
+                            (job) =>
+                              job.type === "bash" &&
+                              job.metadata?.sessionID === sessionID &&
+                              job.status === "running" &&
+                              job.metadata?.kind !== "preview",
+                          ),
+                          (job) => jobs.cancel(job.id),
+                          { discard: true },
                         ),
-                        (job) => jobs.cancel(job.id),
-                        { discard: true },
                       ),
                     ),
-                  ),
-                ],
-                {
-                  concurrency: "unbounded",
-                  discard: true,
-                },
+                  ],
+                  {
+                    concurrency: "unbounded",
+                    discard: true,
+                  },
+                ),
               ),
             ),
           ),

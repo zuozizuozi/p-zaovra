@@ -1038,6 +1038,8 @@ function createLayer(input: StreamInput) {
             Effect.orElseSucceed(() => false),
           )
           if (!settled || signal.aborted || state.wait !== next || !(yield* idle(false))) return
+          // The active request can outlive cancellation and a replacement turn.
+          if (signal.aborted || state.wait !== next || state.tick !== next.tick) return
 
           state.tick = next.tick + 1
           state.wait = undefined

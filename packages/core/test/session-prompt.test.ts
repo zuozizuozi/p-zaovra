@@ -39,10 +39,10 @@ const execution = Layer.succeed(
       Effect.sync(() => {
         executionCalls.push(sessionID)
       }),
-    interrupt: (sessionID) =>
+    interrupt: (sessionID, cleanup) =>
       Effect.sync(() => {
         interruptCalls.push(sessionID)
-      }),
+      }).pipe(Effect.andThen(cleanup ?? Effect.void)),
     wake: (sessionID) =>
       Effect.sync(() => {
         wakeCalls.push(sessionID)
@@ -106,6 +106,101 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  for (const pending of [false, true]) {
+    it.effect(
+      `S1 completion promotion cancels old task notifications when new steer is ${pending ? "pending" : "promoted"}`,
+      () =>
+        Effect.gen(function* () {
+          yield* setup
+          const database = yield* Database.Service
+          const events = yield* EventV2.Service
+          const sessions = yield* SessionV2.Service
+          const store = yield* SessionStore.Service
+          const original = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Task A" }), resume: false })
+          yield* SessionInput.promoteSteers(database.db, events, sessionID, original.admittedSeq)
+          const notifications = yield* Effect.forEach(["one", "two"], (jobID) =>
+            SessionInput.admit(database.db, events, {
+              id: SessionMessage.ID.create(),
+              sessionID,
+              prompt: Prompt.make({ text: "Continue Task A" }),
+              delivery: "queue",
+              completion: { type: "bash-completion", sourceMessageID: original.id, jobID },
+            }),
+          )
+          const next = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Task B" }), resume: false })
+          if (!pending) yield* SessionInput.promoteSteers(database.db, events, sessionID, next.admittedSeq)
+          expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(pending)
+          expect(SessionOutcome.requested(yield* store.context(sessionID)).sourceMessageID).toBe(next.id)
+          expect(
+            (yield* store.context(sessionID)).some((message) => notifications.some((input) => input.id === message.id)),
+          ).toBe(false)
+          for (const input of notifications) {
+            expect((yield* SessionInput.find(database.db, input.id))?.cancelledSeq).toBeDefined()
+            expect((yield* SessionInput.find(database.db, input.id))?.promotedSeq).toBeUndefined()
+          }
+          expect(yield* SessionInput.pending(database.db, sessionID)).toEqual([])
+        }),
+    )
+  }
+
+  it.effect("S1 concurrent expired completion promotions cancel once without corrupting task B", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const store = yield* SessionStore.Service
+      const original = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Task A" }), resume: false })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, original.admittedSeq)
+      const notification = yield* SessionInput.admit(database.db, events, {
+        id: SessionMessage.ID.create(),
+        sessionID,
+        prompt: Prompt.make({ text: "Continue A" }),
+        delivery: "queue",
+        completion: { type: "bash-completion", sourceMessageID: original.id, jobID: "job" },
+      })
+      const next = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Task B" }), resume: false })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, next.admittedSeq)
+      expect(
+        yield* Effect.all(
+          [
+            SessionInput.promoteNextQueued(database.db, events, sessionID),
+            SessionInput.promoteNextQueued(database.db, events, sessionID),
+          ],
+          { concurrency: "unbounded" },
+        ),
+      ).toEqual([false, false])
+      expect((yield* SessionInput.find(database.db, notification.id))?.cancelledSeq).toBeDefined()
+      expect(yield* eventCount(EventV2.versionedType(SessionEvent.PromptCancelled.type, 1))).toBe(1)
+      expect(SessionOutcome.requested(yield* store.context(sessionID)).sourceMessageID).toBe(next.id)
+    }),
+  )
+
+  it.effect("S1 multiple completions survive explicit continuation with the same task root", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const store = yield* SessionStore.Service
+      const original = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Task A" }), resume: false })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, original.admittedSeq)
+      for (const jobID of ["one", "two"])
+        yield* SessionInput.admit(database.db, events, {
+          id: SessionMessage.ID.create(),
+          sessionID,
+          prompt: Prompt.make({ text: "Continue Task A" }),
+          delivery: "queue",
+          completion: { type: "bash-completion", sourceMessageID: original.id, jobID },
+        })
+      yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(true)
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(true)
+      const history = yield* store.context(sessionID)
+      expect(history.filter((message) => message.type === "synthetic" && message.completion)).toHaveLength(2)
+      expect(SessionOutcome.requested(history).sourceMessageID).toBe(original.id)
+    }),
+  )
   it.effect("S1 host completion preserves original clauses, authorization and durable evidence", () =>
     Effect.gen(function* () {
       yield* setup

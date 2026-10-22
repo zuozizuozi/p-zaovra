@@ -134,6 +134,74 @@ test("S1 terminal waits deduplicate and clear busy after host release later than
   }
 })
 
+test("S1 old active idle snapshot cannot overwrite a newer step busy state", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const oldIdle = Promise.withResolvers<void>()
+  const requested = Promise.withResolvers<void>()
+  let terminal = false
+  let held = false
+  const { app, emit, sync } = await mount((url) => {
+    if (url.pathname === `/api/session/${sessionID}`) return json({ data: info })
+    if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/todo`) return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/wait`) {
+      terminal = true
+      return json({ data: {} })
+    }
+    if (url.pathname === "/api/session/active") {
+      if (terminal && !held) {
+        held = true
+        requested.resolve()
+        return oldIdle.promise.then(() => json({ data: {} }))
+      }
+      return json({ data: {} })
+    }
+    return undefined
+  }, tmp.path)
+  const start = (id: string) =>
+    emit(
+      global({
+        id,
+        type: "session.next.step.started",
+        properties: {
+          timestamp: 2,
+          sessionID,
+          assistantMessageID: id,
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+        },
+      }),
+    )
+  try {
+    await sync.session.sync(sessionID)
+    start("first")
+    emit(
+      global({
+        id: "first-end",
+        type: "session.next.step.ended",
+        properties: {
+          timestamp: 3,
+          sessionID,
+          assistantMessageID: "first",
+          finish: "stop",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      }),
+    )
+    await requested.promise
+    start("second")
+    await wait(() => sync.data.session_status[sessionID]?.type === "busy")
+    oldIdle.resolve()
+    await Bun.sleep(30)
+    expect(sync.data.session_status[sessionID]?.type).toBe("busy")
+  } finally {
+    oldIdle.resolve()
+    app.renderer.destroy()
+  }
+})
+
 test("session.next text events reach the visible sync message and part store", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")

@@ -37,12 +37,7 @@ const layer = Layer.effect(
     const unsubscribe = yield* events.listen((event) =>
       event.type === SessionExecution.Wake.type
         ? coordinator.wake(Schema.decodeUnknownSync(SessionExecution.Wake.data)(event.data).sessionID)
-        : event.type === SessionEvent.PromptAdmitted.type
-          ? Effect.suspend(() => {
-              const input = Schema.decodeUnknownSync(SessionEvent.PromptAdmitted.data)(event.data)
-              return input.completion ? Effect.void : coordinator.allowWake(input.sessionID)
-            })
-          : Effect.void,
+        : Effect.void,
     )
     yield* Effect.addFinalizer(() => unsubscribe)
 
@@ -51,6 +46,7 @@ const layer = Layer.effect(
       exclusive: coordinator.exclusive,
       interrupt: coordinator.interrupt,
       freezeWake: coordinator.freezeWake,
+      prepareWake: coordinator.prepareWake,
       resume: (sessionID, claim) => (claim ? coordinator.owned(sessionID, claim) : coordinator.run(sessionID)),
       wait: coordinator.wait,
       compact: Effect.fn("SessionExecution.compact")(function* (sessionID) {
