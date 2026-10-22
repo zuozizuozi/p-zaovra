@@ -165,6 +165,28 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live("335 services requested to stay running use preview and independent business verification", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withTool(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const definition = (yield* toolDefinitions(registry)).find((tool) => tool.name === "bash")!
+            expect(definition.description).toContain("start and keep running")
+            expect(definition.description).toContain("Web, API, database, or virtual machine")
+            expect(definition.description).toContain("background_kind=preview")
+            expect(definition.description).toContain("independent process")
+            expect(definition.description).toContain("business interface")
+            expect(definition.description).toContain("not just whether a port is listening")
+            expect(JSON.stringify(definition.inputSchema)).not.toContain("only for a local development/preview server")
+            expect(runs).toEqual([])
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
   for (const changed of [false, true])
     it.live(`O1 project shell cannot probe before authorization (changed=${changed})`, () =>
       Effect.acquireUseRelease(
@@ -566,7 +588,7 @@ describe("BashTool", () => {
                 [],
               )
               expect(outcome.state).toBe(
-                stage === "broken" ? "failed" : stage === "weakened" ? "completed_unverified" : "completed_verified",
+                stage === "fixed" ? "completed_verified" : "failed",
               )
             }
           }),
@@ -825,6 +847,15 @@ describe("BashTool", () => {
               output: {
                 structured: {
                   shell: ShellIdentity.resolve(),
+                  executionRecord: {
+                    id: expect.any(String),
+                    originCallID: "call-bash",
+                    sequence: expect.any(Number),
+                    started: expect.any(Number),
+                    completed: expect.any(Number),
+                    exit: 0,
+                    scope: { command: "pwd", cwd: realpathSync(tmp.path), targets: [] },
+                  },
                   exit: 0,
                   truncated: false,
                 },

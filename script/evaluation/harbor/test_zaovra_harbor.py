@@ -1,8 +1,102 @@
 import unittest
+import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Trajectory
 from zaovra_harbor import Zaovra
+
+class AttachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_attach_retains_backend_until_verifier_and_exact_cleanup(self):
+        calls = []
+        class Environment:
+            async def exec(self, command, **kwargs):
+                calls.append((command, kwargs))
+                if "--version" in command:
+                    return SimpleNamespace(return_code=0, stdout="fixture", stderr="")
+                if "nohup" in command:
+                    return SimpleNamespace(return_code=0, stdout="123\n456\n", stderr="")
+                if "cat" in command and "attach-backend.stdout" in command:
+                    return SimpleNamespace(return_code=0, stdout="zaovra server listening on http://127.0.0.1:4321", stderr="")
+                if " run " in command:
+                    return SimpleNamespace(return_code=0, stdout='{"type":"step_start"}\n{"type":"step_finish","event":{"properties":{"finish":"stop","usageReported":true,"tokens":{"input":1,"output":2}}}}\n', stderr="")
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as directory:
+            agent = Zaovra(logs_dir=Path(directory), revision="fixture", attach_backend=True)
+            environment = Environment()
+            await agent.setup(environment)
+            context = AgentContext()
+            await agent.run("Generic service request", environment, context)
+            self.assertEqual(context.metadata["execution_ownership"], "attach")
+            self.assertEqual(context.metadata["cli_exit_code"], 0)
+            self.assertIn("--attach http://127.0.0.1:4321", calls[-1][0])
+            self.assertFalse(any("kill -TERM" in command for command, _ in calls))
+            self.assertIsNotNone(agent.backend)  # The verifier can still use the service.
+            await agent.close_backend(environment)
+            self.assertIn("/proc/123/stat", calls[-1][0])
+            self.assertIn("456", calls[-1][0])
+            self.assertIn("kill -TERM 123", calls[-1][0])
+            self.assertIsNone(agent.backend)
+
+    async def test_timeout_stops_owned_backend_without_extending_task(self):
+        calls = []
+        class Environment:
+            async def exec(self, command, **kwargs):
+                calls.append(command)
+                if " run " in command:
+                    return SimpleNamespace(return_code=124, stdout="", stderr="timeout")
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as directory:
+            agent = Zaovra(logs_dir=Path(directory), attach_backend=True, timeout_sec=17)
+            agent.backend = {"pid": 123, "start": "456", "url": "http://127.0.0.1:4321"}
+            context = AgentContext()
+            with self.assertRaises(RuntimeError):
+                await agent.run("Generic service request", Environment(), context)
+            self.assertIn("17s", calls[0])
+            self.assertIn("kill -TERM 123", calls[-1])
+            self.assertIsNone(agent.backend)
+            self.assertEqual(context.metadata["cli_exit_code"], 124)
+            self.assertFalse(context.metadata["complete"])
+
+    async def test_attach_never_falls_back_to_local_without_ready_backend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            agent = Zaovra(logs_dir=Path(directory), attach_backend=True)
+            with self.assertRaisesRegex(RuntimeError, "must be ready"):
+                await agent.run("Generic task", None, AgentContext())
+
+    async def test_nonzero_artifact_still_keeps_backend_for_verifier(self):
+        calls = []
+        class Environment:
+            async def exec(self, command, **kwargs):
+                calls.append(command)
+                return SimpleNamespace(return_code=1, stdout="", stderr="unverified")
+        with tempfile.TemporaryDirectory() as directory:
+            agent = Zaovra(logs_dir=Path(directory), attach_backend=True)
+            agent.backend = {"pid": 123, "start": "456", "url": "http://127.0.0.1:4321"}
+            context = AgentContext()
+            with self.assertRaises(RuntimeError):
+                await agent.run("Generic task", Environment(), context)
+            self.assertEqual(len(calls), 1)
+            self.assertIsNotNone(agent.backend)
+            self.assertEqual(context.metadata["cli_exit_code"], 1)
+
+    async def test_transport_failure_stops_exact_backend_and_remains_unknown(self):
+        calls = []
+        class Environment:
+            async def exec(self, command, **kwargs):
+                calls.append(command)
+                if " run " in command:
+                    raise OSError("transport unavailable")
+                return SimpleNamespace(return_code=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as directory:
+            agent = Zaovra(logs_dir=Path(directory), attach_backend=True)
+            agent.backend = {"pid": 123, "start": "456", "url": "http://127.0.0.1:4321"}
+            context = AgentContext()
+            with self.assertRaises(OSError):
+                await agent.run("Generic task", Environment(), context)
+            self.assertIsNone(agent.backend)
+            self.assertTrue(context.metadata["usage_unknown"])
+            self.assertIn("kill -TERM 123", calls[-1])
 
 class TrajectoryTests(unittest.TestCase):
     def setUp(self):
