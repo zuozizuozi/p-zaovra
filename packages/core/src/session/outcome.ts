@@ -905,6 +905,7 @@ export function derive(
   ) {
     if (!review) missing.push("requirements review: submit verification_review before claiming completion")
     if (review) {
+      missing.push(...reviewContinuityProblems(turn, review, [...checks.values()], targets, snapshot))
       for (const [index, clause] of request.clauses.entries()) {
         if (request.entries[index].withdrawnBy) continue
         const items = review.items.filter((item) => item.requirement === index + 1)
@@ -919,6 +920,7 @@ export function derive(
           )
         )
           missing.push(`requirement ${index + 1} unverified: ${clause}`)
+        if (items.length === 1) missing.push(...reviewProblems(items[0]))
         if (items.length === 1)
           missing.push(
             ...items[0].evidence.flatMap((id) => {
@@ -991,6 +993,131 @@ export function derive(
   if ([...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution))
     return { ...base, state: "failed", runtime: "completed" }
   return { ...base, state: base.missing.length ? "completed_unverified" : "completed_verified", runtime: "completed" }
+}
+
+/** Scope declarations narrow evidence; they never certify a model's assertions. */
+export function reviewProblems(item: SessionOutcome.Review["items"][number]) {
+  const prefix = `requirement ${item.requirement}`
+  if (item.status !== "verified")
+    return item.note.trim()
+      ? []
+      : [`${prefix}: explain the resource, permission or capability reason for unverified scope`]
+  return [
+    ...(item.kind === "process"
+      ? []
+      : item.evidence.flatMap((callID) => {
+          const scopes = item.coverage?.filter((scope) => scope.callID === callID) ?? []
+          if (scopes.length !== 1) return [`${prefix}: check ${callID} needs exactly one evidence scope`]
+          const scope = scopes[0]
+          return [
+            ...(!scope.dimensions.length ||
+            !scope.inputScale.trim() ||
+            !scope.generalization.trim() ||
+            !scope.performance.trim()
+              ? [`${prefix}: check ${callID} has incomplete coverage, input scale, generalization or performance scope`]
+              : []),
+            ...(scope.dependencies === "unknown" ||
+            (["mock", "mixed"].includes(scope.dependencies) &&
+              (item.acceptance !== "interface" || scope.dimensions.some((dimension) => dimension !== "interface")))
+              ? [
+                  `${prefix}: check ${callID} ${scope.dependencies} dependencies cannot establish real acceptance; mock proves only the interface`,
+                ]
+              : []),
+            ...(["stale", "unknown"].includes(scope.artifacts)
+              ? [
+                  `${prefix}: check ${callID} artifact freshness is ${scope.artifacts}; a failed run cannot reuse an old artifact`,
+                ]
+              : []),
+            ...(scope.result !== "passed"
+              ? [`${prefix}: check ${callID} semantic result is ${scope.result}; exit zero does not close this check`]
+              : []),
+          ]
+        })),
+    ...(item.coverage ?? [])
+      .filter((scope) => !item.evidence.includes(scope.callID))
+      .map((scope) => `${prefix}: scope references unused check ${scope.callID}`),
+    ...(item.conditions === undefined
+      ? [`${prefix}: declare the status of user-checkable conditions (or [] when none)`]
+      : item.conditions
+          .filter((condition) => condition.status !== "met" || !condition.text.trim())
+          .map((condition) => `${prefix}: condition ${condition.status}: ${condition.text}`)),
+  ]
+}
+
+/** Rewording a review cannot erase an observed semantic failure or condition. */
+export function reviewContinuityProblems(
+  messages: readonly SessionMessage.Message[],
+  review: SessionOutcome.Review,
+  checks: readonly SessionOutcome.Check[],
+  targets: readonly { path: string; digest: string }[],
+  snapshot?: string,
+) {
+  const tools = executionTools(acceptanceHistory(messages))
+  const active = new Set(
+    requested(messages)
+      .entries.filter((entry) => !entry.withdrawnBy)
+      .map((entry) => entry.id),
+  )
+  const fresh = (check: SessionOutcome.Check) =>
+    checkFreshness(
+      check,
+      targets,
+      snapshot,
+      ExecutionContext.current(check.executionContext, ExecutionContext.approved(messages)),
+    ).fresh
+  return tools.flatMap((part, index) => {
+    if (part.name !== "verification_review" || part.state.status !== "completed") return []
+    const previous = Schema.decodeUnknownOption(SessionOutcome.Review)(part.state.structured.review)
+    if (Option.isNone(previous) || previous.value.userMessageID !== review.userMessageID) return []
+    return previous.value.items.flatMap((item) => {
+      if (!active.has(item.requirement)) return []
+      const current = review.items.find((entry) => entry.requirement === item.requirement)
+      const reruns = checks.filter(
+        (check) =>
+          check.exit === 0 &&
+          !check.execution &&
+          !check.supersededBy &&
+          fresh(check) &&
+          tools.slice(index + 1).some((tool) => toolChecks(tool).some((next) => next.callID === check.callID)) &&
+          current?.evidence.includes(check.callID) &&
+          current.coverage?.some((scope) => scope.callID === check.callID && scope.result === "passed"),
+      )
+      return [
+        ...(item.coverage ?? [])
+          .filter((scope) => scope.result === "failed")
+          .flatMap((scope) => {
+            const original = tools
+              .slice(0, index)
+              .flatMap(toolChecks)
+              .find((check) => check.callID === scope.callID)
+            if (
+              original &&
+              reruns.some(
+                (check) =>
+                  check.callID !== original.callID &&
+                  check.kind === original.kind &&
+                  check.command === original.command &&
+                  check.cwd === original.cwd &&
+                  (original.targets ?? []).every((target) => check.targets?.some((next) => next.path === target.path)),
+              )
+            )
+              return []
+            return [
+              `requirement ${item.requirement}: semantic failure (${scope.callID}) needs a fresh relevant rerun; rewriting the review is not evidence`,
+            ]
+          }),
+        ...(item.conditions ?? [])
+          .filter((condition) => condition.status === "unmet")
+          .flatMap((condition) =>
+            reruns.length && current?.conditions?.some((next) => next.text === condition.text && next.status === "met")
+              ? []
+              : [
+                  `requirement ${item.requirement}: unmet condition ${condition.text} needs a fresh check and an updated condition result`,
+                ],
+          ),
+      ]
+    })
+  })
 }
 
 /** Old single-check records and newer suite records share the same check contract. */

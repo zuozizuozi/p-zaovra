@@ -3331,6 +3331,20 @@ export type SessionsRecoverOutput = {
       readonly items: ReadonlyArray<{
         readonly requirement: number
         readonly evidence: ReadonlyArray<string>
+        readonly coverage?: ReadonlyArray<{
+          readonly callID: string
+          readonly dimensions: ReadonlyArray<
+            "content" | "structure" | "directories" | "types" | "metadata" | "behavior" | "performance" | "interface"
+          >
+          readonly inputScale: string
+          readonly generalization: string
+          readonly performance: string
+          readonly dependencies: "real" | "mock" | "mixed" | "none" | "unknown"
+          readonly artifacts: "fresh" | "not-applicable" | "stale" | "unknown"
+          readonly result: "passed" | "failed" | "unknown"
+        }>
+        readonly acceptance?: "real" | "interface"
+        readonly conditions?: ReadonlyArray<{ readonly text: string; readonly status: "met" | "unmet" | "unknown" }>
         readonly kind?: "result" | "process"
         readonly history?: ReadonlyArray<{
           readonly callID: string
@@ -3681,6 +3695,20 @@ export type SessionsOutcomeOutput = {
       readonly items: ReadonlyArray<{
         readonly requirement: number
         readonly evidence: ReadonlyArray<string>
+        readonly coverage?: ReadonlyArray<{
+          readonly callID: string
+          readonly dimensions: ReadonlyArray<
+            "content" | "structure" | "directories" | "types" | "metadata" | "behavior" | "performance" | "interface"
+          >
+          readonly inputScale: string
+          readonly generalization: string
+          readonly performance: string
+          readonly dependencies: "real" | "mock" | "mixed" | "none" | "unknown"
+          readonly artifacts: "fresh" | "not-applicable" | "stale" | "unknown"
+          readonly result: "passed" | "failed" | "unknown"
+        }>
+        readonly acceptance?: "real" | "interface"
+        readonly conditions?: ReadonlyArray<{ readonly text: string; readonly status: "met" | "unmet" | "unknown" }>
         readonly kind?: "result" | "process"
         readonly history?: ReadonlyArray<{
           readonly callID: string

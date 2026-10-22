@@ -1,3 +1,4 @@
+import { evidenceScope } from "./fixture/evidence-scope"
 import { expect, test } from "bun:test"
 import { DateTime, Schema } from "effect"
 import { RelativePath } from "@zaovra-ai/schema/schema"
@@ -569,7 +570,16 @@ test("review references distinguish replaced, stale, non-check and unknown IDs",
                 structured: {
                   review: {
                     userMessageID: user.id,
-                    items: [{ requirement: 1, status: "verified", evidence: [id], note: "checked" }],
+                    items: [
+                      {
+                        requirement: 1,
+                        status: "verified",
+                        evidence: [id],
+                        coverage: [evidenceScope(id)],
+                        conditions: [],
+                        note: "checked",
+                      },
+                    ],
                     unverified: [],
                   },
                 },
@@ -880,6 +890,8 @@ test("closing review gates every original clause, known gaps and stale evidence"
   const items = [1, 2].map((requirement) => ({
     requirement,
     evidence: ["checked"],
+    coverage: [evidenceScope("checked")],
+    conditions: [],
     status: "verified" as const,
     note: "Assertions executed",
   }))
@@ -1052,7 +1064,14 @@ test("historical execution proves process facts, never substitutes for current f
                         status: "verified",
                         note: "Original test failed before repair",
                       },
-                      { requirement: 2, evidence, status: "verified", note: "Current suite covers every key" },
+                      {
+                        requirement: 2,
+                        evidence,
+                        coverage: evidence.map(evidenceScope),
+                        conditions: [],
+                        status: "verified",
+                        note: "Current suite covers every key",
+                      },
                     ],
                     unverified: [],
                     notes: [{ text: "No cross-platform claim", requirements: [] }],

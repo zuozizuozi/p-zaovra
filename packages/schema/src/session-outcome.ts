@@ -89,12 +89,39 @@ export const Check = Schema.Struct({
   contractDigest: Schema.String.pipe(optional),
 }).annotate({ identifier: "SessionOutcome.Check" })
 export interface Check extends Schema.Schema.Type<typeof Check> {}
+export const EvidenceScope = Schema.Struct({
+  callID: Schema.String,
+  dimensions: Schema.Array(
+    Schema.Literals([
+      "content",
+      "structure",
+      "directories",
+      "types",
+      "metadata",
+      "behavior",
+      "performance",
+      "interface",
+    ]),
+  ),
+  inputScale: Schema.String,
+  generalization: Schema.String,
+  performance: Schema.String,
+  dependencies: Schema.Literals(["real", "mock", "mixed", "none", "unknown"]),
+  artifacts: Schema.Literals(["fresh", "not-applicable", "stale", "unknown"]),
+  result: Schema.Literals(["passed", "failed", "unknown"]),
+}).annotate({ identifier: "SessionOutcome.EvidenceScope" })
+export interface EvidenceScope extends Schema.Schema.Type<typeof EvidenceScope> {}
 export const Review = Schema.Struct({
   userMessageID: Schema.String,
   items: Schema.Array(
     Schema.Struct({
       requirement: Schema.Int,
       evidence: Schema.Array(Schema.String),
+      coverage: Schema.Array(EvidenceScope).pipe(optional),
+      acceptance: Schema.Literals(["real", "interface"]).pipe(optional),
+      conditions: Schema.Array(
+        Schema.Struct({ text: Schema.String, status: Schema.Literals(["met", "unmet", "unknown"]) }),
+      ).pipe(optional),
       kind: Schema.Literals(["result", "process"]).pipe(optional),
       history: Schema.Array(
         Schema.Struct({ callID: Schema.String, exit: Schema.Number, before: Schema.String.pipe(optional) }),

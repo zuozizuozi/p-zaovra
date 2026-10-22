@@ -1,3 +1,4 @@
+import { evidenceScope } from "./fixture/evidence-scope"
 import { BackgroundJob } from "@zaovra-ai/core/background-job"
 import { SessionProgress } from "@zaovra-ai/core/session/progress"
 import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
@@ -99,6 +100,8 @@ function privilegedTexts(request: LLMRequest | undefined) {
       !part.startsWith("Provider: ") &&
       !part.startsWith("Verification rules:") &&
       !part.startsWith("When several reads or checks are independent,") &&
+      !part.startsWith("For forensic investigation, recovery or database repair,") &&
+      !part.startsWith("Map every requirement to the actual checks and their coverage:") &&
       !part.startsWith("You are a coding assistant. Inspect relevant context,"),
   )
 }
@@ -4414,6 +4417,11 @@ describe("SessionRunnerLLM", () => {
   it.effect("review immediately identifies stale documentation evidence while reusing unchanged code evidence", () =>
     Effect.gen(function* () {
       yield* setup
+      yield* Layer.build(
+        VerificationReviewTool.layer.pipe(
+          Layer.provide(Layer.mock(PermissionV2.Service, { assert: () => Effect.void })),
+        ),
+      )
       const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
         Effect.promise(() => dir[Symbol.asyncDispose]()),
       )
@@ -4468,8 +4476,22 @@ describe("SessionRunnerLLM", () => {
         call("change-docs", "edit", {}),
         call("inspect-freshness", "verification_review", {
           items: [
-            { requirement: 1, evidence: ["code"], status: "verified", note: "code" },
-            { requirement: 2, evidence: ["docs"], status: "verified", note: "docs" },
+            {
+              requirement: 1,
+              evidence: ["code"],
+              coverage: [evidenceScope("code")],
+              conditions: [],
+              status: "verified",
+              note: "code",
+            },
+            {
+              requirement: 2,
+              evidence: ["docs"],
+              coverage: [evidenceScope("docs")],
+              conditions: [],
+              status: "verified",
+              note: "docs",
+            },
           ],
           unverified: [],
         }),
@@ -4508,13 +4530,7 @@ describe("SessionRunnerLLM", () => {
           [],
         ).state,
       ).toBe("completed_unverified")
-    }).pipe(
-      Effect.provide(
-        VerificationReviewTool.layer.pipe(
-          Layer.provide(Layer.mock(PermissionV2.Service, { assert: () => Effect.void })),
-        ),
-      ),
-    ),
+    }),
   )
 
   it.effect("persists a real requirement review and keeps declared gaps unverified despite a done message", () =>
@@ -4637,7 +4653,16 @@ describe("SessionRunnerLLM", () => {
         call("check", "bash", {}),
         stop,
         call("review", "verification_review", {
-          items: [{ requirement: 1, evidence: ["check"], status: "verified", note: "All own string keys asserted" }],
+          items: [
+            {
+              requirement: 1,
+              evidence: ["check"],
+              coverage: [evidenceScope("check")],
+              conditions: [],
+              status: "verified",
+              note: "All own string keys asserted",
+            },
+          ],
           unverified: [],
           notes: [
             { text: "Other platforms not tested", requirements: [] },
@@ -7634,7 +7659,16 @@ it.live("K1 seals verified delivery across resume and reopens changed artifacts"
     responses = [
       call("check", "bash", {}),
       call("review", "verification_review", {
-        items: [{ requirement: 1, evidence: ["check"], status: "verified", note: "Observed check" }],
+        items: [
+          {
+            requirement: 1,
+            evidence: ["check"],
+            coverage: [evidenceScope("check")],
+            conditions: [],
+            status: "verified",
+            note: "Observed check",
+          },
+        ],
         unverified: [],
       }),
       stop,

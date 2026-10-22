@@ -6713,11 +6713,30 @@ export type SessionOutcomeTermination4 = {
   source?: "user" | "permission" | "process-exit" | "placement-change"
 }
 
+export type SessionOutcomeEvidenceScope = {
+  callID: string
+  dimensions: Array<
+    "content" | "structure" | "directories" | "types" | "metadata" | "behavior" | "performance" | "interface"
+  >
+  inputScale: string
+  generalization: string
+  performance: string
+  dependencies: "real" | "mock" | "mixed" | "none" | "unknown"
+  artifacts: "fresh" | "not-applicable" | "stale" | "unknown"
+  result: "passed" | "failed" | "unknown"
+}
+
 export type SessionOutcomeReview = {
   userMessageID: string
   items: Array<{
     requirement: number
     evidence: Array<string>
+    coverage?: Array<SessionOutcomeEvidenceScope>
+    acceptance?: "real" | "interface"
+    conditions?: Array<{
+      text: string
+      status: "met" | "unmet" | "unknown"
+    }>
     kind?: "result" | "process"
     history?: Array<{
       callID: string

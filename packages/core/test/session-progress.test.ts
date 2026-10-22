@@ -1,6 +1,76 @@
 import { expect, test } from "bun:test"
 import { ConfigExperimental } from "../src/config/experimental"
 import { SessionProgress } from "../src/session/progress"
+import { evidenceScope } from "./fixture/evidence-scope"
+
+test("331 deadline facts give a delivery checkpoint only after half of the explicit window", () => {
+  const input = {
+    now: 149,
+    state: { activeMs: 0, request: "one", requestStarted: 100 },
+    turns: 1,
+    step: 1,
+    limit: 100,
+    tokens: 0,
+    unreported: 0,
+  }
+  expect(SessionProgress.facts({ ...input, deadline: 200 })).not.toContain("Wall-clock delivery checkpoint")
+  expect(SessionProgress.facts({ ...input, now: 150, deadline: 200 })).toContain("50ms remain")
+  expect(SessionProgress.facts({ ...input, now: 150 })).not.toContain("Wall-clock delivery checkpoint")
+})
+
+test("331 changing coverage or conditions reopens closing while call ID changes do not", () => {
+  const input = {
+    requirements: ["original"],
+    required: [],
+    environment: {},
+    targets: [],
+    missing: [],
+    checks: [{ kind: "test" as const, command: "node check.js", exit: 0, callID: "a" }],
+    review: {
+      userMessageID: "user",
+      items: [
+        {
+          requirement: 1,
+          evidence: ["a"],
+          status: "verified" as const,
+          note: "passed",
+          coverage: [evidenceScope("a")],
+          conditions: [],
+        },
+      ],
+      unverified: [],
+    },
+  }
+  const key = SessionProgress.closingKey(input)
+  expect(
+    SessionProgress.closingKey({
+      ...input,
+      checks: [{ ...input.checks[0], callID: "b" }],
+      review: {
+        ...input.review,
+        items: [{ ...input.review.items[0], evidence: ["b"], coverage: [evidenceScope("b")] }],
+      },
+    }),
+  ).toBe(key)
+  expect(
+    SessionProgress.closingKey({
+      ...input,
+      review: {
+        ...input.review,
+        items: [{ ...input.review.items[0], coverage: [{ ...evidenceScope("a"), dependencies: "mock" }] }],
+      },
+    }),
+  ).not.toBe(key)
+  expect(
+    SessionProgress.closingKey({
+      ...input,
+      review: {
+        ...input.review,
+        items: [{ ...input.review.items[0], conditions: [{ text: "prefix", status: "unmet" }] }],
+      },
+    }),
+  ).not.toBe(key)
+})
 
 test("K3 closing identity preserves changed failure evidence and specific unresolved reasons", () => {
   const check = { kind: "test" as const, command: "node check.js", exit: 1, callID: "a", resultDigest: "failure-one" }

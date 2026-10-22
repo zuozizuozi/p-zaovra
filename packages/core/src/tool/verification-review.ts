@@ -18,6 +18,8 @@ import {
   historyCandidates,
   history,
   requested,
+  reviewProblems,
+  reviewContinuityProblems,
   toolChecks,
 } from "../session/outcome"
 import { PermissionV2 } from "../permission"
@@ -92,7 +94,8 @@ export const layer = Layer.effectDiscard(
             "For history, copy a {callID, exit} entry from historyCandidates exactly; these are the only eligible references in the current request. executions also lists other tools solely for optional before ordering; do not use review/edit/read calls as history evidence. The host validates exit and ordering. Reference corrections do not require rerunning passing checks. " +
             "Checks include host-computed fresh and changedTargets. Reuse current passing checks and their requirement mappings; rerun only checks whose dependencies changed. An artifact observation changing requires an updated review, not automatically a new code test. A declared check target remains a dependency even if it is documentation; never drop it retroactively to salvage stale evidence. " +
             "Requirement sourceMessageID identifies the user's original wording. Entries with withdrawnBy were explicitly withdrawn by that user message; keep their IDs reserved but do not demand those deliverables. Other conflicts must remain explained and unverified. Host artifacts are file observations, not semantic proof. Repair reported missing artifacts, then update the review. " +
-            "Record final requirement review; does not run commands or certify semantic correctness. Call {} for numbered ORIGINAL clauses, check callIDs and historical executions. Submit items for EVERY active clause (without withdrawnBy): requirement=id, status=verified or unverified, evidence=[current passing check callIDs], note=what is asserted or missing. Default kind=result requires current passing evidence. Use kind=process ONLY for a clause about actions or execution order, with history=[{callID, exit, before?: later executed tool callID}]; observed nonzero exits are valid historical facts, not proof of a working product. Mixed process/function clauses need current evidence too. Never reclassify functionality as process to bypass checks. Log/event IDs are not callIDs. Put unmet or uncertain USER requirements and narrowed interpretations in unverified and mark affected items unverified. Optional notes=[{text, requirements:[]}] is for supplementary context: verified behavior, resolved historical errors, or extra facts outside requested scope such as unrequested platform coverage. Its requirement IDs identify related clauses, NOT a gap; use [] for unrelated context. Never hide unmet requirements in notes. Notes cannot replace any original clause or waive failures; uncertain scope belongs in unverified. Do not demand unrequested features merely to achieve completion. Rerun affected checks after repairs and update this review. An earlier failed command that has been correctly reverified is history, not a remaining gap.",
+            "For every result item, map EACH evidence callID to exactly one coverage entry: {callID, dimensions:[content|structure|directories|types|metadata|behavior|performance|interface], inputScale, generalization, performance, dependencies:real|mock|mixed|none|unknown, artifacts:fresh|not-applicable|stale|unknown, result:passed|failed|unknown}. Describe actual input scale, non-example coverage and requested performance metrics; say not applicable with the reason when appropriate. Mock only proves interface behavior and cannot establish real acceptance; record a separate real check or leave the requirement unverified. Acceptance defaults to real; set acceptance=interface ONLY when the user's actual requirement is limited to an interface contract. Never narrow a functionality requirement to interface to bypass real validation. File presence is not freshness: after a failed run, inspect newly produced artifacts rather than reusing old outputs. These declarations are evidence limits, not host certification. Include conditions:[{text,status:met|unmet|unknown}] for checkable user constraints such as prefixes, example outputs and expected ranges, or [] when none. Never fabricate or fill in data from expected constraints. Semantic FAIL or unexecuted assertions remain open even if the command exited zero. " +
+            "Record final requirement review; does not run commands or certify semantic correctness. Call {} for numbered ORIGINAL clauses, check callIDs and historical executions. Submit items for EVERY active clause (without withdrawnBy): requirement=id, status=verified or unverified, evidence=[current passing check callIDs], note=what is asserted or missing. Default kind=result requires current passing evidence. Use kind=process ONLY for a clause about actions or execution order, with history=[{callID, exit, before?: later executed tool callID}]; observed nonzero exits are valid historical facts, not proof of a working product. Mixed process/function clauses need current evidence too. Never reclassify functionality as process to bypass checks. Log/event IDs are not callIDs. Put unmet or uncertain USER requirements and narrowed interpretations in unverified and mark affected items unverified; explain the resource, permission or capability reason if stopping honestly. Optional notes=[{text, requirements:[]}] is for supplementary context: verified behavior, resolved historical errors, or extra facts outside requested scope such as unrequested platform coverage. Its requirement IDs identify related clauses, NOT a gap; use [] for unrelated context. Never hide unmet requirements in notes. Notes cannot replace any original clause or waive failures; uncertain scope belongs in unverified. Do not demand unrequested features merely to achieve completion. Rerun affected checks after repairs and update this review. An earlier failed command that has been correctly reverified is history, not a remaining gap.",
           input: Input,
           output: Output,
           execute: (input, context) =>
@@ -141,6 +144,19 @@ export const layer = Layer.effectDiscard(
                 executions: observed,
                 historyCandidates: historyCandidates(observed),
                 problems: [
+                  ...(input.items && request.userMessageID
+                    ? reviewContinuityProblems(
+                        messages,
+                        {
+                          userMessageID: request.userMessageID,
+                          items: input.items,
+                          unverified: input.unverified ?? [],
+                        },
+                        retained,
+                        targets,
+                        snapshot,
+                      )
+                    : []),
                   ...(input.items
                     ? request.entries
                         .filter(
@@ -168,6 +184,7 @@ export const layer = Layer.effectDiscard(
                         `Requirement ${item.requirement}: ${item.path}: ${item.problem}; repair the requested artifact and update this review.`,
                     ),
                   ...(input.items ?? []).flatMap((item) => [
+                    ...reviewProblems(item),
                     ...item.evidence.flatMap((id) => {
                       const problem = checkReferenceProblem(id, messages, retained, targets, snapshot)
                       return problem ? [`Requirement ${item.requirement}: ${problem}`] : []

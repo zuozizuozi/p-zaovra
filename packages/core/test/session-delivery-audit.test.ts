@@ -1,3 +1,4 @@
+import { evidenceScope } from "./fixture/evidence-scope"
 import { expect, test } from "bun:test"
 import { DateTime, Effect } from "effect"
 import path from "node:path"
@@ -190,7 +191,16 @@ test("host outcome rejects missing or stale artifacts and accepts repair without
               artifacts: recorded,
               review: {
                 userMessageID: user.id,
-                items: [{ requirement: 1, evidence: ["green"], status: "verified", note: "delivered" }],
+                items: [
+                  {
+                    requirement: 1,
+                    evidence: ["green"],
+                    coverage: [evidenceScope("green")],
+                    conditions: [],
+                    status: "verified",
+                    note: "delivered",
+                  },
+                ],
                 unverified: [],
               },
             },

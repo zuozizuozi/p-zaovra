@@ -105,7 +105,7 @@ test("real Bash permission denial prevents a process while allowed success and n
               input: { command: "bun probe.mjs 0", verification: "lint" },
               content: [],
               structured: {},
-              error: { type: "unknown", message: denied.result.value, metadata: denied.errorMetadata },
+              error: { type: "unknown", message: String(denied.result.value), metadata: denied.errorMetadata },
             },
           },
         ],
