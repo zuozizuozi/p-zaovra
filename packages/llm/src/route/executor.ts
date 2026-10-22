@@ -9,22 +9,15 @@ import {
   HttpClientResponse,
 } from "effect/unstable/http"
 import {
-  AuthenticationReason,
-  ContentPolicyReason,
   HttpContext,
   HttpRateLimitDetails,
   HttpRequestDetails,
   HttpResponseDetails,
-  InvalidRequestReason,
   LLMError,
   type LLMEvent,
-  ProviderInternalReason,
-  QuotaExceededReason,
-  RateLimitReason,
   TransportReason,
-  UnknownProviderReason,
 } from "../schema"
-import { isContextOverflow } from "../provider-error"
+import { providerFailure } from "../provider-error"
 
 export interface Interface {
   readonly execute: (
@@ -33,6 +26,11 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/LLM/RequestExecutor") {}
+
+/** Session-owned recovery observes each physical request and decides when to resend. */
+export const AutomaticRetries = Context.Reference<boolean>("@zaovra/LLM/AutomaticRetries", {
+  defaultValue: () => true,
+})
 
 export const RetryObserver = Context.Reference<
   (input: { attempt: number; delayMs: number; error: LLMError }) => Effect.Effect<void>
@@ -286,72 +284,16 @@ const statusReason = (input: {
   readonly rateLimit?: HttpRateLimitDetails | undefined
   readonly http: HttpContext
 }) => {
-  const body = `${input.http.body ?? ""} ${input.message}`
-  if (/content[-_\s]?policy|content_filter|safety/i.test(body)) {
-    return new ContentPolicyReason({ message: input.message, http: input.http })
-  }
-  if (
-    /insufficient[-_\s]?(?:quota|balance|credits)|quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|余额不足|额度不足/i.test(
-      body,
-    )
+  const decoded = input.http.body
+    ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(input.http.body))
+    : undefined
+  const root = decoded !== null && typeof decoded === "object" ? (decoded as Record<string, unknown>) : {}
+  const error = root.error !== null && typeof root.error === "object" ? (root.error as Record<string, unknown>) : {}
+  const code = [error.code, error.type, root.code, root.type].find(
+    (value): value is string => typeof value === "string",
   )
-    return new QuotaExceededReason({ message: input.message, http: input.http })
-  if ([401, 402, 403].includes(input.status)) {
-    if (/rate[-_\s]?limit|too many requests|throttl|请求频率|限流/i.test(body))
-      return new RateLimitReason({
-        message: input.message,
-        retryAfterMs: input.retryAfterMs,
-        rateLimit: input.rateLimit,
-        http: input.http,
-      })
-    if (/overload|over capacity|temporarily unavailable|过载|暂时不可用/i.test(body))
-      return new ProviderInternalReason({
-        message: input.message,
-        status: input.status,
-        retryAfterMs: input.retryAfterMs,
-        http: input.http,
-      })
-  }
-  if (input.status === 402) return new QuotaExceededReason({ message: input.message, http: input.http })
-  if (input.status === 401) {
-    return new AuthenticationReason({ message: input.message, kind: "invalid", http: input.http })
-  }
-  if (input.status === 403) {
-    return new AuthenticationReason({ message: input.message, kind: "insufficient-permissions", http: input.http })
-  }
-  if (input.status === 429) {
-    if (/insufficient[-_\s]?quota|quota[-_\s]?exceeded|free-models-per-day|openrouter_free_tier_daily/i.test(body)) {
-      return new QuotaExceededReason({ message: input.message, http: input.http })
-    }
-    return new RateLimitReason({
-      message: input.message,
-      retryAfterMs: input.retryAfterMs,
-      rateLimit: input.rateLimit,
-      http: input.http,
-    })
-  }
-  if (
-    input.status === 400 ||
-    input.status === 404 ||
-    input.status === 409 ||
-    input.status === 413 ||
-    input.status === 422
-  ) {
-    return new InvalidRequestReason({
-      message: input.message,
-      classification: isContextOverflow(body) ? "context-overflow" : undefined,
-      http: input.http,
-    })
-  }
-  if (input.status >= 500 || retryableStatus(input.status)) {
-    return new ProviderInternalReason({
-      message: input.message,
-      status: input.status,
-      retryAfterMs: input.retryAfterMs,
-      http: input.http,
-    })
-  }
-  return new UnknownProviderReason({ message: input.message, status: input.status, http: input.http })
+  const type = [error.type, root.type].find((value): value is string => typeof value === "string")
+  return providerFailure({ ...input, code, type })
 }
 
 const statusError =
@@ -440,6 +382,7 @@ const RetryBudget = Context.Reference<{ used: number } | undefined>("@zaovra/LLM
 
 const waitForRetry = (error: LLMError, budget: { used: number }) =>
   Effect.gen(function* () {
+    if (!(yield* AutomaticRetries)) return yield* error
     if (budget.used >= MAX_RETRIES) return yield* error
     const attempt = budget.used++
     const delay = yield* retryDelay(error, attempt)

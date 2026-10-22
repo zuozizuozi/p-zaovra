@@ -24,6 +24,26 @@ const request = LLM.request({
   generation: { maxTokens: 20, temperature: 0 },
 })
 
+it.effect("S2 classifies invalid request nested in an actual error frame", () =>
+  Effect.gen(function* () {
+    const events = yield* LLMClient.stream(request).pipe(
+      Stream.runCollect,
+      Effect.provide(
+        fixedResponse(
+          sseEvents({
+            type: "error",
+            error: { code: "invalid_value", type: "invalid_request_error", message: "unsupported request" },
+          }),
+        ),
+      ),
+    )
+    expect(events.find((event) => event.type === "provider-error")).toMatchObject({
+      code: "invalid_value",
+      reason: { _tag: "InvalidRequest" },
+    })
+  }),
+)
+
 const configEnv = (env: Record<string, string>) => Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))
 
 it.effect("K2 retains Responses model and fingerprint", () =>
@@ -1364,7 +1384,7 @@ describe("OpenAI Responses route", () => {
       // sometimes-generic provider message. The bare message alone meant
       // production errors like rate limits were indistinguishable from
       // unrelated stream failures.
-      expect(response.events).toEqual([{ type: "provider-error", message: "rate_limit_exceeded: Slow down" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "rate_limit_exceeded: Slow down" }])
     }),
   )
 
@@ -1374,7 +1394,7 @@ describe("OpenAI Responses route", () => {
         Effect.provide(fixedResponse(sseEvents({ type: "error", code: "internal_error" }))),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "internal_error" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "internal_error" }])
     }),
   )
 
@@ -1384,7 +1404,7 @@ describe("OpenAI Responses route", () => {
         Effect.provide(fixedResponse(sseEvents({ type: "error", code: "internal_error", message: "" }))),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "internal_error" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "internal_error" }])
     }),
   )
 
@@ -1408,7 +1428,9 @@ describe("OpenAI Responses route", () => {
         ),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "server_error: Upstream model unavailable" }])
+      expect(response.events).toMatchObject([
+        { type: "provider-error", message: "server_error: Upstream model unavailable" },
+      ])
     }),
   )
 
@@ -1425,7 +1447,7 @@ describe("OpenAI Responses route", () => {
         ),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "invalid_prompt" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "invalid_prompt" }])
     }),
   )
 
@@ -1447,7 +1469,7 @@ describe("OpenAI Responses route", () => {
         ),
       )
 
-      expect(response.events).toEqual([
+      expect(response.events).toMatchObject([
         {
           type: "provider-error",
           message: "context_length_exceeded: prompt too long",
@@ -1463,7 +1485,7 @@ describe("OpenAI Responses route", () => {
         Effect.provide(fixedResponse(sseEvents({ type: "error" }))),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "OpenAI Responses stream error" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "OpenAI Responses stream error" }])
     }),
   )
 
@@ -1473,7 +1495,7 @@ describe("OpenAI Responses route", () => {
         Effect.provide(fixedResponse(sseEvents({ type: "response.failed", response: { id: "resp_failed_3" } }))),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "OpenAI Responses response failed" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "OpenAI Responses response failed" }])
     }),
   )
 
@@ -1511,7 +1533,7 @@ it.effect("accepts the recorded HTTP2 interruption with an explicitly null param
         ),
       ),
     )
-    expect(response.events).toEqual([
+    expect(response.events).toMatchObject([
       { type: "provider-error", message: "upstream_http2_stream_error: Upstream HTTP/2 stream failed" },
     ])
   }),
@@ -1537,7 +1559,7 @@ it.effect("preserves the recorded overloaded response.failed code and message", 
         ),
       ),
     )
-    expect(response.events).toEqual([
+    expect(response.events).toMatchObject([
       {
         type: "provider-error",
         message: "server_error: Our servers are currently overloaded. Please try again later.",
@@ -1564,7 +1586,7 @@ it.effect("prefers outer then event.error then response.error fields, including 
           ),
         ),
       )
-      expect(response.events[0]).toEqual({
+      expect(response.events[0]).toMatchObject({
         type: "provider-error",
         message: fields.code
           ? "outer: direct"

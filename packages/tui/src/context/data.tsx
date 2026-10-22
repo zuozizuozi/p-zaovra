@@ -190,6 +190,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             message.prepend(draft, {
               id: event.data.messageID,
               type: "synthetic",
+              recovery: event.data.recovery,
               sessionID: event.data.sessionID,
               text: event.data.text,
               time: { created: event.data.timestamp },
@@ -271,7 +272,10 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         case "session.next.text.ended":
           message.update(event.data.sessionID, (draft) => {
             const match = message.latestText(message.assistant(draft, event.data.assistantMessageID), event.data.textID)
-            if (match) match.text = event.data.text
+            if (match) {
+              match.text = event.data.text
+              match.superseded = event.data.superseded
+            }
           })
           break
         case "session.next.tool.input.started":
@@ -380,6 +384,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             )
             if (match) {
               match.text = event.data.text
+              match.superseded = event.data.superseded
               if (event.data.providerMetadata !== undefined) match.providerMetadata = event.data.providerMetadata
             }
           })

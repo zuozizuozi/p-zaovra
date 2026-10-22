@@ -46,6 +46,7 @@ export function safetyMetadata(metadata: Readonly<Record<string, unknown>> | und
       "timeout",
       "cancelled",
       "non-zero-exit",
+      "output-unconfirmed",
     ].includes(String(metadata.reason))
   )
     return { phase: "execution", reason: String(metadata.reason) }

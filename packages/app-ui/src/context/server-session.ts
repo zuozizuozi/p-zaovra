@@ -1079,6 +1079,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         textID?: string
         reasoningID?: string
         text: string
+        superseded?: boolean
       }
       const id = props.textID ?? props.reasoningID
       const partID = id ? adaptPartID(props.assistantMessageID, id) : undefined
@@ -1090,7 +1091,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           properties: {
             part: {
               ...current,
-              text: props.text,
+              text: props.superseded
+                ? `[被替代的未完成${current.type === "reasoning" ? "推理" : "输出"}]\n${props.text}`
+                : props.text,
+              metadata: { ...current.metadata, ...(props.superseded ? { superseded: true } : {}) },
               ...(current.type === "reasoning" ? { time: { ...current.time, end: props.timestamp } } : {}),
             },
           },
@@ -1139,7 +1143,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       event.type === "session.next.tool.failed" ||
       event.type === "session.next.shell.started" ||
       event.type === "session.next.shell.ended" ||
-      event.type === "session.next.compaction.ended"
+      event.type === "session.next.compaction.ended" ||
+      event.type === "session.next.synthetic"
     ) {
       if (eventID) refreshV2(eventID)
       return

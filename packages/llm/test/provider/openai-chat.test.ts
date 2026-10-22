@@ -28,6 +28,23 @@ const request = LLM.request({
   generation: { maxTokens: 20, temperature: 0 },
 })
 
+it.effect("S2 preserves invalid request codes from error-only Chat frames", () =>
+  Effect.gen(function* () {
+    const events = yield* LLMClient.stream(request).pipe(
+      Stream.runCollect,
+      Effect.provide(
+        fixedResponse(
+          sseEvents({ error: { code: "invalid_value", type: "invalid_request_error", message: "invalid request" } }),
+        ),
+      ),
+    )
+    expect(events).toMatchObject([
+      { type: "provider-error", code: "invalid_value", reason: { _tag: "InvalidRequest" } },
+    ])
+    expect(events).toHaveLength(1)
+  }),
+)
+
 describe("OpenAI Chat route", () => {
   it.effect("K2 retains response model and fingerprint even when trailing usage omits them", () =>
     Effect.gen(function* () {

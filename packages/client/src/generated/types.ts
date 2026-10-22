@@ -1027,6 +1027,13 @@ export type SessionsContextOutput = {
           readonly sourceMessageID: string
           readonly jobID: string
         }
+        readonly recovery?: {
+          readonly id: string
+          readonly started: number
+          readonly ended: number
+          readonly attempts: number
+          readonly phase: "recovered" | "stopped" | "interrupted"
+        }
         readonly type: "synthetic"
       }
     | {
@@ -1209,11 +1216,12 @@ export type SessionsContextOutput = {
         readonly inputSequence?: number
         readonly contextEpoch?: number
         readonly content: ReadonlyArray<
-          | { readonly type: "text"; readonly id: string; readonly text: string }
+          | { readonly type: "text"; readonly id: string; readonly text: string; readonly superseded?: boolean }
           | {
               readonly type: "reasoning"
               readonly id: string
               readonly text: string
+              readonly superseded?: boolean
               readonly providerMetadata?: { readonly [x: string]: { readonly [x: string]: JsonValue } }
               readonly time?: { readonly created: number; readonly completed?: number }
             }
@@ -1343,7 +1351,7 @@ export type SessionsHistoryOutput = {
         readonly data: {
           readonly timestamp: number
           readonly sessionID: string
-          readonly category: "continuation" | "closing" | "stagnation" | "cache"
+          readonly category: "continuation" | "closing" | "stagnation" | "cache" | "operation" | "recovery"
           readonly details: JsonValue
         }
       }
@@ -1576,6 +1584,13 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly messageID: string
           readonly text: string
+          readonly recovery?: {
+            readonly id: string
+            readonly started: number
+            readonly ended: number
+            readonly attempts: number
+            readonly phase: "recovered" | "stopped" | "interrupted"
+          }
         }
       }
     | {
@@ -1891,6 +1906,7 @@ export type SessionsHistoryOutput = {
           readonly assistantMessageID: string
           readonly textID: string
           readonly text: string
+          readonly superseded?: boolean
         }
       }
     | {
@@ -2031,6 +2047,7 @@ export type SessionsHistoryOutput = {
           readonly assistantMessageID: string
           readonly reasoningID: string
           readonly text: string
+          readonly superseded?: boolean
           readonly providerMetadata?: { readonly [x: string]: { readonly [x: string]: JsonValue } }
         }
       }
@@ -2182,7 +2199,7 @@ export type SessionsEventsOutput =
       readonly data: {
         readonly timestamp: number
         readonly sessionID: string
-        readonly category: "continuation" | "closing" | "stagnation" | "cache"
+        readonly category: "continuation" | "closing" | "stagnation" | "cache" | "operation" | "recovery"
         readonly details: JsonValue
       }
     }
@@ -2415,6 +2432,13 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly messageID: string
         readonly text: string
+        readonly recovery?: {
+          readonly id: string
+          readonly started: number
+          readonly ended: number
+          readonly attempts: number
+          readonly phase: "recovered" | "stopped" | "interrupted"
+        }
       }
     }
   | {
@@ -2730,6 +2754,7 @@ export type SessionsEventsOutput =
         readonly assistantMessageID: string
         readonly textID: string
         readonly text: string
+        readonly superseded?: boolean
       }
     }
   | {
@@ -2870,6 +2895,7 @@ export type SessionsEventsOutput =
         readonly assistantMessageID: string
         readonly reasoningID: string
         readonly text: string
+        readonly superseded?: boolean
         readonly providerMetadata?: { readonly [x: string]: { readonly [x: string]: unknown } }
       }
     }
@@ -3805,6 +3831,13 @@ export type SessionsMessageOutput = {
           readonly sourceMessageID: string
           readonly jobID: string
         }
+        readonly recovery?: {
+          readonly id: string
+          readonly started: number
+          readonly ended: number
+          readonly attempts: number
+          readonly phase: "recovered" | "stopped" | "interrupted"
+        }
         readonly type: "synthetic"
       }
     | {
@@ -3987,11 +4020,12 @@ export type SessionsMessageOutput = {
         readonly inputSequence?: number
         readonly contextEpoch?: number
         readonly content: ReadonlyArray<
-          | { readonly type: "text"; readonly id: string; readonly text: string }
+          | { readonly type: "text"; readonly id: string; readonly text: string; readonly superseded?: boolean }
           | {
               readonly type: "reasoning"
               readonly id: string
               readonly text: string
+              readonly superseded?: boolean
               readonly providerMetadata?: { readonly [x: string]: { readonly [x: string]: JsonValue } }
               readonly time?: { readonly created: number; readonly completed?: number }
             }
@@ -6772,6 +6806,13 @@ export type MessagesListOutput = {
           readonly sourceMessageID: string
           readonly jobID: string
         }
+        readonly recovery?: {
+          readonly id: string
+          readonly started: number
+          readonly ended: number
+          readonly attempts: number
+          readonly phase: "recovered" | "stopped" | "interrupted"
+        }
         readonly type: "synthetic"
       }
     | {
@@ -6954,11 +6995,12 @@ export type MessagesListOutput = {
         readonly inputSequence?: number
         readonly contextEpoch?: number
         readonly content: ReadonlyArray<
-          | { readonly type: "text"; readonly id: string; readonly text: string }
+          | { readonly type: "text"; readonly id: string; readonly text: string; readonly superseded?: boolean }
           | {
               readonly type: "reasoning"
               readonly id: string
               readonly text: string
+              readonly superseded?: boolean
               readonly providerMetadata?: { readonly [x: string]: { readonly [x: string]: JsonValue } }
               readonly time?: { readonly created: number; readonly completed?: number }
             }

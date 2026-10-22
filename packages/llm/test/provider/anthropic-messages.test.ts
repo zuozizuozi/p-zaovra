@@ -574,7 +574,7 @@ describe("Anthropic Messages route", () => {
 
       // Prefix the error type so consumers can distinguish overloads, rate
       // limits, and quota errors without parsing the message string.
-      expect(response.events).toEqual([{ type: "provider-error", message: "overloaded_error: Overloaded" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "overloaded_error: Overloaded" }])
     }),
   )
 
@@ -591,7 +591,7 @@ describe("Anthropic Messages route", () => {
         ),
       )
 
-      expect(response.events).toEqual([
+      expect(response.events).toMatchObject([
         {
           type: "provider-error",
           message: "invalid_request_error: prompt is too long: 210000 tokens",
@@ -607,7 +607,7 @@ describe("Anthropic Messages route", () => {
         Effect.provide(fixedResponse(sseEvents({ type: "error", error: { type: "overloaded_error", message: "" } }))),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "overloaded_error" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "overloaded_error" }])
     }),
   )
 
@@ -617,7 +617,7 @@ describe("Anthropic Messages route", () => {
         Effect.provide(fixedResponse(sseEvents({ type: "error" }))),
       )
 
-      expect(response.events).toEqual([{ type: "provider-error", message: "Anthropic Messages stream error" }])
+      expect(response.events).toMatchObject([{ type: "provider-error", message: "Anthropic Messages stream error" }])
     }),
   )
 

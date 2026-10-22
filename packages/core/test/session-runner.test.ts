@@ -12,6 +12,9 @@ import {
   LLMEvent,
   Model,
   TransportReason,
+  RateLimitReason,
+  ProviderInternalReason,
+  QuotaExceededReason,
   InvalidRequestReason,
   type LLMClientShape,
   type LLMRequest,
@@ -82,7 +85,7 @@ import { ModelV2 } from "@zaovra-ai/core/model"
 import { Location } from "@zaovra-ai/core/location"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
-import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
+import { Cause, Clock, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
@@ -112,6 +115,7 @@ let response: LLMEvent[] = []
 let responses: (LLMEvent[] | LLMError)[] | undefined
 let responseStream: Stream.Stream<LLMEvent, LLMError> | undefined
 let replayProvider = false
+let replayFailures = 0
 const replayBodies: string[] = []
 let streamGate: Deferred.Deferred<void> | undefined
 let streamStarted: Deferred.Deferred<void> | undefined
@@ -132,6 +136,10 @@ const client = Layer.succeed(
           Stream.provide(
             dynamicResponse((input) => {
               replayBodies.push(input.text)
+              if (replayFailures-- > 0)
+                return Effect.succeed(
+                  input.respond('{"error":{"code":"server_error","message":"overloaded"}}', { status: 503 }),
+                )
               return Effect.succeed(
                 input.respond(
                   sseEvents(deltaChunk({ content: "Offline continuation complete." }), deltaChunk({}, "stop")),
@@ -441,6 +449,7 @@ const setup = Effect.gen(function* () {
   response = []
   requests.length = 0
   replayProvider = false
+  replayFailures = 0
   replayBodies.length = 0
   sessionTokenBudget = undefined
   sessionDuration = undefined
@@ -483,6 +492,601 @@ const providerUnavailable = () =>
     method: "stream",
     reason: new TransportReason({ message: "Provider unavailable" }),
   })
+
+// Projection and ownership tests below use a permanent failure; recovery policy has its own virtual-clock matrix.
+const permanentProviderFailure = () =>
+  new LLMError({
+    module: "test",
+    method: "stream",
+    reason: new InvalidRequestReason({ message: "Provider unavailable" }),
+  })
+
+const awaitRetry = (attempt: number) =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    while (true) {
+      const rows = yield* database.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.type, "session.next.retried.1"))
+        .all()
+        .pipe(Effect.orDie)
+      if (rows.some((row) => row.data.attempt === attempt)) return
+      yield* Effect.yieldNow
+    }
+  })
+
+describe("S2 fixed recovery matrix", () => {
+  it.effect("S2 actual HTTP retries preserve distinct physical attempt identities", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      replayProvider = true
+      replayFailures = 2
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "HTTP recovery" }), resume: false })
+      const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* adjust(5000)
+      yield* awaitRetry(2)
+      yield* adjust(10000)
+      yield* Fiber.join(fiber)
+      const cache = (yield* SessionUsageQuery.read(sessionID)).cache!
+      expect(replayBodies).toHaveLength(3)
+      expect(cache.points).toHaveLength(3)
+      const attempts = cache.points.flatMap((point) => point.attempts ?? [])
+      expect(new Set(attempts.map((attempt) => attempt.id)).size).toBe(3)
+      expect(cache.points.map((point) => point.attempts?.length)).toEqual([1, 1, 1])
+    }),
+  )
+  for (const failure of [
+    new LLMError({
+      module: "fixed",
+      method: "http",
+      reason: new ProviderInternalReason({ message: "stable internal failure", status: 500 }),
+    }),
+    undefined,
+  ])
+    it.effect(`S2 bounds repeated ${failure ? "5xx" : "finish=error"} failures`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Stable failure" }), resume: false })
+        streamFailure = failure
+        response = [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "error",
+            usage: { inputTokens: 3, nonCachedInputTokens: 3, outputTokens: 1 },
+          }),
+        ]
+        const fiber = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          yield* awaitRetry(attempt)
+          yield* adjust([5000, 10000, 20000][attempt - 1])
+        }
+        expect((yield* Fiber.join(fiber))._tag).toBe("Failure")
+        expect(requests).toHaveLength(4)
+        yield* adjust("30 minutes")
+        expect(requests).toHaveLength(4)
+        if (!failure) expect((yield* SessionUsageQuery.read(sessionID)).total.total).toBe(16)
+      }),
+    )
+
+  it.effect("S2 checks live budget changes during backoff and cancels the wait", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Live deadline" }), resume: false })
+      const created = DateTime.toEpochMillis((yield* session.get(sessionID)).time.created)
+      yield* setTime(created)
+      yield* session.update({ sessionID, budget: { durationMs: 120000 } })
+      streamFailure = new LLMError({
+        module: "fixed",
+        method: "http",
+        reason: new RateLimitReason({ message: "limited", retryAfterMs: 60000 }),
+      })
+      const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      yield* adjust(1000)
+      yield* Fiber.join(fiber)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+      expect((yield* SessionUsageQuery.read(sessionID)).total.calls).toBe(1)
+    }),
+  )
+
+  it.effect("S2 promotes steer at the retry boundary and leaves queue pending", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Original" }), resume: false })
+      responses = [
+        new LLMError({
+          module: "fixed",
+          method: "connect",
+          reason: new TransportReason({ message: "reset", diagnostics: { phase: "request", causeCode: "ECONNRESET" } }),
+        }),
+        fragmentFixture("text", "s2-steered", ["Done."]).completeEvents,
+        fragmentFixture("text", "s2-queued", ["Queued done."]).completeEvents,
+      ]
+      const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New steer" }), resume: false })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Queued input" }),
+        delivery: "queue",
+        resume: false,
+      })
+      yield* adjust(5000)
+      yield* Fiber.join(fiber)
+      expect(JSON.stringify(requests[1].messages)).toContain("New steer")
+      expect(JSON.stringify(requests[1].messages)).not.toContain("Queued input")
+      expect(JSON.stringify(requests[2].messages)).toContain("Queued input")
+    }),
+  )
+  for (const [code, category] of [
+    ["invalid_request_error", "InvalidRequest"],
+    ["insufficient_quota", "QuotaExceeded"],
+  ] as const) {
+    it.effect(`S2 stops ${code} frames immediately`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Permanent error" }), resume: false })
+        response = [
+          LLMEvent.providerError({
+            message: "provider rejected",
+            code,
+            status: code === "insufficient_quota" ? 429 : undefined,
+          }),
+        ]
+        const failure = yield* session.resume(sessionID).pipe(Effect.flip)
+        expect(failure).toBeInstanceOf(LLMError)
+        expect((failure as LLMError).reason._tag).toBe(category)
+        expect(requests).toHaveLength(1)
+        expect(JSON.stringify(yield* session.context(sessionID))).toContain(
+          code === "insufficient_quota" ? "额度或余额不足" : "请求格式或参数不受支持",
+        )
+      }),
+    )
+  }
+
+  it.effect("S2 respects Retry-After and resumes real rate limits with known usage counted once", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Rate limit" }), resume: false })
+      responses = [
+        new LLMError({
+          module: "fixed",
+          method: "http",
+          reason: new RateLimitReason({ message: "limited", retryAfterMs: 17000 }),
+        }),
+        [
+          ...fragmentFixture("text", "s2-rate-online", ["Done."]).partialEvents,
+          LLMEvent.textEnd({ id: "s2-rate-online" }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "stop",
+            usage: { inputTokens: 10, nonCachedInputTokens: 10, outputTokens: 2 },
+          }),
+        ],
+      ]
+      const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* adjust(16000)
+      expect(requests).toHaveLength(1)
+      yield* adjust(1000)
+      yield* Fiber.join(fiber)
+      expect(requests).toHaveLength(2)
+      const usage = yield* SessionUsageQuery.read(sessionID)
+      expect(usage.total.total).toBe(12)
+      expect(usage.total.unreported).toBe(1)
+    }),
+  )
+
+  it.effect("S2 stops at the budget when Retry-After cannot fit", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Wait exceeds budget" }), resume: false })
+      yield* session.update({ sessionID, budget: { durationMs: 20000 } })
+      yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
+      streamFailure = new LLMError({
+        module: "fixed",
+        method: "http",
+        reason: new RateLimitReason({ message: "limited", retryAfterMs: 30000 }),
+      })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("超过剩余墙钟预算")
+    }),
+  )
+
+  it.effect("S2 Stop during backoff issues no additional request", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Cancelable recovery" }), resume: false })
+      streamFailure = new LLMError({
+        module: "fixed",
+        method: "http",
+        reason: new ProviderInternalReason({ message: "overloaded", status: 529 }),
+      })
+      const fiber = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* session.interrupt(sessionID)
+      yield* Fiber.join(fiber)
+      yield* adjust("30 minutes")
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).state).toBe("interrupted")
+    }),
+  )
+
+  it.effect("S2 Stop during an in-flight retry settles that request without a phantom wait-only turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Stop active retry" }), resume: false })
+      streamFailure = new LLMError({
+        module: "fixed",
+        method: "http",
+        reason: new RateLimitReason({ message: "limited" }),
+      })
+      const fiber = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+      yield* awaitRetry(1)
+      streamFailure = undefined
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      yield* adjust(5000)
+      yield* Deferred.await(streamStarted)
+      yield* session.interrupt(sessionID)
+      yield* Fiber.join(fiber)
+      streamGate = undefined
+      streamStarted = undefined
+      const usage = yield* SessionUsageQuery.read(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(usage.total.calls).toBe(2)
+      const context = yield* session.context(sessionID)
+      expect(context.filter((message) => message.type === "assistant")).toHaveLength(2)
+      expect((yield* session.outcome(sessionID)).state).toBe("interrupted")
+    }),
+  )
+
+  it.effect("S2 marks an unconfirmed hosted operation unknown and never resends", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Hosted effects unknown" }), resume: false })
+      responseStream = Stream.fromIterable([
+        LLMEvent.toolCall({ id: "hosted-unknown", name: "hosted-write", input: {}, providerExecuted: true }),
+      ]).pipe(
+        Stream.concat(
+          Stream.fail(
+            new LLMError({
+              module: "fixed",
+              method: "read",
+              reason: new TransportReason({ message: "dropped", kind: "StreamReadError" }),
+            }),
+          ),
+        ),
+      )
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      expect(requests).toHaveLength(1)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("工具效果不确定")
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+    }),
+  )
+
+  it.effect("S2 preserves confirmed hosted item metadata after a stream interruption", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Keep hosted result" }), resume: false })
+      responseStream = Stream.fromIterable([
+        LLMEvent.toolCall({
+          id: "hosted-complete",
+          name: "web_search",
+          input: {},
+          providerExecuted: true,
+          providerMetadata: { openai: { itemId: "ws_complete" } },
+        }),
+        LLMEvent.toolResult({
+          id: "hosted-complete",
+          name: "web_search",
+          result: { type: "json", value: { found: true } },
+          providerExecuted: true,
+          providerMetadata: { openai: { itemId: "ws_complete" } },
+        }),
+      ]).pipe(
+        Stream.concat(
+          Stream.fail(
+            new LLMError({
+              module: "fixed",
+              method: "read",
+              reason: new TransportReason({ message: "reset", kind: "StreamReadError" }),
+            }),
+          ),
+        ),
+      )
+      responses = [fragmentFixture("text", "hosted-recovered", ["Done."]).completeEvents]
+      const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* adjust(5000)
+      yield* Fiber.join(fiber)
+      expect(JSON.stringify(requests[1].messages)).toContain("ws_complete")
+      expect(JSON.stringify(requests[1].messages)).toContain('"found":true')
+      expect(requests).toHaveLength(2)
+    }),
+  )
+
+  it.effect("S2 treats a returned hosted tool error as uncertain", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Hosted error" }), resume: false })
+      response = [
+        LLMEvent.toolCall({ id: "hosted-failed", name: "hosted-write", input: {}, providerExecuted: true }),
+        LLMEvent.toolResult({
+          id: "hosted-failed",
+          name: "hosted-write",
+          result: { type: "error", value: "ack lost" },
+          providerExecuted: true,
+        }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      ]
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("工具效果不确定")
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+    }),
+  )
+
+  it.effect("S2 stops structured hard timeouts without replaying a possibly applied operation", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      let dispatched = 0
+      yield* registry.register({
+        hard_timeout: Tool.make({
+          description: "fixed timeout result after a write",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ timeout: Schema.Boolean }),
+          execute: () =>
+            Effect.sync(() => {
+              dispatched++
+              return { timeout: true }
+            }),
+        }),
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Write before timeout" }), resume: false })
+      response = [
+        LLMEvent.toolCall({ id: "hard-timeout", name: "hard_timeout", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      ]
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(dispatched).toBe(1)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+    }),
+  )
+
+  it.effect("S2 stops an executed tool whose output cannot be confirmed against its schema", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      let dispatched = 0
+      yield* registry.register({
+        invalid_output: Tool.make({
+          description: "write followed by invalid output",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ confirmed: Schema.String }),
+          execute: () =>
+            Effect.sync(() => {
+              dispatched++
+              return { confirmed: 42 as unknown as string }
+            }),
+        }),
+      })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Write once with acknowledgement" }),
+        resume: false,
+      })
+      response = [
+        LLMEvent.toolCall({ id: "invalid-ack", name: "invalid_output", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      ]
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(dispatched).toBe(1)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+    }),
+  )
+
+  it.effect("S2 blocks unknown local effects across explicit continue and new call IDs", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      let dispatched = 0
+      yield* registry.register({
+        uncertain: Tool.make({
+          description: "uncertain write",
+          input: Schema.Struct({}),
+          output: Schema.Struct({}),
+          execute: () =>
+            Effect.sync(() => {
+              dispatched++
+            }).pipe(Effect.andThen(Effect.die("write acknowledgement lost"))),
+        }),
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Write once" }), resume: false })
+      response = [
+        LLMEvent.toolCall({ id: "unknown-write", name: "uncertain", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      ]
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      response = [
+        LLMEvent.toolCall({ id: "new-unknown-id", name: "uncertain", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "continue" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect(dispatched).toBe(1)
+    }),
+  )
+  it.effect(
+    "S2 reconnects after thirty virtual minutes with one physical turn per attempt",
+    () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const database = yield* Database.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Recover network" }), resume: false })
+        const offline = new LLMError({
+          module: "fixed",
+          method: "connect",
+          reason: new TransportReason({
+            message: "offline",
+            kind: "TransportError",
+            diagnostics: { phase: "request", causeCode: "ENOTFOUND" },
+          }),
+        })
+        const before = executions.length
+        responseStream = Stream.fromIterable([
+          LLMEvent.toolCall({ id: "s2-offline-operation", name: "echo", input: { text: "once during outage" } }),
+        ]).pipe(Stream.concat(Stream.fail(offline)))
+        responses = [
+          ...Array.from({ length: 33 }, () => offline),
+          fragmentFixture("text", "s2-online", ["Done."]).completeEvents,
+        ]
+        const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        for (let attempt = 1; attempt <= 34; attempt++) {
+          yield* awaitRetry(attempt)
+          yield* adjust([5000, 10000, 20000, 40000, 60000][Math.min(attempt - 1, 4)])
+        }
+        yield* Fiber.join(fiber)
+        expect(requests).toHaveLength(35)
+        expect(executions.slice(before)).toEqual(["once during outage"])
+        expect(JSON.stringify(requests.at(-1)?.messages)).toContain("once during outage")
+        expect(yield* Clock.currentTimeMillis).toBeGreaterThanOrEqual(1_800_000)
+        const usage = yield* SessionUsageQuery.read(sessionID)
+        expect(usage.total.calls).toBe(35)
+        expect(usage.total.unreported).toBe(35)
+        const rows = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+        expect(
+          rows.filter(
+            (row) =>
+              row.data.category === "recovery" && (row.data.details as Record<string, unknown>).phase === "recovered",
+          ),
+        ).toHaveLength(1)
+      }),
+    30000,
+  )
+
+  it.effect("S2 stops identical unknown errors after three probes", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Unknown provider" }), resume: false })
+      streamFailure = providerUnavailable()
+      const fiber = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        yield* awaitRetry(attempt)
+        yield* adjust([5000, 10000, 20000][attempt - 1])
+      }
+      expect((yield* Fiber.join(fiber))._tag).toBe("Failure")
+      expect(requests).toHaveLength(4)
+      yield* adjust("30 minutes")
+      expect(requests).toHaveLength(4)
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("等待环境或请求修正")
+    }),
+  )
+
+  it.effect("S2 preserves complete tools, supersedes partial output, and blocks replay under a new call ID", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Execute once" }), resume: false })
+      const before = executions.length
+      const drop = new LLMError({
+        module: "fixed",
+        method: "read",
+        reason: new TransportReason({ message: "stream reset", kind: "StreamReadError" }),
+      })
+      responseStream = Stream.fromIterable([
+        LLMEvent.toolCall({ id: "first-operation", name: "echo", input: { text: "once" } }),
+        LLMEvent.reasoningStart({ id: "s2-complete-reasoning" }),
+        LLMEvent.reasoningEnd({
+          id: "s2-complete-reasoning",
+          providerMetadata: { openai: { reasoningEncryptedContent: "COMPLETE_UNIT", itemId: "rs_complete" } },
+        }),
+        LLMEvent.textStart({ id: "s2-half" }),
+        LLMEvent.textDelta({ id: "s2-half", text: "HALF_REPLACED" }),
+        LLMEvent.reasoningStart({
+          id: "s2-half-reasoning",
+          providerMetadata: { openai: { reasoningEncryptedContent: "INCOMPLETE", itemId: "rs_incomplete" } },
+        }),
+        LLMEvent.reasoningDelta({ id: "s2-half-reasoning", text: "unfinished" }),
+      ]).pipe(Stream.concat(Stream.fail(drop)))
+      responses = [
+        [
+          LLMEvent.toolCall({ id: "new-call-id", name: "echo", input: { text: "once" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "s2-final", ["Done."]).completeEvents,
+      ]
+      const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* adjust(5000)
+      yield* Fiber.join(fiber)
+      expect(executions.slice(before)).toEqual(["once"])
+      expect(JSON.stringify(requests[1].messages)).toContain("once")
+      expect(JSON.stringify(requests[1].messages)).not.toContain("HALF_REPLACED")
+      expect(JSON.stringify(requests[1].messages)).not.toContain("INCOMPLETE")
+      expect(JSON.stringify(requests[1].messages)).toContain("COMPLETE_UNIT")
+      const prepared = yield* LLMClient.prepare(
+        LLM.updateRequest(requests[1], {
+          model: OpenAIResponses.route.with({ auth: Auth.bearer("fixed") }).model({ id: "fake-model" }),
+          providerOptions: { openai: { store: false } },
+        }),
+      )
+      expect(JSON.stringify(prepared.body)).toContain("COMPLETE_UNIT")
+      expect(JSON.stringify(prepared.body)).not.toContain("INCOMPLETE")
+      const context = yield* session.context(sessionID)
+      expect(
+        context
+          .flatMap((message) => (message.type === "assistant" ? message.content : []))
+          .filter((part) => part.type !== "tool" && part.superseded),
+      ).toHaveLength(2)
+      yield* replaySessionProjection(sessionID)
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain('"superseded":true')
+    }),
+  )
+})
 
 const setupOverflowRecovery = Effect.gen(function* () {
   yield* setup
@@ -880,7 +1484,13 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
     yield* Effect.yieldNow
     response = fixture.completeEvents
 
-    const exit = yield* session.resume(sessionID).pipe(Effect.exit)
+    const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    if (kind === "tool input")
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        yield* awaitRetry(attempt)
+        yield* adjust([5000, 10000, 20000][attempt - 1])
+      }
+    const exit = yield* Fiber.join(run)
     expect(Exit.isFailure(exit)).toBe(kind === "tool input")
 
     const { db } = yield* Database.Service
@@ -901,11 +1511,13 @@ const verifyEphemeralDeltas = (kind: FragmentKind) =>
         ),
       ).toEqual(chunks.map((_, index) => chunks.slice(0, index).join("").length))
     expect(deltas).toHaveLength(0)
-    expect(yield* session.context(sessionID)).toMatchObject(expectedContext)
+    const visible = (messages: SessionMessage.Message[]) =>
+      messages.filter((message) => message.type !== "synthetic" || !message.recovery)
+    expect(visible(yield* session.context(sessionID)).slice(0, 2)).toMatchObject(expectedContext)
 
     yield* replaySessionProjection(sessionID)
 
-    expect(yield* session.context(sessionID)).toMatchObject(expectedContext)
+    expect(visible(yield* session.context(sessionID)).slice(0, 2)).toMatchObject(expectedContext)
   })
 
 const verifyPartialFlushOnFailure = (kind: FragmentKind) =>
@@ -914,7 +1526,7 @@ const verifyPartialFlushOnFailure = (kind: FragmentKind) =>
     const session = yield* SessionV2.Service
     const prompt = `Fail after ${kind}`
     const fixture = fragmentFixture(kind, fragmentID(kind, "partial"), ["Partial"])
-    const failure = providerUnavailable()
+    const failure = permanentProviderFailure()
     yield* session.prompt({ sessionID, prompt: Prompt.make({ text: prompt }), resume: false })
     responseStream = Stream.concat(Stream.fromIterable(fixture.partialEvents), Stream.fail(failure))
 
@@ -924,8 +1536,8 @@ const verifyPartialFlushOnFailure = (kind: FragmentKind) =>
       {
         type: "assistant",
         finish: "error",
-        error: { type: "unknown", message: "Provider unavailable" },
-        termination: { category: "network", provider: "fake" },
+        error: { type: "unknown", message: expect.stringContaining("Provider unavailable") },
+        termination: { category: "request", provider: "fake" },
         content: [
           kind === "tool input"
             ? { type: "tool", id: fragmentID(kind, "partial"), state: { status: "error" } }
@@ -1414,14 +2026,14 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.toolCall({ id: "active-write", name: "echo", input: { text: "first" } }),
           LLMEvent.toolCall({ id: "queued-write", name: "echo", input: { text: "second" } }),
         ]),
-        Stream.unwrap(Deferred.await(toolExecutionsStarted).pipe(Effect.as(Stream.fail(providerUnavailable())))),
+        Stream.unwrap(Deferred.await(toolExecutionsStarted).pipe(Effect.as(Stream.fail(permanentProviderFailure())))),
       )
       const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
       yield* Fiber.join(failed)
       yield* Deferred.succeed(toolExecutionGate, undefined)
       expect(Exit.isFailure(yield* Fiber.join(run))).toBe(true)
       expect(executions).toEqual(["first"])
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+      expect((yield* session.context(sessionID)).findLast((message) => message.type === "assistant")).toMatchObject({
         finish: "error",
         content: [
           { id: "active-write", state: { status: "completed" } },
@@ -2717,7 +3329,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("projects reasoning and tool events without executing or continuing tools", () =>
+  it.effect("projects reasoning and tools but stops after an uncertain provider-executed failure", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
@@ -2772,7 +3384,7 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.finish({ reason: "tool-calls" }),
       ]
 
-      yield* session.resume(sessionID)
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.tools.map((tool) => tool.name)).toEqual(["defect", "echo"])
@@ -2780,7 +3392,7 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Use tools" },
         {
           type: "assistant",
-          finish: "tool-calls",
+          finish: "error",
           tokens: { input: 8, output: 3, reasoning: 1, cache: { read: 2, write: 0 } },
           content: [
             { type: "reasoning", id: "reasoning-1", text: "Think" },
@@ -3665,7 +4277,7 @@ describe("SessionRunnerLLM", () => {
       requests.length = 0
       responses = undefined
       response = []
-      streamFailure = providerUnavailable()
+      streamFailure = permanentProviderFailure()
       streamGate = yield* Deferred.make<void>()
       streamStarted = yield* Deferred.make<void>()
 
@@ -4077,7 +4689,7 @@ describe("SessionRunnerLLM", () => {
       requests.length = 0
       responses = undefined
       response = []
-      streamFailure = providerUnavailable()
+      streamFailure = permanentProviderFailure()
       streamGate = yield* Deferred.make<void>()
       streamStarted = yield* Deferred.make<void>()
 
@@ -4145,7 +4757,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("returns unexpected local tool defects to the model and continues", () =>
+  it.effect("stops unknown local tool defects without resending side effects", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
@@ -4169,10 +4781,9 @@ describe("SessionRunnerLLM", () => {
         ],
       ]
 
-      yield* session.resume(sessionID)
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
 
-      expect(requests).toHaveLength(2)
-      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"])
+      expect(requests).toHaveLength(1)
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Call defect" },
         {
@@ -4188,7 +4799,6 @@ describe("SessionRunnerLLM", () => {
             },
           ],
         },
-        { type: "assistant", finish: "stop", content: [{ type: "text", text: "Recovered" }] },
       ])
     }),
   )
@@ -5482,7 +6092,7 @@ describe("SessionRunnerLLM", () => {
       yield* setup
       const session = yield* SessionV2.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Settle before failing" }), resume: false })
-      const failure = providerUnavailable()
+      const failure = permanentProviderFailure()
       toolExecutionGate = yield* Deferred.make<void>()
       responseStream = Stream.concat(
         Stream.fromIterable([
@@ -5557,7 +6167,10 @@ describe("SessionRunnerLLM", () => {
       responseStream = undefined
       response = []
       yield* session.resume(sessionID)
-      expect(requests[0]?.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"])
+      expect(requests).toHaveLength(0)
+      expect(executions).toEqual(["blocked"])
+      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("工具效果不确定")
     }),
   )
 
@@ -5864,8 +6477,8 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.stepFinish({ index: 0, reason: "length" }),
         LLMEvent.finish({ reason: "length" }),
       ]
-      yield* session.resume(sessionID)
-      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("工具效果不确定")
       expect(requests).toHaveLength(1)
     }),
   )
@@ -6207,8 +6820,14 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.stepFinish({ index: 0, reason }),
           LLMEvent.finish({ reason }),
         ]
-        expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
-        expect(requests).toHaveLength(1)
+        const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+        if (reason === "error" || reason === "unknown")
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            yield* awaitRetry(attempt)
+            yield* adjust([5000, 10000, 20000][attempt - 1])
+          }
+        expect(Exit.isFailure(yield* Fiber.join(run))).toBe(true)
+        expect(requests).toHaveLength(reason === "content-filter" ? 1 : 4)
       }),
     )
   }
@@ -6228,9 +6847,15 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.stepFinish({ index: 0, reason }),
           LLMEvent.finish({ reason }),
         ]
-        const exit = yield* session.resume(sessionID).pipe(Effect.exit)
+        const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+        if (reason === "error" || reason === "unknown")
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            yield* awaitRetry(attempt)
+            yield* adjust([5000, 10000, 20000][attempt - 1])
+          }
+        const exit = yield* Fiber.join(run)
         expect(Exit.isFailure(exit)).toBe(reason !== "length")
-        expect(requests).toHaveLength(reason === "length" ? 2 : 1)
+        expect(requests).toHaveLength(reason === "length" ? 2 : reason === "content-filter" ? 1 : 4)
         expect((yield* session.context(sessionID)).findLast((message) => message.type === "assistant")).toMatchObject({
           type: "assistant",
           finish: reason === "length" ? "stopped" : "error",
@@ -6253,9 +6878,14 @@ describe("SessionRunnerLLM", () => {
         LLMEvent.textStart({ id: "partial" }),
         LLMEvent.textDelta({ id: "partial", text: "Partial result" }),
       ]
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
-      expect(requests).toHaveLength(1)
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+      const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        yield* awaitRetry(attempt)
+        yield* adjust([5000, 10000, 20000][attempt - 1])
+      }
+      expect((yield* Fiber.join(run))._tag).toBe("Failure")
+      expect(requests).toHaveLength(4)
+      expect((yield* session.context(sessionID)).findLast((message) => message.type === "assistant")).toMatchObject({
         finish: "error",
         error: { message: "Provider stream ended without completing the turn" },
         content: [{ type: "text", text: "Partial result" }],
@@ -7067,14 +7697,21 @@ describe("SessionRunnerLLM", () => {
       responses = undefined
       streamGate = undefined
       streamStarted = undefined
-      response = [LLMEvent.stepStart({ index: 0 }), LLMEvent.providerError({ message: "Provider unavailable" })]
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.providerError({ message: "Provider unavailable", code: "invalid_request_error" }),
+      ]
 
       expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
 
       expect(requests).toHaveLength(1)
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Fail durably" },
-        { type: "assistant", finish: "error", error: { type: "unknown", message: "Provider unavailable" } },
+        {
+          type: "assistant",
+          finish: "error",
+          error: { type: "unknown", message: expect.stringContaining("Provider unavailable") },
+        },
       ])
     }),
   )
@@ -7086,14 +7723,18 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fail before step" }), resume: false })
 
       requests.length = 0
-      response = [LLMEvent.providerError({ message: "Provider unavailable" })]
+      response = [LLMEvent.providerError({ message: "Provider unavailable", code: "invalid_request_error" })]
 
       expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
 
       expect(requests).toHaveLength(1)
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Fail before step" },
-        { type: "assistant", finish: "error", error: { type: "unknown", message: "Provider unavailable" } },
+        {
+          type: "assistant",
+          finish: "error",
+          error: { type: "unknown", message: expect.stringContaining("Provider unavailable") },
+        },
       ])
     }),
   )
@@ -7120,7 +7761,7 @@ describe("SessionRunnerLLM", () => {
         {
           type: "assistant",
           finish: "error",
-          error: { message: "prompt too long" },
+          error: { message: expect.stringContaining("prompt too long") },
           content: [{ type: "text", text: "Partial" }],
         },
       ])
@@ -7132,14 +7773,18 @@ describe("SessionRunnerLLM", () => {
       yield* setup
       const session = yield* SessionV2.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fail raw stream durably" }), resume: false })
-      const failure = providerUnavailable()
+      const failure = permanentProviderFailure()
       responseStream = Stream.fail(failure)
 
       expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBe(failure)
       yield* replaySessionProjection(sessionID)
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Fail raw stream durably" },
-        { type: "assistant", finish: "error", error: { type: "unknown", message: "Provider unavailable" } },
+        {
+          type: "assistant",
+          finish: "error",
+          error: { type: "unknown", message: expect.stringContaining("Provider unavailable") },
+        },
       ])
     }),
   )
@@ -7159,7 +7804,7 @@ describe("SessionRunnerLLM", () => {
       response = [
         LLMEvent.stepStart({ index: 0 }),
         LLMEvent.toolCall({ id: "call-before-provider-error", name: "echo", input: { text: "settled" } }),
-        LLMEvent.providerError({ message: "Provider unavailable" }),
+        LLMEvent.providerError({ message: "Provider unavailable", code: "invalid_request_error" }),
       ]
 
       expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
@@ -7184,7 +7829,7 @@ describe("SessionRunnerLLM", () => {
           input: { query: "effect" },
           providerExecuted: true,
         }),
-        LLMEvent.providerError({ message: "Provider unavailable" }),
+        LLMEvent.providerError({ message: "Provider unavailable", code: "invalid_request_error" }),
       ]
 
       expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
@@ -7234,7 +7879,7 @@ describe("SessionRunnerLLM", () => {
         prompt: Prompt.make({ text: "Fail hosted tool on raw failure" }),
         resume: false,
       })
-      const failure = providerUnavailable()
+      const failure = permanentProviderFailure()
       responseStream = Stream.concat(
         Stream.fromIterable([
           LLMEvent.stepStart({ index: 0 }),
@@ -7255,7 +7900,7 @@ describe("SessionRunnerLLM", () => {
         {
           type: "assistant",
           finish: "error",
-          error: { type: "unknown", message: "Provider unavailable" },
+          error: { type: "unknown", message: expect.stringContaining("Provider unavailable") },
           content: [{ type: "tool", id: "call-hosted-raw-failure", state: { status: "error" } }],
         },
       ])
@@ -7267,7 +7912,7 @@ describe("SessionRunnerLLM", () => {
       yield* setup
       const session = yield* SessionV2.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Reject invalid tool JSON" }), resume: false })
-      const failure = providerUnavailable()
+      const failure = permanentProviderFailure()
       responseStream = Stream.concat(
         Stream.fromIterable([
           LLMEvent.stepStart({ index: 0 }),
@@ -7628,7 +8273,8 @@ it.live("K1 read grep cat shadow records successful evidence without adding turn
       .where(eq(EventTable.type, "session.next.quality.progress.1"))
       .all()
       .pipe(Effect.orDie)
-    expect(rows).toHaveLength(11) // Four request/usage pairs and three read observations.
+    expect(rows.filter((row) => row.data.category !== "operation")).toHaveLength(11)
+    expect(rows.filter((row) => row.data.category === "operation")).toHaveLength(6)
     const observations = rows.filter((row) => row.data.category === "stagnation")
     expect(observations).toHaveLength(3)
     for (const row of observations)

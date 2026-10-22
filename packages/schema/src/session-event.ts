@@ -164,6 +164,7 @@ export const Synthetic = Event.define({
     ...Base,
     messageID: SessionMessage.ID,
     text: Schema.String,
+    recovery: SessionMessage.Recovery.pipe(optional),
   },
 })
 export type Synthetic = typeof Synthetic.Type
@@ -287,6 +288,7 @@ export namespace Text {
       assistantMessageID: SessionMessage.ID,
       textID: Schema.String,
       text: Schema.String,
+      superseded: Schema.Boolean.pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type
@@ -326,6 +328,7 @@ export namespace Reasoning {
       assistantMessageID: SessionMessage.ID,
       reasoningID: Schema.String,
       text: Schema.String,
+      superseded: Schema.Boolean.pipe(optional),
       providerMetadata: ProviderMetadata.pipe(optional),
     },
   })
@@ -535,7 +538,7 @@ export const QualityProgress = Event.define({
   ...options,
   schema: {
     ...Base,
-    category: Schema.Literals(["continuation", "closing", "stagnation", "cache"]),
+    category: Schema.Literals(["continuation", "closing", "stagnation", "cache", "operation", "recovery"]),
     details: Schema.Json,
   },
 })

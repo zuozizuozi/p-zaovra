@@ -72,6 +72,50 @@ const expectLLMError = (error: unknown) => {
 
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
 
+it.effect("S2 delegates HTTP recovery with exactly one physical attempt", () =>
+  Effect.gen(function* () {
+    const attempts = yield* Ref.make(0)
+    const observed: RequestExecutor.Attempt[] = []
+    const result = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+      Effect.provide(
+        countedResponsesLayer(attempts, [new Response('{"error":{"code":"rate_limit_exceeded"}}', { status: 429 })]),
+      ),
+      Effect.provideService(RequestExecutor.AutomaticRetries, false),
+      Effect.provideService(RequestExecutor.AttemptObserver, (attempt) =>
+        Effect.sync(() => {
+          observed.push(attempt)
+        }),
+      ),
+      Effect.flip,
+    )
+    expect(result.reason._tag).toBe("RateLimit")
+    expect(yield* Ref.get(attempts)).toBe(1)
+    expect(observed.filter((attempt) => attempt.phase === "start")).toHaveLength(1)
+    expect(observed.filter((attempt) => attempt.phase === "headers")).toHaveLength(1)
+  }),
+)
+
+it.effect("S2 preserves a permanent nested error type even when its detailed code is generic", () =>
+  Effect.gen(function* () {
+    const attempts = yield* Ref.make(0)
+    const result = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+      Effect.provide(
+        countedResponsesLayer(attempts, [
+          new Response(
+            JSON.stringify({
+              error: { code: "invalid_value", type: "invalid_request_error", message: "unsupported input" },
+            }),
+            { status: 500 },
+          ),
+        ]),
+      ),
+      Effect.flip,
+    )
+    expect(result.reason._tag).toBe("InvalidRequest")
+    expect(yield* Ref.get(attempts)).toBe(1)
+  }),
+)
+
 for (const status of [401, 402, 403])
   it.effect(`S1 HTTP ${status} transient body is retried`, () =>
     Effect.gen(function* () {

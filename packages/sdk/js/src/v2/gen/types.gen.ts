@@ -947,6 +947,7 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           text: string
+          recovery?: SessionRecovery
         }
       }
     | {
@@ -1056,6 +1057,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           textID: string
           text: string
+          superseded?: boolean
         }
       }
     | {
@@ -1090,6 +1092,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           reasoningID: string
           text: string
+          superseded?: boolean
           providerMetadata?: LlmProviderMetadata
         }
       }
@@ -3502,6 +3505,14 @@ export type SessionHostCompletion = {
   jobID: string
 }
 
+export type SessionRecovery = {
+  id: string
+  started: number
+  ended: number
+  attempts: number
+  phase: "recovered" | "stopped" | "interrupted"
+}
+
 export type SessionOutcomeExecutionRecord = {
   scope: {
     cwd: string
@@ -4308,6 +4319,7 @@ export type SyncEventSessionNextSynthetic = {
       sessionID: string
       messageID: string
       text: string
+      recovery?: SessionRecovery
     }
   }
 }
@@ -4454,6 +4466,7 @@ export type SyncEventSessionNextTextEnded = {
       assistantMessageID: string
       textID: string
       text: string
+      superseded?: boolean
     }
   }
 }
@@ -4490,6 +4503,7 @@ export type SyncEventSessionNextReasoningEnded = {
       assistantMessageID: string
       reasoningID: string
       text: string
+      superseded?: boolean
       providerMetadata?: LlmProviderMetadata
     }
   }
@@ -5656,6 +5670,7 @@ export type SessionMessageSynthetic = {
   sessionID: string
   text: string
   completion?: SessionHostCompletion
+  recovery?: SessionRecovery
   type: "synthetic"
 }
 
@@ -5692,12 +5707,14 @@ export type SessionMessageAssistantText = {
   type: "text"
   id: string
   text: string
+  superseded?: boolean
 }
 
 export type SessionMessageAssistantReasoning = {
   type: "reasoning"
   id: string
   text: string
+  superseded?: boolean
   providerMetadata?: LlmProviderMetadata
   time?: {
     created: number
@@ -5844,7 +5861,7 @@ export type SessionNextQualityProgress = {
   data: {
     timestamp: number
     sessionID: string
-    category: "continuation" | "closing" | "stagnation" | "cache"
+    category: "continuation" | "closing" | "stagnation" | "cache" | "operation" | "recovery"
     details: unknown
   }
 }
@@ -6075,6 +6092,7 @@ export type SessionNextSynthetic = {
     sessionID: string
     messageID: string
     text: string
+    recovery?: SessionRecovery
   }
 }
 
@@ -6242,6 +6260,7 @@ export type SessionNextTextEnded = {
     assistantMessageID: string
     textID: string
     text: string
+    superseded?: boolean
   }
 }
 
@@ -6434,6 +6453,7 @@ export type SessionNextReasoningEnded = {
     assistantMessageID: string
     reasoningID: string
     text: string
+    superseded?: boolean
     providerMetadata?: LlmProviderMetadata
   }
 }
@@ -9261,6 +9281,7 @@ export type EventSessionNextSynthetic = {
     sessionID: string
     messageID: string
     text: string
+    recovery?: SessionRecovery
   }
 }
 
@@ -9485,6 +9506,7 @@ export type EventSessionNextTextEnded = {
     assistantMessageID: string
     textID: string
     text: string
+    superseded?: boolean
   }
 }
 
@@ -9522,6 +9544,7 @@ export type EventSessionNextReasoningEnded = {
     assistantMessageID: string
     reasoningID: string
     text: string
+    superseded?: boolean
     providerMetadata?: LlmProviderMetadata
   }
 }

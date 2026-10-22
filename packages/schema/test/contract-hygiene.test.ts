@@ -17,6 +17,32 @@ import { Work } from "../src/work"
 import { optional } from "../src/schema"
 
 describe("contract hygiene", () => {
+  test("recovery diagnostics and superseded fragments remain optional in old histories", () => {
+    const recovery = { id: "retry", started: 1000, ended: 3000, attempts: 2, phase: "recovered" as const }
+    const message = Schema.decodeUnknownSync(SessionMessage.Synthetic)({
+      type: "synthetic",
+      id: SessionMessage.ID.create(),
+      sessionID: "ses_test",
+      time: { created: 0 },
+      text: "diagnostic",
+      recovery,
+    })
+    expect(Schema.encodeSync(SessionMessage.Synthetic)(message).recovery).toEqual(recovery)
+    expect(Schema.encodeSync(SessionMessage.Synthetic)({ ...message, recovery: undefined })).not.toHaveProperty(
+      "recovery",
+    )
+    expect(
+      Schema.decodeUnknownSync(SessionMessage.AssistantText)({ type: "text", id: "part", text: "old" }).superseded,
+    ).toBeUndefined()
+    expect(
+      Schema.decodeUnknownSync(SessionMessage.AssistantText)({
+        type: "text",
+        id: "part",
+        text: "half",
+        superseded: true,
+      }).superseded,
+    ).toBe(true)
+  })
   test("host completion is optional and preserves its validated task identity on the wire", () => {
     const completion = { type: "bash-completion" as const, sourceMessageID: "msg_original", jobID: "job_task" }
     const decode = Schema.decodeUnknownSync(SessionInput.Admitted)

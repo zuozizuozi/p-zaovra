@@ -113,6 +113,7 @@ export function make<
                   (error) =>
                     new ToolFailure({
                       message: `Tool returned an invalid value for its output schema: ${error.message}`,
+                      metadata: { phase: "execution", reason: "output-unconfirmed" },
                     }),
                 ),
               ),

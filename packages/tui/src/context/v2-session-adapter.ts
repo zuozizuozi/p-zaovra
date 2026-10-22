@@ -113,7 +113,8 @@ export function adaptMessages(session: SessionV2Info, messages: SessionMessage[]
               sessionID: session.id,
               messageID: item.id,
               type: "text",
-              text: content.text,
+              text: content.superseded ? `[被替代的未完成输出]\n${content.text}` : content.text,
+              metadata: content.superseded ? { superseded: true } : undefined,
             }
           }
           if (content.type === "reasoning") {
@@ -122,8 +123,8 @@ export function adaptMessages(session: SessionV2Info, messages: SessionMessage[]
               sessionID: session.id,
               messageID: item.id,
               type: "reasoning",
-              text: content.text,
-              metadata: content.providerMetadata,
+              text: content.superseded ? `[被替代的未完成推理]\n${content.text}` : content.text,
+              metadata: { ...content.providerMetadata, ...(content.superseded ? { superseded: true } : {}) },
               time: {
                 start: content.time?.created ?? item.time.created,
                 end: content.time?.completed,

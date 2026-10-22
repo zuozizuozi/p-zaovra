@@ -363,7 +363,7 @@ describe("Bedrock Converse route", () => {
       )
       const response = yield* LLMClient.generate(baseRequest).pipe(Effect.provide(fixedBytes(body)))
 
-      expect(response.events.find((event) => event.type === "provider-error")).toEqual({
+      expect(response.events.find((event) => event.type === "provider-error")).toMatchObject({
         type: "provider-error",
         message: "Slow down",
         retryable: true,
@@ -379,7 +379,7 @@ describe("Bedrock Converse route", () => {
         ),
       )
 
-      expect(response.events.find((event) => event.type === "provider-error")).toEqual({
+      expect(response.events.find((event) => event.type === "provider-error")).toMatchObject({
         type: "provider-error",
         message: "Input is too long for requested model",
         classification: "context-overflow",

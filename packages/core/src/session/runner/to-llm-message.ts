@@ -105,6 +105,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
     String(message.model.providerID) === String(model.provider) && String(message.model.id) === String(model.id)
   const reuseProviderMetadata = sameModel && message.error === undefined
   const content = message.content.flatMap((item): ContentPart[] => {
+    if (item.type !== "tool" && item.superseded) return []
     if (item.type === "text") return [{ type: "text", text: item.text }]
     if (item.type === "reasoning")
       return sameModel
@@ -112,17 +113,22 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
             {
               type: "reasoning",
               text: item.text,
-              providerMetadata: reuseProviderMetadata ? item.providerMetadata : undefined,
+              providerMetadata: item.time?.completed
+                ? item.providerMetadata
+                : reuseProviderMetadata
+                  ? item.providerMetadata
+                  : undefined,
             },
           ]
         : item.text.length > 0
           ? [{ type: "text", text: item.text }]
           : []
-    const call = toolCall(item, reuseProviderMetadata ? item.provider?.metadata : undefined)
+    const complete = sameModel && item.state.status === "completed"
+    const call = toolCall(item, reuseProviderMetadata || complete ? item.provider?.metadata : undefined)
     if (item.provider?.executed !== true) return [call]
     const result = toolResult(
       item,
-      reuseProviderMetadata ? (item.provider.resultMetadata ?? item.provider.metadata) : undefined,
+      reuseProviderMetadata || complete ? (item.provider.resultMetadata ?? item.provider.metadata) : undefined,
     )
     return result ? [call, result] : [call]
   })
@@ -174,6 +180,7 @@ function toLLMMessage(message: SessionMessage.Message, model: Model, originalReq
         }),
       ]
     case "synthetic":
+      if (message.recovery) return []
       return [Message.make({ id: message.id, role: "user", content: message.text, metadata: message.metadata })]
     case "system":
       return [Message.system(message.text)]

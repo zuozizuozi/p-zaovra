@@ -170,6 +170,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           SessionMessage.Synthetic.make({
             sessionID: event.data.sessionID,
             text: event.data.text,
+            recovery: event.data.recovery,
             id: event.data.messageID,
             type: "synthetic",
             time: { created: event.data.timestamp },
@@ -271,7 +272,10 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.next.text.ended": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
           const match = latestText(draft, event.data.textID)
-          if (match) match.text = event.data.text
+          if (match) {
+            match.text = event.data.text
+            if (event.data.superseded) match.superseded = true
+          }
         })
       },
       "session.next.tool.input.started": (event) => {
@@ -394,8 +398,13 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           const match = latestReasoning(draft, event.data.reasoningID)
           if (match) {
             match.text = event.data.text
+            if (event.data.superseded) {
+              match.superseded = true
+              delete match.providerMetadata
+            }
             match.time = { created: match.time?.created ?? event.data.timestamp, completed: event.data.timestamp }
-            if (event.data.providerMetadata !== undefined) match.providerMetadata = event.data.providerMetadata
+            if (!event.data.superseded && event.data.providerMetadata !== undefined)
+              match.providerMetadata = event.data.providerMetadata
           }
         })
       },

@@ -15,6 +15,35 @@ const session: SessionV2Info = {
 }
 
 describe("V2 session timeline adapter", () => {
+  test("retains recovery intervals and identifies superseded partial outputs after reload", () => {
+    const result = adaptSessionMessages(session, [
+      { id: "user", type: "user", text: "task", time: { created: 0 } },
+      {
+        id: "assistant",
+        type: "assistant",
+        agent: "build",
+        model: session.model!,
+        time: { created: 1 },
+        content: [
+          { id: "half", type: "text", text: "partial", superseded: true },
+          { id: "reason", type: "reasoning", text: "partial reasoning", superseded: true },
+        ],
+      },
+      {
+        id: "recovery",
+        type: "synthetic",
+        sessionID: session.id,
+        time: { created: 2 },
+        text: "恢复记录：重试 3 次",
+        recovery: { id: "retry", started: 1, ended: 2, attempts: 3, phase: "recovered" },
+      },
+    ])
+    expect(result[1]?.parts.map((part) => ("text" in part ? part.text : ""))).toEqual([
+      "[被替代的未完成输出]\npartial",
+      "[被替代的未完成推理]\npartial reasoning",
+    ])
+    expect(result[2]?.parts[0]).toMatchObject({ text: "恢复记录：重试 3 次" })
+  })
   test("warns about missing undo snapshots only for completed potentially mutating tools", () => {
     const assistant: Extract<SessionMessage, { type: "assistant" }> = {
       id: "msg_snapshot",

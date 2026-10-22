@@ -47,7 +47,7 @@ export function SessionRetry(props: { status: SessionStatus; show?: boolean }) {
     const retrying = i18n.t("ui.sessionTurn.retry.retrying")
     const line = [retrying, delay].filter(Boolean).join(" ")
     if (!line) return i18n.t("ui.sessionTurn.retry.attempt", { attempt: current.attempt })
-    return i18n.t("ui.sessionTurn.retry.attemptLine", { line, attempt: current.attempt })
+    return `${i18n.t("ui.sessionTurn.retry.attemptLine", { line, attempt: current.attempt })} · ${new Date(current.next).toLocaleTimeString()}`
   })
 
   return (

@@ -1,5 +1,79 @@
 import { Schema } from "effect"
-import { LLMError, ProviderErrorEvent } from "./schema"
+import {
+  AuthenticationReason,
+  ContentPolicyReason,
+  HttpContext,
+  InvalidRequestReason,
+  LLMError,
+  ProviderErrorEvent,
+  ProviderInternalReason,
+  QuotaExceededReason,
+  RateLimitReason,
+  UnknownProviderReason,
+} from "./schema"
+
+/** Use provider codes before HTTP fallbacks; generic messages must not imply transience. */
+export function providerFailure(input: {
+  message: string
+  code?: string
+  type?: string
+  status?: number
+  retryAfterMs?: number
+  http?: HttpContext
+}) {
+  const code = [input.code, input.type].filter(Boolean).join(" ").toLowerCase()
+  const common = { message: input.message, http: input.http }
+  const detail = code || input.message
+  if (
+    /insufficient[-_\s]?(?:quota|balance|credits)|quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|free-models-per-day|openrouter_free_tier_daily|余额不足|额度不足/i.test(
+      detail,
+    )
+  )
+    return new QuotaExceededReason(common)
+  if (/content_filter|content[-_\s]?policy|safety|permission_denied/i.test(detail))
+    return /permission_denied/.test(code)
+      ? new AuthenticationReason({ ...common, kind: "insufficient-permissions" })
+      : new ContentPolicyReason(common)
+  if (/invalid_api_key|authentication_error|unauthorized|access_denied|forbidden/.test(code))
+    return new AuthenticationReason({ ...common, kind: input.status === 403 ? "insufficient-permissions" : "invalid" })
+  if (
+    /invalid_request|invalid_argument|invalid_prompt|bad_request|context_length_exceeded|model_not_found|unsupported/.test(
+      code,
+    ) ||
+    (input.status !== undefined && [400, 413, 422].includes(input.status) && isContextOverflow(input.message))
+  )
+    return new InvalidRequestReason({
+      ...common,
+      classification:
+        /context_length_exceeded/.test(code) || isContextOverflow(input.message) ? "context-overflow" : undefined,
+    })
+  if (/rate[-_\s]?limit|too[_ ]many[_ ]requests|throttl|请求频率|限流/i.test(detail) || input.status === 429)
+    return new RateLimitReason({ ...common, retryAfterMs: input.retryAfterMs, rateLimit: input.http?.rateLimit })
+  if (
+    /overload|over capacity|temporarily unavailable|server_error|internal_error|service_unavailable|过载|暂时不可用/i.test(
+      detail,
+    ) ||
+    (input.status ?? 0) >= 500 ||
+    [408, 425].includes(input.status ?? 0)
+  )
+    return new ProviderInternalReason({ ...common, status: input.status ?? 503, retryAfterMs: input.retryAfterMs })
+  if (input.status === 401 || input.status === 403)
+    return new AuthenticationReason({ ...common, kind: input.status === 403 ? "insufficient-permissions" : "invalid" })
+  if (input.status === 402) return new QuotaExceededReason(common)
+  if ([400, 404, 409, 413, 422].includes(input.status ?? 0)) return new InvalidRequestReason(common)
+  return new UnknownProviderReason({ ...common, status: input.status })
+}
+
+export function providerEventError(event: ProviderErrorEvent) {
+  return new LLMError({
+    module: "Provider",
+    method: "stream",
+    reason:
+      event.classification === "context-overflow"
+        ? new InvalidRequestReason({ message: event.message, classification: "context-overflow" })
+        : (event.reason ?? providerFailure(event)),
+  })
+}
 
 const patterns = [
   /prompt is too long/i,

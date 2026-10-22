@@ -24,6 +24,7 @@ import { DeepSeekOptions } from "./utils/deepseek-options"
 import { Lifecycle } from "./utils/lifecycle"
 import { ToolSchemaProjection } from "./utils/tool-schema"
 import { ToolStream } from "./utils/tool-stream"
+import { providerFailure } from "../provider-error"
 
 const ADAPTER = "openai-chat"
 const IMAGE_MIMES = new Set<string>(ProviderShared.IMAGE_MIMES)
@@ -160,9 +161,16 @@ const OpenAIChatChoice = Schema.Struct({
 })
 
 export const OpenAIChatEvent = Schema.Struct({
+  error: optionalNull(
+    Schema.Struct({
+      code: optionalNull(Schema.String),
+      type: optionalNull(Schema.String),
+      message: optionalNull(Schema.String),
+    }),
+  ),
   model: optionalNull(Schema.String),
   system_fingerprint: optionalNull(Schema.String),
-  choices: Schema.Array(OpenAIChatChoice),
+  choices: Schema.Array(OpenAIChatChoice).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   usage: optionalNull(OpenAIChatUsage),
 })
 type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>
@@ -436,6 +444,20 @@ const mapUsage = (usage: OpenAIChatEvent["usage"]): Usage | undefined => {
 
 const step = (state: ParserState, event: OpenAIChatEvent) =>
   Effect.gen(function* () {
+    if (event.error) {
+      const code = event.error.code ?? event.error.type ?? undefined
+      const message = event.error.message ?? code ?? "Provider stream error"
+      return [
+        state,
+        [
+          LLMEvent.providerError({
+            message,
+            code,
+            reason: providerFailure({ message, code, type: event.error.type ?? undefined }),
+          }),
+        ],
+      ] as const
+    }
     const events: LLMEvent[] = []
     const usage = mapUsage(event.usage) ?? state.usage
     const choice = event.choices[0]
@@ -547,6 +569,7 @@ export const protocol = Protocol.make({
   },
   stream: {
     event: Protocol.jsonEvent(OpenAIChatEvent),
+    terminal: (event) => event.error != null,
     initial: () => ({ tools: ToolStream.empty<number>(), toolCallEvents: [], lifecycle: Lifecycle.initial() }),
     step,
     onHalt: finishEvents,

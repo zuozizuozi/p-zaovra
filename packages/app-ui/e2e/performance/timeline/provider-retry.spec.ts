@@ -16,6 +16,7 @@ test("shows provider retry progress without replacing the conversation", async (
   const fixture = await setupTimelineBenchmark(page, { historyTurns: 2, eventBatch: 1, newLayoutDesigns: true })
   const sessionID = "ses_timeline_state_regression"
   const directory = "C:/Zaovra/TimelineStateRegression"
+  const timestamp = Date.now()
   // The production wait endpoint holds while the drain owns this session.
   // Keep that contract instead of the fixture's immediate idle response.
   await page.route("**/api/session/*/wait", async (route) => {
@@ -28,13 +29,16 @@ test("shows provider retry progress without replacing the conversation", async (
       type: "session.next.retried",
       properties: {
         sessionID,
-        timestamp: Date.now(),
+        timestamp,
         attempt: 2,
         error: { message: "Provider retry diagnostic", isRetryable: true, metadata: { delayMs: "2000" } },
       },
     },
   })
   await expect(page.locator('[data-slot="session-turn-retry-message"]')).toContainText("Provider retry diagnostic")
+  await expect(page.locator('[data-slot="session-turn-retry-info"]')).toContainText(
+    await page.evaluate((next) => new Date(next).toLocaleTimeString(), timestamp + 2000),
+  )
   fixture.transport.enqueue({
     directory,
     payload: {

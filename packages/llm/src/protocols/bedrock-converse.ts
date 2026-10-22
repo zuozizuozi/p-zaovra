@@ -17,7 +17,7 @@ import {
   type ToolResultPart,
 } from "../schema"
 import { BedrockEventStream } from "./bedrock-event-stream"
-import { isContextOverflow } from "../provider-error"
+import { isContextOverflow, providerFailure } from "../provider-error"
 import { JsonObject, optionalArray, ProviderShared } from "./shared"
 import { BedrockAuth } from "./utils/bedrock-auth"
 import { BedrockCache } from "./utils/bedrock-cache"
@@ -592,7 +592,20 @@ const step = (state: ParserState, event: BedrockEvent) =>
         event.modelStreamErrorException?.message ??
         event.serviceUnavailableException?.message ??
         "Bedrock Converse stream error"
-      return [state, [LLMEvent.providerError({ message, retryable: true })]] as const
+      return [
+        state,
+        [
+          LLMEvent.providerError({
+            message,
+            reason: providerFailure({
+              message,
+              code: event.modelStreamErrorException ? "model_stream_error" : "service_unavailable",
+              status: 503,
+            }),
+            retryable: true,
+          }),
+        ],
+      ] as const
     }
 
     if (event.validationException || event.throttlingException) {
@@ -603,6 +616,7 @@ const step = (state: ParserState, event: BedrockEvent) =>
         [
           LLMEvent.providerError({
             message,
+            reason: providerFailure({ message, code: event.validationException ? "invalid_request" : "throttling" }),
             classification: event.validationException && isContextOverflow(message) ? "context-overflow" : undefined,
             retryable: event.throttlingException !== undefined,
           }),

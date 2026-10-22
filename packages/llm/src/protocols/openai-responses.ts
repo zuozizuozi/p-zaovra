@@ -19,7 +19,7 @@ import {
   type ToolResultPart,
 } from "../schema"
 import { JsonObject, optionalArray, optionalNull, ProviderShared } from "./shared"
-import { isContextOverflow } from "../provider-error"
+import { isContextOverflow, providerFailure } from "../provider-error"
 import { OpenAIOptions } from "./utils/openai-options"
 import { Lifecycle } from "./utils/lifecycle"
 import { ToolSchemaProjection } from "./utils/tool-schema"
@@ -205,6 +205,7 @@ type OpenAIResponsesStreamItem = Schema.Schema.Type<typeof OpenAIResponsesStream
 // the parser can surface a useful provider-error message in either path.
 const OpenAIResponsesErrorPayload = Schema.Struct({
   code: optionalNull(Schema.String),
+  type: optionalNull(Schema.String),
   message: optionalNull(Schema.String),
   param: optionalNull(Schema.String),
 })
@@ -899,16 +900,30 @@ const onResponseFinish = (state: ParserState, event: OpenAIResponsesEvent): Step
 // to be indistinguishable from generic stream drops.
 const providerErrorMessage = (event: OpenAIResponsesEvent, fallback: string): string => {
   const message = event.message || event.error?.message || event.response?.error?.message || undefined
-  const code = event.code || event.error?.code || event.response?.error?.code || undefined
+  const code =
+    event.code ||
+    event.error?.code ||
+    event.error?.type ||
+    event.response?.error?.code ||
+    event.response?.error?.type ||
+    undefined
   if (message && code) return `${code}: ${message}`
   return message || code || fallback
 }
 
 const providerError = (event: OpenAIResponsesEvent, fallback: string) => {
-  const code = event.code || event.error?.code || event.response?.error?.code || undefined
+  const code =
+    event.code ||
+    event.error?.code ||
+    event.error?.type ||
+    event.response?.error?.code ||
+    event.response?.error?.type ||
+    undefined
   const message = providerErrorMessage(event, fallback)
   return LLMEvent.providerError({
     message,
+    code,
+    reason: providerFailure({ message, code, type: event.error?.type ?? event.response?.error?.type ?? undefined }),
     classification: code === "context_length_exceeded" || isContextOverflow(message) ? "context-overflow" : undefined,
   })
 }

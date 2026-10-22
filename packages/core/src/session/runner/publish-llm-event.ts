@@ -85,7 +85,12 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
 
   const fragments = (
     name: string,
-    ended: (id: string, value: string, providerMetadata?: ProviderMetadata) => Effect.Effect<void>,
+    ended: (
+      id: string,
+      value: string,
+      providerMetadata?: ProviderMetadata,
+      superseded?: boolean,
+    ) => Effect.Effect<void>,
   ) => {
     const chunks = new Map<string, { values: string[]; length: number }>()
     const start = (id: string) =>
@@ -103,19 +108,19 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         current.length += value.length
         return Effect.succeed(offset)
       })
-    const end = Effect.fnUntraced(function* (id: string, providerMetadata?: ProviderMetadata) {
+    const end = Effect.fnUntraced(function* (id: string, providerMetadata?: ProviderMetadata, superseded?: boolean) {
       const current = chunks.get(id)
       if (!current) return yield* Effect.die(`${name} end before start: ${id}`)
-      yield* ended(id, current.values.join(""), providerMetadata)
+      yield* ended(id, current.values.join(""), providerMetadata, superseded)
       chunks.delete(id)
     })
     const flush = Effect.fnUntraced(function* () {
-      for (const id of chunks.keys()) yield* end(id)
+      for (const id of chunks.keys()) yield* end(id, undefined, true)
     })
     return { start, append, end, flush }
   }
 
-  const text = fragments("text", (textID, value) =>
+  const text = fragments("text", (textID, value, _, superseded) =>
     Effect.gen(function* () {
       yield* events.publish(SessionEvent.Text.Ended, {
         sessionID: input.sessionID,
@@ -123,10 +128,11 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         timestamp: yield* timestamp,
         textID,
         text: value,
+        ...(superseded ? { superseded: true } : {}),
       })
     }),
   )
-  const reasoning = fragments("reasoning", (reasoningID, value, providerMetadata) =>
+  const reasoning = fragments("reasoning", (reasoningID, value, providerMetadata, superseded) =>
     Effect.gen(function* () {
       yield* events.publish(SessionEvent.Reasoning.Ended, {
         sessionID: input.sessionID,
@@ -135,6 +141,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         reasoningID,
         text: value,
         providerMetadata,
+        ...(superseded ? { superseded: true } : {}),
       })
     }),
   )
@@ -210,6 +217,8 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     const category = categories[metadata?.category ?? ""] ?? "provider_output"
     if (category === "auth" || category === "quota")
       message = `提供商 ${input.model.providerID}：${category === "auth" ? "鉴权失败，请检查 API 密钥或访问权限" : "额度或余额不足，请检查余额或服务套餐"}，也可切换模型或提供商后继续。\n${message}`
+    if (category === "request") message = `请求格式或参数不受支持，请修正请求或切换模型后继续。\n${message}`
+    if (category === "content_filter") message = `内容被提供商过滤，请调整请求后继续。\n${message}`
     failureMessage = message
     yield* flush()
     const assistantMessageID = yield* startAssistant()

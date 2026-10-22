@@ -63,12 +63,21 @@ export const User = Schema.Struct({
   type: Schema.Literal("user"),
 }).annotate({ identifier: "Session.Message.User" })
 
+export interface Recovery extends Schema.Schema.Type<typeof Recovery> {}
+export const Recovery = Schema.Struct({
+  id: Schema.String,
+  started: Schema.Finite,
+  ended: Schema.Finite,
+  attempts: NonNegativeInt,
+  phase: Schema.Literals(["recovered", "stopped", "interrupted"]),
+}).annotate({ identifier: "Session.Recovery" })
 export interface Synthetic extends Schema.Schema.Type<typeof Synthetic> {}
 export const Synthetic = Schema.Struct({
   ...Base,
   sessionID: SessionID,
   text: Schema.String,
   completion: HostCompletion.pipe(optional),
+  recovery: Recovery.pipe(optional),
   type: Schema.Literal("synthetic"),
 }).annotate({ identifier: "Session.Message.Synthetic" })
 
@@ -158,6 +167,7 @@ export const AssistantText = Schema.Struct({
   type: Schema.Literal("text"),
   id: Schema.String,
   text: Schema.String,
+  superseded: Schema.Boolean.pipe(optional),
 }).annotate({ identifier: "Session.Message.Assistant.Text" })
 
 export interface AssistantReasoning extends Schema.Schema.Type<typeof AssistantReasoning> {}
@@ -165,6 +175,7 @@ export const AssistantReasoning = Schema.Struct({
   type: Schema.Literal("reasoning"),
   id: Schema.String,
   text: Schema.String,
+  superseded: Schema.Boolean.pipe(optional),
   providerMetadata: ProviderMetadata.pipe(optional),
   time: Schema.Struct({
     created: DateTimeUtcFromMillis,

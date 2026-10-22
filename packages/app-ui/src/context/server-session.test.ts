@@ -638,7 +638,56 @@ describe("V2 server session store", () => {
 
     expect(ctx.store.data.message.ses_child[1]).toMatchObject({ id: "msg_002", parentID: "msg_001" })
     expect(ctx.store.data.part.msg_002).toMatchObject([{ id: "msg_002:text_1", text: "hello" }])
+    ctx.store.apply({
+      type: "session.next.text.ended",
+      properties: {
+        timestamp: 4,
+        sessionID: "ses_child",
+        assistantMessageID: "msg_002",
+        textID: "text_1",
+        text: "hello",
+        superseded: true,
+      },
+    })
+    expect(ctx.store.data.part.msg_002).toMatchObject([
+      { text: "[被替代的未完成输出]\nhello", metadata: { superseded: true } },
+    ])
   })
+})
+
+test("a recovery Synthetic event refreshes durable history while the session stays busy", async () => {
+  const refreshed = Promise.withResolvers<void>()
+  const ctx = setup({
+    pages: [
+      {
+        data: [
+          {
+            type: "synthetic",
+            id: "msg_recovery",
+            sessionID: "ses_child",
+            time: { created: 4 },
+            text: "恢复记录：重试2次",
+            recovery: { id: "msg_episode", started: 1, ended: 4, attempts: 2, phase: "recovered" },
+          },
+        ],
+      },
+    ],
+    pageWait: () => {
+      refreshed.resolve()
+      return Promise.resolve()
+    },
+  })
+  await ctx.store.resolve("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  ctx.store.apply({
+    type: "session.next.synthetic",
+    properties: { sessionID: "ses_child", messageID: "msg_recovery", timestamp: 4, text: "恢复记录：重试2次" },
+  })
+  await refreshed.promise
+  // Let the queued history response finish adapting into the same store.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(ctx.store.data.part.msg_recovery).toMatchObject([{ text: "恢复记录：重试2次" }])
+  expect(ctx.store.data.session_working("ses_child")).toBe(true)
 })
 
 test("Stop wait settling cannot clear the new task's busy state and its final tail is reconciled", async () => {
