@@ -31,6 +31,7 @@ import { Location } from "../src/location"
 import { Config } from "../src/config"
 import { EventV2 } from "../src/event"
 import { ToolOutputStore } from "../src/tool-output-store"
+import { Screenshot } from "../src/screenshot"
 import { toolIdentity, settleTool } from "./lib/tool"
 
 import { AbsolutePath } from "../src/schema"
@@ -59,6 +60,8 @@ test(
   { timeout: 60000 },
   async () => {
     const tmp = { path: await mkdtemp(path.join(os.tmpdir(), "browser-test-")) }
+    const decodeImages: string[] = []
+    const screenshotArtifacts: { reference: string; data: string }[] = []
     let outsideHits = 0
     let uncertainHits = 0
     let effectHits = 0
@@ -78,6 +81,11 @@ test(
     if (!outsideAddress || typeof outsideAddress === "string") throw Error("No outside server")
     const outsideURL = `http://127.0.0.1:${outsideAddress.port}`
     const server = createServer((request, response) => {
+      if (request.url === "/decode") {
+        response.setHeader("Content-Type", "text/html")
+        response.end(`<title>PNG decode fixture</title><p id="status">pending</p><script>Promise.all(${JSON.stringify(decodeImages)}.map(async src => { const img = new Image(); img.src = src; await img.decode(); if (img.naturalWidth !== 1280 || img.naturalHeight !== 720) throw Error('dimensions'); })).then(() => { document.getElementById('status').textContent = 'decoded four PNG images 1280x720'; }, () => { document.getElementById('status').textContent = 'decode failed'; });</script>`)
+        return
+      }
       if (request.url === "/batch-hit" || request.url === "/batch-key") {
         if (request.url === "/batch-hit") batchHits++
         if (request.url === "/batch-key") batchKeys++
@@ -270,6 +278,49 @@ test(
               inputModalities: known ? (vision ? ["text", "image"] : ["text"]) : undefined,
               call: { type: "tool-call", id: `call_${++calls}`, name: "browser", input },
             })
+          const screenshotMatrix = () => Effect.gen(function* () {
+            for (const imageInput of [false, true]) {
+              vision = imageInput
+              for (const action of ["screenshot", "batch"] as const) {
+                const captured = yield* call(action === "screenshot"
+                  ? { action }
+                  : { action, actions: [{ action: "scroll", x: 0, y: 0 }], observation: "screenshot" })
+                const metadata = captured.output?.structured as {
+                  screenshot: { reference: string; name: string; mime: string; modelVisible: boolean }
+                }
+                assert.equal(metadata.screenshot.modelVisible, imageInput)
+                assert.equal(metadata.screenshot.reference, path.basename(metadata.screenshot.name))
+                assert.equal("data" in metadata.screenshot, false)
+                assert.equal(captured.output?.content.some((part) => part.type === "file"), imageInput)
+                const stored = yield* Effect.promise(() => Screenshot.read(
+                  path.join(tmp.path, "tool-output"), "ses_browser_a", metadata.screenshot.reference,
+                ))
+                assert.ok(stored.length > 8)
+                assert.deepEqual(stored.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+                decodeImages.push(`data:image/png;base64,${stored.toString("base64")}`)
+                screenshotArtifacts.push({ reference: metadata.screenshot.reference, data: stored.toString("base64") })
+              }
+            }
+            yield* call({ action: "open", url: new URL("decode", url).href }, "ses_browser_decode")
+            yield* Effect.gen(function* () {
+              while (true) {
+                const observed = JSON.stringify(yield* call({ action: "snapshot" }, "ses_browser_decode"))
+                assert.ok(!observed.includes("decode failed"))
+                if (observed.includes("decoded four PNG images 1280x720")) break
+                yield* Effect.sleep("20 millis")
+              }
+            }).pipe(Effect.timeout("2 seconds"))
+            yield* browser.close(SessionSchema.ID.make("ses_browser_decode"))
+            if (process.env.ZAOVRA_SCREENSHOT_MANIFEST)
+              yield* Effect.promise(() => writeFile(process.env.ZAOVRA_SCREENSHOT_MANIFEST!, JSON.stringify(screenshotArtifacts)))
+          })
+          if (process.env.ZAOVRA_SCREENSHOT_MATRIX_ONLY === "1") {
+            known = true
+            yield* call({ action: "open", url: new URL("batch", url).href })
+            yield* screenshotMatrix()
+            yield* browser.close(SessionSchema.ID.make("ses_browser_a"))
+            return
+          }
           // A click dispatches fetch without waiting for the server to receive it.
           // Observe real receipt, never replay an action to satisfy the counter.
           const received = (count: number) =>
@@ -469,6 +520,7 @@ test(
           expect((yield* call({ action: "screenshot" })).output?.content.some((part) => part.type === "file")).toBe(
             true,
           )
+          yield* screenshotMatrix()
           const redirected = yield* call({ action: "open", url: new URL("redirect", url).href })
           expect(JSON.stringify(redirected)).toContain("Redirect blocked")
           expect(outsideHits).toBe(0)
@@ -541,7 +593,7 @@ test(
   },
 )
 
-test("real Session Stop, archive, Location disposal and browser process loss", { timeout: 60000 }, async () => {
+test("real Session Stop, archive, Location disposal and browser process loss", { timeout: 60000, skip: process.env.ZAOVRA_SCREENSHOT_MATRIX_ONLY === "1" }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "browser-lifecycle-"))
   const second = path.join(root, "other")
   await mkdir(second)

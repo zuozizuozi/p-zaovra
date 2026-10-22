@@ -290,6 +290,8 @@ import type {
   V2SessionRevertCommitResponses,
   V2SessionRevertStageErrors,
   V2SessionRevertStageResponses,
+  V2SessionScreenshotErrors,
+  V2SessionScreenshotResponses,
   V2SessionShellErrors,
   V2SessionShellResponses,
   V2SessionSwitchAgentErrors,
@@ -3628,6 +3630,36 @@ export class Session extends HeyApiClient {
     return (options?.client ?? this.client).get<V2SessionActiveResponses, V2SessionActiveErrors, ThrowOnError>({
       url: "/api/session/active",
       ...options,
+    })
+  }
+
+  /**
+   * Read a managed session screenshot
+   *
+   * Read a retained PNG reference belonging to this session. Arbitrary paths are rejected.
+   */
+  public screenshot<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      reference: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "reference" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2SessionScreenshotResponses, V2SessionScreenshotErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/screenshot/{reference}",
+      ...options,
+      ...params,
     })
   }
 

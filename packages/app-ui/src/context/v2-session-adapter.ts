@@ -213,7 +213,15 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
             type: "text",
             text: item.type === "shell" ? `$ ${item.command}\n\n${item.output}` : item.text,
             synthetic: true,
-            ...(item.type === "shell" ? { metadata: { zaovraShellPending: item.time.completed === undefined } } : {}),
+            ...(item.type === "shell"
+              ? {
+                  metadata: {
+                    zaovraShellPending: item.time.completed === undefined,
+                    zaovraShellJobID: item.id,
+                    zaovraShellCompleted: item.time.completed,
+                  },
+                }
+              : {}),
           },
         ],
       })
@@ -324,7 +332,7 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
         status: "error" as const,
         input,
         error: tool.state.error.message,
-        metadata,
+        metadata: { ...tool.state.error.metadata, ...metadata },
         time: { start: tool.time.ran ?? tool.time.created, end: tool.time.completed ?? tool.time.created },
       }
     return {

@@ -173,6 +173,21 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
       ),
     )
     .add(
+      HttpApiEndpoint.get("session.screenshot", "/api/session/:sessionID/screenshot/:reference", {
+        params: { sessionID: Session.ID, reference: Schema.String },
+        success: Schema.Struct({ data: Schema.String, mime: Schema.Literal("image/png") }),
+        error: InvalidRequestError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.screenshot",
+            summary: "Read a managed session screenshot",
+            description: "Read a retained PNG reference belonging to this session. Arbitrary paths are rejected.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.get("session.get", "/api/session/:sessionID", {
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: Session.Info }),

@@ -160,6 +160,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     permission: {} as Record<string, PermissionView[]>,
     question: {} as Record<string, QuestionView[]>,
     pending_input: {} as Record<string, SessionInputAdmitted[]>,
+    live_shell: {} as Record<string, Record<string, true>>,
     message: {} as Record<string, Message[]>,
     part: {} as Record<string, Part[]>,
     part_text_accum_delta: {} as Record<string, string>,
@@ -223,7 +224,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           await inflight.get(sessionID)?.catch(() => {})
           if (generations.get(sessionID) !== active) return
           await sync(sessionID, { force: true })
-          return
+          // Buffered SSE may start a later step while the final snapshot loads.
+          // Its watch joins this promise, so it must get another ownership check.
+          if (!data.session_working(sessionID)) return
+          continue
         }
         if (failure) throw failure
       }
@@ -446,6 +450,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       if (evicted.has(item.sessionID)) offsetChunks.delete(partID)
     }
     sessionIDs.forEach((sessionID) => {
+      setData("live_shell", sessionID, undefined!)
       generations.delete(sessionID)
       clearOptimistic(sessionID)
       requests.delete(sessionID)
@@ -805,7 +810,20 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const apply = (event: { type: string; properties?: unknown }): void => {
     const normalized = adaptServerEvent(event as Event)
     if (normalized !== event) return apply(normalized)
+    if (event.type === "server.connected" || event.type === "global.disposed") {
+      setData("live_shell", reconcile({}))
+    }
     const eventID = eventSessionID(event)
+    if (eventID && (event.type === "session.next.shell.started" || event.type === "session.next.shell.ended")) {
+      const props = event.properties as { messageID?: string; callID?: string }
+      const id = event.type === "session.next.shell.started" ? props.messageID : props.callID
+      if (id) {
+        const jobs = { ...data.live_shell[eventID] }
+        if (event.type === "session.next.shell.started") jobs[id] = true
+        else delete jobs[id]
+        setData("live_shell", eventID, reconcile(jobs))
+      }
+    }
     if (eventID) {
       touch(eventID)
       if (

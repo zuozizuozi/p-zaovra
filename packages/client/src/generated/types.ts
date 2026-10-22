@@ -476,6 +476,13 @@ export type SessionsUsageOutput = {
 
 export type SessionsActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
 
+export type SessionsScreenshotInput = {
+  readonly sessionID: { readonly sessionID: string; readonly reference: string }["sessionID"]
+  readonly reference: { readonly sessionID: string; readonly reference: string }["reference"]
+}
+
+export type SessionsScreenshotOutput = { readonly data: string; readonly mime: "image/png" }
+
 export type SessionsGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionsGetOutput = {

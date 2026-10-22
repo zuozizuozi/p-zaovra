@@ -135,7 +135,7 @@ const main = Effect.gen(function* () {
 
     const root = join(tmpdir(), `zaovra-onboarding-${randomUUID()}`)
     rmSync(root, { recursive: true, force: true })
-    ;["data", "config", "cache", "state", "desktop", "session"].forEach((dir) =>
+    ;["data", "config", "cache", "state", "desktop", "session", "documents", "home"].forEach((dir) =>
       mkdirSync(join(root, dir), { recursive: true }),
     )
     process.env.ZAOVRA_DB = ":memory:"
@@ -153,7 +153,12 @@ const main = Effect.gen(function* () {
     "userData",
     onboardingTestRoot ? join(onboardingTestRoot, "desktop") : userDataOverride || join(app.getPath("appData"), appId),
   )
-  if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
+  if (onboardingTestRoot) {
+    app.setPath("sessionData", join(onboardingTestRoot, "session"))
+    // First-launch project creation must never fall back to the real user's directories in test mode.
+    app.setPath("documents", join(onboardingTestRoot, "documents"))
+    app.setPath("home", join(onboardingTestRoot, "home"))
+  }
   const settings = getStore()
   const displayBackend = process.platform === "linux" ? settings.get(DISPLAY_BACKEND_KEY) : undefined
   initializeOldLayoutEligibility(app.getPath("userData"))

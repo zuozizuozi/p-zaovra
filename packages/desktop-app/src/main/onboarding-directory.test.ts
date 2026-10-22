@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { mkdtemp, mkdir, writeFile, stat, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { completeFirstLaunch } from "./onboarding-directory"
@@ -34,7 +34,7 @@ test("documents failure falls back to a child of home before marking complete", 
     create: true,
     path: (name) => {
       if (name === "documents") throw new Error("unavailable")
-      return "F:/isolated-home"
+      return resolve(tmpdir(), "isolated-home")
     },
     mkdir: async (path) => {
       events.push(path)
@@ -43,8 +43,8 @@ test("documents failure falls back to a child of home before marking complete", 
       events.push("complete")
     },
   })
-  expect(result).toEqual({ directory: join("F:/isolated-home", "Default Project"), fallback: true })
-  expect(events).toEqual([join("F:/isolated-home", "Default Project"), "complete"])
+  expect(result).toEqual({ directory: join(resolve(tmpdir(), "isolated-home"), "Default Project"), fallback: true })
+  expect(events).toEqual([join(resolve(tmpdir(), "isolated-home"), "Default Project"), "complete"])
 })
 
 test("mkdir denial also falls back; both failures leave onboarding pending", async () => {
@@ -52,7 +52,7 @@ test("mkdir denial also falls back; both failures leave onboarding pending", asy
   const result = await completeFirstLaunch({
     pending: true,
     create: true,
-    path: (name) => `F:/${name}`,
+    path: (name) => resolve(tmpdir(), name),
     mkdir: async () => {
       throw new Error("EACCES")
     },
@@ -106,12 +106,12 @@ test("documents success never probes home", async () => {
       create: true,
       path: (name) => {
         paths.push(name)
-        return "F:/documents"
+        return resolve(tmpdir(), "documents")
       },
       mkdir: async () => {},
       complete: () => {},
     }),
-  ).toEqual({ directory: join("F:/documents", "Default Project"), fallback: false })
+  ).toEqual({ directory: join(resolve(tmpdir(), "documents"), "Default Project"), fallback: false })
   expect(paths).toEqual(["documents"])
 })
 
@@ -123,7 +123,7 @@ test("completion storage errors do not create a second directory", async () => {
       create: true,
       path: (name) => {
         paths.push(name)
-        return `F:/${name}`
+        return resolve(tmpdir(), name)
       },
       mkdir: async () => {},
       complete: () => {

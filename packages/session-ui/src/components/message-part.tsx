@@ -67,6 +67,9 @@ import { useLocation } from "@solidjs/router"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
+import { BrowserScreenshot } from "./browser-screenshot"
+import { recoveredToolFailures } from "./tool-recovery"
+import { ToolRecoverySummary } from "./tool-recovery-summary"
 
 async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -844,7 +847,7 @@ export function AssistantParts(props: {
 }
 
 function isContextGroupTool(part: PartType): part is ToolPart {
-  return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
+  return part.type === "tool" && part.state.status !== "error" && CONTEXT_GROUP_TOOLS.has(part.tool)
 }
 
 function contextToolDetail(part: ToolPart): string | undefined {
@@ -1594,6 +1597,17 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   })
 
   const render = createMemo(() => ToolRegistry.render(part().tool) ?? GenericTool)
+  const recovered = createMemo(() =>
+    part().state.status === "error" && props.message.role === "assistant"
+      ? recoveredToolFailures({
+          message: props.message,
+          messages: data.store.message[part().sessionID] ?? [props.message],
+          parts: data.store.part,
+          working: (data.store.session_status[part().sessionID]?.type ?? "idle") !== "idle",
+        })
+      : [],
+  )
+  const recoveredPart = createMemo(() => recovered().some((item) => item.id === part().id))
   const controlledOpen = () => (props.onToolOpenChange ? (props.toolOpen ?? props.defaultOpen) : undefined)
   const handleToolOpenChange = (open: boolean) => props.onToolOpenChange?.(open)
 
@@ -1601,6 +1615,11 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
     <Show when={!hideQuestion()}>
       <div data-component="tool-part-wrapper" data-timeline-part-id={part().id}>
         <Switch>
+          <Match when={recoveredPart()}>
+            <Show when={recovered()[0]?.id === part().id}>
+              <ToolRecoverySummary parts={recovered()} onSizeChange={props.onContentRendered} />
+            </Show>
+          </Match>
           <Match when={part().state.status === "error" && (part().state as any).error}>
             {(error) => {
               const cleaned = error().replace("Error: ", "")
@@ -1810,37 +1829,13 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
 ToolRegistry.register({
   name: "browser",
   render(props) {
-    const dialog = useDialog()
-    const screenshot = createMemo(() => {
-      const value = props.metadata?.screenshot
-      if (
-        props.status !== "completed" ||
-        value?.mime !== "image/png" ||
-        typeof value.data !== "string" ||
-        value.data.length > 6 * 1024 * 1024
-      )
-        return undefined
-      return `data:image/png;base64,${value.data}`
-    })
     return (
       <>
         <BasicTool {...props} icon="glasses" trigger={{ title: "Browser", subtitle: String(props.input.action ?? "") }}>
           <pre class="whitespace-pre-wrap break-words">{props.metadata?.text ?? props.output}</pre>
         </BasicTool>
-        <Show when={screenshot()}>
-          {(src) => (
-            <button
-              type="button"
-              aria-label="Preview browser screenshot"
-              onClick={() => dialog.show(() => <ImagePreview src={src()} alt="Browser screenshot" />)}
-            >
-              <img
-                src={src()}
-                alt="Browser screenshot"
-                style={{ "max-width": "320px", "max-height": "180px", "object-fit": "contain" }}
-              />
-            </button>
-          )}
+        <Show when={props.status === "completed" && props.metadata?.screenshot?.mime === "image/png"}>
+          <BrowserScreenshot sessionID={props.sessionID} screenshot={props.metadata.screenshot} />
         </Show>
       </>
     )

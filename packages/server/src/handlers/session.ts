@@ -4,12 +4,17 @@ import { Config } from "@zaovra-ai/core/config"
 import { Database } from "@zaovra-ai/core/database/database"
 import { SessionBudget } from "@zaovra-ai/core/session/budget"
 import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
+import { Global } from "@zaovra-ai/core/global"
+import { Screenshot } from "@zaovra-ai/core/screenshot"
+import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
+import path from "node:path"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { SessionsCursor } from "@zaovra-ai/protocol/groups/session"
 import {
   ConflictError,
   InvalidCursorError,
+  InvalidRequestError,
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
@@ -23,8 +28,26 @@ const DefaultSessionHistoryLimit = 50
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
+    const global = yield* Global.Service
 
     return handlers
+      .handle(
+        "session.screenshot",
+        Effect.fn(function* (ctx) {
+          const bytes = yield* Effect.tryPromise({
+            try: () => Screenshot.read(
+              path.join(global.data, ToolOutputStore.MANAGED_DIRECTORY),
+              ctx.params.sessionID,
+              ctx.params.reference,
+            ),
+            catch: () => new InvalidRequestError({
+              message: "Screenshot unavailable, expired or not owned by this session",
+              field: "reference",
+            }),
+          })
+          return { data: bytes.toString("base64"), mime: "image/png" as const }
+        }),
+      )
       .handle(
         "session.usage",
         Effect.fn(function* (ctx) {

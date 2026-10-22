@@ -11,6 +11,7 @@ import { Catalog } from "../catalog"
 import { SessionStore } from "../session/store"
 import { SessionSchema } from "../session/schema"
 import { ToolOutputStore } from "../tool-output-store"
+import { Screenshot } from "../screenshot"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -196,6 +197,7 @@ const Output = Schema.Struct({
       data: Schema.String,
       mime: Schema.Literal("image/png"),
       name: Schema.String,
+      reference: Schema.String,
       modelVisible: Schema.Boolean,
     }),
   ),
@@ -303,7 +305,12 @@ const layer = Layer.effect(
             text: Schema.String,
             steps: Schema.optional(Schema.Array(Step)),
             screenshot: Schema.optional(
-              Schema.Struct({ mime: Schema.Literal("image/png"), name: Schema.String, modelVisible: Schema.Boolean }),
+              Schema.Struct({
+                mime: Schema.Literal("image/png"),
+                name: Schema.String,
+                reference: Schema.String,
+                modelVisible: Schema.Boolean,
+              }),
             ),
           }),
           toStructuredOutput: ({ output }) => ({
@@ -314,6 +321,7 @@ const layer = Layer.effect(
                   screenshot: {
                     mime: output.screenshot.mime,
                     name: output.screenshot.name,
+                    reference: output.screenshot.reference,
                     modelVisible: output.screenshot.modelVisible,
                   },
                 }
@@ -623,6 +631,7 @@ const layer = Layer.effect(
                     data: result.screenshot.toString("base64"),
                     mime: "image/png" as const,
                     name,
+                    reference: Screenshot.reference(name),
                     modelVisible,
                   },
                 }

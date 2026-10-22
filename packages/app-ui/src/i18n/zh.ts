@@ -7,6 +7,8 @@ export const dict = {
   "session.progress.blocked": "执行已中断",
   "session.progress.tool": "等待工具或后台任务结果",
   "session.progress.running": "正在执行",
+  "session.progress.unverified": "后台任务状态待核实",
+  "session.progress.preview": "预览服务运行中",
   "session.progress.idle": "等待证据",
   "session.progress.returned": "{{tool}} 已返回结果",
   "session.progress.updating": "证据更新中 · 剩余验证尚未确认",

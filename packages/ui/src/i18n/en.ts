@@ -1,4 +1,9 @@
 export const dict: Record<string, string> = {
+  "ui.toolRecovery.summary": "{{count}} attempts did not succeed during the process; resolved automatically",
+  "ui.browserScreenshot.loading": "Loading screenshot…",
+  "ui.browserScreenshot.unavailable": "Screenshot unavailable or expired.",
+  "ui.browserScreenshot.retry": "Retry",
+  "ui.browserScreenshot.preview": "Preview browser screenshot",
   "ui.messagePart.diagnosticsFailed": "File changes saved. Language diagnostics could not complete: {{servers}}.",
   "ui.messagePart.formattingFailed": "File changes saved. Automatic formatting failed: {{formatters}}.",
 

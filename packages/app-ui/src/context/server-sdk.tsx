@@ -2,7 +2,7 @@ import type { Event } from "@zaovra-ai/sdk/v2/client"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { type Accessor, batch, createMemo, onCleanup, onMount } from "solid-js"
+import { type Accessor, batch, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { createSdkForServer } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
@@ -143,6 +143,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     timer = setTimeout(flush, Math.max(0, FLUSH_FRAME_MS - elapsed))
   }
 
+  const [transportConnected, setTransportConnected] = createSignal(false)
   let streamErrorLogged = false
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
   let attempt: AbortController | undefined
@@ -186,6 +187,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             headers: lastEventID ? { "Last-Event-ID": lastEventID } : undefined,
             onSseEvent: observeSseActivity(resetHeartbeat),
             onSseError: (error) => {
+              setTransportConnected(false)
               if (isStreamClosed(error, attempt?.signal)) return
               if (streamErrorLogged) return
               streamErrorLogged = true
@@ -207,6 +209,10 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
               if (payload.type !== "server.connected" && typeof payload.id === "string") lastEventID = payload.id
               // Every transport reconnect starts with server.connected, which ServerSync treats as a snapshot resync.
               if (enqueueServerEvent(queue, { directory, payload })) schedule()
+              if (payload.type === "server.connected") {
+                flush()
+                setTransportConnected(true)
+              }
             }
 
             if (Date.now() - yielded < STREAM_YIELD_MS) continue
@@ -223,6 +229,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             })
           }
         } finally {
+          setTransportConnected(false)
           abort.signal.removeEventListener("abort", onAbort)
           attempt = undefined
           clearHeartbeat()
@@ -241,6 +248,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   }
 
   const stop = () => {
+    setTransportConnected(false)
     started = false
     generation++
     attempt?.abort()
@@ -273,6 +281,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   return {
     server,
     scope,
+    transportConnected,
     url: server.http.url,
     client: sdk,
     event: {

@@ -11,6 +11,8 @@ import type {
   SessionsUsageInput,
   SessionsUsageOutput,
   SessionsActiveOutput,
+  SessionsScreenshotInput,
+  SessionsScreenshotOutput,
   SessionsGetInput,
   SessionsGetOutput,
   SessionsSwitchAgentInput,
@@ -406,6 +408,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      screenshot: (input: SessionsScreenshotInput, requestOptions?: RequestOptions) =>
+        request<SessionsScreenshotOutput>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/screenshot/${encodeURIComponent(input.reference)}`,
+            successStatus: 200,
+            declaredStatuses: [400, 404, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
       get: (input: SessionsGetInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: SessionsGetOutput }>(
           {

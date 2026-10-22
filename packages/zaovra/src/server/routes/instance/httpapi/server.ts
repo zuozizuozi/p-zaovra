@@ -30,6 +30,7 @@ import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@zaovra-ai/core/control-plane/move-session"
 import { Database } from "@zaovra-ai/core/database/database"
+import { Global } from "@zaovra-ai/core/global"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { httpClient } from "@zaovra-ai/core/effect/app-node-platform"
@@ -235,6 +236,7 @@ export function createRoutes(
   const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
   const v2Runtime = AppNodeBuilderV1.build(
     LayerNode.group([
+      Global.node,
       SessionV2.node,
       Workspace.node,
       TaskTool.node,

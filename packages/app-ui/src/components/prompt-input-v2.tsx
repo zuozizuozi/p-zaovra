@@ -102,17 +102,21 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
                 </MenuV2.Content>
               </MenuV2.Portal>
             </MenuV2>
-            <PromptInputV2ModelControl
-              loading={props.controller.model.loading}
-              title={language.t("command.model.choose")}
-              keybind={command.keybindParts("model.choose")}
-              model={props.controller.model.selection}
-              providerID={props.controller.model.selection.current()?.provider?.id}
-              modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
-              onClose={props.controller.restoreFocus}
-            />
+            <div data-slot="prompt-model-control" class="min-w-0 max-w-full flex-1">
+              <PromptInputV2ModelControl
+                loading={props.controller.model.loading}
+                title={language.t("command.model.choose")}
+                keybind={command.keybindParts("model.choose")}
+                model={props.controller.model.selection}
+                providerID={props.controller.model.selection.current()?.provider?.id}
+                modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+                onClose={props.controller.restoreFocus}
+              />
+            </div>
             <Show when={params.id}>
-              <SessionContextUsage variant="indicator" buttonAppearance="v2" />
+              <span data-slot="prompt-usage" class="flex size-7 shrink-0 items-center justify-center">
+                <SessionContextUsage variant="indicator" buttonAppearance="v2" />
+              </span>
             </Show>
           </>
         }
@@ -578,7 +582,7 @@ function PromptInputV2ModelControl(props: {
             variant: "ghost-muted",
             size: "normal",
             style: { height: "28px" },
-            class: "min-w-0 max-w-[220px] justify-start ![font-weight:440] group",
+            class: "min-w-0 max-w-full justify-start ![font-weight:440] group",
             classList: { "animate-in fade-in": shouldAnimate() },
             "data-action": "prompt-model",
           }}

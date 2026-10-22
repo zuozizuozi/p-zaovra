@@ -1567,3 +1567,52 @@ body:not([data-new-layout]) {
     color: var(--text-weak);
   }
 }
+[data-component="tool-recovery-summary"] {
+  width: 100%;
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+  line-height: 20px;
+
+  [data-slot="collapsible-trigger"] {
+    display: flex;
+    width: 100%;
+    min-height: 32px;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+    color: inherit;
+  }
+
+  [data-slot="collapsible-trigger"]:focus-visible {
+    outline: 2px solid var(--v2-border-border-focus);
+    outline-offset: 2px;
+  }
+
+  [data-slot="collapsible-arrow"] {
+    display: flex;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  [data-slot="tool-recovery-attempt"] {
+    padding: 8px 0;
+  }
+
+  pre {
+    margin-top: 4px;
+    max-height: 240px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--v2-text-text-faint);
+    font-family: var(--font-family-mono);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="tool-recovery-summary"],
+  [data-component="tool-recovery-summary"] [data-slot="collapsible-arrow"],
+  [data-component="tool-recovery-summary"] [data-slot="collapsible-arrow-icon"] {
+    transition: none !important;
+  }
+}

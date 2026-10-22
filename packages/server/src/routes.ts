@@ -1,5 +1,6 @@
 import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
 import { Database } from "@zaovra-ai/core/database/database"
+import { Global } from "@zaovra-ai/core/global"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { httpClient } from "@zaovra-ai/core/effect/app-node-platform"
@@ -38,6 +39,7 @@ import { layer as locationLayer } from "./location"
 import { sessionLocationLayer } from "./middleware/session-location"
 
 const applicationServices = LayerNode.group([
+  Global.node,
   FSUtil.node,
   Database.node,
   EventV2.node,

@@ -3,6 +3,11 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.toolRecovery.summary": "过程中{{count}}次尝试未成功，已自动处理",
+  "ui.browserScreenshot.loading": "正在加载截图…",
+  "ui.browserScreenshot.unavailable": "截图不可用或已过期。",
+  "ui.browserScreenshot.retry": "重试",
+  "ui.browserScreenshot.preview": "查看浏览器截图",
   "ui.messagePart.diagnosticsFailed": "文件修改已保存，但语言诊断未能完成：{{servers}}。",
   "ui.messagePart.formattingFailed": "文件修改已保存，但自动格式化失败：{{formatters}}。",
   "ui.sessionReview.title": "会话变更",

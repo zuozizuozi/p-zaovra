@@ -13394,6 +13394,45 @@ export type V2SessionActiveResponses = {
 
 export type V2SessionActiveResponse = V2SessionActiveResponses[keyof V2SessionActiveResponses]
 
+export type V2SessionScreenshotData = {
+  body?: never
+  path: {
+    sessionID: string
+    reference: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/screenshot/{reference}"
+}
+
+export type V2SessionScreenshotErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionScreenshotError = V2SessionScreenshotErrors[keyof V2SessionScreenshotErrors]
+
+export type V2SessionScreenshotResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: string
+    mime: "image/png"
+  }
+}
+
+export type V2SessionScreenshotResponse = V2SessionScreenshotResponses[keyof V2SessionScreenshotResponses]
+
 export type V2SessionRemoveData = {
   body?: never
   path: {

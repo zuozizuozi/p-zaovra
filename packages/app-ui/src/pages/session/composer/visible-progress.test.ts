@@ -3,6 +3,30 @@ import { adaptSessionMessages } from "@/context/v2-session-adapter"
 import type { SessionMessage, SessionV2Info } from "@zaovra-ai/sdk/v2/client"
 import { visibleProgress } from "./visible-progress"
 
+test("resolved process errors leave the dock while unresolved and verification failures stay", () => {
+  const history: SessionMessage[] = [
+    { id: "recovery-user", type: "user", text: "Fix app.ts", time: { created: 1 } },
+    { id: "recovery-first", type: "assistant", agent: "build", model: { id: "m", providerID: "p" },
+      time: { created: 2, completed: 3 }, finish: "tool-calls", content: [{ id: "failed-edit", type: "tool", name: "edit",
+        time: { created: 2, completed: 3 }, state: { status: "error", input: { path: "app.ts", oldString: "old", newString: "fixed" },
+          error: { type: "unknown", message: "Could not find oldString", metadata: { phase: "mutation", reason: "match-failed" } }, content: [], structured: {} } }] },
+    { id: "recovery-last", type: "assistant", agent: "build", model: { id: "m", providerID: "p" },
+      time: { created: 4, completed: 5 }, finish: "stop", content: [{ id: "fixed-edit", type: "tool", name: "edit",
+        time: { created: 4, completed: 5 }, state: { status: "completed", input: { path: "app.ts", oldString: " old ", newString: "fixed" }, content: [], structured: {} } }] },
+  ]
+  const rows = adaptSessionMessages(session, history)
+  const input = { sessionID: session.id, messages: rows.map((row) => row.message),
+    parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])), busy: false, waiting: false }
+  expect(visibleProgress(input).failures).toEqual([])
+  expect(visibleProgress({ ...input, busy: true }).failures).toHaveLength(1)
+  const failed = rows[1].parts[0]
+  if (failed.type !== "tool" || failed.state.status !== "error") throw new Error("Expected error")
+  expect(failed.state.metadata?.phase).toBe("mutation")
+  expect(visibleProgress({ ...input, parts: { ...input.parts, [rows[2].message.id]: [] } }).failures).toHaveLength(1)
+  failed.state.error = "Verification failed: test"
+  expect(visibleProgress(input).failures).toHaveLength(1)
+})
+
 test("out-of-order history replay preserves a finished background job and its goal", () => {
   const history: SessionMessage[] = [
     { id: "u1", type: "user", text: "Inspect the result", time: { created: 1 } },
@@ -121,7 +145,7 @@ test("a returned background command is not a finished job", () => {
       state: { status: "completed", input: {}, content: [], structured: { job_id: "job_1" } },
     },
   ])
-  expect(result.state).toBe("tool")
+  expect(result.state).toBe("unverified")
 })
 
 test("a later queued prompt does not replace the active assistant's goal", () => {
@@ -163,7 +187,7 @@ test("background job completion clears activity without declaring task success",
       time: { created: 4, completed: 5 },
       state: { status: "completed", input: { job_id: "job_1" }, content: [], structured: { status: value } },
     }) satisfies Extract<SessionMessage, { type: "assistant" }>["content"][number]
-  expect(run([launch, status("unavailable")]).state).toBe("tool")
+  expect(run([launch, status("unavailable")]).state).toBe("unverified")
   const finished = run([launch, status("finished")])
   expect(finished.state).toBe("running")
   expect(finished.fact).toBe("bash_job")
@@ -205,4 +229,60 @@ test("another session's background job cannot keep this session active", () => {
   expect(result.visible).toBe(false)
   expect(result.facts).toEqual([])
   expect(result.failures).toEqual([])
+})
+
+test("synthetic continuation retains the real goal and earlier failures", () => {
+  const rows = adaptSessionMessages(session, [
+    { id: "goal", type: "user", text: "Fix the build", time: { created: 1 } },
+    { id: "first", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 2 }, content: [{ id: "failed", type: "tool", name: "bash", time: { created: 2, completed: 3 }, state: { status: "error", input: {}, content: [], structured: {}, error: { type: "unknown", message: "build failed" } } }] },
+    { id: "continue", sessionID: session.id, type: "synthetic", text: "Continue automatically", time: { created: 4 } },
+    { id: "second", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 5 }, content: [] },
+    { id: "queued-next", type: "user", text: "Next task", time: { created: 6 } },
+  ])
+  const input = { sessionID: session.id, messages: rows.map((row) => row.message), parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])), busy: true, waiting: false }
+  expect(visibleProgress(input).target).toBe("Fix the build")
+  expect(visibleProgress({ ...input, messages: [...input.messages].reverse() }).target).toBe("Fix the build")
+  expect(visibleProgress(input).failures.map((failure) => failure.error)).toEqual(["build failed"])
+  const next = adaptSessionMessages(session, [{ id: "next-answer", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 7 }, content: [] }], "queued-next")
+  const result = visibleProgress({ ...input, messages: [...input.messages, ...next.map((row) => row.message)] })
+  expect(result.target).toBe("Next task")
+  expect(visibleProgress({ ...input, messages: [...input.messages, ...next.map((row) => row.message)].reverse() }).target).toBe("Next task")
+  expect(result.failures).toEqual([])
+})
+
+test("persisted shell completion clears a launched job without a bash_job poll", () => {
+  const rows = adaptSessionMessages(session, [
+    { id: "goal-shell", type: "user", text: "Run validation", time: { created: 1 } },
+    { id: "launch-shell", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 2 }, content: [{ id: "launch-tool", type: "tool", name: "bash", time: { created: 2, completed: 3 }, state: { status: "completed", input: {}, content: [], structured: { job_id: "msg_bash_job" } } }] },
+    { id: "msg_bash_job", type: "shell", callID: "launch-tool", command: "validate", output: "done", time: { created: 2, completed: 4 } },
+    { id: "after-shell", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 5 }, content: [] },
+  ])
+  const result = visibleProgress({ sessionID: session.id, messages: rows.map((row) => row.message), parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])), busy: false, waiting: false })
+  expect(result.target).toBe("Run validation")
+  expect(result.state).toBe("idle")
+  expect(result.visible).toBe(false)
+  expect(result.facts.map((fact) => fact.tool)).toEqual(["bash"])
+})
+
+test("replayed unfinished jobs are unverified rather than proof of a live process", () => {
+  const rows = adaptSessionMessages(session, [
+    { id: "reconnect-goal", type: "user", text: "Check job", time: { created: 1 } },
+    { id: "reconnect-job", type: "shell", callID: "job", command: "validate", output: "", time: { created: 2 } },
+  ])
+  const input = { sessionID: session.id, messages: rows.map((row) => row.message), parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])), busy: false, waiting: false }
+  expect(visibleProgress(input).state).toBe("unverified")
+  expect(visibleProgress(input).visible).toBe(true)
+})
+
+test("a live preview is separate from task activity and loses liveness on reconnect", () => {
+  const rows = adaptSessionMessages(session, [
+    { id: "preview-goal", type: "user", text: "Show preview", time: { created: 1 } },
+    { id: "preview-answer", type: "assistant", agent: "build", model: { id: "m", providerID: "p" }, time: { created: 2 }, content: [{ id: "preview-launch", type: "tool", name: "bash", time: { created: 2, completed: 3 }, state: { status: "completed", input: { background_kind: "preview" }, content: [], structured: { job_id: "preview-job" } } }] },
+  ])
+  const input = { sessionID: session.id, messages: rows.map((row) => row.message), parts: Object.fromEntries(rows.map((row) => [row.message.id, row.parts])), busy: false, waiting: false, liveShell: { "preview-job": true as const } }
+  expect(visibleProgress(input).state).toBe("idle")
+  expect(visibleProgress(input).preview).toBe(true)
+  expect(visibleProgress(input).visible).toBe(true)
+  expect(visibleProgress({ ...input, liveShell: {}, busy: true }).state).toBe("unverified")
+  expect(visibleProgress({ ...input, liveShell: {} }).preview).toBe(false)
 })

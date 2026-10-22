@@ -951,10 +951,23 @@ html[data-theme="oc-2"] body[data-new-layout] {
     [data-component="switch"] [data-slot="switch-thumb"] {
       transition: none;
     }
+
+    [data-component="prompt-input-v2"] [data-slot="prompt-controls"] {
+      transition: none !important;
+    }
+
+    [data-component="prompt-input-v2"] [data-component="provider-icon"] {
+      transition: none;
+    }
+
+    [data-component="prompt-input-v2"] [data-action="prompt-model"],
+    .desktop-app-menu {
+      animation: none;
+    }
   }
 
   @media (max-width: 1000px) {
-[data-slot="new-session-position"] {
+    [data-slot="new-session-position"] {
       padding-inline: 24px;
     }
 
@@ -1155,11 +1168,22 @@ html[data-theme="oc-2"]
   pointer-events: none;
   user-select: none;
   color: var(--zaovra-ink, var(--text-base));
-  opacity: 0.055;
+  opacity: 0.09;
   mask-image: radial-gradient(ellipse 68% 52% at 50% 48%, transparent 58%, #000 100%);
 }
 
 /* Native drag regions do not dispatch outside-pointer events to the menu. */
 html:has(.desktop-app-menu[data-expanded]) [data-tauri-drag-region] {
   app-region: no-drag;
+}
+
+/* The app menu already owns a border; the floating surface's inset ring doubles it. */
+html[data-theme="oc-2"]
+  body[data-new-layout]
+  :is([data-component="dropdown-menu-content"], [data-component="dropdown-menu-sub-content"]).desktop-app-menu {
+  box-shadow: var(--zaovra-shadow-float);
+}
+
+html[data-color-scheme="dark"] [data-component="empty-binary-background"] {
+  opacity: 0.065;
 }

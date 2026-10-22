@@ -126,6 +126,28 @@ describe("V2 server session store", () => {
     expect(ctx.store.data.part.msg_host).toMatchObject([{ text: "Task completed", synthetic: true }])
     expect(ctx.store.data.part.msg_user).toMatchObject([{ text: "Original task" }])
   })
+
+  test("a late provider start during final history reconciliation is checked again", async () => {
+    const page = Promise.withResolvers<void>()
+    const loading = Promise.withResolvers<void>()
+    let waits = 0
+    const ctx = setup({
+      wait: async () => { waits++ },
+      pageWait: () => { loading.resolve(); return page.promise },
+    })
+    await ctx.store.resolve("ses_child")
+    ctx.store.set("session_status", "ses_child", { type: "busy" })
+    const watching = ctx.store.watchExecution("ses_child")
+    await loading.promise
+    ctx.store.apply({
+      type: "session.next.step.started",
+      properties: { sessionID: "ses_child", assistantMessageID: "late", agent: "build", model: { id: "model", providerID: "provider" }, timestamp: 2 },
+    })
+    page.resolve()
+    await watching
+    expect(waits).toBe(2)
+    expect(ctx.store.data.session_working("ses_child")).toBe(false)
+  })
   test("reconciles the completed transcript when all completion events are missed", async () => {
     const initial = { ...assistant("msg_answer", "", 2), time: { created: 2 } }
     const completed = { ...assistant("msg_answer", "READY", 2), finish: "stop" as const }
@@ -713,4 +735,19 @@ test("Stop wait settling cannot clear the new task's busy state and its final ta
   await watching
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
   expect(ctx.store.data.part.msg_new[0]).toMatchObject({ text: "NEW_TAIL_中文🙂" })
+})
+
+test("shell liveness is connection-local and ends without waiting for history refresh", () => {
+  const { store } = setup({})
+  store.apply({ type: "session.next.shell.started", properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 1 } })
+  expect(store.data.live_shell?.ses_child?.job_live).toBe(true)
+  expect(store.data.live_shell?.ses_other?.job_live).toBeUndefined()
+  store.apply({ type: "session.next.shell.ended", properties: { sessionID: "ses_child", callID: "job_live", output: "", timestamp: 2 } })
+  expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
+  store.apply({ type: "session.next.shell.started", properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 3 } })
+  store.apply({ type: "server.connected" })
+  expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
+  store.apply({ type: "session.next.shell.started", properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 4 } })
+  store.apply({ type: "global.disposed" })
+  expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
 })

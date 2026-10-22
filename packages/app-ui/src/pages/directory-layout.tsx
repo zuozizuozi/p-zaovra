@@ -119,6 +119,21 @@ function AvailableDirectoryDataProvider(
   const params = useParams()
   const sync = useSync()
   const serverSync = useServerSync()
+  const screenshotSdk = useServerSDK()
+  const screenshotSource = createMemo(() => {
+    const sdk = screenshotSdk()
+    return {
+      key: sdk.scope,
+      read: async (sessionID: string, reference: string, signal: AbortSignal) => {
+        const response = await sdk.client.v2.session.screenshot(
+          { sessionID, reference },
+          { signal, throwOnError: true },
+        )
+        if (!response.data) throw new Error("Screenshot unavailable")
+        return response.data
+      },
+    }
+  })
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
   const href = (sessionID: string) => {
@@ -161,6 +176,7 @@ function AvailableDirectoryDataProvider(
           directory={directory}
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
+          screenshotSource={screenshotSource()}
         >
           <LocalProvider>{props.children}</LocalProvider>
         </DataProvider>
