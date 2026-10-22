@@ -80,6 +80,43 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("S1 default budgets, explicit unlimited and live session adjustments survive HTTP", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: { directory: tmp.path } }),
+    })
+    expect(created.status).toBe(200)
+    const session = (await created.json()).data
+    const route = `/api/session/${session.id}/budget`
+    const defaults = await request(route, tmp.path)
+    expect(defaults.status).toBe(200)
+    expect(await defaults.json()).toMatchObject({
+      data: { limits: { tokens: 30_000_000, durationMs: 43_200_000 }, used: { tokens: 0 }, unreported: 0 },
+    })
+    const update = await request(`/api/session/${session.id}`, tmp.path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ budget: { tokens: 40_000_000, durationMs: 86_400_000 } }),
+    })
+    expect(update.status).toBe(200)
+    expect(await (await request(route, tmp.path)).json()).toMatchObject({
+      data: { limits: { tokens: 40_000_000, durationMs: 86_400_000 } },
+    })
+    expect(
+      (
+        await request(`/api/session/${session.id}`, tmp.path, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ budget: {} }),
+        })
+      ).status,
+    ).toBe(200)
+    expect(await (await request(route, tmp.path)).json()).toMatchObject({ data: { limits: {} } })
+    expect((await request("/api/session/ses_missing_budget/budget", tmp.path)).status).toBe(404)
+  }, 30000)
+
   test("isolates missing directories and reopens restored projects without restarting", async () => {
     await using tmp = await tmpdir({ git: true })
     const directory = path.join(tmp.path, "missing-project")

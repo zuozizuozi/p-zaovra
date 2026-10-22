@@ -2425,6 +2425,8 @@ export type AttachmentConfig = {
 }
 
 export type Config = {
+  session_token_budget?: number | null
+  session_duration_ms?: number | null
   $schema?: string
   shell?: string
   logLevel?: LogLevel
@@ -6742,6 +6744,15 @@ export type SessionOutcomeInfo = {
   missing: Array<string>
   review?: SessionOutcomeReview
   messageID?: string
+}
+
+export type SessionOutcomeBudgetStatus = {
+  limits: SessionOutcomeBudget
+  used: {
+    tokens: number
+    durationMs: number
+  }
+  unreported: number
 }
 
 export type WorkProjectMemoryCandidate = {
@@ -14122,6 +14133,43 @@ export type V2SessionRecoverResponses = {
 }
 
 export type V2SessionRecoverResponse = V2SessionRecoverResponses[keyof V2SessionRecoverResponses]
+
+export type V2SessionBudgetData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/budget"
+}
+
+export type V2SessionBudgetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionBudgetError = V2SessionBudgetErrors[keyof V2SessionBudgetErrors]
+
+export type V2SessionBudgetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionOutcomeBudgetStatus
+  }
+}
+
+export type V2SessionBudgetResponse = V2SessionBudgetResponses[keyof V2SessionBudgetResponses]
 
 export type V2SessionOutcomeData = {
   body?: never

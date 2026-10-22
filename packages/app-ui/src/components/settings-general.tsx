@@ -1,3 +1,4 @@
+import { SettingsSessionBudget } from "@/components/settings-session-budget"
 import { createSettingsShells } from "@/utils/settings-shells"
 import { ShellStatus } from "@/components/shell-status"
 import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
@@ -139,7 +140,8 @@ export const SettingsGeneral: Component = () => {
       return {
         directory: dir(),
         configured: serverSync().data.config.shell,
-        read: (directory: string) => client.pty.shells({ directory }, { throwOnError: true }).then((res) => res.data ?? []),
+        read: (directory: string) =>
+          client.pty.shells({ directory }, { throwOnError: true }).then((res) => res.data ?? []),
       }
     },
     () => language.t("settings.shell.queryFailed"),
@@ -352,8 +354,12 @@ export const SettingsGeneral: Component = () => {
           description={
             <>
               <span>{language.t("settings.general.row.shell.description")}</span>
-              <Show when={!dir()}><span>{language.t("settings.shell.globalOnly")}</span></Show>
-              <Show when={!shells.loading && shells().error}><span role="alert">{shells().error}</span></Show>
+              <Show when={!dir()}>
+                <span>{language.t("settings.shell.globalOnly")}</span>
+              </Show>
+              <Show when={!shells.loading && shells().error}>
+                <span role="alert">{shells().error}</span>
+              </Show>
               <ShellStatus shells={shells.loading ? [] : shells().items} />
             </>
           }
@@ -800,6 +806,7 @@ export const SettingsGeneral: Component = () => {
           <InterfaceNoticeSection />
         </Show>
 
+        <SettingsSessionBudget />
         <GeneralSection />
 
         <AppearanceSection />

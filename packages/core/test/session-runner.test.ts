@@ -290,12 +290,20 @@ let sessionTokenBudget: number | undefined
 let sessionOutput: Config.Info["session_output"]
 let qualityProgress: ConfigExperimental.Experimental["quality_progress"]
 let verificationEnabled: boolean | undefined
+let snapshotCaptures = 0
 let fixtureSnapshot: Snapshot.ID | undefined
 const testSnapshots = Layer.effect(
   Snapshot.Service,
   Effect.gen(function* () {
     const snapshots = yield* Snapshot.Service
-    return { ...snapshots, capture: () => Effect.succeed(fixtureSnapshot) }
+    return {
+      ...snapshots,
+      capture: () =>
+        Effect.sync(() => {
+          snapshotCaptures++
+          return fixtureSnapshot
+        }),
+    }
   }),
 ).pipe(Layer.provide(Snapshot.noopLayer))
 const config = Layer.succeed(
@@ -430,6 +438,7 @@ const setup = Effect.gen(function* () {
   sessionOutput = undefined
   verificationEnabled = true
   fixtureSnapshot = undefined
+  snapshotCaptures = 0
   // Transcript fixtures isolate durable history from request-local observations.
   // The Q cases below explicitly cover omitted, enabled and disabled observations.
   qualityProgress = { facts: false, stagnation_log: false }
@@ -6053,6 +6062,99 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("S1 different tool inputs avoid repetition snapshots", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Different inputs" }), resume: false })
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          ...Array.from({ length: 8 }, (_, index) =>
+            LLMEvent.toolCall({ id: "varied-" + index, name: "echo", input: { text: "input-" + index } }),
+          ),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "done", ["Done"]).completeEvents,
+      ]
+      yield* session.resume(sessionID)
+      // One start/end snapshot per provider turn; none per varied tool result.
+      expect(snapshotCaptures).toBe(4)
+    }),
+  )
+
+  it.effect("S1 token exhaustion during a tool waits for settlement and records one stop", () =>
+    Effect.gen(function* () {
+      yield* setup
+      sessionTokenBudget = 100
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Finish current tool" }), resume: false })
+      toolExecutionGate = yield* Deferred.make<void>()
+      toolExecutionsStarted = yield* Deferred.make<void>()
+      toolExecutionsReady = 1
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "blocked", name: "echo", input: { text: "completed" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(toolExecutionsStarted)
+      yield* events.publish(SessionEvent.Compaction.Failed, {
+        sessionID,
+        messageID: SessionMessage.ID.create(),
+        timestamp: yield* DateTime.now,
+        reason: "auto",
+        sourceSequence: 0,
+        error: { type: "unknown", message: "fixture usage" },
+        usage: {
+          providerID: "fake",
+          reported: true,
+          tokens: { input: 100, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      })
+      yield* adjust(1500)
+      expect(run.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(toolExecutionGate, undefined)
+      yield* Fiber.join(run)
+      const messages = yield* session.context(sessionID)
+      expect(
+        messages
+          .flatMap((message) => (message.type === "assistant" ? message.content : []))
+          .find((part) => part.type === "tool"),
+      ).toMatchObject({ state: { status: "completed" } })
+      expect(messages.filter((message) => message.type === "assistant" && message.finish === "stopped")).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("S1 omitted budgets enforce the default token ceiling without another request", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Default ceiling" }), resume: false })
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "default", name: "echo", input: { text: "retained" } }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "tool-calls",
+          usage: { inputTokens: 30_000_000, nonCachedInputTokens: 30_000_000, outputTokens: 0 },
+        }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
+        finish: "stopped",
+        termination: { category: "budget" },
+      })
+    }),
+  )
+
   it.effect("S1 token budget stops without failure and supports live adjustment", () =>
     Effect.gen(function* () {
       yield* setup
@@ -6126,6 +6228,28 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("S1 omitted wall limit covers blocked requests and all elapsed time", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Default wall limit" }), resume: false })
+      yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created) + 43_199_000)
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* adjust(1500)
+      yield* Fiber.join(run)
+      expect(requests).toHaveLength(1)
+      expect(
+        (yield* session.context(sessionID)).filter(
+          (message) => message.type === "assistant" && message.finish === "stopped",
+        ),
+      ).toHaveLength(1)
+      expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+    }),
+  )
+
   it.effect("S1 wall deadline interrupts an in-flight provider without waiting for output", () =>
     Effect.gen(function* () {
       yield* setup
@@ -6142,6 +6266,119 @@ describe("SessionRunnerLLM", () => {
       yield* Effect.yieldNow
       expect(run.pollUnsafe()).toBeDefined()
       expect(yield* session.outcome(sessionID)).toMatchObject({ state: "stopped", termination: { category: "budget" } })
+      expect(
+        (yield* session.context(sessionID)).filter(
+          (message) => message.type === "assistant" && message.finish === "stopped",
+        ),
+      ).toHaveLength(1)
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("现场摘要")
+    }),
+  )
+
+  it.effect("S1 wall budget covers background waits, stops task jobs and preserves previews", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const jobs = yield* BackgroundJob.Service
+      const registry = yield* ToolRegistry.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Wait within budget" }), resume: false })
+      yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
+      yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      const task = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
+      const preview = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "preview" }, run: Effect.never })
+      const waiting = yield* Deferred.make<void>()
+      yield* registry.register({
+        wait_fixture: Tool.make({
+          description: "Wait for the owned job",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          toModelOutput: ({ output }) => [{ type: "text", text: output }],
+          execute: () =>
+            Deferred.succeed(waiting, undefined).pipe(
+              Effect.andThen(jobs.wait({ id: task.id, timeout: 600000 })),
+              Effect.as("finished"),
+            ),
+        }),
+      })
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "wait-task", name: "wait_fixture", input: {} }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(waiting)
+      yield* adjust(1500)
+      yield* Fiber.join(run)
+      expect((yield* jobs.get(task.id))?.status).toBe("cancelled")
+      expect((yield* jobs.get(preview.id))?.status).toBe("running")
+      expect(
+        (yield* session.context(sessionID)).filter(
+          (message) => message.type === "assistant" && message.finish === "stopped",
+        ),
+      ).toHaveLength(1)
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("S1 wall budget still owns background work after the provider returns", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const jobs = yield* BackgroundJob.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Background within budget" }), resume: false })
+      yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
+      yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+      const task = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
+      responses = [fragmentFixture("text", "pending-background", ["Command continues in background"]).completeEvents]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* adjust(1500)
+      yield* Fiber.join(run)
+      expect((yield* jobs.get(task.id))?.status).toBe("cancelled")
+      expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("S1 background completion continues once through the durable queue", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const jobs = yield* BackgroundJob.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Interpret completion" }), resume: false })
+      yield* jobs.start({
+        type: "bash",
+        metadata: { sessionID, kind: "task" },
+        run: Effect.sleep(1500).pipe(
+          Effect.andThen(
+            SessionInput.admit(database.db, events, {
+              id: SessionMessage.ID.create(),
+              sessionID,
+              delivery: "queue",
+              prompt: Prompt.make({ text: "Background completed" }),
+            }),
+          ),
+          Effect.as("done"),
+        ),
+      })
+      responses = [
+        fragmentFixture("text", "waiting-background", ["Waiting"]).completeEvents,
+        fragmentFixture("text", "interpreted-background", ["Done"]).completeEvents,
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* adjust(2500)
+      yield* Fiber.join(run)
+      expect(requests).toHaveLength(2)
+      expect(
+        (yield* session.context(sessionID)).filter(
+          (message) => message.type === "user" && message.text === "Background completed",
+        ),
+      ).toHaveLength(1)
+      expect(yield* SessionInput.pending(database.db, sessionID)).toHaveLength(0)
     }),
   )
 
@@ -6929,13 +7166,12 @@ it.live("Q2 direct model finish lists unfinished owned jobs and cannot verify th
     yield* jobs.start({ id: "pending-check", type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
     response = fragmentFixture("text", "job-final", ["Done"]).completeEvents
     yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run checks" }), resume: false })
-    yield* session.resume(sessionID)
-    const messages = yield* session.context(sessionID)
-    expect(JSON.stringify(messages.at(-1))).toContain("pending-check")
-    expect(JSON.stringify(messages.at(-1))).toContain("bash_job")
-    expect(JSON.stringify(messages.at(-1))).toContain("running")
+    const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Effect.sleep(150)
+    expect(run.pollUnsafe()).toBeUndefined()
     expect((yield* session.outcome(sessionID)).state).not.toBe("completed_verified")
     yield* jobs.cancel("pending-check")
+    yield* Fiber.join(run)
   }),
 )
 
@@ -7204,7 +7440,8 @@ it.live("K1 seals verified delivery across resume and reopens changed artifacts"
     const jobs = yield* BackgroundJob.Service
     yield* jobs.start({ id: "late-check", type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
     responses = [stop]
-    yield* session.resume(sessionID)
+    const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Effect.sleep(150)
     expect(requests).toHaveLength(1)
     const pending = yield* (yield* Database.Service).db
       .select()
@@ -7218,6 +7455,7 @@ it.live("K1 seals verified delivery across resume and reopens changed artifacts"
       ),
     ).toBe(true)
     yield* jobs.cancel("late-check")
+    yield* Fiber.join(run)
     requests.length = 0
     yield* Effect.promise(() => Bun.write(file, "export const result = 'changed'"))
     responses = [stop, stop]

@@ -35,13 +35,13 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   shell: Schema.String.pipe(Schema.optional).annotate({
     description: "Default shell to use for terminal and shell tool execution",
   }),
-  session_token_budget: PositiveInt.pipe(Schema.optional).annotate({
+  session_token_budget: Schema.NullOr(PositiveInt).pipe(Schema.optional).annotate({
     description:
-      "Optional cumulative reported token limit per session, including cache and compaction. Unreported in-flight usage may exceed it. Not a monetary or cross-session budget. Session budget updates replace these defaults without restarting.",
+      "Cumulative reported token limit per session (default 30000000; null explicitly disables), including cache and compaction. Unreported in-flight usage may exceed it. Not a monetary or cross-session budget. Session budget updates replace these defaults without restarting.",
   }),
-  session_duration_ms: PositiveInt.pipe(Schema.optional).annotate({
+  session_duration_ms: Schema.NullOr(PositiveInt).pipe(Schema.optional).annotate({
     description:
-      "Optional session wall-clock limit in milliseconds since creation, also checked during provider and tool waits. Session budget updates replace defaults; an empty budget object removes both limits.",
+      "Session wall-clock limit in milliseconds since creation (default 43200000; null explicitly disables), also checked during provider and tool waits. Session budget updates replace defaults; an empty budget object removes both limits.",
   }),
   session_output: Schema.Record(
     Schema.String,

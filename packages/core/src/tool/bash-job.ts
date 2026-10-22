@@ -54,10 +54,24 @@ const layer = Layer.effect(
     const locks = KeyedMutex.makeUnsafe<string>()
     const owned = new Set<string>()
     const watched = new Set<string>()
+    const notified = new Set<string>()
+    const stopped = new Set<string>()
+    const unsubscribe = yield* events.listen((event) =>
+      Effect.sync(() => {
+        if (event.type === SessionExecution.Stopped.type)
+          stopped.add(Schema.decodeUnknownSync(SessionExecution.Stopped.data)(event.data).sessionID)
+        if (event.type === SessionEvent.PromptAdmitted.type) {
+          const input = Schema.decodeUnknownSync(SessionEvent.PromptAdmitted.data)(event.data)
+          if (!(input.messageID.startsWith("msg_bash_") && input.messageID.endsWith("_completed")))
+            stopped.delete(input.sessionID)
+        }
+      }),
+    )
+    yield* Effect.addFinalizer(() => unsubscribe)
     const notify = (id: string) =>
       locks.withLock(id)(
         Effect.gen(function* () {
-          if (!watched.has(id)) return
+          if (!watched.has(id) || notified.has(id)) return
           const job = yield* jobs.get(id)
           if (!job || job.status === "cancelled") {
             watched.delete(id)
@@ -65,17 +79,39 @@ const layer = Layer.effect(
           }
           const record = yield* sessions.message(SessionMessage.ID.make(id))
           if (!record || record.message.type !== "shell" || !record.message.time.completed) return
+          if (
+            job.metadata?.kind === "preview" ||
+            stopped.has(record.sessionID) ||
+            (yield* sessions.get(record.sessionID))?.time.archived
+          ) {
+            watched.delete(id)
+            return
+          }
+          if (yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))) {
+            watched.delete(id)
+            notified.add(id)
+            return
+          }
           yield* SessionInput.admit(database.db, events, {
             id: SessionMessage.ID.make(`${id}_completed`),
             sessionID: record.sessionID,
             delivery: "queue",
             prompt: {
-              text: `后台命令 ${id} 已结束。请用 bash_job get 核对输出和验证结果，再继续任务；不要重新执行原命令。`,
+              text: `后台命令 ${id} 已结束。完成通知身份：${id}_completed。请用 bash_job get 核对输出和验证结果，再继续任务；不要重新执行原命令。`,
             },
           })
           watched.delete(id)
-          yield* events.publish(SessionExecution.Wake, { sessionID: record.sessionID })
-        }),
+          notified.add(id)
+          if (!stopped.has(record.sessionID))
+            yield* events.publish(SessionExecution.Wake, { sessionID: record.sessionID })
+        }).pipe(
+          Effect.catchCause(() =>
+            Effect.logError("Background completion notification admission failed", {
+              jobID: id,
+              notificationID: `${id}_completed`,
+            }),
+          ),
+        ),
       )
     const results = new Map<
       string,
@@ -177,7 +213,7 @@ const layer = Layer.effect(
         bash_job: withPermission(
           Tool.make({
             description:
-              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Completion durably notifies the Session and wakes it. Jobs are process-local and never automatically rerun after restart.",
+              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Task completion durably notifies and wakes the Session once unless the user has stopped it; preview completion does not notify. Task jobs also stop with budget termination, archive or owner scope closure. Jobs are process-local and never automatically rerun after restart.",
             input: Schema.Struct({
               job_id: Schema.String,
               action: Schema.Literals(["get", "wait", "cancel"]),

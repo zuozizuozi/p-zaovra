@@ -153,6 +153,14 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
 
     const v2 = path.startsWith("/api/session/")
     const sessionPath = v2 ? path.slice(4) : path
+    if (v2 && /^\/session\/[^/]+\/budget$/.test(sessionPath))
+      return json(route, {
+        data: {
+          limits: { tokens: 30_000_000, durationMs: 43_200_000 },
+          used: { tokens: 0, durationMs: 0 },
+          unreported: 0,
+        },
+      })
     const sessionMatch = sessionPath.match(/^\/session\/([^/]+)$/)
     if (sessionMatch) {
       const session = config.sessions.find((s) => s.id === sessionMatch[1])

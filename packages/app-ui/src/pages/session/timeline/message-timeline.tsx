@@ -19,7 +19,13 @@ import { createStore, produce } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { useNavigate } from "@solidjs/router"
 import { useMutation } from "@tanstack/solid-query"
-import { createVirtualizer, defaultRangeExtractor, elementScroll, type VirtualItem } from "@tanstack/solid-virtual"
+import {
+  createVirtualizer,
+  defaultRangeExtractor,
+  elementScroll,
+  observeElementRect,
+  type VirtualItem,
+} from "@tanstack/solid-virtual"
 import { Accordion } from "@zaovra-ai/ui/accordion"
 import { Button } from "@zaovra-ai/ui/button"
 import {
@@ -511,6 +517,12 @@ export function MessageTimeline(props: {
       return timelineRows().length
     },
     getScrollElement: () => listRoot() ?? null,
+    // A late budget/status dock changes the viewport after the cold mount.
+    observeElementRect: (instance, callback) =>
+      observeElementRect(instance, (rect) => {
+        callback(rect)
+        if (props.shouldAnchorBottom() && !props.hasScrollGesture()) instance.scrollToEnd()
+      }),
     observeElementOffset: observeElementOffsetReconnectAware,
     initialOffset: () => (props.shouldAnchorBottom() ? Number.MAX_SAFE_INTEGER : 0),
     initialMeasurementsCache: initialMeasurements,

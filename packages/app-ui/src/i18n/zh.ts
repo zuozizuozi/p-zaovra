@@ -376,6 +376,13 @@ export const dict = {
   "session.outcome.failed": "执行或验证失败",
   "session.outcome.interrupted": "已中断",
   "session.outcome.stopped": "已停止",
+  "session.budget.unlimited": "不设上限",
+  "session.budget.used": "token {{tokens}} / {{limit}} · 分钟 {{minutes}} / {{duration}}",
+  "session.budget.unreported": "另有 {{count}} 次请求用量未完整上报，实际消耗可能更高。",
+  "session.budget.defaults": "默认会话预算",
+  "session.budget.save": "保存默认预算",
+  "session.budget.defaultHint":
+    "未配置时使用 12 小时和 3000 万 token；留空并保存表示明确不设上限。会话内调整优先于默认设置。",
   "session.budget.title": "会话预算",
   "session.budget.hint": "同时替换两项上限，留空表示不限。时长从会话创建时起计算。",
   "session.budget.tokens": "总 token 上限",

@@ -88,6 +88,12 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
   normalizeComponentNames(spec)
   collapseDuplicateComponents(spec)
   applyLegacySchemaOverrides(spec)
+  // These nulls explicitly disable default limits; they are not optional arms.
+  for (const schema of Object.values(spec.components?.schemas ?? {})) {
+    for (const key of ["session_token_budget", "session_duration_ms"]) {
+      if (schema.properties?.[key]) schema.properties[key] = nullable(schema.properties[key])
+    }
+  }
   normalizeComponentDescriptions(spec)
   addLegacyErrorSchemas(spec)
   delete spec.components?.securitySchemes

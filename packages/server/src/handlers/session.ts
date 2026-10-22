@@ -1,5 +1,9 @@
 import { SessionV2 } from "@zaovra-ai/core/session"
-import { DateTime, Effect, Stream } from "effect"
+import { Clock, DateTime, Effect, Stream } from "effect"
+import { Config } from "@zaovra-ai/core/config"
+import { Database } from "@zaovra-ai/core/database/database"
+import { SessionBudget } from "@zaovra-ai/core/session/budget"
+import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { SessionsCursor } from "@zaovra-ai/protocol/groups/session"
@@ -106,6 +110,39 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                     : new ConflictError({ message: error.message }),
                 ),
               ),
+          }
+        }),
+      )
+      .handle(
+        "session.budget",
+        Effect.fn(function* (ctx) {
+          const current = yield* session
+            .get(ctx.params.sessionID)
+            .pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) => new SessionNotFoundError({ sessionID: error.sessionID, message: error.message }),
+              ),
+            )
+          const config = yield* Config.Service
+          const database = yield* Database.Service
+          const limits = yield* SessionBudget.read(database.db, config, current.id)
+          const usage = yield* SessionUsageQuery.readTotal(current.id)
+          return {
+            data: {
+              limits: {
+                ...(limits.limit === undefined ? {} : { tokens: limits.limit }),
+                ...(limits.duration === undefined ? {} : { durationMs: limits.duration }),
+              },
+              used: {
+                tokens: usage.total,
+                durationMs: Math.max(
+                  0,
+                  (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(current.time.created),
+                ),
+              },
+              unreported: usage.unreported,
+            },
           }
         }),
       )

@@ -236,6 +236,8 @@ import type {
   V2ReferenceListResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
+  V2SessionBudgetErrors,
+  V2SessionBudgetResponses,
   V2SessionCancelInputErrors,
   V2SessionCancelInputResponses,
   V2SessionCompactErrors,
@@ -4117,6 +4119,23 @@ export class Session extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Inspect effective session limits and recorded usage
+   */
+  public budget<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionBudgetResponses, V2SessionBudgetErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/budget",
+      ...options,
+      ...params,
     })
   }
 

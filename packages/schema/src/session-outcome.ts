@@ -107,12 +107,20 @@ export const Review = Schema.Struct({
   notes: Schema.Array(Schema.Struct({ text: Schema.String, requirements: Schema.Array(Schema.Int) })).pipe(optional),
 }).annotate({ identifier: "SessionOutcome.Review" })
 export interface Review extends Schema.Schema.Type<typeof Review> {}
+export const DefaultBudget = { tokens: 30_000_000, durationMs: 12 * 60 * 60 * 1000 } as const
+
 export const Budget = Schema.Struct({
   // An explicitly supplied object replaces both limits; omitted fields remove limits.
   tokens: Schema.Int.check(Schema.isGreaterThan(0)).pipe(optional),
   durationMs: Schema.Int.check(Schema.isGreaterThan(0)).pipe(optional),
 }).annotate({ identifier: "SessionOutcome.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}
+export const BudgetStatus = Schema.Struct({
+  limits: Budget,
+  used: Schema.Struct({ tokens: Schema.Finite, durationMs: Schema.Finite }),
+  unreported: Schema.Finite,
+}).annotate({ identifier: "SessionOutcome.BudgetStatus" })
+export interface BudgetStatus extends Schema.Schema.Type<typeof BudgetStatus> {}
 export const Termination = Schema.Struct({
   category: Schema.Literals([
     "provider-turn-limit",

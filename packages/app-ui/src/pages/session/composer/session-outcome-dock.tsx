@@ -84,7 +84,25 @@ export function SessionOutcomeDock() {
   const abandoned = () =>
     !!sync().session.get(params.id ?? "")?.time.archived ||
     (recover.isSuccess && recover.variables?.sessionID === params.id && recover.variables.action === "abandon")
-  const [budget, setBudget] = createStore({ tokens: "", minutes: "" })
+  const budgetQuery = createQuery(() => ({
+    queryKey: ["session-budget", server().scope, params.id],
+    enabled: !!params.id,
+    queryFn: () =>
+      sdk()
+        .client.v2.session.budget({ sessionID: params.id! }, { throwOnError: true })
+        .then((result) => result.data.data),
+    refetchInterval: progress().visible ? 1000 : false,
+    retry: false,
+  }))
+  const [budget, setBudget] = createStore({ tokens: "", minutes: "", dirty: false })
+  createEffect(() => {
+    const current = budgetQuery.data
+    if (!current || budget.dirty) return
+    setBudget({
+      tokens: current.limits.tokens === undefined ? "" : String(current.limits.tokens),
+      minutes: current.limits.durationMs === undefined ? "" : String(current.limits.durationMs / 60_000),
+    })
+  })
   const updateBudget = useMutation(() => ({
     mutationFn: async (remove: boolean) => {
       const tokens = remove || !budget.tokens.trim() ? null : Number(budget.tokens)
@@ -106,7 +124,11 @@ export function SessionOutcomeDock() {
           { throwOnError: true },
         )
     },
-    onSuccess: () => void query.refetch(),
+    onSuccess: () => {
+      setBudget("dirty", false)
+      void budgetQuery.refetch()
+      void query.refetch()
+    },
     onError: (error: unknown) =>
       showToast({
         title: language.t("common.requestFailed"),
@@ -134,43 +156,71 @@ export function SessionOutcomeDock() {
     <>
       <Show when={params.id && !abandoned()}>
         <details data-component="session-budget" class="px-1 py-2 text-12-regular text-text-weak">
-          <summary>{language.t("session.budget.title")}</summary>
+          <summary class="tabular-nums">
+            {language.t("session.budget.title")}
+            <Show when={budgetQuery.data}>
+              {(current) => (
+                <span data-component="session-budget-usage">
+                  {" "}
+                  ·{" "}
+                  {language.t("session.budget.used", {
+                    tokens: current().used.tokens.toLocaleString(),
+                    limit: current().limits.tokens?.toLocaleString() ?? language.t("session.budget.unlimited"),
+                    minutes: Math.floor(current().used.durationMs / 60_000),
+                    duration:
+                      current().limits.durationMs === undefined
+                        ? language.t("session.budget.unlimited")
+                        : Math.floor(current().limits.durationMs! / 60_000),
+                  })}
+                </span>
+              )}
+            </Show>
+          </summary>
           <p>{language.t("session.budget.hint")}</p>
-          <label>
-            {language.t("session.budget.tokens")}
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={budget.tokens}
-              onInput={(event) => setBudget("tokens", event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            {language.t("session.budget.minutes")}
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={budget.minutes}
-              onInput={(event) => setBudget("minutes", event.currentTarget.value)}
-            />
-          </label>
-          <Button
-            size="small"
-            disabled={updateBudget.isPending || recover.isPending}
-            onClick={() => updateBudget.mutate(false)}
-          >
-            {language.t("session.budget.apply")}
-          </Button>
-          <Button
-            size="small"
-            variant="ghost"
-            disabled={updateBudget.isPending || recover.isPending}
-            onClick={() => updateBudget.mutate(true)}
-          >
-            {language.t("session.budget.remove")}
-          </Button>
+          <Show when={budgetQuery.data?.unreported}>
+            <p>{language.t("session.budget.unreported", { count: budgetQuery.data!.unreported })}</p>
+          </Show>
+          <div class="flex flex-wrap items-end gap-3 py-2">
+            <label>
+              {language.t("session.budget.tokens")}
+              <input
+                class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
+                type="number"
+                min="1"
+                step="1"
+                disabled={updateBudget.isPending || recover.isPending}
+                value={budget.tokens}
+                onInput={(event) => setBudget({ tokens: event.currentTarget.value, dirty: true })}
+              />
+            </label>
+            <label>
+              {language.t("session.budget.minutes")}
+              <input
+                class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
+                type="number"
+                min="1"
+                step="1"
+                disabled={updateBudget.isPending || recover.isPending}
+                value={budget.minutes}
+                onInput={(event) => setBudget({ minutes: event.currentTarget.value, dirty: true })}
+              />
+            </label>
+            <Button
+              size="small"
+              disabled={updateBudget.isPending || recover.isPending}
+              onClick={() => updateBudget.mutate(false)}
+            >
+              {language.t("session.budget.apply")}
+            </Button>
+            <Button
+              size="small"
+              variant="ghost"
+              disabled={updateBudget.isPending || recover.isPending}
+              onClick={() => updateBudget.mutate(true)}
+            >
+              {language.t("session.budget.remove")}
+            </Button>
+          </div>
         </details>
       </Show>
       <Show when={progress().visible}>

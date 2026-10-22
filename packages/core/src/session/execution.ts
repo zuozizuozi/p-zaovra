@@ -11,6 +11,9 @@ import { EventV2 } from "../event"
 /** Advisory, process-local wake after a durable background completion input. Never replayed. */
 export const Wake = EventV2.define({ type: "session.execution.wake", schema: { sessionID: SessionSchema.ID } })
 
+/** Prevent process-local completion notifications from restarting stopped work. */
+export const Stopped = EventV2.define({ type: "session.execution.stopped", schema: { sessionID: SessionSchema.ID } })
+
 export interface Interface {
   /** Snapshots active execution owned by this process. */
   readonly exclusive?: (

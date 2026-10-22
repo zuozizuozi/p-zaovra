@@ -2,6 +2,7 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 import { BackgroundJob } from "../../background-job"
 import { EventTable } from "../../event/sql"
+import { SessionBudget } from "../budget"
 import { SessionOwnership } from "../ownership"
 import {
   LLM,
@@ -230,48 +231,22 @@ const layer = Layer.effect(
       }
     })
 
-    const readBudget = Effect.fn("SessionRunner.readBudget")(function* (sessionID: SessionSchema.ID) {
-      const adjustment = yield* db
-        .select({ data: EventTable.data })
-        .from(EventTable)
-        .where(
-          and(
-            eq(EventTable.aggregate_id, sessionID),
-            eq(
-              EventTable.type,
-              EventV2.versionedType(SessionEvent.Updated.type, SessionEvent.Updated.durable?.version ?? 1),
-            ),
-            sql`json_type(${EventTable.data}, '$.budget') = 'object'`,
-          ),
-        )
-        .orderBy(desc(EventTable.seq))
-        .limit(1)
-        .get()
-        .pipe(Effect.orDie)
-      const budget = adjustment
-        ? Schema.decodeUnknownSync(SessionEvent.Updated.data)(adjustment.data).budget
-        : undefined
-      const limit = budget
-        ? (budget.tokens ?? undefined)
-        : Config.latest(yield* config.entries(), "session_token_budget")
-      const duration = budget
-        ? (budget.durationMs ?? undefined)
-        : Config.latest(yield* config.entries(), "session_duration_ms")
-      return { limit, duration }
-    })
+    const readBudget = (sessionID: SessionSchema.ID) => SessionBudget.read(db, config, sessionID)
 
     // Account from durable settlements, like the UI, not compacted/forked history.
     const checkBudget = Effect.fn("SessionRunner.checkBudget")(function* (
       session: SessionSchema.Info,
       model: { readonly id: string; readonly provider: string },
       notify = false,
+      settle = true,
     ) {
       const { limit, duration } = yield* readBudget(session.id)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
       const expired = duration !== undefined && elapsed >= duration
       if (limit === undefined && !expired) return
-      const usage = (yield* SessionUsageQuery.read(session.id).pipe(Effect.provideService(Database.Service, database)))
-        .total
+      const usage = yield* SessionUsageQuery.readTotal(session.id).pipe(
+        Effect.provideService(Database.Service, database),
+      )
       if (!expired && limit !== undefined && usage.total < limit) {
         if (!notify || usage.total < limit * 0.75) return
         const prefix = `Session token budget notice (limit=${limit}):`
@@ -285,6 +260,15 @@ const layer = Layer.effect(
         })
         return
       }
+      if (!settle) return true
+      yield* Effect.forEach(
+        (yield* backgroundJobs.list()).filter(
+          (job) =>
+            job.metadata?.sessionID === session.id && job.metadata.kind !== "preview" && job.status === "running",
+        ),
+        (job) => backgroundJobs.cancel(job.id),
+        { discard: true },
+      )
       const message = `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}可在会话界面提高或移除预算后直接继续，无需重启；这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
       const context = yield* getContext(session.id)
       const last = context.at(-1)
@@ -378,7 +362,7 @@ const layer = Layer.effect(
           sessionID,
           timestamp: yield* DateTime.now,
           assistantMessageID: message.id,
-          finish: current?.budget ? "stopped" : "interrupted",
+          finish: "interrupted",
           termination: current?.budget
             ? { category: "budget", message: "达到会话预算，当前等待已取消；已完成的操作保留，请核对现场后继续。" }
             : { category: "interrupted", source, message: "执行已中断；请核对现场后继续。" },
@@ -454,7 +438,7 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
-      toolCallAttempts: Map<string, number>,
+      toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
       recoverOverflow?: typeof compaction.compactAfterOverflow,
       allowCompaction = true,
       budgetStop?: { expired: boolean; model?: { id: string; provider: string } },
@@ -494,7 +478,8 @@ const layer = Layer.effect(
         }
         if (promoted > 0) {
           currentStep = 1
-          toolCallAttempts.clear()
+          toolCallAttempts.input = undefined
+          toolCallAttempts.count = 0
         }
       }
       const quality = Config.latest(yield* config.entries(), "experimental")?.quality_progress
@@ -892,19 +877,29 @@ const layer = Layer.effect(
                               typeof event.input === "object" &&
                               "action" in event.input &&
                               (event.input.action === "get" || event.input.action === "wait")
-                            const fingerprint = waiting
-                              ? undefined
-                              : SessionEfficiency.fingerprint(event.name, {
-                                  input: SessionEfficiency.fingerprint(event.name, event.input),
-                                  result: settlement.result,
-                                  snapshot: yield* snapshots.capture(),
-                                  jobs: (yield* backgroundJobs.list())
-                                    .filter((job) => job.metadata?.sessionID === session.id)
-                                    .map((job) => ({ id: job.id, status: job.status, output: job.output })),
-                                })
-                            if (fingerprint && !toolCallAttempts.has(fingerprint)) toolCallAttempts.clear()
-                            const attempts = fingerprint ? (toolCallAttempts.get(fingerprint) ?? 0) + 1 : 0
-                            if (fingerprint) toolCallAttempts.set(fingerprint, attempts)
+                            const input = waiting ? undefined : SessionEfficiency.fingerprint(event.name, event.input)
+                            const result = SessionEfficiency.fingerprint(event.name, settlement.result)
+                            const fingerprint =
+                              input && input === toolCallAttempts.input
+                                ? SessionEfficiency.fingerprint(event.name, {
+                                    result: settlement.result,
+                                    snapshot: yield* snapshots.capture(),
+                                    jobs: (yield* backgroundJobs.list())
+                                      .filter((job) => job.metadata?.sessionID === session.id)
+                                      .map((job) => ({ id: job.id, status: job.status, output: job.output })),
+                                  })
+                                : undefined
+                            const attempts = input
+                              ? input === toolCallAttempts.input &&
+                                result === toolCallAttempts.result &&
+                                (!toolCallAttempts.fingerprint || fingerprint === toolCallAttempts.fingerprint)
+                                ? toolCallAttempts.count + 1
+                                : 1
+                              : 0
+                            toolCallAttempts.input = input
+                            toolCallAttempts.result = result
+                            toolCallAttempts.fingerprint = fingerprint
+                            toolCallAttempts.count = attempts
                             const reminder =
                               attempts >= 3
                                 ? `Repeated result (${attempts}): inputs, output and observed workspace/process state match. ${attempts >= 10 ? "Strong reminder: inspect the error and environment, state a new hypothesis and change approach." : "Inspect the retained result and choose a concrete change before retrying."} Tools remain available.`
@@ -1607,17 +1602,23 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
       step: number,
-      toolCallAttempts: Map<string, number>,
+      toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
     const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
       const budgetStop: { expired: boolean; model?: { id: string; provider: string } } = { expired: false }
       const deadline = Effect.gen(function* () {
         while (true) {
-          yield* Effect.sleep("100 millis")
+          yield* Effect.sleep("1 second")
           const session = yield* getSession(sessionID)
           if (!budgetStop.model) continue
-          if (!(yield* checkBudget(session, budgetStop.model))) continue
+          const budget = yield* readBudget(sessionID)
+          if (
+            budget.duration === undefined ||
+            (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created) < budget.duration
+          )
+            continue
+          if (!(yield* checkBudget(session, budgetStop.model, false, false))) continue
           budgetStop.expired = true
           return { needsContinuation: false, step }
         }
@@ -1650,7 +1651,16 @@ const layer = Layer.effect(
         (turn) =>
           Effect.acquireUseRelease(
             Effect.forkChild(turn, { startImmediately: true }),
-            (fiber) => Effect.raceFirst(Fiber.join(fiber), deadline),
+            (fiber) =>
+              Effect.raceFirst(Fiber.join(fiber), deadline).pipe(
+                Effect.tap(
+                  Effect.gen(function* () {
+                    if (!budgetStop.expired) return
+                    yield* Fiber.interrupt(fiber)
+                    yield* checkBudget(yield* getSession(sessionID), budgetStop.model!)
+                  }),
+                ),
+              ),
             (fiber) => Fiber.interrupt(fiber),
           ),
       )
@@ -1751,7 +1761,7 @@ const layer = Layer.effect(
         }).pipe(Effect.forkScoped)
       }
       yield* settleInterruptedTurn(input.sessionID)
-      const toolCallAttempts = new Map<string, number>()
+      const toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number } = { count: 0 }
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
       while (shouldRun) {
@@ -1801,8 +1811,40 @@ const layer = Layer.effect(
             })
           }
         }
-        shouldRun = yield* SessionInput.hasPending(db, input.sessionID, "queue")
-        promotion = shouldRun ? "queue" : undefined
+        // Task work still belongs to this drain after a provider returns. Keep its
+        // wall deadline alive while waiting; completion inputs enter the usual loop.
+        if (
+          (yield* backgroundJobs.list()).some(
+            (job) =>
+              job.metadata?.sessionID === input.sessionID &&
+              job.metadata.kind !== "preview" &&
+              job.status === "running",
+          )
+        ) {
+          const model = yield* models.resolve(yield* getSession(input.sessionID))
+          while (true) {
+            const session = yield* getSession(input.sessionID)
+            if (session.time.archived || (yield* checkBudget(session, model))) return
+            if (
+              (yield* SessionInput.hasPending(db, input.sessionID, "steer")) ||
+              (yield* SessionInput.hasPending(db, input.sessionID, "queue"))
+            )
+              break
+            if (
+              !(yield* backgroundJobs.list()).some(
+                (job) =>
+                  job.metadata?.sessionID === input.sessionID &&
+                  job.metadata.kind !== "preview" &&
+                  job.status === "running",
+              )
+            )
+              break
+            yield* Effect.sleep("1 second")
+          }
+        }
+        const pendingSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
+        shouldRun = pendingSteer || (yield* SessionInput.hasPending(db, input.sessionID, "queue"))
+        promotion = pendingSteer ? "steer" : shouldRun ? "queue" : undefined
       }
     }, Effect.scoped)
 

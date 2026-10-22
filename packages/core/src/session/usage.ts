@@ -21,6 +21,23 @@ const definitions = [
 ]
 const types = definitions.map((item) => Event.versionedType(item.type, item.durable?.version ?? 1))
 
+/** Budget checks read settlement events only, avoiding full history/cache reports. */
+export const readTotal = Effect.fn("SessionUsage.readTotal")(function* (sessionID: string) {
+  const database = yield* Database.Service
+  const rows = yield* database.db
+    .select({
+      aggregate_id: EventTable.aggregate_id,
+      seq: EventTable.seq,
+      type: EventTable.type,
+      data: sql`json_remove(${EventTable.data}, '$.text', '$.recent', '$.prompt', '$.files')`.mapWith(EventTable.data),
+    })
+    .from(EventTable)
+    .where(and(eq(EventTable.aggregate_id, sessionID), inArray(EventTable.type, types.slice(1, 5))))
+    .all()
+    .pipe(Effect.orDie)
+  return summarize(rows).total
+})
+
 export const read = Effect.fn("SessionUsage.read")(function* (
   sessionID?: string,
   catalogs?: (sessions: string[]) => Effect.Effect<ReadonlyMap<string, readonly Model.Info[]>>,

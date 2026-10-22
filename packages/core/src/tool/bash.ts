@@ -88,10 +88,14 @@ export const Input = Schema.Struct({
     description:
       "Working directory. Defaults to the project directory; prefer relative paths or omit workdir. Relative paths resolve from the active Location.",
   }),
+  hard_timeout_ms: Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.optional).annotate({
+    description:
+      "Hard process deadline in milliseconds, measured from launch across foreground/background handoff. Stops the process at expiry. Use this only for an explicit hard limit.",
+  }),
   timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
     .annotate({
-      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Timeout hands the live process to a background job; it never kills it. Background execution has no deadline.`,
+      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Timeout hands the live process to a background job; it preserves the process. hard_timeout_ms is a separate process deadline.`,
     }),
 })
 
@@ -181,7 +185,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it never kills the command. Only explicit cancellation stops a background command. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. Preview jobs survive Stop but close on archive, cancellation or owner scope closure. Use hard_timeout_ms for an explicit process deadline. Start long-running services with run_in_background=true (background_kind=preview for preview servers), then stop them with bash_job cancel using the returned job_id. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input:
             Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log !== false
               ? Schema.Struct({
@@ -410,8 +414,8 @@ const layer = Layer.effectDiscard(
                   ExecutionContext.capture(
                     input.command,
                     target.canonical,
-                    timeout,
-                    input.timeout !== undefined,
+                    input.hard_timeout_ms ?? 0,
+                    input.hard_timeout_ms !== undefined,
                     launchEnvironment,
                     Object.keys(input.environment ?? {}),
                     identity.type,
@@ -444,6 +448,7 @@ const layer = Layer.effectDiscard(
                 const result = yield* appProcess
                   .run(command, {
                     combineOutput: true,
+                    timeout: input.hard_timeout_ms === undefined ? undefined : Duration.millis(input.hard_timeout_ms),
                     maxOutputBytes: MAX_CAPTURE_BYTES,
                     onChunk: (chunk) =>
                       Effect.gen(function* () {
@@ -484,7 +489,7 @@ const layer = Layer.effectDiscard(
                 }
                 if (result instanceof AppProcess.AppProcessError) {
                   return {
-                    output: `${result.output || "(no output)"}${result.outputTruncated ? "\n[in-memory preview truncated; consult the command log for captured bytes]" : ""}\nCommand exceeded timeout of ${timeout} ms. Inspect the output before deciding whether to change the command or allow more time.`,
+                    output: `${result.output || "(no output)"}${result.outputTruncated ? "\n[in-memory preview truncated; consult the command log for captured bytes]" : ""}\nCommand exceeded hard timeout of ${input.hard_timeout_ms} ms. Inspect the output before deciding whether to change the command or allow more time.`,
                     truncated: result.outputTruncated === true,
                     timeout: true,
                     executionRecord,

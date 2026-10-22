@@ -3319,6 +3319,16 @@ export type SessionsRecoverOutput = {
   }
 }["data"]
 
+export type SessionsBudgetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsBudgetOutput = {
+  readonly data: {
+    readonly limits: { readonly tokens?: number; readonly durationMs?: number }
+    readonly used: { readonly tokens: number; readonly durationMs: number }
+    readonly unreported: number
+  }
+}["data"]
+
 export type SessionsOutcomeInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionsOutcomeOutput = {

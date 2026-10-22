@@ -30,6 +30,8 @@ const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate
 })
 
 export const Info = Schema.Struct({
+  session_token_budget: Schema.optional(Schema.NullOr(PositiveInt)),
+  session_duration_ms: Schema.optional(Schema.NullOr(PositiveInt)),
   $schema: Schema.optional(Schema.String).annotate({
     description: "JSON schema reference for configuration validation",
   }),

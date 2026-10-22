@@ -18,10 +18,20 @@ test("legacy bootstrap accepts validated native settings without mutating author
     model: "provider/model",
   }
   const before = JSON.stringify(authored)
-  expect(ConfigParse.legacyConfiguration(authored, "fixture.json")).toEqual({ model: "provider/model" })
+  expect(ConfigParse.legacyConfiguration(authored, "fixture.json")).toEqual({
+    model: "provider/model",
+    session_token_budget: 160000,
+    session_duration_ms: 3600000,
+  })
   expect(JSON.stringify(authored)).toBe(before)
   expect(ConfigParse.configuration(authored, "fixture.json").session_token_budget).toBe(160000)
   expect(ConfigParse.configuration(authored, "fixture.json").session_output).toEqual(authored.session_output)
+})
+
+test("S1 explicit unlimited survives native and legacy config views", () => {
+  const authored = { session_token_budget: null, session_duration_ms: null }
+  expect(ConfigParse.configuration(authored, "fixture.json")).toMatchObject(authored)
+  expect(ConfigParse.legacyConfiguration(authored, "fixture.json")).toMatchObject(authored)
 })
 
 test("native and legacy bootstrap still reject malformed known settings", () => {

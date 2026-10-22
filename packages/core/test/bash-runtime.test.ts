@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
 import path from "path"
-import { Effect, Fiber, Layer, Schema } from "effect"
+import { Deferred, Effect, Fiber, Layer, Logger, Schema } from "effect"
+import { sql } from "drizzle-orm"
 import { adjust } from "effect/testing/TestClock"
 import { BashJob } from "@zaovra-ai/core/tool/bash-job"
 import { AgentV2 } from "@zaovra-ai/core/agent"
@@ -34,6 +35,144 @@ import { testEffect } from "./lib/effect"
 import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
+it.effect("S1 completion races notify once, previews stay quiet, and Stop suppresses wake", () =>
+  withRuntime((directory, sessions) =>
+    Effect.gen(function* () {
+      const bash = yield* BashJob.Service
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const wakes: string[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === SessionExecution.Wake.type)
+            wakes.push(Schema.decodeUnknownSync(SessionExecution.Wake.data)(event.data).sessionID)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      for (const scenario of ["task", "preview", "stopped"] as const) {
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const gate = yield* Deferred.make<void>()
+        const id = yield* bash.start(
+          "virtual " + scenario,
+          Deferred.await(gate).pipe(Effect.as("done")),
+          { sessionID: session.id, ...toolIdentity, toolCallID: scenario },
+          Effect.void,
+          { kind: scenario === "preview" ? "preview" : "task", workdir: directory },
+        )
+        yield* bash.watch(id)
+        if (scenario === "stopped") yield* sessions.interrupt(session.id)
+        yield* Deferred.succeed(gate, undefined)
+        yield* Effect.yieldNow
+        yield* Effect.all([bash.watch(id), bash.watch(id)], { concurrency: "unbounded" })
+        expect(
+          (yield* SessionInput.pending(database.db, session.id)).filter((input) => input.id === `${id}_completed`),
+        ).toHaveLength(scenario === "task" ? 1 : 0)
+        expect(wakes.filter((sessionID) => sessionID === session.id)).toHaveLength(scenario === "task" ? 1 : 0)
+      }
+    }),
+  ),
+)
+
+it.effect("S1 completion admission failure retains a safe diagnostic and permits retry", () =>
+  Effect.gen(function* () {
+    const logs: unknown[] = []
+    yield* withRuntime((directory, sessions) =>
+      Effect.gen(function* () {
+        const bash = yield* BashJob.Service
+        const events = yield* EventV2.Service
+        const database = yield* Database.Service
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const wakes: string[] = []
+        const unsubscribe = yield* events.listen((event) =>
+          Effect.sync(() => {
+            if (event.type === SessionExecution.Wake.type)
+              wakes.push(Schema.decodeUnknownSync(SessionExecution.Wake.data)(event.data).sessionID)
+          }),
+        )
+        yield* Effect.addFinalizer(() => unsubscribe)
+        const id = yield* bash.start(
+          "finished fixture",
+          Effect.succeed("done"),
+          { sessionID: session.id, ...toolIdentity, toolCallID: "admission" },
+          Effect.void,
+        )
+        yield* Effect.yieldNow
+        yield* database.db.run(
+          sql`CREATE TRIGGER reject_notification BEFORE INSERT ON session_input BEGIN SELECT RAISE(ABORT, 'private fixture failure'); END`,
+        )
+        yield* bash.watch(id)
+        expect(yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))).toBeUndefined()
+        expect(wakes).toHaveLength(0)
+        expect(JSON.stringify(logs)).toContain("Background completion notification admission failed")
+        expect(JSON.stringify(logs)).toContain(`${id}_completed`)
+        expect(JSON.stringify(logs)).not.toContain("private fixture failure")
+        yield* database.db.run(sql`DROP TRIGGER reject_notification`)
+        yield* bash.watch(id)
+        yield* bash.watch(id)
+        expect(
+          (yield* SessionInput.pending(database.db, session.id)).filter((input) => input.id === `${id}_completed`),
+        ).toHaveLength(1)
+        expect(wakes).toEqual([session.id])
+      }),
+    ).pipe(Effect.provide(Logger.layer([Logger.make((entry) => logs.push(entry.message))])))
+  }),
+)
+
+it.live(
+  "S1 hard deadline kills the same process after soft yield and preserves timeout evidence",
+  () =>
+    withRuntime((directory, sessions, registry, jobs) =>
+      Effect.gen(function* () {
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const script = path.join(directory, "hard.cjs")
+        const marker = path.join(directory, "late.txt")
+        yield* Effect.promise(() =>
+          Bun.write(
+            script,
+            "require('fs').writeFileSync('pid.txt', String(process.pid)); setTimeout(() => require('fs').writeFileSync('late.txt','escaped'), 2500)",
+          ),
+        )
+        const result = yield* settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: "hard",
+            name: "bash",
+            input: {
+              command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+              timeout: 200,
+              hard_timeout_ms: 1500,
+              verification: "test",
+              verification_targets: [script],
+              verification_requirements: ["does not finish beyond hard deadline"],
+            },
+          },
+        })
+        const id = (result.output?.structured as { job_id: string }).job_id
+        expect(id).toBeString()
+        const done = yield* jobs.wait({ id, timeout: 5000 })
+        expect(done.info).toMatchObject({ id, status: "error" })
+        const observed = yield* settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "hard-get", name: "bash_job", input: { job_id: id, action: "get" } },
+        })
+        expect(observed.output?.structured).toMatchObject({
+          verification: {
+            execution: "timeout",
+            exit: -1,
+            executionContext: { timeout: { observed: { value: "1500" } } },
+          },
+        })
+        const pid = Number(yield* Effect.promise(() => Bun.file(path.join(directory, "pid.txt")).text()))
+        yield* Effect.sleep("1500 millis")
+        expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
+        expect(() => process.kill(pid, 0)).toThrow()
+      }),
+    ),
+  15000,
+)
 const withRuntime = <A, E, R>(
   body: (
     directory: string,
@@ -493,6 +632,16 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
       const other = yield* sessions.create({ location: session.location })
       const script = path.join(directory, "background.js")
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const wakes: string[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === SessionExecution.Wake.type)
+            wakes.push(Schema.decodeUnknownSync(SessionExecution.Wake.data)(event.data).sessionID)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
       yield* Effect.promise(() => Bun.write(script, "process.stdout.write('finished');"))
       const start = (id: string, timeout?: number) =>
         settleTool(registry, {
@@ -534,6 +683,10 @@ it.live("background commands settle durably, enforce ownership, and stop with th
         (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell"),
       ).toHaveLength(1)
       yield* start("background")
+      expect(
+        (yield* SessionInput.pending(database.db, session.id)).filter((input) => input.id === `${job}_completed`),
+      ).toHaveLength(1)
+      expect(wakes).toEqual([session.id])
       expect(
         (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell"),
       ).toHaveLength(1)
@@ -751,7 +904,7 @@ it.live(
           yield* Effect.promise(() =>
             Bun.write(
               script,
-              "let n=0; console.log('start'); const timer=setInterval(() => { console.log(++n); if(n===30) clearInterval(timer) }, 60)",
+              "let n=0; console.log('start'); const timer=setInterval(() => { console.log(++n); if(n===70) clearInterval(timer) }, 60)",
             ),
           )
           const execute = (id: string, timeout?: number) =>
@@ -777,9 +930,9 @@ it.live(
           expect(timedJob).toBeString()
           expect((yield* jobs.wait({ id: timedJob!, timeout: 5000 })).info?.status).toBe("completed")
         }),
-      1500,
+      3000,
     ),
-  15000,
+  20000,
 )
 
 it.live(

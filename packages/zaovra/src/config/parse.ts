@@ -54,12 +54,7 @@ export function legacyConfiguration(data: unknown, source: string) {
     // Other native fields still use the existing native compatibility view.
     // Silently dropping provider_filter here would lose its inherited allow list.
     Object.entries(data as Record<string, unknown>).filter(
-      ([key]) =>
-        !extra.has(key) &&
-        key !== "session_token_budget" &&
-        key !== "session_duration_ms" &&
-        key !== "session_output" &&
-        key !== "permissions",
+      ([key]) => !extra.has(key) && key !== "session_output" && key !== "permissions",
     ),
   )
   return schema(ConfigV1.Info, fields, source)

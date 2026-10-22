@@ -47,6 +47,8 @@ import type {
   SessionsEventsOutput,
   SessionsRecoverInput,
   SessionsRecoverOutput,
+  SessionsBudgetInput,
+  SessionsBudgetOutput,
   SessionsOutcomeInput,
   SessionsOutcomeOutput,
   SessionsInterruptInput,
@@ -606,6 +608,17 @@ export function make(options: ClientOptions) {
             body: { messageID: input["messageID"], action: input["action"] },
             successStatus: 200,
             declaredStatuses: [404, 409, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      budget: (input: SessionsBudgetInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsBudgetOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/budget`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
             empty: false,
           },
           requestOptions,

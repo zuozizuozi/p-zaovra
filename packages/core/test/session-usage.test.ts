@@ -261,9 +261,21 @@ it.effect("queries durable SQLite settlements across conversations and retains d
     }
     yield* events.publish(SessionEvent.Deleted, { sessionID: first, timestamp })
     expect((yield* SessionUsageQuery.read(first)).total.total).toBe(165)
+    expect(yield* SessionUsageQuery.readTotal(first)).toEqual((yield* SessionUsageQuery.read(first)).total)
+    yield* events.publish(SessionEvent.Compaction.Failed, {
+      sessionID: first,
+      messageID: SessionMessage.ID.create(),
+      timestamp,
+      reason: "auto",
+      sourceSequence: 0,
+      error: { type: "unknown", message: "fixture interruption" },
+      usage: { providerID: "openai", tokens, reported: false },
+    })
+    expect(yield* SessionUsageQuery.readTotal(first)).toEqual((yield* SessionUsageQuery.read(first)).total)
     const all = yield* SessionUsageQuery.read()
-    expect(all.total.total).toBe(330)
+    expect(all.total.total).toBe(495)
     expect(all.official.total).toBe(165)
     expect((yield* SessionUsageQuery.read("ses_new_fork_without_requests")).total.total).toBe(0)
+    expect((yield* SessionUsageQuery.readTotal("ses_new_fork_without_requests")).total).toBe(0)
   }),
 )

@@ -395,6 +395,13 @@ export const dict = {
   "session.outcome.failed": "Execution or verification failed",
   "session.outcome.interrupted": "Interrupted",
   "session.outcome.stopped": "Stopped",
+  "session.budget.unlimited": "No limit",
+  "session.budget.used": "tokens {{tokens}} / {{limit}} · minutes {{minutes}} / {{duration}}",
+  "session.budget.unreported": "{{count}} requests have incomplete usage; actual consumption may be higher.",
+  "session.budget.defaults": "Default session limits",
+  "session.budget.save": "Save default limits",
+  "session.budget.defaultHint":
+    "Unconfigured limits are 12 hours and 30 million tokens. Saving blank fields explicitly selects no limit. Session adjustments override defaults.",
   "session.budget.title": "Session limits",
   "session.budget.hint": "Replace both limits. Blank means unlimited. Time is measured from session creation.",
   "session.budget.tokens": "Total tokens",

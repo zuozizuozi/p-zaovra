@@ -457,6 +457,20 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.get("session.budget", "/api/session/:sessionID/budget", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: SessionOutcome.BudgetStatus }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.budget",
+            summary: "Inspect effective session limits and recorded usage",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.get("session.outcome", "/api/session/:sessionID/outcome", {
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: SessionOutcome.Info }),
