@@ -165,6 +165,20 @@ test("K3 cache separates summary purpose and durable versus request-local tails"
   expect(SessionCache.compare(first, next).reason).toBe("durable")
 })
 
+test("352 a prior request-local tail cannot be misclassified as rewritten durable history", () => {
+  const previous = SessionCache.snapshot(
+    LLM.updateRequest(request, { messages: [Message.user("original task"), Message.user("temporary facts")] }),
+    1,
+    { durableMessages: 1 },
+  )
+  const current = SessionCache.snapshot(
+    LLM.updateRequest(request, { messages: [Message.user("original task"), Message.assistant("new answer")] }),
+    1,
+    { durableMessages: 2 },
+  )
+  expect(SessionCache.compare(previous, current)).toMatchObject({ reason: "tail", firstChanged: "message:1" })
+})
+
 test("K3 physical attempts stay under one logical request without duplicating usage", () => {
   const base = { category: "cache" }
   const report = SessionCache.report([

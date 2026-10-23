@@ -93,7 +93,7 @@ export function compare(previous: typeof Snapshot.Type | undefined, current: typ
     reason: name.startsWith("message:")
       ? current.durableMessages === undefined
         ? "history-or-tail"
-        : Number(name.slice(8)) < current.durableMessages
+        : Number(name.slice(8)) < Math.min(previous.durableMessages ?? current.durableMessages, current.durableMessages)
           ? "durable"
           : "tail"
       : name,

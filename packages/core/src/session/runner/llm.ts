@@ -853,13 +853,38 @@ const layer = Layer.effect(
       // A failed compaction can still consume tokens before falling back to the original request.
       if (allowCompaction && (yield* checkBudget(session, model)))
         return { needsContinuation: false, step: currentStep }
+      yield* SessionOwnership.check
+      // Once sent, host observations are part of the conversation prefix. Keep
+      // them as historical data instead of removing them before the next turn.
+      // Synthetic rows do not admit user input or change the user's clauses.
+      const observations =
+        subtask?.type === "user" && subtask.subtask
+          ? []
+          : yield* Effect.forEach(
+              request.messages.slice(durableMessages.length).flatMap((message) => {
+                const part = message.content[0]
+                return message.role === "user" && message.content.length === 1 && part?.type === "text"
+                  ? [part.text]
+                  : []
+              }),
+              (text) =>
+                Effect.gen(function* () {
+                  return yield* events.publish(SessionEvent.Synthetic, {
+                    sessionID: session.id,
+                    timestamp: yield* DateTime.now,
+                    messageID: SessionMessage.ID.create(),
+                    text,
+                  })
+                }),
+            )
+      const inputSequence = observations.at(-1)?.durable?.seq ?? entries.at(-1)?.seq ?? system.baselineSeq
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         catalogModel: model.catalogModel,
         verificationEnabled,
         sessionID: session.id,
         agent: agent.id,
-        inputSequence: Math.max(0, entries.at(-1)?.seq ?? system.baselineSeq),
+        inputSequence: Math.max(0, inputSequence),
         contextEpoch: Math.max(0, system.baselineSeq),
         model: {
           id: ModelV2.ID.make(model.id),
@@ -882,7 +907,6 @@ const layer = Layer.effect(
       let rejectedInput = false
       // Explicit command delegation uses the same durable tool settlement path,
       // without asking a provider to decide whether to create the child.
-      yield* SessionOwnership.check
       const providerStream = (
         subtask?.type === "user" && subtask.subtask
           ? Stream.fromIterable([

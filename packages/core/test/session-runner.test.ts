@@ -8340,9 +8340,94 @@ it.effect("authority lost after provider output prevents tool execution and the 
   }),
 )
 
+for (const verify of [false, true])
+  it.live(`352 host observations preserve the exact wire prefix with verification ${verify}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = verify
+      qualityProgress = { facts: true }
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "cache-prefix-echo", name: "echo", input: { text: "observed" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "cache-prefix-final", ["Done"]).completeEvents,
+      ]
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Echo once" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      const target = OpenAIResponses.route.with({ auth: Auth.bearer("offline") }).model({ id: "fixture" })
+      const first = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.updateRequest(requests[0]!, { model: target }),
+      )
+      const second = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.updateRequest(requests[1]!, { model: target }),
+      )
+      expect(second.body.input.slice(0, first.body.input.length)).toEqual([...first.body.input])
+      const chat = OpenAIChat.route.with({ auth: Auth.bearer("offline") }).model({ id: "deepseek-fixture" })
+      const firstChat = yield* LLMClient.prepare<OpenAIChat.OpenAIChatBody>(
+        LLM.updateRequest(requests[0]!, { model: chat }),
+      )
+      const secondChat = yield* LLMClient.prepare<OpenAIChat.OpenAIChatBody>(
+        LLM.updateRequest(requests[1]!, { model: chat }),
+      )
+      expect(secondChat.body.messages.slice(0, firstChat.body.messages.length)).toEqual([...firstChat.body.messages])
+      const context = yield* session.context(sessionID)
+      expect(context.filter((message) => message.type === "user").map((message) => message.text)).toEqual(["Echo once"])
+      expect(
+        context.filter((message) => message.type === "synthetic" && message.text.startsWith("Current task facts")),
+      ).toHaveLength(2)
+    }),
+  )
+
+it.live("352 an observation checkpoint does not claim concurrently admitted input", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { facts: true }
+    const session = yield* SessionV2.Service
+    const events = yield* EventV2.Service
+    let injected = false
+    let observationSequence = 0
+    const stepInputs: number[] = []
+    yield* events.listen((event) =>
+      Effect.gen(function* () {
+        if (event.type === SessionEvent.Step.Started.type)
+          stepInputs.push(
+            Schema.decodeUnknownSync(Schema.Struct({ inputSequence: Schema.optional(Schema.Number) }))(event.data)
+              .inputSequence ?? 0,
+          )
+        if (event.type !== SessionEvent.Synthetic.type || injected) return
+        injected = true
+        observationSequence = event.durable?.seq ?? 0
+        yield* session
+          .prompt({
+            sessionID,
+            prompt: Prompt.make({ text: "A later queued request" }),
+            delivery: "queue",
+            resume: false,
+          })
+          .pipe(Effect.orDie)
+      }),
+    )
+    response = fragmentFixture("text", "observation-checkpoint", ["Done"]).completeEvents
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Original request" }), resume: false })
+    yield* session.resume(sessionID)
+    expect(injected).toBe(true)
+    expect(observationSequence).toBeGreaterThan(0)
+    expect(stepInputs[0]).toBe(observationSequence)
+    expect(
+      requests[0]?.messages.some((message) => JSON.stringify(message.content).includes("A later queued request")),
+    ).toBe(false)
+  }),
+)
+
 for (const setting of [undefined, {}, { facts: true }]) {
   it.live(
-    `Q1 facts ${JSON.stringify(setting)} stay at request tail and out of history, usage survives another drain`,
+    `Q1 facts ${JSON.stringify(setting)} stay at request tail and replay as historical observations across drains`,
     () =>
       Effect.gen(function* () {
         yield* setup
@@ -8354,7 +8439,7 @@ for (const setting of [undefined, {}, { facts: true }]) {
         yield* session.resume(sessionID)
         const first = JSON.stringify(requests[0]!.messages.at(-1))
         expect(first).toContain("Current task facts")
-        expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("Current task facts")
+        expect(JSON.stringify(yield* session.context(sessionID))).toContain("Current task facts")
         yield* session.resume(sessionID)
         expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain("Current task facts")
         const db = (yield* Database.Service).db
