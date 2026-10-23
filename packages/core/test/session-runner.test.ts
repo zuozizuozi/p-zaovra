@@ -68,6 +68,7 @@ import { Tool } from "@zaovra-ai/core/tool/tool"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
 import { VerificationReviewTool } from "@zaovra-ai/core/tool/verification-review"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
+import { BrowserTool } from "@zaovra-ai/core/tool/browser"
 import { CommandV2 } from "@zaovra-ai/core/command"
 import {
   SessionContextEpochTable,
@@ -517,6 +518,262 @@ const awaitRetry = (attempt: number) =>
   })
 
 describe("S2 fixed recovery matrix", () => {
+  it.effect("346 recovery refreshes observations without repeating confirmed effects or old verification", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      const database = yield* Database.Service
+      let text = "before-edit"
+      let status = "running"
+      let reads = 0
+      let writes = 0
+      let polls = 0
+      const readDone = yield* Deferred.make<void>()
+      const pollDone = yield* Deferred.make<void>()
+      const writeDone = yield* Deferred.make<void>()
+      yield* registry.register({
+        read: Tool.make({
+          description: "Observe fixed file",
+          observation: true,
+          input: Schema.Struct({ path: Schema.String }),
+          output: Schema.Struct({ text: Schema.String }),
+          execute: () =>
+            Effect.sync(() => {
+              reads++
+              return { text }
+            }).pipe(Effect.tap(() => Deferred.succeed(readDone, undefined))),
+        }),
+        write: Tool.make({
+          description: "Change fixed file once",
+          input: Schema.Struct({ path: Schema.String }),
+          output: Schema.String,
+          execute: () =>
+            Effect.sync(() => {
+              writes++
+              text = "after-edit"
+              status = "completed"
+              return "written"
+            }).pipe(Effect.tap(() => Deferred.succeed(writeDone, undefined))),
+        }),
+        bash_job: Tool.make({
+          description: "Observe fixed background status",
+          observation: (input) => input.action === "get",
+          input: Schema.Struct({ action: Schema.Literals(["get", "cancel"]) }),
+          output: Schema.Struct({
+            status: Schema.String,
+            verification: Schema.Struct({
+              callID: Schema.String,
+              kind: Schema.Literal("unit"),
+              command: Schema.String,
+              exit: Schema.Number,
+            }),
+          }),
+          execute: () =>
+            Effect.sync(() => {
+              polls++
+              return {
+                status,
+                verification: {
+                  callID: "original-execution",
+                  kind: "unit" as const,
+                  command: "original-check",
+                  exit: 0,
+                },
+              }
+            }).pipe(Effect.tap(() => Deferred.succeed(pollDone, undefined))),
+        }),
+      })
+      const read = (id: string) => LLMEvent.toolCall({ id, name: "read", input: { path: "fixture" } })
+      const write = (id: string) => LLMEvent.toolCall({ id, name: "write", input: { path: "fixture" } })
+      const poll = (id: string) => LLMEvent.toolCall({ id, name: "bash_job", input: { action: "get" } })
+      // Pause the failed stream until each preceding observation has settled.
+      responseStream = Stream.make(poll("poll-before")).pipe(
+        Stream.concat(Stream.fromEffect(Deferred.await(pollDone)).pipe(Stream.drain)),
+        Stream.concat(Stream.make(read("read-before"))),
+        Stream.concat(Stream.fromEffect(Deferred.await(readDone)).pipe(Stream.drain)),
+        Stream.concat(Stream.make(write("write-before"))),
+        Stream.concat(Stream.fromEffect(Deferred.await(writeDone)).pipe(Stream.drain)),
+        Stream.concat(
+          Stream.fail(
+            new LLMError({
+              module: "fixed",
+              method: "read",
+              reason: new TransportReason({ message: "drop", kind: "StreamReadError" }),
+            }),
+          ),
+        ),
+      )
+      responses = [
+        [
+          read("read-after"),
+          poll("poll-after"),
+          write("write-after"),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "346-finish", ["Done."]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Observe and update once" }), resume: false })
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* awaitRetry(1)
+      yield* adjust(5000)
+      yield* Fiber.join(run)
+      expect(reads).toBe(2)
+      expect(polls).toBe(2)
+      expect(writes).toBe(1)
+      const history = yield* session.context(sessionID)
+      const tools = history.flatMap((message) =>
+        message.type === "assistant" ? message.content.filter((part) => part.type === "tool") : [],
+      )
+      const after = tools.find((part) => part.id === "read-after")
+      expect(JSON.stringify(after)).toContain("after-edit")
+      expect(JSON.stringify(tools.find((part) => part.id === "poll-after"))).toContain("completed")
+      expect(SessionOutcome.derive(history, false).checks).toHaveLength(0)
+      const ledger = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+      expect(
+        ledger.filter(
+          (row) =>
+            row.data.category === "operation" && (row.data.details as Record<string, unknown>).status === "dispatched",
+        ),
+      ).toHaveLength(1)
+    }),
+  )
+
+  for (const name of ["bash", "read", "bash_job"])
+    it.effect(`346 does not replay effectful ${name} based on its name`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        let mutations = 0
+        yield* registry.register({
+          [name]: Tool.make({
+            description: "Fixed mutation",
+            input: Schema.Struct({ action: Schema.Literal("cancel") }),
+            observation: (input) => input.action !== "cancel",
+            output: Schema.String,
+            execute: () =>
+              Effect.sync(() => {
+                mutations++
+                return "changed"
+              }),
+          }),
+        })
+        responseStream = Stream.make(
+          LLMEvent.toolCall({ id: "346-effect-first", name, input: { action: "cancel" } }),
+        ).pipe(
+          Stream.concat(
+            Stream.fail(
+              new LLMError({
+                module: "fixed",
+                method: "read",
+                reason: new TransportReason({ message: "drop", kind: "StreamReadError" }),
+              }),
+            ),
+          ),
+        )
+        responses = [
+          [
+            LLMEvent.toolCall({ id: "346-effect-retry", name, input: { action: "cancel" } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "346-effect-finish", ["Done."]).completeEvents,
+        ]
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Apply once" }), resume: false })
+        const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        yield* awaitRetry(1)
+        yield* adjust(5000)
+        yield* Fiber.join(run)
+        expect(mutations).toBe(1)
+      }),
+    )
+
+  for (const partial of [false, true])
+    it.effect(
+      `346 browser ${partial ? "partial batch" : "action then failed observation"} stays unknown across continue`,
+      () =>
+        Effect.gen(function* () {
+          yield* setup
+          const session = yield* SessionV2.Service
+          const registry = yield* ToolRegistry.Service
+          const database = yield* Database.Service
+          let clicks = 0
+          yield* registry.register({
+            browser: Tool.make({
+              description: "Fixed browser outcome",
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () =>
+                Effect.sync(() => {
+                  clicks++
+                  return BrowserTool.failure(
+                    "observation lost",
+                    !partial,
+                    partial ? [{ status: "executed" }, { status: "not_executed" }] : [],
+                  )
+                }).pipe(Effect.flatMap(Effect.fail)),
+            }),
+          })
+          response = [
+            LLMEvent.toolCall({ id: "346-click", name: "browser", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          ]
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Click once" }), resume: false })
+          expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
+          const ledger = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+          expect(
+            ledger.some(
+              (row) =>
+                row.data.category === "operation" && (row.data.details as Record<string, unknown>).status === "unknown",
+            ),
+          ).toBe(true)
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "continue" }), resume: false })
+          yield* session.resume(sessionID)
+          expect(clicks).toBe(1)
+          expect(requests).toHaveLength(1)
+        }),
+    )
+
+  it.effect("346 browser failure before dispatch accepts a corrected action", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      let clicks = 0
+      yield* registry.register({
+        browser: Tool.make({
+          description: "Fixed browser locator",
+          input: Schema.Struct({ target: Schema.String }),
+          output: Schema.String,
+          execute: (input) =>
+            input.target === "missing"
+              ? Effect.fail(BrowserTool.failure("target missing", false))
+              : Effect.sync(() => {
+                  clicks++
+                  return "clicked"
+                }),
+        }),
+      })
+      responses = [
+        [
+          LLMEvent.toolCall({ id: "346-missing", name: "browser", input: { target: "missing" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        [
+          LLMEvent.toolCall({ id: "346-correct", name: "browser", input: { target: "known" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "346-corrected", ["Done."]).completeEvents,
+      ]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Click known target" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(clicks).toBe(1)
+      expect(requests).toHaveLength(3)
+    }),
+  )
+
   it.effect("S2 actual HTTP retries preserve distinct physical attempt identities", () =>
     Effect.gen(function* () {
       yield* setup

@@ -81,8 +81,7 @@ test(
       if (request.url === "/batch-hit" || request.url === "/batch-key") {
         if (request.url === "/batch-hit") batchHits++
         if (request.url === "/batch-key") batchKeys++
-        if (process.env.BROWSER_BATCH_TRACE)
-          console.log("BATCH_HTTP", Date.now(), request.url, batchHits, batchKeys)
+        if (process.env.BROWSER_BATCH_TRACE) console.log("BATCH_HTTP", Date.now(), request.url, batchHits, batchKeys)
         response.end("ok")
         return
       }
@@ -360,9 +359,16 @@ test(
             actions: [click, { action: "click", target: { role: "button", name: "Missing" } }, click],
           })
           if (process.env.BROWSER_BATCH_TRACE) {
-            console.log("BATCH_RETURN", Date.now(), batchHits, JSON.stringify(failed.result), JSON.stringify(progress.at(-1)))
+            console.log(
+              "BATCH_RETURN",
+              Date.now(),
+              batchHits,
+              JSON.stringify(failed.result),
+              JSON.stringify(progress.at(-1)),
+            )
           }
           expect(failed.result.type).toBe("error")
+          expect(failed.errorMetadata).toEqual({ phase: "execution", reason: "output-unconfirmed" })
           yield* received(3)
           if (process.env.BROWSER_BATCH_TRACE) console.log("BATCH_OBSERVED", Date.now(), batchHits)
           expect(batchHits).toBe(3)
@@ -390,6 +396,7 @@ test(
           const opened = yield* call({ action: "open", url: url.href })
           expect(JSON.stringify(opened)).toContain("Browser fixture")
           const invalidKey = yield* call({ action: "press", key: "NotAKey" })
+          expect(invalidKey.inputRejected).toBe(true)
           expect(JSON.stringify(invalidKey)).toContain("Not executed")
           expect(JSON.stringify(invalidKey)).not.toContain("Outcome may have occurred")
           expect((yield* call({ action: "press", key: "CTRL+a" })).result.type).toBe("text")

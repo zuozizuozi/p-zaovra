@@ -72,6 +72,83 @@ const expectLLMError = (error: unknown) => {
 
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
 
+for (const [code, category] of [
+  ["insufficient_quota", "QuotaExceeded"],
+  ["invalid_request_error", "InvalidRequest"],
+  ["authentication_error", "Authentication"],
+] as const)
+  for (const length of [0, 16_000, 20_000])
+    it.effect(`346 classifies ${code} before bounding ${length} bytes of diagnostics`, () =>
+      Effect.gen(function* () {
+        const attempts = yield* Ref.make(0)
+        const result = yield* RequestExecutor.Service.use((executor) => executor.execute(secretRequest)).pipe(
+          Effect.provide(
+            countedResponsesLayer(attempts, [
+              new Response(
+                JSON.stringify({
+                  error: { code, message: "Limit reached", details: "x".repeat(length) },
+                  api_key: "header-secret-456",
+                }),
+                { status: 429 },
+              ),
+            ]),
+          ),
+          Effect.flip,
+        )
+        expect(result.reason._tag).toBe(category)
+        expect(yield* Ref.get(attempts)).toBe(1)
+        const http = errorHttp(result)
+        expect(http?.body?.length ?? 0).toBeLessThanOrEqual(16_384)
+        expect(JSON.stringify(result)).not.toContain("header-secret-456")
+        expect(JSON.stringify(result)).not.toContain("query-secret-123")
+        expect(http?.bodyTruncated ?? false).toBe(length === 20_000)
+      }),
+    )
+
+for (const error of [
+  { type: "error", error: { message: "Rate limit exceeded: free-models-per-day" } },
+  {
+    type: "error",
+    error: { message: "Rate limit exceeded", metadata: { limit_source: "openrouter_free_tier_daily" } },
+  },
+  { error: { message: "Rate limit exceeded" }, metadata: { limit_source: "openrouter_free_tier_daily" } },
+  { type: "error", error: { message: "x".repeat(20_000) + " insufficient_quota" } },
+])
+  it.effect(`346 does not hide quota behind wrapper or metadata ${JSON.stringify(error).slice(0, 180)}`, () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const result = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(countedResponsesLayer(attempts, [new Response(JSON.stringify(error), { status: 429 })])),
+        Effect.flip,
+      )
+      expect(result.reason._tag).toBe("QuotaExceeded")
+      expect(yield* Ref.get(attempts)).toBe(1)
+    }),
+  )
+
+for (const [code, status] of [
+  ["rate_limit_exceeded", 429],
+  ["overloaded", 503],
+] as const)
+  it.effect(`346 still retries long ${code} responses`, () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const result = yield* RequestExecutor.Service.use((executor) => executor.execute(request)).pipe(
+        Effect.provide(
+          countedResponsesLayer(attempts, [
+            new Response(JSON.stringify({ error: { code, message: "Wait", details: "x".repeat(20_000) } }), {
+              status,
+              headers: { "retry-after-ms": "0" },
+            }),
+            new Response("ok"),
+          ]),
+        ),
+      )
+      expect(result.status).toBe(200)
+      expect(yield* Ref.get(attempts)).toBe(2)
+    }),
+  )
+
 it.effect("S2 delegates HTTP recovery with exactly one physical attempt", () =>
   Effect.gen(function* () {
     const attempts = yield* Ref.make(0)

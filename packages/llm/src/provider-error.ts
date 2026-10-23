@@ -15,6 +15,7 @@ import {
 /** Use provider codes before HTTP fallbacks; generic messages must not imply transience. */
 export function providerFailure(input: {
   message: string
+  quota?: boolean
   code?: string
   type?: string
   status?: number
@@ -24,12 +25,7 @@ export function providerFailure(input: {
   const code = [input.code, input.type].filter(Boolean).join(" ").toLowerCase()
   const common = { message: input.message, http: input.http }
   const detail = code || input.message
-  if (
-    /insufficient[-_\s]?(?:quota|balance|credits)|quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|free-models-per-day|openrouter_free_tier_daily|余额不足|额度不足/i.test(
-      detail,
-    )
-  )
-    return new QuotaExceededReason(common)
+  if (input.quota || isQuotaExceeded(code + " " + input.message)) return new QuotaExceededReason(common)
   if (/content_filter|content[-_\s]?policy|safety|permission_denied/i.test(detail))
     return /permission_denied/.test(code)
       ? new AuthenticationReason({ ...common, kind: "insufficient-permissions" })
@@ -63,6 +59,11 @@ export function providerFailure(input: {
   if ([400, 404, 409, 413, 422].includes(input.status ?? 0)) return new InvalidRequestReason(common)
   return new UnknownProviderReason({ ...common, status: input.status })
 }
+
+export const isQuotaExceeded = (value: string) =>
+  /insufficient[-_\s]?(?:quota|balance|credits)|quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|free-models-per-day|openrouter_free_tier_daily|余额不足|额度不足/i.test(
+    value,
+  )
 
 export function providerEventError(event: ProviderErrorEvent) {
   return new LLMError({

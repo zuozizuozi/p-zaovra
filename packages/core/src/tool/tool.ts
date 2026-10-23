@@ -1,7 +1,7 @@
 export * as Tool from "./tool"
 
 import { ToolDefinition, ToolFailure, ToolOutput, type ToolCall } from "@zaovra-ai/llm"
-import { Effect, JsonSchema, Schema } from "effect"
+import { Effect, JsonSchema, Option, Schema } from "effect"
 import type { AgentV2 } from "../agent"
 import type { SessionMessage } from "../session/message"
 import type { SessionSchema } from "../session/schema"
@@ -46,6 +46,8 @@ type Config<
   Structured extends SchemaType<any> = Output,
 > = {
   readonly description: string
+  /** Trusted capability: fresh observations may be repeated during network recovery. */
+  readonly observation?: boolean | ((input: Schema.Schema.Type<Input>) => boolean)
   readonly input: Input
   /** External producers such as MCP may override only the model-facing schema. Runtime input still crosses this Tool's canonical input codec. */
   readonly inputJsonSchema?: ToolDefinition["inputSchema"]
@@ -67,6 +69,7 @@ type Config<
 
 type Runtime = {
   readonly permission?: string
+  readonly observation: (input: unknown) => boolean
   readonly definition: (name: string) => ToolDefinition
   readonly settle: (call: ToolCall, context: Context) => Effect.Effect<ToolOutput, ToolFailure>
 }
@@ -81,6 +84,11 @@ export function make<
   const tool = Object.freeze({}) as Definition<Input, Structured>
   const definitions = new Map<string, ToolDefinition>()
   runtimes.set(tool, {
+    observation: (input) => {
+      if (typeof config.observation !== "function") return config.observation ?? false
+      const decoded = Schema.decodeUnknownOption(config.input)(input)
+      return Option.isSome(decoded) && config.observation(decoded.value)
+    },
     definition: (name) => {
       const cached = definitions.get(name)
       if (cached) return cached
@@ -155,6 +163,7 @@ export const withPermission = <Input extends SchemaType<any>, Output extends Sch
 
 export const permission = (tool: AnyTool, name: string) => runtimeOf(tool).permission ?? name
 export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
+export const observation = (tool: AnyTool, input: unknown) => runtimeOf(tool).observation(input)
 export const settle = (tool: AnyTool, call: ToolCall, context: Context) => runtimeOf(tool).settle(call, context)
 
 function runtimeOf(tool: AnyTool) {

@@ -996,6 +996,21 @@ const layer = Layer.effect(
                     )
                   : Effect.uninterruptibleMask((restore) =>
                       Effect.gen(function* () {
+                        const execute = restore(
+                          SessionOwnership.check.pipe(
+                            Effect.andThen(
+                              toolMaterialization.settle({
+                                sessionID: session.id,
+                                agent: agent.id,
+                                assistantMessageID,
+                                call: event,
+                                inputModalities: model.inputModalities,
+                                shell,
+                              }),
+                            ),
+                          ),
+                        )
+                        if (toolMaterialization.observation?.(event)) return yield* execute
                         const fingerprint = createHash("sha256")
                           .update(SessionEfficiency.fingerprint(event.name, event.input))
                           .digest("hex")
@@ -1020,20 +1035,7 @@ const layer = Layer.effect(
                         networkRecovery?.operations.set(key, operation)
                         activeOperations.set(event.id, { fingerprint, operation })
                         yield* recordOperation(operation.id, fingerprint, "dispatched", event.id)
-                        return yield* restore(
-                          SessionOwnership.check.pipe(
-                            Effect.andThen(
-                              toolMaterialization.settle({
-                                sessionID: session.id,
-                                agent: agent.id,
-                                assistantMessageID,
-                                call: event,
-                                inputModalities: model.inputModalities,
-                                shell,
-                              }),
-                            ),
-                          ),
-                        ).pipe(
+                        return yield* execute.pipe(
                           Effect.onExit((exit) =>
                             Effect.gen(function* () {
                               if (exit._tag === "Success") return

@@ -89,6 +89,7 @@ const layer = Layer.effectDiscard(
             }),
         }),
         [statusName]: Tool.make({
+          observation: true,
           description: "Inspect one child subagent Session without restarting it.",
           input: StatusInput,
           output: StatusOutput,
@@ -103,6 +104,7 @@ const layer = Layer.effectDiscard(
             }),
         }),
         [listName]: Tool.make({
+          observation: true,
           description: "List child subagent Sessions owned by the current parent Session.",
           input: Schema.Struct({}),
           output: ListOutput,

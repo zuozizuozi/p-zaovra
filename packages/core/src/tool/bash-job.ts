@@ -226,6 +226,7 @@ const layer = Layer.effect(
       .register({
         bash_job: withPermission(
           Tool.make({
+            observation: (input) => input.action === "get" || input.action === "wait",
             description:
               "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Task completion durably notifies and wakes the Session once unless the user has stopped it; preview completion does not notify. Task jobs also stop with budget termination, archive or owner scope closure. Jobs are process-local and never automatically rerun after restart.",
             input: Schema.Struct({

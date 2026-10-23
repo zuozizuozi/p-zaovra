@@ -293,6 +293,8 @@ const layer = Layer.effect(
     yield* tools
       .register({
         browser: Tool.make({
+          observation: (input) =>
+            input.action === "snapshot" || input.action === "screenshot" || input.action === "console",
           description:
             "Use this tool to observe and interact with local web previews instead of writing browser scripts. Run repeatable assertions with bash and the project's tests; screenshots do not prove completion. Open an authorized local URL first; use observed unique roles/labels/selectors or screenshot coordinates. Use batch for up to 4 already-known click/type/press/scroll actions with one final snapshot (default) or screenshot. Batch stops at the first error; inspect step statuses before continuing, never replay completed actions. Use single steps when the next target depends on a new observation. Explicitly authorize any additional resource origins with allowOrigins on open. No uploads, downloads, or arbitrary JavaScript. Built-in browser does not support Web Workers; use the system browser for full capabilities. Streaming is supported for GET/HEAD fetch, XHR and EventSource; Chromium may resend native GET requests. Navigation and mutating requests retain bounded zero-retry transport.",
           input: Input,
@@ -595,10 +597,7 @@ const layer = Layer.effect(
                       }
                     }
                   },
-                  catch: (error) =>
-                    new Tool.Failure({
-                      message: `${started ? "Outcome may have occurred; observe before retrying" : "Not executed"}: ${String(error)}`,
-                    }),
+                  catch: (error) => failure(error, started, steps),
                 })
                 if (!result.screenshot)
                   return {
@@ -607,7 +606,7 @@ const layer = Layer.effect(
                   }
                 const name = yield* outputs
                   .image(context.sessionID, result.screenshot)
-                  .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
+                  .pipe(Effect.mapError((error) => failure(error.message, started, steps)))
                 const message =
                   context.inputModalities === undefined
                     ? yield* sessions.message(context.assistantMessageID)
@@ -662,6 +661,14 @@ const layer = Layer.effect(
     return Service.of({ close: (id) => Effect.promise(() => close(id)) })
   }),
 )
+
+export function failure(error: unknown, started: boolean, steps: readonly { status: string }[] = []) {
+  const uncertain = started || steps.some((step) => step.status !== "not_executed")
+  return new Tool.Failure({
+    message: `${uncertain ? "Outcome may have occurred; observe before retrying" : "Not executed"}: ${String(error)}`,
+    metadata: uncertain ? { phase: "execution", reason: "output-unconfirmed" } : { phase: "input" },
+  })
+}
 
 export const node = makeLocationNode({
   service: Service,

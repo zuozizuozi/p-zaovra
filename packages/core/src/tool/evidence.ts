@@ -18,6 +18,7 @@ const layer = Layer.effectDiscard(
       yield* tools
         .register({
           [name]: Tool.make({
+            observation: true,
             description:
               "Retrieve retained original tool output by Evidence ID, without rerunning the command. Offsets and lengths are UTF-8 bytes. Search is literal and paginated; no matches in one page does not mean no matches in the full log. snapshotBytes is the observed file size, not proof the producer has finished. IDs are session-owned and expire with retained output. Use nextOffset for continuation.",
             input: Schema.Struct({

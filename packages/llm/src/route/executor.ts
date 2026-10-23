@@ -17,7 +17,7 @@ import {
   type LLMEvent,
   TransportReason,
 } from "../schema"
-import { providerFailure } from "../provider-error"
+import { isQuotaExceeded, providerFailure } from "../provider-error"
 
 export interface Interface {
   readonly execute: (
@@ -277,23 +277,23 @@ const responseHttp = (input: {
     rateLimit: input.rateLimit,
   })
 
-const statusReason = (input: {
-  readonly status: number
-  readonly message: string
-  readonly retryAfterMs?: number | undefined
-  readonly rateLimit?: HttpRateLimitDetails | undefined
-  readonly http: HttpContext
-}) => {
-  const decoded = input.http.body
-    ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(input.http.body))
+const providerEvidence = (body: string | void) => {
+  // Diagnostics may be truncated JSON; classify the complete response instead.
+  const decoded = body
+    ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body))
     : undefined
   const root = decoded !== null && typeof decoded === "object" ? (decoded as Record<string, unknown>) : {}
   const error = root.error !== null && typeof root.error === "object" ? (root.error as Record<string, unknown>) : {}
-  const code = [error.code, error.type, root.code, root.type].find(
-    (value): value is string => typeof value === "string",
+  const metadata = [error.metadata, root.metadata].flatMap((value) =>
+    value !== null && typeof value === "object" && "limit_source" in value ? [value.limit_source] : [],
   )
+  const code = [error.code, error.type, root.code, root.type, ...metadata]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.slice(0, 256))
+    .join(" ")
   const type = [error.type, root.type].find((value): value is string => typeof value === "string")
-  return providerFailure({ ...input, code, type })
+  const quota = [error.message, root.message].some((value) => typeof value === "string" && isQuotaExceeded(value))
+  return { code, type, quota }
 }
 
 const statusError =
@@ -308,15 +308,16 @@ const statusError =
       const headers = normalizedHeaders(response.headers)
       const retryAfter = retryAfterMs(headers)
       const rateLimit = rateLimitDetails(headers, retryAfter)
+      const evidence = providerEvidence(body)
       const details = responseBody(body, request)
       return yield* new LLMError({
         module: "RequestExecutor",
         method: "execute",
-        reason: statusReason({
+        reason: providerFailure({
+          ...evidence,
           status: response.status,
           message: providerMessage(response.status, body, request),
           retryAfterMs: retryAfter,
-          rateLimit,
           http: responseHttp({
             request,
             response,

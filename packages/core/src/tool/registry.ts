@@ -25,6 +25,7 @@ export interface Interface {
 
 export interface Materialization {
   readonly definitions: ReadonlyArray<ToolDefinition>
+  readonly observation?: (call: ToolCall) => boolean
   readonly settle: (input: ExecuteInput) => Effect.Effect<Settlement, ToolOutputStore.Error>
 }
 
@@ -186,6 +187,10 @@ const registryLayer = Layer.effect(
             registrations.delete(name)
           }
         return {
+          observation: (call) => {
+            const registration = registrations.get(call.name)
+            return registration !== undefined && Tool.observation(registration.tool, call.input)
+          },
           definitions: Array.from(registrations, ([name, registration]) => definition(name, registration.tool)).sort(
             (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
           ),
