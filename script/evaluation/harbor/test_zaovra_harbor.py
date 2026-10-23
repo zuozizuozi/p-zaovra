@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+import json
 from types import SimpleNamespace
 from pathlib import Path
 from harbor.models.agent.context import AgentContext
@@ -7,6 +8,43 @@ from harbor.models.trajectories import Trajectory
 from zaovra_harbor import Zaovra
 
 class AttachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_and_cleanup_failures_preserve_original_and_persist_context_first(self):
+        for cleanup in ("transport", "nonzero", "success"):
+            with self.subTest(cleanup=cleanup), tempfile.TemporaryDirectory() as directory:
+                calls = []
+                original = OSError("original run transport unavailable")
+                class Environment:
+                    async def exec(self, command, **kwargs):
+                        calls.append(command)
+                        if " run " in command:
+                            raise original
+                        saved = json.loads((Path(directory) / "context.json").read_text(encoding="utf-8"))
+                        self_context = saved["metadata"]
+                        assert self_context["complete"] is False and self_context["usage_unknown"] is True
+                        assert self_context["error"] == str(original) and self_context["cleanup_status"] == "pending"
+                        if cleanup == "transport":
+                            raise ConnectionError("cleanup transport unavailable")
+                        return SimpleNamespace(return_code=1 if cleanup == "nonzero" else 0, stdout="", stderr="")
+                agent = Zaovra(logs_dir=Path(directory), attach_backend=True)
+                agent.backend = {"pid": 123, "start": "456", "url": "http://127.0.0.1:4321"}
+                context = AgentContext()
+                with self.assertRaises(OSError) as raised:
+                    await agent.run("Generic task", Environment(), context)
+                self.assertIs(raised.exception, original)
+                saved = json.loads((Path(directory) / "context.json").read_text(encoding="utf-8"))["metadata"]
+                self.assertEqual(saved, context.metadata)
+                self.assertEqual(saved["error_type"], "OSError")
+                self.assertFalse(saved["complete"])
+                self.assertTrue(saved["usage_unknown"])
+                self.assertEqual(len(calls), 2)
+                if cleanup == "success":
+                    self.assertEqual(saved["cleanup_status"], "closed")
+                    self.assertIsNone(agent.backend)
+                else:
+                    self.assertEqual(saved["cleanup_status"], "failed")
+                    self.assertIn("cleanup", saved["cleanup_error"])
+                    self.assertIsNotNone(agent.backend)
+
     async def test_attach_retains_backend_until_verifier_and_exact_cleanup(self):
         calls = []
         class Environment:

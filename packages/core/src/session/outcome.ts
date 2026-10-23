@@ -679,30 +679,9 @@ export function derive(
         // require an exact rerun or explicit revalidation with unchanged assertions.
         for (const [key, previous] of checks) {
           if (
-            check.exit === 0 &&
-            newerExecution(check, previous, part) &&
-            fresh(check) &&
             (previous.exit !== 0 || ExecutionContext.problems(previous.executionContext).length > 0) &&
-            (["not-run", "invalid-report"].includes(previous.execution ?? "") ||
-              (!previous.execution &&
-                (previous.command === check.command ||
-                  (Array.isArray(part.state.input.verification_replaces) &&
-                    part.state.input.verification_replaces.includes(previous.callID))) &&
-                (previous.assertions ?? []).every(
-                  (assertion) =>
-                    assertion.digest &&
-                    check.assertions?.some(
-                      (current) =>
-                        current.path === assertion.path &&
-                        !!current.digest &&
-                        (current.digest === assertion.digest || created.has(path.resolve(assertion.path))),
-                    ),
-                ))) &&
-            previous.kind === check.kind &&
-            JSON.stringify(previous.sample) === JSON.stringify(check.sample) &&
-            previous.cwd === check.cwd &&
             previous.targets?.length &&
-            previous.targets.every((target) => check.targets?.some((current) => current.path === target.path))
+            revalidatesCheck(check, previous, part, created, fresh(check))
           )
             checks.set(key, { ...previous, supersededBy: check.callID })
         }
@@ -905,7 +884,7 @@ export function derive(
   ) {
     if (!review) missing.push("requirements review: submit verification_review before claiming completion")
     if (review) {
-      missing.push(...reviewContinuityProblems(turn, review, [...checks.values()], targets, snapshot))
+      missing.push(...reviewContinuityProblems(turn, review, [...checks.values()], targets, snapshot, directory))
       for (const [index, clause] of request.clauses.entries()) {
         if (request.entries[index].withdrawnBy) continue
         const items = review.items.filter((item) => item.requirement === index + 1)
@@ -1051,13 +1030,12 @@ export function reviewContinuityProblems(
   checks: readonly SessionOutcome.Check[],
   targets: readonly { path: string; digest: string }[],
   snapshot?: string,
+  directory?: string,
 ) {
-  const tools = executionTools(acceptanceHistory(messages))
-  const active = new Set(
-    requested(messages)
-      .entries.filter((entry) => !entry.withdrawnBy)
-      .map((entry) => entry.id),
-  )
+  const history = acceptanceHistory(messages)
+  const tools = executionTools(history)
+  const active = requested(history).entries.filter((entry) => !entry.withdrawnBy)
+  const created = taskCreatedFiles(history, directory)
   const fresh = (check: SessionOutcome.Check) =>
     checkFreshness(
       check,
@@ -1068,9 +1046,18 @@ export function reviewContinuityProblems(
   return tools.flatMap((part, index) => {
     if (part.name !== "verification_review" || part.state.status !== "completed") return []
     const previous = Schema.decodeUnknownOption(SessionOutcome.Review)(part.state.structured.review)
-    if (Option.isNone(previous) || previous.value.userMessageID !== review.userMessageID) return []
+    if (Option.isNone(previous)) return []
+    const source = history.findIndex(
+      (message) => message.type === "user" && message.id === previous.value.userMessageID,
+    )
+    if (source < 0) return []
+    // Continuations move the review cursor, while clause IDs and their source
+    // remain stable in this acceptance history. New tasks have a different history.
+    const entries = requested(history.slice(0, source + 1)).entries
     return previous.value.items.flatMap((item) => {
-      if (!active.has(item.requirement)) return []
+      const entry = entries.find((entry) => entry.id === item.requirement)
+      if (!entry || !active.some((next) => next.id === entry.id && next.sourceMessageID === entry.sourceMessageID))
+        return []
       const current = review.items.find((entry) => entry.requirement === item.requirement)
       const reruns = checks.filter(
         (check) =>
@@ -1082,26 +1069,24 @@ export function reviewContinuityProblems(
           current?.evidence.includes(check.callID) &&
           current.coverage?.some((scope) => scope.callID === check.callID && scope.result === "passed"),
       )
+      const originals = tools.slice(0, index).flatMap(toolChecks)
+      const relevant = (check: SessionOutcome.Check, original: SessionOutcome.Check) => {
+        const lineage = [original]
+        for (const tool of tools.slice(index + 1))
+          for (const next of toolChecks(tool)) {
+            if (lineage.some((previous) => next.callID === previous.callID)) continue
+            if (!lineage.some((previous) => revalidatesCheck(next, previous, tool, created, fresh(next)))) continue
+            if (next.callID === check.callID) return true
+            lineage.push(next)
+          }
+        return false
+      }
       return [
         ...(item.coverage ?? [])
           .filter((scope) => scope.result === "failed")
           .flatMap((scope) => {
-            const original = tools
-              .slice(0, index)
-              .flatMap(toolChecks)
-              .find((check) => check.callID === scope.callID)
-            if (
-              original &&
-              reruns.some(
-                (check) =>
-                  check.callID !== original.callID &&
-                  check.kind === original.kind &&
-                  check.command === original.command &&
-                  check.cwd === original.cwd &&
-                  (original.targets ?? []).every((target) => check.targets?.some((next) => next.path === target.path)),
-              )
-            )
-              return []
+            const original = originals.find((check) => check.callID === scope.callID)
+            if (original && reruns.some((check) => relevant(check, original))) return []
             return [
               `requirement ${item.requirement}: semantic failure (${scope.callID}) needs a fresh relevant rerun; rewriting the review is not evidence`,
             ]
@@ -1109,21 +1094,17 @@ export function reviewContinuityProblems(
         ...(item.conditions ?? [])
           .filter((condition) => condition.status === "unmet")
           .flatMap((condition) =>
-            reruns.some((check) =>
-              tools
-                .slice(0, index)
-                .flatMap(toolChecks)
-                .some(
-                  (original) =>
-                    item.evidence.includes(original.callID) &&
-                    original.kind === check.kind &&
-                    original.command === check.command &&
-                    original.cwd === check.cwd &&
-                    (original.targets ?? []).every((target) =>
-                      check.targets?.some((next) => next.path === target.path),
-                    ),
-                ),
-            ) && current?.conditions?.some((next) => next.text === condition.text && next.status === "met")
+            reruns.some((check) => {
+              const prior = originals.filter((original) => item.evidence.includes(original.callID))
+              // With no previous execution, bind the first real observation to
+              // the stable user clause, not merely the new review's evidence list.
+              if (!item.evidence.length)
+                return (
+                  check.requirements?.includes(entry.text) &&
+                  current?.coverage?.some((scope) => scope.callID === check.callID && scope.dependencies === "real")
+                )
+              return prior.some((original) => relevant(check, original))
+            }) && current?.conditions?.some((next) => next.text === condition.text && next.status === "met")
               ? []
               : [
                   `requirement ${item.requirement}: unmet condition ${condition.text} needs a fresh check and an updated condition result`,
@@ -1132,6 +1113,45 @@ export function reviewContinuityProblems(
       ]
     })
   })
+}
+
+// Shared by execution failure replacement and semantic review continuity.
+// A renamed command must explicitly replace the original without weakening its
+// scope, sample or protected assertions; prose in a review grants no replacement.
+function revalidatesCheck(
+  check: SessionOutcome.Check,
+  previous: SessionOutcome.Check,
+  part: SessionMessage.AssistantTool,
+  created: ReadonlySet<string>,
+  fresh: boolean,
+) {
+  if (part.state.status !== "completed") return false
+  return (
+    check.exit === 0 &&
+    !check.execution &&
+    newerExecution(check, previous, part) &&
+    fresh &&
+    previous.kind === check.kind &&
+    previous.sample?.id === check.sample?.id &&
+    previous.sample?.planDigest === check.sample?.planDigest &&
+    previous.cwd === check.cwd &&
+    (previous.targets ?? []).every((target) => check.targets?.some((current) => current.path === target.path)) &&
+    (["not-run", "invalid-report"].includes(previous.execution ?? "") ||
+      (!previous.execution &&
+        (previous.command === check.command ||
+          (Array.isArray(part.state.input.verification_replaces) &&
+            part.state.input.verification_replaces.includes(previous.callID))) &&
+        (previous.assertions ?? []).every(
+          (assertion) =>
+            assertion.digest &&
+            check.assertions?.some(
+              (current) =>
+                current.path === assertion.path &&
+                !!current.digest &&
+                (current.digest === assertion.digest || created.has(path.resolve(assertion.path))),
+            ),
+        )))
+  )
 }
 
 /** Old single-check records and newer suite records share the same check contract. */

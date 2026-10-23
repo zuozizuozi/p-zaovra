@@ -112,10 +112,17 @@ class Zaovra(BaseAgent):
             )
             result = await environment.exec(command, env=self.extra_env, timeout_sec=self.timeout_sec + (10 if self.attach_backend else 0))
         except BaseException as error:
-            if self.attach_backend:
-                await self.close_backend(environment)
-            context.metadata = {"complete": False, "error_type": type(error).__name__, "usage_unknown": True}
+            context.metadata = {"complete": False, "error_type": type(error).__name__, "error": str(error), "usage_unknown": True,
+                                "cleanup_status": "pending" if self.attach_backend else "not-required"}
             (self.logs_dir / "context.json").write_text(context.model_dump_json(indent=2), encoding="utf-8")
+            if self.attach_backend:
+                try:
+                    await self.close_backend(environment)
+                    context.metadata["cleanup_status"] = "closed"
+                except BaseException as cleanup_error:
+                    context.metadata["cleanup_status"] = "failed"
+                    context.metadata["cleanup_error"] = str(cleanup_error)
+                (self.logs_dir / "context.json").write_text(context.model_dump_json(indent=2), encoding="utf-8")
             raise
         (self.logs_dir / "stdout.jsonl").write_text(result.stdout or "", encoding="utf-8")
         (self.logs_dir / "stderr.txt").write_text(result.stderr or "", encoding="utf-8")

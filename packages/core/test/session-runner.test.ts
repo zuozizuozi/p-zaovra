@@ -8112,6 +8112,33 @@ for (const setting of [undefined, {}, { facts: true }]) {
   )
 }
 
+for (const duration of [null, 3_600_000])
+  it.effect(`13 advisory deadline survives an expired reminder with budget ${duration}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      sessionDuration = duration
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "advisory-delivery", ["Done"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Check advisory deadline" }), resume: false })
+      const created = DateTime.toEpochMillis((yield* session.get(sessionID)).time.created)
+      yield* setTime(created)
+      qualityProgress = { facts: true, deadline: created + 30_000 }
+      yield* session.resume(sessionID)
+      const first = JSON.stringify(requests.at(-1)!.messages)
+      expect(first).toContain('\\"advisoryRemainingMs\\":30000')
+      expect(first).toContain("not a stop condition")
+      if (duration) expect(first).toContain('\\"remainingMs\\":3600000')
+      if (!duration) expect(first).not.toContain('\\"remainingMs\\"')
+      yield* setTime(created + 60_000)
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(JSON.stringify(requests.at(-1)!.messages)).toContain('\\"advisoryRemainingMs\\":0')
+      expect((yield* session.outcome(sessionID)).state).toBe("completed")
+    }),
+  )
+
 it.live("Q2 direct model finish lists unfinished owned jobs and cannot verify them", () =>
   Effect.gen(function* () {
     yield* setup

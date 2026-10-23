@@ -753,6 +753,7 @@ const layer = Layer.effect(
             tokens: progressUsage.total,
             unreported: progressUsage.unreported,
             budget: progressBudget?.limit,
+            advisoryDeadline: quality?.deadline,
             deadline:
               progressBudget?.duration === undefined
                 ? undefined

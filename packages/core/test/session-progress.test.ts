@@ -3,6 +3,30 @@ import { ConfigExperimental } from "../src/config/experimental"
 import { SessionProgress } from "../src/session/progress"
 import { evidenceScope } from "./fixture/evidence-scope"
 
+test("13 advisory deadline remains separate from finite and unlimited wall-clock budgets", () => {
+  const input = {
+    now: 1_000_000,
+    state: { activeMs: 0, request: "x", requestStarted: 1_000_000 },
+    turns: 0,
+    step: 1,
+    tokens: 0,
+    unreported: 0,
+  }
+  for (const deadline of [undefined, 2_000_000]) {
+    const facts = SessionProgress.facts({ ...input, deadline, advisoryDeadline: 1_030_000 })
+    expect(facts).toContain('"advisoryRemainingMs":30000')
+    expect(facts).toContain('"advisoryOnly":true')
+    expect(facts).toContain("not a stop condition")
+    expect(facts).toContain("Preserve the current runnable artifact")
+    if (deadline) expect(facts).toContain('"remainingMs":1000000')
+    if (!deadline) expect(facts).not.toContain('"remainingMs"')
+    expect(SessionProgress.facts({ ...input, deadline })).not.toContain("advisory")
+  }
+  const expired = SessionProgress.facts({ ...input, advisoryDeadline: 900_000 })
+  expect(expired).toContain('"advisoryRemainingMs":0')
+  expect(expired).toContain("not a stop condition")
+})
+
 test("339 facts retain remaining time without repeating the durable delivery checkpoint", () => {
   const input = {
     now: 149,
