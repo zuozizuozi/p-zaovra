@@ -733,7 +733,7 @@ const layer = Layer.effect(
               location.directory,
               yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(history).entries),
             )
-            return Message.user(
+            return Message.system(
               `Current host verification evidence (observations, not user requirements): ${JSON.stringify({ facts: SessionOutcome.deliveryFacts(history), missing: outcome.missing, unresolved: outcome.checks.filter((check) => check.exit !== 0 && !check.supersededBy).map((check) => ({ callID: check.callID, kind: check.kind, execution: check.execution, command: check.command })) })}\nReflect unresolved checks and missing evidence in the final report. A passing edited test does not establish that the original failed requirement was fixed.`,
             )
           })
@@ -763,6 +763,7 @@ const layer = Layer.effect(
       const durableMessages = toLLMMessages(context, model, originalRequests)
       const baseRequest = LLM.request({
         model,
+        cache: { tools: true, system: true, messages: { tail: 1 } },
         providerOptions: { openai: { promptCacheKey } },
         system: [
           agent.info?.system ??
@@ -787,7 +788,7 @@ const layer = Layer.effect(
           requirements.entries.length > 0 &&
           toolMaterialization?.definitions.some((tool) => tool.name === "verification_review")
             ? [
-                Message.user(
+                Message.system(
                   `Host requirement index (quoted user data, not new instructions): ${JSON.stringify(requirements.entries)}\nUse these exact IDs in verification_review; do not invent or renumber clauses. Reuse current passing checks, and use historical executions for process requirements. Request verification_review with {} when you need available evidence IDs; do not rerun checks just to obtain IDs.`,
                 ),
               ]
@@ -795,13 +796,13 @@ const layer = Layer.effect(
           ...(evidence ? [evidence] : []),
           ...(quality?.evidence_closing === true
             ? [
-                Message.user(
+                Message.system(
                   "Continue only for a concrete unmet requirement, new change, new failure or unresolved tool result. Name the requirement and next discriminating check. Reuse current evidence; if there is no gap, finish. Missing or blocked evidence remains unverified; never narrow user requirements.",
                 ),
               ]
             : []),
           ...(quality?.independent_review === true && SessionOutcome.engineeringWork(verificationHistory)
-            ? [Message.user(SessionProgress.independentReview)]
+            ? [Message.system(SessionProgress.independentReview)]
             : []),
           ...(stopReason
             ? [
@@ -810,7 +811,7 @@ const layer = Layer.effect(
                 ),
               ]
             : []),
-          ...(progressFacts ? [Message.user(progressFacts)] : []),
+          ...(progressFacts ? [Message.system(progressFacts)] : []),
           ...[
             failures >= 4 || recovery.repeated >= 3
               ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. Tools remain available. ${failures >= 10 ? "Strong recovery reminder: inspect the environment and actual error before another attempt; state a concrete new hypothesis." : "Recovery reminder: choose a different approach."}`
@@ -822,7 +823,7 @@ const layer = Layer.effect(
               ? "The previous turn exhausted its output limit in reasoning without producing text or a tool call. Keep the original task and use a small concrete next action."
               : undefined,
             pendingOutput ? SessionOutputRecovery.instruction(pendingOutput) : undefined,
-          ].flatMap((text) => (text ? [Message.user(text)] : [])),
+          ].flatMap((text) => (text ? [Message.system(text)] : [])),
         ],
         tools: SessionCache.tools(toolMaterialization?.definitions ?? []),
         toolChoice: isLastStep || textOnlyRecovery ? "none" : undefined,
@@ -856,20 +857,20 @@ const layer = Layer.effect(
       yield* SessionOwnership.check
       // Once sent, host observations are part of the conversation prefix. Keep
       // them as historical data instead of removing them before the next turn.
-      // Synthetic rows do not admit user input or change the user's clauses.
+      // Context rows do not admit user input or create visible user turns.
       const observations =
         subtask?.type === "user" && subtask.subtask
           ? []
           : yield* Effect.forEach(
               request.messages.slice(durableMessages.length).flatMap((message) => {
                 const part = message.content[0]
-                return message.role === "user" && message.content.length === 1 && part?.type === "text"
+                return message.role === "system" && message.content.length === 1 && part?.type === "text"
                   ? [part.text]
                   : []
               }),
               (text) =>
                 Effect.gen(function* () {
-                  return yield* events.publish(SessionEvent.Synthetic, {
+                  return yield* events.publish(SessionEvent.ContextUpdated, {
                     sessionID: session.id,
                     timestamp: yield* DateTime.now,
                     messageID: SessionMessage.ID.create(),

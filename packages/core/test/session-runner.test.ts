@@ -25,6 +25,7 @@ import { sseEvents } from "../../llm/test/lib/sse"
 import { deltaChunk, usageChunk } from "../../llm/test/lib/openai-chunks"
 import * as OpenAIChat from "@zaovra-ai/llm/protocols/openai-chat"
 import { OpenAIResponses } from "@zaovra-ai/llm/protocols/openai-responses"
+import { AnthropicMessages } from "@zaovra-ai/llm/protocols/anthropic-messages"
 import { Database } from "@zaovra-ai/core/database/database"
 import { makeLocationNode } from "@zaovra-ai/core/effect/app-node"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -6779,7 +6780,18 @@ describe("SessionRunnerLLM", () => {
       expect(JSON.stringify(requests[1].system)).toBe(JSON.stringify(requests[0].system))
       expect(JSON.stringify(requests[1].tools)).toBe(JSON.stringify(requests[0].tools))
       expect(JSON.stringify(requests[1].messages[0])).toBe(JSON.stringify(requests[0].messages[0]))
-      expect(userTexts(requests[1]).some((text) => text.includes("Output recovery"))).toBe(true)
+      expect(
+        requests[1].messages.some(
+          (message) => message.role === "system" && JSON.stringify(message.content).includes("Output recovery"),
+        ),
+      ).toBe(true)
+      const target = OpenAIChat.route.with({ auth: Auth.bearer("offline") }).model({ id: "fixture" })
+      const prepared = yield* LLMClient.prepare<OpenAIChat.OpenAIChatBody>(
+        LLM.updateRequest(requests[1], { model: target }),
+      )
+      expect(prepared.body.messages.find((message) => JSON.stringify(message).includes("Output recovery"))?.role).toBe(
+        "user",
+      )
       expect(executions).toEqual(["small action"])
       expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({
         total: 16529,
@@ -8375,10 +8387,19 @@ for (const verify of [false, true])
         LLM.updateRequest(requests[1]!, { model: chat }),
       )
       expect(secondChat.body.messages.slice(0, firstChat.body.messages.length)).toEqual([...firstChat.body.messages])
+      expect(JSON.stringify(secondChat.body)).not.toContain('"cache_control"')
+      const anthropic = AnthropicMessages.route
+        .with({ auth: Auth.header("x-api-key", "offline") })
+        .model({ id: "claude-fixture" })
+      const cached = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+        LLM.updateRequest(requests[1]!, { model: anthropic }),
+      )
+      expect(JSON.stringify(cached.body.messages.at(-1))).toContain('"cache_control":{"type":"ephemeral"}')
+      expect(JSON.stringify(cached.body).match(/"cache_control":/g)?.length ?? 0).toBeLessThanOrEqual(4)
       const context = yield* session.context(sessionID)
       expect(context.filter((message) => message.type === "user").map((message) => message.text)).toEqual(["Echo once"])
       expect(
-        context.filter((message) => message.type === "synthetic" && message.text.startsWith("Current task facts")),
+        context.filter((message) => message.type === "system" && message.text.startsWith("Current task facts")),
       ).toHaveLength(2)
     }),
   )
@@ -8400,7 +8421,13 @@ it.live("352 an observation checkpoint does not claim concurrently admitted inpu
             Schema.decodeUnknownSync(Schema.Struct({ inputSequence: Schema.optional(Schema.Number) }))(event.data)
               .inputSequence ?? 0,
           )
-        if (event.type !== SessionEvent.Synthetic.type || injected) return
+        if (event.type !== SessionEvent.ContextUpdated.type || injected) return
+        if (
+          !Schema.decodeUnknownSync(Schema.Struct({ text: Schema.String }))(event.data).text.startsWith(
+            "Current task facts",
+          )
+        )
+          return
         injected = true
         observationSequence = event.durable?.seq ?? 0
         yield* session

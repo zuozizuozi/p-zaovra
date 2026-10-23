@@ -15,6 +15,24 @@ const session: SessionV2Info = {
 }
 
 describe("V2 session timeline adapter", () => {
+  test("352 replayed host context stays outside visible user turns", () => {
+    const result = adaptSessionMessages(session, [
+      { id: "user", type: "user", text: "original task", time: { created: 0 } },
+      { id: "facts", type: "system", text: "Current task facts: observed state", time: { created: 1 } },
+      { id: "evidence", type: "system", text: "Host verification evidence", time: { created: 2 } },
+      {
+        id: "assistant",
+        type: "assistant",
+        agent: "build",
+        model: session.model!,
+        time: { created: 3, completed: 4 },
+        content: [{ id: "answer", type: "text", text: "Done" }],
+      },
+    ])
+    expect(result.map((item) => item.message.id)).toEqual(["user", "assistant"])
+    expect(result[1]?.message).toMatchObject({ role: "assistant", parentID: "user" })
+  })
+
   test("retains recovery intervals and identifies superseded partial outputs after reload", () => {
     const result = adaptSessionMessages(session, [
       { id: "user", type: "user", text: "task", time: { created: 0 } },
