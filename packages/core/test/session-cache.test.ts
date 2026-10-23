@@ -172,11 +172,28 @@ test("352 a prior request-local tail cannot be misclassified as rewritten durabl
     { durableMessages: 1 },
   )
   const current = SessionCache.snapshot(
-    LLM.updateRequest(request, { messages: [Message.user("original task"), Message.assistant("new answer")] }),
+    LLM.updateRequest(request, {
+      messages: [Message.user("original task"), Message.assistant("new answer"), Message.user("new temporary facts")],
+    }),
     1,
     { durableMessages: 2 },
   )
-  expect(SessionCache.compare(previous, current)).toMatchObject({ reason: "tail", firstChanged: "message:1" })
+  expect(SessionCache.compare(previous, current)).toMatchObject({
+    reason: "tail",
+    firstChanged: "message:1",
+    commonSegments: previous.segments.findIndex((segment) => segment.name === "message:1"),
+  })
+  expect(SessionCache.compare(previous, { ...current, durableMessages: undefined }).reason).toBe("history-or-tail")
+  expect(SessionCache.compare({ ...previous, durableMessages: undefined }, current).reason).toBe("history-or-tail")
+  expect(
+    SessionCache.compare(previous, {
+      ...current,
+      segments: previous.segments.map((segment) =>
+        segment.name === "message:1" ? { ...segment, hash: "different temporary tail" } : segment,
+      ),
+      durableMessages: 1,
+    }),
+  ).toMatchObject({ reason: "tail", firstChanged: "message:1" })
 })
 
 test("K3 physical attempts stay under one logical request without duplicating usage", () => {
