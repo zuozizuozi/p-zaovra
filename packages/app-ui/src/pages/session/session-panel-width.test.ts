@@ -17,6 +17,13 @@ describe("sessionPanelWidthMax", () => {
     expect(REVIEW_PANE_WIDTH_MIN_SPLIT).toBeGreaterThan(REVIEW_PANE_WIDTH_MIN)
   })
 
+  test("leaves resize travel for split review at a typical desktop width", () => {
+    const available = 1200
+    const max = sessionPanelWidthMax({ available, split: true })
+    expect(max).toBeGreaterThan(SESSION_PANEL_WIDTH_MIN + 100)
+    expect(available - max).toBeGreaterThanOrEqual(REVIEW_PANE_WIDTH_MIN)
+  })
+
   test("lets the chat panel take everything beyond the review pane minimum", () => {
     // Regression: the old cap was 45% of the window, forcing the review pane
     // to at least 55% of the window regardless of content.
@@ -31,6 +38,10 @@ describe("sessionPanelWidthMax", () => {
 })
 
 describe("clampSessionPanelWidth", () => {
+  test("allows dragging away from the minimum beside split review", () => {
+    expect(clampSessionPanelWidth({ width: 570, available: 1200, split: true })).toBe(570)
+  })
+
   test("keeps widths already within the limit", () => {
     expect(clampSessionPanelWidth({ width: 800, available: 1700, split: false })).toBe(800)
   })

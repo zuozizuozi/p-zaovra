@@ -89,6 +89,7 @@ import {
 } from "@/pages/session/session-model-helpers"
 import {
   clampSessionPanelWidth,
+  REVIEW_PANE_WIDTH_MIN,
   SESSION_PANEL_WIDTH_MIN,
   sessionPanelWidthMax,
 } from "@/pages/session/session-panel-width"
@@ -486,7 +487,23 @@ export default function Page() {
     ),
   )
 
-  const isDesktop = createMediaQuery("(min-width: 768px)")
+  const desktopViewport = createMediaQuery("(min-width: 768px)")
+  let panelRow: HTMLDivElement | undefined
+  const [panelRowWidth, setPanelRowWidth] = createSignal<number>()
+  createResizeObserver(
+    () => panelRow,
+    ({ width }) => setPanelRowWidth(width),
+  )
+  const isDesktop = createMemo(() => {
+    if (!desktopViewport()) return false
+    const width = panelRowWidth()
+    // Use the existing full-width tabs when side-by-side panes would crush
+    // review content, including when the navigation sidebar takes that space.
+    return (
+      width === undefined ||
+      width >= SESSION_PANEL_WIDTH_MIN + REVIEW_PANE_WIDTH_MIN + (settings.general.newLayoutDesigns() ? 8 : 0)
+    )
+  })
   const size = createSizing()
   const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const desktopV2ReviewOpen = createMemo(() => newSessionDesign() && desktopReviewOpen() && !!params.id)
@@ -507,12 +524,6 @@ export default function Page() {
     newSessionDesign() ? desktopV2ReviewOpen() || desktopTerminalOpen() : desktopReviewOpen(),
   )
   const desktopSidePanelOpen = createMemo(() => desktopSessionResizeOpen() || desktopFileTreeOpen())
-  let panelRow: HTMLDivElement | undefined
-  const [panelRowWidth, setPanelRowWidth] = createSignal<number>()
-  createResizeObserver(
-    () => panelRow,
-    ({ width }) => setPanelRowWidth(width),
-  )
   const splitReview = createMemo(
     () => (newSessionDesign() ? desktopV2ReviewOpen() : desktopReviewOpen()) && layout.review.diffStyle() === "split",
   )
