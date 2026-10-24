@@ -57,6 +57,7 @@ import { PluginV2 } from "../../plugin"
 import { PluginInternal } from "../../plugin/internal"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
+import { TextRecovery } from "./text-recovery"
 import { maxStepsPrompt } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { FSUtil } from "../../fs-util"
@@ -640,7 +641,7 @@ const layer = Layer.effect(
       const recovery = SessionOutcome.shellRecovery(durableHistory)
       const failures = recovery.failures
       const inputRejections = SessionOutcome.consecutiveInputRejections(durableHistory)
-      const previous = context.at(-1)
+      const previous = context.findLast((message) => message.type !== "system" || message.text !== TextRecovery.ended)
       const outputState = yield* SessionOutputRecovery.read(db, session.id)
       const configuration = yield* config.entries()
       const verificationEnabled = Config.latest(configuration, "experimental")?.verification === true
@@ -812,12 +813,14 @@ const layer = Layer.effect(
               ]
             : []),
           ...(progressFacts ? [Message.system(progressFacts)] : []),
+          // Close legacy or interrupted recovery scopes by appending, never editing history.
+          ...(!textOnlyRecovery && TextRecovery.pending(context) ? [Message.system(TextRecovery.ended)] : []),
           ...[
             failures >= 4 || recovery.repeated >= 3
               ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. Tools remain available. ${failures >= 10 ? "Strong recovery reminder: inspect the environment and actual error before another attempt; state a concrete new hypothesis." : "Recovery reminder: choose a different approach."}`
               : undefined,
             textOnlyRecovery
-              ? "The previous text response reached its output limit. Continue only the missing text once, using the retained partial answer. Do not repeat earlier text or execute tools. Report anything still unfinished."
+              ? TextRecovery.instruction(previous.id, context.findLast((message) => message.type === "user")?.id)
               : undefined,
             reasoningOnlyRecovery
               ? "The previous turn exhausted its output limit in reasoning without producing text or a tool call. Keep the original task and use a small concrete next action."
@@ -879,6 +882,17 @@ const layer = Layer.effect(
                 }),
             )
       const inputSequence = observations.at(-1)?.durable?.seq ?? entries.at(-1)?.seq ?? system.baselineSeq
+      if (textOnlyRecovery)
+        yield* Effect.addFinalizer(() =>
+          Effect.gen(function* () {
+            yield* events.publish(SessionEvent.ContextUpdated, {
+              sessionID: session.id,
+              timestamp: yield* DateTime.now,
+              messageID: SessionMessage.ID.create(),
+              text: TextRecovery.ended,
+            })
+          }),
+        )
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         catalogModel: model.catalogModel,

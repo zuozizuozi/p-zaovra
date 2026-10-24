@@ -47,6 +47,7 @@ import { SessionInput } from "@zaovra-ai/core/session/input"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
 import { SessionOutputRecovery } from "@zaovra-ai/core/session/output-recovery"
+import { TextRecovery } from "@zaovra-ai/core/session/runner/text-recovery"
 import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
@@ -1618,6 +1619,15 @@ const reasoningLimitResponse = (): LLMEvent[] => [
   LLMEvent.finish({ reason: "length" }),
 ]
 
+const textLimitResponse = (): LLMEvent[] => [
+  LLMEvent.stepStart({ index: 0 }),
+  LLMEvent.textStart({ id: "scope-partial" }),
+  LLMEvent.textDelta({ id: "scope-partial", text: "Retained partial answer" }),
+  LLMEvent.textEnd({ id: "scope-partial" }),
+  LLMEvent.stepFinish({ index: 0, reason: "length" }),
+  LLMEvent.finish({ reason: "length" }),
+]
+
 const replaySessionProjection = (id: SessionV2.ID) =>
   Effect.gen(function* () {
     const { db } = yield* Database.Service
@@ -1933,7 +1943,9 @@ describe("SessionRunnerLLM", () => {
       expect(requests[1].tools).toEqual([])
       expect(requests[1].toolChoice).toMatchObject({ type: "none" })
       expect(JSON.stringify(requests[1].messages)).toContain("First part")
-      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+      expect((yield* session.context(sessionID)).findLast((message) => message.type === "assistant")).toMatchObject({
+        finish: "stop",
+      })
     }),
   )
   for (const status of [401, 402, 403]) {
@@ -8351,6 +8363,272 @@ it.effect("authority lost after provider output prevents tool execution and the 
     expect(executions).toHaveLength(0)
   }),
 )
+
+describe("356 text recovery scope", () => {
+  for (const boundary of ["same-task", "new-task", "model-switch", "replay"] as const)
+    it.effect(`356 restores tools after recovery across ${boundary}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        executions.length = 0
+        const session = yield* SessionV2.Service
+        const events = yield* EventV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Explain then inspect" }), resume: false })
+        responses = [textLimitResponse(), fragmentFixture("text", "scope-rest", ["Rest of answer"]).completeEvents]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(2)
+        const recovery = requests[1]
+        expect(recovery.tools).toEqual([])
+        expect(recovery.toolChoice?.type).toBe("none")
+        expect(systemTexts(recovery).join("\n")).toContain("ONLY to the single provider turn immediately following")
+        expect(systemTexts(recovery).join("\n")).toContain("Do not repeat earlier text or execute tools")
+        const history = yield* session.context(sessionID)
+        const partial = history.find((message) => message.type === "assistant" && message.finish === "length")!
+        expect(systemTexts(recovery).join("\n")).toContain(`source assistant ${partial.id}`)
+        expect(history.at(-1)).toMatchObject({ type: "system", text: TextRecovery.ended })
+        expect(TextRecovery.pending(history)).toBe(false)
+        if (boundary === "new-task")
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Now inspect a file" }), resume: false })
+        if (boundary === "model-switch")
+          yield* events.publish(SessionEvent.ModelSwitched, {
+            sessionID,
+            messageID: SessionMessage.ID.create(),
+            timestamp: yield* DateTime.now,
+            model: { id: ModelV2.ID.make("replacement"), providerID: ProviderV2.ID.make("fake") },
+          })
+        if (boundary === "replay") yield* replaySessionProjection(sessionID)
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "scope-echo", name: "echo", input: { text: boundary } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "scope-done", ["Inspected"]).completeEvents,
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(4)
+        expect(executions).toEqual([boundary])
+        expect(requests[2].tools.some((tool) => tool.name === "echo")).toBe(true)
+        expect(requests[2].toolChoice?.type).not.toBe("none")
+        expect(systemTexts(requests[2])).toContain(TextRecovery.ended)
+        expect(requests[2].messages.slice(0, recovery.messages.length)).toEqual([...recovery.messages])
+        if (boundary === "model-switch") expect(requests[2].model.id).toBe(replacementModel.id)
+
+        // Compare actual lowered content. Tools intentionally change at the recovery boundary;
+        // Anthropic's per-request cache markers are not part of the conversation content.
+        const targets = [
+          OpenAIResponses.route.with({ auth: Auth.bearer("offline") }).model({ id: "fixture" }),
+          OpenAIChat.route.with({ auth: Auth.bearer("offline") }).model({ id: "fixture" }),
+          AnthropicMessages.route.with({ auth: Auth.header("x-api-key", "offline") }).model({ id: "claude-fixture" }),
+          AnthropicMessages.route.with({ auth: Auth.header("x-api-key", "offline") }).model({ id: "claude-opus-4-8" }),
+        ]
+        for (const target of targets) {
+          const bodies = yield* Effect.forEach(requests, (request) =>
+            LLMClient.prepare<{ input?: unknown[]; messages?: unknown[] }>(
+              LLM.updateRequest(request, { model: target }),
+            ),
+          )
+          const messages = bodies.map(
+            (prepared) =>
+              JSON.parse(
+                JSON.stringify(prepared.body.input ?? prepared.body.messages, (key, value) =>
+                  key === "cache_control" ? undefined : value,
+                ),
+              ) as unknown[],
+          )
+          for (const [index, next] of messages.entries()) {
+            if (index === 0) continue
+            // The model identity in Chat's top-level system changes by design.
+            // Durable messages above must still retain the exact recovery prefix.
+            if (boundary === "model-switch" && index === 2) continue
+            expect(next.slice(0, messages[index - 1].length)).toEqual(messages[index - 1])
+          }
+          expect(JSON.stringify(messages[2])).toContain(TextRecovery.ended)
+        }
+      }),
+    )
+
+  for (const result of ["success", "summary-failed", "replacement-blocked"] as const)
+    it.effect(`356 keeps recovery expired after compaction ${result} and replay`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        executions.length = 0
+        const session = yield* SessionV2.Service
+        const runner = yield* SessionRunner.Service
+        const database = yield* Database.Service
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Explain retained work and inspect files. ".repeat(700) }),
+          resume: false,
+        })
+        responses = [textLimitResponse(), fragmentFixture("text", "scope-compacted-rest", ["Rest"]).completeEvents]
+        yield* session.resume(sessionID)
+        const before = yield* session.context(sessionID)
+        const epoch = yield* database.db.select().from(SessionContextEpochTable).get().pipe(Effect.orDie)
+        currentModel = recoveryModel
+        systemUnavailable = result === "replacement-blocked"
+        response = fragmentFixture("text", "scope-summary", [
+          result === "summary-failed" ? "Invalid summary" : handoff("Inspect files; text recovery has ended"),
+        ]).completeEvents
+        responses = undefined
+        expect(yield* runner.compact(sessionID)).toBe(result !== "summary-failed")
+        if (result === "summary-failed") expect(yield* session.context(sessionID)).toEqual(before)
+        yield* replaySessionProjection(sessionID)
+        requests.length = 0
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "scope-after-compaction", name: "echo", input: { text: result } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "scope-after-compaction-done", ["Inspected"]).completeEvents,
+        ]
+        yield* session.resume(sessionID)
+        expect(executions).toEqual([result])
+        expect(requests[0].tools.some((tool) => tool.name === "echo")).toBe(true)
+        expect(requests[0].toolChoice?.type).not.toBe("none")
+        const retained = systemTexts(requests[0]).join("\n")
+        const after = yield* database.db.select().from(SessionContextEpochTable).get().pipe(Effect.orDie)
+        if (result === "success") {
+          expect(retained).not.toContain("Do not repeat earlier text or execute tools")
+          expect(after!.baseline_seq).toBeGreaterThan(epoch!.baseline_seq)
+        }
+        if (result !== "success") {
+          expect(retained).toContain("Do not repeat earlier text or execute tools")
+          expect(retained).toContain(TextRecovery.ended)
+          expect(after!.baseline_seq).toBe(epoch!.baseline_seq)
+        }
+      }),
+    )
+
+  it.effect("356 closes legacy unscoped recovery history on replay without editing it", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "New work" }), resume: false })
+      response = fragmentFixture("text", "legacy-answer", ["Earlier recovery finished"]).completeEvents
+      yield* session.resume(sessionID)
+      const legacy =
+        "The previous text response reached its output limit. Continue only the missing text once, using the retained partial answer. Do not repeat earlier text or execute tools. Report anything still unfinished."
+      yield* events.publish(SessionEvent.ContextUpdated, {
+        sessionID,
+        messageID: SessionMessage.ID.create(),
+        timestamp: yield* DateTime.now,
+        text: legacy,
+      })
+      yield* replaySessionProjection(sessionID)
+      yield* session.resume(sessionID)
+      expect(systemTexts(requests.at(-1)!)).toEqual([legacy, TextRecovery.ended])
+      expect(requests.at(-1)!.tools.some((tool) => tool.name === "echo")).toBe(true)
+      expect(TextRecovery.pending(yield* session.context(sessionID))).toBe(false)
+      yield* replaySessionProjection(sessionID)
+      yield* session.resume(sessionID)
+      expect(systemTexts(requests.at(-1)!).filter((text) => text === TextRecovery.ended)).toHaveLength(1)
+    }),
+  )
+
+  for (const ending of ["cancelled", "failed"] as const)
+    it.live(`356 expires a ${ending} recovery turn before a new task`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        executions.length = 0
+        const session = yield* SessionV2.Service
+        const started = yield* Deferred.make<void>()
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Explain" }), resume: false })
+        responseStream = Stream.fromIterable(textLimitResponse()).pipe(
+          Stream.ensuring(
+            Effect.sync(() => {
+              responseStream =
+                ending === "cancelled"
+                  ? Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)))
+                  : Stream.fail(
+                      new LLMError({
+                        module: "fixed",
+                        method: "stream",
+                        reason: new InvalidRequestReason({ message: "Invalid fixture request" }),
+                      }),
+                    )
+            }),
+          ),
+        )
+        const fiber = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+        if (ending === "cancelled") {
+          yield* Deferred.await(started).pipe(Effect.timeout("3 seconds"))
+          yield* session.interrupt(sessionID)
+        }
+        yield* Fiber.join(fiber)
+        expect(requests).toHaveLength(2)
+        expect(requests[1].tools).toEqual([])
+        expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ type: "system", text: TextRecovery.ended })
+        yield* replaySessionProjection(sessionID)
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Inspect now" }), resume: false })
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "scope-after-failure", name: "echo", input: { text: ending } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "scope-failure-done", ["Inspected"]).completeEvents,
+        ]
+        yield* session.resume(sessionID)
+        expect(executions).toEqual([ending])
+        expect(systemTexts(requests[2])).toContain(TextRecovery.ended)
+      }),
+    )
+
+  it.effect("356 expires a scope left by a process exit before provider completion", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Inspect" }), resume: false })
+      yield* session.resume(sessionID)
+      yield* events.publish(SessionEvent.ContextUpdated, {
+        sessionID,
+        messageID: SessionMessage.ID.create(),
+        timestamp: yield* DateTime.now,
+        text: TextRecovery.instruction(SessionMessage.ID.create()),
+      })
+      yield* replaySessionProjection(sessionID)
+      expect(TextRecovery.pending(yield* session.context(sessionID))).toBe(true)
+      yield* session.resume(sessionID)
+      expect(systemTexts(requests.at(-1)!)).toContain(TextRecovery.ended)
+      expect(requests.at(-1)!.toolChoice?.type).not.toBe("none")
+      expect(TextRecovery.pending(yield* session.context(sessionID))).toBe(false)
+    }),
+  )
+
+  it.effect("356 rejects a provider tool call during the text-only recovery", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      executions.length = 0
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Explain" }), resume: false })
+      responses = [
+        textLimitResponse(),
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "scope-forbidden", name: "echo", input: { text: "must not run" } }),
+          ...fragmentFixture("text", "scope-rogue-rest", ["Remaining text"]).completeEvents.slice(1),
+        ],
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(executions).toEqual([])
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("Tools are disabled")
+      expect(TextRecovery.pending(yield* session.context(sessionID))).toBe(false)
+    }),
+  )
+})
 
 for (const verify of [false, true])
   it.live(`352 host observations preserve the exact wire prefix with verification ${verify}`, () =>
