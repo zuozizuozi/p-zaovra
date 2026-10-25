@@ -228,7 +228,7 @@ const layer = Layer.effect(
           Tool.make({
             observation: (input) => input.action === "get" || input.action === "wait",
             description:
-              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Task completion durably notifies and wakes the Session once unless the user has stopped it; preview completion does not notify. Task jobs also stop with budget termination, archive or owner scope closure. Jobs are process-local and never automatically rerun after restart.",
+              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Use explicit short wait timeouts with bounded backoff, or await completion notification; do not poll unchanged output indefinitely. Running or unknown is not failure and must not trigger an automatic command retry. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Task completion durably notifies and wakes the Session once unless the user has stopped it; preview completion does not notify. Task jobs also stop with budget termination, archive or owner scope closure. Jobs are process-local and never automatically rerun after restart.",
             input: Schema.Struct({
               job_id: Schema.String,
               action: Schema.Literals(["get", "wait", "cancel"]),

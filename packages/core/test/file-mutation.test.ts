@@ -34,6 +34,60 @@ function withTmp<A, E, R>(f: (directory: string) => Effect.Effect<A, E, R>) {
 }
 
 describe("FileMutation", () => {
+  it.live("367 candidate promotion is atomic and preserves previous verified bytes", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        const mutation = yield* LocationMutation.Service
+        const files = yield* FileMutation.Service
+        const target = yield* mutation.resolve({ path: "final.json" })
+        const candidate = yield* mutation.resolve({ path: "candidate.json" })
+        const backup = yield* mutation.resolve({ path: "previous.bak" })
+        yield* Effect.promise(() => Bun.write(target.canonical, "[1]"))
+        yield* Effect.promise(() => Bun.write(candidate.canonical, "[1,2]"))
+        const result = yield* files.publish({
+          target,
+          candidate,
+          backup,
+          expected: new TextEncoder().encode("[1]"),
+          verified: new TextEncoder().encode("[1,2]"),
+          validate: Effect.void,
+        })
+        expect(result.existed).toBe(true)
+        expect(yield* Effect.promise(() => Bun.file(target.canonical).json())).toEqual([1, 2])
+        expect(yield* Effect.promise(() => Bun.file(backup.canonical).text())).toBe("[1]")
+        expect(yield* Effect.promise(() => Bun.file(candidate.canonical).exists())).toBe(false)
+      }).pipe(provide(directory)),
+    ),
+  )
+
+  for (const scenario of ["stale-candidate", "concurrent-final", "disk-failure", "cancelled"])
+    it.live(`367 ${scenario} never truncates the previous verified artifact`, () =>
+      withTmp((directory) =>
+        Effect.gen(function* () {
+          const mutation = yield* LocationMutation.Service
+          const files = yield* FileMutation.Service
+          const target = yield* mutation.resolve({ path: "final.json" })
+          const candidate = yield* mutation.resolve({ path: "candidate.json" })
+          const backup = yield* mutation.resolve({ path: "previous.bak" })
+          yield* Effect.promise(() => Bun.write(target.canonical, "[1]"))
+          yield* Effect.promise(() => Bun.write(candidate.canonical, "[1,2]"))
+          if (scenario === "disk-failure") yield* Effect.promise(() => fs.mkdir(backup.canonical))
+          const commit = files.publish({
+            target,
+            candidate,
+            backup,
+            expected: new TextEncoder().encode(scenario === "concurrent-final" ? "wrong version" : "[1]"),
+            verified: new TextEncoder().encode(scenario === "stale-candidate" ? "wrong candidate" : "[1,2]"),
+            validate: scenario === "cancelled" ? Effect.interrupt : Effect.void,
+          })
+          const result = yield* commit.pipe(Effect.exit)
+          expect(result._tag).toBe("Failure")
+          expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("[1]")
+          expect(yield* Effect.promise(() => Bun.file(candidate.canonical).text())).toBe("[1,2]")
+        }).pipe(provide(directory)),
+      ),
+    )
+
   it.live("guards text creation and permits only one replacement of the same observed content", () =>
     withTmp((directory) =>
       Effect.gen(function* () {

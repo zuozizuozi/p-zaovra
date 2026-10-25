@@ -67,6 +67,14 @@ export interface RemoveResult {
 }
 
 export interface Interface {
+  readonly publish: (input: {
+    target: Target
+    candidate: Target
+    backup: Target
+    expected: Uint8Array | null
+    verified: Uint8Array
+    validate: Effect.Effect<void, TargetChangedError | FSUtil.Error>
+  }) => Effect.Effect<WriteResult, StaleContentError | TargetChangedError | TargetExistsError | FSUtil.Error>
   /** Create without replacing an existing target. */
   readonly create: (
     input: WriteInput,
@@ -245,7 +253,58 @@ const layer = Layer.effect(
       ),
     )
 
-    return Service.of({ create, write, writeTextPreservingBom, writeIfUnchanged, remove })
+    const publish: Interface["publish"] = (input) => {
+      const commit = Effect.gen(function* () {
+        yield* input.validate
+        if (new Set([input.target.canonical, input.candidate.canonical, input.backup.canonical]).size !== 3)
+          return yield* new TargetChangedError({ path: input.target.canonical })
+        const candidate = yield* fs.readFile(input.candidate.canonical)
+        const current = yield* fs
+          .readFile(input.target.canonical)
+          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+        if (
+          !sameBytes(candidate, input.verified) ||
+          (current === null ? input.expected !== null : input.expected === null || !sameBytes(current, input.expected))
+        )
+          return yield* new StaleContentError({ path: input.target.canonical })
+        if (current !== null) {
+          // Immutable content-addressed backup is written before the single rename.
+          // A failed backup or interrupted preflight leaves the final path intact.
+          yield* fs
+            .writeFile(input.backup.canonical, current, { flag: "wx" })
+            .pipe(
+              Effect.catchReason("PlatformError", "AlreadyExists", () =>
+                fs
+                  .readFile(input.backup.canonical)
+                  .pipe(
+                    Effect.flatMap((bytes) =>
+                      sameBytes(bytes, current)
+                        ? Effect.void
+                        : Effect.fail(new TargetExistsError({ path: input.backup.canonical })),
+                    ),
+                  ),
+              ),
+            )
+        }
+        yield* input.validate
+        const unchanged = yield* fs.readFile(input.candidate.canonical)
+        const latest = yield* fs
+          .readFile(input.target.canonical)
+          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+        if (
+          !sameBytes(unchanged, candidate) ||
+          (current === null ? latest !== null : latest === null || !sameBytes(latest, current))
+        )
+          return yield* new StaleContentError({ path: input.target.canonical })
+        yield* fs.rename(input.candidate.canonical, input.target.canonical)
+        return writeResult(input.target, current !== null)
+      })
+      return [input.target, input.candidate, input.backup]
+        .sort((a, b) => a.canonical.localeCompare(b.canonical))
+        .reduceRight((effect, target) => withTargetLock(target)(effect), commit)
+    }
+
+    return Service.of({ create, write, writeTextPreservingBom, writeIfUnchanged, remove, publish })
   }),
 )
 

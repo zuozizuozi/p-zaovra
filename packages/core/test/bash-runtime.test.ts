@@ -1031,12 +1031,18 @@ it.live("Q4 default bash schema exposes optional observation fields without enab
   ),
 )
 
-it.live("S1 foreground timeout retains process and completion", () =>
+it.live("367 S1 foreground timeout retains the same process identity without retry", () =>
   withRuntime((directory, sessions, registry) =>
     Effect.gen(function* () {
       const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
       const script = path.join(directory, "survive.cjs")
-      yield* Effect.promise(() => Bun.write(script, "setTimeout(() => console.log('survived'), 1500)"))
+      const marker = path.join(directory, "launches.txt")
+      yield* Effect.promise(() =>
+        Bun.write(
+          script,
+          `require('fs').appendFileSync(${JSON.stringify(marker)}, process.pid + '\\n'); setTimeout(() => console.log('survived ' + process.pid), 1500)`,
+        ),
+      )
       const first = yield* settleTool(registry, {
         sessionID: session.id,
         ...toolIdentity,
@@ -1052,6 +1058,14 @@ it.live("S1 foreground timeout retains process and completion", () =>
       })
       const job = (first.output?.structured as { job_id?: string })?.job_id
       expect(job).toBeDefined()
+      yield* Effect.promise(async () => {
+        const deadline = Date.now() + 5000
+        while (!(await Bun.file(marker).exists())) {
+          if (Date.now() >= deadline) throw new Error("Background child did not start")
+          await Bun.sleep(20)
+        }
+      })
+      const originalPID = yield* Effect.promise(() => Bun.file(marker).text())
       const done = yield* settleTool(registry, {
         sessionID: session.id,
         ...toolIdentity,
@@ -1064,6 +1078,9 @@ it.live("S1 foreground timeout retains process and completion", () =>
       })
       expect(done.output?.structured).toMatchObject({ status: "completed" })
       expect(JSON.stringify(done.output?.content)).toContain("survived")
+      expect(JSON.stringify(done.output?.content)).toContain(originalPID.trim())
+      expect(yield* Effect.promise(() => Bun.file(marker).text())).toBe(originalPID)
+      expect(originalPID.trim().split("\n")).toHaveLength(1)
       expect(JSON.stringify(done.output?.content)).not.toContain("clamped")
       const database = yield* Database.Service
       const notification = yield* SessionInput.find(database.db, SessionMessage.ID.make(`${job}_completed`))

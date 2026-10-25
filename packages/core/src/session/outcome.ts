@@ -21,6 +21,7 @@ export const RECOVERY_PROMPT =
 // scheduling (steer/queue) and model-generated summaries are not task identity.
 function continuationText(text: string) {
   if (text === RECOVERY_PROMPT) return ""
+  if (/^(?:取消要求|撤销要求|将要求|修改要求)\s*[“「]/u.test(text.trim())) return text.trim()
   if (
     /^(?:请\s*)?(?:继续|继续执行|继续完成|继续修复|接着做)[。.!！\s]*$/u.test(text.trim()) ||
     /^(?:please\s+)?(?:continue|resume|keep going)[.!\s]*$/iu.test(text.trim())
@@ -188,7 +189,7 @@ export function engineeringWork(messages: readonly SessionMessage.Message[]) {
         (part) =>
           part.type === "tool" &&
           !part.provider?.executed &&
-          ["write", "edit", "apply_patch", "bash"].includes(part.name),
+          ["write", "edit", "apply_patch", "bash", "publish_artifact"].includes(part.name),
       ),
   )
 }
@@ -275,8 +276,16 @@ export const requirements = (fs: FSUtil.Interface, directory: string) =>
 export function requested(messages: readonly SessionMessage.Message[]) {
   const scope = acceptanceHistory(messages)
   const user = scope.find((message) => message.type === "user")
-  const entries: { id: number; text: string; sourceMessageID: SessionMessage.ID; withdrawnBy?: SessionMessage.ID }[] =
-    []
+  const entries: {
+    id: number
+    text: string
+    sourceMessageID: SessionMessage.ID
+    sourceStart: number
+    sourceEnd: number
+    version: string
+    data?: boolean
+    withdrawnBy?: SessionMessage.ID
+  }[] = []
   const seen = new Set<string>()
   for (const message of scope) {
     if (message.type !== "user" || seen.has(message.text)) continue
@@ -284,17 +293,34 @@ export function requested(messages: readonly SessionMessage.Message[]) {
     const text = message.id === user?.id ? message.text : (continuationText(message.text) ?? message.text)
     // An exact, whole-message withdrawal can retire a clause without trusting
     // the model to waive it. Ambiguous corrections remain visible for review.
-    const withdrawal = text.trim().match(/^(?:取消要求|撤销要求)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)?.[1]
+    const replacement = text
+      .trim()
+      .match(/^(?:将要求|修改要求)\s*[“「]([^”」]+)[”」]\s*(?:改为|替换为)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)
+    const withdrawal =
+      replacement?.[1] ?? text.trim().match(/^(?:取消要求|撤销要求)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)?.[1]
     const matches = withdrawal ? entries.filter((entry) => entry.text === withdrawal && !entry.withdrawnBy) : []
     if (matches.length === 1) {
       matches[0].withdrawnBy = message.id
-      continue
+      if (!replacement) continue
     }
-    for (const clause of text
-      .split(/(?<=[。；;\n])/u)
-      .map((text) => text.trim())
-      .filter(Boolean))
-      entries.push({ id: entries.length + 1, text: clause, sourceMessageID: message.id })
+    const body = replacement && matches.length === 1 ? replacement[2] : text
+    let offset = message.text.indexOf(body)
+    for (const part of body.split(/(?<=[。；;\n])/u)) {
+      const clause = part.trim()
+      if (clause)
+        entries.push({
+          id: entries.length + 1,
+          text: clause,
+          sourceMessageID: message.id,
+          sourceStart: offset + part.indexOf(clause),
+          sourceEnd: offset + part.indexOf(clause) + clause.length,
+          version: createHash("sha256").update(message.text).digest("hex"),
+          ...((message.text.slice(0, offset).match(/^\s*```/gm)?.length ?? 0) % 2 === 1 || /^\s*(?:```|>)/u.test(part)
+            ? { data: true }
+            : {}),
+        })
+      offset += part.length
+    }
   }
   return {
     userMessageID: scope.findLast((message) => message.type === "user")?.id,
@@ -935,11 +961,39 @@ export function derive(
             (part) => part.type === "tool" && (part.state.status === "pending" || part.state.status === "running"),
           ))),
   )
+  const lightweightMissing = engineeringWork(turn)
+    ? request.entries
+        .filter((entry) => !entry.withdrawnBy && !entry.data)
+        .flatMap((entry) => {
+          const expected = DeliveryAudit.expected([entry])
+          if (expected.length)
+            return expected.flatMap((item) => {
+              const artifact = artifacts.find((artifact) => artifact.requirement === item.requirement)
+              return artifact?.digest && !artifact.problem
+                ? []
+                : [`requirement ${entry.id}: ${artifact?.problem ?? "unverified: artifact not inspected"}`]
+            })
+          return [...checks.values()].some(
+            (check) =>
+              check.exit === 0 &&
+              !check.execution &&
+              !check.supersededBy &&
+              fresh(check) &&
+              check.requirements?.includes(entry.text),
+          )
+            ? []
+            : [`requirement ${entry.id} unverified: ${entry.text}`]
+        })
+    : []
   const base = {
     termination: last?.termination,
     verification: [...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution)
       ? ("failed" as const)
-      : !active && observationsComplete && checks.size > 0 && missing.length === 0
+      : !active &&
+          observationsComplete &&
+          checks.size > 0 &&
+          missing.length === 0 &&
+          (verificationEnabled || !lightweightMissing.length)
         ? ("verified" as const)
         : ("unverified" as const),
     outcomeUnknown: !active && unknown,
@@ -947,13 +1001,16 @@ export function derive(
     // Running previews and concurrent history changes have no coherent file
     // observation. Absence of that observation is not evidence of a stale file.
     missing: !verificationEnabled
-      ? [...checks.values()]
-          .filter((check) => !check.supersededBy)
-          .flatMap((check) => {
-            if (check.exit !== 0) return [`${check.execution ?? "failed"}: ${check.kind} (${check.callID})`]
-            if (!active && observationsComplete && !fresh(check)) return [`stale: ${check.kind} (${check.callID})`]
-            return []
-          })
+      ? [
+          ...lightweightMissing,
+          ...[...checks.values()]
+            .filter((check) => !check.supersededBy)
+            .flatMap((check) => {
+              if (check.exit !== 0) return [`${check.execution ?? "failed"}: ${check.kind} (${check.callID})`]
+              if (!active && observationsComplete && !fresh(check)) return [`stale: ${check.kind} (${check.callID})`]
+              return []
+            }),
+        ]
       : active || !observationsComplete
         ? ["verification pending: current workspace has not been inspected"]
         : missing,

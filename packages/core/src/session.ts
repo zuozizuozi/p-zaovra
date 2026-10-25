@@ -400,6 +400,9 @@ const layer = Layer.effect(
       }),
       recover: Effect.fn("V2Session.recover")(function* (input) {
         if (!execution.exclusive) return yield* new OperationUnavailableError({ operation: "recover" })
+        // Recovery is explicit intent. Capture it before admission so it can
+        // release the previous Stop, while a later Stop still invalidates it.
+        const wake = yield* execution.prepareWake?.(input.sessionID) ?? Effect.succeed(execution.wake(input.sessionID))
         let completed: Exit.Exit<Info, Error> | undefined
         yield* execution
           .exclusive(
@@ -460,7 +463,7 @@ const layer = Layer.effect(
           .pipe(Effect.orDie)
         if (!completed) return yield* Effect.die("Recovery did not settle")
         const outcome = yield* completed
-        if (input.action !== "abandon") yield* execution.wake(input.sessionID)
+        if (input.action !== "abandon") yield* wake
         return outcome
       }),
       outcome: Effect.fn("V2Session.outcome")(function* (sessionID) {

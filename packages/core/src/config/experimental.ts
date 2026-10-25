@@ -14,6 +14,10 @@ export class Policy extends Schema.Class<Policy>("ConfigV2.Experimental.Policy")
 }) {}
 
 export class Experimental extends Schema.Class<Experimental>("ConfigV2.Experimental")({
+  delivery_contract: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Lightweight delivery guidance and one bounded closing audit default on. Set false to disable automatic closing; this does not enable strict verification or authorize external actions.",
+  }),
   quality_progress: Schema.optional(
     Schema.Struct({
       facts: Schema.optional(Schema.Boolean),

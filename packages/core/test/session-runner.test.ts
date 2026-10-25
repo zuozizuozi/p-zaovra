@@ -47,6 +47,7 @@ import { SessionEvent } from "@zaovra-ai/core/session/event"
 import { SessionInput } from "@zaovra-ai/core/session/input"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
+import { DeliveryContract } from "@zaovra-ai/core/session/delivery-contract"
 import { SessionOutputRecovery } from "@zaovra-ai/core/session/output-recovery"
 import { TextRecovery } from "@zaovra-ai/core/session/runner/text-recovery"
 import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
@@ -110,6 +111,8 @@ function privilegedTexts(request: LLMRequest | undefined) {
       !part.startsWith("When several reads or checks are independent,") &&
       !part.startsWith("For forensic investigation, recovery or database repair,") &&
       !part.startsWith("Map every requirement to the actual checks and their coverage:") &&
+      !part.startsWith("Delivery contract (lightweight, default):") &&
+      !part.startsWith("Long commands:") &&
       !part.startsWith("You are a coding assistant. Inspect relevant context,"),
   )
 }
@@ -307,6 +310,7 @@ let sessionDuration: number | null | undefined
 let sessionOutput: Config.Info["session_output"]
 let qualityProgress: ConfigExperimental.Experimental["quality_progress"]
 let verificationEnabled: boolean | undefined
+let deliveryEnabled: boolean | undefined
 let snapshotCaptures = 0
 let fixtureSnapshot: Snapshot.ID | undefined
 const testSnapshots = Layer.effect(
@@ -336,6 +340,7 @@ const config = Layer.succeed(
             session_output: sessionOutput,
             experimental: new ConfigExperimental.Experimental({
               verification: verificationEnabled,
+              delivery_contract: deliveryEnabled,
               quality_progress: qualityProgress,
             }),
             compaction: new ConfigCompaction.Info({
@@ -459,6 +464,9 @@ const setup = Effect.gen(function* () {
   sessionDuration = undefined
   sessionOutput = undefined
   verificationEnabled = true
+  // Legacy runner fixtures keep their original request counts. The 367 cases
+  // below explicitly exercise the default-on bounded delivery path.
+  deliveryEnabled = false
   fixtureSnapshot = undefined
   snapshotCaptures = 0
   // Transcript fixtures isolate durable history from request-local observations.
@@ -496,6 +504,221 @@ const providerUnavailable = () =>
     method: "stream",
     reason: new TransportReason({ message: "Provider unavailable" }),
   })
+
+it.effect("367 cancellation before first review byte cannot restore its allowance on resume", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    deliveryEnabled = undefined
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+    response = fragmentFixture("text", "admitted", ["开始检查。"]).completeEvents
+    yield* session.resume(sessionID)
+    requests.length = 0
+    const context = yield* session.context(sessionID)
+    const events = yield* EventV2.Service
+    yield* events.publish(SessionEvent.Synthetic, {
+      sessionID,
+      messageID: SessionMessage.ID.create(),
+      timestamp: yield* DateTime.now,
+      text:
+        DeliveryContract.prefix +
+        JSON.stringify({
+          request: SessionOutcome.requested(context).userMessageID,
+          started: yield* Clock.currentTimeMillis,
+          tokens: 1024,
+          decision: "review",
+          missing: ["permission missing"],
+        }),
+    })
+    streamStarted = yield* Deferred.make<void>()
+    streamGate = yield* Deferred.make<void>()
+    response = fragmentFixture("text", "review", ["unverified"]).completeEvents
+    const first = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* session.interrupt(sessionID)
+    yield* Fiber.join(first)
+    const saved = yield* session.context(sessionID)
+    expect(DeliveryContract.receipt(saved, SessionOutcome.requested(saved).userMessageID)?.decision).toBe("consumed")
+    streamGate = undefined
+    streamStarted = undefined
+    response = fragmentFixture("text", "resumed", ["未验证；检查现场后恢复。"]).completeEvents
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    expect(requests[0].tools).toEqual([])
+    expect(requests[1].tools.some((tool) => tool.name === "echo")).toBe(true)
+    expect((yield* session.outcome(sessionID)).verification).not.toBe("verified")
+  }),
+)
+
+it.effect("367 explicit recovery after a real Stop clears the stopped wake generation", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+    streamStarted = yield* Deferred.make<void>()
+    streamGate = yield* Deferred.make<void>()
+    response = fragmentFixture("text", "initial", ["unverified"]).completeEvents
+    const first = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* session.interrupt(sessionID)
+    yield* Fiber.join(first)
+    const interrupted = yield* session.outcome(sessionID)
+    expect(interrupted.state).toBe("interrupted")
+    streamGate = undefined
+    streamStarted = undefined
+    response = fragmentFixture("text", "continued", ["核对现场后继续；未验证。"]).completeEvents
+    yield* session.recover({ sessionID, messageID: interrupted.messageID!, action: "continue" })
+    const execution = yield* SessionExecution.Service
+    yield* execution.wait!(sessionID)
+    expect(requests).toHaveLength(2)
+    expect((yield* session.outcome(sessionID)).runtime).toBe("completed")
+  }),
+)
+
+it.effect("367 expired lightweight receipt reports its budget gap without a provider call", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    deliveryEnabled = undefined
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+    response = fragmentFixture("text", "initial", ["未验证。"]).completeEvents
+    yield* session.resume(sessionID)
+    const context = yield* session.context(sessionID)
+    const events = yield* EventV2.Service
+    yield* events.publish(SessionEvent.Synthetic, {
+      sessionID,
+      timestamp: yield* DateTime.now,
+      messageID: SessionMessage.ID.create(),
+      text:
+        DeliveryContract.prefix +
+        JSON.stringify({
+          request: SessionOutcome.requested(context).userMessageID,
+          started: (yield* Clock.currentTimeMillis) - DeliveryContract.budget.durationMs - 1,
+          tokens: 1024,
+          decision: "review",
+          missing: ["permission unavailable"],
+        }),
+    })
+    requests.length = 0
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(0)
+    const saved = yield* session.context(sessionID)
+    const receipt = DeliveryContract.receipt(saved, SessionOutcome.requested(saved).userMessageID)
+    expect(receipt?.decision).toBe("unverified")
+    expect(receipt?.missing.join(" ")).toContain("wall-clock budget exhausted")
+    expect((yield* session.outcome(sessionID)).verification).not.toBe("verified")
+  }),
+)
+
+it.effect("367 review wall budget expires even while provider progress continues", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    deliveryEnabled = undefined
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+    response = fragmentFixture("text", "initial", ["未验证。"]).completeEvents
+    yield* session.resume(sessionID)
+    const context = yield* session.context(sessionID)
+    const events = yield* EventV2.Service
+    yield* events.publish(SessionEvent.Synthetic, {
+      sessionID,
+      timestamp: yield* DateTime.now,
+      messageID: SessionMessage.ID.create(),
+      text:
+        DeliveryContract.prefix +
+        JSON.stringify({
+          request: SessionOutcome.requested(context).userMessageID,
+          started: yield* Clock.currentTimeMillis,
+          tokens: 1024,
+          decision: "review",
+          missing: ["missing file"],
+        }),
+    })
+    const started = yield* Deferred.make<void>()
+    responseStream = Stream.concat(
+      Stream.fromIterable([LLMEvent.stepStart({ index: 0 }), LLMEvent.textStart({ id: "slow-review" })]),
+      Stream.tick("1 second").pipe(Stream.map(() => LLMEvent.textDelta({ id: "slow-review", text: "." }))),
+    ).pipe(Stream.tap((event) => (event.type === "text-start" ? Deferred.succeed(started, undefined) : Effect.void)))
+    requests.length = 0
+    const reviewing = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Deferred.await(started)
+    yield* adjust(DeliveryContract.budget.durationMs + 1000)
+    expect(reviewing.pollUnsafe()).toBeDefined()
+    yield* Fiber.join(reviewing)
+    const saved = yield* session.context(sessionID)
+    expect(DeliveryContract.receipt(saved, SessionOutcome.requested(saved).userMessageID)?.missing.join(" ")).toContain(
+      "wall-clock budget exhausted",
+    )
+    expect(requests).toHaveLength(1)
+  }),
+)
+
+for (const usage of ["known", "unknown", "small"] as const)
+  it.live(`367 default lightweight closing is bounded and separate from strict: ${usage}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = undefined
+      fixtureSnapshot = Snapshot.ID.make("unchanged")
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        bash: Tool.make({
+          description: "local failed check fixture",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ verification: Schema.Unknown }),
+          execute: (_input, context) =>
+            Effect.succeed({
+              verification: { kind: "test", command: "check-original", callID: context.toolCallID, exit: 1 },
+            }),
+        }),
+      })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+      const tokens = usage === "small" ? 10 : 100_000
+      const reported =
+        usage === "unknown" ? {} : { usage: { inputTokens: tokens, nonCachedInputTokens: tokens, outputTokens: 10 } }
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "original", name: "bash", input: {} }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls", ...reported }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "done" }),
+          LLMEvent.textDelta({ id: "done", text: "Finished execution." }),
+          LLMEvent.textEnd({ id: "done" }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop", ...reported }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+        fragmentFixture("text", "review", ["未验证：文件未交付，原检查失败。"]).completeEvents,
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(usage === "known" ? 3 : 2)
+      expect(JSON.stringify(requests)).not.toContain("Verification rules:")
+      expect(JSON.stringify(requests[0].system)).toContain("Delivery contract (lightweight, default)")
+      const history = yield* session.context(sessionID)
+      const receipts = history.filter(
+        (message) => message.type === "synthetic" && message.text.startsWith("Delivery contract review:"),
+      )
+      expect(receipts).toHaveLength(usage === "known" ? 2 : 1)
+      if (usage === "known") {
+        expect(requests[2].tools).toEqual([])
+        expect(requests[2].toolChoice).toMatchObject({ type: "none" })
+        expect(requests[2].generation?.maxTokens).toBeLessThanOrEqual(1_024)
+      }
+      const outcome = yield* session.outcome(sessionID)
+      expect(outcome.runtime).toBe("completed")
+      expect(outcome.verification).toBe("failed")
+      expect(outcome.missing.join(" ")).toContain("original")
+      expect(outcome.missing.join(" ")).toContain("requirement 1")
+    }),
+  )
 
 // Projection and ownership tests below use a permanent failure; recovery policy has its own virtual-clock matrix.
 const permanentProviderFailure = () =>
@@ -6737,10 +6960,16 @@ describe("SessionRunnerLLM", () => {
         expect(requests.every((request) => !request.tools.some((tool) => tool.name === "verification_review"))).toBe(
           true,
         )
-        expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
+        expect(yield* session.outcome(sessionID)).toMatchObject({
+          state: "completed",
+          missing: ["requirement 1 unverified: Implement and test CSV parsing"],
+        })
         verificationEnabled = true
         yield* replaySessionProjection(sessionID)
-        expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed", missing: [] })
+        expect(yield* session.outcome(sessionID)).toMatchObject({
+          state: "completed",
+          missing: ["requirement 1 unverified: Implement and test CSV parsing"],
+        })
       }).pipe(Effect.scoped),
     )
 

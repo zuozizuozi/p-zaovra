@@ -95,7 +95,7 @@ export const Input = Schema.Struct({
   timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
     .annotate({
-      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Timeout hands the live process to a background job; it preserves the process. hard_timeout_ms is a separate process deadline.`,
+      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Prefer a short yield for long work, then observe bash_job with bounded backoff. Timeout hands the same live process to a background job; running or unknown does not authorize retrying it. hard_timeout_ms is a separate process deadline.`,
     }),
 })
 
