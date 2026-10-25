@@ -5,6 +5,24 @@ from evaluation_probe import backend_identity
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ended_backend_is_observed_without_claiming_live_identity(self):
+        class Environment:
+            async def exec(self, command, **kwargs):
+                return SimpleNamespace(return_code=3, stdout="ZAOVRA_BACKEND_ENDED\n")
+        result = await backend_identity(Environment(), {"pid": 48, "start": "19101989"}, (0, 0))
+        self.assertIsNone(result["verified"])
+        self.assertTrue(result["ended"])
+        self.assertFalse(result["facility_failure"])
+        self.assertEqual(result["attempts"], 1)
+
+    async def test_unrecognized_error_cannot_claim_backend_ended(self):
+        class Environment:
+            async def exec(self, command, **kwargs):
+                return SimpleNamespace(return_code=2, stdout="permission denied\n")
+        result = await backend_identity(Environment(), {"pid": 48, "start": "19101989"}, (0, 0))
+        self.assertFalse(result["verified"])
+        self.assertFalse(result["ended"])
+
     async def test_transient_timeout_recovers_with_exact_identity(self):
         calls = []
         class Environment:
@@ -17,7 +35,8 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["verified"])
         self.assertFalse(result["facility_failure"])
         self.assertEqual(result["attempts"], 2)
-        self.assertTrue(all(call == ("awk '{print $22}' /proc/123/stat", {"timeout_sec": 5}) for call in calls))
+        command = "start=$(awk '{print $22}' /proc/123/stat 2>/dev/null) && { printf '%s\\n' \"$start\"; exit 0; }; if [ ! -d /proc/123 ]; then printf 'ZAOVRA_BACKEND_ENDED\\n'; exit 3; fi; exit 2"
+        self.assertTrue(all(call == (command, {"timeout_sec": 5}) for call in calls))
 
     async def test_exhausted_transport_is_unverified_facility_failure(self):
         calls = []
