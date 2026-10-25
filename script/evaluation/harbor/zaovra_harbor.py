@@ -148,6 +148,7 @@ class Zaovra(BaseAgent):
         steps = [Step(step_id=1, source="user", message=instruction)]
         current = None
         calls = {}
+        observations = []
         totals = {"input": 0, "output": 0, "cache": 0}
         unknown = False
         terminal = False
@@ -171,9 +172,7 @@ class Zaovra(BaseAgent):
                 current.tool_calls = [*(current.tool_calls or []), call]
                 calls[data["callID"]] = current
             if kind in ("tool_result", "tool_error"):
-                owner = calls.get(data.get("callID"), current)
-                observation = ObservationResult(source_call_id=data.get("callID"), content=json.dumps(data.get("content", data.get("error", {})), ensure_ascii=False), extra={"type": kind, "structured": data.get("structured")})
-                owner.observation = Observation(results=[*(owner.observation.results if owner.observation else []), observation])
+                observations.append((current, kind, data))
             if kind == "step_finish":
                 token = data.get("tokens", {})
                 reported = data.get("usageReported") is True
@@ -188,6 +187,16 @@ class Zaovra(BaseAgent):
                     totals["cache"] += cache.get("read", 0)
                 current.extra = {"finish": data.get("finish"), "usage_reported": reported}
                 terminal = data.get("finish") in ("stop", "end-turn", "end_turn")
+        for origin, kind, data in observations:
+            owner = calls.get(data.get("callID"))
+            extra = {"type": kind, "structured": data.get("structured")}
+            # ATIF permits diagnostic observations without a tool call. Keep the
+            # original reference when no corresponding call exists in the events.
+            if owner is None:
+                extra["original_call_id"] = data.get("callID")
+            observation = ObservationResult(source_call_id=data.get("callID") if owner is not None else None, content=json.dumps(data.get("content", data.get("error", {})), ensure_ascii=False), extra=extra)
+            owner = owner if owner is not None else origin
+            owner.observation = Observation(results=[*(owner.observation.results if owner.observation else []), observation])
         unknown |= len(steps) == 1 or any(s.extra is None for s in steps[1:])
         context.metadata = {"complete": terminal and not any(e.get("type")=="error" for e in events), "usage_unknown": unknown, "provider_turns": len(steps)-1, "known_tokens": totals}
         if not unknown:

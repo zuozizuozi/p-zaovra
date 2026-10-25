@@ -146,6 +146,31 @@ class TrajectoryTests(unittest.TestCase):
         self.assertTrue(context.metadata["usage_unknown"])
         self.assertIsNone(context.n_input_tokens)
 
+    def test_orphan_tool_error_preserves_diagnostic_without_inventing_call(self):
+        context = AgentContext()
+        events = [{"type": "step_start"}, {"type": "tool_error", "event": {"properties": {"callID": "orphan", "error": {"message": "blocked"}}}}, {"type": "error"}]
+        trajectory = Trajectory.model_validate_json(self.agent.trajectory(events, "task", context).model_dump_json())
+        observation = trajectory.steps[1].observation.results[0]
+        self.assertIsNone(observation.source_call_id)
+        self.assertEqual(observation.extra["original_call_id"], "orphan")
+        self.assertEqual(json.loads(observation.content), {"message": "blocked"})
+        self.assertFalse(trajectory.steps[1].tool_calls)
+        self.assertFalse(context.metadata["complete"])
+        self.assertTrue(context.metadata["usage_unknown"])
+
+    def test_observation_before_call_attaches_to_actual_call_step(self):
+        events = [{"type": "step_start"}, {"type": "tool_result", "event": {"properties": {"callID": "later", "content": "retained"}}}, {"type": "step_start"}, {"type": "tool_use", "event": {"properties": {"callID": "later", "tool": "bash", "input": {}}}}]
+        trajectory = Trajectory.model_validate_json(self.agent.trajectory(events, "task", AgentContext()).model_dump_json())
+        self.assertIsNone(trajectory.steps[1].observation)
+        self.assertEqual(trajectory.steps[2].observation.results[0].source_call_id, "later")
+        self.assertEqual(json.loads(trajectory.steps[2].observation.results[0].content), "retained")
+
+    def test_late_observation_retains_original_call_owner(self):
+        events = [{"type": "step_start"}, {"type": "tool_use", "event": {"properties": {"callID": "early", "tool": "bash", "input": {}}}}, {"type": "step_start"}, {"type": "tool_result", "event": {"properties": {"callID": "early", "content": "retained"}}}]
+        trajectory = Trajectory.model_validate_json(self.agent.trajectory(events, "task", AgentContext()).model_dump_json())
+        self.assertEqual(trajectory.steps[1].observation.results[0].source_call_id, "early")
+        self.assertIsNone(trajectory.steps[2].observation)
+
     def test_unfinished_and_empty_are_not_complete(self):
         for events in [[], [{"type": "step_start"}], [{"type": "text", "event": {"properties": {"text": "partial"}}}]]:
             context = AgentContext()
