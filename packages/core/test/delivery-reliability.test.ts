@@ -77,6 +77,14 @@ test("367 deterministic file-count and byte budgets return explicit unverified",
   expect(results[32].problem).toContain("budget exhausted")
   await Bun.write(path.join(dir.path, "large.txt"), new Uint8Array(DeliveryAudit.budget.bytes + 1))
   expect((await inspect(dir.path, "交付 large.txt。"))[0].problem).toContain("budget")
+  const files = ["first.txt", "second.txt", "third.txt"].map((file) => path.join(dir.path, file))
+  for (const file of files) await Bun.write(file, "ab")
+  const fingerprints = await Effect.runPromise(
+    FSUtil.Service.use((fs) => SessionOutcome.fingerprint(fs, files, { files: 2, bytes: 2 })).pipe(
+      Effect.provide(live),
+    ),
+  )
+  expect(fingerprints.map((item) => Boolean(item.digest))).toEqual([true, false, false])
 })
 
 test("367 a denied read remains unverified and never attempts an external action", async () => {
@@ -97,6 +105,32 @@ test("367 a denied read remains unverified and never attempts an external action
   )
   expect(result[0].digest).toBe("")
   expect(result[0].problem).toContain("unreadable")
+})
+
+test("367 host file inspection has one total wall budget across stalled reads", async () => {
+  await using dir = await tmpdir()
+  await Bun.write(path.join(dir.path, "a.txt"), "ok")
+  const calls = { reads: 0 }
+  const results = await Effect.runPromise(
+    FSUtil.Service.use((fs) =>
+      DeliveryAudit.inspect(
+        {
+          ...fs,
+          readFile: () => {
+            calls.reads++
+            return Effect.never
+          },
+        },
+        dir.path,
+        [
+          { id: 1, text: "交付 a.txt。" },
+          { id: 2, text: "交付 a.txt。" },
+        ],
+      ),
+    ).pipe(Effect.provide(live)),
+  )
+  expect(calls.reads).toBe(1)
+  expect(results.every((item) => !item.digest && item.problem?.includes("wall-clock"))).toBe(true)
 })
 
 test("367 review allowance counts the whole request, unknown usage grants no budget, and durable receipt survives restore", () => {

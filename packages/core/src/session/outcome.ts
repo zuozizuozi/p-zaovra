@@ -245,12 +245,20 @@ function rejected(tool: SessionMessage.AssistantTool) {
 }
 
 /** Hash explicit verification inputs; missing/unreadable files invalidate old evidence. */
-export const fingerprint = (fs: FSUtil.Interface, paths: readonly string[]) =>
+export const fingerprint = (
+  fs: FSUtil.Interface,
+  paths: readonly string[],
+  budget?: { files: number; bytes: number },
+) =>
   Effect.gen(function* () {
-    return yield* Effect.forEach([...new Set(paths)], (path) =>
+    let bytesRead = 0
+    return yield* Effect.forEach([...new Set(paths)], (path, index) =>
       Effect.gen(function* () {
+        if (budget && index >= budget.files) return { path, digest: "" }
         const info = yield* fs.stat(path)
         if (info.type !== "File" || info.size > 64 * 1024 * 1024) return { path, digest: "" }
+        if (budget && bytesRead + Number(info.size) > budget.bytes) return { path, digest: "" }
+        bytesRead += Number(info.size)
         const bytes = yield* fs.readFile(path)
         return { path, digest: createHash("sha256").update(bytes).digest("hex") }
       }).pipe(Effect.catch(() => Effect.succeed({ path, digest: "" }))),

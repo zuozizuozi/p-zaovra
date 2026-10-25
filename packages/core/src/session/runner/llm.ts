@@ -1803,26 +1803,39 @@ const layer = Layer.effect(
                 undefined,
                 location.directory,
               )
-              const targets = yield* restore(
-                SessionOutcome.fingerprint(
-                  fs,
-                  preliminary.checks.flatMap((check) =>
-                    [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path),
-                  ),
-                ),
+              // Bound the entire host inspection, including old evidence and
+              // legacy snapshots; a short model review must not hide unbounded IO.
+              const observation = yield* restore(
+                Effect.gen(function* () {
+                  const targets = yield* SessionOutcome.fingerprint(
+                    fs,
+                    preliminary.checks.flatMap((check) =>
+                      [...(check.targets ?? []), ...(check.assertions ?? [])].map((target) => target.path),
+                    ),
+                    DeliveryAudit.budget,
+                  )
+                  const snapshot = preliminary.checks.some((check) => !check.targets?.length)
+                    ? yield* snapshots.capture()
+                    : undefined
+                  return SessionOutcome.derive(
+                    messages,
+                    false,
+                    snapshot,
+                    targets,
+                    [],
+                    undefined,
+                    location.directory,
+                    yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries),
+                  )
+                }).pipe(Effect.timeoutOption(DeliveryAudit.budget.durationMs)),
               )
-              const outcome = SessionOutcome.derive(
-                messages,
-                false,
-                yield* restore(snapshots.capture()),
-                targets,
-                [],
-                undefined,
-                location.directory,
-                yield* restore(
-                  DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries),
-                ),
-              )
+              const outcome = Option.isSome(observation)
+                ? observation.value
+                : {
+                    ...preliminary,
+                    verification: preliminary.verification === "failed" ? "failed" : "unverified",
+                    missing: [...preliminary.missing, "unverified: host inspection budget exhausted"],
+                  }
               const usage = (yield* SessionUsageQuery.read(session.id).pipe(
                 Effect.provideService(Database.Service, database),
               )).lastTurn
@@ -1838,7 +1851,11 @@ const layer = Layer.effect(
                   (job.type !== "bash" || job.metadata?.kind !== "preview"),
               )
               const review =
-                outcome.missing.length > 0 && !outcome.outcomeUnknown && !pending && allowance.output >= 256
+                Option.isSome(observation) &&
+                outcome.missing.length > 0 &&
+                !outcome.outcomeUnknown &&
+                !pending &&
+                allowance.output >= 256
               yield* events.publish(SessionEvent.Synthetic, {
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
@@ -1851,17 +1868,19 @@ const layer = Layer.effect(
                     tokens: allowance.output,
                     decision: review ? "review" : "unverified",
                     missing: outcome.missing,
-                    reason: review
-                      ? "one bounded text-only review"
-                      : !outcome.missing.length
-                        ? "no outstanding lightweight gap"
-                        : pending
-                          ? "unfinished background jobs"
-                          : outcome.outcomeUnknown
-                            ? "unknown effects"
-                            : usage?.unreported
-                              ? "unknown usage; no extra allowance"
-                              : "token review budget exhausted",
+                    reason: Option.isNone(observation)
+                      ? "host inspection budget exhausted"
+                      : review
+                        ? "one bounded text-only review"
+                        : !outcome.missing.length
+                          ? "no outstanding lightweight gap"
+                          : pending
+                            ? "unfinished background jobs"
+                            : outcome.outcomeUnknown
+                              ? "unknown effects"
+                              : usage?.unreported
+                                ? "unknown usage; no extra allowance"
+                                : "token review budget exhausted",
                     limits: {
                       turns: DeliveryContract.budget.turns,
                       totalTokens: allowance.tokens,
