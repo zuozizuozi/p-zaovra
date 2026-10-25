@@ -693,7 +693,11 @@ const layer = Layer.effect(
       const isLastStep = stopReason !== undefined
       const toolMaterialization =
         isLastStep || textOnlyRecovery ? undefined : yield* tools.materialize(agent.info?.permissions)
-      const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
+      const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id)
+        ? session.id.slice(4)
+        : session.id.length > 64
+          ? createHash("sha256").update(session.id).digest("hex")
+          : session.id
       const verificationHistory = durableHistory
       const requirements = SessionOutcome.requested(verificationHistory)
       const reviewing =

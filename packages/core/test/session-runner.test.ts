@@ -1,4 +1,5 @@
 import { evidenceScope } from "./fixture/evidence-scope"
+import { createHash } from "node:crypto"
 import { BackgroundJob } from "@zaovra-ai/core/background-job"
 import { SessionProgress } from "@zaovra-ai/core/session/progress"
 import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
@@ -4947,6 +4948,57 @@ describe("SessionRunnerLLM", () => {
       expect(keys).toEqual([longSessionID.slice(4), otherLongSessionID.slice(4)])
       expect(keys.every((key) => typeof key === "string" && key.length === 64)).toBe(true)
       expect(keys[0]).not.toBe(keys[1])
+    }),
+  )
+
+  it.effect("hashes long child Session cache keys consistently on the Responses wire", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const child = SessionV2.ID.make(`ses_task_${"a".repeat(91)}`)
+      const other = SessionV2.ID.make(`ses_task_${"a".repeat(90)}b`)
+      yield* insertSession(child)
+      yield* insertSession(other)
+      const session = yield* SessionV2.Service
+      for (const id of [child, child, other]) {
+        yield* session.prompt({ sessionID: id, prompt: Prompt.make({ text: "Continue child" }), resume: false })
+        yield* session.resume(id)
+      }
+      expect(child.length).toBe(100)
+      const keys = requests.map((request) => request.providerOptions?.openai?.promptCacheKey)
+      expect(keys).toEqual([
+        createHash("sha256").update(child).digest("hex"),
+        createHash("sha256").update(child).digest("hex"),
+        createHash("sha256").update(other).digest("hex"),
+      ])
+      expect(keys[0]).not.toBe(keys[2])
+      const target = OpenAIResponses.route.with({ auth: Auth.bearer("offline") }).model({ id: "offline" })
+      for (const request of requests) {
+        const prepared = yield* LLMClient.prepare(LLM.updateRequest(request, { model: target }))
+        const body = Schema.decodeUnknownSync(Schema.Struct({ prompt_cache_key: Schema.String }))(prepared.body)
+        expect(body.prompt_cache_key).toHaveLength(64)
+        expect(body.prompt_cache_key).toBe(
+          Schema.decodeUnknownSync(Schema.String)(request.providerOptions?.openai?.promptCacheKey),
+        )
+      }
+    }),
+  )
+
+  it.effect("preserves 64-character cache keys and bounds 65-character Session IDs", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const boundary = SessionV2.ID.make(`ses_${"z".repeat(60)}`)
+      const longer = SessionV2.ID.make(`${boundary}z`)
+      yield* insertSession(boundary)
+      yield* insertSession(longer)
+      const session = yield* SessionV2.Service
+      for (const id of [boundary, longer]) {
+        yield* session.prompt({ sessionID: id, prompt: Prompt.make({ text: "Boundary key" }), resume: false })
+        yield* session.resume(id)
+      }
+      expect(requests.map((request) => request.providerOptions?.openai?.promptCacheKey)).toEqual([
+        boundary,
+        createHash("sha256").update(longer).digest("hex"),
+      ])
     }),
   )
 
