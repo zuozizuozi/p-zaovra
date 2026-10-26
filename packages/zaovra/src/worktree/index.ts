@@ -275,7 +275,10 @@ const layer: Layer.Layer<
         },
       })
 
-      yield* runStartScripts(info.directory, { projectID, extra })
+      yield* runStartScripts(info.directory, { projectID, extra }).pipe(
+        Effect.catchCause((cause) => Effect.logError("worktree start task failed", { cause })),
+        Effect.forkIn(scope),
+      )
     })
 
     const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (

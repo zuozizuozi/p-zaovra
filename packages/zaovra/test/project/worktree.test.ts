@@ -2,17 +2,18 @@ import { afterEach, describe, expect } from "bun:test"
 import path from "path"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
-import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
+import { CrossSpawnSpawner } from "@zaovra-ai/core/cross-spawn-spawner"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Git } from "../../src/git"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
 import { Worktree } from "../../src/worktree"
-import { disposeAllInstances, provideInstance, TestInstance } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { disposeAllInstances, provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
+import { pollWithTimeout, testEffect } from "../lib/effect"
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([Worktree.node, FSUtil.node, Git.node]), [
+  LayerNode.compile(LayerNode.group([Worktree.node, FSUtil.node, Git.node, CrossSpawnSpawner.node]), [
     [InstanceStore.bootstrapNode, InstanceBootstrap.node],
   ]),
 )
@@ -241,6 +242,118 @@ describe("Worktree", () => {
   })
 
   describe("createFromInfo", () => {
+    it.instance(
+      "runs a normal startup command to completion after reporting readiness",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          const svc = yield* Worktree.Service
+          const finished = path.join(test.directory, "startup-finished")
+          const script = path.join(test.directory, "startup.cjs")
+          yield* Effect.promise(() =>
+            Bun.write(script, `require("node:fs").writeFileSync(${JSON.stringify(finished)}, "done")`),
+          )
+          yield* git(test.directory, ["add", "startup.cjs"])
+          yield* git(test.directory, ["commit", "-m", "startup fixture"])
+          const info = yield* svc.makeWorktreeInfo({ name: "startup-completion" })
+          yield* Effect.acquireUseRelease(
+            svc.createFromInfo(info, "bun startup.cjs", true).pipe(Effect.as(info)),
+            () =>
+              pollWithTimeout(
+                Effect.promise(async () => ((await Bun.file(finished).exists()) ? true : undefined)),
+                "startup command did not complete",
+              ),
+            (created) => removeCreatedWorktree(created.directory).pipe(Effect.orDie),
+          )
+          expect(yield* Effect.promise(() => Bun.file(finished).text())).toBe("done")
+        }),
+      { git: true },
+    )
+
+    it.live("closing the Worktree service scope terminates its background startup process", () =>
+      Effect.gen(function* () {
+        const directory = yield* tmpdirScoped({ git: true })
+        const scope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+        // Build an independent service lifetime so this test closes the scope that owns the startup fiber.
+        const services = yield* Layer.buildWithScope(
+          Layer.fresh(
+            LayerNode.compile(LayerNode.group([Worktree.node, InstanceStore.node]), [
+              [InstanceStore.bootstrapNode, InstanceBootstrap.node],
+            ]),
+          ),
+          scope,
+        )
+        const script = path.join(directory, "startup.cjs")
+        const pidFile = path.join(directory, "startup-pid")
+        yield* Effect.promise(() =>
+          Bun.write(
+            script,
+            `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+            setInterval(() => {}, 1000); setTimeout(() => process.exit(2), 20000).unref();`,
+          ),
+        )
+        const info = { name: "scope-cleanup", directory: path.join(directory, "linked") }
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => disposeAllInstances()).pipe(
+            Effect.andThen(git(directory, ["worktree", "remove", "--force", info.directory])),
+            Effect.orDie,
+          ),
+        )
+        yield* Effect.gen(function* () {
+          const svc = yield* Worktree.Service
+          yield* svc
+            .createFromInfo(info, "bun ../startup.cjs", true)
+            .pipe(Effect.timeout("6 seconds"))
+        }).pipe(provideInstance(directory), Effect.provide(services))
+        const pid = Number(
+          yield* pollWithTimeout(
+            Effect.promise(async () => ((await Bun.file(pidFile).exists()) ? Bun.file(pidFile).text() : undefined)),
+            "startup process never became ready",
+          ),
+        )
+        expect(Number.isInteger(pid) && pid > 0).toBe(true)
+        expect(() => process.kill(pid, 0)).not.toThrow()
+        yield* Scope.close(scope, Exit.void)
+        yield* pollWithTimeout(
+          Effect.sync(() => {
+            try {
+              process.kill(pid, 0)
+              return undefined
+            } catch (error) {
+              if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error
+              return true
+            }
+          }),
+          "background startup process survived service scope closure",
+        )
+      }),
+    )
+
+    it.instance(
+      "a bootstrap failure still fails synchronous creation without publishing Ready",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          const svc = yield* Worktree.Service
+          yield* Effect.promise(() => Bun.write(path.join(test.directory, "zaovra.json"), "{ invalid json"))
+          yield* git(test.directory, ["add", "zaovra.json"])
+          yield* git(test.directory, ["commit", "-m", "invalid bootstrap config"])
+          const info = yield* svc.makeWorktreeInfo({ name: "bootstrap-failure" })
+          const ready: string[] = []
+          const on = (event: GlobalEvent) => {
+            if (event.payload.type === Worktree.Event.Ready.type && event.directory) ready.push(event.directory)
+          }
+          GlobalBus.on("event", on)
+          yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", on)))
+          yield* Effect.addFinalizer(() => removeCreatedWorktree(info.directory).pipe(Effect.ignore))
+          const exit = yield* Effect.exit(svc.createFromInfo(info, undefined, true))
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(ready).not.toContain(info.directory)
+        }),
+      { git: true },
+    )
+
     ;(it.instance(
       "can wait for checkout and bootstrap before reporting creation",
       () =>
