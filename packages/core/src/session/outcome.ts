@@ -308,10 +308,11 @@ export function requested(messages: readonly SessionMessage.Message[]) {
       .match(/^(?:将要求|修改要求)\s*[“「]([^”」]+)[”」]\s*(?:改为|替换为)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)
     const withdrawal =
       replacement?.[1] ?? text.trim().match(/^(?:取消要求|撤销要求)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)?.[1]
-    // Identical amendments from distinct messages are new actions. Ordinary
+    // Explicit additions and amendments from distinct messages are new actions. Ordinary
     // repeated prompts still refer to the original clauses and their evidence.
-    if (!withdrawal && ordinary.has(message.text)) continue
-    if (!withdrawal) ordinary.add(message.text)
+    const amendment = withdrawal || continuationText(message.text) !== undefined
+    if (!amendment && ordinary.has(message.text)) continue
+    if (!amendment) ordinary.add(message.text)
     const matches = withdrawal ? entries.filter((entry) => entry.text === withdrawal && !entry.withdrawnBy) : []
     if (matches.length === 1) {
       matches[0].withdrawnBy = message.id

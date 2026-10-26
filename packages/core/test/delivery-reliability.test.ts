@@ -55,6 +55,21 @@ test("367 contradictory and ambiguous clauses are preserved; examples and refere
   expect(DeliveryAudit.expected(quoted.entries).map((entry) => entry.path)).toEqual(["real.json"])
 })
 
+test("371 explicit additions restore withdrawn requirements with the newest identity", () => {
+  const first = user("交付 a.json。", "msg_one")
+  const second = user("修改要求：取消要求“交付 a.json。”", "msg_two")
+  const third = user("追加要求：交付 a.json。", "msg_three")
+  const fourth = user(second.text, "msg_four")
+  const fifth = user(third.text, "msg_five")
+  const entries = SessionOutcome.requested([first, second, third, fourth, fifth, fifth]).entries
+  expect(DeliveryAudit.expected(entries).map((entry) => entry.path)).toEqual(["a.json"])
+  expect(entries.filter((entry) => !entry.withdrawnBy)).toHaveLength(1)
+  const active = entries.find((entry) => !entry.withdrawnBy)!
+  expect(active.sourceMessageID).toBe(fifth.id)
+  expect(fifth.text.slice(active.sourceStart, active.sourceEnd)).toBe(active.text)
+  expect(entries.map((entry) => entry.withdrawnBy)).toEqual([second.id, fourth.id, undefined])
+})
+
 test("369 repeated corrections follow message identity and chronological order", () => {
   const first = user("交付 a.json。", "msg_first")
   const second = user("修改要求：将要求“交付 a.json。”改为“交付 b.json。”", "msg_second")

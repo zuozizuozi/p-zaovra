@@ -362,12 +362,13 @@ const config = Layer.succeed(
       ]),
   }),
 )
+let pluginWaitHook = Effect.void
 const plugins = Layer.succeed(
   PluginV2.Service,
   PluginV2.Service.of({
     add: () => Effect.void,
     remove: () => Effect.void,
-    wait: () => Effect.void,
+    wait: () => Effect.suspend(() => pluginWaitHook),
   }),
 )
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
@@ -488,6 +489,7 @@ const setup = Effect.gen(function* () {
   systemUnavailable = false
   systemLoadHook = Effect.void
   modelResolveHook = Effect.void
+  pluginWaitHook = Effect.void
   currentModel = model
   skillBaselines.clear()
   responses = undefined
@@ -541,7 +543,43 @@ const repairCall = (id: string, name: string, input: Record<string, unknown>) =>
   LLMEvent.finish({ reason: "tool-calls" }),
 ]
 
-for (const phase of ["setup", "system", "provider"] as const)
+it.effect("371 cold initialization waits for agent system steps and skills", () =>
+  Effect.gen(function* () {
+    yield* setup
+    const agents = yield* AgentV2.Service
+    const session = yield* SessionV2.Service
+    const entered = yield* Deferred.make<void>()
+    const ready = yield* Deferred.make<void>()
+    pluginWaitHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(ready)))
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+    response = repairCall("first-call", "echo", { text: "check steps" })
+    const running = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    yield* agents.transform((editor) =>
+      editor.update(AgentV2.ID.make("build"), (agent) => {
+        agent.system = "Ready agent system"
+        agent.mode = "primary"
+        agent.steps = 1
+      }),
+    )
+    skillBaselines.set(AgentV2.ID.make("build"), "Ready skills")
+    systemBaseline = "Ready context"
+    yield* Deferred.succeed(ready, undefined)
+    yield* Fiber.join(running)
+    expect(requests).toHaveLength(1)
+    expect(privilegedTexts(requests[0])?.join("\n")).toContain("Ready agent system")
+    expect(privilegedTexts(requests[0])?.join("\n")).toContain("Ready skills")
+    expect(privilegedTexts(requests[0])?.join("\n")).toContain("Ready context")
+    expect(requests[0].toolChoice?.type).toBe("none")
+    response = repairStop("next-turn")
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    expect(privilegedTexts(requests[1])?.join("\n")).toContain("Ready agent system")
+  }),
+)
+
+for (const phase of ["setup", "system", "provider", "rebuild", "readiness"] as const)
   for (const scenario of ["steer", "queue", "continue", "delivery-off", "strict"] as const)
     it.effect(`369 repair deadline binds after promotion: ${scenario}/${phase}`, () =>
       Effect.gen(function* () {
@@ -584,11 +622,22 @@ for (const phase of ["setup", "system", "provider"] as const)
         if (scenario === "delivery-off") deliveryEnabled = false
         if (scenario === "strict") verificationEnabled = true
         const entered = yield* Deferred.make<void>()
+        const finished = yield* Deferred.make<void>()
+        if (phase === "rebuild" || phase === "readiness") {
+          fixtureDirectory = "/relocated"
+          yield* events.publish(SessionEvent.Moved, {
+            sessionID,
+            timestamp: yield* DateTime.now,
+            location: Location.Ref.make({ directory: AbsolutePath.make(fixtureDirectory) }),
+          })
+        }
         response = repairStop("completed-new-task")
         if (phase === "setup")
           modelResolveHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.sleep(200)))
-        else if (phase === "system")
+        else if (phase === "system" || phase === "rebuild")
           systemLoadHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.sleep(200)))
+        else if (phase === "readiness")
+          pluginWaitHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.sleep(200)))
         else
           responseStream = Stream.unwrap(
             Deferred.succeed(entered, undefined).pipe(
@@ -597,9 +646,13 @@ for (const phase of ["setup", "system", "provider"] as const)
             ),
           )
         requests.length = 0
-        const running = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        const running = yield* session
+          .resume(sessionID)
+          .pipe(Effect.ensuring(Deferred.succeed(finished, undefined)), Effect.forkChild)
         yield* Deferred.await(entered)
-        yield* adjust(200)
+        yield* adjust(50)
+        expect(yield* Deferred.isDone(finished)).toBe(scenario === "continue")
+        yield* adjust(150)
         yield* Fiber.join(running)
         const history = yield* session.context(sessionID)
         const receipt = DeliveryContract.receipt(history, request)

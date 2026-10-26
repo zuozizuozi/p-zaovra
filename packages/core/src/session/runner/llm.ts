@@ -521,13 +521,21 @@ const layer = Layer.effect(
       ]
         .flatMap((input) => (input.prompt.selection ? [input.prompt.selection] : []))
         .at(-1)
-      const selectAgent = yield* Effect.cached(agents.select(selected?.agent ?? placement.agent))
-      const shell = ShellIdentity.snapshot(yield* config.entries(), location)
-      const initialized = yield* SessionContextEpoch.initialize(
-        db,
-        selectAgent.pipe(Effect.flatMap(loadSystemContext)),
-        sessionID,
-      ).pipe(Effect.provideService(ShellIdentity.Current, shell))
+      const previousHistory = yield* SessionOutcome.history(db, sessionID)
+      const initialize = yield* Effect.cached(
+        Effect.gen(function* () {
+          yield* plugins.wait(PluginInternal.readyID)
+          const agent = yield* agents.select(selected?.agent ?? placement.agent)
+          const shell = ShellIdentity.snapshot(yield* config.entries(), location)
+          const context = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), sessionID).pipe(
+            Effect.provideService(ShellIdentity.Current, shell),
+          )
+          return { agent, shell, context }
+        }),
+      )
+      // A first prompt stays admitted if initialization fails. Historical Sessions
+      // may rebuild a moved epoch only after promotion has bound their repair cap.
+      if (!previousHistory.some((message) => message.type === "user")) yield* initialize
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       const withTool = Semaphore.makeUnsafe(1).withPermit
       let toolsStopped = false
@@ -544,7 +552,7 @@ const layer = Layer.effect(
       const hostedOperations = new Map<string, { id: string; fingerprint: string }>()
       let currentStep = step
       if (promotion) {
-        const previousUser = SessionOutcome.requested(yield* store.context(sessionID)).userMessageID
+        const previousUser = SessionOutcome.requested(previousHistory).userMessageID
         let promoted = 0
         if (promotion === "steer") promoted = yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         if (promotion === "queue") {
@@ -569,8 +577,7 @@ const layer = Layer.effect(
         const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
         yield* Deferred.succeed(budgetStop.repairScope, receipt?.decision === "repair" ? receipt : undefined)
       }
-      yield* plugins.wait(PluginInternal.readyID)
-      const selectedAgent = yield* selectAgent
+      const initialized = yield* initialize
       const quality = Config.latest(configuration, "experimental")?.quality_progress
       if (quality?.facts !== false) {
         const latest = yield* db
@@ -586,11 +593,11 @@ const layer = Layer.effect(
       const session = promotion ? yield* getSession(sessionID) : placement
       if (networkRecovery) networkRecovery.step = currentStep
       const sameAgent = session.agent === (selected?.agent ?? placement.agent)
-      const agent = sameAgent ? selectedAgent : yield* agents.select(session.agent)
+      const agent = sameAgent ? initialized.agent : yield* agents.select(session.agent)
       const system =
-        (sameAgent ? initialized : undefined) ??
+        (sameAgent ? initialized.context : undefined) ??
         (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id).pipe(
-          Effect.provideService(ShellIdentity.Current, shell),
+          Effect.provideService(ShellIdentity.Current, initialized.shell),
         ))
       const model = yield* models.resolve(session)
       if (budgetStop) budgetStop.model = model
@@ -1175,7 +1182,7 @@ const layer = Layer.effect(
                                 assistantMessageID,
                                 call: event,
                                 inputModalities: model.inputModalities,
-                                shell,
+                                shell: initialized.shell,
                               }),
                             ),
                           ),
@@ -1780,7 +1787,7 @@ const layer = Layer.effect(
                     : typeof input.workdir === "string"
                       ? input.workdir
                       : location.directory,
-                environment: shell.identity ? JSON.stringify(shell.identity) : undefined,
+                environment: initialized.shell.identity ? JSON.stringify(initialized.shell.identity) : undefined,
                 artifact: (yield* restore(snapshots.capture())) ?? undefined,
                 hypothesis: typeof input.progress_hypothesis === "string" ? input.progress_hypothesis : undefined,
                 expectedEvidence:
