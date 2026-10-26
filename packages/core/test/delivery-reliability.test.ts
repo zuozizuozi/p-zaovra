@@ -55,6 +55,56 @@ test("367 contradictory and ambiguous clauses are preserved; examples and refere
   expect(DeliveryAudit.expected(quoted.entries).map((entry) => entry.path)).toEqual(["real.json"])
 })
 
+test("369 repeated corrections follow message identity and chronological order", () => {
+  const first = user("交付 a.json。", "msg_first")
+  const second = user("修改要求：将要求“交付 a.json。”改为“交付 b.json。”", "msg_second")
+  const third = user("修改要求：将要求“交付 b.json。”改为“交付 a.json。”", "msg_third")
+  const fourth = user(second.text, "msg_fourth")
+  const entries = SessionOutcome.requested([first, second, third, fourth, second, fourth]).entries
+  expect(DeliveryAudit.expected(entries).map((entry) => entry.path)).toEqual(["b.json"])
+  expect(entries.map((entry) => entry.withdrawnBy)).toEqual([second.id, third.id, fourth.id, undefined])
+  expect(entries.at(-1)?.sourceMessageID).toBe(fourth.id)
+  expect(fourth.text.slice(entries.at(-1)!.sourceStart, entries.at(-1)!.sourceEnd)).toBe("交付 b.json。")
+  expect(SessionOutcome.requested([first, user(first.text, "msg_repeat"), first]).entries).toHaveLength(1)
+})
+
+test("369 repeated withdrawals apply to a reintroduced requirement, same-ID replay stays idempotent", () => {
+  const first = user("交付 a.json。", "msg_first")
+  const removed = user("修改要求：取消要求“交付 a.json。”", "msg_removed")
+  const restored = user("追加要求：交付 a.json。", "msg_restored")
+  const removedAgain = user(removed.text, "msg_removed_again")
+  const entries = SessionOutcome.requested([first, removed, restored, removed, removedAgain]).entries
+  expect(DeliveryAudit.expected(entries)).toEqual([])
+  expect(entries.map((entry) => entry.withdrawnBy)).toEqual([removed.id, removedAgain.id])
+})
+
+for (const [name, reference, real] of [
+  ["backticks", "```text\nCreate example.json.\nactually run example\n```", true],
+  ["tildes", "~~~text\nCreate example.json.\nactually run example\n~~~", true],
+  ["long opener", "````text\n```\nCreate example.json.\n~~~\nactually run example\n`````", true],
+  ["short closer", "~~~~text\n~~~\nCreate example.json.\nactually run example\n~~~~", true],
+  ["indented CRLF", "   ~~~text\r\nCreate example.json.\r\nactually run example\r\n   ~~~~ \t", true],
+  ["bare CR", "~~~text\rCreate example.json.\ractually run example\r~~~\r", true],
+  ["closing text is content", "~~~text\n~~~still data\nCreate example.json.\nactually run example\n~~~", true],
+  ["unclosed", "~~~text\nCreate example.json.\nactually run example\n```", false],
+] as const)
+  test(`369 fenced original ranges: ${name}`, async () => {
+    await using dir = await tmpdir()
+    await Bun.write(path.join(dir.path, "real.json"), "[]")
+    const source = user(`参考文本（仅作数据）：\n${reference}\n交付 real.json。`, "msg_fence")
+    const entries = SessionOutcome.requested([source]).entries
+    expect(DeliveryAudit.expected(entries).map((entry) => entry.path)).toEqual(real ? ["real.json"] : [])
+    const artifacts = await inspect(dir.path, source.text)
+    expect(artifacts.map((item) => path.basename(item.path))).toEqual(real ? ["real.json"] : [])
+    expect(DeliveryContract.gaps(entries, artifacts, [])).toEqual([])
+    for (const entry of entries) expect(source.text.slice(entry.sourceStart, entry.sourceEnd)).toBe(entry.text)
+    if (!real) return
+    const outside = SessionOutcome.requested([user(`${source.text}\nactually run real service`, "msg_outside")])
+    expect(DeliveryContract.gaps(outside.entries, artifacts, [])).toEqual([
+      `requirement ${outside.entries.at(-1)!.id}: actual execution evidence missing: actually run real service`,
+    ])
+  })
+
 test("367 deterministic checks enforce JSON syntax/type and reobserve changed files", async () => {
   await using dir = await tmpdir()
   const request = "交付 `result.json`，顶层为数组。"

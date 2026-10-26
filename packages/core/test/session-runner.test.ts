@@ -541,6 +541,141 @@ const repairCall = (id: string, name: string, input: Record<string, unknown>) =>
   LLMEvent.finish({ reason: "tool-calls" }),
 ]
 
+for (const phase of ["setup", "system", "provider"] as const)
+  for (const scenario of ["steer", "queue", "continue", "delivery-off", "strict"] as const)
+    it.effect(`369 repair deadline binds after promotion: ${scenario}/${phase}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        deliveryEnabled = undefined
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+        response = repairStop("seed")
+        yield* session.resume(sessionID)
+        const request = SessionOutcome.requested(yield* session.context(sessionID)).sourceMessageID!
+        const events = yield* EventV2.Service
+        const startedAt = (yield* Clock.currentTimeMillis) - DeliveryContract.budget.durationMs + 50
+        yield* events.publish(SessionEvent.Synthetic, {
+          sessionID,
+          timestamp: yield* DateTime.now,
+          messageID: SessionMessage.ID.create(),
+          text:
+            DeliveryContract.prefix +
+            JSON.stringify({
+              request,
+              started: startedAt,
+              tokens: 1024,
+              decision: "repair",
+              missing: ["required file missing"],
+              allowance: 1,
+              spent: 0,
+              turns: 0,
+              costs: repairPricing.cost,
+              model: SessionOutputRecovery.identity(model),
+            }),
+        })
+        if (scenario === "steer" || scenario === "queue" || scenario === "continue")
+          yield* session.prompt({
+            sessionID,
+            prompt: Prompt.make({ text: scenario === "continue" ? "继续" : "解释数字七。" }),
+            delivery: scenario === "queue" ? "queue" : "steer",
+            resume: false,
+          })
+        if (scenario === "delivery-off") deliveryEnabled = false
+        if (scenario === "strict") verificationEnabled = true
+        const entered = yield* Deferred.make<void>()
+        response = repairStop("completed-new-task")
+        if (phase === "setup")
+          modelResolveHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.sleep(200)))
+        else if (phase === "system")
+          systemLoadHook = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.sleep(200)))
+        else
+          responseStream = Stream.unwrap(
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Effect.sleep(200)),
+              Effect.as(Stream.fromIterable(response)),
+            ),
+          )
+        requests.length = 0
+        const running = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        yield* Deferred.await(entered)
+        yield* adjust(200)
+        yield* Fiber.join(running)
+        const history = yield* session.context(sessionID)
+        const receipt = DeliveryContract.receipt(history, request)
+        expect(receipt?.started).toBe(startedAt)
+        if (scenario === "continue") {
+          expect(SessionOutcome.requested(history).sourceMessageID).toBe(request)
+          expect(receipt?.decision).toBe("unverified")
+          expect(receipt?.reason).toContain("wall-clock")
+          expect(requests).toHaveLength(phase === "provider" ? 1 : 0)
+        } else {
+          expect(requests).toHaveLength(1)
+          expect(history.findLast((message) => message.type === "assistant")?.finish).toBe("stop")
+          expect(receipt?.decision).toBe("repair")
+          if (scenario === "steer" || scenario === "queue")
+            expect(SessionOutcome.requested(history).sourceMessageID).not.toBe(request)
+        }
+      }),
+    )
+
+for (const fence of ["```", "~~~"])
+  it.live(`369 fenced references never start tool repair: ${fence}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = undefined
+      currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+        pricing: repairPricing,
+      })
+      const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
+        Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      fixtureDirectory = dir.path
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ directory: dir.path })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() => Bun.write(`${dir.path}/real.json`, "[]"))
+      const session = yield* SessionV2.Service
+      const registry = yield* ToolRegistry.Service
+      let writes = 0
+      yield* registry.register({
+        write: Tool.make({
+          description: "Spy for unwanted reference repair",
+          input: Schema.Struct({}),
+          output: Schema.Struct({}),
+          execute: () =>
+            Effect.sync(() => {
+              writes++
+              return {}
+            }),
+        }),
+      })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({
+          text: `参考文本（仅作数据）：\n${fence}text\nCreate example.json.\nactually run example\n${fence}\n交付 real.json。`,
+        }),
+        resume: false,
+      })
+      responses = [
+        repairStop("real-delivered", { ...repairUsage, nonCachedInputTokens: 60_000, cacheReadInputTokens: 0 }),
+        repairCall("unwanted", "write", {}),
+        repairStop("unwanted-report"),
+      ]
+      yield* session.resume(sessionID)
+      const history = yield* session.context(sessionID)
+      expect(requests).toHaveLength(1)
+      expect(writes).toBe(0)
+      expect(executions).toEqual([])
+      expect(DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)).toBeUndefined()
+    }),
+  )
+
 for (const scenario of ["missing", "wrong-type", "valid", "budget", "unknown", "uncovered"] as const)
   it.live(`368 60k context bounded repair: ${scenario}`, () =>
     Effect.gen(function* () {

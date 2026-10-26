@@ -22,7 +22,20 @@ import {
   type ProviderErrorEvent,
 } from "@zaovra-ai/llm"
 import { RequestExecutor } from "@zaovra-ai/llm/route"
-import { Cause, Clock, DateTime, Effect, Fiber, FiberSet, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import {
+  Cause,
+  Clock,
+  DateTime,
+  Deferred,
+  Effect,
+  Fiber,
+  FiberSet,
+  Layer,
+  Option,
+  Schema,
+  Semaphore,
+  Stream,
+} from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { ShellIdentity } from "../../shell-identity"
@@ -468,6 +481,12 @@ const layer = Layer.effect(
         }),
       )
 
+    type TurnBudget = {
+      expired: boolean
+      repairExpired?: boolean
+      model?: { id: string; provider: string }
+      repairScope: Deferred.Deferred<typeof DeliveryContract.Receipt.Type | undefined>
+    }
     const runTurnAttempt = Effect.fn("SessionRunner.runTurn")(function* (
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
@@ -475,7 +494,7 @@ const layer = Layer.effect(
       toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
       recoverOverflow?: typeof compaction.compactAfterOverflow,
       allowCompaction = true,
-      budgetStop?: { expired: boolean; repairExpired?: boolean; model?: { id: string; provider: string } },
+      budgetStop?: TurnBudget,
       networkRecovery?: {
         id: string
         attempt: number
@@ -488,7 +507,6 @@ const layer = Layer.effect(
         >
       },
     ) {
-      yield* plugins.wait(PluginInternal.readyID)
       const placement = yield* getSession(sessionID)
       if (
         placement.location.directory !== location.directory ||
@@ -503,11 +521,13 @@ const layer = Layer.effect(
       ]
         .flatMap((input) => (input.prompt.selection ? [input.prompt.selection] : []))
         .at(-1)
-      const selectedAgent = yield* agents.select(selected?.agent ?? placement.agent)
+      const selectAgent = yield* Effect.cached(agents.select(selected?.agent ?? placement.agent))
       const shell = ShellIdentity.snapshot(yield* config.entries(), location)
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(selectedAgent), sessionID).pipe(
-        Effect.provideService(ShellIdentity.Current, shell),
-      )
+      const initialized = yield* SessionContextEpoch.initialize(
+        db,
+        selectAgent.pipe(Effect.flatMap(loadSystemContext)),
+        sessionID,
+      ).pipe(Effect.provideService(ShellIdentity.Current, shell))
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       const withTool = Semaphore.makeUnsafe(1).withPermit
       let toolsStopped = false
@@ -539,7 +559,19 @@ const layer = Layer.effect(
           toolCallAttempts.count = 0
         }
       }
-      const quality = Config.latest(yield* config.entries(), "experimental")?.quality_progress
+      const configuration = yield* config.entries()
+      const verificationEnabled = Config.latest(configuration, "experimental")?.verification === true
+      const deliveryEnabled = Config.latest(configuration, "experimental")?.delivery_contract !== false
+      // Bind only after safe promotion, before host setup can block. Same-request
+      // continuation keeps the durable start; a new task or mode inherits no cap.
+      if (budgetStop) {
+        const history = deliveryEnabled && !verificationEnabled ? yield* SessionOutcome.history(db, sessionID) : []
+        const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
+        yield* Deferred.succeed(budgetStop.repairScope, receipt?.decision === "repair" ? receipt : undefined)
+      }
+      yield* plugins.wait(PluginInternal.readyID)
+      const selectedAgent = yield* selectAgent
+      const quality = Config.latest(configuration, "experimental")?.quality_progress
       if (quality?.facts !== false) {
         const latest = yield* db
           .select({ id: SessionMessageTable.id })
@@ -644,9 +676,6 @@ const layer = Layer.effect(
       const inputRejections = SessionOutcome.consecutiveInputRejections(durableHistory)
       const previous = context.findLast((message) => message.type !== "system" || message.text !== TextRecovery.ended)
       const outputState = yield* SessionOutputRecovery.read(db, session.id)
-      const configuration = yield* config.entries()
-      const verificationEnabled = Config.latest(configuration, "experimental")?.verification === true
-      const deliveryEnabled = Config.latest(configuration, "experimental")?.delivery_contract !== false
       const outputPolicy = configuration
         .filter((entry): entry is Config.Document => entry.type === "document")
         .flatMap((entry) => entry.info.session_output?.[model.provider]?.[model.id] ?? [])
@@ -2178,8 +2207,9 @@ const layer = Layer.effect(
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
     const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
-      const budgetStop: { expired: boolean; repairExpired?: boolean; model?: { id: string; provider: string } } = {
+      const budgetStop: TurnBudget = {
         expired: false,
+        repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
       }
       const deadline = Effect.gen(function* () {
         while (true) {
@@ -2378,45 +2408,41 @@ const layer = Layer.effect(
           }),
         ),
       )
-      const history = yield* SessionOutcome.history(db, sessionID)
-      const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
-      const bounded =
-        receipt?.decision === "repair"
-          ? Effect.raceFirst(
-              turn,
-              Effect.sleep(
-                Math.max(1, DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - receipt.started)),
-              ).pipe(
-                Effect.tap(() =>
-                  Effect.sync(() => {
-                    budgetStop.repairExpired = true
-                  }),
-                ),
-                Effect.as({ needsContinuation: false, step }),
-              ),
-            ).pipe(
-              Effect.tap(() =>
-                Effect.gen(function* () {
-                  if (!budgetStop.repairExpired) return
-                  const current = yield* SessionOutcome.history(db, sessionID)
-                  const consumed = DeliveryContract.receipt(current, receipt.request) ?? receipt
-                  yield* events.publish(SessionEvent.Synthetic, {
-                    sessionID,
-                    timestamp: yield* DateTime.now,
-                    messageID: SessionMessage.ID.create(),
-                    text:
-                      DeliveryContract.prefix +
-                      JSON.stringify({
-                        ...consumed,
-                        decision: "unverified",
-                        reason: "wall-clock budget exhausted",
-                        missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
-                      }),
-                  })
+      const bounded = Effect.raceFirst(
+        turn,
+        Effect.gen(function* () {
+          const receipt = yield* Deferred.await(budgetStop.repairScope)
+          if (!receipt) return yield* Effect.never
+          yield* Effect.sleep(
+            Math.max(1, DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - receipt.started)),
+          )
+          budgetStop.repairExpired = true
+          return { needsContinuation: false, step }
+        }),
+      ).pipe(
+        Effect.tap(() =>
+          Effect.gen(function* () {
+            if (!budgetStop.repairExpired) return
+            const receipt = yield* Deferred.await(budgetStop.repairScope)
+            if (!receipt) return
+            const current = yield* SessionOutcome.history(db, sessionID)
+            const consumed = DeliveryContract.receipt(current, receipt.request) ?? receipt
+            yield* events.publish(SessionEvent.Synthetic, {
+              sessionID,
+              timestamp: yield* DateTime.now,
+              messageID: SessionMessage.ID.create(),
+              text:
+                DeliveryContract.prefix +
+                JSON.stringify({
+                  ...consumed,
+                  decision: "unverified",
+                  reason: "wall-clock budget exhausted",
+                  missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
                 }),
-              ),
-            )
-          : turn
+            })
+          }),
+        ),
+      )
       return yield* bounded.pipe((turn) =>
         Effect.acquireUseRelease(
           Effect.forkChild(turn, { startImmediately: true }),

@@ -296,9 +296,10 @@ export function requested(messages: readonly SessionMessage.Message[]) {
     withdrawnBy?: SessionMessage.ID
   }[] = []
   const seen = new Set<string>()
+  const ordinary = new Set<string>()
   for (const message of scope) {
-    if (message.type !== "user" || seen.has(message.text)) continue
-    seen.add(message.text)
+    if (message.type !== "user" || seen.has(message.id)) continue
+    seen.add(message.id)
     const text = message.id === user?.id ? message.text : (continuationText(message.text) ?? message.text)
     // An exact, whole-message withdrawal can retire a clause without trusting
     // the model to waive it. Ambiguous corrections remain visible for review.
@@ -307,14 +308,19 @@ export function requested(messages: readonly SessionMessage.Message[]) {
       .match(/^(?:将要求|修改要求)\s*[“「]([^”」]+)[”」]\s*(?:改为|替换为)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)
     const withdrawal =
       replacement?.[1] ?? text.trim().match(/^(?:取消要求|撤销要求)\s*[“「]([^”」]+)[”」][。.!！\s]*$/u)?.[1]
+    // Identical amendments from distinct messages are new actions. Ordinary
+    // repeated prompts still refer to the original clauses and their evidence.
+    if (!withdrawal && ordinary.has(message.text)) continue
+    if (!withdrawal) ordinary.add(message.text)
     const matches = withdrawal ? entries.filter((entry) => entry.text === withdrawal && !entry.withdrawnBy) : []
     if (matches.length === 1) {
       matches[0].withdrawnBy = message.id
       if (!replacement) continue
     }
     const body = replacement && matches.length === 1 ? replacement[2] : text
+    const fences = fencedRanges(message.text)
     let offset = message.text.indexOf(body)
-    for (const part of body.split(/(?<=[。；;\n])/u)) {
+    for (const part of body.split(/(?<=[。；;\r\n])/u)) {
       const clause = part.trim()
       if (clause)
         entries.push({
@@ -324,7 +330,7 @@ export function requested(messages: readonly SessionMessage.Message[]) {
           sourceStart: offset + part.indexOf(clause),
           sourceEnd: offset + part.indexOf(clause) + clause.length,
           version: createHash("sha256").update(message.text).digest("hex"),
-          ...((message.text.slice(0, offset).match(/^\s*```/gm)?.length ?? 0) % 2 === 1 || /^\s*(?:```|>)/u.test(part)
+          ...(fences.some(([start, end]) => offset < end && offset + part.length > start) || /^\s*>/u.test(part)
             ? { data: true }
             : {}),
         })
@@ -337,6 +343,28 @@ export function requested(messages: readonly SessionMessage.Message[]) {
     clauses: entries.map((entry) => entry.text),
     entries,
   }
+}
+
+/** CommonMark fences include their delimiters and run to EOF if unclosed. */
+function fencedRanges(text: string) {
+  const ranges: [number, number][] = []
+  let open: { start: number; marker: string } | undefined
+  for (const line of text.matchAll(/[^\r\n]*(?:\r\n|[\r\n]|$)/g)) {
+    const content = line[0].replace(/(?:\r\n|[\r\n])$/, "")
+    if (open) {
+      const close = content.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+      if (close && close[1][0] === open.marker[0] && close[1].length >= open.marker.length) {
+        ranges.push([open.start, line.index + line[0].length])
+        open = undefined
+      }
+      continue
+    }
+    const fence = content.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (!fence || (fence[1][0] === "`" && fence[2].includes("`"))) continue
+    open = { start: line.index, marker: fence[1] }
+  }
+  if (open) ranges.push([open.start, text.length])
+  return ranges
 }
 
 // Shell completion records are durable execution evidence, independent of observers.
