@@ -274,7 +274,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
   // Provider failures preserve already-durable output but must surface a
   // non-zero process result instead of looking like a successful completion.
   cliIt.concurrent(
-    "unknown stream finish preserves partial output and exits nonzero",
+    "terminal provider failure preserves partial output and exits nonzero",
     ({ llm, zaovra }) =>
       Effect.gen(function* () {
         yield* llm.push(
@@ -283,11 +283,14 @@ describe("zaovra run (non-interactive subprocess)", () => {
             description: "Print deterministic output",
           }),
         )
-        yield* llm.fail("upstream provider exploded mid-stream")
+        yield* llm.error(400, {
+          error: { message: "upstream provider exploded mid-stream", type: "invalid_request_error" },
+        })
         const result = yield* zaovra.run("trigger midstream error", { timeoutMs: 30_000 })
         expect(result.exitCode).not.toBe(0)
         expect(result.stdout).toBe("partial response\n")
-        expect(result.stderr).not.toContain("upstream provider exploded mid-stream")
+        expect(result.stderr).toContain("请求格式或参数不受支持")
+        expect(result.stderr).toContain("HTTP 400")
       }),
     60_000,
   )
@@ -419,7 +422,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
-    "--format json records partial output for an unknown stream finish",
+    "--format json records partial output before a terminal provider failure",
     ({ llm, zaovra }) =>
       Effect.gen(function* () {
         yield* llm.push(
@@ -428,7 +431,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
             description: "Print deterministic output",
           }),
         )
-        yield* llm.fail("provider failed")
+        yield* llm.error(400, { error: { message: "provider failed", type: "invalid_request_error" } })
         const result = yield* zaovra.run("fail after output", { format: "json" })
 
         const events = zaovra.parseJsonEvents(result.stdout)
