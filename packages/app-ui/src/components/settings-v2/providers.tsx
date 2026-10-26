@@ -81,7 +81,10 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
 
   const canDisconnect = (item: ProviderItem) => source(item) !== "env"
 
-  const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
+  const note = (provider: ProviderItem) =>
+    provider.options.supportsOAuth === false
+      ? "provider.connect.method.apiKey"
+      : PROVIDER_NOTES.find((item) => item.match(provider.id))?.key
 
   const isConfigCustom = (providerID: string) => {
     const provider = serverSync().data.config.provider?.[providerID]
@@ -218,7 +221,7 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
                           <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
                         </Show>
                       </div>
-                      <Show when={note(item.id)}>
+                      <Show when={note(item)}>
                         {(key) => <p class="settings-v2-provider-description">{language.t(key())}</p>}
                       </Show>
                     </div>

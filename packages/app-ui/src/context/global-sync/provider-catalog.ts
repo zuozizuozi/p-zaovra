@@ -1,5 +1,6 @@
 import type { IntegrationInfo, Model, ModelV2Info, Provider, ProviderV2Info } from "@zaovra-ai/sdk/v2/client"
 import type { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
+import { providerConnectionMethods } from "@/utils/provider-integration"
 
 export function adaptProviderCatalog(
   providers: ProviderV2Info[],
@@ -16,6 +17,9 @@ export function adaptProviderCatalog(
         env: integration.methods.flatMap((method) => (method.type === "env" ? method.names : [])),
         options: {
           integrationID: integration.id,
+          supportsOAuth: providerConnectionMethods(integration.id, integration.methods).some(
+            (method) => method.type === "oauth",
+          ),
           credentialOnly: true,
           credentialLabels: integration.connections.flatMap((connection) =>
             connection.type === "credential" ? [connection.label] : [],
@@ -38,7 +42,12 @@ export function adaptProviderCatalog(
             ? "api"
             : "config",
         env: integration?.methods.flatMap((method) => (method.type === "env" ? method.names : [])) ?? [],
-        options: { integrationID: provider.integrationID ?? provider.id },
+        options: {
+          integrationID: provider.integrationID ?? provider.id,
+          supportsOAuth: providerConnectionMethods(integration?.id ?? provider.id, integration?.methods).some(
+            (method) => method.type === "oauth",
+          ),
+        },
         models: Object.fromEntries(
           models
             .filter((model) => model.providerID === provider.id && model.enabled && model.status !== "deprecated")
