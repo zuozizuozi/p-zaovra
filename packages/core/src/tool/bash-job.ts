@@ -62,7 +62,8 @@ const layer = Layer.effect(
         if (event.type === SessionExecution.Stopped.type)
           stopped.add(Schema.decodeUnknownSync(SessionExecution.Stopped.data)(event.data).sessionID)
         if (event.type === SessionEvent.PromptAdmitted.type) {
-          const input = Schema.decodeUnknownSync(SessionEvent.PromptAdmitted.data)(event.data)
+          // EventV2 listeners receive decoded payloads, including DateTime values.
+          const input = Schema.decodeUnknownSync(Schema.toType(SessionEvent.PromptAdmitted.data))(event.data)
           if (!input.completion) stopped.delete(input.sessionID)
         }
       }),

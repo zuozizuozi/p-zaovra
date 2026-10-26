@@ -248,6 +248,76 @@ for (const exit of [0, 1])
     })
 
 for (const exit of [0, 1])
+  for (const boundary of [
+    "safe",
+    "stale",
+    "failed",
+    "reduced",
+    "assertion",
+    "sample",
+    "plan",
+    "cwd",
+    "context",
+    "digest",
+    "missing",
+  ])
+    test(`378 replacement after exit ${exit} survives repeated edits with ${boundary} boundary`, () => {
+      const assertion = { path: path.resolve("verify.test.js"), digest: "protected" }
+      const old = [target, assertion]
+      const middle = [{ ...target, digest: "edit-one" }, assertion]
+      const current = [{ ...target, digest: "edit-two" }, assertion]
+      const command = "node fixed.js"
+      const context = ExecutionContext.capture(command, path.dirname(target.path), 5000, false)
+      const first = check("first", { exit, targets: old, assertions: [assertion] })
+      const replacement = check("replacement", { command, targets: old, assertions: [assertion] }, ["first"])
+      const rerun = check("middle", { command, targets: middle, assertions: [assertion] })
+      const final = check("final", {
+        command,
+        exit: boundary === "failed" ? 1 : 0,
+        targets:
+          boundary === "reduced"
+            ? [assertion]
+            : boundary === "missing"
+              ? [{ ...current[0], digest: "" }, assertion]
+              : boundary === "stale"
+                ? middle
+                : current,
+        assertions: [{ ...assertion, digest: boundary === "assertion" ? "changed" : assertion.digest }],
+        ...(boundary === "sample" ? { sample: { id: "other", planDigest: "other" } } : {}),
+        ...(boundary === "plan" ? { sample: { id: "one", planDigest: "wrong" } } : {}),
+        ...(boundary === "cwd" ? { cwd: path.resolve("other") } : {}),
+        ...(boundary === "context"
+          ? {
+              executionContext: {
+                ...context,
+                entry: {
+                  observed: { value: "wrong", source: "observed" },
+                  requested: { value: command, source: "user" },
+                },
+              },
+            }
+          : {}),
+        ...(boundary === "digest" ? { executionContext: context, contractDigest: "wrong" } : {}),
+      })
+      const result = SessionOutcome.derive(
+        [
+          user,
+          assistant([first, review([item(["first"], true)]), replacement]),
+          assistant([rerun]),
+          assistant([final, review([item(["final"])])]),
+        ],
+        false,
+        undefined,
+        current,
+        [],
+      )
+      expect(result.state === "completed_verified").toBe(boundary === "safe")
+      if (boundary === "safe" && exit === 1)
+        expect(result.checks.find((check) => check.callID === "first")?.supersededBy).toBe("final")
+      if (boundary === "stale") expect(result.missing.join(" ")).toContain("stale")
+    })
+
+for (const exit of [0, 1])
   for (const replacement of ["safe", "implicit", "reduced", "assertion", "sample"])
     test(`13 formal replacement after exit ${exit} respects ${replacement} boundaries`, () => {
       const assertion = { path: path.resolve("verify.test.js"), digest: "protected" }

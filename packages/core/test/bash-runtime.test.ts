@@ -35,6 +35,40 @@ import { testEffect } from "./lib/effect"
 import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
+it.effect("378 prompt admission consumes decoded DateTime and clears Stop for new background completion", () =>
+  Effect.gen(function* () {
+    const logs: unknown[] = []
+    yield* withRuntime((directory, sessions) =>
+      Effect.gen(function* () {
+        const bash = yield* BashJob.Service
+        const events = yield* EventV2.Service
+        const database = yield* Database.Service
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        yield* events.publish(SessionExecution.Stopped, { sessionID: session.id })
+        const admitted = yield* sessions.prompt({
+          sessionID: session.id,
+          prompt: { text: "New explicit task" },
+          resume: false,
+        })
+        expect(JSON.stringify(logs)).not.toContain("Event listener failed")
+        yield* SessionInput.promoteSteers(database.db, events, session.id, admitted.admittedSeq)
+        const id = yield* bash.start(
+          "finished fixture",
+          Effect.succeed("done"),
+          { sessionID: session.id, ...toolIdentity, toolCallID: "decoded-admission" },
+          Effect.void,
+        )
+        yield* Effect.yieldNow
+        yield* bash.watch(id)
+        expect(yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))).toMatchObject({
+          completion: { sourceMessageID: admitted.id, jobID: id },
+        })
+      }),
+    ).pipe(Effect.provide(Logger.layer([Logger.make((entry) => logs.push(entry.message))])))
+    expect(JSON.stringify(logs)).not.toContain("Event listener failed")
+  }),
+)
+
 it.effect("S1 completion keeps durable task identity and never notifies a replacement task", () =>
   withRuntime((directory, sessions) =>
     Effect.gen(function* () {

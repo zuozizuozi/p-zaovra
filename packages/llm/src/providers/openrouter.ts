@@ -98,6 +98,7 @@ export const protocol = Protocol.make({
   },
   stream: {
     event: Protocol.jsonEvent(OpenRouterEvent),
+    terminal: OpenAIChat.protocol.stream.terminal,
     initial: (request) => ({
       base: OpenAIChat.protocol.stream.initial(request),
       reasoningStarted: false,
@@ -105,6 +106,10 @@ export const protocol = Protocol.make({
     }),
     step: (state, event) =>
       Effect.gen(function* () {
+        if (state.base.failed || event.error) {
+          const [base, events] = yield* OpenAIChat.protocol.stream.step(state.base, event)
+          return [{ ...state, base }, events] as const
+        }
         const delta = event.choices[0]?.delta
         const details = [...state.details]
         // Reconstruct consecutive unsigned text deltas into their original block.
@@ -162,18 +167,21 @@ export const protocol = Protocol.make({
         )
         return [{ base, reasoningStarted, details }, [...events, ...parsed]] as const
       }),
-    onHalt: (state) => [
-      ...(state.reasoningStarted
-        ? [
-            LLMEvent.reasoningEnd({
-              id: "openrouter-reasoning",
-              providerMetadata:
-                state.details.length > 0 ? { openrouter: { reasoning_details: state.details } } : undefined,
-            }),
-          ]
-        : []),
-      ...(OpenAIChat.protocol.stream.onHalt?.(state.base) ?? []),
-    ],
+    onHalt: (state) =>
+      state.base.failed
+        ? []
+        : [
+            ...(state.reasoningStarted
+              ? [
+                  LLMEvent.reasoningEnd({
+                    id: "openrouter-reasoning",
+                    providerMetadata:
+                      state.details.length > 0 ? { openrouter: { reasoning_details: state.details } } : undefined,
+                  }),
+                ]
+              : []),
+            ...(OpenAIChat.protocol.stream.onHalt?.(state.base) ?? []),
+          ],
   },
 })
 

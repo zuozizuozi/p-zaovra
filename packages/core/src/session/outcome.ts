@@ -768,7 +768,7 @@ export function derive(
           previous.exit === 0 &&
           check.exit === 0 &&
           !check.execution &&
-          fresh(check) &&
+          historicalFreshness(check, contract) &&
           previous.kind === check.kind &&
           JSON.stringify(previous.sample) === JSON.stringify(check.sample) &&
           previous.cwd === check.cwd &&

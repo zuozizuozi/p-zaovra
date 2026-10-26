@@ -445,6 +445,7 @@ const mapUsage = (usage: OpenAIChatEvent["usage"]): Usage | undefined => {
 
 const step = (state: ParserState, event: OpenAIChatEvent) =>
   Effect.gen(function* () {
+    if (state.failed) return [state, []] as const
     if (event.error) {
       const code = event.error.code ?? event.error.type ?? undefined
       const message = event.error.message ?? code ?? "Provider stream error"
