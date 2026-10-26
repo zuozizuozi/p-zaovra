@@ -250,7 +250,7 @@ const echo = Layer.effectDiscard(
 )
 const echoNode = makeLocationNode({ name: "test/session-runner-tools", layer: echo, deps: [ToolRegistry.node] })
 let modelResolveHook = Effect.void
-let currentModel = model
+let currentModel: SessionRunnerModel.ResolvedModel = model
 const models = SessionRunnerModel.layerWith((session) =>
   modelResolveHook.pipe(Effect.as(session.model?.id === "replacement" ? replacementModel : currentModel)),
 )
@@ -313,6 +313,16 @@ let verificationEnabled: boolean | undefined
 let deliveryEnabled: boolean | undefined
 let snapshotCaptures = 0
 let fixtureSnapshot: Snapshot.ID | undefined
+let fixtureDirectory = "/project"
+const fixtureLocation = Layer.succeed(
+  Location.Service,
+  Location.Service.of({
+    get directory() {
+      return AbsolutePath.make(fixtureDirectory)
+    },
+    project: { id: Project.ID.global, directory: AbsolutePath.make("/project") },
+  }),
+)
 const testSnapshots = Layer.effect(
   Snapshot.Service,
   Effect.gen(function* () {
@@ -365,7 +375,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
   [SystemContextRegistry.node, systemContext],
-  [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+  [Location.node, fixtureLocation],
   [SkillGuidance.node, skillGuidance],
   [ReferenceGuidance.node, referenceGuidance],
   [PermissionV2.node, permission],
@@ -423,7 +433,7 @@ const it = testEffect(
       [PluginV2.node, plugins],
       [SessionRunnerModel.node, models],
       [SystemContextRegistry.node, systemContext],
-      [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+      [Location.node, fixtureLocation],
       [SkillGuidance.node, skillGuidance],
       [ReferenceGuidance.node, referenceGuidance],
       [Snapshot.node, testSnapshots],
@@ -468,6 +478,7 @@ const setup = Effect.gen(function* () {
   // below explicitly exercise the default-on bounded delivery path.
   deliveryEnabled = false
   fixtureSnapshot = undefined
+  fixtureDirectory = "/project"
   snapshotCaptures = 0
   // Transcript fixtures isolate durable history from request-local observations.
   // The Q cases below explicitly cover omitted, enabled and disabled observations.
@@ -505,6 +516,253 @@ const providerUnavailable = () =>
     reason: new TransportReason({ message: "Provider unavailable" }),
   })
 
+const repairPricing = {
+  ...ModelV2.Info.empty(ProviderV2.ID.make("fake"), ModelV2.ID.make("fake-model")),
+  cost: [{ input: 1, output: 2, cache: { read: 0.1, write: 1 } }],
+}
+const repairUsage = {
+  inputTokens: 60_000,
+  nonCachedInputTokens: 2_000,
+  cacheReadInputTokens: 58_000,
+  outputTokens: 100,
+}
+const repairStop = (id: string, usage = repairUsage) => [
+  LLMEvent.stepStart({ index: 0 }),
+  LLMEvent.textStart({ id }),
+  LLMEvent.textDelta({ id, text: "Execution finished; report the observed scope." }),
+  LLMEvent.textEnd({ id }),
+  LLMEvent.stepFinish({ index: 0, reason: "stop", usage }),
+  LLMEvent.finish({ reason: "stop" }),
+]
+const repairCall = (id: string, name: string, input: Record<string, unknown>) => [
+  LLMEvent.stepStart({ index: 0 }),
+  LLMEvent.toolCall({ id, name, input }),
+  LLMEvent.stepFinish({ index: 0, reason: "tool-calls", usage: repairUsage }),
+  LLMEvent.finish({ reason: "tool-calls" }),
+]
+
+for (const scenario of ["missing", "wrong-type", "valid", "budget", "unknown", "uncovered"] as const)
+  it.live(`368 60k context bounded repair: ${scenario}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = undefined
+      currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+        pricing: repairPricing,
+      })
+      const dir = yield* Effect.acquireRelease(Effect.promise(tmpdir), (dir) =>
+        Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      fixtureDirectory = dir.path
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ directory: dir.path })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      systemBaseline = "context ".repeat(30_000)
+      const fs = yield* FSUtil.Service
+      if (scenario === "valid" || scenario === "wrong-type")
+        yield* fs.writeFileString(`${dir.path}/result.json`, scenario === "valid" ? "[]" : "{}").pipe(Effect.orDie)
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        write: Tool.make({
+          description: "Write the requested final artifact directly",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ resource: Schema.String, existed: Schema.Boolean }),
+          execute: () =>
+            fs
+              .writeFileString(`${dir.path}/result.json`, "[1,2]")
+              .pipe(
+                Effect.as({ resource: `${dir.path}/result.json`, existed: scenario === "wrong-type" }),
+                Effect.orDie,
+              ),
+        }),
+      })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({
+          text: scenario === "uncovered" ? "解释一个复杂工程观点。" : "交付 `result.json`，顶层为数组。",
+        }),
+        resume: false,
+      })
+      const primary =
+        scenario === "budget" || scenario === "unknown"
+          ? []
+          : Array.from({ length: 19 }, (_, i) => repairCall(`work-${i}`, "echo", { text: `observed-${i}` }))
+      const final =
+        scenario === "unknown"
+          ? fragmentFixture("text", "unknown", ["No usage was reported."]).completeEvents
+          : repairStop("primary")
+      responses = [...primary, final, repairCall("repair-write", "write", {}), repairStop("report")]
+      yield* session.resume(sessionID)
+      const normal = primary.length + 1
+      const history = yield* session.context(sessionID)
+      const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
+      expect(JSON.stringify(requests[0].system).length).toBeGreaterThan(240_000)
+      if (scenario === "missing" || scenario === "wrong-type") {
+        expect(requests).toHaveLength(normal + 2)
+        expect(requests[normal].tools.some((tool) => tool.name === "write")).toBe(true)
+        expect(requests[normal].toolChoice?.type).not.toBe("none")
+        expect(requests[normal].tools.some((tool) => tool.name === "task")).toBe(false)
+        expect(requests.at(-1)!.tools).toEqual([])
+        expect(receipt?.decision).toBe("finished")
+        expect(receipt?.turns).toBe(2)
+        expect(receipt?.spent).toBeLessThanOrEqual(receipt!.allowance!)
+        expect(yield* fs.readFileString(`${dir.path}/result.json`)).toBe("[1,2]")
+        expect(receipt?.missing.join(" ")).not.toContain("JSON type")
+        expect(receipt?.missing.join(" ")).not.toContain("missing or unreadable")
+      } else {
+        expect(requests).toHaveLength(normal)
+        if (scenario === "budget" || scenario === "unknown") {
+          expect(receipt?.decision).toBe("unverified")
+          expect(receipt?.reason).toContain("budget")
+          expect((yield* session.outcome(sessionID)).verification).not.toBe("verified")
+        } else expect(receipt).toBeUndefined()
+      }
+    }),
+  )
+
+for (const scenario of ["turn-cap", "spent", "running", "repair-unknown"] as const)
+  it.live(`368 repair bounds and no recursion: ${scenario}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = undefined
+      currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+        pricing: repairPricing,
+      })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+      response = repairStop("seed")
+      // No usable original allowance yet. Explicitly fixture one authorized repair
+      // receipt, then exercise real dispatch/settlement and durable consumption.
+      yield* session.resume(sessionID)
+      const context = yield* session.context(sessionID)
+      const request = SessionOutcome.requested(context).sourceMessageID!
+      const events = yield* EventV2.Service
+      yield* events.publish(SessionEvent.Synthetic, {
+        sessionID,
+        timestamp: yield* DateTime.now,
+        messageID: SessionMessage.ID.create(),
+        text:
+          DeliveryContract.prefix +
+          JSON.stringify({
+            request,
+            started: yield* Clock.currentTimeMillis,
+            tokens: 1024,
+            decision: "repair",
+            missing: ["required result.json is missing"],
+            allowance: scenario === "spent" ? 0.02 : 1,
+            spent: 0,
+            turns: 0,
+            costs: repairPricing.cost,
+            model: SessionOutputRecovery.identity(model),
+          }),
+      })
+      const jobs = yield* BackgroundJob.Service
+      const runningJob =
+        scenario === "running"
+          ? yield* Effect.acquireRelease(
+              jobs.start({ type: "bash", title: "still running", metadata: { sessionID }, run: Effect.never }),
+              (job) => jobs.cancel(job.id).pipe(Effect.asVoid),
+            )
+          : undefined
+      requests.length = 0
+      const stop =
+        scenario === "repair-unknown"
+          ? fragmentFixture("text", "unreported", ["Unverified."]).completeEvents
+          : scenario === "spent"
+            ? repairStop("expensive", { ...repairUsage, nonCachedInputTokens: 60_000, cacheReadInputTokens: 0 })
+            : repairStop("gap-still-open")
+      responses = [stop, stop, stop, stop]
+      if (runningJob) {
+        const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        while (true) {
+          const receipt = DeliveryContract.receipt(yield* session.context(sessionID), request)
+          if (receipt?.decision === "unverified" && receipt.turns === 1) break
+          yield* Effect.sleep("1 millis")
+        }
+        yield* jobs.cancel(runningJob.id)
+        yield* Fiber.join(run)
+      } else yield* session.resume(sessionID)
+      const saved = yield* session.context(sessionID)
+      const receipt = DeliveryContract.receipt(saved, request)
+      expect(requests).toHaveLength(scenario === "turn-cap" ? 3 : 1)
+      expect(receipt?.decision).toBe("unverified")
+      expect(receipt?.turns).toBe(scenario === "turn-cap" ? 3 : 1)
+      expect(receipt?.missing.join(" ")).toContain("unverified")
+      // Another explicit resume is ordinary user work; it cannot create another
+      // automatic repair cycle or reset the old allowance.
+      response = repairStop("ordinary-resume")
+      responses = undefined
+      const previous = requests.length
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(previous + 1)
+      expect(DeliveryContract.receipt(yield* session.context(sessionID), request)?.turns).toBe(receipt?.turns)
+    }),
+  )
+
+it.effect("368 the absolute repair deadline includes stalled local tools", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    deliveryEnabled = undefined
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+    response = repairStop("seed")
+    yield* session.resume(sessionID)
+    const context = yield* session.context(sessionID)
+    const events = yield* EventV2.Service
+    yield* events.publish(SessionEvent.Synthetic, {
+      sessionID,
+      timestamp: yield* DateTime.now,
+      messageID: SessionMessage.ID.create(),
+      text:
+        DeliveryContract.prefix +
+        JSON.stringify({
+          request: SessionOutcome.requested(context).sourceMessageID,
+          started: yield* Clock.currentTimeMillis,
+          tokens: 1024,
+          decision: "repair",
+          missing: ["required file missing"],
+          allowance: 1,
+          spent: 0,
+          turns: 0,
+          costs: repairPricing.cost,
+          model: SessionOutputRecovery.identity(model),
+        }),
+    })
+    const started = yield* Deferred.make<void>()
+    const registry = yield* ToolRegistry.Service
+    yield* registry.register({
+      write: Tool.make({
+        description: "stalled local write",
+        input: Schema.Struct({}),
+        output: Schema.Struct({}),
+        execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+      }),
+    })
+    response = repairCall("stalled-write", "write", {})
+    requests.length = 0
+    const fiber = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Deferred.await(started)
+    yield* adjust(DeliveryContract.budget.durationMs + 1000)
+    expect(fiber.pollUnsafe()).toBeDefined()
+    yield* Fiber.join(fiber)
+    const receipt = DeliveryContract.receipt(
+      yield* session.context(sessionID),
+      SessionOutcome.requested(context).sourceMessageID,
+    )
+    expect(receipt?.decision).toBe("unverified")
+    expect(receipt?.reason).toContain("wall-clock")
+    expect(receipt?.turns).toBe(1)
+    expect(requests).toHaveLength(1)
+  }),
+)
+
 it.effect("367 cancellation before first review byte cannot restore its allowance on resume", () =>
   Effect.gen(function* () {
     yield* setup
@@ -527,7 +785,12 @@ it.effect("367 cancellation before first review byte cannot restore its allowanc
           request: SessionOutcome.requested(context).userMessageID,
           started: yield* Clock.currentTimeMillis,
           tokens: 1024,
-          decision: "review",
+          decision: "repair",
+          allowance: 1,
+          spent: 0,
+          turns: 0,
+          costs: repairPricing.cost,
+          model: SessionOutputRecovery.identity(model),
           missing: ["permission missing"],
         }),
     })
@@ -598,7 +861,12 @@ it.effect("367 expired lightweight receipt reports its budget gap without a prov
           request: SessionOutcome.requested(context).userMessageID,
           started: (yield* Clock.currentTimeMillis) - DeliveryContract.budget.durationMs - 1,
           tokens: 1024,
-          decision: "review",
+          decision: "repair",
+          allowance: 1,
+          spent: 0,
+          turns: 0,
+          costs: repairPricing.cost,
+          model: SessionOutputRecovery.identity(model),
           missing: ["permission unavailable"],
         }),
     })
@@ -634,7 +902,12 @@ it.effect("367 review wall budget expires even while provider progress continues
           request: SessionOutcome.requested(context).userMessageID,
           started: yield* Clock.currentTimeMillis,
           tokens: 1024,
-          decision: "review",
+          decision: "repair",
+          allowance: 1,
+          spent: 0,
+          turns: 0,
+          costs: repairPricing.cost,
+          model: SessionOutputRecovery.identity(model),
           missing: ["missing file"],
         }),
     })
@@ -663,6 +936,9 @@ for (const usage of ["known", "unknown", "small"] as const)
       yield* setup
       verificationEnabled = false
       deliveryEnabled = undefined
+      currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+        pricing: repairPricing,
+      })
       fixtureSnapshot = Snapshot.ID.make("unchanged")
       const registry = yield* ToolRegistry.Service
       yield* registry.register({
@@ -706,10 +982,10 @@ for (const usage of ["known", "unknown", "small"] as const)
       const receipts = history.filter(
         (message) => message.type === "synthetic" && message.text.startsWith("Delivery contract review:"),
       )
-      expect(receipts).toHaveLength(usage === "known" ? 2 : 1)
+      expect(receipts).toHaveLength(usage === "known" ? 3 : 1)
       if (usage === "known") {
-        expect(requests[2].tools).toEqual([])
-        expect(requests[2].toolChoice).toMatchObject({ type: "none" })
+        expect(requests[2].tools.some((tool) => tool.name === "bash")).toBe(true)
+        expect(requests[2].toolChoice?.type).not.toBe("none")
         expect(requests[2].generation?.maxTokens).toBeLessThanOrEqual(1_024)
       }
       const outcome = yield* session.outcome(sessionID)

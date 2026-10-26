@@ -89,6 +89,7 @@ export class MissingEndpointError extends Schema.TaggedErrorClass<MissingEndpoin
 export type ResolvedModel = Model & {
   readonly inputModalities?: readonly string[]
   readonly catalogModel?: ModelV2.Ref
+  readonly pricing?: ModelV2.Info
 }
 
 export interface Interface {
@@ -301,6 +302,11 @@ export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, creden
           Object.assign(resolved, {
             inputModalities: configured.capabilities.input,
             catalogModel: { id: configured.id, providerID: configured.providerID },
+            pricing: {
+              ...ModelV2.Info.empty(configured.providerID, configured.id),
+              api: { id: configured.api.id, type: "native" as const, settings: {} },
+              cost: configured.cost,
+            },
           }),
         ),
       ),

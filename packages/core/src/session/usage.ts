@@ -62,6 +62,72 @@ export const read = Effect.fn("SessionUsage.read")(function* (
   return { ...summary, lastTurn: sessionID ? summary.lastTurn : null }
 })
 
+/** Price only known settlements belonging to this original user request. A
+ * continuation is not a fresh allowance, and an unknown call earns no credit. */
+export const readRequest = Effect.fn("SessionUsage.readRequest")(function* (
+  sessionID: string,
+  source: string | undefined,
+  model: Model.Info | undefined,
+  before?: string,
+) {
+  const database = yield* Database.Service
+  const rows = yield* database.db
+    .select({
+      aggregate_id: EventTable.aggregate_id,
+      seq: EventTable.seq,
+      type: EventTable.type,
+      data: sql`json_remove(${EventTable.data}, '$.prompt', '$.text', '$.recent', '$.files')`.mapWith(EventTable.data),
+    })
+    .from(EventTable)
+    .where(
+      and(eq(EventTable.aggregate_id, sessionID), inArray(EventTable.type, [...types, "session.next.synthetic.1"])),
+    )
+    .all()
+    .pipe(Effect.orDie)
+  const start = rows.find((row) => row.type === types[5] && row.data.messageID === source)?.seq
+  const end = before ? rows.find((row) => row.data.messageID === before)?.seq : undefined
+  if (start === undefined || (before && end === undefined)) return { amount: 0, calls: 0, unreported: 1, cacheRead: 0 }
+  return requestUsage(
+    rows.filter((row) => row.seq > start && (end === undefined || row.seq < end)),
+    model,
+  )
+})
+
+export function requestUsage(rows: Parameters<typeof summarize>[0], model: Model.Info | undefined) {
+  const catalogs = new Map([[rows[0]?.aggregate_id ?? "", model ? [model] : []]])
+  const starts = [
+    ...new Map(
+      rows
+        .filter((row) => row.type === types[0])
+        .toSorted((a, b) => a.seq - b.seq)
+        .map((row) => [row.data.assistantMessageID, row]),
+    ).values(),
+  ]
+  const requests = starts.map((start) => {
+    const result = summarize(
+      rows.filter((row) => row.data.assistantMessageID === start.data.assistantMessageID),
+      catalogs,
+    )
+    return {
+      amount: result.models.reduce((sum, bucket) => sum + (bucket.estimate ?? 0), 0),
+      known:
+        result.total.unreported === 0 &&
+        result.models.length > 0 &&
+        result.models.every((bucket) => bucket.estimate !== null),
+      tokens: result.total,
+    }
+  })
+  const totals = summarize(rows).total
+  return {
+    amount: requests.reduce((sum, request) => sum + (request.known ? request.amount : 0), 0),
+    calls: totals.calls,
+    unreported: totals.unreported + requests.filter((request) => !request.known && !request.tokens.unreported).length,
+    // An admission estimate may reuse only the last actually reported cache
+    // count, never an assumed future hit ratio or an unknown request's usage.
+    cacheRead: requests.at(-1)?.known ? requests.at(-1)!.tokens.cacheRead : 0,
+  }
+}
+
 type MutableTotals = { -readonly [Key in keyof SessionUsage.Totals]: SessionUsage.Totals[Key] }
 const empty = (): MutableTotals => ({
   input: 0,

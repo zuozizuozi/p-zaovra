@@ -133,11 +133,12 @@ test("367 host file inspection has one total wall budget across stalled reads", 
   expect(results.every((item) => !item.digest && item.problem?.includes("wall-clock"))).toBe(true)
 })
 
-test("367 review allowance counts the whole request, unknown usage grants no budget, and durable receipt survives restore", () => {
-  expect(DeliveryContract.allowance(0, 0, "").output).toBe(0)
-  expect(DeliveryContract.allowance(100_000, 1, "").output).toBe(0)
-  expect(DeliveryContract.allowance(1_000, 0, "x".repeat(10_000)).output).toBe(0)
-  expect(DeliveryContract.allowance(100_000, 0, "small").output).toBe(1_024)
+test("368 cached replay uses configured rates; unknown prices grant no inferred budget; receipts survive restore", () => {
+  const prices = [{ input: 1, output: 2, cache: { read: 0.1, write: 1 } }]
+  expect(DeliveryContract.allowance(0, prices, 0, "").output).toBe(0)
+  expect(DeliveryContract.allowance(1, [], 0, "").output).toBe(0)
+  expect(DeliveryContract.allowance(0.01, prices, 0, "x".repeat(240_000)).output).toBe(0)
+  expect(DeliveryContract.allowance(0.01, prices, 60_000, "x".repeat(240_000)).output).toBe(1_024)
   const marker: SessionMessage.Synthetic = {
     type: "synthetic",
     id: SessionMessage.ID.make("msg_receipt"),
@@ -158,4 +159,35 @@ test("367 review allowance counts the whole request, unknown usage grants no bud
   )
   expect(DeliveryContract.receipt([restored], "msg_user")?.missing).toEqual(["permission denied"])
   expect(DeliveryContract.receipt([restored], "msg_other")).toBeUndefined()
+})
+
+test("368 hard gaps distinguish failed artifacts and missing real execution from unknown coverage", () => {
+  const entries = SessionOutcome.requested([user("实际运行服务。\n解释设计取舍。", "msg_run")]).entries
+  expect(DeliveryContract.gaps(entries, [], [])).toEqual([
+    "requirement 1: actual execution evidence missing: 实际运行服务。",
+  ])
+  expect(
+    DeliveryContract.gaps(
+      entries,
+      [],
+      [{ kind: "test", callID: "import-only", command: "import service", exit: 0, requirements: ["实际运行服务。"] }],
+    ),
+  ).toHaveLength(1)
+  expect(
+    DeliveryContract.gaps(
+      entries,
+      [],
+      [{ kind: "smoke", callID: "real-run", command: "run service", exit: 0, requirements: ["实际运行服务。"] }],
+    ),
+  ).toEqual([])
+  expect(
+    DeliveryContract.gaps(
+      [],
+      [{ requirement: 1, path: "large.json", digest: "", problem: "unverified: byte budget exhausted" }],
+      [],
+    ),
+  ).toEqual([])
+  expect(
+    DeliveryContract.gaps([], [{ requirement: 1, path: "result.json", digest: "", problem: "invalid JSON" }], []),
+  ).toHaveLength(1)
 })

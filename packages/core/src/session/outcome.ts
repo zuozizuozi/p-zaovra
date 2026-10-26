@@ -12,6 +12,7 @@ import type { Database } from "../database/database"
 import type { SessionSchema } from "./schema"
 import { SessionMessageTable } from "./sql"
 import { DeliveryAudit } from "./delivery-audit"
+import { DeliveryContract } from "./delivery-contract"
 import { ExecutionContext } from "./execution-context"
 
 export const RECOVERY_PROMPT =
@@ -969,30 +970,34 @@ export function derive(
             (part) => part.type === "tool" && (part.state.status === "pending" || part.state.status === "running"),
           ))),
   )
-  const lightweightMissing = engineeringWork(turn)
-    ? request.entries
-        .filter((entry) => !entry.withdrawnBy && !entry.data)
-        .flatMap((entry) => {
-          const expected = DeliveryAudit.expected([entry])
-          if (expected.length)
-            return expected.flatMap((item) => {
-              const artifact = artifacts.find((artifact) => artifact.requirement === item.requirement)
-              return artifact?.digest && !artifact.problem
-                ? []
-                : [`requirement ${entry.id}: ${artifact?.problem ?? "unverified: artifact not inspected"}`]
-            })
-          return [...checks.values()].some(
-            (check) =>
-              check.exit === 0 &&
-              !check.execution &&
-              !check.supersededBy &&
-              fresh(check) &&
-              check.requirements?.includes(entry.text),
-          )
-            ? []
-            : [`requirement ${entry.id} unverified: ${entry.text}`]
-        })
-    : []
+  const lightweightMissing =
+    engineeringWork(turn) || DeliveryAudit.expected(request.entries).length > 0
+      ? request.entries
+          .filter((entry) => !entry.withdrawnBy && !entry.data)
+          .flatMap((entry) => {
+            const expected = DeliveryAudit.expected([entry])
+            if (expected.length)
+              return expected.flatMap((item) => {
+                const artifact = artifacts.find((artifact) => artifact.requirement === item.requirement)
+                return artifact?.digest && !artifact.problem
+                  ? []
+                  : [`requirement ${entry.id}: ${artifact?.problem ?? "unverified: artifact not inspected"}`]
+              })
+            return [...checks.values()].some(
+              (check) =>
+                check.exit === 0 &&
+                !check.execution &&
+                !check.supersededBy &&
+                fresh(check) &&
+                check.requirements?.includes(entry.text),
+            )
+              ? []
+              : [`requirement ${entry.id} unverified: ${entry.text}`]
+          })
+      : []
+  const delivery = DeliveryContract.receipt(turn, request.sourceMessageID)
+  const deliveryMissing =
+    delivery?.decision === "unverified" ? delivery.missing.filter((gap) => gap.startsWith("unverified:")) : []
   const base = {
     termination: last?.termination,
     verification: [...checks.values()].some((check) => check.exit !== 0 && !check.supersededBy && !check.execution)
@@ -1011,6 +1016,7 @@ export function derive(
     missing: !verificationEnabled
       ? [
           ...lightweightMissing,
+          ...deliveryMissing,
           ...[...checks.values()]
             .filter((check) => !check.supersededBy)
             .flatMap((check) => {

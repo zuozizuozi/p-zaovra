@@ -268,6 +268,7 @@ describe("SessionRunnerModel", () => {
       const configured = ModelV2.Info.make({
         ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
         capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+        cost: [{ input: 1, output: 2, cache: { read: 0.1, write: 1 } }],
       })
       const session = SessionV2.Info.make({
         id: SessionV2.ID.make("ses_alias"),
@@ -283,6 +284,11 @@ describe("SessionRunnerModel", () => {
       expect(configured.id).not.toBe(resolved.id)
       expect(resolved.inputModalities).toEqual(["text", "image"])
       expect(resolved.catalogModel).toEqual({ id: configured.id, providerID: configured.providerID })
+      expect(resolved.pricing?.cost).toEqual(configured.cost)
+      expect(resolved.pricing?.api.id).toBe(configured.api.id)
+      expect(resolved.pricing?.request.body).toEqual({})
+      expect(resolved.pricing?.request.headers).toEqual({})
+      expect(JSON.stringify(resolved.pricing)).not.toContain("secret")
     }),
   )
 

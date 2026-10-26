@@ -475,7 +475,7 @@ const layer = Layer.effect(
       toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
       recoverOverflow?: typeof compaction.compactAfterOverflow,
       allowCompaction = true,
-      budgetStop?: { expired: boolean; model?: { id: string; provider: string } },
+      budgetStop?: { expired: boolean; repairExpired?: boolean; model?: { id: string; provider: string } },
       networkRecovery?: {
         id: string
         attempt: number
@@ -695,15 +695,10 @@ const layer = Layer.effect(
       const isLastStep = stopReason !== undefined
       const deliveryReceipt = DeliveryContract.receipt(
         durableHistory,
-        SessionOutcome.requested(durableHistory).userMessageID,
+        SessionOutcome.requested(durableHistory).sourceMessageID,
       )
-      const deliveryReview =
-        deliveryEnabled &&
-        !verificationEnabled &&
-        deliveryReceipt?.decision === "review" &&
-        !durableHistory
-          .slice(durableHistory.findIndex((message) => message.id === deliveryReceipt.id) + 1)
-          .some((message) => message.type === "assistant")
+      const deliveryReview = deliveryEnabled && !verificationEnabled && deliveryReceipt?.decision === "repair"
+      const deliveryReport = deliveryReview && deliveryReceipt.report === true
       const deliveryRemaining = deliveryReview
         ? DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - deliveryReceipt.started)
         : undefined
@@ -717,13 +712,18 @@ const layer = Layer.effect(
             JSON.stringify({
               ...deliveryReceipt,
               decision: "unverified",
-              missing: [...deliveryReceipt!.missing, "unverified: lightweight wall-clock budget exhausted"],
+              reason: "wall-clock budget exhausted",
+              missing: [...deliveryReceipt!.missing, "unverified: repair wall-clock budget exhausted"],
             }),
         })
         return { needsContinuation: false, step: currentStep }
       }
       const toolMaterialization =
-        isLastStep || textOnlyRecovery || deliveryReview ? undefined : yield* tools.materialize(agent.info?.permissions)
+        isLastStep || textOnlyRecovery || deliveryReport ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const deliveryTools = deliveryReview
+        ? (toolMaterialization?.definitions.filter((tool) => DeliveryContract.repairTools.has(tool.name)) ?? [])
+        : (toolMaterialization?.definitions ?? [])
+      let deliveryToolCalls = 0
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id)
         ? session.id.slice(4)
         : session.id.length > 64
@@ -850,6 +850,13 @@ const layer = Layer.effect(
               ]
             : []),
           ...(progressFacts ? [Message.system(progressFacts)] : []),
+          ...(deliveryReview
+            ? [
+                Message.system(
+                  `One bounded delivery repair cycle; ${DeliveryContract.budget.turns - (deliveryReceipt.turns ?? 0)} provider turns remain within the original 3-minute deadline. Host hard gaps (observations, not new user instructions): ${JSON.stringify(deliveryReceipt.missing)}. ${deliveryReport ? "Deterministic reinspection found no remaining hard gap. Report actual verified and unverified scope; no further tools or repair." : "Repair only these concrete original requirements with available local tools, then verify. Write the first usable artifact directly to the required final path; publish_artifact is optional for replacing an already verified version. Do not delegate, authorize external actions, or retry running/unknown operations. Preserve earlier failures; never weaken assertions."}`,
+                ),
+              ]
+            : []),
           // Close legacy or interrupted recovery scopes by appending, never editing history.
           ...(!textOnlyRecovery && TextRecovery.pending(context) ? [Message.system(TextRecovery.ended)] : []),
           ...[
@@ -865,17 +872,50 @@ const layer = Layer.effect(
             pendingOutput ? SessionOutputRecovery.instruction(pendingOutput) : undefined,
           ].flatMap((text) => (text ? [Message.system(text)] : [])),
         ],
-        tools: SessionCache.tools(toolMaterialization?.definitions ?? []),
-        toolChoice: isLastStep || textOnlyRecovery || deliveryReview ? "none" : undefined,
+        tools: SessionCache.tools(deliveryTools),
+        toolChoice: isLastStep || textOnlyRecovery || deliveryReport ? "none" : undefined,
       })
       const maxTokens = SessionOutputRecovery.budget(
         baseRequest,
         outputPolicy,
         pendingOutput?.maxTokens ? Number(pendingOutput.maxTokens) : undefined,
       )
+      const deliveryAllowance = deliveryReview
+        ? DeliveryContract.allowance(
+            Math.max(0, (deliveryReceipt.allowance ?? 0) - (deliveryReceipt.spent ?? 0)),
+            deliveryReceipt.costs ?? [],
+            deliveryReceipt.cacheRead ?? 0,
+            {
+              system: baseRequest.system,
+              messages: baseRequest.messages,
+              tools: baseRequest.tools,
+            },
+          )
+        : undefined
+      if (
+        deliveryReview &&
+        (deliveryAllowance!.output < 256 ||
+          (deliveryReceipt.turns ?? 0) >= DeliveryContract.budget.turns ||
+          deliveryReceipt.model !== SessionOutputRecovery.identity(model))
+      ) {
+        yield* events.publish(SessionEvent.Synthetic, {
+          sessionID: session.id,
+          timestamp: yield* DateTime.now,
+          messageID: SessionMessage.ID.create(),
+          text:
+            DeliveryContract.prefix +
+            JSON.stringify({
+              ...deliveryReceipt,
+              decision: "unverified",
+              reason: "repair token allowance exhausted or model changed",
+              missing: [...deliveryReceipt.missing, "unverified: repair budget exhausted"],
+            }),
+        })
+        return { needsContinuation: false, step: currentStep }
+      }
       const request = deliveryReview
         ? LLM.updateRequest(baseRequest, {
-            generation: { maxTokens: Math.max(1, Math.min(DeliveryContract.budget.output, deliveryReceipt.tokens)) },
+            generation: { maxTokens: deliveryAllowance!.output },
           })
         : maxTokens === undefined
           ? baseRequest
@@ -903,14 +943,16 @@ const layer = Layer.effect(
       // A failed compaction can still consume tokens before falling back to the original request.
       if (allowCompaction && (yield* checkBudget(session, model)))
         return { needsContinuation: false, step: currentStep }
-      // Claim the one review durably before dispatch. Cancellation before the
-      // first provider byte must not restore its allowance on resume.
+      // Consume each turn before dispatch. A cancellation leaves consumed state,
+      // never a resumable repair receipt or a renewed original allowance.
       if (deliveryReview)
         yield* events.publish(SessionEvent.Synthetic, {
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text: DeliveryContract.prefix + JSON.stringify({ ...deliveryReceipt, decision: "consumed" }),
+          text:
+            DeliveryContract.prefix +
+            JSON.stringify({ ...deliveryReceipt, turns: (deliveryReceipt.turns ?? 0) + 1, decision: "consumed" }),
         })
       yield* SessionOwnership.check
       // Once sent, host observations are part of the conversation prefix. Keep
@@ -1059,7 +1101,12 @@ const layer = Layer.effect(
               if (!uncertain) hostedOperations.delete(event.id)
             }
             if (event.type !== "tool-call" || event.providerExecuted) return
-            if (!toolMaterialization) {
+            if (
+              !toolMaterialization ||
+              (deliveryReview &&
+                (!deliveryTools.some((tool) => tool.name === event.name) ||
+                  ++deliveryToolCalls + (deliveryReceipt.toolCalls ?? 0) > DeliveryContract.budget.tools))
+            ) {
               yield* publish(
                 LLMEvent.toolResult({
                   id: event.id,
@@ -1292,36 +1339,7 @@ const layer = Layer.effect(
 
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const remaining = deliveryReview
-            ? DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - deliveryReceipt.started)
-            : undefined
-          const stream = yield* restore(
-            remaining === undefined
-              ? providerStream
-              : providerStream.pipe(
-                  Effect.timeoutOrElse({
-                    duration: Math.max(1, remaining),
-                    orElse: () =>
-                      events
-                        .publish(SessionEvent.Synthetic, {
-                          sessionID: session.id,
-                          timestamp: DateTime.nowUnsafe(),
-                          messageID: SessionMessage.ID.create(),
-                          text:
-                            DeliveryContract.prefix +
-                            JSON.stringify({
-                              ...deliveryReceipt,
-                              decision: "unverified",
-                              missing: [
-                                ...deliveryReceipt!.missing,
-                                "unverified: lightweight wall-clock budget exhausted",
-                              ],
-                            }),
-                        })
-                        .pipe(Effect.asVoid),
-                  }),
-                ),
-          ).pipe(Effect.exit)
+          const stream = yield* restore(providerStream).pipe(Effect.exit)
           const failure =
             stream._tag === "Failure" ? Option.getOrUndefined(Cause.findErrorOption(stream.cause)) : undefined
           const rollback =
@@ -1435,7 +1453,7 @@ const layer = Layer.effect(
             yield* withPublication(
               settleInterruptedTurn(session.id, {
                 publisher,
-                budget: budgetStop?.expired,
+                budget: budgetStop?.expired || budgetStop?.repairExpired,
                 requestPerformed: !(subtask?.type === "user" && subtask.subtask),
               }),
             )
@@ -1785,15 +1803,22 @@ const layer = Layer.effect(
           if (
             deliveryEnabled &&
             !verificationEnabled &&
-            !deliveryReceipt &&
-            !needsContinuation &&
-            !recoverText &&
-            !recoverInput &&
             !isLastStep &&
-            stepSettlement?.finish === "stop"
+            (deliveryReview ||
+              (!deliveryReceipt &&
+                !needsContinuation &&
+                !recoverText &&
+                !recoverInput &&
+                stepSettlement?.finish === "stop"))
           ) {
             const messages = yield* restore(SessionOutcome.history(db, session.id))
-            if (SessionOutcome.engineeringWork(messages)) {
+            const requirements = SessionOutcome.requested(messages)
+            if (
+              SessionOutcome.engineeringWork(messages) ||
+              DeliveryAudit.expected(requirements.entries).length ||
+              DeliveryContract.gaps(requirements.entries, [], []).length ||
+              deliveryReview
+            ) {
               const preliminary = SessionOutcome.derive(
                 messages,
                 false,
@@ -1803,8 +1828,6 @@ const layer = Layer.effect(
                 undefined,
                 location.directory,
               )
-              // Bound the entire host inspection, including old evidence and
-              // legacy snapshots; a short model review must not hide unbounded IO.
               const observation = yield* restore(
                 Effect.gen(function* () {
                   const targets = yield* SessionOutcome.fingerprint(
@@ -1817,7 +1840,8 @@ const layer = Layer.effect(
                   const snapshot = preliminary.checks.some((check) => !check.targets?.length)
                     ? yield* snapshots.capture()
                     : undefined
-                  return SessionOutcome.derive(
+                  const artifacts = yield* DeliveryAudit.inspect(fs, location.directory, requirements.entries)
+                  const outcome = SessionOutcome.derive(
                     messages,
                     false,
                     snapshot,
@@ -1825,72 +1849,139 @@ const layer = Layer.effect(
                     [],
                     undefined,
                     location.directory,
-                    yield* DeliveryAudit.inspect(fs, location.directory, SessionOutcome.requested(messages).entries),
+                    artifacts,
                   )
+                  return {
+                    outcome,
+                    hard: DeliveryContract.gaps(
+                      requirements.entries,
+                      artifacts,
+                      outcome.checks.filter(
+                        (check) =>
+                          check.exit !== 0 ||
+                          SessionOutcome.checkFreshness(
+                            check,
+                            targets,
+                            snapshot,
+                            ExecutionContext.current(check.executionContext, ExecutionContext.approved(messages)),
+                          ).fresh,
+                      ),
+                    ),
+                  }
                 }).pipe(Effect.timeoutOption(DeliveryAudit.budget.durationMs)),
               )
-              const outcome = Option.isSome(observation)
-                ? observation.value
-                : {
-                    ...preliminary,
-                    verification: preliminary.verification === "failed" ? "failed" : "unverified",
-                    missing: [...preliminary.missing, "unverified: host inspection budget exhausted"],
-                  }
-              const usage = (yield* SessionUsageQuery.read(session.id).pipe(
-                Effect.provideService(Database.Service, database),
-              )).lastTurn
-              const allowance = DeliveryContract.allowance(usage?.total ?? 0, usage?.unreported ?? 1, {
-                system: baseRequest.system,
-                messages: baseRequest.messages,
-                tools: baseRequest.tools,
-              })
               const pending = (yield* backgroundJobs.list()).some(
                 (job) =>
                   job.status === "running" &&
                   job.metadata?.sessionID === session.id &&
                   (job.type !== "bash" || job.metadata?.kind !== "preview"),
               )
-              const review =
-                Option.isSome(observation) &&
-                outcome.missing.length > 0 &&
-                !outcome.outcomeUnknown &&
-                !pending &&
-                allowance.output >= 256
-              yield* events.publish(SessionEvent.Synthetic, {
-                sessionID: session.id,
-                timestamp: yield* DateTime.now,
-                messageID: SessionMessage.ID.create(),
-                text:
-                  DeliveryContract.prefix +
-                  JSON.stringify({
-                    request: SessionOutcome.requested(messages).userMessageID,
-                    started: yield* Clock.currentTimeMillis,
-                    tokens: allowance.output,
-                    decision: review ? "review" : "unverified",
-                    missing: outcome.missing,
-                    reason: Option.isNone(observation)
-                      ? "host inspection budget exhausted"
-                      : review
-                        ? "one bounded text-only review"
-                        : !outcome.missing.length
-                          ? "no outstanding lightweight gap"
-                          : pending
-                            ? "unfinished background jobs"
-                            : outcome.outcomeUnknown
-                              ? "unknown effects"
-                              : usage?.unreported
-                                ? "unknown usage; no extra allowance"
-                                : "token review budget exhausted",
-                    limits: {
-                      turns: DeliveryContract.budget.turns,
-                      totalTokens: allowance.tokens,
-                      outputTokens: allowance.output,
-                      durationMs: DeliveryContract.budget.durationMs,
-                      toolChecks: DeliveryContract.budget.tools,
-                    },
-                  }),
-              })
-              needsContinuation = review
+              const outcome = Option.isSome(observation) ? observation.value.outcome : preliminary
+              const hard = Option.isSome(observation) ? observation.value.hard : []
+              // No hard gap means no new repair cycle and no extra provider call.
+              if (hard.length || deliveryReview || Option.isNone(observation)) {
+                const pricing = model.pricing
+                  ? { ...model.pricing, cost: deliveryReceipt?.costs ?? model.pricing.cost }
+                  : undefined
+                const usage = yield* SessionUsageQuery.readRequest(
+                  session.id,
+                  requirements.sourceMessageID,
+                  pricing,
+                  deliveryReview
+                    ? messages.find(
+                        (message) =>
+                          message.type === "synthetic" &&
+                          DeliveryContract.receipt([message], requirements.sourceMessageID)?.decision === "repair",
+                      )?.id
+                    : undefined,
+                ).pipe(Effect.provideService(Database.Service, database))
+                const current = deliveryReview
+                  ? yield* SessionUsageQuery.readRequest(session.id, requirements.sourceMessageID, pricing).pipe(
+                      Effect.provideService(Database.Service, database),
+                    )
+                  : usage
+                const allowance = deliveryReceipt?.allowance ?? usage.amount * DeliveryContract.budget.ratio
+                const spent = deliveryReview ? Math.max(0, current.amount - usage.amount) : 0
+                const turns = deliveryReview ? (deliveryReceipt.turns ?? 0) + 1 : 0
+                const toolCalls = (deliveryReceipt?.toolCalls ?? 0) + deliveryToolCalls
+                const estimate = DeliveryContract.allowance(
+                  Math.max(0, allowance - spent),
+                  deliveryReceipt?.costs ?? model.pricing?.cost ?? [],
+                  current.cacheRead,
+                  { system: baseRequest.system, messages: baseRequest.messages, tools: baseRequest.tools },
+                )
+                const report = deliveryReview && !hard.length
+                const continuing =
+                  Option.isSome(observation) &&
+                  !outcome.outcomeUnknown &&
+                  !pending &&
+                  turns < DeliveryContract.budget.turns &&
+                  toolCalls < DeliveryContract.budget.tools &&
+                  (!deliveryReview || current.unreported <= usage.unreported) &&
+                  estimate.output >= 256 &&
+                  (!deliveryReview || !deliveryReport) &&
+                  (hard.length > 0 || (deliveryReview && needsContinuation))
+                const accountingUnknown = deliveryReview && current.unreported > usage.unreported
+                const overBudget = spent > allowance
+                const exhausted =
+                  turns >= DeliveryContract.budget.turns ||
+                  toolCalls >= DeliveryContract.budget.tools ||
+                  estimate.output < 256
+                const reason = Option.isNone(observation)
+                  ? "host inspection budget exhausted"
+                  : pending
+                    ? "unfinished background jobs; no retry"
+                    : outcome.outcomeUnknown
+                      ? "unknown effects; no retry"
+                      : accountingUnknown
+                        ? "unknown repair usage; no further allowance"
+                        : overBudget
+                          ? "reported repair usage exceeded estimated allowance; no further requests"
+                          : exhausted && (hard.length || needsContinuation)
+                            ? "repair budget exhausted"
+                            : report
+                              ? "deterministic hard gaps closed; report remaining scope"
+                              : continuing
+                                ? "one bounded local repair cycle"
+                                : "repair budget exhausted or usage unavailable"
+                yield* events.publish(SessionEvent.Synthetic, {
+                  sessionID: session.id,
+                  timestamp: yield* DateTime.now,
+                  messageID: SessionMessage.ID.create(),
+                  text:
+                    DeliveryContract.prefix +
+                    JSON.stringify({
+                      request: requirements.sourceMessageID,
+                      started: deliveryReceipt?.started ?? (yield* Clock.currentTimeMillis),
+                      tokens: estimate.output,
+                      decision: continuing
+                        ? "repair"
+                        : hard.length || accountingUnknown || overBudget || Option.isNone(observation)
+                          ? "unverified"
+                          : "finished",
+                      missing: [
+                        ...new Set([...hard, ...outcome.missing]),
+                        ...(Option.isNone(observation) ? ["unverified: host inspection budget exhausted"] : []),
+                        ...(accountingUnknown
+                          ? ["unverified: repair usage unavailable; allowance remains consumed"]
+                          : []),
+                        ...(overBudget ? ["unverified: actual repair usage exceeded admission estimate"] : []),
+                        ...(!continuing && hard.length ? ["unverified: bounded repair ended; " + reason] : []),
+                      ],
+                      reason,
+                      turns,
+                      toolCalls,
+                      report,
+                      allowance,
+                      spent,
+                      cacheRead: current.cacheRead,
+                      estimatedCost: estimate.estimatedCost,
+                      model: deliveryReceipt?.model ?? SessionOutputRecovery.identity(model),
+                      costs: deliveryReceipt?.costs ?? model.pricing?.cost ?? [],
+                    }),
+                })
+                needsContinuation = continuing
+              }
             }
           }
           if (
@@ -2073,8 +2164,7 @@ const layer = Layer.effect(
               !exhausted &&
               !incomplete &&
               !publisher.hasProviderError() &&
-              !deliveryReview &&
-              (needsContinuation || recoverText || recoverInput || recoverOutput),
+              (deliveryReview ? needsContinuation : needsContinuation || recoverText || recoverInput || recoverOutput),
             step: subtask ? currentStep - 1 : currentStep,
           }
         }),
@@ -2088,7 +2178,9 @@ const layer = Layer.effect(
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
     const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
-      const budgetStop: { expired: boolean; model?: { id: string; provider: string } } = { expired: false }
+      const budgetStop: { expired: boolean; repairExpired?: boolean; model?: { id: string; provider: string } } = {
+        expired: false,
+      }
       const deadline = Effect.gen(function* () {
         while (true) {
           yield* Effect.sleep("1 second")
@@ -2286,7 +2378,46 @@ const layer = Layer.effect(
           }),
         ),
       )
-      return yield* turn.pipe((turn) =>
+      const history = yield* SessionOutcome.history(db, sessionID)
+      const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
+      const bounded =
+        receipt?.decision === "repair"
+          ? Effect.raceFirst(
+              turn,
+              Effect.sleep(
+                Math.max(1, DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - receipt.started)),
+              ).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    budgetStop.repairExpired = true
+                  }),
+                ),
+                Effect.as({ needsContinuation: false, step }),
+              ),
+            ).pipe(
+              Effect.tap(() =>
+                Effect.gen(function* () {
+                  if (!budgetStop.repairExpired) return
+                  const current = yield* SessionOutcome.history(db, sessionID)
+                  const consumed = DeliveryContract.receipt(current, receipt.request) ?? receipt
+                  yield* events.publish(SessionEvent.Synthetic, {
+                    sessionID,
+                    timestamp: yield* DateTime.now,
+                    messageID: SessionMessage.ID.create(),
+                    text:
+                      DeliveryContract.prefix +
+                      JSON.stringify({
+                        ...consumed,
+                        decision: "unverified",
+                        reason: "wall-clock budget exhausted",
+                        missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
+                      }),
+                  })
+                }),
+              ),
+            )
+          : turn
+      return yield* bounded.pipe((turn) =>
         Effect.acquireUseRelease(
           Effect.forkChild(turn, { startImmediately: true }),
           (fiber) =>

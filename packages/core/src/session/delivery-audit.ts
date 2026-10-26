@@ -94,12 +94,19 @@ export const inspect = (fs: FSUtil.Interface, directory: string, entries: Parame
           if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`))
             return { requirement: item.requirement, path: item.path, digest: "", problem: "outside workspace" }
           const info = yield* fs.stat(target)
-          if (info.type !== "File" || Number(info.size) > budget.bytes || bytesRead + Number(info.size) > budget.bytes)
+          if (info.type !== "File")
             return {
               requirement: item.requirement,
               path: item.path,
               digest: "",
-              problem: "unverified: not a file or byte-check budget exhausted",
+              problem: "required artifact is not a file",
+            }
+          if (Number(info.size) > budget.bytes || bytesRead + Number(info.size) > budget.bytes)
+            return {
+              requirement: item.requirement,
+              path: item.path,
+              digest: "",
+              problem: "unverified: byte-check budget exhausted",
             }
           bytesRead += Number(info.size)
           const bytes = yield* fs.readFile(target)

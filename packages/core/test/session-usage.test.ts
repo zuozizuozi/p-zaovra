@@ -80,6 +80,32 @@ test("one user turn sums tool continuations, separates sources and deduplicates 
   ).toBe(330)
 })
 
+test("368 repair allowance credits known priced requests only, using real cache rates and context tiers", () => {
+  const model = {
+    ...Model.Info.empty(Provider.ID.make("openai"), Model.ID.make("test")),
+    cost: [
+      { input: 1, output: 2, cache: { read: 0.1, write: 1 } },
+      { tier: { type: "context" as const, size: 50_000 }, input: 2, output: 4, cache: { read: 0.2, write: 2 } },
+    ],
+  }
+  const cached = { input: 2_000, output: 100, reasoning: 0, cache: { read: 58_000, write: 0 } }
+  const rows = [
+    start(1, "msg_a"),
+    end(2, "msg_a", { tokens: cached }),
+    start(3, "msg_b"),
+    end(4, "msg_b", { tokens: cached }),
+    start(5, "msg_unknown"),
+    end(6, "msg_unknown", { tokens: cached, usageReported: false }),
+  ]
+  const result = SessionUsageQuery.requestUsage(rows, model)
+  expect(result.amount).toBeCloseTo(0.032)
+  expect(result.calls).toBe(3)
+  expect(result.unreported).toBe(1)
+  expect(result.cacheRead).toBe(0)
+  expect(SessionUsageQuery.requestUsage(rows.slice(0, 4), model).cacheRead).toBe(58_000)
+  expect(SessionUsageQuery.requestUsage(rows, undefined).amount).toBe(0)
+})
+
 test("missing usage, interrupted calls and synthetic delegation are not represented as free calls", () => {
   const result = SessionUsageQuery.summarize([
     start(1, "msg_one"),
