@@ -48,7 +48,7 @@ copying only selected package sources is not a clean installation.
 
 Run the complete core suite with `cd packages/core && bun run test`. Its pretest installs the pinned Chromium
 runtime used by the local browser fixtures. Linux also needs Playwright system libraries; install them once
-with `bunx --no-install playwright-core install-deps chromium` from the repository root (CI handles this).
+with `bun x --no-install playwright-core install-deps chromium` from the repository root (CI handles this).
 Tests use local fixtures and do not need provider API keys.
 
 The `test` workflow runs core, schema, llm, protocol, client and zaovra unit tests on `ubuntu-latest`.
