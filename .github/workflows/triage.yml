@@ -1,8 +1,8 @@
 name: triage
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
 
 jobs:
   triage:

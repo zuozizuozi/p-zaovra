@@ -39,6 +39,24 @@ https://github.com/anomalyco/models.dev
   bun dev
   ```
 
+### Core tests and CI
+
+Use the Bun version pinned in `package.json`, then run `bun install --frozen-lockfile` from the repository root.
+The repository uses the hoisted linker so native install scripts and patched peers resolve consistently.
+Workspace packages, including `@zaovra-ai/plugin/v2/effect/plugin`, must come from this checkout;
+copying only selected package sources is not a clean installation.
+
+Run the complete core suite with `cd packages/core && bun run test`. Its pretest installs the pinned Chromium
+runtime used by the local browser fixtures. Linux also needs Playwright system libraries; install them once
+with `bunx --no-install playwright-core install-deps chromium` from the repository root (CI handles this).
+Tests use local fixtures and do not need provider API keys.
+
+The `test` workflow runs core, schema, llm, protocol, client and zaovra unit tests on `ubuntu-latest`.
+The `typecheck` workflow checks those packages and the additional CLI still referenced by the release scripts.
+Both run on pushes to main, every PR and manual dispatch. Windows remains a local validation target until
+its separate CI matrix is restored. Other inherited workflows are manual-only; enabling one requires checking
+its runner, credentials and external writes first.
+
 ### Running against a different directory
 
 By default, `bun dev` runs Zaovra in the `packages/zaovra` directory. To run it against a different directory or repository:

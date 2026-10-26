@@ -1,8 +1,7 @@
 name: docs-update
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  schedule:
-    - cron: "0 */12 * * *"
   workflow_dispatch:
 
 env:

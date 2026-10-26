@@ -1,8 +1,7 @@
 name: close-issues
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  schedule:
-    - cron: "0 2 * * *" # Daily at 2:00 AM
   workflow_dispatch:
 
 jobs:

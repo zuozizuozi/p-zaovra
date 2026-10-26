@@ -1,11 +1,8 @@
 name: release-github-action
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - "github/**"
+  workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 

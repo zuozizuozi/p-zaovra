@@ -1,11 +1,8 @@
 name: docs-locale-sync
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - packages/website-docs/src/content/docs/*.mdx
+  workflow_dispatch:
 
 jobs:
   sync-locales:

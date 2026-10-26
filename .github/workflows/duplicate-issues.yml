@@ -1,8 +1,8 @@
 name: duplicate-issues
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  issues:
-    types: [opened, edited]
+  workflow_dispatch:
 
 jobs:
   check-duplicates:

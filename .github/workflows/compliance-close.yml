@@ -1,9 +1,7 @@
 name: compliance-close
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  schedule:
-    # Run every 30 minutes to check for expired compliance windows
-    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:

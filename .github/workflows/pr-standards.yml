@@ -1,8 +1,8 @@
 name: pr-standards
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  pull_request_target:
-    types: [opened, edited, synchronize]
+  workflow_dispatch:
 
 jobs:
   check-standards:

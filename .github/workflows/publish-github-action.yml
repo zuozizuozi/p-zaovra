@@ -1,11 +1,8 @@
 name: publish-github-action
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "github-v*.*.*"
-      - "!github-v1"
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 

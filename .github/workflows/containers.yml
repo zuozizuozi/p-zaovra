@@ -1,13 +1,7 @@
 name: containers
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - packages/containers/**
-      - .github/workflows/containers.yml
-      - package.json
   workflow_dispatch:
 
 permissions:

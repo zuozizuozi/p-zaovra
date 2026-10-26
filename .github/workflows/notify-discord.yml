@@ -1,8 +1,8 @@
 name: notify-discord
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  release:
-    types: [released] # fires when a draft release is published
+  workflow_dispatch:
 
 jobs:
   notify:

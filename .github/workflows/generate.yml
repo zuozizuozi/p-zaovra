@@ -1,9 +1,8 @@
 name: generate
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  push:
-    branches:
-      - dev
+  workflow_dispatch:
 
 jobs:
   generate:

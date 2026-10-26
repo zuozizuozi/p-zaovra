@@ -1,10 +1,8 @@
 name: publish-vscode
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "vscode-v*.*.*"
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 

@@ -1,8 +1,8 @@
 name: review
 
+# Upstream automation is manual-only in this fork (revision 372).
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 jobs:
   check-guidelines:

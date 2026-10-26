@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
 import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { Screenshot } from "../src/screenshot"
 
 test("managed screenshot reads enforce session, storage, size, type and retention", async () => {
-  const root = process.env.ZAOVRA_SCREENSHOT_TEST_ROOT
-  if (!root) throw new Error("Set an isolated screenshot test directory")
+  const root = process.env.ZAOVRA_SCREENSHOT_TEST_ROOT ?? os.tmpdir()
   await fs.mkdir(root, { recursive: true })
   const directory = await fs.mkdtemp(path.join(root, "screenshot-"))
   const id = `tool_${Buffer.from("ses_image").toString("hex")}_sample.png`
