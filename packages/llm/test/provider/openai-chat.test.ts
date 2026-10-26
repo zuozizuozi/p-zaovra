@@ -46,6 +46,30 @@ it.effect("S2 preserves invalid request codes from error-only Chat frames", () =
 )
 
 describe("OpenAI Chat route", () => {
+  for (const finish of ["stop", "tool_calls", "length"])
+    it.effect(`373 keeps error terminal after buffered tools and ${finish}`, () =>
+      Effect.gen(function* () {
+        const body = sseEvents(
+          deltaChunk({ tool_calls: [{ index: 0, id: "late-call", function: { name: "lookup", arguments: "{}" } }] }),
+          deltaChunk({}, finish),
+          { error: { message: "terminal fixture", type: "invalid_request_error" } },
+          usageChunk({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 }),
+          deltaChunk({ content: "must not resume" }, "stop"),
+        )
+        const events = Array.from(
+          yield* LLMClient.stream(request).pipe(Stream.runCollect, Effect.provide(fixedResponse(body))),
+        )
+        const failed = events.findIndex(LLMEvent.is.providerError)
+        expect(failed).toBeGreaterThanOrEqual(0)
+        expect(events.slice(failed + 1)).toEqual([])
+        expect(events.filter(LLMEvent.is.toolCall)).toEqual([])
+        expect(events.filter(LLMEvent.is.finish)).toEqual([])
+        const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
+        expect(response.finishReason).toBe("error")
+        expect(response.toolCalls).toEqual([])
+      }),
+    )
+
   it.effect("K2 retains response model and fingerprint even when trailing usage omits them", () =>
     Effect.gen(function* () {
       const events = yield* LLMClient.stream(request).pipe(

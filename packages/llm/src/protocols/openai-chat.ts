@@ -177,6 +177,7 @@ type OpenAIChatEvent = Schema.Schema.Type<typeof OpenAIChatEvent>
 type OpenAIChatRequestMessage = LLMRequest["messages"][number]
 
 interface ParserState {
+  readonly failed?: boolean
   readonly model?: string
   readonly systemFingerprint?: string
   readonly tools: ToolStream.State<number>
@@ -448,7 +449,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
       const code = event.error.code ?? event.error.type ?? undefined
       const message = event.error.message ?? code ?? "Provider stream error"
       return [
-        state,
+        { ...state, failed: true },
         [
           LLMEvent.providerError({
             message,
@@ -532,6 +533,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
   })
 
 const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
+  if (state.failed) return []
   const events: LLMEvent[] = []
   const hasToolCalls = state.toolCallEvents.length > 0
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason

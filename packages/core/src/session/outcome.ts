@@ -528,6 +528,17 @@ export function checkFreshness(
   }
 }
 
+// Historical fingerprints describe their execution-time artifact state. Keep
+// missing fingerprints and execution-contract violations invalid at every edge.
+function historicalFreshness(check: SessionOutcome.Check, contract: ReturnType<typeof ExecutionContext.approved>) {
+  return checkFreshness(
+    check,
+    check.targets ?? [],
+    check.snapshot,
+    ExecutionContext.current(check.executionContext, contract),
+  ).fresh
+}
+
 // Only local tool results establish creation. Unknown origins stay protected;
 // observing an existing file before a delete/recreate must not grant an exemption.
 function taskCreatedFiles(messages: readonly SessionMessage.Message[], directory?: string) {
@@ -738,14 +749,13 @@ export function derive(
             )
               failedAssertions.delete(file)
           }
-        // Only a later, current check in the same category and scope can replace
-        // a check that never ran or produced no usable report. Assertion failures
-        // require an exact rerun or explicit revalidation with unchanged assertions.
+        // Preserve historical replacement edges. Their final endpoint is checked
+        // for current freshness below; editing files cannot erase a valid edge.
         for (const [key, previous] of checks) {
           if (
             (previous.exit !== 0 || ExecutionContext.problems(previous.executionContext).length > 0) &&
             previous.targets?.length &&
-            revalidatesCheck(check, previous, part, created, fresh(check))
+            revalidatesCheck(check, previous, part, created, historicalFreshness(check, contract))
           )
             checks.set(key, { ...previous, supersededBy: check.callID })
         }
@@ -1175,7 +1185,22 @@ export function reviewContinuityProblems(
         for (const tool of tools.slice(index + 1))
           for (const next of toolChecks(tool)) {
             if (lineage.some((previous) => next.callID === previous.callID)) continue
-            if (!lineage.some((previous) => revalidatesCheck(next, previous, tool, created, fresh(next)))) continue
+            // Intermediate checks describe historical replacement identity. The
+            // selected endpoint must still be fresh against the current files.
+            if (
+              !lineage.some((previous) =>
+                revalidatesCheck(
+                  next,
+                  previous,
+                  tool,
+                  created,
+                  next.callID === check.callID
+                    ? fresh(next)
+                    : historicalFreshness(next, ExecutionContext.approved(messages)),
+                ),
+              )
+            )
+              continue
             if (next.callID === check.callID) return true
             lineage.push(next)
           }
