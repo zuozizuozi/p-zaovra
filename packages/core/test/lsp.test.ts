@@ -48,6 +48,8 @@ it.live(
         expect(yield* lsp.changed(file)).toEqual({ diagnostics: {}, failed: ["diagnostic timeout"] })
         expect(Date.now() - started).toBeLessThan(25_000)
         const pid = Number(yield* Effect.promise(() => Bun.file(pidFile).text()))
+        // The POSIX signal is asynchronous; observe exit after the child can be reaped.
+        yield* Effect.sleep("100 millis")
         expect(() => process.kill(pid, 0)).toThrow()
         expect(yield* Effect.promise(() => Bun.file(file).text())).toBe("saved content")
         yield* Effect.promise(() =>

@@ -5,6 +5,7 @@ import { SessionMessage } from "../src/session/message"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
 import { SessionSchema } from "../src/session/schema"
+import { evidenceScope } from "./fixture/evidence-scope"
 
 const time = { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) }
 const user = (id: string, text: string): SessionMessage.User => ({
@@ -74,6 +75,8 @@ const review = (message: SessionMessage.User, evidence: string, clauses = [1, 2]
         items: clauses.map((requirement) => ({
           requirement,
           evidence: [evidence],
+          coverage: [evidenceScope(evidence)],
+          conditions: [],
           status: "verified",
           note: "observed",
         })),
@@ -198,7 +201,9 @@ test("explicit amendment labels retain the source while ordinary new requests re
   for (const text of ["补充要求：增加暂停按钮。", "追加要求：增加暂停按钮。", "continue, add a pause button."])
     expect(SessionOutcome.requested([original, user("amendment", text)]).sourceMessageID).toBe(original.id)
   for (const text of ["新任务：交付新的 README.md。", "解释如何增加暂停按钮。"])
-    expect(SessionOutcome.requested([original, user("new", text)]).sourceMessageID).toBe(SessionMessage.ID.make("msg_new"))
+    expect(SessionOutcome.requested([original, user("new", text)]).sourceMessageID).toBe(
+      SessionMessage.ID.make("msg_new"),
+    )
 })
 
 test("changed attachments are a new request, not an exact retry", () => {

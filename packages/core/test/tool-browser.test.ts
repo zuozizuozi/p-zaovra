@@ -55,7 +55,7 @@ test("browser integration on the Desktop Node runtime", async () => {
     "esbuild",
     path.dirname(Bun.resolveSync("vite", path.resolve(import.meta.dir, "../../app-ui"))),
   )
-  const { build } = await import(pathToFileURL(bundler).href)
+  const { build, stop } = await import(pathToFileURL(bundler).href)
   await build({
     entryPoints: [path.join(import.meta.dir, "tool-browser.node.ts")],
     platform: "node",
@@ -92,6 +92,11 @@ test("browser integration on the Desktop Node runtime", async () => {
       },
     ],
   })
-  const child = Bun.spawn(["node", output], { stdout: "inherit", stderr: "inherit", env: { ...Bun.env } })
+  await stop()
+  const child = Bun.spawn(["node", "--test", "--test-concurrency=1", "--test-force-exit", output], {
+    stdout: "inherit",
+    stderr: "inherit",
+    env: { ...Bun.env },
+  })
   if ((await child.exited) !== 0) throw new Error("Node browser integration failed")
 }, 60000)

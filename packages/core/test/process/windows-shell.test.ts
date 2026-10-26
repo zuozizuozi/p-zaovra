@@ -73,7 +73,9 @@ describe.skipIf(process.platform !== "win32")("Windows shell boundary", () => {
     Effect.gen(function* () {
       const service = yield* AppProcess.Service
       const rejected = yield* Effect.exit(
-        service.run(AppProcess.shellCommand("node -e \"\nconsole.log('CHECK_RAN');\n\"", process.cwd(), "cmd.exe")),
+        Effect.suspend(() =>
+          service.run(AppProcess.shellCommand("node -e \"\nconsole.log('CHECK_RAN');\n\"", process.cwd(), "cmd.exe")),
+        ),
       )
       expect(Exit.isFailure(rejected)).toBe(true)
       const result = yield* service.run(AppProcess.shellCommand("Write-Output 'CHECK_RAN'", process.cwd()))

@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import path from "node:path"
 import { Database } from "@zaovra-ai/core/database/database"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -31,7 +32,7 @@ describe("WorkRemoteJob", () => {
       const operation = Work.WorkerCommandOperation.make({
         type: "command",
         command: "bun test",
-        location: { directory: AbsolutePath.make("C:\\project") },
+        location: { directory: AbsolutePath.make(path.resolve("project")) },
         timeoutMs: 30_000,
         maxOutputBytes: 4_096,
         artifactCapture: { type: "git_diff", baseRevision, maxBytes: 1024 * 1024 },
@@ -211,7 +212,7 @@ describe("WorkRemoteJob", () => {
       const operation = Work.WorkerCommandOperation.make({
         type: "command",
         command: "dangerous-command",
-        location: { directory: AbsolutePath.make("C:\\project") },
+        location: { directory: AbsolutePath.make(path.resolve("project")) },
         timeoutMs: 30_000,
         maxOutputBytes: 4_096,
       })
@@ -244,7 +245,7 @@ describe("WorkRemoteJob", () => {
         sessionID: SessionV2.ID.make("ses_remote_agent"),
         agent: AgentV2.ID.make("build"),
         prompt: "Implement the Task",
-        location: { directory: AbsolutePath.make("C:\\project") },
+        location: { directory: AbsolutePath.make(path.resolve("project")) },
         artifactCapture: { type: "git_diff", baseRevision, maxBytes: 1024 * 1024 },
       })
       const resultFiber = yield* jobs
@@ -483,7 +484,7 @@ function commandOperation(command: string) {
   return Work.WorkerCommandOperation.make({
     type: "command",
     command,
-    location: { directory: AbsolutePath.make("C:\\project") },
+    location: { directory: AbsolutePath.make(path.resolve("project")) },
     timeoutMs: 30_000,
     maxOutputBytes: 4_096,
   })
@@ -502,7 +503,7 @@ function setup() {
         capabilities: ["execute"],
         workspace_roots: ["/project"],
         execution_mode: "remote",
-        location_mappings: [{ controllerRoot: "C:\\project", workerRoot: "/project" }],
+        location_mappings: [{ controllerRoot: path.resolve("project"), workerRoot: "/project" }],
         time_created: 0,
         time_heartbeat: 0,
         expires_at: 60_000,
@@ -514,7 +515,7 @@ function setup() {
       .insert(WorkGoalTable)
       .values({
         id: goalID,
-        directory: AbsolutePath.make("C:\\project"),
+        directory: AbsolutePath.make(path.resolve("project")),
         objective: "Run verification remotely",
         acceptance_criteria: [],
         worker_id: workerID,

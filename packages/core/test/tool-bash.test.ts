@@ -961,6 +961,12 @@ describe("BashTool", () => {
                   value: [
                     { type: "text", text: "core-bash" },
                     { type: "text", text: "Command exited with code 0." },
+                    {
+                      type: "text",
+                      text: expect.stringMatching(
+                        /^\nCommand log: ev_[a-f0-9]{64} \(evidence_read \/ evidence_search\)$/,
+                      ),
+                    },
                   ],
                 })
                 expect(settled.output?.structured).toMatchObject({

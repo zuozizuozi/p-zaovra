@@ -9,7 +9,7 @@ test("browser network authorization on the Desktop Node runtime", async () => {
     "esbuild",
     path.dirname(Bun.resolveSync("vite", path.resolve(import.meta.dir, "../../app-ui"))),
   )
-  const { build } = await import(pathToFileURL(bundler).href)
+  const { build, stop } = await import(pathToFileURL(bundler).href)
   await build({
     entryPoints: [path.join(import.meta.dir, "browser-network.node.ts")],
     bundle: true,
@@ -33,6 +33,11 @@ test("browser network authorization on the Desktop Node runtime", async () => {
       },
     ],
   })
-  const child = Bun.spawn(["node", output], { stdout: "inherit", stderr: "inherit", env: { ...Bun.env } })
+  await stop()
+  const child = Bun.spawn(["node", "--test", "--test-concurrency=1", "--test-force-exit", output], {
+    stdout: "inherit",
+    stderr: "inherit",
+    env: { ...Bun.env },
+  })
   expect(await child.exited).toBe(0)
 }, 90000)

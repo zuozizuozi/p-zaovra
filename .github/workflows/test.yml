@@ -30,6 +30,18 @@ jobs:
           git config --global user.name "Zaovra tests"
       - name: Install browser test runtime
         run: bun x --no-install playwright-core install --with-deps --only-shell chromium
+      - name: Allow the test Chromium sandbox on Ubuntu
+        # Ubuntu's AppArmor policy blocks downloaded Chromium's user namespaces.
+        # Scope the exception to Playwright's headless binary on this ephemeral runner.
+        run: |
+          cat <<EOF | sudo tee /etc/apparmor.d/zaovra-test-chromium
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile zaovra-test-chromium "$HOME/.cache/ms-playwright/**/chrome-headless-shell" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
       - name: Run package unit tests
         shell: bash
         run: |

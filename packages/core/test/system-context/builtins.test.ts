@@ -174,7 +174,7 @@ for (const shell of process.platform === "win32" ? ["powershell", "cmd"] : ["/bi
     Effect.gen(function* () {
       const registry = yield* SystemContextRegistry.Service
       expect((yield* SystemContext.initialize(yield* registry.load())).baseline).toContain(
-        ShellIdentity.guidance(ShellIdentity.resolve(shell, "project")),
+        ShellIdentity.guidance(ShellIdentity.resolve(shell, "project", false)),
       )
     }),
   )

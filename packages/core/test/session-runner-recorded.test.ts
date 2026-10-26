@@ -40,16 +40,25 @@ import { Effect, Layer } from "effect"
 import path from "node:path"
 import { testEffect } from "./lib/effect"
 
-const cassette =
-  process.env.RECORD === "true"
-    ? HttpRecorderInternal.cassetteLayer("session-runner/openai-chat-streams-text-current", {
-        directory: path.resolve(import.meta.dir, "fixtures/recordings"),
-        mode: "record",
-      })
-    : HttpRecorderInternal.cassetteLayer("session-runner/openai-chat-streams-text-current", {
-        mode: "replay",
-        directory: path.resolve(import.meta.dir, "fixtures/recordings"),
-      })
+const cassette = HttpRecorderInternal.cassetteLayer("session-runner/openai-chat-streams-text-current", {
+  mode: "replay",
+  directory: path.resolve(import.meta.dir, "fixtures/recordings"),
+  // This cassette tests HTTP transport and event persistence. System wording and
+  // host observations have their own runner/context tests and change over time.
+  match: (incoming, recorded) =>
+    Bun.deepEquals({ ...incoming, body: stableBody(incoming.body) }, { ...recorded, body: stableBody(recorded.body) }),
+})
+
+function stableBody(body: string) {
+  const value = JSON.parse(body) as { messages: { role: string; content: string }[] }
+  expect(value.messages.some((message) => message.role === "system" && message.content.length > 0)).toBe(true)
+  return {
+    ...value,
+    messages: value.messages.map((message) =>
+      message.role === "system" ? { ...message, content: "<system context>" } : message,
+    ),
+  }
+}
 const executor = RequestExecutor.layer.pipe(Layer.provide(cassette))
 const client = LLMClient.layer.pipe(Layer.provide(executor))
 const permission = Layer.succeed(

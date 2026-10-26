@@ -27,7 +27,7 @@ test("combined recovery survives a committed compaction crash without replaying 
         summaries++
         return done({
           content:
-            "## Objective\nORIGINAL_REQUIREMENT\n## Important Details\nLATEST_CONSTRAINT preserve BOM\n## Work State\n### Completed\nAppend done once\n### Active\nResume\n### Blocked\nNone\n## Next Move\nResume explicitly\n## Relevant Files\nside-effect.txt",
+            "## Objective\nORIGINAL_REQUIREMENT\n## Important Details\nLATEST_CONSTRAINT preserve BOM\n## Work State\n### Completed\nAppend done once; RETAINED_TAIL before crash\n### Active\nResume\n### Blocked\nNone\n## Next Move\nResume explicitly\n## Relevant Files\nside-effect.txt",
         })
       }
       turns++
@@ -77,6 +77,7 @@ test("combined recovery survives a committed compaction crash without replaying 
   )
   for (const phase of ["before", "inspect", "resume"]) {
     const count = bodies.length
+    const previousTurns = turns
     const child = Bun.spawn(
       [process.execPath, path.join(import.meta.dir, "fixture/session-combined-recovery.ts"), phase, tmp.path],
       {
@@ -99,6 +100,7 @@ test("combined recovery survives a committed compaction crash without replaying 
     if (phase === "before") expect(code).not.toBe(0)
     if (phase !== "before") expect(code, `${stdout}\n${stderr}`).toBe(0)
     if (phase === "inspect") expect(bodies.length).toBe(count)
+    if (phase === "resume") expect(turns - previousTurns).toBe(1)
   }
   const before = await Bun.file(path.join(tmp.path, "before.json")).json()
   const inspect = await Bun.file(path.join(tmp.path, "inspect.json")).json()
@@ -118,5 +120,4 @@ test("combined recovery survives a committed compaction crash without replaying 
   expect(bodies.at(-1)).toContain("ORIGINAL_REQUIREMENT")
   expect(await Bun.file(path.join(tmp.path, "side-effect.txt")).text()).toBe("once\n")
   expect(resumed.usage.total.total - before.usage.total.total).toBe(110)
-  expect(turns).toBe(6)
 }, 120_000)
