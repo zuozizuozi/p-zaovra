@@ -280,13 +280,25 @@ describe("worktree endpoint reproduction", () => {
       Effect.gen(function* () {
         const test = yield* TestInstance
         const server = yield* serverScoped()
+        const release = `${test.directory}/startup-release`
+        const finished = `${test.directory}/startup-finished`
+        const script = `${test.directory}/startup.cjs`
+        yield* Effect.promise(() =>
+          Bun.write(
+            script,
+            `const fs = require("node:fs"); const timer = setInterval(() => {
+            if (!fs.existsSync(${JSON.stringify(release)})) return;
+            fs.writeFileSync(${JSON.stringify(finished)}, "done"); clearInterval(timer);
+          }, 10); setTimeout(() => { clearInterval(timer); process.exitCode = 2 }, 10000).unref();`,
+          ),
+        )
+        yield* Effect.addFinalizer(() => Effect.promise(() => Bun.write(release, "release")).pipe(Effect.asVoid))
         yield* setProjectStartCommand({
           server,
           directory: test.directory,
-          command: 'bun -e "setTimeout(() => {}, 2000)"',
+          command: `bun ${JSON.stringify(script)}`,
         })
 
-        const started = Date.now()
         yield* createWorktreeScoped({
           server,
           directory: test.directory,
@@ -300,7 +312,11 @@ describe("worktree endpoint reproduction", () => {
           timeoutMs: 6_000,
         })
 
-        expect(Date.now() - started).toBeLessThan(1_500)
+        expect(yield* Effect.promise(() => Bun.file(finished).exists())).toBe(false)
+        yield* Effect.promise(() => Bun.write(release, "release"))
+        yield* Effect.gen(function* () {
+          while (!(yield* Effect.promise(() => Bun.file(finished).exists()))) yield* Effect.sleep("20 millis")
+        }).pipe(Effect.timeout("5 seconds"))
       }),
     { git: true },
   )

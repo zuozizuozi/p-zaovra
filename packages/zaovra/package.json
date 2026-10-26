@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "bun test --timeout 30000 --only-failures",
+    "test": "bun test --max-concurrency 2 --timeout 30000 --only-failures",
     "bench:test": "bun run script/bench-test-suite.ts",
     "profile:test": "bun run script/profile-test-files.ts",
     "build": "bun run script/build.ts",
