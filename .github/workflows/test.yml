@@ -29,7 +29,7 @@ jobs:
           git config --global user.email "test@zaovra.local"
           git config --global user.name "Zaovra tests"
       - name: Install browser test runtime
-        run: bun x --no-install playwright-core install --with-deps chromium
+        run: bun x --no-install playwright-core install --with-deps --only-shell chromium
       - name: Run package unit tests
         shell: bash
         run: |
