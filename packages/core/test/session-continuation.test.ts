@@ -162,9 +162,12 @@ test("multiple continues, Desktop inspect, and exact retry keep the same source"
 
 test("explicit substantive continuation appends requirements with stable original IDs", () => {
   const amendment = user("amend", "继续，再增加暂停按钮。")
-  const request = SessionOutcome.requested([original, amendment, user("retry", amendment.text), next])
+  const request = SessionOutcome.requested([original, amendment, amendment, next])
   expect(request.sourceMessageID).toBe(original.id)
   expect(request.clauses).toEqual(["实现 CSV 往返；", "交付 README.md。", "再增加暂停按钮。"])
+  expect(
+    SessionOutcome.requested([original, amendment, user("second-amendment", amendment.text)]).entries.at(-1),
+  ).toMatchObject({ id: 4, sourceMessageID: "msg_second-amendment", text: "再增加暂停按钮。" })
   expect(
     result([
       original,
