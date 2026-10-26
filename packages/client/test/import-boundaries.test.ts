@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 
 const directory = resolve(import.meta.dir, "..")
-const effect = realpathSync(resolve(import.meta.dir, "../node_modules/effect"))
+const effect = realpathSync(resolve(Bun.resolveSync("effect/package.json", directory), ".."))
 const schema = resolve(import.meta.dir, "../../schema")
 const protocol = resolve(import.meta.dir, "../../protocol")
 const core = resolve(import.meta.dir, "../../core")
