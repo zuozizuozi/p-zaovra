@@ -1,4 +1,12 @@
-import type { IntegrationInfo, ZaovraClient } from "@zaovra-ai/sdk/v2"
+import type { IntegrationInfo, IntegrationMethod, ZaovraClient } from "@zaovra-ai/sdk/v2"
+
+export function providerConnectionMethods(integrationID: string, methods: readonly IntegrationMethod[] = []) {
+  // Also protect a desktop connected to an older server that still advertises ChatGPT subscription login.
+  return methods.filter(
+    (method): method is Extract<IntegrationMethod, { type: "key" | "oauth" }> =>
+      method.type === "key" || (method.type === "oauth" && integrationID !== "openai"),
+  )
+}
 
 export function integrationLocation(directory?: string) {
   return directory ? { directory } : undefined
@@ -17,17 +25,16 @@ export async function resolveProviderIntegration(client: ZaovraClient, providerI
 }
 
 export function credentialConnectionIDs(integration: IntegrationInfo | null | undefined) {
-  return integration?.connections.flatMap((connection) => (connection.type === "credential" ? [connection.id] : [])) ?? []
+  return (
+    integration?.connections.flatMap((connection) => (connection.type === "credential" ? [connection.id] : [])) ?? []
+  )
 }
 
 export async function disconnectProviderCredentials(client: ZaovraClient, providerID: string, directory?: string) {
   const resolved = await resolveProviderIntegration(client, providerID, directory)
   await Promise.all(
     credentialConnectionIDs(resolved.integration).map((credentialID) =>
-      client.v2.credential.remove(
-        { credentialID, location: resolved.location },
-        { throwOnError: true },
-      ),
+      client.v2.credential.remove({ credentialID, location: resolved.location }, { throwOnError: true }),
     ),
   )
   return resolved

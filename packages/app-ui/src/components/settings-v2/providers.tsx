@@ -67,6 +67,7 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   }
 
   const type = (item: ProviderItem) => {
+    if (item.options.credentialOnly) return language.t("settings.providers.tag.saved")
     const current = source(item)
     if (current === "env") return language.t("settings.providers.tag.environment")
     if (current === "api") return language.t("provider.connect.method.apiKey")
@@ -162,6 +163,11 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
                       />
                       <div class="settings-v2-provider-main">
                         <span class="settings-v2-provider-name truncate">{item.name}</span>
+                        <Show when={item.options.credentialOnly && Array.isArray(item.options.credentialLabels)}>
+                          <span class="text-12-regular text-v2-text-text-weak">
+                            {(item.options.credentialLabels as string[]).join(", ")}
+                          </span>
+                        </Show>
                         <Tag>{type(item)}</Tag>
                       </div>
                     </div>

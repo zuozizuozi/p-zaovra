@@ -73,6 +73,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   }
 
   const type = (item: ProviderItem) => {
+    if (item.options.credentialOnly) return language.t("settings.providers.tag.saved")
     const current = source(item)
     if (current === "env") return language.t("settings.providers.tag.environment")
     if (current === "api") return language.t("provider.connect.method.apiKey")
@@ -167,6 +168,11 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
                     <div class="flex items-center gap-3 min-w-0">
                       <ProviderIcon id={item.id} class="size-5 shrink-0 icon-strong-base" />
                       <span class="text-14-medium text-text-strong truncate">{item.name}</span>
+                      <Show when={item.options.credentialOnly && Array.isArray(item.options.credentialLabels)}>
+                        <span class="text-12-regular text-text-weak">
+                          {(item.options.credentialLabels as string[]).join(", ")}
+                        </span>
+                      </Show>
                       <Tag>{type(item)}</Tag>
                     </div>
                     <Show when={protocolEditable(serverSync().data.config.provider?.[item.id])}>

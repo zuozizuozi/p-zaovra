@@ -11,6 +11,47 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Integration.node, Credential.node, EventV2.node])))
 
 describe("Integration", () => {
+  it.effect("keeps credentials from a removed OAuth method visible and removable without resolving them", () =>
+    Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const credentials = yield* Credential.Service
+      const integrationID = Integration.ID.make("unsupported-oauth")
+      yield* integrations.transform((editor) =>
+        editor.method.update({ integrationID, method: { type: "key", label: "API key" } }),
+      )
+      const saved = yield* credentials.create({
+        integrationID,
+        label: "Saved subscription",
+        value: Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("removed-subscription"),
+          access: "old-access",
+          refresh: "old-refresh",
+          expires: 0,
+        }),
+      })
+      const connection = { type: "credential" as const, id: saved.id, label: saved.label }
+      expect((yield* integrations.get(integrationID))?.connections).toEqual([connection])
+      expect(
+        (yield* integrations.list({ usableConnectionsOnly: true })).find((item) => item.id === integrationID)
+          ?.connections,
+      ).toEqual([])
+      expect(yield* integrations.connection.active(integrationID)).toBeUndefined()
+      expect(yield* integrations.connection.resolve(connection)).toBeUndefined()
+      expect(yield* credentials.get(saved.id)).toEqual(saved)
+      yield* integrations.connection.remove(saved.id)
+      expect(yield* credentials.get(saved.id)).toBeUndefined()
+      expect((yield* integrations.get(integrationID))?.connections).toEqual([])
+      yield* integrations.connection.key({ integrationID, key: "working-api-key" })
+      const active = yield* integrations.connection.active(integrationID)
+      expect(active).toBeDefined()
+      expect(active && (yield* integrations.connection.resolve(active))).toEqual({
+        type: "key",
+        key: "working-api-key",
+      })
+    }),
+  )
+
   it.effect("registers integrations through the editor", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service

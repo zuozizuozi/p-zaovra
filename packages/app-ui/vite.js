@@ -19,7 +19,7 @@ const channel = (() => {
 export default [
   viteStaticCopy({
     targets: ["cmaps", "standard_fonts", "wasm"].map((folder) => ({
-      src: fileURLToPath(new URL(`./node_modules/pdfjs-dist/${folder}/*`, import.meta.url)).replaceAll("\\", "/"),
+      src: fileURLToPath(new URL(`./${folder}/*`, import.meta.resolve("pdfjs-dist/package.json"))).replaceAll("\\", "/"),
       dest: `pdfjs/${folder}`,
       rename: { stripBase: true },
     })),

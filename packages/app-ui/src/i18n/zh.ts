@@ -666,7 +666,7 @@ export const dict = {
   "dialog.provider.zaovraGo.tagline": "适合所有人的低成本订阅",
   "dialog.provider.anthropic.note": "使用 Claude Pro/Max 或 API 密钥连接",
   "dialog.provider.copilot.note": "使用 Copilot 或 API 密钥连接",
-  "dialog.provider.openai.note": "使用 ChatGPT Pro/Plus 或 API 密钥连接",
+  "dialog.provider.openai.note": "使用 OpenAI API 密钥连接",
   "dialog.provider.google.note": "使用 Google 账号或 API 密钥连接",
   "dialog.provider.openrouter.note": "使用 OpenRouter 账号或 API 密钥连接",
   "dialog.provider.vercel.note": "使用 Vercel 账号或 API 密钥连接",
@@ -1485,6 +1485,7 @@ export const dict = {
   "settings.providers.tag.config": "配置",
   "settings.providers.tag.custom": "自定义",
   "settings.providers.tag.other": "其他",
+  "settings.providers.tag.saved": "已保存的凭据",
 
   "settings.models.title": "模型",
   "settings.models.description": "模型设置将在此处可配置。",

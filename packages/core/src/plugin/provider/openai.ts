@@ -17,6 +17,8 @@ const callbackPort = 1455
 const pollingSafetyMargin = 3000
 const browserMethodID = Integration.MethodID.make("chatgpt-browser")
 const headlessMethodID = Integration.MethodID.make("chatgpt-headless")
+// V2 uses OpenAI's public API routes; subscription OAuth needs a separate Codex transport.
+const capabilities = { subscriptionOAuth: false }
 
 type Pkce = {
   verifier: string
@@ -154,10 +156,12 @@ const headless = {
 export const OpenAIPlugin = define({
   id: "openai",
   effect: Effect.fn(function* (ctx) {
-    yield* ctx.integration.transform((draft) => {
-      draft.method.update(browser)
-      draft.method.update(headless)
-    })
+    if (capabilities.subscriptionOAuth) {
+      yield* ctx.integration.transform((draft) => {
+        draft.method.update(browser)
+        draft.method.update(headless)
+      })
+    }
     yield* ctx.catalog.transform(
       Effect.fn(function* (evt) {
         for (const item of evt.provider.list()) {

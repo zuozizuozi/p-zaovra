@@ -143,7 +143,7 @@ export interface Interface extends State.Transformable<Draft> {
   /** Returns one integration with its methods and current connections. */
   readonly get: (id: ID) => Effect.Effect<Info | undefined>
   /** Returns all integrations with their methods and current connections. */
-  readonly list: () => Effect.Effect<Info[]>
+  readonly list: (options?: { readonly usableConnectionsOnly?: boolean }) => Effect.Effect<Info[]>
   readonly connection: {
     /** Returns the active connection for one integration. */
     readonly active: (id: ID) => Effect.Effect<IntegrationConnection.Info | undefined>
@@ -291,8 +291,12 @@ export const locationLayer = Layer.effect(
       finalize: () => events.publish(Event.Updated, {}).pipe(Effect.asVoid),
     })
 
-    const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
+    const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[], usableOnly = false) => {
       const credentials = saved
+        .filter(
+          (credential) =>
+            !usableOnly || credential.value.type === "key" || entry?.implementations.has(credential.value.methodID),
+        )
         .map((credential) => ({
           type: "credential" as const,
           id: credential.id,
@@ -377,16 +381,16 @@ export const locationLayer = Layer.effect(
         if (!entry) return undefined
         return project(entry, resolveConnections(entry, yield* credentials.list(id)))
       }),
-      list: Effect.fn("Integration.list")(function* () {
+      list: Effect.fn("Integration.list")(function* (options) {
         const saved = Map.groupBy(yield* credentials.all(), (credential) => credential.integrationID)
         return Array.from(state.get().integrations.values(), (entry) =>
-          project(entry, resolveConnections(entry, saved.get(entry.ref.id) ?? [])),
+          project(entry, resolveConnections(entry, saved.get(entry.ref.id) ?? [], options?.usableConnectionsOnly)),
         ).toSorted((a, b) => a.name.localeCompare(b.name))
       }),
       connection: {
         active: Effect.fn("Integration.connection.active")(function* (id) {
           const entry = state.get().integrations.get(id)
-          return resolveConnections(entry, yield* credentials.list(id))[0]
+          return resolveConnections(entry, yield* credentials.list(id), true)[0]
         }),
         resolve: Effect.fn("Integration.connection.resolve")(function* (connection) {
           if (connection.type === "env") {
@@ -408,7 +412,8 @@ export const locationLayer = Layer.effect(
                   .get()
                   .integrations.get(credential.integrationID)
                   ?.implementations.get(credential.value.methodID)
-                if (!implementation?.refresh) return credential.value
+                if (!implementation) return undefined
+                if (!implementation.refresh) return credential.value
                 const now = yield* Clock.currentTimeMillis
                 if (credential.value.expires > now + Duration.toMillis(Duration.minutes(5))) return credential.value
                 const value = yield* restore(authorize(implementation.refresh(credential.value)))

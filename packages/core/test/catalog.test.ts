@@ -30,6 +30,41 @@ const catalogLayer = AppNodeBuilder.build(
 const it = testEffect(catalogLayer)
 
 describe("CatalogV2", () => {
+  it.effect("an unsupported saved OAuth credential does not make provider models available", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const credentials = yield* Credential.Service
+      const integrations = yield* Integration.Service
+      const integrationID = Integration.ID.make("old-subscription")
+      const providerID = ProviderV2.ID.make("old-subscription")
+      yield* integrations.transform((editor) =>
+        editor.method.update({ integrationID, method: { type: "key", label: "API key" } }),
+      )
+      yield* catalog.transform((editor) => {
+        editor.provider.update(providerID, (provider) => {
+          provider.integrationID = integrationID
+        })
+        editor.model.update(providerID, ModelV2.ID.make("test-model"), () => {})
+      })
+      yield* credentials.create({
+        integrationID,
+        value: Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("removed"),
+          access: "old",
+          refresh: "old",
+          expires: 0,
+        }),
+      })
+      expect((yield* integrations.get(integrationID))?.connections).toHaveLength(1)
+      expect((yield* catalog.provider.available()).some((provider) => provider.id === providerID)).toBe(false)
+      expect((yield* catalog.model.available()).some((model) => model.providerID === providerID)).toBe(false)
+      yield* integrations.connection.key({ integrationID, key: "real-key" })
+      expect((yield* catalog.provider.available()).some((provider) => provider.id === providerID)).toBe(true)
+      expect((yield* catalog.model.available()).some((model) => model.providerID === providerID)).toBe(true)
+    }),
+  )
+
   it.effect("explicit keyless endpoints still respect disabled providers and integration bindings", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

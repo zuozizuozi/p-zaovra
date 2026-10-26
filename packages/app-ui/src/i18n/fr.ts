@@ -217,7 +217,7 @@ export const dict = {
   "dialog.provider.zaovraGo.tagline": "Abonnement abordable pour tous",
   "dialog.provider.anthropic.note": "Connectez-vous avec Claude Pro/Max ou une clé API",
   "dialog.provider.copilot.note": "Connectez-vous avec Copilot ou une clé API",
-  "dialog.provider.openai.note": "Connectez-vous avec ChatGPT Pro/Plus ou une clé API",
+  "dialog.provider.openai.note": "Connectez-vous avec une clé API OpenAI",
   "dialog.provider.google.note": "Modèles Gemini pour des réponses rapides et structurées",
   "dialog.provider.openrouter.note": "Accédez à tous les modèles pris en charge depuis un seul fournisseur",
   "dialog.provider.vercel.note": "Accès unifié aux modèles d'IA avec routage intelligent",

@@ -193,7 +193,7 @@ export const dict = {
   "dialog.provider.zaovra.tagline": "可靠的優化模型",
   "dialog.provider.zaovraGo.tagline": "適合所有人的低成本訂閱",
   "dialog.provider.anthropic.note": "使用 Claude Pro/Max 或 API 金鑰連線",
-  "dialog.provider.openai.note": "使用 ChatGPT Pro/Plus 或 API 金鑰連線",
+  "dialog.provider.openai.note": "使用 OpenAI API 金鑰連線",
   "dialog.provider.copilot.note": "使用 Copilot 或 API 金鑰連線",
   "dialog.provider.google.note": "Gemini 模型，提供快速且結構化的回應",
   "dialog.provider.openrouter.note": "從單一提供者存取所有支援的模型",

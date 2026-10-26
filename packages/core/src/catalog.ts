@@ -185,7 +185,12 @@ const layer = Layer.effect(
         }),
 
         available: Effect.fn("CatalogV2.provider.available")(function* () {
-          const active = new Map((yield* integrations.list()).map((integration) => [integration.id, integration]))
+          const active = new Map(
+            (yield* integrations.list({ usableConnectionsOnly: true })).map((integration) => [
+              integration.id,
+              integration,
+            ]),
+          )
           return (yield* result.provider.all()).filter(
             (provider) =>
               available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))) ||

@@ -14,7 +14,13 @@ export function adaptProviderCatalog(
         name: integration.name,
         source: integration.connections.some((connection) => connection.type === "env") ? "env" : "api",
         env: integration.methods.flatMap((method) => (method.type === "env" ? method.names : [])),
-        options: { integrationID: integration.id },
+        options: {
+          integrationID: integration.id,
+          credentialOnly: true,
+          credentialLabels: integration.connections.flatMap((connection) =>
+            connection.type === "credential" ? [connection.label] : [],
+          ),
+        },
         models: {},
       },
     ]),
@@ -42,7 +48,20 @@ export function adaptProviderCatalog(
     })
   return {
     all,
-    connected: providers.filter((provider) => !provider.disabled).map((provider) => provider.id),
+    connected: [
+      ...new Set([
+        ...providers.filter((provider) => !provider.disabled).map((provider) => provider.id),
+        // Keep saved provider credentials removable even when their authentication method no longer runs.
+        // OAuth-only integrations such as MCP servers are not model providers.
+        ...integrations
+          .filter(
+            (integration) =>
+              integration.connections.some((connection) => connection.type === "credential") &&
+              integration.methods.some((method) => method.type === "key"),
+          )
+          .map((integration) => integration.id),
+      ]),
+    ],
     default: {},
   }
 }

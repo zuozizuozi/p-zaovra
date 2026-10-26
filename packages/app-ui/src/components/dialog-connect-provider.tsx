@@ -38,7 +38,7 @@ import { useSettings } from "@/context/settings"
 import { popularProviders } from "@/hooks/use-providers"
 import { useQuery } from "@tanstack/solid-query"
 import { directoryKey } from "@/context/global-sync/utils"
-import { resolveProviderIntegration } from "@/utils/provider-integration"
+import { providerConnectionMethods, resolveProviderIntegration } from "@/utils/provider-integration"
 import { CustomProviderForm } from "./dialog-custom-provider"
 import { usePlatform } from "@/context/platform"
 import { discoverProviderModels, providerDiscoveryPresets, providerProtocols } from "@/provider-discovery"
@@ -499,9 +499,7 @@ function ProviderConnection(props: {
   )
   const loading = createMemo(() => auth.loading)
   const methods = createMemo<ConnectMethod[]>(() =>
-    (auth.latest?.integration?.methods ?? []).filter(
-      (method): method is ConnectMethod => method.type === "key" || method.type === "oauth",
-    ),
+    providerConnectionMethods(auth.latest?.integrationID ?? props.provider, auth.latest?.integration?.methods),
   )
   const [store, setStore] = createStore({
     methodIndex: undefined as undefined | number,

@@ -210,7 +210,7 @@ export const dict = {
   "dialog.provider.zaovraGo.tagline": "모두를 위한 저렴한 구독",
   "dialog.provider.anthropic.note": "Claude Pro/Max 또는 API 키로 연결",
   "dialog.provider.copilot.note": "Copilot 또는 API 키로 연결",
-  "dialog.provider.openai.note": "ChatGPT Pro/Plus 또는 API 키로 연결",
+  "dialog.provider.openai.note": "OpenAI API 키로 연결",
   "dialog.provider.google.note": "빠르고 구조화된 응답을 위한 Gemini 모델",
   "dialog.provider.openrouter.note": "모든 지원 모델을 단일 공급자에서 액세스",
   "dialog.provider.vercel.note": "스마트 라우팅을 통한 AI 모델 통합 액세스",
