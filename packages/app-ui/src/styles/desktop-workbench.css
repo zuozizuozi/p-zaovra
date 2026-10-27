@@ -988,6 +988,16 @@ html[data-theme="oc-2"] body[data-new-layout] {
       padding-inline: 4px;
     }
 
+    [data-component="prompt-input-v2"] [data-component="prompt-input"] {
+      max-height: 60px;
+    }
+
+    [data-component="session-evidence-risk"] {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     [data-component="verification-summary"] {
       display: block;
       max-width: 100%;
