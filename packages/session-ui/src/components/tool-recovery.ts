@@ -1,5 +1,6 @@
 import type { AssistantMessage, Message, Part, ToolPart } from "@zaovra-ai/sdk/v2"
 import { diagnosticFailures, formattingFailures } from "./formatting-failures"
+import { displayTurnOwners } from "./turn-ownership"
 
 /** Display-only evidence. A later successful operation never changes the stored failure or verification verdict. */
 export function recoveredToolFailures(input: {
@@ -11,17 +12,10 @@ export function recoveredToolFailures(input: {
   const messages = input.messages
     .filter((message) => message.sessionID === input.message.sessionID)
     .toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
-  const owners = new Map<string, string>()
-  let owner: string | undefined
-  for (const message of messages) {
-    if (message.role === "user") {
-      if (!(input.parts[message.id] ?? []).some((part) => part.type === "text" && part.synthetic)) owner = message.id
-      if (owner) owners.set(message.id, owner)
-      continue
-    }
-    const request = owners.get(message.parentID)
-    if (request) owners.set(message.id, request)
-  }
+  const owners = displayTurnOwners(messages, (id) => input.parts[id] ?? [])
+  messages.forEach((message) => {
+    if (message.role === "assistant") owners.set(message.id, owners.get(message.parentID) ?? message.parentID)
+  })
   const request = owners.get(input.message.id)
   const active = messages.findLast((message) => message.role === "assistant")
   if (!request || (input.working && active && owners.get(active.id) === request)) return []
@@ -73,9 +67,12 @@ function sameOperation(failed: ToolPart, success: ToolPart) {
     return (
       success.tool === "edit" &&
       (input.filePath ?? input.path) === (next.filePath ?? next.path) &&
-      typeof input.newString === "string" && input.newString.length > 0 && input.newString === next.newString &&
+      typeof input.newString === "string" &&
+      input.newString.length > 0 &&
+      input.newString === next.newString &&
       (input.replaceAll === true) === (next.replaceAll === true) &&
-      typeof input.oldString === "string" && typeof next.oldString === "string" &&
+      typeof input.oldString === "string" &&
+      typeof next.oldString === "string" &&
       input.oldString.trim().replace(/\s+/g, " ") === next.oldString.trim().replace(/\s+/g, " ")
     )
   }

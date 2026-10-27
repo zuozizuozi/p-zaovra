@@ -39,6 +39,7 @@ export type PromptInputV2Props = {
   readOnly?: boolean
   class?: string
   modelControl?: JSX.Element
+  usageControl?: JSX.Element
 }
 
 export function PromptInputV2(props: PromptInputV2Props) {
@@ -210,10 +211,10 @@ export function PromptInputV2(props: PromptInputV2Props) {
           </Show>
         </div>
 
-        <div data-slot="prompt-toolbar" class="flex min-h-11 items-end gap-2 px-2 py-2">
+        <div data-slot="prompt-toolbar" class="flex min-h-11 flex-wrap items-end gap-2 px-2 py-2">
           <div
             data-slot="prompt-controls"
-            class="flex min-w-0 flex-1 flex-wrap items-center gap-1"
+            class="flex min-w-0 max-w-full flex-1 basis-40 flex-wrap items-center gap-1"
             aria-hidden={state.mode === "shell"}
             inert={state.mode === "shell" ? true : undefined}
             style={buttons()}
@@ -256,7 +257,11 @@ export function PromptInputV2(props: PromptInputV2Props) {
               )}
             </Show>
           </div>
-          <div data-slot="prompt-submit-slot" class="shrink-0">
+          <div
+            data-slot="prompt-submit-slot"
+            class="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2"
+          >
+            {props.usageControl}
             <PromptInputV2SubmitButton
               mode={state.mode}
               stopping={view.submit.stopping()}

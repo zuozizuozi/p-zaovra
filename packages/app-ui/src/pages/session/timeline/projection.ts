@@ -3,6 +3,7 @@ import type { AssistantMessage, Message, Part, SessionStatus, UserMessage } from
 import { createMemo, mapArray, type Accessor } from "solid-js"
 import { reuseTimelineRows } from "./row-reconciliation"
 import { Timeline, TimelineRow } from "./rows"
+import { displayTurnOwners } from "@zaovra-ai/session-ui/turn-ownership"
 
 export { reuseTimelineRows } from "./row-reconciliation"
 
@@ -17,26 +18,13 @@ export function createTimelineProjection(input: {
   inlineComments: Accessor<boolean>
 }) {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
-  // Host completion and synthetic continuation keep the preceding human turn's heading.
-  const displayTurns = createMemo(() => {
-    const owners = new Map<string, string>()
-    input.userMessages().reduce<string | undefined>((previous, message) => {
-      const parts = input.parts(message.id)
-      const continuation =
-        parts.length > 0 &&
-        parts.every(
-          (part) =>
-            part.type === "step-start" || part.type === "compaction" || (part.type === "text" && part.synthetic),
-        )
-      const owner = continuation && previous ? previous : message.id
-      owners.set(message.id, owner)
-      return owner
-    }, undefined)
-    return owners
-  })
+  const chronologicalMessages = createMemo(() =>
+    input.messages().toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id)),
+  )
+  const displayTurns = createMemo(() => displayTurnOwners(input.messages(), input.parts))
   const assistantMessagesByParent = createMemo(() => {
     const result = new Map<string, AssistantMessage[]>()
-    input.messages().forEach((message) => {
+    chronologicalMessages().forEach((message) => {
       if (message.role !== "assistant") return
       const messages = result.get(message.parentID)
       if (messages) {
@@ -49,7 +37,7 @@ export function createTimelineProjection(input: {
   })
   const assistantMessagesByTurn = createMemo(() => {
     const result = new Map<string, AssistantMessage[]>()
-    input.messages().forEach((message) => {
+    chronologicalMessages().forEach((message) => {
       if (message.role !== "assistant") return
       const owner = displayTurns().get(message.parentID) ?? message.parentID
       const messages = result.get(owner)
@@ -62,12 +50,10 @@ export function createTimelineProjection(input: {
     return result
   })
   const activeMessageID = createMemo(() => {
-    const parentID = input
-      .messages()
-      .findLast(
-        (message): message is AssistantMessage =>
-          message.role === "assistant" && typeof message.time.completed !== "number",
-      )?.parentID
+    const parentID = chronologicalMessages().findLast(
+      (message): message is AssistantMessage =>
+        message.role === "assistant" && typeof message.time.completed !== "number",
+    )?.parentID
     if (parentID) {
       const messages = input.messages()
       const result = Binary.search(messages, parentID, (message) => message.id)
@@ -76,7 +62,7 @@ export function createTimelineProjection(input: {
     }
 
     if (input.status().type === "idle") return
-    return input.messages().findLast((message) => message.role === "user")?.id
+    return input.userMessages().at(-1)?.id
   })
   const messageRowMemos = createMemo(
     mapArray(input.userMessages, (userMessage, indexAccessor) =>
@@ -98,7 +84,21 @@ export function createTimelineProjection(input: {
     ),
   )
   const rows = createMemo((previous: TimelineRow.TimelineRow[] | undefined) => {
-    const projected = messageRowMemos().flatMap((memo) => memo())
+    const groups = new Map<string, TimelineRow.TimelineRow[]>()
+    messageRowMemos().forEach((memo) =>
+      memo().forEach((row) => {
+        const owner = displayTurns().get(row.userMessageID) ?? row.userMessageID
+        const group = groups.get(owner)
+        if (group) group.push(row)
+        if (!group) groups.set(owner, [row])
+      }),
+    )
+    const projected = [...groups]
+      .sort(
+        ([a], [b]) =>
+          (messageByID().get(a)?.time.created ?? 0) - (messageByID().get(b)?.time.created ?? 0) || a.localeCompare(b),
+      )
+      .flatMap(([, rows]) => rows)
     const headings = new Set(
       projected.flatMap((row) =>
         row._tag === "AssistantHeading" ? [displayTurns().get(row.userMessageID) ?? row.userMessageID] : [],

@@ -95,7 +95,9 @@ export function createTimelineModel(input: {
 }
 
 export function selectUserMessages(messages: Message[]) {
-  return messages.filter((message): message is UserMessage => message.role === "user")
+  return messages
+    .filter((message): message is UserMessage => message.role === "user")
+    .toSorted((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0) || a.id.localeCompare(b.id))
 }
 
 export function isTimelineReady(messages: Message[] | undefined, loading: boolean) {
@@ -104,7 +106,8 @@ export function isTimelineReady(messages: Message[] | undefined, loading: boolea
 
 export function selectVisibleUserMessages(messages: UserMessage[], revertMessageID?: string) {
   if (!revertMessageID) return messages
-  return messages.filter((message) => message.id < revertMessageID)
+  const index = messages.findIndex((message) => message.id === revertMessageID)
+  return index >= 0 ? messages.slice(0, index) : messages.filter((message) => message.id < revertMessageID)
 }
 
 export async function loadOlderTimeline(input: {

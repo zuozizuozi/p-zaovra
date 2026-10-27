@@ -76,13 +76,20 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
         attachLabel={language.t("prompt.addFiles")}
         controller={props.controller}
         class={props.class}
+        usageControl={
+          <Show when={params.id}>
+            <span data-slot="prompt-usage" class="flex size-7 shrink-0 items-center justify-center">
+              <SessionContextUsage variant="indicator" buttonAppearance="v2" />
+            </span>
+          </Show>
+        }
         modelControl={
           <>
             <MenuV2>
               <MenuV2.Trigger
                 data-component="permission-chip"
                 data-ask={!accepting() ? "" : undefined}
-                class="h-7 shrink-0 rounded-full bg-v2-background-bg-layer-02 px-2 text-xs"
+                class="h-7 min-w-0 max-w-full truncate rounded-full bg-v2-background-bg-layer-02 px-2 text-xs"
                 title={language.t(
                   accepting()
                     ? "toast.permissions.autoaccept.on.description"
@@ -102,7 +109,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
                 </MenuV2.Content>
               </MenuV2.Portal>
             </MenuV2>
-            <div data-slot="prompt-model-control" class="min-w-0 max-w-full flex-1">
+            <div data-slot="prompt-model-control" class="min-w-0 max-w-full flex-1 basis-24">
               <PromptInputV2ModelControl
                 loading={props.controller.model.loading}
                 title={language.t("command.model.choose")}
@@ -113,11 +120,6 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
                 onClose={props.controller.restoreFocus}
               />
             </div>
-            <Show when={params.id}>
-              <span data-slot="prompt-usage" class="flex size-7 shrink-0 items-center justify-center">
-                <SessionContextUsage variant="indicator" buttonAppearance="v2" />
-              </span>
-            </Show>
           </>
         }
       />

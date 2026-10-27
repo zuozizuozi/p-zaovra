@@ -42,6 +42,7 @@ import { Icon } from "@zaovra-ai/ui/icon"
 import { type MascotState } from "@/components/task-mascot"
 import { TaskActivity } from "@/components/task-activity"
 import { runningTool } from "@/utils/running-tool"
+import { isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
 import { recoveredToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
@@ -567,7 +568,9 @@ export function MessageTimeline(props: {
       }
     },
     anchorTo: "end",
-    followOnAppend: true,
+    get followOnAppend() {
+      return props.shouldAnchorBottom() && !props.hasScrollGesture()
+    },
     scrollEndThreshold: 80,
     get scrollMargin() {
       return showHeader() ? 64 : 0
@@ -1137,6 +1140,57 @@ export function MessageTimeline(props: {
     }
   }
 
+  const recoveredParts = createMemo(() => {
+    const result = new Set<string>()
+    assistantMessagesByTurn().forEach((messages, user) => {
+      const latest = messages.at(-1)
+      if (
+        !latest ||
+        !messages.some((message) =>
+          getMsgParts(message.id).some((part) => part.type === "tool" && part.state.status === "error"),
+        )
+      )
+        return
+      recoveredToolFailures({
+        message: latest,
+        messages: sessionMessages(),
+        parts: sync().data.part,
+        working: workingDisplayTurn(user),
+      }).forEach((part) => result.add(part.id))
+    })
+    return result
+  })
+  const answerMessages = createMemo(() => {
+    const result = new Map<string, string>()
+    assistantMessagesByTurn().forEach((messages, user) => {
+      const latest = messages.at(-1)
+      const answer = workingDisplayTurn(user)
+        ? latest
+        : messages.findLast(
+            (message) =>
+              message.finish !== "tool-calls" &&
+              getMsgParts(message.id).some((part) => part.type === "text" && part.text.trim()),
+          )
+      if (answer) result.set(user, answer.id)
+    })
+    return result
+  })
+  const snapshotWarning = createMemo(() => {
+    const messages = sessionMessages().toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
+    for (const message of messages) {
+      if (message.role !== "assistant") continue
+      if (
+        getMsgParts(message.id).some(
+          (part) =>
+            part.type === "tool" &&
+            part.state.status === "completed" &&
+            part.state.metadata?.zaovraSnapshotUnavailable === true,
+        )
+      )
+        return displayTurn(message.parentID)
+    }
+  })
+
   const renderAssistantPartGroup = (row: Accessor<TimelineRowMap["AssistantPart"]>, onSizeChange?: () => void) => {
     if (row().group.type === "context") {
       const parts = createMemo(() => {
@@ -1152,15 +1206,47 @@ export function MessageTimeline(props: {
       })
 
       return (
-        <ContextToolGroup
-          parts={parts()}
-          open={open()}
-          onOpenChange={(value) => setToolOpen(contextOpenKey(), value)}
-          busy={
-            workingTurn(row().userMessageID) && lastAssistantGroupKey().get(row().userMessageID) === row().group.key
+        <Show
+          when={(() => {
+            const group = row().group
+            return group.type === "context" && group.kind
+          })()}
+          fallback={
+            <ContextToolGroup
+              parts={parts()}
+              open={open()}
+              onOpenChange={(value) => setToolOpen(contextOpenKey(), value)}
+              busy={
+                workingTurn(row().userMessageID) && lastAssistantGroupKey().get(row().userMessageID) === row().group.key
+              }
+              onSizeChange={onSizeChange}
+            />
           }
-          onSizeChange={onSizeChange}
-        />
+        >
+          <details data-component="process-tool-group" onToggle={() => onSizeChange?.()}>
+            <summary class="cursor-pointer text-xs text-text-weak">
+              {language.t(
+                `session.process.${(() => {
+                  const group = row().group
+                  return group.type === "context" ? (group.kind ?? "edit") : "edit"
+                })()}`,
+                { count: parts().length },
+              )}
+            </summary>
+            <For each={parts()}>
+              {(part) => {
+                const message = () => messageByID().get(part.messageID)
+                return (
+                  <Show when={message()}>
+                    {(message) => (
+                      <MessagePart part={part} message={message()} deferToolContent onContentRendered={onSizeChange} />
+                    )}
+                  </Show>
+                )
+              }}
+            </For>
+          </details>
+        </Show>
       )
     }
 
@@ -1186,26 +1272,6 @@ export function MessageTimeline(props: {
           <Show when={part()}>
             {(part) => (
               <>
-                <Show
-                  when={(() => {
-                    const value = part()
-                    return (
-                      value.type === "tool" &&
-                      value.state.status === "completed" &&
-                      value.state.metadata?.zaovraSnapshotUnavailable === true
-                    )
-                  })()}
-                >
-                  <div
-                    role="status"
-                    data-slot="snapshot-unavailable"
-                    class="mb-2 flex items-start gap-2 rounded-md px-3 py-2 text-12-regular"
-                    style={{ background: "var(--zaovra-warning-soft)", color: "var(--zaovra-warning)" }}
-                  >
-                    <Icon name="warning" size="small" class="mt-0.5 shrink-0" />
-                    <span>{language.t("session.snapshot.unavailable")}</span>
-                  </div>
-                </Show>
                 <MessagePart
                   part={part()}
                   message={message()}
@@ -1321,6 +1387,15 @@ export function MessageTimeline(props: {
               {(message) => (
                 <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
                   <div data-slot="session-turn-message-content" aria-live="off">
+                    <Show when={isContinuation(getMsgParts(message().id))}>
+                      <div data-component="system-followup" class="text-xs text-text-weak">
+                        {language.t(
+                          displayTurn(message().id) === message().id
+                            ? "session.process.unknownOwner"
+                            : "session.process.followup",
+                        )}
+                      </div>
+                    </Show>
                     <Message
                       message={message()}
                       parts={getMsgParts(userMessageRow().userMessageID)}
@@ -1374,11 +1449,13 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={headingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <div data-slot="assistant-heading">
-                <TaskActivity
-                  state={mascotState(headingRow().userMessageID)}
-                  tool={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.label : undefined}
-                  started={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.started : undefined}
-                />
+                <Show when={workingDisplayTurn(headingRow().userMessageID)}>
+                  <TaskActivity
+                    state={mascotState(headingRow().userMessageID)}
+                    tool={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.label : undefined}
+                    started={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.started : undefined}
+                  />
+                </Show>
                 <Show when={elapsed() !== undefined && !workingDisplayTurn(headingRow().userMessageID)}>
                   <button
                     type="button"
@@ -1386,28 +1463,38 @@ export function MessageTimeline(props: {
                     aria-expanded={!folded()}
                     onClick={() => setTurns(headingRow().userMessageID, !folded())}
                   >
-                    {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "›" : "⌄"}
+                    {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "⌄" : "⌃"}
                   </button>
                 </Show>
               </div>
+              <Show when={snapshotWarning() === headingRow().userMessageID}>
+                <div role="status" data-slot="snapshot-unavailable" class="py-1 text-xs text-text-weak">
+                  {language.t(
+                    sync().project && sync().project?.vcs !== "git"
+                      ? "session.snapshot.nogit"
+                      : "session.snapshot.unknown",
+                  )}
+                </div>
+              </Show>
             </div>
           </TimelineRowFrame>
         )
       }
       case "AssistantPart": {
         const assistantPartRow = row as Accessor<TimelineRowByTag<"AssistantPart">>
-        const folded = () =>
-          !workingDisplayTurn(assistantPartRow().userMessageID) &&
-          (turns[displayTurn(assistantPartRow().userMessageID)] ?? true)
+        const folded = () => turns[displayTurn(assistantPartRow().userMessageID)] ?? true
         const foldable = () => {
           const group = assistantPartRow().group
           const refs = group.type === "part" ? [group.ref] : group.refs
           return refs.every((ref) => {
             const part = getMsgPart(ref.messageID, ref.partID)
-            return part?.type === "reasoning" || (part?.type === "tool" && part.state.status === "completed")
+            if (part?.type === "text")
+              return ref.messageID !== answerMessages().get(displayTurn(assistantPartRow().userMessageID))
+            if (part?.type === "reasoning") return true
+            if (part?.type !== "tool") return false
+            return part.state.status !== "error" || recoveredParts().has(part.id)
           })
         }
-        const first = () => firstDisplayPart(assistantPartRow().userMessageID) === assistantPartRow()
         const modelName = createMemo(() => {
           const group = assistantPartRow().group
           const ref = group.type === "part" ? group.ref : group.refs[0]
@@ -1431,12 +1518,11 @@ export function MessageTimeline(props: {
           )
         }
         return (
-          <TimelineRowFrame row={assistantPartRow} hidden={folded() && foldable() && !first()}>
+          <TimelineRowFrame row={assistantPartRow} hidden={folded() && foldable()}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <div
                 data-slot="session-turn-assistant-content"
                 data-streaming={workingTurn(assistantPartRow().userMessageID)}
-                aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
                 <Show when={modelChanged() && !assistantPartRow().previousAssistantPart}>
                   <div data-slot="model-change-divider">{modelName()}</div>

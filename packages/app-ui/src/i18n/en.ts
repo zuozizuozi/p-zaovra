@@ -1,4 +1,16 @@
 export const dict = {
+  "session.snapshot.unconfirmed":
+    "Git tracking has not been confirmed. Authoritative change totals are unavailable; changes without snapshots cannot be undone.",
+  "session.progress.settled": "Turn ended",
+  "session.snapshot.nogit":
+    "This folder is not tracked by Git. Snapshots and authoritative change totals are unavailable; changes cannot be undone here.",
+  "session.snapshot.unknown": "No usable snapshot was recorded. Changes without a snapshot cannot be undone.",
+  "session.changes.untracked": "This turn · Untracked",
+  "session.process.edit": "{{count}} edit operations",
+  "session.process.command": "{{count}} commands",
+  "session.process.browser": "{{count}} browser operations",
+  "session.process.followup": "System follow-up",
+  "session.process.unknownOwner": "System follow-up · ownership unconfirmed",
   "session.progress.waiting": "Waiting for your response",
   "session.progress.blocked": "Execution interrupted",
   "session.progress.tool": "Waiting for tool or background task results",

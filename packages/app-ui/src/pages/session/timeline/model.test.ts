@@ -15,6 +15,14 @@ describe("timeline model", () => {
     expect(selectVisibleUserMessages(users)).toBe(users)
   })
 
+  test("revert keeps chronologically older shell continuations despite their ID prefix", () => {
+    const messages = [user("msg_old"), user("msg_bash_old"), user("msg_new")]
+    expect(selectVisibleUserMessages(messages, "msg_new").map((message) => message.id)).toEqual([
+      "msg_old",
+      "msg_bash_old",
+    ])
+  })
+
   test("waits for an assistant-only load to hydrate its user root", () => {
     expect(isTimelineReady([assistant("msg_2")], true)).toBe(false)
     expect(isTimelineReady([user("msg_1"), assistant("msg_2")], true)).toBe(true)

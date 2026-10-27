@@ -6,6 +6,7 @@ import { useParams } from "@solidjs/router"
 import { createQuery, useMutation } from "@tanstack/solid-query"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
+import { Popover } from "@zaovra-ai/ui/popover"
 import { Button } from "@zaovra-ai/ui/button"
 import { useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
@@ -177,133 +178,165 @@ export function SessionOutcomeDock() {
   return (
     <>
       <Show when={params.id && !abandoned()}>
-        <details data-component="session-budget" class="px-1 py-2 text-12-regular text-text-weak">
-          <summary class="tabular-nums">
-            {language.t("session.budget.title")}
-            <Show when={budgetQuery.data}>
-              {(current) => (
-                <span data-component="session-budget-usage">
-                  {" "}
-                  ·{" "}
-                  {language.t("session.budget.used", {
-                    tokens: current().used.tokens.toLocaleString(),
-                    limit: current().limits.tokens?.toLocaleString() ?? language.t("session.budget.unlimited"),
-                    minutes: Math.floor(current().used.durationMs / 60_000),
-                    duration:
-                      current().limits.durationMs === undefined
-                        ? language.t("session.budget.unlimited")
-                        : Math.floor(current().limits.durationMs! / 60_000),
-                  })}
+        <div
+          data-component="session-status-bar"
+          class="flex h-7 min-w-0 items-center gap-2 px-1 text-xs text-text-weak"
+        >
+          <div data-component="session-live-progress" role="status" class="min-w-0 flex-1 truncate">
+            <Popover
+              triggerAs="button"
+              triggerProps={{ type: "button", class: "block w-full min-w-0 truncate text-left" }}
+              trigger={
+                <span>
+                  <Show when={progress().visible} fallback={language.t("session.progress.settled")}>
+                    {" "}
+                    <Show when={progress().target}>{progress().target} · </Show>
+                    {language.t(
+                      `session.progress.${progress().state === "idle" && progress().preview ? "preview" : progress().state}`,
+                    )}
+                    <Show when={progress().tool}> · {progress().tool}</Show>
+                  </Show>
                 </span>
-              )}
-            </Show>
-          </summary>
-          <p>{language.t("session.budget.hint")}</p>
-          <Show when={budgetQuery.data?.unreported}>
-            <p>{language.t("session.budget.unreported", { count: budgetQuery.data!.unreported })}</p>
-          </Show>
-          <div class="flex flex-wrap items-end gap-3 py-2">
-            <label>
-              {language.t("session.budget.tokens")}
-              <input
-                class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
-                type="number"
-                min="1"
-                step="1"
-                disabled={updateBudget.isPending || recover.isPending}
-                value={budget.tokens}
-                onInput={(event) => setBudget({ tokens: event.currentTarget.value, dirty: true })}
-              />
-            </label>
-            <label>
-              {language.t("session.budget.minutes")}
-              <input
-                class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
-                type="number"
-                min="1"
-                step="1"
-                disabled={updateBudget.isPending || recover.isPending}
-                value={budget.minutes}
-                onInput={(event) => setBudget({ minutes: event.currentTarget.value, dirty: true })}
-              />
-            </label>
-            <Button
-              size="small"
-              disabled={updateBudget.isPending || recover.isPending}
-              onClick={() => updateBudget.mutate(false)}
+              }
+              title={language.t("session.progress.details")}
             >
-              {language.t("session.budget.apply")}
-            </Button>
-            <Button
-              size="small"
-              variant="ghost"
-              disabled={updateBudget.isPending || recover.isPending}
-              onClick={() => updateBudget.mutate(true)}
-            >
-              {language.t("session.budget.remove")}
-            </Button>
+              <div class="max-h-80 overflow-auto text-xs">
+                <Show when={progress().fact || progress().updating}>
+                  <p>
+                    <Show when={progress().fact}>
+                      {language.t("session.progress.returned", { tool: progress().fact! })}
+                    </Show>
+                    <Show when={progress().updating}>
+                      <Show when={progress().fact}> · </Show>
+                      {language.t("session.progress.updating")}
+                    </Show>
+                  </p>
+                </Show>
+                <details>
+                  <summary>{language.t("session.progress.details")}</summary>
+                  <p>{language.t("session.progress.usageUnknown")}</p>
+                  <For each={progress().facts}>
+                    {(fact) => (
+                      <p class="break-words">
+                        {fact.tool} · {fact.duration} ms · {fact.id}
+                      </p>
+                    )}
+                  </For>
+                  <Show
+                    when={outcome()?.missing.length || unresolvedChecks().length || staleChecks() || incompleteChecks()}
+                  >
+                    <p>{language.t("session.progress.previousEvidence")}</p>
+                    <For each={outcome()?.missing}>{(missing) => <p>{missing}</p>}</For>
+                    <For each={unresolvedChecks()}>
+                      {(check) => (
+                        <p class="break-words">
+                          {check.command} · exit {check.exit}
+                        </p>
+                      )}
+                    </For>
+                    <Show when={staleChecks()}>
+                      <p>{language.t("session.outcome.staleCount", { count: staleChecks() })}</p>
+                    </Show>
+                    <Show when={incompleteChecks()}>
+                      <p>{language.t("session.outcome.incompleteCount", { count: incompleteChecks() })}</p>
+                    </Show>
+                  </Show>
+                </details>
+                <Show when={progress().failures.length}>
+                  <details>
+                    <summary>{language.t("session.progress.failures", { count: progress().failures.length })}</summary>
+                    <For each={progress().failures}>
+                      {(failure) => (
+                        <p class="break-words">
+                          {failure.tool}: {failure.error}
+                        </p>
+                      )}
+                    </For>
+                  </details>
+                </Show>
+              </div>
+            </Popover>
           </div>
-        </details>
-      </Show>
-      <Show when={progress().visible}>
-        <div data-component="session-live-progress" role="status" class="px-1 py-2 text-12-regular text-text-weak">
-          <p class="break-words">
-            <Show when={progress().target}>{progress().target} · </Show>
-            {language.t(
-              `session.progress.${progress().state === "idle" && progress().preview ? "preview" : progress().state}`,
-            )}
-            <Show when={progress().tool}> · {progress().tool}</Show>
-          </p>
-          <Show when={progress().fact || progress().updating}>
-            <p>
-              <Show when={progress().fact}>{language.t("session.progress.returned", { tool: progress().fact! })}</Show>
-              <Show when={progress().updating}>
-                <Show when={progress().fact}> · </Show>
-                {language.t("session.progress.updating")}
-              </Show>
-            </p>
-          </Show>
-          <details>
-            <summary>{language.t("session.progress.details")}</summary>
-            <p>{language.t("session.progress.usageUnknown")}</p>
-            <For each={progress().facts}>
-              {(fact) => (
-                <p class="break-words">
-                  {fact.tool} · {fact.duration} ms · {fact.id}
-                </p>
-              )}
-            </For>
-            <Show when={outcome()?.missing.length || unresolvedChecks().length || staleChecks() || incompleteChecks()}>
-              <p>{language.t("session.progress.previousEvidence")}</p>
-              <For each={outcome()?.missing}>{(missing) => <p>{missing}</p>}</For>
-              <For each={unresolvedChecks()}>
-                {(check) => (
-                  <p class="break-words">
-                    {check.command} · exit {check.exit}
+          <Popover
+            triggerAs="button"
+            triggerProps={{ type: "button", class: "shrink-0" }}
+            trigger={language.t("session.budget.title")}
+            title={language.t("session.budget.title")}
+          >
+            <div data-component="session-budget" class="max-h-80 overflow-auto text-xs">
+              <Show when={budgetQuery.data}>
+                {(current) => (
+                  <p data-component="session-budget-usage">
+                    {language.t("session.budget.used", {
+                      tokens: current().used.tokens.toLocaleString(),
+                      limit: current().limits.tokens?.toLocaleString() ?? language.t("session.budget.unlimited"),
+                      minutes: Math.floor(current().used.durationMs / 60_000),
+                      duration:
+                        current().limits.durationMs === undefined
+                          ? language.t("session.budget.unlimited")
+                          : Math.floor(current().limits.durationMs! / 60_000),
+                    })}
                   </p>
                 )}
-              </For>
-              <Show when={staleChecks()}>
-                <p>{language.t("session.outcome.staleCount", { count: staleChecks() })}</p>
               </Show>
-              <Show when={incompleteChecks()}>
-                <p>{language.t("session.outcome.incompleteCount", { count: incompleteChecks() })}</p>
+              <p>{language.t("session.budget.hint")}</p>
+              <Show when={budgetQuery.data?.unreported}>
+                <p>{language.t("session.budget.unreported", { count: budgetQuery.data!.unreported })}</p>
               </Show>
-            </Show>
-          </details>
-          <Show when={progress().failures.length}>
-            <details>
-              <summary>{language.t("session.progress.failures", { count: progress().failures.length })}</summary>
-              <For each={progress().failures}>
-                {(failure) => (
-                  <p class="break-words">
-                    {failure.tool}: {failure.error}
-                  </p>
-                )}
-              </For>
-            </details>
-          </Show>
+              <div class="flex flex-wrap items-end gap-3 py-2">
+                <label>
+                  {language.t("session.budget.tokens")}
+                  <input
+                    class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
+                    type="number"
+                    min="1"
+                    step="1"
+                    disabled={updateBudget.isPending || recover.isPending}
+                    value={budget.tokens}
+                    onInput={(event) => setBudget({ tokens: event.currentTarget.value, dirty: true })}
+                  />
+                </label>
+                <label>
+                  {language.t("session.budget.minutes")}
+                  <input
+                    class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
+                    type="number"
+                    min="1"
+                    step="1"
+                    disabled={updateBudget.isPending || recover.isPending}
+                    value={budget.minutes}
+                    onInput={(event) => setBudget({ minutes: event.currentTarget.value, dirty: true })}
+                  />
+                </label>
+                <Button
+                  size="small"
+                  disabled={updateBudget.isPending || recover.isPending}
+                  onClick={() => updateBudget.mutate(false)}
+                >
+                  {language.t("session.budget.apply")}
+                </Button>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  disabled={updateBudget.isPending || recover.isPending}
+                  onClick={() => updateBudget.mutate(true)}
+                >
+                  {language.t("session.budget.remove")}
+                </Button>
+              </div>
+            </div>
+          </Popover>
         </div>
+        <Show when={progress().visible && (outcome()?.missing.length || staleChecks() || incompleteChecks())}>
+          <div role="status" class="px-1 text-xs text-text-weak" data-component="session-evidence-risk">
+            {language.t("session.progress.updating")}
+            <Show when={staleChecks()}> · {language.t("session.outcome.staleCount", { count: staleChecks() })}</Show>
+            <Show when={incompleteChecks()}>
+              {" "}
+              · {language.t("session.outcome.incompleteCount", { count: incompleteChecks() })}
+            </Show>
+          </div>
+        </Show>
       </Show>
       <Show
         when={!query.isError}

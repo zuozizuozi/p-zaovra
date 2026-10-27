@@ -18,6 +18,10 @@ export function ToolRecoverySummary(props: { parts: readonly ToolPart[]; onSizeC
           {(part) => (
             <div data-slot="tool-recovery-attempt">
               <span>{part.tool}</span>
+              <div>
+                {part.id} · {part.callID}
+              </div>
+              <pre>{JSON.stringify(part.state.input, null, 2)}</pre>
               <pre>{part.state.status === "error" ? part.state.error : ""}</pre>
             </div>
           )}

@@ -229,15 +229,18 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
             type: "text",
             text: item.type === "shell" ? `$ ${item.command}\n\n${item.output}` : item.text,
             synthetic: true,
-            ...(item.type === "shell"
-              ? {
-                  metadata: {
+            metadata: {
+              ...(item.type === "synthetic" && item.completion
+                ? { zaovraSourceMessageID: item.completion.sourceMessageID }
+                : {}),
+              ...(item.type === "shell"
+                ? {
                     zaovraShellPending: item.time.completed === undefined,
                     zaovraShellJobID: item.id,
                     zaovraShellCompleted: item.time.completed,
-                  },
-                }
-              : {}),
+                  }
+                : {}),
+            },
           },
         ],
       })

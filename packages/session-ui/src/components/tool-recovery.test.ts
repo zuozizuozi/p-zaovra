@@ -55,7 +55,15 @@ const success: ToolPart = {
   },
 }
 function recovered(parts: Record<string, Part[]>, messages: readonly Message[] = [user, first, last], working = false) {
-  return recoveredToolFailures({ message: first, messages, parts, working }).map((part) => part.id)
+  return recoveredToolFailures({
+    message: first,
+    messages,
+    parts: {
+      [user.id]: [{ id: "request", messageID: user.id, sessionID: user.sessionID, type: "text", text: "Fix app.ts" }],
+      ...parts,
+    },
+    working,
+  }).map((part) => part.id)
 }
 
 test("exact edit recovery is display-only and closes only after the turn settles", () => {
@@ -105,8 +113,18 @@ test("verification failures stay visible even when the exact command later succe
 
 test("uncertain effects and background or timed-out results never count as recovery", () => {
   if (failure.state.status !== "error" || success.state.status !== "completed") throw new Error("Expected fixtures")
-  expect(recovered({ first: [{ ...failure, state: { ...failure.state, error: "Outcome may have occurred; observe before retrying" } }], last: [success] })).toEqual([])
-  expect(recovered({ first: [{ ...failure, state: { ...failure.state, metadata: { phase: "mutation", reason: "target-changed" } } }], last: [success] })).toEqual([])
+  expect(
+    recovered({
+      first: [{ ...failure, state: { ...failure.state, error: "Outcome may have occurred; observe before retrying" } }],
+      last: [success],
+    }),
+  ).toEqual([])
+  expect(
+    recovered({
+      first: [{ ...failure, state: { ...failure.state, metadata: { phase: "mutation", reason: "target-changed" } } }],
+      last: [success],
+    }),
+  ).toEqual([])
   for (const metadata of [{ timeout: true }, { job_id: "still-running" }, { exit: 1 }]) {
     expect(recovered({ first: [failure], last: [{ ...success, state: { ...success.state, metadata } }] })).toEqual([])
   }

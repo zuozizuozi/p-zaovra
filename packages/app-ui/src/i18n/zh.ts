@@ -3,6 +3,16 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.snapshot.unconfirmed": "尚未确认 Git 跟踪，无法提供权威改动统计；没有快照的改动无法撤销。",
+  "session.progress.settled": "本轮已结束",
+  "session.snapshot.nogit": "此文件夹未使用 Git，无法提供快照和权威改动统计，相关改动不能在此撤销。",
+  "session.snapshot.unknown": "本次未能保存可用快照；没有快照的改动无法撤销。",
+  "session.changes.untracked": "本轮 · 未跟踪",
+  "session.process.edit": "编辑 {{count}} 项",
+  "session.process.command": "运行 {{count}} 条命令",
+  "session.process.browser": "浏览 {{count}} 次",
+  "session.process.followup": "系统跟进",
+  "session.process.unknownOwner": "系统跟进 · 归属暂未确认",
   "session.progress.waiting": "等待你的回复",
   "session.progress.blocked": "执行已中断",
   "session.progress.tool": "等待工具或后台任务结果",

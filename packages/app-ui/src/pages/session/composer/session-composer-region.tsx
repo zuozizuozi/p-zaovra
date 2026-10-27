@@ -12,6 +12,7 @@ import type { SessionComposerRegionController } from "./session-composer-region-
 export function SessionComposerRegion(props: {
   controller: SessionComposerRegionController
   promptInput: JSX.Element
+  changes?: JSX.Element
 }) {
   const language = useLanguage()
   const controller = props.controller
@@ -38,7 +39,8 @@ export function SessionComposerRegion(props: {
         }}
       >
         {/* Outcome reads suspend on a cold query; keep that wait local to this optional status. */}
-        <Suspense>
+        {props.changes}
+        <Suspense fallback={<div class="h-7" />}>
           <SessionOutcomeDock />
         </Suspense>
         <Show when={controller.state.questionRequest()} keyed>

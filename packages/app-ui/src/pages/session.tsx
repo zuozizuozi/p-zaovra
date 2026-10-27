@@ -814,6 +814,7 @@ export default function Page() {
     if (selected && diffs.some((diff) => diff.file === selected)) return selected
     return diffs[0]?.file
   }
+  const turnTracked = () => sync().project?.vcs === "git" && !turnQuery.isError
   const reviewCount = () => reviewDiffs().length
   const hasReview = () => reviewCount() > 0
   const reviewReady = () => {
@@ -1685,14 +1686,14 @@ export default function Page() {
   let scrollStateTarget: HTMLDivElement | undefined
   let fillFrame: number | undefined
 
-  const jumpThreshold = (el: HTMLDivElement) => Math.max(400, el.clientHeight)
+  const jumpThreshold = () => 80
 
   const updateScrollState = (el: HTMLDivElement) => {
     const max = el.scrollHeight - el.clientHeight
     const distance = max - el.scrollTop
     const overflow = max > 1
     const bottom = !overflow || distance <= 2
-    const jump = overflow && distance > jumpThreshold(el)
+    const jump = overflow && distance > jumpThreshold()
 
     if (ui.scroll.overflow === overflow && ui.scroll.bottom === bottom && ui.scroll.jump === jump) return
     setUi("scroll", { overflow, bottom, jump })
@@ -2472,6 +2473,40 @@ export default function Page() {
           return (
             <SessionComposerRegion
               controller={controller}
+              changes={
+                <Show when={params.id}>
+                  <button
+                    type="button"
+                    data-component="session-changes-entry"
+                    class="flex h-7 w-full min-w-0 items-center gap-2 px-1 text-xs text-text-weak"
+                    title={
+                      !turnTracked()
+                        ? language.t("session.snapshot.unconfirmed")
+                        : language.t("session.changes.inspect")
+                    }
+                    onClick={() => {
+                      view().review.setMode("turn")
+                      if (!isDesktop()) setStore("mobileTab", "changes")
+                      openReviewPanel()
+                    }}
+                  >
+                    <span class="min-w-0 truncate">
+                      {!turnTracked()
+                        ? language.t("session.changes.untracked")
+                        : !turnQuery.isFetched
+                          ? language.t("prompt.loading")
+                          : language.t("session.review.filesChanged", { count: turnQuery.data?.length ?? 0 })}
+                    </span>
+                    <Show when={turnTracked() && turnQuery.isFetched}>
+                      <span class="shrink-0 tabular-nums">
+                        +{turnQuery.data?.reduce((sum, diff) => sum + diff.additions, 0) ?? 0} −
+                        {turnQuery.data?.reduce((sum, diff) => sum + diff.deletions, 0) ?? 0}
+                      </span>
+                    </Show>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                </Show>
+              }
               promptInput={
                 <div
                   data-component="prompt-admission"

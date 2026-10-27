@@ -1,4 +1,5 @@
 import type { Message, Part } from "@zaovra-ai/sdk/v2/client"
+import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
 import { recoveredToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 
 export function visibleProgress(input: {
@@ -14,15 +15,10 @@ export function visibleProgress(input: {
     .filter((message) => message.sessionID === input.sessionID)
     .toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
   // Adapted synthetic/shell rows are user-shaped but keep the preceding request's ownership.
-  const owners = new Map<string, string>()
-  let request: string | undefined
-  for (const message of messages) {
-    if (message.role !== "user") continue
-    if (!(input.parts[message.id] ?? []).some((part) => part.type === "text" && part.synthetic)) {
-      request = message.id
-    }
-    if (request) owners.set(message.id, request)
-  }
+  const owners = displayTurnOwners(messages, (id) => input.parts[id] ?? [])
+  const request = messages.findLast(
+    (message) => message.role === "user" && !isContinuation(input.parts[message.id] ?? []),
+  )?.id
   const assistant = messages.findLast((message) => message.role === "assistant")
   const owner = assistant ? owners.get(assistant.parentID) : request
   const user = messages.find((message) => message.role === "user" && message.id === owner)
