@@ -1,16 +1,26 @@
 import type { ToolPart } from "@zaovra-ai/sdk/v2"
-import { For } from "solid-js"
+import { For, Show } from "solid-js"
 import { Collapsible } from "@zaovra-ai/ui/collapsible"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { useI18n } from "@zaovra-ai/ui/context/i18n"
 
-export function ToolRecoverySummary(props: { parts: readonly ToolPart[]; onSizeChange?: () => void }) {
+export function ToolRecoverySummary(props: {
+  parts: readonly ToolPart[]
+  recovered?: boolean
+  onSizeChange?: () => void
+}) {
   const i18n = useI18n()
   return (
     <Collapsible data-component="tool-recovery-summary" onOpenChange={() => props.onSizeChange?.()}>
       <Collapsible.Trigger>
-        <Icon name="check" size="small" />
-        <span>{i18n.t("ui.toolRecovery.summary", { count: props.parts.length })}</span>
+        <Show when={props.recovered !== false}>
+          <Icon name="check" size="small" />
+        </Show>
+        <span>
+          {i18n.t(props.recovered === false ? "ui.toolRecovery.exploratory" : "ui.toolRecovery.summary", {
+            count: props.parts.length,
+          })}
+        </span>
         <Collapsible.Arrow />
       </Collapsible.Trigger>
       <Collapsible.Content>

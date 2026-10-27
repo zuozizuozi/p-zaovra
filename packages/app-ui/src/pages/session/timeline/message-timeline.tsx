@@ -43,7 +43,6 @@ import { type MascotState } from "@/components/task-mascot"
 import { TaskActivity } from "@/components/task-activity"
 import { runningTool } from "@/utils/running-tool"
 import { isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
-import { recoveredToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
@@ -90,6 +89,7 @@ import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { filterVirtualIndexes } from "./virtual-items"
+import { TurnProcessSummary, settledTurnStatus } from "./turn-process-summary"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
@@ -452,20 +452,14 @@ export function MessageTimeline(props: {
     const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
     const latest = messages.at(-1)
     if (!latest) return false
-    const recovered = recoveredToolFailures({
-      message: latest,
-      messages: sessionMessages(),
-      parts: sync().data.part,
-      working:
-        sessionStatus().type !== "idle" &&
-        activeMessageID() !== undefined &&
-        displayTurn(activeMessageID()!) === displayTurn(user),
-    })
     return messages
       .flatMap((message) => getMsgParts(message.id))
       .some(
         (part) =>
-          part.type === "tool" && part.state.status === "error" && !recovered.some((item) => item.id === part.id),
+          part.type === "tool" &&
+          part.state.status === "error" &&
+          !(part.tool === "question" && part.state.error.includes("dismissed this question")) &&
+          !projection.quietParts().has(part.id),
       )
   }
   const messageLastRowIndex = projection.messageLastRowIndex
@@ -1137,26 +1131,7 @@ export function MessageTimeline(props: {
     }
   }
 
-  const recoveredParts = createMemo(() => {
-    const result = new Set<string>()
-    assistantMessagesByTurn().forEach((messages, user) => {
-      const latest = messages.at(-1)
-      if (
-        !latest ||
-        !messages.some((message) =>
-          getMsgParts(message.id).some((part) => part.type === "tool" && part.state.status === "error"),
-        )
-      )
-        return
-      recoveredToolFailures({
-        message: latest,
-        messages: sessionMessages(),
-        parts: sync().data.part,
-        working: workingDisplayTurn(user),
-      }).forEach((part) => result.add(part.id))
-    })
-    return result
-  })
+  const quietParts = projection.quietParts
   const answerMessages = createMemo(() => {
     const result = new Map<string, string>()
     assistantMessagesByTurn().forEach((messages, user) => {
@@ -1280,6 +1255,8 @@ export function MessageTimeline(props: {
                   onToolOpenChange={(open) => setToolOpen(part().id, open)}
                   deferToolContent
                   virtualizeDiff={false}
+                  quietFailure={quietParts().has(part().id)}
+                  explainFailure={!workingDisplayTurn(row().userMessageID) && !quietParts().has(part().id)}
                   onContentRendered={onSizeChange}
                 />
               </>
@@ -1453,15 +1430,19 @@ export function MessageTimeline(props: {
                     started={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.started : undefined}
                   />
                 </Show>
-                <Show when={elapsed() !== undefined && !workingDisplayTurn(headingRow().userMessageID)}>
-                  <button
-                    type="button"
-                    class="shrink-0 text-xs text-text-weak"
-                    aria-expanded={!folded()}
-                    onClick={() => setTurns(headingRow().userMessageID, !folded())}
-                  >
-                    {language.t("session.turn.duration", { seconds: elapsed()! })} {folded() ? "⌄" : "⌃"}
-                  </button>
+                <Show when={!workingDisplayTurn(headingRow().userMessageID)}>
+                  <TurnProcessSummary
+                    seconds={elapsed()}
+                    tools={(assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages)
+                      .flatMap((message) => getMsgParts(message.id))
+                      .filter((part): part is ToolPart => part.type === "tool")}
+                    status={settledTurnStatus(
+                      assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages,
+                      unresolvedTools(headingRow().userMessageID),
+                    )}
+                    folded={folded()}
+                    onToggle={() => setTurns(headingRow().userMessageID, !folded())}
+                  />
                 </Show>
               </div>
               <Show when={snapshotWarning() === headingRow().userMessageID}>
@@ -1489,7 +1470,7 @@ export function MessageTimeline(props: {
               return ref.messageID !== answerMessages().get(displayTurn(assistantPartRow().userMessageID))
             if (part?.type === "reasoning") return true
             if (part?.type !== "tool") return false
-            return part.state.status !== "error" || recoveredParts().has(part.id)
+            return part.state.status !== "error" || quietParts().has(part.id)
           })
         }
         const modelName = createMemo(() => {

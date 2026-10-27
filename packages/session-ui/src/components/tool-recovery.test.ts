@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { AssistantMessage, Message, Part, ToolPart } from "@zaovra-ai/sdk/v2"
-import { recoveredToolFailures } from "./tool-recovery"
+import { quietToolFailures, recoveredToolFailures } from "./tool-recovery"
 
 const user: Message = {
   id: "user",
@@ -164,5 +164,114 @@ test("synthetic continuation keeps request ownership and a new user request cann
   ).toEqual([failure.id])
   expect(
     recovered({ first: [failure], last: [success] }, [user, first, synthetic, { ...last, parentID: "shell" }]),
+  ).toEqual([])
+})
+
+test("a missing exploratory read is quiet after a different successful operation and a normal answer", () => {
+  if (failure.state.status !== "error") throw new Error("Expected failure")
+  const read = {
+    ...failure,
+    tool: "read",
+    state: { ...failure.state, input: { filePath: "missing.html" }, error: "File not found: missing.html" },
+  }
+  const parts = {
+    user: [
+      { id: "request", messageID: user.id, sessionID: user.sessionID, type: "text" as const, text: "Build a page" },
+    ],
+    first: [read],
+    last: [
+      success,
+      {
+        id: "answer",
+        messageID: last.id,
+        sessionID: last.sessionID,
+        type: "text" as const,
+        text: "The page is ready.",
+      },
+    ],
+  }
+  const input = { message: last, messages: [user, first, last], parts, working: false }
+  expect(recoveredToolFailures(input)).toEqual([])
+  expect(quietToolFailures(input).map((part) => part.id)).toEqual([read.id])
+  expect(read.state.error).toBe("File not found: missing.html")
+  expect(quietToolFailures({ ...input, working: true })).toEqual([])
+  for (const finish of ["interrupted", "stopped", "tool-calls"])
+    expect(quietToolFailures({ ...input, messages: [user, first, { ...last, finish }] })).toEqual([])
+  expect(quietToolFailures({ ...input, parts: { ...parts, last: [success] } })).toEqual([])
+  expect(quietToolFailures({ ...input, parts: { ...parts, last: parts.last.slice(1) } })).toEqual([])
+  expect(
+    quietToolFailures({
+      ...input,
+      messages: [user, first, { ...last, error: { name: "UnknownError", data: { message: "failed" } } }],
+    }),
+  ).toEqual([])
+})
+
+test("exploration cannot hide verification, permissions, uncertain effects, a final failed step or another turn", () => {
+  if (failure.state.status !== "error" || success.state.status !== "completed") throw new Error("Expected fixtures")
+  const read = {
+    ...failure,
+    tool: "read",
+    state: { ...failure.state, input: { filePath: "missing.html" }, error: "File not found: missing.html" },
+  }
+  const answer: Part = { id: "answer", messageID: last.id, sessionID: last.sessionID, type: "text", text: "Done" }
+  const parts = {
+    user: [{ ...answer, id: "request", messageID: user.id, text: "Build a page" }],
+    first: [read],
+    last: [success, answer],
+  }
+  const input = { message: last, messages: [user, first, last], parts, working: false }
+  for (const error of [
+    "File not found; partial result",
+    "File not found; timed out",
+    "Permission denied",
+    "Verification failed: file not found",
+  ])
+    expect(
+      quietToolFailures({ ...input, parts: { ...parts, first: [{ ...read, state: { ...read.state, error } }] } }),
+    ).toEqual([])
+  for (const metadata of [{ phase: "mutation", reason: "target-changed" }, { verification: true }, { timeout: true }])
+    expect(
+      quietToolFailures({ ...input, parts: { ...parts, first: [{ ...read, state: { ...read.state, metadata } }] } }),
+    ).toEqual([])
+  for (const metadata of [
+    { exit: 1, verification: true },
+    { timeout: true },
+    { job_id: "active" },
+    { formatting: { failed: ["formatter"] } },
+  ])
+    expect(
+      quietToolFailures({
+        ...input,
+        parts: { ...parts, last: [{ ...success, state: { ...success.state, metadata } }, answer] },
+      }),
+    ).toEqual([])
+  expect(quietToolFailures({ ...input, parts: { ...parts, first: [success], last: [read, answer] } })).toEqual([])
+  expect(
+    quietToolFailures({
+      ...input,
+      parts: {
+        ...parts,
+        first: [
+          read,
+          {
+            ...failure,
+            id: "mutation",
+            state: { ...failure.state, input: { ...failure.state.input, path: "other.ts" } },
+          },
+        ],
+      },
+    }),
+  ).toEqual([])
+  expect(
+    quietToolFailures({
+      ...input,
+      messages: [
+        user,
+        first,
+        { ...user, id: "new", time: { created: 4 } },
+        { ...last, parentID: "new", time: { created: 5, completed: 6 } },
+      ],
+    }),
   ).toEqual([])
 })

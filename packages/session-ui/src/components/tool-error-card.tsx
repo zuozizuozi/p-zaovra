@@ -18,6 +18,30 @@ export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "c
   href?: string
 }
 
+export function ToolFailureNotice(props: { error: string }) {
+  const i18n = useI18n()
+  const kind = () => {
+    if (/\bOutcome may have occurred\b|\bpartial\b|\btimeout\b|\btimed out\b/i.test(props.error))
+      return "ui.toolErrorCard.uncertainAction"
+    if (/\bVerification failed\b/i.test(props.error)) return "ui.toolErrorCard.verificationAction"
+    if (/\b(?:ENOENT|file not found|no such file|does not exist)\b/i.test(props.error))
+      return "ui.toolErrorCard.missingAction"
+    if (/\b(?:permission denied|access denied|EACCES|EPERM)\b/i.test(props.error))
+      return "ui.toolErrorCard.permissionAction"
+    return "ui.toolErrorCard.actionable"
+  }
+  return (
+    <p data-component="tool-failure-notice" role="status" class="text-13-regular text-text-critical-base py-2">
+      {i18n.t(kind(), {
+        reason: props.error
+          .replace(/^Error:\s*/, "")
+          .split(/\r?\n/)[0]
+          .slice(0, 240),
+      })}
+    </p>
+  )
+}
+
 export function ToolErrorCard(props: ToolErrorCardProps) {
   const i18n = useI18n()
   const [state, setState] = createStore({

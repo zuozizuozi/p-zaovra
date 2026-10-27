@@ -1,4 +1,15 @@
 export const dict: Record<string, string> = {
+  "ui.toolRecovery.exploratory": "{{count}} failed attempts · original record",
+  "ui.toolErrorCard.missingAction":
+    "A required file or path was not found ({{reason}}). Check the path or provide the file, then retry.",
+  "ui.toolErrorCard.verificationAction":
+    "Verification did not pass ({{reason}}). Open the results, fix the failed checks, then run verification again.",
+  "ui.toolErrorCard.uncertainAction":
+    "This operation may have taken effect ({{reason}}). Check the current files or process status before retrying.",
+  "ui.toolErrorCard.permissionAction":
+    "Access was denied ({{reason}}). Check permissions or choose an accessible path before retrying.",
+  "ui.toolErrorCard.actionable":
+    "This operation could not complete: {{reason}}. Open the details, address the cause, then retry.",
   "ui.toolRecovery.summary": "{{count}} attempts did not succeed during the process; resolved automatically",
   "ui.browserScreenshot.loading": "Loading screenshot…",
   "ui.browserScreenshot.unavailable": "Screenshot unavailable or expired.",

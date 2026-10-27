@@ -43,7 +43,7 @@ import { StickyAccordionHeader } from "@zaovra-ai/ui/sticky-accordion-header"
 import { Collapsible } from "@zaovra-ai/ui/collapsible"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
-import { ToolErrorCard } from "./tool-error-card"
+import { ToolErrorCard, ToolFailureNotice } from "./tool-error-card"
 import { Checkbox } from "@zaovra-ai/ui/checkbox"
 import { DiffChanges } from "@zaovra-ai/ui/diff-changes"
 import { Markdown } from "./markdown"
@@ -205,6 +205,8 @@ export interface MessagePartProps {
   onToolOpenChange?: (open: boolean) => void
   deferToolContent?: boolean
   virtualizeDiff?: boolean
+  quietFailure?: boolean
+  explainFailure?: boolean
   onContentRendered?: () => void
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
@@ -1383,6 +1385,8 @@ export function Part(props: MessagePartProps) {
         onToolOpenChange={props.onToolOpenChange}
         deferToolContent={props.deferToolContent}
         virtualizeDiff={props.virtualizeDiff}
+        quietFailure={props.quietFailure}
+        explainFailure={props.explainFailure}
         onContentRendered={props.onContentRendered}
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
@@ -1514,7 +1518,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
 
   const render = createMemo(() => ToolRegistry.render(part().tool) ?? GenericTool)
   const recovered = createMemo(() =>
-    part().state.status === "error" && props.message.role === "assistant"
+    !props.quietFailure && part().state.status === "error" && props.message.role === "assistant"
       ? recoveredToolFailures({
           message: props.message,
           messages: data.store.message[part().sessionID] ?? [props.message],
@@ -1531,6 +1535,9 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
     <Show when={!hideQuestion()}>
       <div data-component="tool-part-wrapper" data-timeline-part-id={part().id}>
         <Switch>
+          <Match when={props.quietFailure}>
+            <ToolRecoverySummary parts={[part()]} recovered={false} onSizeChange={props.onContentRendered} />
+          </Match>
           <Match when={recoveredPart()}>
             <Show when={recovered()[0]?.id === part().id}>
               <ToolRecoverySummary parts={recovered()} onSizeChange={props.onContentRendered} />
@@ -1549,16 +1556,21 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                 )
               }
               return (
-                <ToolErrorCard
-                  tool={part().tool}
-                  error={error()}
-                  title={part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider) : undefined}
-                  defaultOpen={props.defaultOpen}
-                  open={controlledOpen()}
-                  onOpenChange={props.onToolOpenChange ? handleToolOpenChange : undefined}
-                  subtitle={taskSubtitle()}
-                  href={taskHref()}
-                />
+                <>
+                  <Show when={props.explainFailure}>
+                    <ToolFailureNotice error={error()} />
+                  </Show>
+                  <ToolErrorCard
+                    tool={part().tool}
+                    error={error()}
+                    title={part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider) : undefined}
+                    defaultOpen={props.defaultOpen}
+                    open={controlledOpen()}
+                    onOpenChange={props.onToolOpenChange ? handleToolOpenChange : undefined}
+                    subtitle={taskSubtitle()}
+                    href={taskHref()}
+                  />
+                </>
               )
             }}
           </Match>

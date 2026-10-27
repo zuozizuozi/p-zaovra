@@ -3,6 +3,13 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.toolRecovery.exploratory": "{{count}}次尝试失败 · 原始记录",
+  "ui.toolErrorCard.missingAction": "未找到所需文件或路径（{{reason}}）。请检查路径或提供文件后重试。",
+  "ui.toolErrorCard.verificationAction": "验证未通过（{{reason}}）。请展开结果，修复失败项后重新验证。",
+  "ui.toolErrorCard.uncertainAction":
+    "这项操作可能已部分生效（{{reason}}）。请先检查当前文件或进程状态，再决定是否重试。",
+  "ui.toolErrorCard.permissionAction": "操作被拒绝访问（{{reason}}）。请检查权限或换用可访问的路径后重试。",
+  "ui.toolErrorCard.actionable": "这项操作未能完成：{{reason}}。请展开详情，处理原因后重试。",
   "ui.toolRecovery.summary": "过程中{{count}}次尝试未成功，已自动处理",
   "ui.browserScreenshot.loading": "正在加载截图…",
   "ui.browserScreenshot.unavailable": "截图不可用或已过期。",

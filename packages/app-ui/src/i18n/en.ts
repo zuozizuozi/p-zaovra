@@ -1,4 +1,11 @@
 export const dict = {
+  "session.process.other": "{{count}} other operations",
+  "session.process.failed": " ({{count}} failed)",
+  "session.process.separator": ", ",
+  "session.process.details": "Process details",
+  "session.turn.stopped": "Stopped",
+  "session.turn.interrupted": "Interrupted",
+  "session.turn.error": "Action needed",
   "session.snapshot.unconfirmed":
     "Git tracking has not been confirmed. Authoritative change totals are unavailable; changes without snapshots cannot be undone.",
   "session.progress.settled": "Turn ended",

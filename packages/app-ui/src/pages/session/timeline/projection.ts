@@ -4,6 +4,8 @@ import { createMemo, mapArray, type Accessor } from "solid-js"
 import { reuseTimelineRows } from "./row-reconciliation"
 import { Timeline, TimelineRow } from "./rows"
 import { displayTurnOwners } from "@zaovra-ai/session-ui/turn-ownership"
+import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
+import { placeToolFailuresAfterAnswer } from "./tool-failure-rows"
 
 export { reuseTimelineRows } from "./row-reconciliation"
 
@@ -46,6 +48,27 @@ export function createTimelineProjection(input: {
         return
       }
       result.set(owner, [message])
+    })
+    return result
+  })
+  const quietParts = createMemo(() => {
+    const result = new Set<string>()
+    const parts = Object.fromEntries(input.messages().map((message) => [message.id, input.parts(message.id)]))
+    assistantMessagesByTurn().forEach((messages) => {
+      const latest = messages.at(-1)
+      if (
+        !latest ||
+        !messages.some((message) =>
+          parts[message.id].some((part) => part.type === "tool" && part.state.status === "error"),
+        )
+      )
+        return
+      quietToolFailures({
+        message: latest,
+        messages: input.messages(),
+        parts,
+        working: input.status().type !== "idle",
+      }).forEach((part) => result.add(part.id))
     })
     return result
   })
@@ -98,7 +121,17 @@ export function createTimelineProjection(input: {
         ([a], [b]) =>
           (messageByID().get(a)?.time.created ?? 0) - (messageByID().get(b)?.time.created ?? 0) || a.localeCompare(b),
       )
-      .flatMap(([, rows]) => rows)
+      .flatMap(([owner, rows]) => {
+        const last = assistantMessagesByTurn().get(owner)?.at(-1)
+        const working =
+          input.status().type !== "idle" && (displayTurns().get(activeMessageID() ?? "") ?? activeMessageID()) === owner
+        return placeToolFailuresAfterAnswer(
+          rows,
+          input.parts,
+          quietParts(),
+          !working && typeof last?.time.completed === "number" && last.finish !== "tool-calls",
+        )
+      })
     const headings = new Set(
       projected.flatMap((row) =>
         row._tag === "AssistantHeading" ? [displayTurns().get(row.userMessageID) ?? row.userMessageID] : [],
@@ -140,6 +173,7 @@ export function createTimelineProjection(input: {
 
   return {
     activeMessageID,
+    quietParts,
     assistantMessagesByParent,
     assistantMessagesByTurn,
     displayTurns,
