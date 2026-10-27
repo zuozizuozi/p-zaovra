@@ -586,7 +586,7 @@ export default function Page() {
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
   const diffs = createMemo(() => (params.id ? list(sync().data.session_diff[params.id]) : []))
-  const canReview = createMemo(() => !!sync().project)
+  const canReview = createMemo(() => !!sync().project || !!params.id)
   const reviewTab = createMemo(() => isDesktop())
   const tabState = createSessionTabs({
     tabs,
@@ -1338,6 +1338,8 @@ export default function Page() {
   const reviewEmptyText = createMemo(() => {
     if (reviewMode() === "git") return language.t("session.review.noUncommittedChanges")
     if (reviewMode() === "branch") return language.t("session.review.noBranchChanges")
+    if (!turnTracked())
+      return language.t("session.changes.untracked") + " · " + language.t("session.snapshot.unconfirmed")
     return language.t("session.review.noChanges")
   })
 
@@ -2486,6 +2488,7 @@ export default function Page() {
                     }
                     onClick={() => {
                       view().review.setMode("turn")
+                      if (isDesktop()) tabs().setActive("review")
                       if (!isDesktop()) setStore("mobileTab", "changes")
                       openReviewPanel()
                     }}
