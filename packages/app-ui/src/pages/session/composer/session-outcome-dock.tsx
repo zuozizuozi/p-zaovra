@@ -175,6 +175,12 @@ export function SessionOutcomeDock() {
     observer.observe(document.body, { childList: true, subtree: true })
     onCleanup(() => observer.disconnect())
   })
+  const verificationSummary = () =>
+    language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`) +
+    " · " +
+    (currentChecks().length
+      ? language.t("session.outcome.latestCount", { count: passedChecks() })
+      : language.t("session.outcome.noChecks"))
   return (
     <>
       <Show when={params.id && !abandoned()}>
@@ -377,12 +383,10 @@ export function SessionOutcomeDock() {
                 <summary
                   class="font-medium cursor-pointer"
                   data-component="verification-summary"
+                  title={verificationSummary()}
                   data-warning={failedChecks() || staleChecks() || incompleteChecks() ? "" : undefined}
                 >
-                  {language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`)} ·{" "}
-                  <Show when={currentChecks().length} fallback={language.t("session.outcome.noChecks")}>
-                    {language.t("session.outcome.latestCount", { count: passedChecks() })}
-                  </Show>
+                  {verificationSummary()}
                 </summary>
                 <IconButton
                   icon="reset"

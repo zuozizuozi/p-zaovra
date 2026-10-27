@@ -1093,9 +1093,6 @@ export function MessageTimeline(props: {
     )
   }
 
-  const firstDisplayPart = (id: string) =>
-    projection.rows().find((row) => row._tag === "AssistantPart" && displayTurn(row.userMessageID) === displayTurn(id))
-
   const workingTurn = (userMessageID: string) => sessionStatus().type !== "idle" && activeMessageID() === userMessageID
   const workingDisplayTurn = (userMessageID: string) =>
     sessionStatus().type !== "idle" &&

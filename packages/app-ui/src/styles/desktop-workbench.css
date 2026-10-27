@@ -978,6 +978,25 @@ html[data-theme="oc-2"] body[data-new-layout] {
     }
   }
 
+  /* Narrow chat panes also occur with native window zoom and a side panel open. */
+  @container (max-width: 240px) {
+    [data-component="session-prompt-dock"] > div {
+      padding-inline: 0;
+    }
+
+    [data-component="prompt-input-v2"] [data-slot="prompt-toolbar"] {
+      padding-inline: 4px;
+    }
+
+    [data-component="verification-summary"] {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
   @media (max-width: 640px) {
     [data-slot="new-session-heading"] {
       margin-bottom: 16px;
