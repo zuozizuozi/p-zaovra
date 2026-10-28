@@ -66,6 +66,9 @@ export function quietToolFailures(input: RecoveryInput) {
   const recovered = settled ? recoveries(settled.tools).filter((part) => part.tool !== "read") : []
   if (!settled || settled.last.error || settled.last.finish !== "stop") return recovered
   if (!(input.parts[settled.last.id] ?? []).some((part) => part.type === "text" && part.text.trim())) return recovered
+  const agents = new Map(
+    input.messages.filter((message) => message.role === "assistant").map((message) => [message.id, message.agent]),
+  )
   const exploratory = (part: ToolPart) =>
     part.state.status === "error" &&
     !verification(part) &&
@@ -101,6 +104,14 @@ export function quietToolFailures(input: RecoveryInput) {
         (next) =>
           next.state.status === "completed" &&
           next.state.time.end >= end &&
+          (part.tool !== "read" ||
+            (["read", "write"].includes(next.tool) &&
+              typeof (part.state.input.path ?? part.state.input.filePath) === "string" &&
+              !!(part.state.input.path ?? part.state.input.filePath) &&
+              (part.state.input.path ?? part.state.input.filePath) ===
+                (next.state.input.path ?? next.state.input.filePath) &&
+              !!agents.get(part.messageID) &&
+              agents.get(part.messageID) === agents.get(next.messageID))) &&
           !next.state.metadata.timeout &&
           !next.state.metadata.job_id &&
           (typeof next.state.metadata.exit !== "number" || next.state.metadata.exit === 0),

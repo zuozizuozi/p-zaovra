@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { createStore } from "solid-js/store"
-import { Show } from "solid-js"
+import { Show, For } from "solid-js"
 import { render } from "solid-js/web"
 import type { AssistantMessage, Part, ToolPart, UserMessage } from "@zaovra-ai/sdk/v2"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
@@ -8,6 +8,8 @@ import { dict } from "../../../ui/src/i18n/zh"
 import { ToolErrorCard, ToolFailureNotice } from "../../../session-ui/src/components/tool-error-card"
 import { ToolRecoverySummary } from "../../../session-ui/src/components/tool-recovery-summary"
 import { quietToolFailures } from "../../../session-ui/src/components/tool-recovery"
+import { TimelineRow } from "../../src/pages/session/timeline/timeline-row"
+import { placeToolFailuresAfterAnswer } from "../../src/pages/session/timeline/tool-failure-rows"
 import { TurnProcessSummary, settledTurnStatus } from "../../src/pages/session/timeline/turn-process-summary"
 
 const user: UserMessage = {
@@ -57,7 +59,7 @@ const success: ToolPart = {
   tool: "write",
   state: {
     status: "completed",
-    input: { filePath: "index.html", content: "<h1>Ready</h1>" },
+    input: { filePath: "missing.html", content: "<h1>Ready</h1>" },
     output: "Written",
     title: "write",
     metadata: {},
@@ -269,3 +271,76 @@ test("confirmed empty Stop renders stopped while output interruption stays inter
   dispose()
   root.remove()
 })
+
+for (const text of ["缺少必需规格文件，无法完成，请提供。", "已完成。"])
+  test("required missing read stays below the final answer despite an unrelated list: " + text, () => {
+    if (failure.state.status !== "error" || success.state.status !== "completed") throw Error("fixtures")
+    const missing: ToolPart = {
+      ...failure,
+      state: {
+        ...failure.state,
+        input: { path: "customer-spec.md" },
+        error: "Unable to read customer-spec.md",
+        metadata: { reason: "not_found" },
+      },
+    }
+    const listing: ToolPart = { ...success, tool: "list", state: { ...success.state, input: { path: "." } } }
+    const final: Part = { ...answer, text }
+    const parts = { first: [missing], last: [listing, final] }
+    const quiet = new Set(
+      quietToolFailures({ message: last, messages: [user, first, last], parts, working: false }).map((part) => part.id),
+    )
+    const failedRow = new TimelineRow.AssistantPart({
+      userMessageID: user.id,
+      group: { type: "part", key: missing.id, ref: { messageID: first.id, partID: missing.id } },
+      previousAssistantPart: false,
+    })
+    const answerRow = new TimelineRow.AssistantPart({
+      userMessageID: user.id,
+      group: { type: "part", key: final.id, ref: { messageID: last.id, partID: final.id } },
+      previousAssistantPart: true,
+    })
+    const rows = placeToolFailuresAfterAnswer(
+      [failedRow, answerRow],
+      (id) => parts[id as keyof typeof parts] ?? [],
+      quiet,
+      true,
+    )
+    const host = document.createElement("main")
+    document.body.append(host)
+    const dispose = render(
+      () => (
+        <I18nProvider value={value}>
+          <TurnProcessSummary
+            tools={[missing, listing]}
+            status={settledTurnStatus([first, last], !quiet.has(missing.id))}
+            folded={true}
+            onToggle={() => {}}
+          />
+          <For each={rows}>
+            {(row) =>
+              row === answerRow ? (
+                <p data-slot="required-answer">{text}</p>
+              ) : (
+                <Show when={!quiet.has(missing.id)}>
+                  <div data-slot="required-failure">
+                    <ToolFailureNotice error="Unable to read customer-spec.md" />
+                  </div>
+                </Show>
+              )
+            }
+          </For>
+        </I18nProvider>
+      ),
+      host,
+    )
+    expect(host.querySelector("[data-slot=turn-terminal-status]")?.textContent).toBe("需要处理")
+    expect(host.querySelector("[data-slot=required-failure]")?.textContent).toContain("customer-spec.md")
+    expect(
+      host
+        .querySelector("[data-slot=required-answer]")
+        ?.compareDocumentPosition(host.querySelector("[data-slot=required-failure]")!),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    dispose()
+    host.remove()
+  })

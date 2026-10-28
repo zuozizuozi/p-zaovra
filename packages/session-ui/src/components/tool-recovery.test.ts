@@ -167,7 +167,7 @@ test("synthetic continuation keeps request ownership and a new user request cann
   ).toEqual([])
 })
 
-test("a missing exploratory read is quiet after a different successful operation and a normal answer", () => {
+test("a missing exploratory read is quiet after a successful same-target creation and a normal answer", () => {
   if (failure.state.status !== "error") throw new Error("Expected failure")
   const read = {
     ...failure,
@@ -179,13 +179,18 @@ test("a missing exploratory read is quiet after a different successful operation
       metadata: { reason: "not_found" },
     },
   }
+  const created: ToolPart = {
+    ...success,
+    tool: "write",
+    state: { ...success.state, input: { filePath: "missing.html" } },
+  }
   const parts = {
     user: [
       { id: "request", messageID: user.id, sessionID: user.sessionID, type: "text" as const, text: "Build a page" },
     ],
     first: [read],
     last: [
-      success,
+      created,
       {
         id: "answer",
         messageID: last.id,
@@ -225,10 +230,15 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
     },
   }
   const answer: Part = { id: "answer", messageID: last.id, sessionID: last.sessionID, type: "text", text: "Done" }
+  const created: ToolPart = {
+    ...success,
+    tool: "write",
+    state: { ...success.state, input: { filePath: "missing.html" } },
+  }
   const parts = {
     user: [{ ...answer, id: "request", messageID: user.id, text: "Build a page" }],
     first: [read],
-    last: [success, answer],
+    last: [created, answer],
   }
   const input = { message: last, messages: [user, first, last], parts, working: false }
   for (const error of [
@@ -260,7 +270,10 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
     expect(
       quietToolFailures({
         ...input,
-        parts: { ...parts, last: [{ ...success, state: { ...success.state, metadata } }, answer] },
+        parts: {
+          ...parts,
+          last: [{ ...created, state: { ...success.state, input: { filePath: "missing.html" }, metadata } }, answer],
+        },
       }),
     ).toEqual([])
   expect(quietToolFailures({ ...input, parts: { ...parts, first: [success], last: [read, answer] } })).toEqual([])
@@ -291,4 +304,38 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
       ],
     }),
   ).toEqual([])
+})
+
+test("required missing reads need later evidence for the same agent and path", () => {
+  if (failure.state.status !== "error" || success.state.status !== "completed") throw Error("fixtures")
+  const missing: ToolPart = {
+    ...failure,
+    tool: "read",
+    state: {
+      ...failure.state,
+      input: { path: "customer-spec.md" },
+      error: "Unable to read customer-spec.md",
+      metadata: { reason: "not_found" },
+    },
+  }
+  const answer: Part = {
+    id: "answer",
+    messageID: last.id,
+    sessionID: last.sessionID,
+    type: "text",
+    text: "缺少必需规格文件，无法完成，请提供。",
+  }
+  const check = (tool: string, path: string, agent = last.agent) =>
+    quietToolFailures({
+      message: last,
+      messages: [user, first, { ...last, agent }],
+      parts: { first: [missing], last: [{ ...success, tool, state: { ...success.state, input: { path } } }, answer] },
+      working: false,
+    })
+  expect(check("list", ".")).toEqual([])
+  expect(check("write", "other.md")).toEqual([])
+  expect(check("read", "other.md")).toEqual([])
+  expect(check("write", "customer-spec.md").map((part) => part.id)).toEqual([missing.id])
+  expect(check("read", "customer-spec.md").map((part) => part.id)).toEqual([missing.id])
+  expect(check("write", "customer-spec.md", "other-agent")).toEqual([])
 })
