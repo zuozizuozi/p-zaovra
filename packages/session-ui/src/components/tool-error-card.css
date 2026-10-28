@@ -1,5 +1,14 @@
 [data-component="card"][data-kind="tool-error-card"] {
   --card-pad-y: 8px;
+  &[data-variant="warning"]::before {
+    display: none;
+  }
+  [data-slot="basic-tool-tool-info-main"] {
+    flex-wrap: wrap;
+  }
+  [data-slot="basic-tool-tool-subtitle"] {
+    white-space: normal;
+  }
   --card-line-pad: 12px;
 
   [data-slot="basic-tool-tool-title"] {

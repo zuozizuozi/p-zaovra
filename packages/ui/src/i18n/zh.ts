@@ -3,13 +3,14 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.toolErrorCard.commandAction": "命令没有成功执行。请展开结果查看原因，修复后重试。",
+  "ui.toolErrorCard.readAction": "无法读取 {{target}}。请检查文件是否可访问，或告诉我改用其他文件。",
   "ui.toolRecovery.exploratory": "{{count}}次尝试失败 · 原始记录",
-  "ui.toolErrorCard.missingAction": "未找到所需文件或路径（{{reason}}）。请检查路径或提供文件后重试。",
-  "ui.toolErrorCard.verificationAction": "验证未通过（{{reason}}）。请展开结果，修复失败项后重新验证。",
-  "ui.toolErrorCard.uncertainAction":
-    "这项操作可能已部分生效（{{reason}}）。请先检查当前文件或进程状态，再决定是否重试。",
-  "ui.toolErrorCard.permissionAction": "操作被拒绝访问（{{reason}}）。请检查权限或换用可访问的路径后重试。",
-  "ui.toolErrorCard.actionable": "这项操作未能完成：{{reason}}。请展开详情，处理原因后重试。",
+  "ui.toolErrorCard.missingAction": "没有找到 {{target}}，任务没有完成。你可以提供这个文件，或者告诉我改用其他文件。",
+  "ui.toolErrorCard.verificationAction": "检查没有通过。请查看失败项，修复后重新检查。",
+  "ui.toolErrorCard.uncertainAction": "操作结果还不确定。请先检查文件当前状态，再决定是否重试。",
+  "ui.toolErrorCard.permissionAction": "无法访问 {{target}}。请允许访问，或换用有权限的文件后重试。",
+  "ui.toolErrorCard.actionable": "这项操作未能完成。请展开详情查看原因，再告诉我如何继续。",
   "ui.toolRecovery.summary": "过程中{{count}}次尝试未成功，已自动处理",
   "ui.browserScreenshot.loading": "正在加载截图…",
   "ui.browserScreenshot.unavailable": "截图不可用或已过期。",

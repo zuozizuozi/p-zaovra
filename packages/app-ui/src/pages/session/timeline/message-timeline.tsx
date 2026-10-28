@@ -271,6 +271,7 @@ function TimelineDiffView(props: { diff: SummaryDiff }) {
 
 export function MessageTimeline(props: {
   actions?: UserActions
+  compactTurnID?: string
   scroll: { overflow: boolean; bottom: boolean; jump: boolean }
   onResumeScroll: () => void
   setScrollRef: (el: HTMLDivElement | undefined) => void
@@ -1476,7 +1477,13 @@ export function MessageTimeline(props: {
               return ref.messageID !== answerMessages().get(displayTurn(assistantPartRow().userMessageID))
             if (part?.type === "reasoning") return true
             if (part?.type !== "tool") return false
-            return part.state.status !== "error" || quietParts().has(part.id)
+            return (
+              part.state.status !== "error" ||
+              quietParts().has(part.id) ||
+              (!!props.compactTurnID &&
+                part.state.metadata?.phase !== "permission" &&
+                displayTurn(assistantPartRow().userMessageID) === displayTurn(props.compactTurnID))
+            )
           })
         }
         const modelName = createMemo(() => {
@@ -1546,19 +1553,26 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={diffSummaryRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <TimelineDiffSummaryRow
-                diffs={diffSummaryRow().diffs}
-                onRevert={
-                  props.actions?.revert
-                    ? () => {
-                        void props.actions?.revert?.({
-                          sessionID: sessionID()!,
-                          messageID: diffSummaryRow().userMessageID,
-                        })
-                      }
-                    : undefined
+              <Show
+                when={
+                  !props.compactTurnID ||
+                  displayTurn(diffSummaryRow().userMessageID) !== displayTurn(props.compactTurnID)
                 }
-              />
+              >
+                <TimelineDiffSummaryRow
+                  diffs={diffSummaryRow().diffs}
+                  onRevert={
+                    props.actions?.revert
+                      ? () => {
+                          void props.actions?.revert?.({
+                            sessionID: sessionID()!,
+                            messageID: diffSummaryRow().userMessageID,
+                          })
+                        }
+                      : undefined
+                  }
+                />
+              </Show>
             </div>
           </TimelineRowFrame>
         )

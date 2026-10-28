@@ -2380,6 +2380,7 @@ export default function Page() {
               {(_id) => (
                 <MessageTimeline
                   actions={actions}
+                  compactTurnID={turnMessageID()}
                   scroll={ui.scroll}
                   onResumeScroll={resumeScroll}
                   setScrollRef={setScrollRef}
@@ -2475,17 +2476,17 @@ export default function Page() {
           return (
             <SessionComposerRegion
               controller={controller}
+              hasChanges={turnQuery.isFetched && !turnQuery.isError && !!turnQuery.data?.length}
+              onUndo={() => {
+                if (params.id && turnMessageID()) void revert({ sessionID: params.id, messageID: turnMessageID()! })
+              }}
               changes={
-                <Show when={params.id}>
+                <Show when={params.id && turnQuery.isFetched && !turnQuery.isError && turnQuery.data?.length}>
                   <button
                     type="button"
                     data-component="session-changes-entry"
-                    class="flex h-7 w-full min-w-0 items-center gap-2 px-1 text-xs text-text-weak"
-                    title={
-                      !turnTracked()
-                        ? language.t("session.snapshot.unconfirmed")
-                        : language.t("session.changes.inspect")
-                    }
+                    class="flex h-7 min-w-0 shrink items-center gap-2 text-xs text-text-weak"
+                    title={language.t("session.changes.inspect")}
                     onClick={() => {
                       view().review.setMode("turn")
                       if (isDesktop()) tabs().setActive("review")
@@ -2494,13 +2495,9 @@ export default function Page() {
                     }}
                   >
                     <span class="min-w-0 truncate">
-                      {!turnTracked()
-                        ? language.t("session.changes.untracked")
-                        : !turnQuery.isFetched
-                          ? language.t("prompt.loading")
-                          : language.t("session.review.filesChanged", { count: turnQuery.data?.length ?? 0 })}
+                      {language.t("session.review.filesChanged", { count: turnQuery.data?.length ?? 0 })}
                     </span>
-                    <Show when={turnTracked() && turnQuery.isFetched}>
+                    <Show when={turnQuery.isFetched && !turnQuery.isError}>
                       <span class="shrink-0 tabular-nums">
                         +{turnQuery.data?.reduce((sum, diff) => sum + diff.additions, 0) ?? 0} −
                         {turnQuery.data?.reduce((sum, diff) => sum + diff.deletions, 0) ?? 0}

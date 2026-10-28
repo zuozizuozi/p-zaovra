@@ -150,15 +150,16 @@ test("normal completion folds exploratory failure into a neutral count, and expa
   before.dispose()
   const fixture = mount()
   try {
-    expect(fixture.host.textContent).toContain("1个失败")
+    expect(fixture.host.querySelector("[data-slot=process-counts]")).toBeNull()
     expect(fixture.host.textContent).toContain("用时 4 秒")
     expect(fixture.host.querySelector("[data-slot=turn-terminal-status]")).toBeNull()
     expect(fixture.host.textContent).not.toContain("当前未执行")
     expect(fixture.host.querySelector("[data-kind=tool-error-card]")).toBeNull()
     expect(fixture.host.querySelector("pre")).toBeNull()
     await evidence("after-read-then-complete-folded", fixture.host)
-    fixture.host.querySelector<HTMLButtonElement>("[data-slot=process-counts]")!.click()
+    fixture.host.querySelector<HTMLButtonElement>("[data-component=turn-process-summary] button")!.click()
     expect(fixture.state.folded).toBe(false)
+    expect(fixture.host.textContent).toContain("1个失败")
     fixture.host.querySelector<HTMLButtonElement>("[data-component=tool-recovery-summary] button")!.click()
     await Promise.resolve()
     expect(fixture.host.textContent).toContain("missing.html")
@@ -180,8 +181,8 @@ test("blocking failure remains visible after the answer with an explanation and 
     const answer = fixture.host.querySelector("[data-slot=final-answer]")!
     expect(fixture.host.querySelector("[data-kind=tool-error-card]")).not.toBeNull()
     expect(fixture.host.querySelector("[data-slot=turn-terminal-status]")?.textContent).toBe("需要处理")
-    expect(notice.textContent).toContain("File not found: missing.html")
-    expect(notice.textContent).toContain("检查路径或提供文件后重试")
+    expect(notice.textContent).toContain("没有找到 missing.html")
+    expect(notice.textContent).toContain("你可以提供这个文件")
     expect(answer.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     await evidence("after-blocking-failure", fixture.host)
   } finally {
@@ -240,8 +241,8 @@ test("uncertain effects explain that current state must be checked before retryi
     host,
   )
   try {
-    expect(host.textContent).toContain("可能已部分生效")
-    expect(host.textContent).toContain("先检查当前文件或进程状态")
+    expect(host.textContent).toContain("操作结果还不确定")
+    expect(host.textContent).toContain("请先检查文件当前状态")
   } finally {
     dispose()
   }

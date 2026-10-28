@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createEffect, onCleanup } from "solid-js"
+import { For, Show, createMemo, createEffect, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
@@ -18,8 +18,10 @@ import { showToast } from "@/utils/toast"
 import { commandVerification, staleVerification } from "@/utils/verification-label"
 import { artifactPath } from "@/utils/artifact-path"
 import { visibleProgress } from "./visible-progress"
+import { SessionEndBar, budgetAttention } from "./session-end-bar"
+import { toolFailureMessage } from "@zaovra-ai/session-ui/tool-error-card"
 
-export function SessionOutcomeDock() {
+export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.Element; onUndo?: () => void }) {
   const params = useParams()
   const sdk = useSDK()
   const server = useServerSDK()
@@ -39,6 +41,7 @@ export function SessionOutcomeDock() {
       busy: !!params.id && sync().session.data.session_working(params.id),
       liveShell: sync().session.data.live_shell[params.id ?? ""],
       transportConnected: server().transportConnected(),
+      historyComplete: sync().session.history.complete(params.id ?? ""),
       waiting:
         (sync().session.data.permission[params.id ?? ""]?.length ?? 0) > 0 ||
         (sync().session.data.question[params.id ?? ""]?.length ?? 0) > 0,
@@ -181,7 +184,28 @@ export function SessionOutcomeDock() {
     (currentChecks().length
       ? language.t("session.outcome.latestCount", { count: passedChecks() })
       : language.t("session.outcome.noChecks"))
-  return (
+  const notice = createMemo(() => {
+    if (abandoned()) return
+    if (budgetAttention(budgetQuery.data, outcome()?.state === "stopped")) return language.t("session.end.budget")
+    if (failedChecks() || staleChecks() || incompleteChecks()) return language.t("session.end.checkFailed")
+    const failure = progress().failures[0]
+    if (failure) {
+      const part = Object.values(sync().session.data.part)
+        .flat()
+        .find((part) => part.id === failure.id)
+      const message = toolFailureMessage({
+        ...failure,
+        input: part?.type === "tool" ? part.state.input : undefined,
+        metadata: part?.type === "tool" && part.state.status === "error" ? part.state.metadata : undefined,
+      })
+      if (message.critical) return
+      return language.t(message.key, { target: message.target })
+    }
+    if (outcome()?.outcomeUnknown) return language.t("session.end.uncertain")
+    if (outcome()?.state === "interrupted") return language.t("session.end.interrupted")
+    if (outcome()?.state === "failed" && progress().state !== "blocked") return language.t("session.end.failed")
+  })
+  const controls = () => (
     <>
       <Show when={params.id && !abandoned()}>
         <div
@@ -194,7 +218,7 @@ export function SessionOutcomeDock() {
               triggerProps={{ type: "button", class: "block w-full min-w-0 truncate text-left" }}
               trigger={
                 <span>
-                  <Show when={progress().visible} fallback={language.t("session.progress.settled")}>
+                  <Show when={progress().visible} fallback={language.t("session.progress.details")}>
                     {" "}
                     <Show when={progress().target}>{progress().target} · </Show>
                     {language.t(
@@ -630,5 +654,23 @@ export function SessionOutcomeDock() {
         </Show>
       </Show>
     </>
+  )
+  return (
+    <Show
+      when={progress().visible}
+      fallback={
+        <SessionEndBar
+          hasChanges={props.hasChanges}
+          changes={props.changes}
+          passed={passedChecks()}
+          notice={notice()}
+          onUndo={props.onUndo}
+        >
+          {controls()}
+        </SessionEndBar>
+      }
+    >
+      {controls()}
+    </Show>
   )
 }

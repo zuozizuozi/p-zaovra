@@ -16,28 +16,57 @@ export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "c
   onOpenChange?: (open: boolean) => void
   subtitle?: string
   href?: string
+  input?: Record<string, unknown>
+  metadata?: Record<string, unknown>
 }
 
-export function ToolFailureNotice(props: { error: string }) {
+export function toolFailureMessage(input: {
+  error: string
+  tool?: string
+  input?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}) {
+  const path =
+    input.input?.path ??
+    input.input?.filePath ??
+    input.error.match(/(?:File not found:|Unable to read)\s+([^\r\n]+)/i)?.[1]
+  const target = typeof path === "string" ? (path.split(/[\\/]/).at(-1) ?? path) : ""
+  const reason = input.metadata?.readFailure
+  const kind =
+    reason === "not_found" || /\b(?:ENOENT|file not found|no such file|does not exist)\b/i.test(input.error)
+      ? "missingAction"
+      : reason === "permission" ||
+          input.metadata?.phase === "permission" ||
+          /\b(?:permission denied|access denied|EACCES|EPERM)\b/i.test(input.error)
+        ? "permissionAction"
+        : /\bOutcome may have occurred\b|\bpartial\b|\btimeout\b|\btimed out\b/i.test(input.error)
+          ? "uncertainAction"
+          : /\bVerification failed\b/i.test(input.error)
+            ? "verificationAction"
+            : input.tool === "bash"
+              ? "commandAction"
+              : input.tool === "read" || target
+                ? "readAction"
+                : "actionable"
+  return { key: `ui.toolErrorCard.${kind}`, target, critical: input.metadata?.phase === "permission" }
+}
+
+export function ToolFailureNotice(props: {
+  error: string
+  tool?: string
+  input?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}) {
   const i18n = useI18n()
-  const kind = () => {
-    if (/\bOutcome may have occurred\b|\bpartial\b|\btimeout\b|\btimed out\b/i.test(props.error))
-      return "ui.toolErrorCard.uncertainAction"
-    if (/\bVerification failed\b/i.test(props.error)) return "ui.toolErrorCard.verificationAction"
-    if (/\b(?:ENOENT|file not found|no such file|does not exist)\b/i.test(props.error))
-      return "ui.toolErrorCard.missingAction"
-    if (/\b(?:permission denied|access denied|EACCES|EPERM)\b/i.test(props.error))
-      return "ui.toolErrorCard.permissionAction"
-    return "ui.toolErrorCard.actionable"
-  }
+  const message = () => toolFailureMessage(props)
   return (
-    <p data-component="tool-failure-notice" role="status" class="text-13-regular text-text-critical-base py-2">
-      {i18n.t(kind(), {
-        reason: props.error
-          .replace(/^Error:\s*/, "")
-          .split(/\r?\n/)[0]
-          .slice(0, 240),
-      })}
+    <p
+      data-component="tool-failure-notice"
+      role="status"
+      class="text-13-regular py-2"
+      style={{ color: message().critical ? "var(--text-critical-base)" : "var(--icon-warning-active)" }}
+    >
+      {i18n.t(message().key, { target: message().target })}
     </p>
   )
 }
@@ -59,6 +88,8 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     "onOpenChange",
     "subtitle",
     "href",
+    "input",
+    "metadata",
   ])
   const setOpen = (value: boolean) => {
     if (props.open === undefined) setState("open", value)
@@ -84,26 +115,11 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     return i18n.t(key)
   })
   const cleaned = createMemo(() => split.error.replace(/^Error:\s*/, "").trim())
-  const tail = createMemo(() => {
-    const value = cleaned()
-    const prefix = `${split.tool} `
-    if (value.startsWith(prefix)) return value.slice(prefix.length)
-    return value
-  })
-
   const subtitle = createMemo(() => {
     if (split.subtitle) return split.subtitle
-    if (/^Invalid tool input\b/i.test(tail())) return i18n.t("ui.toolErrorCard.invalidInput")
-    if (/^Outcome may have occurred\b/i.test(tail())) return i18n.t("ui.toolErrorCard.uncertain")
-    if (/^Verification failed\b/i.test(tail())) return i18n.t("ui.toolErrorCard.verificationFailed")
-    if (/^Not executed\b/i.test(tail())) return i18n.t("ui.toolErrorCard.notExecuted")
-    const parts = tail().split(": ")
-    if (parts.length <= 1) return i18n.t("ui.toolErrorCard.failed")
-    const head = (parts[0] ?? "").trim()
-    if (!head) return i18n.t("ui.toolErrorCard.failed")
-    return head[0] ? head[0].toUpperCase() + head.slice(1) : i18n.t("ui.toolErrorCard.failed")
+    const message = toolFailureMessage(props)
+    return i18n.t(message.key, { target: message.target })
   })
-
   const body = createMemo(() => {
     return split.error
   })
@@ -117,13 +133,22 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   }
 
   return (
-    <Card {...rest} data-kind="tool-error-card" data-open={open() ? "true" : "false"} variant="error">
+    <Card
+      {...rest}
+      data-kind="tool-error-card"
+      data-open={open() ? "true" : "false"}
+      variant={toolFailureMessage(props).critical ? "error" : "warning"}
+    >
       <Collapsible class="tool-collapsible" data-open={open() ? "true" : "false"} open={open()} onOpenChange={setOpen}>
         <Collapsible.Trigger>
           <div data-component="tool-trigger">
             <div data-slot="basic-tool-tool-trigger-content">
               <span data-slot="basic-tool-tool-indicator" data-component="tool-error-card-icon">
-                <Icon name="circle-ban-sign" size="small" style={{ "stroke-width": 1.5 }} />
+                <Icon
+                  name={toolFailureMessage(props).critical ? "circle-ban-sign" : "warning"}
+                  size="small"
+                  style={{ "stroke-width": 1.5 }}
+                />
               </span>
               <div data-slot="basic-tool-tool-info">
                 <div data-slot="basic-tool-tool-info-structured">

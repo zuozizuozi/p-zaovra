@@ -1,6 +1,6 @@
 import type { Message, Part } from "@zaovra-ai/sdk/v2/client"
 import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
-import { recoveredToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
+import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 
 export function visibleProgress(input: {
   sessionID: string
@@ -9,6 +9,7 @@ export function visibleProgress(input: {
   busy: boolean
   liveShell?: Readonly<Record<string, true>>
   transportConnected?: boolean
+  historyComplete?: boolean
   waiting: boolean
 }) {
   const messages = input.messages
@@ -28,16 +29,24 @@ export function visibleProgress(input: {
   const parts = current.flatMap((message) => input.parts[message.id] ?? [])
   const tools = parts.filter((part) => part.type === "tool")
   const active = tools.findLast((part) => part.state.status === "running" || part.state.status === "pending")
-  const recovered =
+  const quiet =
     assistant?.role === "assistant"
-      ? recoveredToolFailures({
+      ? quietToolFailures({
           message: assistant,
           messages,
           parts: input.parts,
           working: input.busy || input.waiting,
+          historyComplete: input.historyComplete,
         })
       : []
-  const failed = tools.filter((part) => part.state.status === "error" && !recovered.some((item) => item.id === part.id))
+  const failed = tools.filter(
+    (part) =>
+      !quiet.some((item) => item.id === part.id) &&
+      (part.state.status === "error" ||
+        (part.state.status === "completed" &&
+          typeof part.state.metadata.exit === "number" &&
+          part.state.metadata.exit !== 0)),
+  )
   const returned = tools.findLast((part) => part.state.status === "completed")
   const error = current.some((message) => message.role === "assistant" && !!message.error)
   const kinds = new Map<string, string>()
@@ -117,7 +126,12 @@ export function visibleProgress(input: {
     failures: failed.map((part) => ({
       id: part.id,
       tool: part.tool,
-      error: part.state.status === "error" ? part.state.error : "",
+      error:
+        part.state.status === "error"
+          ? part.state.error
+          : part.state.status === "completed"
+            ? `exit ${part.state.metadata.exit}`
+            : "",
     })),
     // A returned tool is a fact, never a completion or verification verdict.
     visible: input.busy || input.waiting || !!active || unknown || pendingJob || preview,

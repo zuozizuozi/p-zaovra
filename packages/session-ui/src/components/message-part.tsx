@@ -43,7 +43,7 @@ import { StickyAccordionHeader } from "@zaovra-ai/ui/sticky-accordion-header"
 import { Collapsible } from "@zaovra-ai/ui/collapsible"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
-import { ToolErrorCard, ToolFailureNotice } from "./tool-error-card"
+import { ToolErrorCard } from "./tool-error-card"
 import { Checkbox } from "@zaovra-ai/ui/checkbox"
 import { DiffChanges } from "@zaovra-ai/ui/diff-changes"
 import { Markdown } from "./markdown"
@@ -1557,11 +1557,10 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
               }
               return (
                 <>
-                  <Show when={props.explainFailure}>
-                    <ToolFailureNotice error={error()} />
-                  </Show>
                   <ToolErrorCard
                     tool={part().tool}
+                    input={input()}
+                    metadata={partMetadata()}
                     error={error()}
                     title={part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider) : undefined}
                     defaultOpen={props.defaultOpen}

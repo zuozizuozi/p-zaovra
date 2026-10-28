@@ -1,4 +1,13 @@
 export const dict = {
+  "session.end.checked": "Checked {{count}} items",
+  "session.end.details": "Turn details",
+  "session.end.undo": "Undo",
+  "session.end.budget": "The budget is nearly used or execution stopped. Adjust the budget to continue.",
+  "session.end.checkFailed":
+    "Checks failed or evidence is stale. Review the results, fix the issues, then check again.",
+  "session.end.uncertain": "The result is uncertain. Review details and files before continuing.",
+  "session.end.interrupted": "This turn was interrupted. You can continue the task.",
+  "session.end.failed": "The task is unfinished. Expand details and resolve the issue to continue.",
   "session.process.other": "{{count}} other operations",
   "session.process.failed": " ({{count}} failed)",
   "session.process.separator": ", ",
@@ -10,7 +19,7 @@ export const dict = {
     "Git tracking has not been confirmed. Authoritative change totals are unavailable; changes without snapshots cannot be undone.",
   "session.progress.settled": "Turn ended",
   "session.snapshot.nogit":
-    "This folder is not tracked by Git. Snapshots and authoritative change totals are unavailable; changes cannot be undone here.",
+    "Some operations, such as ordinary shell commands, have no undo snapshot. Captured file changes remain available in the turn changes bar.",
   "session.snapshot.unknown": "No usable snapshot was recorded. Changes without a snapshot cannot be undone.",
   "session.changes.untracked": "This turn · Untracked",
   "session.process.edit": "{{count}} edit operations",

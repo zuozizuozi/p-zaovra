@@ -1216,3 +1216,10 @@ html[data-theme="oc-2"]
 html[data-color-scheme="dark"] [data-component="empty-binary-background"] {
   opacity: 0.065;
 }
+
+[data-component="session-end-bar"][data-attention] {
+  color: var(--zaovra-warning, var(--icon-warning-active));
+}
+[data-component="session-end-bar"] > * {
+  min-width: 0;
+}

@@ -48,7 +48,7 @@ export function TurnProcessSummary(props: {
           {props.folded ? "⌄" : "⌃"}
         </button>
       </div>
-      <Show when={counts()}>
+      <Show when={!props.folded && counts()}>
         <button
           data-slot="process-counts"
           class="text-left break-words"

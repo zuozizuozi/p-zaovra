@@ -3,6 +3,14 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.end.checked": "已检查 {{count}} 项",
+  "session.end.details": "查看本轮详情",
+  "session.end.undo": "撤销",
+  "session.end.budget": "预算即将用完或已停止。请调整预算后继续。",
+  "session.end.checkFailed": "检查未通过或证据已失效。请查看失败项，修复后重新检查。",
+  "session.end.uncertain": "操作结果不确定。请先查看详情、核对文件后再继续。",
+  "session.end.interrupted": "本轮已中断。你可以继续当前任务。",
+  "session.end.failed": "任务没有完成。请展开详情，处理后继续。",
   "session.process.other": "另外{{count}}项操作",
   "session.process.failed": "（{{count}}个失败）",
   "session.process.separator": "、",
@@ -12,7 +20,8 @@ export const dict = {
   "session.turn.error": "需要处理",
   "session.snapshot.unconfirmed": "尚未确认 Git 跟踪，无法提供权威改动统计；没有快照的改动无法撤销。",
   "session.progress.settled": "本轮已结束",
-  "session.snapshot.nogit": "此文件夹未使用 Git，无法提供快照和权威改动统计，相关改动不能在此撤销。",
+  "session.snapshot.nogit":
+    "部分操作（如普通 shell 命令）没有可撤销的快照。已捕获的文件改动仍可在本轮改动条中查看和撤销。",
   "session.snapshot.unknown": "本次未能保存可用快照；没有快照的改动无法撤销。",
   "session.changes.untracked": "本轮 · 未跟踪",
   "session.process.edit": "编辑 {{count}} 项",

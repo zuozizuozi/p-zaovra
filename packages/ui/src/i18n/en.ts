@@ -1,15 +1,14 @@
 export const dict: Record<string, string> = {
+  "ui.toolErrorCard.readAction": "Could not read {{target}}. Check access or tell me which file to use instead.",
+  "ui.toolErrorCard.commandAction": "The command did not succeed. Expand the result, fix the cause, then retry.",
   "ui.toolRecovery.exploratory": "{{count}} failed attempts · original record",
   "ui.toolErrorCard.missingAction":
-    "A required file or path was not found ({{reason}}). Check the path or provide the file, then retry.",
-  "ui.toolErrorCard.verificationAction":
-    "Verification did not pass ({{reason}}). Open the results, fix the failed checks, then run verification again.",
-  "ui.toolErrorCard.uncertainAction":
-    "This operation may have taken effect ({{reason}}). Check the current files or process status before retrying.",
+    "Could not find {{target}}. The task is unfinished. Provide the file or tell me which file to use instead.",
+  "ui.toolErrorCard.verificationAction": "Checks did not pass. Review the failures, fix them, then check again.",
+  "ui.toolErrorCard.uncertainAction": "The result is uncertain. Check the current file state before retrying.",
   "ui.toolErrorCard.permissionAction":
-    "Access was denied ({{reason}}). Check permissions or choose an accessible path before retrying.",
-  "ui.toolErrorCard.actionable":
-    "This operation could not complete: {{reason}}. Open the details, address the cause, then retry.",
+    "Could not access {{target}}. Allow access or choose an accessible file, then retry.",
+  "ui.toolErrorCard.actionable": "This operation could not finish. Expand the details and tell me how to continue.",
   "ui.toolRecovery.summary": "{{count}} attempts did not succeed during the process; resolved automatically",
   "ui.browserScreenshot.loading": "Loading screenshot…",
   "ui.browserScreenshot.unavailable": "Screenshot unavailable or expired.",
