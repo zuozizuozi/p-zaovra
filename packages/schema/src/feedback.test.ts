@@ -64,3 +64,27 @@ test("self check classifies suggestions without creating a submission gate or co
     "unknown",
   ])
 })
+
+test("explicitly included JSON and code redact quoted nested credentials while preserving ordinary code", () => {
+  const input =
+    '{"token":"SYNTHETIC_JSON_SECRET","headers":{"Cookie":"SYNTHETIC_COOKIE_SECRET"},"apiKey":"SYNTHETIC_KEY_SECRET"}\nCUSTOM_PRIVATE="SYNTHETIC_ENV_SECRET"\nconst ordinary="APPROVED_CODE"'
+  const snapshot = Feedback.snapshot({
+    now: 0,
+    context: {},
+    description: "",
+    include: { environment: false, events: false, errors: false },
+    code: input,
+  })
+  const code = snapshot.files.find((file) => file.name === "code.txt")!.text
+  for (const secret of [
+    "SYNTHETIC_JSON_SECRET",
+    "SYNTHETIC_COOKIE_SECRET",
+    "SYNTHETIC_KEY_SECRET",
+    "SYNTHETIC_ENV_SECRET",
+  ])
+    expect(code).not.toContain(secret)
+  expect(code).toContain("APPROVED_CODE")
+  expect(Feedback.redact('escaped: {\\"token\\":\\"SYNTHETIC_ESCAPED_SECRET\\"}')).not.toContain(
+    "SYNTHETIC_ESCAPED_SECRET",
+  )
+})

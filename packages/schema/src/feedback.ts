@@ -19,20 +19,31 @@ export namespace Feedback {
   export function redact(value: string) {
     return value
       .slice(0, 32_000)
-      .replace(/https?:\/\/[^\s<>"')]+/gi, (value) => {
-        if (!URL.canParse(value)) return "[url]"
-        const url = new URL(value)
+      .replace(/https?:(?:\\?\/){2}[^\s<>"')]+/gi, (value) => {
+        const normalized = value.replace(/\\\//g, "/")
+        if (!URL.canParse(normalized)) return "[url]"
+        const url = new URL(normalized)
         return `${url.protocol}//${url.host}/[path-removed]`
       })
-      .replace(/\b(?:Bearer|Basic)\s+[^\s,;]+/gi, "[credential]")
+      .replace(/\b(?:Bearer|Basic)\s+[^\s,"';}\]]+/gi, "[credential]")
       .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential]")
+      .replace(/^([ \t]*)(cookie|set-cookie)\s*:[^\r\n]*/gim, "$1$2: [redacted]")
       .replace(
-        /\b(?:authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|token|secret|password|[A-Z][A-Z0-9_]{2,})\b\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/gi,
-        "[sensitive-field]",
+        /((?:\\)*["']?)(authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|token|secret|password)\1\s*[:=]\s*(?:\\+"[^\r\n]*?\\+"|\\+'[^\r\n]*?\\+'|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/gi,
+        maskField,
+      )
+      .replace(
+        /((?:\\)*["']?)([A-Z][A-Z0-9_]{2,})\1\s*[:=]\s*(?:\\+"[^\r\n]*?\\+"|\\+'[^\r\n]*?\\+'|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/g,
+        maskField,
       )
       .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
       .replace(/(?:[A-Z]:[\\/]|\\\\)[^\r\n"<>|]*/gi, "[local-path]")
       .replace(/\/(?:Users|home|tmp|var|workspace|projects?)\/[^\s"<>]*/gi, "[local-path]")
+  }
+
+  function maskField(_value: string, quote: string, key: string) {
+    const delimiter = quote.endsWith('"') || quote.endsWith("'") ? quote : '"'
+    return `${quote}${key}${quote}: ${delimiter}[redacted]${delimiter}`
   }
 
   export function suggestion(error: string) {

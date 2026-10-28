@@ -119,7 +119,29 @@ function mount(kind: "provider" | "permission" | "query" | "success", changes: b
   }
   setData("message", id, [user, assistant])
   setData("part", "user", [])
-  setData("part", "assistant", [])
+  setData(
+    "part",
+    "assistant",
+    kind === "permission"
+      ? [
+          {
+            id: "permission-error",
+            type: "tool",
+            sessionID: id,
+            messageID: "assistant",
+            callID: "permission",
+            tool: "write",
+            state: {
+              status: "error",
+              input: { path: "fixture.txt" },
+              error: "Permission denied",
+              metadata: { phase: "permission", reason: "denied" },
+              time: { start: 2, end: 3 },
+            },
+          },
+        ]
+      : [],
+  )
   const host = document.createElement("main")
   document.body.append(host)
   const [card, setCard] = createStore({ mounted: false })
