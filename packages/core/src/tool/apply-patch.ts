@@ -6,6 +6,7 @@ import { createTwoFilesPatch, diffLines } from "diff"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileMutation } from "../file-mutation"
+import { FileBackup } from "../file-backup"
 import { Formatter } from "../formatter"
 import { LSP } from "../lsp"
 import { FSUtil } from "../fs-util"
@@ -26,6 +27,7 @@ export const Input = Schema.Struct({
 })
 
 export const Applied = Schema.Struct({
+  backup: FileBackup.Status.pipe(Schema.optional),
   type: Schema.Literals(["add", "update", "delete"]),
   resource: Schema.String,
   target: Schema.String,
@@ -53,6 +55,9 @@ export const toModelOutput = (output: Output) =>
         : [],
     ),
     ...output.applied.map((item) => LSP.describe(item.lsp)),
+    ...output.applied
+      .filter((item) => item.backup?.reversible === false)
+      .map((item) => `${item.resource}: ${FileBackup.describe(item.backup)}`),
   ]
     .filter(Boolean)
     .join("\n")
@@ -194,6 +199,7 @@ const layer = Layer.effectDiscard(
                     Effect.gen(function* () {
                       if (change.type === "add") {
                         const result = yield* files.create({
+                          sessionID: context.sessionID,
                           target: change.target,
                           format: true,
                           content:
@@ -203,6 +209,7 @@ const layer = Layer.effectDiscard(
                         })
                         const diagnostics = yield* lsp.changed(result.target)
                         applied.push({
+                          ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
                           ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
                             ? { lsp: diagnostics }
                             : {}),
@@ -215,9 +222,10 @@ const layer = Layer.effectDiscard(
                         return
                       }
                       if (change.type === "delete") {
-                        const result = yield* files.remove({ target: change.target })
+                        const result = yield* files.remove({ target: change.target, sessionID: context.sessionID })
                         const diagnostics = yield* lsp.removed(result.target)
                         applied.push({
+                          ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
                           type: change.type,
                           resource: result.resource,
                           target: result.target,
@@ -229,6 +237,7 @@ const layer = Layer.effectDiscard(
                         return
                       }
                       const result = yield* files.writeIfUnchanged({
+                        sessionID: context.sessionID,
                         target: change.target,
                         expected: change.source,
                         content: change.content,
@@ -236,6 +245,7 @@ const layer = Layer.effectDiscard(
                       })
                       const diagnostics = yield* lsp.changed(result.target)
                       applied.push({
+                        ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
                         ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
                           ? { lsp: diagnostics }
                           : {}),

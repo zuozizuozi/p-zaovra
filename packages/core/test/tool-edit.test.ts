@@ -7,6 +7,7 @@ import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { FileMutation } from "@zaovra-ai/core/file-mutation"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
+import { Global } from "@zaovra-ai/core/global"
 import { Location } from "@zaovra-ai/core/location"
 import { LocationMutation } from "@zaovra-ai/core/location-mutation"
 import { PermissionV2 } from "@zaovra-ai/core/permission"
@@ -23,6 +24,9 @@ import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/to
 const sessionID = SessionV2.ID.make("ses_edit_tool_test")
 const assertions: PermissionV2.AssertInput[] = []
 const writes: string[] = []
+// Backup storage is separate from the project's one conditional mutation.
+const projectWrites = () =>
+  writes.filter((file) => !FSUtil.contains(path.join(Global.Path.data, "session-file-backup"), file))
 let reads = 0
 let denyAction: string | undefined
 let afterRead = (_target: string, _content: Uint8Array): Effect.Effect<void> => Effect.void
@@ -198,7 +202,7 @@ describe("EditTool", () => {
                 })
                 expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after\nrest\n")
                 expect(assertions).toMatchObject([{ sessionID, action: "edit", resources: ["hello.txt"], save: ["*"] }])
-                expect(writes).toEqual([yield* Effect.promise(() => fs.realpath(target))])
+                expect(projectWrites()).toEqual([yield* Effect.promise(() => fs.realpath(target))])
               }),
             ),
           ),
@@ -250,7 +254,7 @@ describe("EditTool", () => {
               expect(result.type).toBe("text")
               expect(assertions.map((input) => input.action)).toEqual(["external_directory", "edit"])
               expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after")
-              expect(writes).toHaveLength(1)
+              expect(projectWrites()).toHaveLength(1)
             }),
           ),
         )
@@ -407,7 +411,7 @@ describe("EditTool", () => {
             Effect.gen(function* () {
               expect(settled.output?.structured).toMatchObject({ replacements: 3 })
               expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after after after")
-              expect(writes).toHaveLength(1)
+              expect(projectWrites()).toHaveLength(1)
             }),
           ),
         )

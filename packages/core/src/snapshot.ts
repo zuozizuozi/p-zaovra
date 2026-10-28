@@ -11,6 +11,10 @@ import { Global } from "./global"
 import { Location } from "./location"
 import { AbsolutePath, RelativePath } from "./schema"
 import { Hash } from "./util/hash"
+import { FileBackup } from "./file-backup"
+import { FileMutation } from "./file-mutation"
+import { LocationMutation } from "./location-mutation"
+import { SessionSchema } from "./session/schema"
 
 export const ID = Schema.String.pipe(Schema.brand("Snapshot.ID"))
 export type ID = typeof ID.Type
@@ -46,7 +50,8 @@ export interface Interface {
    * tree. Returns `undefined` when snapshots are disabled, unsupported, or the
    * best-effort capture fails.
    */
-  readonly capture: () => Effect.Effect<ID | undefined>
+  // Session opt-in tracks tool writes in non-git folders, not arbitrary shell changes.
+  readonly capture: (input?: { sessionID: SessionSchema.ID }) => Effect.Effect<ID | undefined>
 
   /**
    * List project-relative paths changed between two captured trees without
@@ -91,6 +96,9 @@ const layer = Layer.effect(
     const git = yield* Git.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
+    const backups = yield* FileBackup.Service
+    const mutations = yield* FileMutation.Service
+    const targets = yield* LocationMutation.Service
     const source = yield* git.repo.discover(location.project.directory)
     const worktree = source
       ? AbsolutePath.make(yield* fs.realPath(source.worktree).pipe(Effect.orDie))
@@ -126,7 +134,12 @@ const layer = Layer.effect(
       return Config.latest(yield* config.entries(), "snapshots") !== false
     })
 
-    const capture = Effect.fn("Snapshot.capture")(function* () {
+    const capture = Effect.fn("Snapshot.capture")(function* (input?: { sessionID: SessionSchema.ID }) {
+      if (!source && input && Config.latest(yield* config.entries(), "snapshots") !== false)
+        return yield* backups.capture(input.sessionID).pipe(
+          Effect.map(ID.make),
+          Effect.orElseSucceed(() => undefined),
+        )
       if (!(yield* enabled())) return undefined
       return yield* Effect.gen(function* () {
         const repo = yield* repository()
@@ -157,6 +170,8 @@ const layer = Layer.effect(
     })
 
     const files = Effect.fn("Snapshot.files")(function* (input: CompareInput) {
+      if (FileBackup.isID(input.from) || FileBackup.isID(input.to))
+        return yield* backups.files(input).pipe(Effect.mapError((cause) => failure("files", cause)))
       const comparison = yield* compare("files", input)
       const files = yield* git.tree.files(comparison).pipe(Effect.mapError((cause) => failure("files", cause)))
       if (!source) return files
@@ -167,6 +182,8 @@ const layer = Layer.effect(
     })
 
     const diff = Effect.fn("Snapshot.diff")(function* (input: DiffInput) {
+      if (FileBackup.isID(input.from) || FileBackup.isID(input.to))
+        return yield* backups.diff(input).pipe(Effect.mapError((cause) => failure("diff", cause)))
       const comparison = yield* compare("diff", input)
       const files = yield* git.tree.files(comparison).pipe(Effect.mapError((cause) => failure("diff", cause)))
       const ignored = source
@@ -195,6 +212,20 @@ const layer = Layer.effect(
     })
 
     const preview = Effect.fn("Snapshot.preview")(function* (input: PreviewInput) {
+      if ([...input.files.values()].some(FileBackup.isID)) {
+        const plan = yield* backups.restore(input.files).pipe(Effect.mapError((cause) => failure("preview", cause)))
+        return yield* Effect.forEach(plan, (item) =>
+          Effect.gen(function* () {
+            const current = yield* backups.capture(item.sessionID)
+            return yield* backups.diff({
+              from: current,
+              to: input.files.get(item.path)!,
+              paths: [item.path],
+              context: input.context,
+            })
+          }).pipe(Effect.mapError((cause) => failure("preview", cause))),
+        ).pipe(Effect.map((items) => items.flat()))
+      }
       if (!(yield* enabled())) return yield* new Error({ operation: "preview", message: "Snapshots are disabled" })
       const repo = yield* repository().pipe(Effect.mapError((cause) => failure("preview", cause)))
       const files = yield* plan("preview", input)
@@ -217,6 +248,40 @@ const layer = Layer.effect(
     })
 
     const restore = Effect.fn("Snapshot.restore")(function* (input: RestoreInput) {
+      if ([...input.files.values()].some(FileBackup.isID)) {
+        return yield* Effect.gen(function* () {
+          const plan = yield* backups.restore(input.files)
+          // Validate every selected path/hash before modifying the first file.
+          const prepared = yield* Effect.forEach(plan, (item) =>
+            Effect.gen(function* () {
+              const target = yield* targets.resolve({ path: item.path, kind: "file" })
+              if (target.canonical !== item.target || !FSUtil.contains(location.directory, target.canonical))
+                return yield* new FileMutation.TargetChangedError({ path: item.path })
+              const bytes = yield* fs
+                .readFile(target.canonical)
+                .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+              if ((bytes === null ? null : FileBackup.hash(bytes)) !== item.expected)
+                return yield* new FileMutation.StaleContentError({ path: item.path })
+              return { item, target }
+            }),
+          )
+          yield* Effect.forEach(
+            prepared,
+            ({ item, target }) =>
+              mutations.restore({
+                ...item,
+                validate: Effect.gen(function* () {
+                  const current = yield* targets
+                    .resolve({ path: item.path, kind: "file" })
+                    .pipe(Effect.mapError(() => new FileMutation.TargetChangedError({ path: item.path })))
+                  if (current.canonical !== target.canonical || current.identity !== target.identity)
+                    return yield* new FileMutation.TargetChangedError({ path: item.path })
+                }),
+              }),
+            { discard: true },
+          )
+        }).pipe(Effect.mapError((cause) => failure("restore", cause)))
+      }
       if (!(yield* enabled())) return yield* new Error({ operation: "restore", message: "Snapshots are disabled" })
       const repo = yield* repository().pipe(Effect.mapError((cause) => failure("restore", cause)))
       yield* git.tree
@@ -240,7 +305,16 @@ export const locationLayer = layer.pipe(Layer.provideMerge(Config.locationLayer)
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Config.node, FSUtil.node, Git.node, Global.node, Location.node],
+  deps: [
+    Config.node,
+    FSUtil.node,
+    Git.node,
+    Global.node,
+    Location.node,
+    FileBackup.node,
+    FileMutation.node,
+    LocationMutation.node,
+  ],
 })
 
 export const noopLayer = Layer.succeed(
@@ -259,7 +333,14 @@ function failure(operation: Error["operation"], cause: unknown) {
   if (cause instanceof Error && cause.operation === operation) return cause
   return new Error({
     operation,
-    message: cause instanceof globalThis.Error ? cause.message : String(cause),
+    message:
+      cause instanceof FileMutation.StaleContentError
+        ? `Cannot undo ${cause.path}: the file changed after this write. No conflicting file was overwritten.`
+        : cause instanceof FileMutation.TargetChangedError
+          ? `Cannot undo ${cause.path}: the file or its parent was replaced. No conflicting file was overwritten.`
+          : cause instanceof globalThis.Error
+            ? cause.message
+            : String(cause),
     cause,
   })
 }

@@ -1,11 +1,13 @@
 export * as FileMutation from "./file-mutation"
 
 import { makeLocationNode } from "./effect/app-node"
-import { Context, Effect, Layer, Schema, Option } from "effect"
+import { Context, Effect, Exit, Layer, Schema, Option } from "effect"
 import { dirname } from "path"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { FSUtil } from "./fs-util"
 import { Formatter } from "./formatter"
+import { FileBackup } from "./file-backup"
+import { SessionSchema } from "./session/schema"
 
 export interface Target {
   readonly canonical: string
@@ -13,6 +15,7 @@ export interface Target {
 }
 
 export interface WriteInput {
+  readonly sessionID?: SessionSchema.ID
   readonly validate?: Effect.Effect<void, TargetChangedError | FSUtil.Error>
   readonly target: Target
   readonly content: string | Uint8Array
@@ -20,6 +23,7 @@ export interface WriteInput {
 }
 
 export interface TextWriteInput {
+  readonly sessionID?: SessionSchema.ID
   readonly validate?: Effect.Effect<void, TargetChangedError | FSUtil.Error>
   readonly target: Target
   readonly content: string
@@ -33,6 +37,7 @@ export interface ConditionalWriteInput extends WriteInput {
 }
 
 export interface RemoveInput {
+  readonly sessionID?: SessionSchema.ID
   readonly target: Target
 }
 
@@ -50,6 +55,9 @@ export class TargetExistsError extends Schema.TaggedErrorClass<TargetExistsError
 }) {}
 
 export interface WriteResult {
+  /** Internal bytes observed at commit, never forwarded by tool output schemas. */
+  readonly finalBytes?: Uint8Array
+  readonly backup?: FileBackup.Status
   readonly operation: "write"
   readonly target: string
   readonly resource: string
@@ -60,6 +68,7 @@ export interface WriteResult {
 }
 
 export interface RemoveResult {
+  readonly backup?: FileBackup.Status
   readonly operation: "remove"
   readonly target: string
   readonly resource: string
@@ -68,6 +77,7 @@ export interface RemoveResult {
 
 export interface Interface {
   readonly publish: (input: {
+    sessionID?: SessionSchema.ID
     target: Target
     candidate: Target
     backup: Target
@@ -89,6 +99,9 @@ export interface Interface {
     input: ConditionalWriteInput,
   ) => Effect.Effect<WriteResult, StaleContentError | FSUtil.Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<RemoveResult, FSUtil.Error>
+  readonly restore: (
+    input: FileBackup.Restore & { validate: Effect.Effect<void, TargetChangedError | FSUtil.Error> },
+  ) => Effect.Effect<WriteResult | RemoveResult, StaleContentError | TargetChangedError | FSUtil.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/FileMutation") {}
@@ -103,11 +116,46 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const formatter = yield* Formatter.Service
+    const backups = yield* FileBackup.Service
     const locks = KeyedMutex.makeUnsafe<string>()
     const withTargetLock =
       (target: Target) =>
       <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         locks.withLock(target.canonical)(Effect.uninterruptible(effect))
+
+    const track = <A extends WriteResult | RemoveResult, E, R>(
+      input: { target: Target; sessionID?: SessionSchema.ID; verified?: Uint8Array },
+      effect: (before: (bytes: Uint8Array | null) => Effect.Effect<void, FSUtil.Error>) => Effect.Effect<A, E, R>,
+    ) =>
+      Effect.gen(function* () {
+        let ticket: FileBackup.Ticket | undefined
+        const before = (bytes: Uint8Array | null) =>
+          backups.begin({ ...input, before: bytes }).pipe(
+            Effect.tap((value) =>
+              Effect.sync(() => {
+                ticket = value
+              }),
+            ),
+            Effect.asVoid,
+          )
+        const result = yield* effect(before).pipe(
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit)
+              ? backups.finish(
+                  ticket,
+                  exit.value.operation === "remove" ? null : (exit.value.finalBytes ?? input.verified),
+                )
+              : Effect.void,
+          ),
+        )
+        return { ...result, ...(ticket ? { backup: ticket.status } : {}) }
+      })
+    const withMutationLock =
+      (input: { target: Target; sessionID?: SessionSchema.ID }) =>
+      <A extends WriteResult | RemoveResult, E, R>(
+        effect: (before: (bytes: Uint8Array | null) => Effect.Effect<void, FSUtil.Error>) => Effect.Effect<A, E, R>,
+      ) =>
+        withTargetLock(input.target)(track(input, effect))
 
     const writeResult = (target: Target, existed: boolean): WriteResult => ({
       operation: "write",
@@ -117,11 +165,20 @@ const layer = Layer.effect(
     })
 
     const formattedResult = Effect.fn("FileMutation.formattedResult")(function* (input: WriteInput, existed: boolean) {
-      if (!input.format) return writeResult(input.target, existed)
+      if (!input.format)
+        return {
+          ...writeResult(input.target, existed),
+          ...(input.sessionID
+            ? {
+                finalBytes: typeof input.content === "string" ? new TextEncoder().encode(input.content) : input.content,
+              }
+            : {}),
+        }
       const formatting = yield* formatter.format(input.target.canonical)
       const content = yield* fs.readFileString(input.target.canonical)
       return {
         ...writeResult(input.target, existed),
+        ...(input.sessionID ? { finalBytes: yield* fs.readFile(input.target.canonical) } : {}),
         content,
         ...(formatting.ran.length || formatting.failed.length ? { formatting } : {}),
       }
@@ -135,9 +192,10 @@ const layer = Layer.effect(
     })
 
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
-      withTargetLock(input.target)(
+      withMutationLock(input)((before) =>
         Effect.gen(function* () {
           const existed = yield* fs.exists(input.target.canonical)
+          if (input.sessionID) yield* before(existed ? yield* fs.readFile(input.target.canonical) : null)
           yield* fs.writeWithDirs(input.target.canonical, input.content)
           return yield* formattedResult(input, existed)
         }),
@@ -150,7 +208,7 @@ const layer = Layer.effect(
         const next = splitBom(input.content)
         return yield* create({ ...input, content: joinBom(next.text, next.bom) })
       }
-      return yield* withTargetLock(input.target)(
+      return yield* withMutationLock(input)((before) =>
         Effect.gen(function* () {
           if (input.validate) yield* input.validate
           const next = splitBom(input.content)
@@ -190,6 +248,8 @@ const layer = Layer.effect(
                 if (!sameBytes(Buffer.concat(chunks), current))
                   return yield* new StaleContentError({ path: input.target.canonical })
                 yield* input.validate!
+                yield* before(current)
+                yield* input.validate!
                 yield* handle.seek(0, "start")
                 yield* handle.writeAll(bytes)
                 yield* handle.truncate(bytes.length)
@@ -197,17 +257,23 @@ const layer = Layer.effect(
               }),
             )
           } else {
+            yield* before(current ?? null)
+            if (input.validate) yield* input.validate
             yield* fs.writeWithDirs(input.target.canonical, bytes)
           }
           if (input.validate) yield* input.validate
-          return yield* formattedResult(input, current !== undefined)
+          return yield* formattedResult({ ...input, content: bytes }, current !== undefined)
         }),
       )
     })
 
     const create = Effect.fn("FileMutation.create")((input: WriteInput) =>
-      withTargetLock(input.target)(
+      withMutationLock(input)((before) =>
         Effect.gen(function* () {
+          if (input.validate) yield* input.validate
+          if (yield* fs.exists(input.target.canonical))
+            return yield* new TargetExistsError({ path: input.target.canonical })
+          yield* before(null)
           if (input.validate) yield* input.validate
           const write =
             typeof input.content === "string"
@@ -227,12 +293,15 @@ const layer = Layer.effect(
     )
 
     const writeIfUnchanged = Effect.fn("FileMutation.writeIfUnchanged")((input: ConditionalWriteInput) =>
-      withTargetLock(input.target)(
+      withMutationLock(input)((before) =>
         Effect.gen(function* () {
           const current = yield* fs.readFile(input.target.canonical)
           if (!sameBytes(current, input.expected)) {
             return yield* new StaleContentError({ path: input.target.canonical })
           }
+          yield* before(current)
+          const latest = yield* fs.readFile(input.target.canonical)
+          if (!sameBytes(latest, current)) return yield* new StaleContentError({ path: input.target.canonical })
           yield* typeof input.content === "string"
             ? fs.writeFileString(input.target.canonical, input.content)
             : fs.writeFile(input.target.canonical, input.content)
@@ -242,8 +311,14 @@ const layer = Layer.effect(
     )
 
     const remove = Effect.fn("FileMutation.remove")((input: RemoveInput) =>
-      withTargetLock(input.target)(
+      withMutationLock(input)((before) =>
         Effect.gen(function* () {
+          if (input.sessionID)
+            yield* before(
+              yield* fs
+                .readFile(input.target.canonical)
+                .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null))),
+            )
           const existed = yield* fs.remove(input.target.canonical).pipe(
             Effect.as(true),
             Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
@@ -254,57 +329,121 @@ const layer = Layer.effect(
     )
 
     const publish: Interface["publish"] = (input) => {
-      const commit = Effect.gen(function* () {
-        yield* input.validate
-        if (new Set([input.target.canonical, input.candidate.canonical, input.backup.canonical]).size !== 3)
-          return yield* new TargetChangedError({ path: input.target.canonical })
-        const candidate = yield* fs.readFile(input.candidate.canonical)
-        const current = yield* fs
-          .readFile(input.target.canonical)
-          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
-        if (
-          !sameBytes(candidate, input.verified) ||
-          (current === null ? input.expected !== null : input.expected === null || !sameBytes(current, input.expected))
-        )
-          return yield* new StaleContentError({ path: input.target.canonical })
-        if (current !== null) {
-          // Immutable content-addressed backup is written before the single rename.
-          // A failed backup or interrupted preflight leaves the final path intact.
-          yield* fs
-            .writeFile(input.backup.canonical, current, { flag: "wx" })
-            .pipe(
-              Effect.catchReason("PlatformError", "AlreadyExists", () =>
-                fs
-                  .readFile(input.backup.canonical)
-                  .pipe(
-                    Effect.flatMap((bytes) =>
-                      sameBytes(bytes, current)
-                        ? Effect.void
-                        : Effect.fail(new TargetExistsError({ path: input.backup.canonical })),
+      const commit = (before: (bytes: Uint8Array | null) => Effect.Effect<void, FSUtil.Error>) =>
+        Effect.gen(function* () {
+          yield* input.validate
+          if (new Set([input.target.canonical, input.candidate.canonical, input.backup.canonical]).size !== 3)
+            return yield* new TargetChangedError({ path: input.target.canonical })
+          const candidate = yield* fs.readFile(input.candidate.canonical)
+          const current = yield* fs
+            .readFile(input.target.canonical)
+            .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+          if (
+            !sameBytes(candidate, input.verified) ||
+            (current === null
+              ? input.expected !== null
+              : input.expected === null || !sameBytes(current, input.expected))
+          )
+            return yield* new StaleContentError({ path: input.target.canonical })
+          if (current !== null) {
+            // Immutable content-addressed backup is written before the single rename.
+            // A failed backup or interrupted preflight leaves the final path intact.
+            yield* fs
+              .writeFile(input.backup.canonical, current, { flag: "wx" })
+              .pipe(
+                Effect.catchReason("PlatformError", "AlreadyExists", () =>
+                  fs
+                    .readFile(input.backup.canonical)
+                    .pipe(
+                      Effect.flatMap((bytes) =>
+                        sameBytes(bytes, current)
+                          ? Effect.void
+                          : Effect.fail(new TargetExistsError({ path: input.backup.canonical })),
+                      ),
                     ),
-                  ),
-              ),
-            )
-        }
-        yield* input.validate
-        const unchanged = yield* fs.readFile(input.candidate.canonical)
-        const latest = yield* fs
-          .readFile(input.target.canonical)
-          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
-        if (
-          !sameBytes(unchanged, candidate) ||
-          (current === null ? latest !== null : latest === null || !sameBytes(latest, current))
-        )
-          return yield* new StaleContentError({ path: input.target.canonical })
-        yield* fs.rename(input.candidate.canonical, input.target.canonical)
-        return writeResult(input.target, current !== null)
-      })
+                ),
+              )
+          }
+          yield* input.validate
+          const unchanged = yield* fs.readFile(input.candidate.canonical)
+          const latest = yield* fs
+            .readFile(input.target.canonical)
+            .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+          if (
+            !sameBytes(unchanged, candidate) ||
+            (current === null ? latest !== null : latest === null || !sameBytes(latest, current))
+          )
+            return yield* new StaleContentError({ path: input.target.canonical })
+          yield* before(current)
+          yield* input.validate
+          const ready = yield* fs
+            .readFile(input.target.canonical)
+            .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+          if (current === null ? ready !== null : ready === null || !sameBytes(ready, current))
+            return yield* new StaleContentError({ path: input.target.canonical })
+          yield* fs.rename(input.candidate.canonical, input.target.canonical)
+          return writeResult(input.target, current !== null)
+        })
       return [input.target, input.candidate, input.backup]
         .sort((a, b) => a.canonical.localeCompare(b.canonical))
-        .reduceRight((effect, target) => withTargetLock(target)(effect), commit)
+        .reduceRight((effect, target) => withTargetLock(target)(effect), track(input, commit))
     }
 
-    return Service.of({ create, write, writeTextPreservingBom, writeIfUnchanged, remove, publish })
+    const restore: Interface["restore"] = (input) => {
+      const target = { canonical: input.target, resource: input.path }
+      return withMutationLock({ target, sessionID: input.sessionID })((before) =>
+        Effect.gen(function* () {
+          yield* input.validate
+          const current = yield* fs
+            .readFile(input.target)
+            .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+          if ((current === null ? null : FileBackup.hash(current)) !== input.expected)
+            return yield* new StaleContentError({ path: input.target })
+          yield* input.validate
+          yield* before(current)
+          yield* input.validate
+          if (input.content === null) {
+            const ready = yield* fs
+              .readFile(input.target)
+              .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+            if ((ready === null ? null : FileBackup.hash(ready)) !== input.expected)
+              return yield* new StaleContentError({ path: input.target })
+            if (current !== null) yield* fs.remove(input.target)
+            return removeResult(target, current !== null)
+          }
+          if (current === null) {
+            yield* fs.ensureDir(dirname(input.target))
+            yield* fs.writeFile(input.target, input.content, { flag: "wx" })
+          } else {
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                const handle = yield* fs.open(input.target, { flag: "r+" })
+                const opened = yield* handle.stat
+                yield* input.validate
+                const named = yield* fs.stat(input.target)
+                if (opened.dev !== named.dev || Option.getOrNull(opened.ino) !== Option.getOrNull(named.ino))
+                  return yield* new TargetChangedError({ path: input.target })
+                const chunks: Uint8Array[] = []
+                while (true) {
+                  const chunk = yield* handle.readAlloc(65536)
+                  if (Option.isNone(chunk)) break
+                  chunks.push(chunk.value)
+                }
+                if (FileBackup.hash(Buffer.concat(chunks)) !== input.expected)
+                  return yield* new StaleContentError({ path: input.target })
+                yield* handle.seek(0, "start")
+                yield* handle.writeAll(input.content!)
+                yield* handle.truncate(input.content!.length)
+                yield* handle.sync
+              }),
+            )
+          }
+          return { ...writeResult(target, current !== null), finalBytes: input.content }
+        }),
+      )
+    }
+
+    return Service.of({ create, write, writeTextPreservingBom, writeIfUnchanged, remove, publish, restore })
   }),
 )
 
@@ -329,7 +468,7 @@ function sameBytes(left: Uint8Array, right: Uint8Array) {
 
 export const locationLayer = layer
 
-export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node, Formatter.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node, Formatter.node, FileBackup.node] })
 
 /**
  * Deferred until the corresponding V2 integrations exist.

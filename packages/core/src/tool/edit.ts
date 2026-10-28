@@ -12,6 +12,7 @@ import { createTwoFilesPatch, diffLines } from "diff"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileMutation } from "../file-mutation"
+import { FileBackup } from "../file-backup"
 import { Formatter } from "../formatter"
 import { LSP } from "../lsp"
 import { FSUtil } from "../fs-util"
@@ -37,6 +38,7 @@ export const Input = Schema.Struct({
 })
 
 export const Output = Schema.Struct({
+  backup: FileBackup.Status.pipe(Schema.optional),
   files: Schema.Array(FileDiff.Info),
   replacements: Schema.Number,
   formatting: Formatter.Result.pipe(Schema.optional),
@@ -91,6 +93,7 @@ export const toModelOutput = (output: Output, oldString: string, newString: stri
         ]
       : []),
     LSP.describe(output.lsp),
+    FileBackup.describe(output.backup),
   ]
     .filter(Boolean)
     .join("\n")
@@ -195,6 +198,7 @@ const layer = Layer.effectDiscard(
                 const next = splitBom(replaced)
                 const result = yield* unableToEdit(
                   files.writeIfUnchanged({
+                    sessionID: context.sessionID,
                     target,
                     expected: source.content,
                     content: joinBom(next.text, source.bom || next.bom),
@@ -203,6 +207,7 @@ const layer = Layer.effectDiscard(
                 )
                 const diagnostics = yield* lsp.changed(result.target)
                 return {
+                  ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
                   ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
                     ? { lsp: diagnostics, target: result.target }
                     : {}),

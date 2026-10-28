@@ -16,21 +16,23 @@ import { SessionTable, SessionMessageTable } from "../src/session/sql"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
 import { PublishArtifactTool } from "../src/tool/publish-artifact"
+import { FileBackup } from "../src/file-backup"
 import { ToolRegistry } from "../src/tool/registry"
 import { ToolOutputStore } from "../src/tool-output-store"
 import { tmpdir } from "./fixture/tmpdir"
 import { location } from "./fixture/location"
 import { settleTool, toolIdentity } from "./lib/tool"
 
-for (const scenario of ["valid", "denied", "stale", "failed", "unverified"])
+for (const scenario of ["valid", "denied", "stale", "failed", "unverified", "capacity"])
   test(`367 publish_artifact leaf validates actual candidate and preserves final: ${scenario}`, async () => {
     await using dir = await tmpdir()
     const candidate = path.join(dir.path, "candidate.json")
     const final = path.join(dir.path, "final.json")
-    await Bun.write(candidate, "[1,2]")
+    const expected = scenario === "capacity" ? [1, 2, "x".repeat(FileBackup.MAX_FILE_BYTES)] : [1, 2]
+    await Bun.write(candidate, JSON.stringify(expected))
     await Bun.write(final, "[1]")
     // This acceptance check actually parses the candidate and checks its contents.
-    expect(await Bun.file(candidate).json()).toEqual([1, 2])
+    expect(await Bun.file(candidate).json()).toEqual(expected)
     const digest = createHash("sha256")
       .update(await Bun.file(candidate).bytes())
       .digest("hex")
@@ -133,7 +135,10 @@ for (const scenario of ["valid", "denied", "stale", "failed", "unverified"])
         })
       }).pipe(Effect.provide(layer), Effect.scoped),
     )
-    expect(result.result.type).toBe(scenario === "valid" ? "text" : "error")
-    expect(await Bun.file(final).json()).toEqual(scenario === "valid" ? [1, 2] : [1])
-    if (scenario === "valid") expect(await Bun.file(final + `.verified-${previous}.bak`).text()).toBe("[1]")
+    const success = scenario === "valid" || scenario === "capacity"
+    expect(result.result.type).toBe(success ? "text" : "error")
+    expect(await Bun.file(final).json()).toEqual(success ? expected : [1])
+    if (success) expect(await Bun.file(final + `.verified-${previous}.bak`).text()).toBe("[1]")
+    if (scenario === "capacity")
+      expect(result.result).toMatchObject({ type: "text", value: expect.stringContaining("cannot be undone") })
   })

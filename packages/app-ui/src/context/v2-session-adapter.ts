@@ -11,6 +11,19 @@ import { toLegacySessionSummary } from "./global-sync/home-session-index"
 
 export type SessionView = Session & Pick<SessionV2Info, "agent" | "model">
 
+function unavailableBackup(tool: SessionMessageAssistantTool) {
+  if (tool.state.status !== "completed") return false
+  const output = tool.state.structured
+  const backup = output.undoBackup ?? output.backup
+  if (backup && typeof backup === "object" && "reversible" in backup && backup.reversible === false) return true
+  if (!Array.isArray(output.applied)) return false
+  return output.applied.some((item) => {
+    if (!item || typeof item !== "object" || !("backup" in item)) return false
+    const backup = item.backup
+    return !!backup && typeof backup === "object" && "reversible" in backup && backup.reversible === false
+  })
+}
+
 export function adaptPartID(messageID: string, partID: string) {
   // Provider part IDs such as text-0 are only unique within one message.
   return `${messageID}:${partID}`
@@ -180,8 +193,11 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
           if (
             part.type === "tool" &&
             part.state.status === "completed" &&
-            ["write", "edit", "apply_patch", "bash"].includes(content.name) &&
-            (!item.snapshot?.start || (item.time.completed !== undefined && !item.snapshot.end))
+            ["write", "edit", "apply_patch", "publish_artifact", "bash"].includes(content.name) &&
+            (!item.snapshot?.start ||
+              (item.time.completed !== undefined && !item.snapshot.end) ||
+              (content.name === "bash" && item.snapshot.start.startsWith("nongit:")) ||
+              unavailableBackup(content))
           )
             part.state.metadata = { ...part.state.metadata, zaovraSnapshotUnavailable: true }
           return [part]

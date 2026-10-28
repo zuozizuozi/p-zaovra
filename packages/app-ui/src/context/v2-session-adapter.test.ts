@@ -94,6 +94,40 @@ describe("V2 session timeline adapter", () => {
     expect(warning({ ...assistant, snapshot: { start: "before", end: "after", files: ["a.txt"] } })).toBe(false)
     expect(warning({ ...assistant, snapshot: { start: "before" } })).toBe(true)
     expect(warning({ ...assistant, content: assistant.content.map((part) => ({ ...part, name: "read" })) })).toBe(false)
+    expect(warning({ ...assistant, snapshot: { start: "nongit:session:0", end: "nongit:session:1" } })).toBe(false)
+    expect(
+      warning({
+        ...assistant,
+        snapshot: { start: "nongit:session:0", end: "nongit:session:1" },
+        content: assistant.content.map((part) =>
+          part.type === "tool" && part.state.status === "completed"
+            ? { ...part, state: { ...part.state, structured: { backup: { reversible: false, reason: "capacity" } } } }
+            : part,
+        ),
+      }),
+    ).toBe(true)
+    expect(
+      warning({
+        ...assistant,
+        snapshot: { start: "nongit:session:0", end: "nongit:session:1" },
+        content: assistant.content.map((part) =>
+          part.type === "tool" && part.state.status === "completed"
+            ? {
+                ...part,
+                name: "publish_artifact",
+                state: { ...part.state, structured: { undoBackup: { reversible: false, reason: "capacity" } } },
+              }
+            : part,
+        ),
+      }),
+    ).toBe(true)
+    expect(
+      warning({
+        ...assistant,
+        snapshot: { start: "nongit:session:0", end: "nongit:session:1" },
+        content: assistant.content.map((part) => ({ ...part, name: "bash" })),
+      }),
+    ).toBe(true)
   })
   test("preserves durable execution failure reasons and references on reload", () => {
     const message = "输入或媒体处理超过运行时限制（RangeError）。ref=err_test"

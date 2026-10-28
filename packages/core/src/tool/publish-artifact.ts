@@ -7,6 +7,7 @@ import { ToolFailure } from "@zaovra-ai/llm"
 import { makeLocationNode } from "../effect/app-node"
 import { Database } from "../database/database"
 import { FileMutation } from "../file-mutation"
+import { FileBackup } from "../file-backup"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
@@ -43,11 +44,16 @@ const layer = Layer.effectDiscard(
             description:
               "Atomically publish a validated candidate file in the same directory as the final artifact. Requires a current passing task check on the candidate; this is file delivery only, never deployment or sending. Keeps immutable old bytes at <final>.verified-<sha256>.bak before replacement. Candidate, final and backup must remain unchanged. No formatting is performed after validation.",
             input: Input,
-            output: Schema.Struct({ path: Schema.String, digest: Schema.String, backup: Schema.NullOr(Schema.String) }),
+            output: Schema.Struct({
+              path: Schema.String,
+              digest: Schema.String,
+              backup: Schema.NullOr(Schema.String),
+              undoBackup: FileBackup.Status.pipe(Schema.optional),
+            }),
             toModelOutput: ({ output }) => [
               {
                 type: "text",
-                text: `Published ${output.path} (${output.digest}). Preserved previous artifact: ${output.backup ?? "no previous file"}. This certifies only the supplied check's actual scope.`,
+                text: `Published ${output.path} (${output.digest}). Preserved previous artifact: ${output.backup ?? "no previous file"}. This certifies only the supplied check's actual scope.${output.undoBackup ? `\n${FileBackup.describe(output.undoBackup)}` : ""}`,
               },
             ],
             execute: (input, context) =>
@@ -144,8 +150,21 @@ const layer = Layer.effectDiscard(
                   input.expectedDigest
                 )
                   return yield* new ToolFailure({ message: "Final artifact changed; inspect it before publishing." })
-                yield* files.publish({ target, candidate, backup, verified, expected, validate })
-                return { path: target.resource, digest, backup: expected === null ? null : backup.resource }
+                const result = yield* files.publish({
+                  target,
+                  candidate,
+                  backup,
+                  verified,
+                  expected,
+                  validate,
+                  sessionID: context.sessionID,
+                })
+                return {
+                  path: target.resource,
+                  digest,
+                  backup: expected === null ? null : backup.resource,
+                  ...(result.backup?.reversible === false ? { undoBackup: result.backup } : {}),
+                }
               }).pipe(
                 Effect.mapError((error) =>
                   error instanceof ToolFailure

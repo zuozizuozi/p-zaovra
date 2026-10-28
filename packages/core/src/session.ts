@@ -50,6 +50,7 @@ import { SessionRevert } from "./session/revert"
 import { SessionTurnDiff } from "./session/turn-diff"
 import { Revert } from "@zaovra-ai/schema/revert"
 import { FSUtil } from "./fs-util"
+import { FileBackup } from "./file-backup"
 import { SessionDurable } from "@zaovra-ai/schema/durable-event-manifest"
 import { SessionTodo } from "./session/todo"
 import { SessionUsage } from "@zaovra-ai/schema/session-usage"
@@ -632,7 +633,11 @@ const layer = Layer.effect(
       }),
       remove: Effect.fn("V2Session.remove")(function* (sessionID) {
         const session = yield* result.get(sessionID)
+        yield* result.interrupt(sessionID)
         yield* result.update({ sessionID, archived: true })
+        yield* fs
+          .remove(FileBackup.directory(global.data, sessionID), { recursive: true, force: true })
+          .pipe(Effect.orDie)
         yield* events.publish(
           SessionEvent.Deleted,
           { sessionID, timestamp: yield* DateTime.now },

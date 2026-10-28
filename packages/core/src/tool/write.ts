@@ -10,6 +10,7 @@ import { ToolFailure } from "@zaovra-ai/llm"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileMutation } from "../file-mutation"
+import { FileBackup } from "../file-backup"
 import { Formatter } from "../formatter"
 import { LSP } from "../lsp"
 import { LocationMutation } from "../location-mutation"
@@ -35,6 +36,7 @@ export const Input = Schema.Struct({
 })
 
 export const Output = Schema.Struct({
+  backup: FileBackup.Status.pipe(Schema.optional),
   operation: Schema.Literal("write"),
   target: Schema.String,
   resource: Schema.String,
@@ -46,7 +48,7 @@ export const Output = Schema.Struct({
 export type Output = typeof Output.Type
 
 export const toModelOutput = (output: Output) =>
-  `${output.existed ? "Wrote" : "Created"} file successfully: ${output.resource}${output.formatting?.failed.length ? `\nAutomatic formatting failed: ${output.formatting.failed.join(", ")}. Read the file before making further edits.` : ""}${LSP.describe(output.lsp) ? `\n${LSP.describe(output.lsp)}` : ""}`
+  `${output.existed ? "Wrote" : "Created"} file successfully: ${output.resource}${FileBackup.describe(output.backup) ? `\n${FileBackup.describe(output.backup)}` : ""}${output.formatting?.failed.length ? `\nAutomatic formatting failed: ${output.formatting.failed.join(", ")}. Read the file before making further edits.` : ""}${LSP.describe(output.lsp) ? `\n${LSP.describe(output.lsp)}` : ""}`
 
 /** Deferred V2 write UX integrations remain visible at the model-facing seam. */
 // TODO: Publish watcher/file-edit events after V2 watcher integration exists.
@@ -107,6 +109,7 @@ const layer = Layer.effectDiscard(
                 })
                 yield* validate
                 const result = yield* files.writeTextPreservingBom({
+                  sessionID: context.sessionID,
                   validate,
                   target,
                   content: input.content,
@@ -122,6 +125,7 @@ const layer = Layer.effectDiscard(
                   target: result.target,
                   resource: result.resource,
                   existed: result.existed,
+                  ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
                   ...(result.formatting ? { formatting: result.formatting } : {}),
                   ...(result.formatting ? { content: result.content } : {}),
                 }

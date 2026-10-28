@@ -7,6 +7,7 @@ import { FileMutation } from "@zaovra-ai/core/file-mutation"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
+import { Global } from "@zaovra-ai/core/global"
 import { Location } from "@zaovra-ai/core/location"
 import { LocationMutation } from "@zaovra-ai/core/location-mutation"
 import { PermissionV2 } from "@zaovra-ai/core/permission"
@@ -23,6 +24,9 @@ import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/to
 const sessionID = SessionV2.ID.make("ses_write_tool_test")
 const assertions: PermissionV2.AssertInput[] = []
 const writes: string[] = []
+// Keep every project-write assertion; private backup I/O is checked separately.
+const projectWrites = () =>
+  writes.filter((file) => !FSUtil.contains(path.join(Global.Path.data, "session-file-backup"), file))
 let denyAction: string | undefined
 let afterRead: ((target: string) => Promise<void>) | undefined
 let onApproval: ((input: PermissionV2.AssertInput) => Promise<void>) | undefined
@@ -163,7 +167,9 @@ describe("WriteTool", () => {
               "created",
             )
             expect(assertions).toMatchObject([{ sessionID, action: "edit", resources: ["src/new.txt"], save: ["*"] }])
-            expect(writes).toEqual([path.join(yield* Effect.promise(() => fs.realpath(tmp.path)), "src", "new.txt")])
+            expect(projectWrites()).toEqual([
+              path.join(yield* Effect.promise(() => fs.realpath(tmp.path)), "src", "new.txt"),
+            ])
           }),
         )
       },

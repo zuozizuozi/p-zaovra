@@ -1026,7 +1026,7 @@ const layer = Layer.effect(
             })
           }),
         )
-      const startSnapshot = yield* snapshots.capture()
+      const startSnapshot = yield* snapshots.capture({ sessionID: session.id })
       const publisher = createLLMEventPublisher(events, {
         catalogModel: model.catalogModel,
         verificationEnabled,
@@ -1522,7 +1522,7 @@ const layer = Layer.effect(
           }
           const stepSettlement = publisher.stepSettlement()
           if (stepSettlement && !publisher.hasProviderError() && !publisher.failureMessage()) {
-            const endSnapshot = yield* snapshots.capture()
+            const endSnapshot = yield* snapshots.capture({ sessionID: session.id })
             const files =
               startSnapshot && endSnapshot
                 ? yield* snapshots
