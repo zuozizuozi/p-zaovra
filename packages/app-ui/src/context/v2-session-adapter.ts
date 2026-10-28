@@ -56,6 +56,14 @@ export function adaptSessionInput(session: Pick<SessionV2Info, "id" | "agent" | 
               messageID: input.id,
               type: "text" as const,
               text: input.prompt.invocation ?? input.prompt.text,
+              ...(input.prompt.invocation
+                ? {
+                    metadata: {
+                      zaovraRequestText: input.prompt.text,
+                      zaovraRequestInvocation: input.prompt.invocation,
+                    },
+                  }
+                : {}),
             },
           ]
         : []),
@@ -111,6 +119,15 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
                   messageID: item.id,
                   type: "text" as const,
                   text: item.invocation ?? item.text,
+                  ...(item.invocation || item.subtask
+                    ? {
+                        metadata: {
+                          zaovraRequestText: item.text,
+                          zaovraRequestInvocation: item.invocation,
+                          zaovraRequestSubtask: !!item.subtask,
+                        },
+                      }
+                    : {}),
                 },
               ]
             : []),

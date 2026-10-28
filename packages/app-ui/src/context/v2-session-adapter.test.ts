@@ -424,6 +424,29 @@ describe("V2 session timeline adapter", () => {
     })
   })
 
+  test("preserves original request text when invocation display replaces it", () => {
+    const text = "必须读取 customer-spec.md，不能自编。"
+    const input: SessionInputAdmitted = {
+      admittedSeq: 3,
+      id: "msg_pending",
+      sessionID: session.id,
+      prompt: { text, invocation: "/build" },
+      delivery: "steer",
+      timeCreated: 4,
+    }
+    for (const result of [
+      adaptSessionInput(session, input),
+      adaptSessionMessages(session, [
+        { id: input.id, type: "user", text, invocation: "/build", time: { created: 4 } },
+      ])[0],
+    ])
+      expect(result.parts[0]).toMatchObject({
+        type: "text",
+        text: "/build",
+        metadata: { zaovraRequestText: text, zaovraRequestInvocation: "/build" },
+      })
+  })
+
   test("keeps user attachments and assigns assistants to the consumed user turn", () => {
     const messages: SessionMessage[] = [
       {

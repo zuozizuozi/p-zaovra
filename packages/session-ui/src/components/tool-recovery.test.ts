@@ -331,13 +331,145 @@ test("required missing reads need later evidence for the same agent and path", (
     quietToolFailures({
       message: last,
       messages: [user, first, { ...last, agent }],
-      parts: { first: [missing], last: [{ ...success, tool, state: { ...success.state, input: { path } } }, answer] },
+      parts: {
+        user: [
+          {
+            ...answer,
+            id: "request",
+            messageID: user.id,
+            text: "必须先读取 customer-spec.md，缺失时提醒我，不得自编。",
+          },
+        ],
+        first: [missing],
+        last: [{ ...success, tool, state: { ...success.state, input: { path } } }, answer],
+      },
       working: false,
     })
   expect(check("list", ".")).toEqual([])
   expect(check("write", "other.md")).toEqual([])
   expect(check("read", "other.md")).toEqual([])
-  expect(check("write", "customer-spec.md").map((part) => part.id)).toEqual([missing.id])
+  expect(check("write", "customer-spec.md")).toEqual([])
   expect(check("read", "customer-spec.md").map((part) => part.id)).toEqual([missing.id])
   expect(check("write", "customer-spec.md", "other-agent")).toEqual([])
+})
+
+test("named source reads stay unresolved after placeholder writes, including raw data and amendments", () => {
+  if (failure.state.status !== "error" || success.state.status !== "completed") throw Error("fixtures")
+  const missing: ToolPart = {
+    ...failure,
+    tool: "read",
+    state: { ...failure.state, input: { path: "docs/customer-spec.md" }, metadata: { readFailure: "not_found" } },
+  }
+  const answer: Part = { id: "answer", sessionID: user.sessionID, messageID: last.id, type: "text", text: "已完成" }
+  const text = (body: string): Extract<Part, { type: "text" }> => ({
+    ...answer,
+    id: "request",
+    messageID: user.id,
+    text: body,
+  })
+  const check = (
+    requests: Part[],
+    tool = "write",
+    messages: readonly Message[] = [user, first, last],
+    extra: Record<string, Part[]> = {},
+  ) => {
+    const input = {
+      message: last,
+      messages,
+      working: false,
+      parts: {
+        user: requests,
+        first: [missing],
+        last: [{ ...success, tool, state: { ...success.state, input: { path: "docs/customer-spec.md" } } }, answer],
+        ...extra,
+      },
+    }
+    return { quiet: quietToolFailures(input), recovered: recoveredToolFailures(input) }
+  }
+  for (const request of [
+    "必须读取 customer-spec.md，缺少时不要自编",
+    "先读 docs/customer-spec.md",
+    "读取 DOCS\\CUSTOMER-SPEC.MD",
+    "原资料如下：\n```data\ncustomer-spec.md\n```",
+    "创建页面；\n> customer-spec.md",
+  ]) {
+    expect(check([text(request)])).toEqual({ quiet: [], recovered: [] })
+    expect(check([text(request)], "read").quiet).toEqual([missing])
+  }
+  expect(check([text("做个小游戏")]).quiet).toEqual([missing])
+  expect(check([])).toEqual({ quiet: [], recovered: [] })
+  expect(check([{ ...text("必须读取 customer-spec.md"), metadata: { zaovraRequestText: "做个小游戏" } }])).toEqual({
+    quiet: [],
+    recovered: [],
+  })
+  expect(check([{ ...text("做个小游戏"), synthetic: true }])).toEqual({ quiet: [], recovered: [] })
+  expect(
+    check([
+      {
+        ...text("/task"),
+        metadata: { zaovraRequestText: "必须读取 customer-spec.md", zaovraRequestInvocation: "/task" },
+      },
+    ]),
+  ).toEqual({ quiet: [], recovered: [] })
+  expect(
+    check([
+      {
+        ...text("/game customer-spec.md"),
+        metadata: {
+          zaovraRequestText: "做个小游戏",
+          zaovraRequestInvocation: "/game customer-spec.md",
+        },
+      },
+    ]),
+  ).toEqual({ quiet: [], recovered: [] })
+  expect(
+    check([{ ...text("做个小游戏"), metadata: { zaovraRequestText: "做个小游戏", zaovraRequestSubtask: true } }]),
+  ).toEqual({ quiet: [], recovered: [] })
+  const original = { ...user, id: "original", time: { created: 0 } }
+  expect(
+    check([text("补充要求：先读 customer-spec.md")], "write", [original, user, first, last], {
+      original: [{ ...text("做个小游戏"), messageID: original.id }],
+    }),
+  ).toEqual({ quiet: [], recovered: [] })
+  const queued = { ...user, id: "queued", time: { created: 3.5 } }
+  expect(
+    check([text("必须读取 customer-spec.md")], "write", [user, first, queued, last], {
+      queued: [{ ...text("做个小游戏"), messageID: queued.id }],
+    }),
+  ).toEqual({ quiet: [], recovered: [] })
+})
+
+test("a named filename spanning request clause punctuation still needs its original read", () => {
+  if (failure.state.status !== "error" || success.state.status !== "completed") throw Error("fixtures")
+  for (const path of ["docs/customer; spec.md", "docs/客户。spec.md"]) {
+    expect(
+      quietToolFailures({
+        message: last,
+        messages: [user, first, last],
+        working: false,
+        parts: {
+          user: [
+            {
+              id: "request",
+              messageID: user.id,
+              sessionID: user.sessionID,
+              type: "text",
+              text: `必须读取 ${path}，不能自编`,
+            },
+          ],
+          first: [
+            {
+              ...failure,
+              tool: "read",
+              state: { ...failure.state, input: { path }, metadata: { readFailure: "not_found" } },
+            },
+          ],
+          last: [
+            { ...success, tool: "write", state: { ...success.state, input: { path } } },
+            { id: "answer", messageID: last.id, sessionID: last.sessionID, type: "text", text: "已完成" },
+          ],
+        },
+      }),
+    ).toEqual([])
+  }
 })

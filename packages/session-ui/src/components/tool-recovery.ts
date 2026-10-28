@@ -1,6 +1,7 @@
 import type { AssistantMessage, Message, Part, ToolPart } from "@zaovra-ai/sdk/v2"
+import { SessionRequest } from "@zaovra-ai/schema/session-request"
 import { diagnosticFailures, formattingFailures } from "./formatting-failures"
-import { displayTurnOwners } from "./turn-ownership"
+import { displayTurnOwners, isContinuation } from "./turn-ownership"
 
 /** Display-only evidence. A later successful operation never changes the stored failure or verification verdict. */
 type RecoveryInput = {
@@ -30,7 +31,7 @@ function settledTools(input: RecoveryInput) {
     .flatMap((message) => input.parts[message.id] ?? [])
     .filter((part): part is ToolPart => part.type === "tool")
   if (tools.some((part) => part.state.status === "pending" || part.state.status === "running")) return
-  return { tools, last }
+  return { tools, last, request, messages }
 }
 
 export function recoveredToolFailures(input: RecoveryInput) {
@@ -69,6 +70,55 @@ export function quietToolFailures(input: RecoveryInput) {
   const agents = new Map(
     input.messages.filter((message) => message.role === "assistant").map((message) => [message.id, message.agent]),
   )
+  const users = (
+    settled.tools.some(
+      (part) =>
+        part.tool === "read" && part.state.status === "error" && part.state.metadata?.readFailure === "not_found",
+    )
+      ? settled.messages
+      : []
+  )
+    .slice(0, settled.messages.findIndex((message) => message.id === settled.request) + 1)
+    .filter((message) => message.role === "user" && !isContinuation(input.parts[message.id] ?? []))
+    .map((message) => {
+      const parts = input.parts[message.id] ?? []
+      const text = parts.filter(
+        (part): part is Extract<Part, { type: "text" }> => part.type === "text" && !part.synthetic,
+      )
+      const source = text.find((part) => typeof part.metadata?.zaovraRequestText === "string")?.metadata
+      return {
+        id: message.id,
+        type: "user",
+        text:
+          typeof source?.zaovraRequestText === "string"
+            ? source.zaovraRequestText
+            : text.map((part) => part.text).join("\n"),
+        visibleText: text.map((part) => part.text).join("\n"),
+        files: parts.filter((part) => part.type === "file"),
+        agents: parts.filter((part) => part.type === "agent"),
+        subtask: source?.zaovraRequestSubtask,
+        invocation: source?.zaovraRequestInvocation,
+      }
+    })
+  const requested = SessionRequest.requested(users, () => "")
+  const scope = users.slice(users.findIndex((message) => message.id === requested.sourceMessageID))
+  // Missing request pages or opaque attachment/delegation sources cannot prove a file was unrequested.
+  const request =
+    scope.length &&
+    scope.every((message) => message.text.trim() && !message.files.length && !message.agents.length && !message.subtask)
+      ? requested
+      : undefined
+  const sources = new Set(request?.entries.map((entry) => entry.sourceMessageID))
+  // Match the source text, so punctuation in a filename cannot be split across clauses.
+  const originalText = request
+    ? scope
+        .filter((message) => sources.has(message.id))
+        .flatMap((message) => [
+          message.text,
+          message.visibleText,
+          ...(typeof message.invocation === "string" ? [message.invocation] : []),
+        ])
+    : undefined
   const exploratory = (part: ToolPart) =>
     part.state.status === "error" &&
     !verification(part) &&
@@ -97,6 +147,14 @@ export function quietToolFailures(input: RecoveryInput) {
   return settled.tools.filter((part, index, tools) => {
     if (recovered.includes(part)) return true
     if (part.state.status !== "error" || !exploratory(part)) return false
+    const path = part.state.input.path ?? part.state.input.filePath
+    const filename = typeof path === "string" ? path.split(/[\\/]/).at(-1)?.trim().toLowerCase() : undefined
+    const unrequested =
+      originalText &&
+      filename &&
+      filename !== "." &&
+      filename !== ".." &&
+      !originalText.some((text) => text.replaceAll("\\", "/").toLowerCase().includes(filename))
     const end = part.state.time.end
     return tools
       .slice(index + 1)
@@ -105,7 +163,7 @@ export function quietToolFailures(input: RecoveryInput) {
           next.state.status === "completed" &&
           next.state.time.end >= end &&
           (part.tool !== "read" ||
-            (["read", "write"].includes(next.tool) &&
+            ((next.tool === "read" || (next.tool === "write" && unrequested)) &&
               typeof (part.state.input.path ?? part.state.input.filePath) === "string" &&
               !!(part.state.input.path ?? part.state.input.filePath) &&
               (part.state.input.path ?? part.state.input.filePath) ===
