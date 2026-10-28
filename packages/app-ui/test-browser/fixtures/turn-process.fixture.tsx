@@ -45,6 +45,7 @@ const failure: ToolPart = {
     status: "error",
     input: { filePath: "missing.html" },
     error: "File not found: missing.html",
+    metadata: { reason: "not_found" },
     time: { start: 2, end: 3 },
   },
 }
@@ -241,4 +242,30 @@ test("uncertain effects explain that current state must be checked before retryi
   } finally {
     dispose()
   }
+})
+
+test("confirmed empty Stop renders stopped while output interruption stays interrupted", () => {
+  const root = document.createElement("div")
+  document.body.append(root)
+  const dispose = render(
+    () => (
+      <I18nProvider value={value}>
+        <TurnProcessSummary tools={[]} status={settledTurnStatus([], false, true)} folded={true} onToggle={() => {}} />
+        <TurnProcessSummary
+          tools={[]}
+          status={settledTurnStatus([{ ...last, finish: "interrupted" }], false)}
+          folded={true}
+          onToggle={() => {}}
+        />
+      </I18nProvider>
+    ),
+    root,
+  )
+  expect([...root.querySelectorAll("[data-slot=turn-terminal-status]")].map((node) => node.textContent)).toEqual([
+    "已停止",
+    "已中断",
+  ])
+  expect(settledTurnStatus([], false)).toBeUndefined()
+  dispose()
+  root.remove()
 })

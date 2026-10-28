@@ -86,13 +86,23 @@ const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: Provid
     })
   }
   if (tool.state.status === "error") {
+    const error = { ...tool.state.error }
+    if (tool.name === "read" && ["not_found", "permission", "unknown"].includes(error.metadata?.reason ?? "")) {
+      // UI-only read classification must not change historical tool text seen by a provider.
+      const metadata = { ...error.metadata }
+      delete metadata.reason
+      delete metadata.permissionReason
+      if (error.metadata?.permissionReason) metadata.reason = error.metadata.permissionReason
+      if (Object.keys(metadata).length) error.metadata = metadata
+      if (!Object.keys(metadata).length) delete error.metadata
+    }
     return ToolResultPart.make({
       id: tool.id,
       name: tool.name,
       result:
         tool.provider?.executed === true && tool.state.result !== undefined
           ? tool.state.result
-          : { error: tool.state.error, content: tool.state.content, structured: tool.state.structured },
+          : { error, content: tool.state.content, structured: tool.state.structured },
       resultType: "error",
       providerExecuted: tool.provider?.executed,
       providerMetadata,

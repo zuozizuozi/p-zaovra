@@ -152,6 +152,8 @@ function reconcileFetched<T extends { id: string }>(
 }
 
 export function createServerSession(client: ZaovraClient, options?: { retry?: typeof retry }) {
+  // Confirmed local Stop receipts are presentation state, never synthetic model history.
+  const [stoppedTurns, setStoppedTurns] = createStore<Record<string, string>>({})
   const [data, setData] = createStore({
     info: {} as Record<string, SessionView | undefined>,
     session_status: {} as Record<string, SessionStatus>,
@@ -467,6 +469,13 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       if (refresh) clearTimeout(refresh)
       v2Refreshes.delete(sessionID)
     })
+    setStoppedTurns(
+      produce((turns) => {
+        Object.entries(turns).forEach(([id, sessionID]) => {
+          if (sessionIDs.includes(sessionID)) delete turns[id]
+        })
+      }),
+    )
     setData(
       produce((draft) => {
         dropSessionCaches(draft, sessionIDs)
@@ -1483,6 +1492,35 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
 
   return {
     data,
+    stopped: (messageID: string) => stoppedTurns[messageID] !== undefined,
+    async interrupt(sessionID: string) {
+      const active = generation(sessionID)
+      const messages = data.message[sessionID] ?? []
+      const user = data.session_working(sessionID)
+        ? messages.toSorted(cmpMessage).findLast((message) => message.role === "user")
+        : undefined
+      await client.v2.session.interrupt({ sessionID }, { throwOnError: true })
+      // Capture before awaiting: a newly admitted prompt must never inherit the old Stop.
+      if (
+        !user ||
+        generations.get(sessionID) !== active ||
+        !data.message[sessionID]?.some((message) => message.id === user.id)
+      )
+        return
+      if (
+        (data.message[sessionID] ?? []).some(
+          (message) =>
+            message.role === "assistant" &&
+            message.parentID === user.id &&
+            (data.part[message.id] ?? []).some(
+              (part) =>
+                part.type === "tool" || ((part.type === "text" || part.type === "reasoning") && part.text.trim()),
+            ),
+        )
+      )
+        return
+      setStoppedTurns(user.id, sessionID)
+    },
     set: setData,
     get: (sessionID: string) => data.info[sessionID],
     peek: (sessionID: string) => data.info[sessionID],

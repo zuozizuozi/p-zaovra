@@ -21,6 +21,7 @@ function setup(input: {
   pending?: SessionInputAdmitted[]
   wait?: () => Promise<void>
   active?: () => Partial<Record<string, { type: "running" }>>
+  interrupt?: () => Promise<void>
   pageWait?: () => Promise<void>
 }) {
   const sessions = input.sessions ?? { ses_child: info("ses_child") }
@@ -34,6 +35,7 @@ function setup(input: {
   const client = {
     v2: {
       session: {
+        interrupt: input.interrupt ?? (() => Promise.resolve()),
         wait: input.wait ?? (() => Promise.resolve()),
         active: async () => ({ data: { data: input.active?.() ?? {} } }),
         get: async ({ sessionID }: { sessionID: string }) => {
@@ -132,8 +134,13 @@ describe("V2 server session store", () => {
     const loading = Promise.withResolvers<void>()
     let waits = 0
     const ctx = setup({
-      wait: async () => { waits++ },
-      pageWait: () => { loading.resolve(); return page.promise },
+      wait: async () => {
+        waits++
+      },
+      pageWait: () => {
+        loading.resolve()
+        return page.promise
+      },
     })
     await ctx.store.resolve("ses_child")
     ctx.store.set("session_status", "ses_child", { type: "busy" })
@@ -141,7 +148,13 @@ describe("V2 server session store", () => {
     await loading.promise
     ctx.store.apply({
       type: "session.next.step.started",
-      properties: { sessionID: "ses_child", assistantMessageID: "late", agent: "build", model: { id: "model", providerID: "provider" }, timestamp: 2 },
+      properties: {
+        sessionID: "ses_child",
+        assistantMessageID: "late",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        timestamp: 2,
+      },
     })
     page.resolve()
     await watching
@@ -739,15 +752,103 @@ test("Stop wait settling cannot clear the new task's busy state and its final ta
 
 test("shell liveness is connection-local and ends without waiting for history refresh", () => {
   const { store } = setup({})
-  store.apply({ type: "session.next.shell.started", properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 1 } })
+  store.apply({
+    type: "session.next.shell.started",
+    properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 1 },
+  })
   expect(store.data.live_shell?.ses_child?.job_live).toBe(true)
   expect(store.data.live_shell?.ses_other?.job_live).toBeUndefined()
-  store.apply({ type: "session.next.shell.ended", properties: { sessionID: "ses_child", callID: "job_live", output: "", timestamp: 2 } })
+  store.apply({
+    type: "session.next.shell.ended",
+    properties: { sessionID: "ses_child", callID: "job_live", output: "", timestamp: 2 },
+  })
   expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
-  store.apply({ type: "session.next.shell.started", properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 3 } })
+  store.apply({
+    type: "session.next.shell.started",
+    properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 3 },
+  })
   store.apply({ type: "server.connected" })
   expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
-  store.apply({ type: "session.next.shell.started", properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 4 } })
+  store.apply({
+    type: "session.next.shell.started",
+    properties: { sessionID: "ses_child", messageID: "job_live", callID: "job_live", command: "serve", timestamp: 4 },
+  })
   store.apply({ type: "global.disposed" })
   expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
+})
+
+test("a confirmed Stop before any assistant belongs to the captured turn, not a later input", async () => {
+  const gate = Promise.withResolvers<void>()
+  const ctx = setup({ pages: [{ data: [user("msg_first", "Task", 1)] }], interrupt: () => gate.promise })
+  await ctx.store.sync("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  const stopping = ctx.store.interrupt("ses_child")
+  ctx.store.apply({
+    type: "message.updated",
+    properties: {
+      info: {
+        ...ctx.store.data.message.ses_child[0],
+        id: "msg_second",
+        time: { created: 3 },
+      },
+    },
+  })
+  gate.resolve()
+  await stopping
+  expect(ctx.store.stopped("msg_first")).toBe(true)
+  expect(ctx.store.stopped("msg_second")).toBe(false)
+})
+
+test("idle or failed Stop never invents a stopped turn", async () => {
+  const ctx = setup({
+    pages: [{ data: [user("msg_first", "Task", 1)] }],
+    interrupt: async () => {
+      throw Error("offline")
+    },
+  })
+  await ctx.store.sync("ses_child")
+  await expect(ctx.store.interrupt("ses_child")).rejects.toThrow("offline")
+  expect(ctx.store.stopped("msg_first")).toBe(false)
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  await expect(ctx.store.interrupt("ses_child")).rejects.toThrow("offline")
+  expect(ctx.store.stopped("msg_first")).toBe(false)
+})
+
+test("a Stop receipt does not replace an existing assistant's interrupted result", async () => {
+  const ctx = setup({
+    pages: [
+      { data: [user("msg_first", "Task", 1), { ...assistant("msg_answer", "Partial", 2), finish: "interrupted" }] },
+    ],
+  })
+  await ctx.store.sync("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  await ctx.store.interrupt("ses_child")
+  expect(ctx.store.stopped("msg_first")).toBe(false)
+})
+
+test("an empty streaming assistant shell still counts as first-output Stop", async () => {
+  const ctx = setup({ pages: [{ data: [user("msg_first", "Task", 1)] }] })
+  await ctx.store.sync("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  ctx.store.apply({
+    type: "message.updated",
+    properties: {
+      info: {
+        id: "msg_empty",
+        sessionID: "ses_child",
+        role: "assistant",
+        parentID: "msg_first",
+        time: { created: 2 },
+        agent: "build",
+        mode: "build",
+        providerID: "provider",
+        modelID: "model",
+        path: { cwd: "/repo", root: "/repo" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    },
+  })
+  await ctx.store.interrupt("ses_child")
+  expect(ctx.store.stopped("msg_first")).toBe(true)
 })

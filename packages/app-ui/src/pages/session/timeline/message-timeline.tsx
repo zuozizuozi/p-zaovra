@@ -363,6 +363,7 @@ export function MessageTimeline(props: {
     status: sessionStatus,
     showReasoningSummaries: settings.general.showReasoningSummaries,
     inlineComments: settings.general.newLayoutDesigns,
+    stopped: (messageID) => serverSync().session.stopped(messageID),
   })
   const activeMessageID = projection.activeMessageID
   const [turns, setTurns] = createStore<Record<string, boolean>>({})
@@ -1439,6 +1440,7 @@ export function MessageTimeline(props: {
                     status={settledTurnStatus(
                       assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages,
                       unresolvedTools(headingRow().userMessageID),
+                      serverSync().session.stopped(headingRow().userMessageID),
                     )}
                     folded={folded()}
                     onToggle={() => setTurns(headingRow().userMessageID, !folded())}

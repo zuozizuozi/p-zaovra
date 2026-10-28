@@ -42,6 +42,7 @@ export namespace Timeline {
     isActive: boolean,
     // v2 renders comments inside the user message attachments row instead of a strip row
     inlineComments: boolean,
+    stopped = false,
   ) {
     const rows: TimelineRow.TimelineRow[] = []
 
@@ -96,7 +97,7 @@ export namespace Timeline {
       }),
     )
 
-    if (assistantMessages.length || (isActive && status !== "idle"))
+    if (assistantMessages.length || stopped || (isActive && status !== "idle"))
       rows.push(new TimelineRow.AssistantHeading({ userMessageID: userMessage.id }))
 
     if (compaction) {

@@ -2,8 +2,9 @@ import type { AssistantMessage, ToolPart } from "@zaovra-ai/sdk/v2"
 import { useI18n } from "@zaovra-ai/ui/context/i18n"
 import { Show, createMemo } from "solid-js"
 
-export function settledTurnStatus(messages: readonly AssistantMessage[], unresolved: boolean) {
+export function settledTurnStatus(messages: readonly AssistantMessage[], unresolved: boolean, stopped = false) {
   const last = messages.at(-1)
+  if (stopped) return "stopped"
   if (last?.finish === "stopped") return "stopped"
   if (last?.finish === "interrupted" || last?.error?.name === "MessageAbortedError") return "interrupted"
   if (last?.error || unresolved) return "error"

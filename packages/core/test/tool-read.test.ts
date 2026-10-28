@@ -569,6 +569,30 @@ describe("ReadTool", () => {
     }),
   )
 
+  for (const [tag, reason] of [
+    ["NotFound", "not_found"],
+    ["PermissionDenied", "permission"],
+    ["Unknown", "unknown"],
+  ] as const)
+    it.effect(`keeps read ${reason} metadata separate from the unchanged model text`, () =>
+      Effect.gen(function* () {
+        readFailure = PlatformError.systemError({
+          _tag: tag,
+          module: "FileSystem",
+          method: "readFile",
+          pathOrDescriptor: "missing.html",
+        })
+        const registry = yield* ToolRegistry.Service
+        const result = yield* settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-read-reason", name: "read", input: { path: "missing.html" } },
+        })
+        expect(result.result).toEqual({ type: "error", value: "Unable to read missing.html" })
+        expect(result.errorMetadata?.reason).toBe(reason)
+      }),
+    )
+
   it.effect("preserves unexpected filesystem defects", () =>
     Effect.gen(function* () {
       resolveFailure = new Error("unexpected")

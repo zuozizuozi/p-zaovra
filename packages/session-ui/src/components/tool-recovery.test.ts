@@ -172,7 +172,12 @@ test("a missing exploratory read is quiet after a different successful operation
   const read = {
     ...failure,
     tool: "read",
-    state: { ...failure.state, input: { filePath: "missing.html" }, error: "File not found: missing.html" },
+    state: {
+      ...failure.state,
+      input: { filePath: "missing.html" },
+      error: "Unable to read missing.html",
+      metadata: { reason: "not_found" },
+    },
   }
   const parts = {
     user: [
@@ -193,7 +198,7 @@ test("a missing exploratory read is quiet after a different successful operation
   const input = { message: last, messages: [user, first, last], parts, working: false }
   expect(recoveredToolFailures(input)).toEqual([])
   expect(quietToolFailures(input).map((part) => part.id)).toEqual([read.id])
-  expect(read.state.error).toBe("File not found: missing.html")
+  expect(read.state.error).toBe("Unable to read missing.html")
   expect(quietToolFailures({ ...input, working: true })).toEqual([])
   for (const finish of ["interrupted", "stopped", "tool-calls"])
     expect(quietToolFailures({ ...input, messages: [user, first, { ...last, finish }] })).toEqual([])
@@ -212,7 +217,12 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
   const read = {
     ...failure,
     tool: "read",
-    state: { ...failure.state, input: { filePath: "missing.html" }, error: "File not found: missing.html" },
+    state: {
+      ...failure.state,
+      input: { filePath: "missing.html" },
+      error: "Unable to read missing.html",
+      metadata: { reason: "not_found" },
+    },
   }
   const answer: Part = { id: "answer", messageID: last.id, sessionID: last.sessionID, type: "text", text: "Done" }
   const parts = {
@@ -230,7 +240,14 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
     expect(
       quietToolFailures({ ...input, parts: { ...parts, first: [{ ...read, state: { ...read.state, error } }] } }),
     ).toEqual([])
-  for (const metadata of [{ phase: "mutation", reason: "target-changed" }, { verification: true }, { timeout: true }])
+  for (const metadata of [
+    { phase: "mutation", reason: "target-changed" },
+    { verification: true },
+    { timeout: true },
+    { reason: "permission" },
+    { reason: "unknown" },
+    {},
+  ])
     expect(
       quietToolFailures({ ...input, parts: { ...parts, first: [{ ...read, state: { ...read.state, metadata } }] } }),
     ).toEqual([])

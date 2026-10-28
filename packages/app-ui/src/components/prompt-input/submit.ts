@@ -342,8 +342,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       input.onAbort?.()
       return Promise.resolve()
     }
-    const request = sdk()
-      .client.v2.session.interrupt({ sessionID }, { throwOnError: true })
+    const request = serverSync()
+      .session.interrupt(sessionID)
       .then(() => {
         input.onAbort?.()
       })

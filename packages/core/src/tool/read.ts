@@ -1,9 +1,10 @@
 export * as ReadTool from "./read"
 
 import { ToolFailure } from "@zaovra-ai/llm"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, PlatformError, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { FileSystem } from "../filesystem"
+import { FSUtil } from "../fs-util"
 import { Image } from "../image"
 import { Catalog } from "../catalog"
 import { SessionStore } from "../session/store"
@@ -113,7 +114,15 @@ const layer = Layer.effectDiscard(
                   error instanceof Image.SizeError
                     ? error.message
                     : `Unable to read ${input.path}`
-                return safetyFailure(error) ?? new ToolFailure({ message })
+                const safety = safetyFailure(error)
+                return new ToolFailure({
+                  message: safety?.message ?? message,
+                  metadata: {
+                    ...safety?.metadata,
+                    ...(safety?.metadata?.reason ? { permissionReason: safety.metadata.reason } : {}),
+                    reason: readFailureReason(error),
+                  },
+                })
               }),
             )
           },
@@ -136,3 +145,21 @@ export const node = makeLocationNode({
     Catalog.node,
   ],
 })
+
+function readFailureReason(error: unknown) {
+  if (error instanceof PermissionV2.BlockedError || error instanceof PermissionV2.CorrectedError) return "permission"
+  if (error instanceof PlatformError.PlatformError) {
+    if (error.reason._tag === "NotFound") return "not_found"
+    if (error.reason._tag === "PermissionDenied") return "permission"
+  }
+  if (
+    error instanceof FSUtil.FileSystemError &&
+    error.cause &&
+    typeof error.cause === "object" &&
+    "code" in error.cause
+  ) {
+    if (error.cause.code === "ENOENT") return "not_found"
+    if (error.cause.code === "EACCES" || error.cause.code === "EPERM") return "permission"
+  }
+  return "unknown"
+}

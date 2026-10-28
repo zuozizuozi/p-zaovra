@@ -18,6 +18,7 @@ export function createTimelineProjection(input: {
   status: Accessor<SessionStatus>
   showReasoningSummaries: Accessor<boolean>
   inlineComments: Accessor<boolean>
+  stopped?: (messageID: string) => boolean
 }) {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
   const chronologicalMessages = createMemo(() =>
@@ -101,6 +102,7 @@ export function createTimelineProjection(input: {
             input.status().type,
             activeMessageID() === userMessage.id,
             input.inlineComments(),
+            input.stopped?.(userMessage.id) ?? false,
           ),
         ),
       ),

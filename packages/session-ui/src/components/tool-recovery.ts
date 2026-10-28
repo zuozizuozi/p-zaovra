@@ -35,12 +35,15 @@ function settledTools(input: RecoveryInput) {
 
 export function recoveredToolFailures(input: RecoveryInput) {
   const tools = settledTools(input)?.tools
-  return tools ? recoveries(tools) : []
+  return tools
+    ? recoveries(tools).filter((part) => part.tool !== "read" || quietToolFailures(input).includes(part))
+    : []
 }
 
 function recoveries(tools: ToolPart[]) {
   return tools.filter((part, index) => {
     if (part.state.status !== "error" || verification(part)) return false
+    if (part.tool === "read" && part.state.metadata?.reason !== "not_found") return false
     if (part.tool === "edit" && /^\s*(?:Error:\s*)?No changes to apply:/i.test(part.state.error)) return true
     const metadata = part.state.metadata
     if (/\bOutcome may have occurred\b|\btimeout\b|\btimed out\b|\bpartial/i.test(part.state.error)) return false
@@ -60,17 +63,19 @@ function recoveries(tools: ToolPart[]) {
 /** Exploratory misses are quiet only after a successful alternative, never merely because prose claims success. */
 export function quietToolFailures(input: RecoveryInput) {
   const settled = settledTools(input)
-  const recovered = settled ? recoveries(settled.tools) : []
+  const recovered = settled ? recoveries(settled.tools).filter((part) => part.tool !== "read") : []
   if (!settled || settled.last.error || settled.last.finish !== "stop") return recovered
   if (!(input.parts[settled.last.id] ?? []).some((part) => part.type === "text" && part.text.trim())) return recovered
   const exploratory = (part: ToolPart) =>
     part.state.status === "error" &&
     !verification(part) &&
     !uncertain(part) &&
-    ["read", "list", "glob", "grep", "websearch"].includes(part.tool) &&
-    /\b(?:ENOENT|file not found|no such file|does not exist|no (?:results|matches)(?: found)?)\b/i.test(
-      part.state.error,
-    )
+    (part.tool === "read"
+      ? part.state.metadata?.reason === "not_found"
+      : ["list", "glob", "grep", "websearch"].includes(part.tool) &&
+        /\b(?:ENOENT|file not found|no such file|does not exist|no (?:results|matches)(?: found)?)\b/i.test(
+          part.state.error,
+        ))
   // An unresolved verification, mutation, permission or unknown error prevents an outcome-neutral claim.
   if (
     settled.tools.some(
@@ -107,7 +112,9 @@ function uncertain(part: ToolPart) {
   const metadata = "metadata" in part.state ? part.state.metadata : undefined
   return (
     (part.state.status === "error" &&
-      /\bOutcome may have occurred\b|\btimeout\b|\btimed out\b|\bpartial/i.test(part.state.error)) ||
+      /\bOutcome may have occurred\b|\btimeout\b|\btimed out\b|\bpartial|\bpermission denied\b|\baccess denied\b|\bEACCES\b|\bEPERM\b/i.test(
+        part.state.error,
+      )) ||
     !!metadata?.timeout ||
     !!metadata?.job_id ||
     (metadata?.phase === "mutation" && metadata.reason !== "match-failed")
