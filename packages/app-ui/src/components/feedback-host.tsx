@@ -227,197 +227,207 @@ export function FeedbackHost() {
       <Kobalte.Portal>
         <Kobalte.Overlay class="fixed inset-0 z-[10000] bg-black/40" />
         <div class="fixed inset-0 z-[10001] flex items-center justify-center p-3 pointer-events-none">
-          <Dialog title={text().title} size="large" class="pointer-events-auto max-h-[90dvh] overflow-y-auto">
+          <Dialog title={text().title} size="large" class="pointer-events-auto h-full max-h-[90dvh] overflow-hidden">
             <div
               data-component="feedback-dialog"
-              class="flex flex-col gap-4 px-4 pb-4 text-13-regular min-w-0 min-h-0 overflow-y-auto max-h-[70dvh]"
+              class="flex h-full min-h-0 flex-col gap-4 px-4 pb-4 text-13-regular min-w-0"
             >
               <p>{text().local}</p>
-              <Show
-                when={!state.preview}
-                fallback={
-                  <>
-                    <h3>{text().preview}</h3>
-                    <For each={state.preview?.files}>
-                      {(file) => (
-                        <details open>
-                          <summary>{file.name}</summary>
-                          <pre class="whitespace-pre-wrap break-all select-text max-h-64 overflow-y-auto">
-                            {file.text}
-                          </pre>
-                        </details>
-                      )}
-                    </For>
-                    <Show when={state.preview?.image}>
-                      {(image) => (
-                        <>
-                          <p>{text().image}</p>
-                          <img src={image()} alt={text().screenshot} class="max-h-64 object-contain" />
-                        </>
-                      )}
-                    </Show>
-                    <p>{text().emailHint}</p>
-                    <div class="flex flex-wrap gap-2">
-                      <Button disabled={state.pending} onClick={() => setState("preview", undefined)}>
-                        {text().back}
-                      </Button>
+              <div data-component="feedback-scroll" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+                <Show
+                  when={!state.preview}
+                  fallback={
+                    <>
+                      <h3>{text().preview}</h3>
+                      <For each={state.preview?.files}>
+                        {(file) => (
+                          <details open>
+                            <summary>{file.name}</summary>
+                            <pre class="whitespace-pre-wrap break-all select-text max-h-64 overflow-y-auto">
+                              {file.text}
+                            </pre>
+                          </details>
+                        )}
+                      </For>
+                      <Show when={state.preview?.image}>
+                        {(image) => (
+                          <>
+                            <p>{text().image}</p>
+                            <img src={image()} alt={text().screenshot} class="max-h-64 object-contain" />
+                          </>
+                        )}
+                      </Show>
+                      <p>{text().emailHint}</p>
+                    </>
+                  }
+                >
+                  <label class="flex flex-col gap-2">
+                    {text().description}
+                    <textarea
+                      autofocus
+                      rows={4}
+                      maxLength={2000}
+                      value={state.description}
+                      onInput={(event) => setState("description", event.currentTarget.value)}
+                      class="rounded-md border border-border-base bg-background-base p-2 resize-y"
+                    />
+                  </label>
+                  <p role="status">{text()[advice()]}</p>
+                  <Show when={state.configure}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setState("open", false)
+                        state.configure?.()
+                      }}
+                    >
+                      {text().configure}
+                    </Button>
+                  </Show>
+                  <p class="text-text-weak">{text().review}</p>
+                  <For each={["environment", "events", "errors"] as const}>
+                    {(key) => (
+                      <label class="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={state.include[key]}
+                          onChange={(event) => setState("include", key, event.currentTarget.checked)}
+                        />
+                        {text()[key]}
+                      </label>
+                    )}
+                  </For>
+                  <Show when={state.context.model || state.context.provider}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={state.modelNames}
+                        onChange={(event) => setState("modelNames", event.currentTarget.checked)}
+                      />{" "}
+                      {text().modelNames}
+                    </label>
+                  </Show>
+                  <Show when={state.error}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={state.details}
+                        onChange={(event) => setState("details", event.currentTarget.checked)}
+                      />{" "}
+                      {text().details}
+                    </label>
+                  </Show>
+                  <label>
+                    <input
+                      type="checkbox"
+                      disabled={!state.readConversation}
+                      checked={state.conversation !== undefined}
+                      onChange={(event) =>
+                        setState("conversation", event.currentTarget.checked ? state.readConversation?.() : undefined)
+                      }
+                    />{" "}
+                    {text().conversation}
+                  </label>
+                  <label>
+                    {text().code}
+                    <input
+                      type="file"
+                      disabled={state.pending}
+                      accept="text/*,.ts,.tsx,.js,.json,.md,.py,.rs"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0]
+                        if (!file) return
+                        const generation = state.generation
+                        void perform(async () => {
+                          if (file.size > 32_000) throw new Error("Text too large")
+                          const code = await file.text()
+                          if (state.open && state.generation === generation && !state.preview) setState("code", code)
+                          return ""
+                        })
+                        event.currentTarget.value = ""
+                      }}
+                    />
+                  </label>
+                  <Show when={state.code !== undefined}>
+                    <Button variant="ghost" onClick={() => setState("code", undefined)}>
+                      {text().remove} {text().code}
+                    </Button>
+                  </Show>
+                  <label>
+                    {text().screenshot}
+                    <input
+                      type="file"
+                      disabled={state.pending}
+                      accept="image/png"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0]
+                        if (file) void perform(() => chooseImage(file))
+                        event.currentTarget.value = ""
+                      }}
+                    />
+                  </label>
+                  <Show when={state.image}>
+                    <p>{text().image}</p>
+                    <img src={state.image} alt={text().screenshot} class="max-h-64 object-contain" />
+                    <Button variant="ghost" onClick={() => setState("image", undefined)}>
+                      {text().remove} {text().screenshot}
+                    </Button>
+                  </Show>
+                  <Show when={state.busy}>
+                    <p role="status">{text().busy}</p>
+                  </Show>
+                </Show>
+              </div>
+              <div data-component="feedback-actions" class="shrink-0">
+                <Show
+                  when={state.preview}
+                  fallback={
+                    <Button disabled={state.pending} onClick={freeze}>
+                      {text().continue}
+                    </Button>
+                  }
+                >
+                  <div class="flex flex-wrap gap-2">
+                    <Button disabled={state.pending} onClick={() => setState("preview", undefined)}>
+                      {text().back}
+                    </Button>
+                    <Button
+                      disabled={state.pending}
+                      onClick={() =>
+                        void perform(async () => {
+                          await navigator.clipboard.writeText(Feedback.copy(state.preview!))
+                          return text().copied
+                        })
+                      }
+                    >
+                      {text().copy}
+                    </Button>
+                    <Show when={platform.saveFeedback}>
                       <Button
                         disabled={state.pending}
                         onClick={() =>
-                          void perform(async () => {
-                            await navigator.clipboard.writeText(Feedback.copy(state.preview!))
-                            return text().copied
-                          })
-                        }
-                      >
-                        {text().copy}
-                      </Button>
-                      <Show when={platform.saveFeedback}>
-                        <Button
-                          disabled={state.pending}
-                          onClick={() =>
-                            void perform(async () =>
-                              (await platform.saveFeedback!(state.preview!)) ? text().saved : text().cancelled,
-                            )
-                          }
-                        >
-                          {text().save}
-                        </Button>
-                      </Show>
-                      <Button
-                        disabled={state.pending || Feedback.copy(state.preview!).length > 8000}
-                        title={text().largeMail}
-                        onClick={() =>
-                          platform.openLink(
-                            `mailto:support@zaovra.com?subject=Zaovra%20feedback&body=${encodeURIComponent(Feedback.copy(state.preview!))}`,
+                          void perform(async () =>
+                            (await platform.saveFeedback!(state.preview!)) ? text().saved : text().cancelled,
                           )
                         }
                       >
-                        {text().mail}
+                        {text().save}
                       </Button>
-                    </div>
-                  </>
-                }
-              >
-                <label class="flex flex-col gap-2">
-                  {text().description}
-                  <textarea
-                    autofocus
-                    rows={4}
-                    maxLength={2000}
-                    value={state.description}
-                    onInput={(event) => setState("description", event.currentTarget.value)}
-                    class="rounded-md border border-border-base bg-background-base p-2 resize-y"
-                  />
-                </label>
-                <p role="status">{text()[advice()]}</p>
-                <Show when={state.configure}>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setState("open", false)
-                      state.configure?.()
-                    }}
-                  >
-                    {text().configure}
-                  </Button>
+                    </Show>
+                    <Button
+                      disabled={state.pending || Feedback.copy(state.preview!).length > 8000}
+                      title={text().largeMail}
+                      onClick={() =>
+                        platform.openLink(
+                          `mailto:support@zaovra.com?subject=Zaovra%20feedback&body=${encodeURIComponent(Feedback.copy(state.preview!))}`,
+                        )
+                      }
+                    >
+                      {text().mail}
+                    </Button>
+                  </div>
                 </Show>
-                <p class="text-text-weak">{text().review}</p>
-                <For each={["environment", "events", "errors"] as const}>
-                  {(key) => (
-                    <label class="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={state.include[key]}
-                        onChange={(event) => setState("include", key, event.currentTarget.checked)}
-                      />
-                      {text()[key]}
-                    </label>
-                  )}
-                </For>
-                <Show when={state.context.model || state.context.provider}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={state.modelNames}
-                      onChange={(event) => setState("modelNames", event.currentTarget.checked)}
-                    />{" "}
-                    {text().modelNames}
-                  </label>
-                </Show>
-                <Show when={state.error}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={state.details}
-                      onChange={(event) => setState("details", event.currentTarget.checked)}
-                    />{" "}
-                    {text().details}
-                  </label>
-                </Show>
-                <label>
-                  <input
-                    type="checkbox"
-                    disabled={!state.readConversation}
-                    checked={state.conversation !== undefined}
-                    onChange={(event) =>
-                      setState("conversation", event.currentTarget.checked ? state.readConversation?.() : undefined)
-                    }
-                  />{" "}
-                  {text().conversation}
-                </label>
-                <label>
-                  {text().code}
-                  <input
-                    type="file"
-                    disabled={state.pending}
-                    accept="text/*,.ts,.tsx,.js,.json,.md,.py,.rs"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0]
-                      if (!file) return
-                      const generation = state.generation
-                      void perform(async () => {
-                        if (file.size > 32_000) throw new Error("Text too large")
-                        const code = await file.text()
-                        if (state.open && state.generation === generation && !state.preview) setState("code", code)
-                        return ""
-                      })
-                      event.currentTarget.value = ""
-                    }}
-                  />
-                </label>
-                <Show when={state.code !== undefined}>
-                  <Button variant="ghost" onClick={() => setState("code", undefined)}>
-                    {text().remove} {text().code}
-                  </Button>
-                </Show>
-                <label>
-                  {text().screenshot}
-                  <input
-                    type="file"
-                    disabled={state.pending}
-                    accept="image/png"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0]
-                      if (file) void perform(() => chooseImage(file))
-                      event.currentTarget.value = ""
-                    }}
-                  />
-                </label>
-                <Show when={state.image}>
-                  <p>{text().image}</p>
-                  <img src={state.image} alt={text().screenshot} class="max-h-64 object-contain" />
-                  <Button variant="ghost" onClick={() => setState("image", undefined)}>
-                    {text().remove} {text().screenshot}
-                  </Button>
-                </Show>
-                <Show when={state.busy}>
-                  <p role="status">{text().busy}</p>
-                </Show>
-                <Button disabled={state.pending} onClick={freeze}>
-                  {text().continue}
-                </Button>
-              </Show>
+              </div>
               <Show when={state.notice}>
                 <p role="status">{state.notice}</p>
               </Show>

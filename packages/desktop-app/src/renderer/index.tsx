@@ -263,7 +263,13 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
     feedbackDiagnostics: () => window.api.feedbackDiagnostics(),
-    saveFeedback: (snapshot) => window.api.saveFeedback(snapshot),
+    // Solid store wrappers cannot cross Electron's context bridge.
+    saveFeedback: (snapshot) =>
+      window.api.saveFeedback({
+        text: snapshot.text,
+        files: snapshot.files.map((file) => ({ name: file.name, text: file.text })),
+        ...(snapshot.image ? { image: snapshot.image } : {}),
+      }),
     legalDocument: (document) => window.api.legalDocument(document),
 
     setForceFocus: (enabled) => window.api.setForceFocus(enabled),
