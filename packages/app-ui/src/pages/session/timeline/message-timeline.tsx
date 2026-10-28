@@ -363,6 +363,10 @@ export function MessageTimeline(props: {
     status: sessionStatus,
     showReasoningSummaries: settings.general.showReasoningSummaries,
     inlineComments: settings.general.newLayoutDesigns,
+    historyComplete: () => {
+      const id = sessionID()
+      return !!id && serverSync().session.history.complete(id)
+    },
     stopped: (messageID) => serverSync().session.stopped(messageID),
   })
   const activeMessageID = projection.activeMessageID

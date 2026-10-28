@@ -18,6 +18,7 @@ export function createTimelineProjection(input: {
   status: Accessor<SessionStatus>
   showReasoningSummaries: Accessor<boolean>
   inlineComments: Accessor<boolean>
+  historyComplete?: Accessor<boolean>
   stopped?: (messageID: string) => boolean
 }) {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
@@ -69,6 +70,7 @@ export function createTimelineProjection(input: {
         messages: input.messages(),
         parts,
         working: input.status().type !== "idle",
+        historyComplete: input.historyComplete?.(),
       }).forEach((part) => result.add(part.id))
     })
     return result

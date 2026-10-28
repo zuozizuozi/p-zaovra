@@ -9,6 +9,7 @@ type RecoveryInput = {
   messages: readonly Message[]
   parts: Readonly<Record<string, Part[]>>
   working: boolean
+  historyComplete?: boolean
 }
 
 function settledTools(input: RecoveryInput) {
@@ -102,9 +103,15 @@ export function quietToolFailures(input: RecoveryInput) {
     })
   const requested = SessionRequest.requested(users, () => "")
   const scope = users.slice(users.findIndex((message) => message.id === requested.sourceMessageID))
+  const start = scope[0]
+  // A continuation at a page boundary is not evidence of the original request.
+  const startKnown =
+    start &&
+    !/^(?:补充要求|追加要求|修改要求)\s*[。.!！]*$/u.test(start.text.trim()) &&
+    (input.historyComplete === true || SessionRequest.continuationText(start.text) === undefined)
   // Missing request pages or opaque attachment/delegation sources cannot prove a file was unrequested.
   const request =
-    scope.length &&
+    startKnown &&
     scope.every((message) => message.text.trim() && !message.files.length && !message.agents.length && !message.subtask)
       ? requested
       : undefined

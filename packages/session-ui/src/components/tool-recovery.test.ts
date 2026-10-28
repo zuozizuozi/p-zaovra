@@ -439,6 +439,62 @@ test("named source reads stay unresolved after placeholder writes, including raw
   ).toEqual({ quiet: [], recovered: [] })
 })
 
+for (const continuation of [
+  "继续",
+  "continue",
+  "补充要求",
+  "修改要求",
+  "补充要求：保留原目标",
+  "修改要求：按原计划完成",
+])
+  test("partial request history cannot waive a named source after " + continuation, () => {
+    if (failure.state.status !== "error" || success.state.status !== "completed") throw Error("fixtures")
+    const missing: ToolPart = {
+      ...failure,
+      tool: "read",
+      state: { ...failure.state, input: { path: "customer-spec.md" }, metadata: { readFailure: "not_found" } },
+    }
+    const created: ToolPart = {
+      ...success,
+      tool: "write",
+      state: { ...success.state, input: { path: "customer-spec.md", content: "placeholder" } },
+    }
+    const original = { ...user, id: "original", time: { created: 0 } }
+    const text: Extract<Part, { type: "text" }> = {
+      id: "request",
+      sessionID: user.sessionID,
+      messageID: user.id,
+      type: "text",
+      text: continuation,
+    }
+    const input = {
+      message: last,
+      messages: [user, first, last],
+      working: false,
+      historyComplete: false,
+      parts: {
+        user: [text],
+        first: [missing],
+        last: [created, { ...text, id: "answer", messageID: last.id, text: "已完成" }],
+        original: [{ ...text, messageID: original.id, text: "先读 customer-spec.md，缺失不能自编。" }],
+      },
+    }
+    const before = JSON.stringify(input)
+    expect(quietToolFailures(input)).toEqual([])
+    expect(quietToolFailures({ ...input, messages: [original, user, first, last], historyComplete: true })).toEqual([])
+    expect(quietToolFailures(structuredClone(input))).toEqual([])
+    expect(quietToolFailures({ ...input, parts: { ...input.parts, user: [{ ...text, text: "做个小游戏" }] } })).toEqual(
+      [missing],
+    )
+    expect(
+      quietToolFailures({
+        ...input,
+        parts: { ...input.parts, last: [{ ...created, tool: "read" }, input.parts.last[1]] },
+      }),
+    ).toEqual([missing])
+    expect(JSON.stringify(input)).toBe(before)
+  })
+
 test("a named filename spanning request clause punctuation still needs its original read", () => {
   if (failure.state.status !== "error" || success.state.status !== "completed") throw Error("fixtures")
   for (const path of ["docs/customer; spec.md", "docs/客户。spec.md"]) {

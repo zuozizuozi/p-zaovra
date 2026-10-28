@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionInputAdmitted, ZaovraClient, SessionMessage, SessionV2Info } from "@zaovra-ai/sdk/v2/client"
 import { createServerSession } from "./server-session"
+import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 
 const info = (id: string, parentID?: string): SessionV2Info => ({
   id,
@@ -79,6 +80,91 @@ const assistant = (id: string, text: string, created: number): Extract<SessionMe
   content: [{ id: `${id}:text`, type: "text", text }],
   time: { created, completed: created + 1 },
 })
+
+for (const continuation of ["继续", "continue", "补充要求", "修改要求"])
+  test("request evidence stays conservative through real store pagination and reopen: " + continuation, async () => {
+    const original = user("msg_001", "必须先读 customer-spec.md，缺失不得自编。", 1)
+    const current: Extract<SessionMessage, { type: "user" }> = {
+      id: "msg_003",
+      type: "user",
+      text: continuation,
+      time: { created: 3 },
+    }
+    const failed: Extract<SessionMessage, { type: "assistant" }> = {
+      ...assistant("msg_004", "", 4),
+      finish: "tool-calls",
+      content: [
+        {
+          id: "read",
+          type: "tool",
+          name: "read",
+          time: { created: 4, completed: 5 },
+          state: {
+            status: "error",
+            input: { path: "customer-spec.md" },
+            content: [],
+            structured: {},
+            error: {
+              type: "unknown",
+              message: "Unable to read customer-spec.md",
+              metadata: { readFailure: "not_found" },
+            },
+          },
+        },
+      ],
+    }
+    const final: Extract<SessionMessage, { type: "assistant" }> = {
+      ...assistant("msg_006", "已完成", 6),
+      finish: "stop",
+      content: [
+        {
+          id: "write",
+          type: "tool",
+          name: "write",
+          time: { created: 6, completed: 7 },
+          state: {
+            status: "completed",
+            input: { path: "customer-spec.md", content: "placeholder" },
+            content: [],
+            structured: {},
+          },
+        },
+        { id: "answer", type: "text", text: "已完成" },
+      ],
+    }
+    const recent = [final, failed, current]
+    const before = JSON.stringify([original, ...recent])
+    const check = (ctx: ReturnType<typeof setup>) => {
+      const message = ctx.store.data.message.ses_child.find((item) => item.id === final.id)
+      if (message?.role !== "assistant") throw Error("Missing actual adapted assistant")
+      return quietToolFailures({
+        message,
+        messages: ctx.store.data.message.ses_child,
+        parts: ctx.store.data.part,
+        working: false,
+        historyComplete: ctx.store.history.complete("ses_child"),
+      })
+    }
+    const ctx = setup({ pages: [{ data: recent, cursor: "older" }, { data: [original] }] })
+    expect(ctx.store.history.complete("ses_child")).toBe(false)
+    await ctx.store.sync("ses_child")
+    expect(ctx.store.history.more("ses_child")).toBe(true)
+    expect(check(ctx)).toEqual([])
+    expect(ctx.requests.messages.length).toBe(1)
+    await ctx.store.history.loadMore("ses_child")
+    expect(ctx.store.history.complete("ses_child")).toBe(true)
+    expect(check(ctx)).toEqual([])
+    expect(ctx.requests.messages.length).toBe(2)
+    const reopened = setup({ pages: [{ data: recent, cursor: "older" }] })
+    await reopened.store.sync("ses_child")
+    expect(reopened.store.history.complete("ses_child")).toBe(false)
+    expect(check(reopened)).toEqual([])
+    expect(reopened.requests.messages.length).toBe(1)
+    const fresh = setup({ pages: [{ data: [final, failed, { ...current, text: "做个小游戏" }], cursor: "older" }] })
+    await fresh.store.sync("ses_child")
+    expect(check(fresh).map((part) => part.id)).toEqual([`${failed.id}:read`])
+    expect(JSON.stringify([original, ...recent])).toBe(before)
+  })
 
 describe("V2 server session store", () => {
   test("host completion events reconcile as synthetic history without a transient user prompt", async () => {

@@ -14,7 +14,7 @@ export const RECOVERY_PROMPT =
 
 // Only explicit continuation syntax establishes this relationship. Delivery
 // scheduling (steer/queue) and model-generated summaries are not task identity.
-function continuationText(text = "") {
+export function continuationText(text = "") {
   if (text === RECOVERY_PROMPT) return ""
   if (/^(?:取消要求|撤销要求|将要求|修改要求)\s*[“「]/u.test(text.trim())) return text.trim()
   if (

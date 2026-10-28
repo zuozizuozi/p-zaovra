@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
 import { createStore } from "solid-js/store"
-import { Show, For } from "solid-js"
+import { Show, For, createRoot } from "solid-js"
 import { render } from "solid-js/web"
-import type { AssistantMessage, Part, ToolPart, UserMessage } from "@zaovra-ai/sdk/v2"
+import type { AssistantMessage, Message, Part, ToolPart, UserMessage } from "@zaovra-ai/sdk/v2"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
 import { dict } from "../../../ui/src/i18n/zh"
 import { ToolErrorCard, ToolFailureNotice } from "../../../session-ui/src/components/tool-error-card"
@@ -11,6 +11,7 @@ import { quietToolFailures } from "../../../session-ui/src/components/tool-recov
 import { TimelineRow } from "../../src/pages/session/timeline/timeline-row"
 import { placeToolFailuresAfterAnswer } from "../../src/pages/session/timeline/tool-failure-rows"
 import { TurnProcessSummary, settledTurnStatus } from "../../src/pages/session/timeline/turn-process-summary"
+import { createTimelineProjection } from "../../src/pages/session/timeline/projection"
 
 const user: UserMessage = {
   id: "user",
@@ -271,6 +272,92 @@ test("confirmed empty Stop renders stopped while output interruption stays inter
   dispose()
   root.remove()
 })
+
+for (const continuation of ["继续", "continue", "补充要求", "修改要求"])
+  test("paged source failure remains prominent through projection hydration and remount: " + continuation, () => {
+    const original: UserMessage = { ...user, id: "original", time: { created: 0 } }
+    const parts: Record<string, Part[]> = {
+      original: [{ ...request, messageID: original.id, text: "必须先读 customer-spec.md，缺失不能自编。" }],
+      user: [{ ...request, text: continuation }],
+      first: [{ ...failure, state: { ...failure.state, input: { path: "customer-spec.md" } } }],
+      last: [
+        { ...success, state: { ...success.state, input: { path: "customer-spec.md", content: "placeholder" } } },
+        { ...answer, text: "已完成。" },
+      ],
+    }
+    const before = JSON.stringify(parts)
+    const mountPage = () =>
+      createRoot((disposeRoot) => {
+        const [state, setState] = createStore({ messages: [user, first, last] as Message[], complete: false })
+        const projection = createTimelineProjection({
+          messages: () => state.messages,
+          userMessages: () => state.messages.filter((message): message is UserMessage => message.role === "user"),
+          parts: (id) => parts[id] ?? [],
+          status: () => ({ type: "idle" }),
+          showReasoningSummaries: () => false,
+          inlineComments: () => false,
+          historyComplete: () => state.complete,
+        })
+        const host = document.createElement("main")
+        document.body.append(host)
+        const disposeView = render(
+          () => (
+            <I18nProvider value={value}>
+              <TurnProcessSummary
+                tools={[failure, success]}
+                status={settledTurnStatus([first, last], !projection.quietParts().has(failure.id))}
+                folded={true}
+                onToggle={() => {}}
+              />
+              <For each={projection.rows()}>
+                {(row) => {
+                  if (row._tag !== "AssistantPart" || row.group.type !== "part") return null
+                  const part = parts[row.group.ref.messageID]?.find((item) => item.id === row.group.ref.partID)
+                  if (part?.type === "text") return <p data-slot="paged-answer">{part.text}</p>
+                  if (part?.type !== "tool" || part.state.status !== "error") return null
+                  return (
+                    <Show when={!projection.quietParts().has(part.id)}>
+                      <div data-slot="paged-failure">
+                        <ToolFailureNotice error="Unable to read customer-spec.md" />
+                      </div>
+                    </Show>
+                  )
+                }}
+              </For>
+            </I18nProvider>
+          ),
+          host,
+        )
+        return {
+          host,
+          setState,
+          projection,
+          dispose: () => {
+            disposeView()
+            host.remove()
+            disposeRoot()
+          },
+        }
+      })
+    const check = (view: ReturnType<typeof mountPage>) => {
+      expect([...view.projection.quietParts()]).toEqual([])
+      expect(view.host.querySelector("[data-slot=turn-terminal-status]")?.textContent).toBe("需要处理")
+      const failed = view.host.querySelector("[data-slot=paged-failure]")
+      expect(failed?.textContent).toContain("customer-spec.md")
+      expect(view.host.querySelector("[data-slot=paged-answer]")?.compareDocumentPosition(failed!)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+    }
+    const view = mountPage()
+    check(view)
+    view.setState({ messages: [original, user, first, last], complete: true })
+    check(view)
+    view.dispose()
+    const reopened = mountPage()
+    check(reopened)
+    reopened.dispose()
+    expect(JSON.stringify(parts)).toBe(before)
+  })
 
 for (const text of ["缺少必需规格文件，无法完成，请提供。", "已完成。"])
   for (const tool of ["list", "write"])

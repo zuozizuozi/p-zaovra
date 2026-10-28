@@ -1631,6 +1631,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       })
     },
     history: {
+      complete: (sessionID: string) => meta.complete[sessionID] === true,
       more: (sessionID: string) =>
         data.message[sessionID] !== undefined &&
         meta.limit[sessionID] !== undefined &&
