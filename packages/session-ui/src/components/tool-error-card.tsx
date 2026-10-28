@@ -4,6 +4,7 @@ import { Card, CardDescription } from "@zaovra-ai/ui/card"
 import { Collapsible } from "@zaovra-ai/ui/collapsible"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
+import { Button } from "@zaovra-ai/ui/button"
 import { Tooltip } from "@zaovra-ai/ui/tooltip"
 import { useI18n } from "@zaovra-ai/ui/context/i18n"
 
@@ -18,6 +19,7 @@ export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "c
   href?: string
   input?: Record<string, unknown>
   metadata?: Record<string, unknown>
+  onFeedback?: () => void
 }
 
 export function toolFailureMessage(input: {
@@ -32,23 +34,37 @@ export function toolFailureMessage(input: {
     input.error.match(/(?:File not found:|Unable to read)\s+([^\r\n]+)/i)?.[1]
   const target = typeof path === "string" ? (path.split(/[\\/]/).at(-1) ?? path) : ""
   const reason = input.metadata?.readFailure
-  const kind =
+  const missing =
     reason === "not_found" || /\b(?:ENOENT|file not found|no such file|does not exist)\b/i.test(input.error)
+  const permission =
+    reason === "permission" ||
+    input.metadata?.phase === "permission" ||
+    /\b(?:permission denied|access denied|EACCES|EPERM)\b/i.test(input.error)
+  const uncertain =
+    input.metadata?.reason === "output-unconfirmed" ||
+    /\bOutcome may have occurred\b|\bpartial\b|\btimeout\b|\btimed out\b/i.test(input.error)
+  const kind = uncertain
+    ? "uncertainAction"
+    : missing
       ? "missingAction"
-      : reason === "permission" ||
-          input.metadata?.phase === "permission" ||
-          /\b(?:permission denied|access denied|EACCES|EPERM)\b/i.test(input.error)
+      : permission
         ? "permissionAction"
-        : /\bOutcome may have occurred\b|\bpartial\b|\btimeout\b|\btimed out\b/i.test(input.error)
-          ? "uncertainAction"
-          : /\bVerification failed\b/i.test(input.error)
-            ? "verificationAction"
-            : input.tool === "bash"
-              ? "commandAction"
-              : input.tool === "read" || target
-                ? "readAction"
-                : "actionable"
-  return { key: `ui.toolErrorCard.${kind}`, target, critical: input.metadata?.phase === "permission" }
+        : /\bVerification failed\b/i.test(input.error)
+          ? "verificationAction"
+          : input.tool === "bash"
+            ? "commandAction"
+            : input.tool === "read" || target
+              ? "readAction"
+              : "actionable"
+  return {
+    key: `ui.toolErrorCard.${kind}`,
+    causeKey:
+      uncertain && (missing || permission)
+        ? `ui.toolErrorCard.${missing ? "missingCause" : "permissionCause"}`
+        : undefined,
+    target,
+    critical: input.metadata?.phase === "permission",
+  }
 }
 
 export function ToolFailureNotice(props: {
@@ -67,6 +83,7 @@ export function ToolFailureNotice(props: {
       style={{ color: message().critical ? "var(--text-critical-base)" : "var(--icon-warning-active)" }}
     >
       {i18n.t(message().key, { target: message().target })}
+      <Show when={message().causeKey}>{(key) => <> {i18n.t(key())}</>}</Show>
     </p>
   )
 }
@@ -90,6 +107,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     "href",
     "input",
     "metadata",
+    "onFeedback",
   ])
   const setOpen = (value: boolean) => {
     if (props.open === undefined) setState("open", value)
@@ -118,7 +136,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   const subtitle = createMemo(() => {
     if (split.subtitle) return split.subtitle
     const message = toolFailureMessage(props)
-    return i18n.t(message.key, { target: message.target })
+    return i18n.t(message.key, { target: message.target }) + (message.causeKey ? ` ${i18n.t(message.causeKey)}` : "")
   })
   const body = createMemo(() => {
     return split.error
@@ -201,6 +219,11 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
           </div>
         </Collapsible.Content>
       </Collapsible>
+      <Show when={split.onFeedback}>
+        <Button size="small" variant="ghost" onClick={() => split.onFeedback?.()}>
+          {i18n.t("ui.toolErrorCard.feedback")}
+        </Button>
+      </Show>
     </Card>
   )
 }

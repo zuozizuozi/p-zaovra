@@ -262,6 +262,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     },
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
+    feedbackDiagnostics: () => window.api.feedbackDiagnostics(),
+    saveFeedback: (snapshot) => window.api.saveFeedback(snapshot),
     legalDocument: (document) => window.api.legalDocument(document),
 
     setForceFocus: (enabled) => window.api.setForceFocus(enabled),
@@ -346,6 +348,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
 let menuTrigger = null as null | ((id: string) => void)
 window.api.onMenuCommand((id) => {
+  if (id === "feedback.open") {
+    void import("@zaovra-ai/app/feedback").then(({ openFeedback }) => openFeedback())
+    return
+  }
   menuTrigger?.(id)
 })
 listenForDeepLinks()

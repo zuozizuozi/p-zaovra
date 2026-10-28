@@ -1,4 +1,5 @@
 import type { ArtifactPreviewAPI } from "../artifact-preview"
+import type { Feedback } from "@zaovra-ai/schema/feedback"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
 import type { Accessor } from "solid-js"
@@ -125,6 +126,8 @@ type PlatformBase = {
 
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>
+  feedbackDiagnostics?(): Promise<Feedback.Context>
+  saveFeedback?(snapshot: Feedback.Snapshot): Promise<boolean>
 
   /** Force focus styles on interactive elements through desktop devtools (desktop only) */
   setForceFocus?(enabled: boolean): Promise<void>

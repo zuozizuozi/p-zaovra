@@ -48,6 +48,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     directory: string
     onNavigateToSession?: NavigateToSessionFn
     onSessionHref?: SessionHrefFn
+    onFeedback?: (error: string) => void
     screenshotSource?: {
       key: string
       read: (sessionID: string, reference: string, signal: AbortSignal) => Promise<{ data: string; mime: "image/png" }>
@@ -62,6 +63,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       },
       navigateToSession: props.onNavigateToSession,
       sessionHref: props.onSessionHref,
+      feedback: props.onFeedback,
       get screenshotSource() {
         return props.screenshotSource
       },

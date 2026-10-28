@@ -318,6 +318,36 @@ beforeEach(() => {
 })
 
 describe("prompt submit worktree selection", () => {
+  test("/bug opens local feedback before model admission, without sending a prompt or creating a session", async () => {
+    const descriptions: string[] = []
+    const receive = (event: Event) =>
+      descriptions.push((event as CustomEvent<{ description: string }>).detail.description)
+    window.addEventListener("zaovra:feedback", receive)
+    const captured = { ...prompt }
+    captured.current = () => [{ type: "text", content: "/bug expected result", start: 0, end: 20 }]
+    captured.capture = () => captured
+    const submit = createPromptSubmit({
+      prompt: captured,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: () => 20,
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+    await submit.handleSubmit(new Event("submit"))
+    window.removeEventListener("zaovra:feedback", receive)
+    expect(descriptions).toEqual(["expected result"])
+    expect(sentPrompts).toHaveLength(0)
+    expect(createdSessions).toHaveLength(0)
+  })
   for (const mode of ["normal", "shell"] as const) {
     test(`admission failure releases the session lock without blocking another session or draft: ${mode}`, async () => {
       const gate = Promise.withResolvers<void>()

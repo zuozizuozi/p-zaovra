@@ -1,4 +1,5 @@
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
+import type { Feedback } from "@zaovra-ai/schema/feedback"
 import type { DesktopMenuAction } from "@zaovra-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@zaovra-ai/app/wsl/types"
 import type { UpdaterState } from "@zaovra-ai/app/updater"
@@ -121,6 +122,8 @@ export type ElectronAPI = {
   runDesktopMenuAction: (action: DesktopMenuAction) => Promise<void>
   setBackgroundColor: (color: string) => Promise<void>
   exportDebugLogs: () => Promise<string>
+  feedbackDiagnostics: () => Promise<Feedback.Context>
+  saveFeedback: (snapshot: Feedback.Snapshot) => Promise<boolean>
   setForceFocus: (enabled: boolean) => Promise<void>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>
 }

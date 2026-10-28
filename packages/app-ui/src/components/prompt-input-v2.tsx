@@ -408,13 +408,15 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     })),
   ])
   const slashCommands = createMemo(() => [
-    ...sync().data.command.map((item) => ({
-      id: `custom.${item.name}`,
-      trigger: item.name,
-      title: item.name,
-      description: item.description,
-      type: "custom" as const,
-    })),
+    ...sync()
+      .data.command.filter((item) => item.name !== "bug")
+      .map((item) => ({
+        id: `custom.${item.name}`,
+        trigger: item.name,
+        title: item.name,
+        description: item.description,
+        type: "custom" as const,
+      })),
     ...command.options
       .filter((item) => !item.disabled && !item.id.startsWith("suggested.") && item.slash)
       .map((item) => ({

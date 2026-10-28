@@ -105,3 +105,23 @@ test("tool failure is amber with a useful next action; permission abort retains 
   expect(toolFailureMessage({ error: "opaque diagnostic" }).key).toBe("ui.toolErrorCard.actionable")
   dispose()
 })
+
+test("an executed browser action with a failed screenshot asks to inspect the scene before the filesystem cause", () => {
+  for (const cause of ["EACCES: access denied", "ENOENT: no such file"]) {
+    const error = `Outcome may have occurred; observe before retrying: ${cause}`
+    const message = toolFailureMessage({
+      tool: "browser",
+      error,
+      metadata: { phase: "execution", reason: "output-unconfirmed" },
+    })
+    expect(message.key).toBe("ui.toolErrorCard.uncertainAction")
+    expect(message.critical).toBe(false)
+  }
+  expect(toolFailureMessage({ tool: "browser", error: "ENOENT", metadata: { reason: "output-unconfirmed" } }).key).toBe(
+    "ui.toolErrorCard.uncertainAction",
+  )
+  expect(toolFailureMessage({ tool: "read", error: "ENOENT: no such file" }).key).toBe("ui.toolErrorCard.missingAction")
+  expect(toolFailureMessage({ tool: "read", error: "EACCES: access denied" }).key).toBe(
+    "ui.toolErrorCard.permissionAction",
+  )
+})

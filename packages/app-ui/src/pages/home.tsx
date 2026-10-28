@@ -1,3 +1,4 @@
+import { openFeedback } from "@/feedback"
 import type { Session } from "@zaovra-ai/sdk/v2/client"
 import {
   type ComponentProps,
@@ -710,7 +711,7 @@ export function NewHome() {
               clearNotifications={clearNotifications}
               unseenCount={unseenCount}
               openSettings={openSettings}
-              openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+              openHelp={() => openFeedback()}
               language={language}
               onWheel={(event) => {
                 if (sessionViewport) containHomeWheel(event, sessionViewport)
@@ -820,7 +821,7 @@ export function NewHome() {
             <HomeUtilityNav
               class="flex lg:hidden"
               openSettings={openSettings}
-              openHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+              openHelp={() => openFeedback()}
               language={language}
             />
           </div>

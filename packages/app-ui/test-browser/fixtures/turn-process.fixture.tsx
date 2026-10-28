@@ -242,7 +242,7 @@ test("uncertain effects explain that current state must be checked before retryi
   )
   try {
     expect(host.textContent).toContain("操作结果还不确定")
-    expect(host.textContent).toContain("请先检查文件当前状态")
+    expect(host.textContent).toContain("请先核对当前现场")
   } finally {
     dispose()
   }

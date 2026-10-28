@@ -262,6 +262,7 @@
       "name": "@zaovra-ai/desktop",
       "version": "1.18.3",
       "dependencies": {
+        "@zaovra-ai/schema": "workspace:*",
         "@zip.js/zip.js": "2.7.62",
         "effect": "catalog:",
         "electron-context-menu": "4.1.2",

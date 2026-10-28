@@ -198,18 +198,18 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     label: "Help",
     items: [
       { type: "item", label: "Zaovra Documentation", href: "https://zaovra.com/docs" },
-      { type: "item", label: "Support Forum", href: "https://discord.com/invite/zaovra" },
+      { type: "item", label: "Support", command: "feedback.open" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
       { type: "separator" },
       {
         type: "item",
         label: "Share Feedback",
-        href: "mailto:support@zaovra.com?subject=Zaovra%20feedback",
+        command: "feedback.open",
       },
       {
         type: "item",
         label: "Report a Bug",
-        href: "mailto:support@zaovra.com?subject=Zaovra%20bug%20report",
+        command: "feedback.open",
       },
     ],
   },

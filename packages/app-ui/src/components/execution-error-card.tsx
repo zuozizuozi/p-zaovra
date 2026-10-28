@@ -1,4 +1,5 @@
 import { TaskMascot } from "./task-mascot"
+import { openFeedback } from "@/feedback"
 import { Show } from "solid-js"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useLanguage } from "@/context/language"
@@ -29,6 +30,12 @@ export function ExecutionErrorCard(props: {
           </ButtonV2>
         </Show>
         {props.children}
+        <ButtonV2
+          variant="ghost-muted"
+          onClick={() => openFeedback({ error: props.detail, configure: props.onConfigure })}
+        >
+          {language.locale().startsWith("zh") ? "反馈这个问题" : "Report this problem"}
+        </ButtonV2>
         <span data-recovery-target={props.recoveryID} class="contents" />
       </div>
       <details>

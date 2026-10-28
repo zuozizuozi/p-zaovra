@@ -1,12 +1,11 @@
+import { openFeedback } from "@/feedback"
 import { TextField } from "@zaovra-ai/ui/text-field"
-import * as Sentry from "@sentry/solid"
 import { Logo } from "@zaovra-ai/ui/logo"
 import { Button } from "@zaovra-ai/ui/button"
 import { Component, createSignal, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
-import { Icon } from "@zaovra-ai/ui/icon"
 import { errorDescriptionKey } from "./error-description"
 
 export type InitError = {
@@ -306,23 +305,6 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
               {language.t("error.page.action.exportLogs")}
             </Button>
           </Show>
-          <Show when={Sentry.isEnabled}>
-            {(_) => {
-              const [reported, setReported] = createSignal(false)
-              return (
-                <Button
-                  size="large"
-                  disabled={reported()}
-                  onClick={() => {
-                    Sentry.captureException(props.error)
-                    setReported(true)
-                  }}
-                >
-                  {language.t(reported() ? "error.page.action.reported" : "error.page.action.report")}
-                </Button>
-              )
-            }}
-          </Show>
           <Show when={platform.updater}>
             <Show
               when={updateVersion()}
@@ -356,10 +338,9 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             <button
               type="button"
               class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+              onClick={() => openFeedback({ error: formattedError() })}
             >
-              <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
+              <div>{language.locale().startsWith("zh") ? "反馈问题" : "Report a problem"}</div>
             </button>
           </div>
           <Show when={platform.version}>

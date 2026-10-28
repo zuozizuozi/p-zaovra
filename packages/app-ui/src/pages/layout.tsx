@@ -1,3 +1,4 @@
+import { openFeedback } from "@/feedback"
 import {
   createEffect,
   createMemo,
@@ -2229,7 +2230,7 @@ export default function LegacyLayout(props: ParentProps) {
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
-      onOpenHelp={() => platform.openLink("https://zaovra.com/desktop-feedback")}
+      onOpenHelp={() => openFeedback()}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }

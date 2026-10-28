@@ -6,6 +6,7 @@ import { ZipWriter, BlobWriter, BlobReader } from "@zip.js/zip.js"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
 import { guardConsoleTransport } from "./console-transport"
+import { Feedback } from "@zaovra-ai/schema/feedback"
 
 const MAX_LOG_AGE_DAYS = 7
 const TAIL_LINES = 1000
@@ -18,6 +19,19 @@ let run = ""
 let netLogPath: string | undefined
 
 let logger: MainLogger
+const feedbackEvents: Feedback.Event[] = []
+export function feedbackDiagnostics(): Feedback.Context {
+  const now = Date.now()
+  return {
+    version: app.getVersion(),
+    platform: process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux",
+    events: feedbackEvents.filter((event) => event.at >= now - 300_000).map((event) => ({ ...event })),
+    errors: feedbackEvents
+      .filter((event) => event.state === "error" && event.at >= now - 300_000)
+      .slice(-20)
+      .map((event) => ({ at: event.at, category: "unknown" })),
+  }
+}
 export const getLogger = () => logger
 
 export function initLogging() {
@@ -80,6 +94,12 @@ export function write(
   level: "info" | "warn" | "error" = "info",
 ) {
   if (!run) return
+  feedbackEvents.push({
+    at: Date.now(),
+    kind: ["main", "renderer", "server", "network"].includes(name) ? name : "unknown",
+    state: level,
+  })
+  if (feedbackEvents.length > 50) feedbackEvents.shift()
   const scoped = log.scope(safeLogName(name))
   if (extra !== undefined) {
     scoped[level](message, extra)

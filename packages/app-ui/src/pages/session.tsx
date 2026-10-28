@@ -1,4 +1,5 @@
 import type { FilePart, Project, UserMessage, VcsFileDiff } from "@zaovra-ai/sdk/v2"
+import { FeedbackScene } from "@/components/feedback-scene"
 import { getFilename } from "@zaovra-ai/core/util/path"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { FileLinkContext } from "@zaovra-ai/session-ui/context/file-link"
@@ -2585,6 +2586,7 @@ export default function Page() {
 
   return (
     <FileLinkContext.Provider value={openResultFile}>
+      <FeedbackScene />
       <SessionRouteFrame>
         <SessionHeader />
         <div

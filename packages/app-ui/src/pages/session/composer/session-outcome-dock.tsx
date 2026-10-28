@@ -1,10 +1,8 @@
 import { For, Show, createMemo, createEffect, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { Dynamic, Portal } from "solid-js/web"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { useParams } from "@solidjs/router"
 import { createQuery, useMutation } from "@tanstack/solid-query"
-import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { Popover } from "@zaovra-ai/ui/popover"
 import { Button } from "@zaovra-ai/ui/button"
@@ -83,8 +81,16 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
   const failedChecks = () => unresolvedChecks().length
   const incompleteChecks = createMemo(() => currentChecks().filter((check) => !!check.execution).length)
   const recover = useMutation(() => ({
-    mutationFn: (input: { sessionID: string; messageID: string; action: "continue" | "retry" | "abandon" }) =>
-      sdk().client.v2.session.recover(input, { throwOnError: true }),
+    mutationFn: (input: {
+      client: ReturnType<typeof selection>["client"]
+      sessionID: string
+      messageID: string
+      action: "continue" | "retry" | "abandon"
+    }) =>
+      input.client.v2.session.recover(
+        { sessionID: input.sessionID, messageID: input.messageID, action: input.action },
+        { throwOnError: true },
+      ),
     onSuccess: () => void query.refetch(),
     onError: (error: unknown) =>
       showToast({
@@ -161,23 +167,17 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
         description: error instanceof Error ? error.message : String(error),
       }),
   }))
-  const [display, setDisplay] = createStore<{ target?: HTMLElement }>({})
-  createEffect(() => {
-    const messageID = outcome()?.messageID
-    const message = sync().session.data.message[params.id ?? ""]?.find((item) => item.id === messageID)
-    const id = message?.role === "assistant" ? message.parentID : messageID
-    const update = () => {
-      const target = id
-        ? (document.querySelector<HTMLElement>(`[data-recovery-target="${CSS.escape(id)}"]`) ?? undefined)
-        : undefined
-      if (target !== display.target) setDisplay("target", target)
-    }
-    update()
-    // A virtualized error card can mount after the outcome query, or leave the viewport.
-    const observer = new MutationObserver(update)
-    observer.observe(document.body, { childList: true, subtree: true })
-    onCleanup(() => observer.disconnect())
-  })
+  const terminal = () => {
+    const current = outcome()
+    if (query.isError || !params.id || sync().session.data.session_working(params.id) || abandoned()) return
+    if (current?.state === "interrupted" || current?.state === "failed" || current?.state === "stopped") return current
+  }
+  const requestRecovery = (action: "continue" | "retry" | "abandon") => {
+    const current = selection()
+    const messageID = terminal()?.messageID
+    if (!current.sessionID || !messageID) return
+    recover.mutate({ ...current, sessionID: current.sessionID, messageID, action })
+  }
   const verificationSummary = () =>
     language.t(abandoned() ? "session.outcome.abandoned" : `session.outcome.${outcome()!.state}`) +
     " · " +
@@ -199,7 +199,10 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
         metadata: part?.type === "tool" && part.state.status === "error" ? part.state.metadata : undefined,
       })
       if (message.critical) return
-      return language.t(message.key, { target: message.target })
+      return (
+        language.t(message.key, { target: message.target }) +
+        (message.causeKey ? ` ${language.t(message.causeKey)}` : "")
+      )
     }
     if (outcome()?.outcomeUnknown) return language.t("session.end.uncertain")
     if (outcome()?.state === "interrupted") return language.t("session.end.interrupted")
@@ -368,17 +371,7 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
           </div>
         </Show>
       </Show>
-      <Show
-        when={!query.isError}
-        fallback={
-          <div role="status" class="px-1 py-2 text-12-regular text-text-weak">
-            {language.t("session.outcome.unavailable")}{" "}
-            <Button size="small" variant="ghost" onClick={() => void query.refetch()}>
-              {language.t("session.outcome.refresh")}
-            </Button>
-          </div>
-        }
-      >
+      <Show when={!query.isError}>
         <Show
           when={
             outcome() &&
@@ -392,16 +385,6 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
             role="status"
             aria-busy={recover.isPending}
           >
-            <Show when={outcome()?.termination}>
-              <p data-component="session-termination">
-                {language.t(`session.outcome.${outcome()!.state}`)} · {outcome()!.termination!.message}
-              </p>
-            </Show>
-            <Show when={outcome()?.outcomeUnknown && !abandoned()}>
-              <span role="alert" class="text-icon-critical-base font-medium">
-                {language.t("session.outcome.unknown")}
-              </span>
-            </Show>
             <Show when={outcome()?.checks.length || outcome()?.missing.length}>
               <details data-component="verification-panel">
                 <summary
@@ -598,79 +581,74 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
                 </Show>
               </details>
             </Show>
-            <Show when={!abandoned()}>
-              <Dynamic component={display.target ? Portal : "div"} mount={display.target}>
-                <div class="flex flex-wrap items-center gap-1" data-component="session-recovery-actions">
-                  <Show
-                    when={
-                      outcome()?.messageID &&
-                      (outcome()?.state === "interrupted" ||
-                        outcome()?.state === "failed" ||
-                        outcome()?.state === "stopped")
-                    }
-                  >
-                    <ButtonV2
-                      size="small"
-                      variant="outline"
-                      disabled={recover.isPending}
-                      onClick={() =>
-                        recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action: "continue" })
-                      }
-                    >
-                      {language.t("session.outcome.continue")}
-                    </ButtonV2>
-                    <MenuV2>
-                      <MenuV2.Trigger
-                        as={ButtonV2}
-                        size="small"
-                        variant="ghost-muted"
-                        disabled={recover.isPending}
-                        aria-label={language.t("common.moreOptions")}
-                      >
-                        ···
-                      </MenuV2.Trigger>
-                      <MenuV2.Portal>
-                        <MenuV2.Content>
-                          <For each={["retry", "abandon"] as const}>
-                            {(action) => (
-                              <MenuV2.Item
-                                disabled={recover.isPending}
-                                onSelect={() =>
-                                  recover.mutate({ sessionID: params.id!, messageID: outcome()!.messageID!, action })
-                                }
-                              >
-                                {language.t(`session.outcome.${action}`)}
-                              </MenuV2.Item>
-                            )}
-                          </For>
-                        </MenuV2.Content>
-                      </MenuV2.Portal>
-                    </MenuV2>
-                  </Show>
-                </div>
-              </Dynamic>
-            </Show>
           </div>
         </Show>
       </Show>
     </>
   )
   return (
-    <Show
-      when={progress().visible}
-      fallback={
-        <SessionEndBar
-          hasChanges={props.hasChanges}
-          changes={props.changes}
-          passed={passedChecks()}
-          notice={notice()}
-          onUndo={props.onUndo}
-        >
-          {controls()}
-        </SessionEndBar>
-      }
-    >
-      {controls()}
-    </Show>
+    <>
+      {/* Recovery must survive the optional summary and virtualized error cards. */}
+      <Show when={query.isError}>
+        <div role="status" class="px-1 py-2 text-12-regular text-text-weak">
+          {language.t("session.outcome.unavailable")}{" "}
+          <Button size="small" variant="ghost" disabled={query.isFetching} onClick={() => void query.refetch()}>
+            {language.t("session.outcome.refresh")}
+          </Button>
+        </div>
+      </Show>
+      <Show when={terminal()}>
+        {(current) => (
+          <div class="px-1 py-2 flex flex-col gap-1 text-12-regular text-text-weak" role="status">
+            <Show when={current().termination}>
+              <p data-component="session-termination">
+                {language.t(`session.outcome.${current().state}`)} · {current().termination!.message}
+              </p>
+            </Show>
+            <Show when={current().outcomeUnknown}>
+              <span role="alert" class="text-icon-critical-base font-medium">
+                {language.t("session.outcome.unknown")}
+              </span>
+            </Show>
+            <Show when={current().messageID}>
+              <div
+                class="flex flex-wrap items-center gap-1"
+                data-component="session-recovery-actions"
+                aria-busy={recover.isPending}
+              >
+                <For each={["continue", "retry", "abandon"] as const}>
+                  {(action) => (
+                    <ButtonV2
+                      size="small"
+                      variant={action === "continue" ? "outline" : "ghost-muted"}
+                      disabled={recover.isPending}
+                      onClick={() => requestRecovery(action)}
+                    >
+                      {language.t(`session.outcome.${action}`)}
+                    </ButtonV2>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        )}
+      </Show>
+      <Show
+        when={progress().visible}
+        fallback={
+          <SessionEndBar
+            hasChanges={props.hasChanges}
+            changes={props.changes}
+            passed={passedChecks()}
+            notice={notice()}
+            onUndo={props.onUndo}
+          >
+            {controls()}
+          </SessionEndBar>
+        }
+      >
+        {controls()}
+      </Show>
+    </>
   )
 }

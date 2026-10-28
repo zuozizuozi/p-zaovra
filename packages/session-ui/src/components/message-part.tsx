@@ -1562,6 +1562,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                     input={input()}
                     metadata={partMetadata()}
                     error={error()}
+                    onFeedback={data.feedback ? () => data.feedback?.(error()) : undefined}
                     title={part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider) : undefined}
                     defaultOpen={props.defaultOpen}
                     open={controlledOpen()}

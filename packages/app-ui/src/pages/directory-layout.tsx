@@ -1,4 +1,5 @@
 import { DataProvider } from "@zaovra-ai/session-ui/context"
+import { openFeedback } from "@/feedback"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
@@ -176,6 +177,7 @@ function AvailableDirectoryDataProvider(
           directory={directory}
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
+          onFeedback={(error) => openFeedback({ error })}
           screenshotSource={screenshotSource()}
         >
           <LocalProvider>{props.children}</LocalProvider>

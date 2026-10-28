@@ -5,7 +5,11 @@ export const dict: Record<string, string> = {
   "ui.toolErrorCard.missingAction":
     "Could not find {{target}}. The task is unfinished. Provide the file or tell me which file to use instead.",
   "ui.toolErrorCard.verificationAction": "Checks did not pass. Review the failures, fix them, then check again.",
-  "ui.toolErrorCard.uncertainAction": "The result is uncertain. Check the current file state before retrying.",
+  "ui.toolErrorCard.uncertainAction":
+    "The result is uncertain. Inspect the current state before deciding whether to retry.",
+  "ui.toolErrorCard.missingCause": "The underlying error also reports a missing file.",
+  "ui.toolErrorCard.feedback": "Report this problem",
+  "ui.toolErrorCard.permissionCause": "The underlying error also reports restricted access.",
   "ui.toolErrorCard.permissionAction":
     "Could not access {{target}}. Allow access or choose an accessible file, then retry.",
   "ui.toolErrorCard.actionable": "This operation could not finish. Expand the details and tell me how to continue.",

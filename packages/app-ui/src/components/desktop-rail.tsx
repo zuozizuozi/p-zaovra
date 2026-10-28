@@ -1,3 +1,4 @@
+import { openFeedback } from "@/feedback"
 import { Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Icon } from "@zaovra-ai/ui/icon"
@@ -65,9 +66,7 @@ export function DesktopRail() {
         <MenuV2.Portal>
           <MenuV2.Content>
             <MenuV2.Item onSelect={openSettings}>{language.t("sidebar.settings")}</MenuV2.Item>
-            <MenuV2.Item onSelect={() => platform.openLink("https://zaovra.com/desktop-feedback")}>
-              {language.t("sidebar.help")}
-            </MenuV2.Item>
+            <MenuV2.Item onSelect={() => openFeedback()}>{language.t("sidebar.help")}</MenuV2.Item>
             <MenuV2.Item onSelect={openAbout}>{language.t("settings.about.title")}</MenuV2.Item>
           </MenuV2.Content>
         </MenuV2.Portal>

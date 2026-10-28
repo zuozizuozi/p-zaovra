@@ -2,7 +2,10 @@ import { createArtifactPreview } from "./artifact-preview"
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/app/provider-discovery"
-import { readFile, stat } from "node:fs/promises"
+import { readFile, stat, writeFile } from "node:fs/promises"
+import { feedbackArchive } from "./feedback"
+import { feedbackDiagnostics } from "./logging"
+import { Feedback } from "@zaovra-ai/schema/feedback"
 import { basename, join } from "node:path"
 import { convertAttachment } from "./attachment-convert"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
@@ -226,6 +229,18 @@ export function registerIpcHandlers(deps: Deps) {
   handle("updater-install", () => deps.updater.install())
   handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   handle("export-debug-logs", () => deps.exportDebugLogs())
+  handle("feedback-diagnostics", () => feedbackDiagnostics())
+  handle("feedback-save", async (_event, input: unknown) => {
+    if (!Feedback.validSnapshot(input)) throw new Error("Invalid feedback preview")
+    const result = await dialog.showSaveDialog({
+      defaultPath: "zaovra-feedback.zip",
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    })
+    if (result.canceled || !result.filePath) return false
+    const archive = await feedbackArchive(input)
+    await writeFile(result.filePath, new Uint8Array(await archive.arrayBuffer()))
+    return true
+  })
   handle("set-force-focus", (event: IpcMainInvokeEvent, enabled: boolean) => setForceFocus(event.sender, enabled))
   handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),

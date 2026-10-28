@@ -1,4 +1,6 @@
 import "@/index.css"
+import { FeedbackHost } from "./components/feedback-host"
+import { openFeedback } from "./feedback"
 import * as Sentry from "@sentry/solid"
 import { I18nProvider } from "@zaovra-ai/ui/context"
 import { DialogProvider } from "@zaovra-ai/ui/context/dialog"
@@ -480,6 +482,12 @@ function DesktopCommands() {
           },
         ]
       : []
+    commands.push({
+      id: "feedback.open",
+      slash: "bug",
+      title: language.locale().startsWith("zh") ? "反馈问题" : "Report a problem",
+      onSelect: () => openFeedback(),
+    })
     if (platform.platform === "desktop" && platform.exportDebugLogs) {
       commands.push({
         id: "logs.export",
@@ -553,6 +561,7 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
       >
         <LanguageProvider locale={props.locale}>
           <UiI18nBridge>
+            <FeedbackHost />
             <ErrorBoundary
               fallback={(error) => {
                 Sentry.captureException(error)
