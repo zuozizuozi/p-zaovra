@@ -62,7 +62,7 @@ export namespace Timeline {
         .map((part) => ({ messageID: message.id, messageIndex, part })),
     )
     const assistantItems =
-      interrupted && !compaction
+      interrupted && !compaction && !stopped
         ? [
             ...groupParts(
               assistantPartRefs.filter((ref) => ref.messageIndex <= interruptedMessageIndex),
