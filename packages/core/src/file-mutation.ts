@@ -98,7 +98,7 @@ export interface Interface {
   readonly writeIfUnchanged: (
     input: ConditionalWriteInput,
   ) => Effect.Effect<WriteResult, StaleContentError | FSUtil.Error>
-  readonly remove: (input: RemoveInput) => Effect.Effect<RemoveResult, FSUtil.Error>
+  readonly remove: (input: RemoveInput) => Effect.Effect<RemoveResult, StaleContentError | FSUtil.Error>
   readonly restore: (
     input: FileBackup.Restore & { validate: Effect.Effect<void, TargetChangedError | FSUtil.Error> },
   ) => Effect.Effect<WriteResult | RemoveResult, StaleContentError | TargetChangedError | FSUtil.Error>
@@ -250,6 +250,8 @@ const layer = Layer.effect(
                 yield* input.validate!
                 yield* before(current)
                 yield* input.validate!
+                if (!sameBytes(yield* fs.readFile(input.target.canonical), current))
+                  return yield* new StaleContentError({ path: input.target.canonical })
                 yield* handle.seek(0, "start")
                 yield* handle.writeAll(bytes)
                 yield* handle.truncate(bytes.length)
@@ -259,6 +261,11 @@ const layer = Layer.effect(
           } else {
             yield* before(current ?? null)
             if (input.validate) yield* input.validate
+            const latest = yield* fs
+              .readFile(input.target.canonical)
+              .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+            if (current === undefined ? latest !== undefined : latest === undefined || !sameBytes(latest, current))
+              return yield* new StaleContentError({ path: input.target.canonical })
             yield* fs.writeWithDirs(input.target.canonical, bytes)
           }
           if (input.validate) yield* input.validate
@@ -313,12 +320,17 @@ const layer = Layer.effect(
     const remove = Effect.fn("FileMutation.remove")((input: RemoveInput) =>
       withMutationLock(input)((before) =>
         Effect.gen(function* () {
-          if (input.sessionID)
-            yield* before(
-              yield* fs
-                .readFile(input.target.canonical)
-                .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null))),
-            )
+          if (input.sessionID) {
+            const current = yield* fs
+              .readFile(input.target.canonical)
+              .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+            yield* before(current)
+            const latest = yield* fs
+              .readFile(input.target.canonical)
+              .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+            if (current === null ? latest !== null : latest === null || !sameBytes(latest, current))
+              return yield* new StaleContentError({ path: input.target.canonical })
+          }
           const existed = yield* fs.remove(input.target.canonical).pipe(
             Effect.as(true),
             Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
@@ -379,7 +391,10 @@ const layer = Layer.effect(
           const ready = yield* fs
             .readFile(input.target.canonical)
             .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
-          if (current === null ? ready !== null : ready === null || !sameBytes(ready, current))
+          if (
+            (current === null ? ready !== null : ready === null || !sameBytes(ready, current)) ||
+            !sameBytes(yield* fs.readFile(input.candidate.canonical), candidate)
+          )
             return yield* new StaleContentError({ path: input.target.canonical })
           yield* fs.rename(input.candidate.canonical, input.target.canonical)
           return writeResult(input.target, current !== null)

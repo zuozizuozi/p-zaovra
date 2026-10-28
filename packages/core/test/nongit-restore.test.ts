@@ -394,3 +394,52 @@ it.live("undo never deletes external bytes written while its backup journal is p
     }),
   ),
 )
+
+it.live("saving a backup cannot make replacement or deletion overwrite a late external edit", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const temp = yield* Effect.acquireRelease(Effect.promise(tmpdir), (tmp) =>
+        Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      let armed: string | undefined
+      const filesystem = Layer.effect(
+        FSUtil.Service,
+        Effect.gen(function* () {
+          const fs = yield* FSUtil.Service
+          return FSUtil.Service.of({
+            ...fs,
+            rename: (from, file) =>
+              fs.rename(from, file).pipe(
+                Effect.andThen(
+                  Effect.gen(function* () {
+                    if (armed && path.basename(file) === "journal.json") {
+                      const target = armed
+                      armed = undefined
+                      yield* Effect.promise(() => Bun.write(target, "external"))
+                    }
+                  }),
+                ),
+              ),
+          })
+        }),
+      ).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))
+      yield* Effect.gen(function* () {
+        const mutation = yield* LocationMutation.Service
+        const files = yield* FileMutation.Service
+        for (const operation of ["replace", "delete"]) {
+          const target = yield* mutation.resolve({ path: `${operation}.txt` })
+          yield* Effect.promise(() => Bun.write(target.canonical, "before"))
+          armed = target.canonical
+          const result =
+            operation === "replace"
+              ? yield* files
+                  .writeTextPreservingBom({ target, content: "ours", expected: "before", sessionID })
+                  .pipe(Effect.result)
+              : yield* files.remove({ target, sessionID }).pipe(Effect.result)
+          expect(result._tag).toBe("Failure")
+          expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("external")
+        }
+      }).pipe(provide(temp.path, filesystem))
+    }),
+  ),
+)
