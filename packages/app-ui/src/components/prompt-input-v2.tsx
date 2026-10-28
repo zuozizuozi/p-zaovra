@@ -1,4 +1,5 @@
 import { ImagePreview } from "@zaovra-ai/ui/image-preview"
+import { useFeedbackModel } from "@/feedback"
 import { SessionUsageBar } from "./usage-dashboard"
 import { SessionContextUsage } from "./session-context-usage"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
@@ -52,6 +53,7 @@ export type PromptInputV2ComposerController = PromptInputV2Interaction & {
 }
 
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
+  useFeedbackModel(() => props.controller.model.selection.current())
   const command = useCommand()
   const language = useLanguage()
   const params = useParams<{ id?: string }>()

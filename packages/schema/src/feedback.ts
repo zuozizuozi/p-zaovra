@@ -68,7 +68,11 @@ export namespace Feedback {
             environment: {
               version: /^\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?$/.test(context.version ?? "") ? context.version : "unknown",
               platform: allowed(context.platform, ["windows", "macos", "linux", "web"]),
-              provider: allowed(context.provider, ["openai", "anthropic", "google", "deepseek", "custom"]),
+              provider: context.provider
+                ? allowed(context.provider, ["openai", "anthropic", "google", "deepseek", "custom"]) === "unknown"
+                  ? "custom"
+                  : context.provider
+                : "unknown",
               model:
                 /^(?:gpt|claude|gemini|deepseek)/i.exec(context.model ?? "")?.[0].toLowerCase() ?? "custom-or-unknown",
             },

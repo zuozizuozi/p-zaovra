@@ -1,4 +1,5 @@
 import { useFilteredList } from "@zaovra-ai/ui/hooks"
+import { useFeedbackModel } from "@/feedback"
 import { useSpring } from "@zaovra-ai/ui/motion-spring"
 import {
   createEffect,
@@ -116,6 +117,7 @@ const EXAMPLES = [
 ] as const
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
+  useFeedbackModel(() => props.controls.model.selection.current())
   const local = useLocal()
   const sdk = useSDK()
 
