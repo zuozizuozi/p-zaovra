@@ -38,7 +38,13 @@ const Journal = Schema.Struct({
   entries: Schema.Array(Entry),
   exhausted: Schema.Boolean,
   pending: Schema.Array(
-    Schema.Struct({ id: Schema.String, path: RelativePath, target: Schema.String, before: Version }),
+    Schema.Struct({
+      id: Schema.String,
+      path: RelativePath,
+      target: Schema.String,
+      before: Version,
+      phase: Schema.optional(Schema.Literals(["prepared", "writing", "isolated"])),
+    }),
   ).pipe(Schema.optional),
 })
 type Journal = typeof Journal.Type
@@ -56,6 +62,8 @@ export interface Ticket {
   target: string
   before: Version
   status: Status
+  related?: readonly Ticket[]
+  after?: Uint8Array | null
 }
 export interface Restore {
   sessionID: SessionSchema.ID
@@ -69,8 +77,12 @@ export interface Interface {
     sessionID?: SessionSchema.ID
     target: { canonical: string }
     before: Uint8Array | null
+    related?: readonly { target: { canonical: string }; before: Uint8Array | null; after: Uint8Array | null }[]
   }) => Effect.Effect<Ticket | undefined, FSUtil.Error>
   readonly finish: (ticket: Ticket | undefined, bytes?: Uint8Array | null) => Effect.Effect<void, FSUtil.Error>
+  readonly start: (ticket: Ticket | undefined) => Effect.Effect<void, FSUtil.Error>
+  /** Only the caller knows whether its filesystem operation was attempted. Never infer after bytes on failure. */
+  readonly abandon: (ticket: Ticket | undefined, attempted: boolean) => Effect.Effect<void, FSUtil.Error>
   readonly capture: (sessionID: SessionSchema.ID) => Effect.Effect<string, FSUtil.Error>
   readonly diff: (input: {
     from: string
@@ -112,6 +124,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const locks = KeyedMutex.makeUnsafe<string>()
     const usage = new Map<string, number>()
+    const active = new Set<string>()
     const placement = hash(new TextEncoder().encode(location.directory))
     const home = (key: string) => path.join(global.data, "session-file-backup", key, placement)
     const failure = (message: string) => new FSUtil.FileSystemError({ method: `FileBackup: ${message}` })
@@ -184,8 +197,12 @@ const layer = Layer.effect(
       const journal = yield* load(from.key)
       return {
         key: from.key,
+        blocked: (journal.pending ?? []).map((item) => item.path),
         entries: journal.entries.filter(
-          (entry) => entry.seq > Math.min(from.seq, to.seq) && entry.seq <= Math.max(from.seq, to.seq),
+          (entry) =>
+            entry.seq > Math.min(from.seq, to.seq) &&
+            entry.seq <= Math.max(from.seq, to.seq) &&
+            !journal.pending?.some((item) => item.path === entry.path),
         ),
         reverse: from.seq > to.seq,
       }
@@ -204,7 +221,10 @@ const layer = Layer.effect(
         if (!input.sessionID || location.vcs?.type === "git") return
         if (Config.latest(yield* config.entries(), "snapshots") === false) return
         const key = hash(new TextEncoder().encode(input.sessionID))
-        if (!FSUtil.contains(location.directory, input.target.canonical))
+        const changes = [input, ...(input.related ?? [])]
+        if (new Set(changes.map((item) => item.target.canonical)).size !== changes.length)
+          return yield* failure("duplicate path in file operation")
+        if (changes.some((item) => !FSUtil.contains(location.directory, item.target.canonical)))
           return {
             id: randomUUID(),
             key,
@@ -214,80 +234,149 @@ const layer = Layer.effect(
           }
         return yield* locks.withLock(key)(
           Effect.gen(function* () {
-            const journal = yield* load(key)
-            if ((journal.pending?.length ?? 0) >= 64)
-              return yield* failure("too many unfinished backups; inspect interrupted file changes before writing")
-            yield* fs.makeDirectory(home(key), { recursive: true, mode: 0o700 })
-            const before = yield* version(key, input.before, journal)
-            const pending = {
-              id: randomUUID(),
-              target: input.target.canonical,
-              path: RelativePath.make(path.relative(location.directory, input.target.canonical).replaceAll("\\", "/")),
-              before: before.value,
+            let journal = yield* load(key)
+            if ((journal.pending?.length ?? 0) + changes.length > 64)
+              return yield* failure("too many unfinished backups; inspect isolated file changes before writing")
+            if (changes.some((change) => journal.pending?.some((item) => item.target === change.target.canonical)))
+              return yield* failure(
+                "unfinished file change: path is isolated; original bytes retained, refusing another write",
+              )
+            const tickets: Ticket[] = []
+            for (const change of changes) {
+              const before = yield* version(key, change.before, journal)
+              const ticket: Ticket = {
+                id: randomUUID(),
+                key,
+                target: change.target.canonical,
+                path: RelativePath.make(
+                  path.relative(location.directory, change.target.canonical).replaceAll("\\", "/"),
+                ),
+                before: before.value,
+                status: {
+                  reversible: before.available && !journal.exhausted,
+                  ...(!before.available || journal.exhausted ? { reason: "capacity" as const } : {}),
+                },
+                ...("after" in change ? { after: change.after } : {}),
+              }
+              tickets.push(ticket)
+              journal = {
+                ...journal,
+                bytes: before.bytes,
+                pending: [
+                  ...(journal.pending ?? []),
+                  {
+                    id: ticket.id,
+                    target: ticket.target,
+                    path: ticket.path!,
+                    before: ticket.before,
+                    phase: "prepared",
+                  },
+                ],
+              }
             }
-            yield* save(key, {
-              ...journal,
-              sessionID: input.sessionID,
-              bytes: before.bytes,
-              pending: [...(journal.pending ?? []), pending],
-            })
-            return {
-              ...pending,
-              key,
-              status: {
-                reversible: before.available && !journal.exhausted,
-                ...(!before.available || journal.exhausted ? { reason: "capacity" as const } : {}),
-              },
-            }
+            // One journal commit admits both sides of a rename before any filesystem mutation.
+            yield* save(key, { ...journal, sessionID: input.sessionID })
+            for (const ticket of tickets) active.add(ticket.id)
+            return { ...tickets[0], related: tickets.slice(1) }
           }),
         )
       }),
-      finish: Effect.fn("FileBackup.finish")(function* (ticket, bytes) {
+      start: Effect.fn("FileBackup.start")(function* (ticket) {
         if (!ticket?.path) return
-        const file = ticket.path
+        const ids = [ticket, ...(ticket.related ?? [])].map((item) => item.id)
         yield* locks.withLock(ticket.key)(
           Effect.gen(function* () {
             const journal = yield* load(ticket.key)
-            const current =
-              bytes === undefined
-                ? yield* fs
-                    .readFile(ticket.target)
-                    .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
-                : bytes
-            const after = yield* version(ticket.key, current, journal)
-            if (after.value.hash === ticket.before.hash && after.value.size === ticket.before.size) {
-              yield* save(ticket.key, {
-                ...journal,
-                pending: (journal.pending ?? []).filter((item) => item.id !== ticket.id),
-              })
-              return
-            }
-            ticket.status = {
-              reversible: ticket.status.reversible && after.available && journal.entries.length < MAX_ENTRIES,
-              ...(!ticket.status.reversible || !after.available || journal.entries.length >= MAX_ENTRIES
-                ? { reason: "capacity" as const }
-                : {}),
-            }
+            if (ids.some((id) => !journal.pending?.some((item) => item.id === id && item.phase === "prepared")))
+              return yield* failure("backup ticket is no longer prepared")
             yield* save(ticket.key, {
               ...journal,
-              pending: (journal.pending ?? []).filter((item) => item.id !== ticket.id),
-              bytes: after.bytes,
-              exhausted: journal.exhausted || journal.entries.length >= MAX_ENTRIES,
-              entries:
-                journal.entries.length >= MAX_ENTRIES
-                  ? journal.entries
-                  : [
-                      ...journal.entries,
-                      {
-                        seq: journal.entries.length + 1,
-                        path: file,
-                        target: ticket.target,
-                        before: ticket.before,
-                        after: after.value,
-                        reversible: ticket.status.reversible,
-                      },
-                    ],
+              pending: journal.pending?.map((item) =>
+                ids.includes(item.id) ? { ...item, phase: "writing" as const } : item,
+              ),
             })
+          }),
+        )
+      }),
+      abandon: Effect.fn("FileBackup.abandon")(function* (ticket, attempted) {
+        if (!ticket?.path) return
+        const ids = [ticket, ...(ticket.related ?? [])].map((item) => item.id)
+        yield* locks
+          .withLock(ticket.key)(
+            Effect.gen(function* () {
+              const journal = yield* load(ticket.key)
+              // A safe rejection cancels only this operation. Uncertain writes retain originals
+              // and quarantine their paths; never read current bytes and call them our after.
+              yield* save(ticket.key, {
+                ...journal,
+                pending: attempted
+                  ? journal.pending?.map((item) =>
+                      ids.includes(item.id) ? { ...item, phase: "isolated" as const } : item,
+                    )
+                  : journal.pending?.filter((item) => !ids.includes(item.id)),
+              })
+            }),
+          )
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                for (const id of ids) active.delete(id)
+              }),
+            ),
+          )
+      }),
+      finish: Effect.fn("FileBackup.finish")(function* (ticket, bytes) {
+        if (!ticket?.path) return
+        const tickets = [ticket, ...(ticket.related ?? [])]
+        yield* locks.withLock(ticket.key)(
+          Effect.gen(function* () {
+            let journal = yield* load(ticket.key)
+            if (tickets.some((item) => !journal.pending?.some((pending) => pending.id === item.id)))
+              return yield* failure("backup ticket missing; refusing to certify write completion")
+            const entries: Journal["entries"][number][] = []
+            for (const item of tickets) {
+              const current = item === ticket ? bytes : item.after
+              const after = yield* version(
+                ticket.key,
+                current === undefined
+                  ? yield* fs
+                      .readFile(item.target)
+                      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(null)))
+                  : current,
+                journal,
+              )
+              journal = { ...journal, bytes: after.bytes }
+              item.status = {
+                reversible:
+                  item.status.reversible && after.available && journal.entries.length + tickets.length <= MAX_ENTRIES,
+                ...(!item.status.reversible || !after.available || journal.entries.length + tickets.length > MAX_ENTRIES
+                  ? { reason: "capacity" as const }
+                  : {}),
+              }
+              if (after.value.hash !== item.before.hash || after.value.size !== item.before.size)
+                entries.push({
+                  seq: journal.entries.length + entries.length + 1,
+                  path: item.path!,
+                  target: item.target,
+                  before: item.before,
+                  after: after.value,
+                  reversible: item.status.reversible,
+                })
+            }
+            const reversible = tickets.every((item) => item.status.reversible)
+            for (const item of tickets)
+              item.status = reversible ? item.status : { reversible: false, reason: "capacity" }
+            // Both rename entries settle in the same commit. A failed commit leaves both pending.
+            yield* save(ticket.key, {
+              ...journal,
+              pending: journal.pending?.filter((item) => !tickets.some((value) => value.id === item.id)),
+              exhausted: journal.exhausted || journal.entries.length + tickets.length > MAX_ENTRIES,
+              entries:
+                journal.entries.length + tickets.length > MAX_ENTRIES
+                  ? journal.entries
+                  : [...journal.entries, ...entries.map((item) => ({ ...item, reversible }))],
+            })
+            for (const item of tickets) active.delete(item.id)
           }),
         )
       }),
@@ -296,8 +385,8 @@ const layer = Layer.effect(
         return yield* locks.withLock(key)(
           Effect.gen(function* () {
             const journal = yield* load(key)
-            if (journal.pending?.length)
-              return yield* failure("unfinished backup: write completion cannot be verified; changes remain untracked")
+            if (journal.pending?.some((item) => active.has(item.id)))
+              return yield* failure("file operation still active; capture again after settlement")
             yield* save(key, { ...journal, sessionID })
             return `nongit:${key}:${journal.entries.length}`
           }),
@@ -308,6 +397,8 @@ const layer = Layer.effect(
       }),
       diff: Effect.fn("FileBackup.diff")(function* (input) {
         const comparison = yield* compare(input)
+        if (input.paths?.some((file) => comparison.blocked.includes(file)))
+          return yield* failure("unfinished file change: requested path is isolated")
         const paths = changedPaths(comparison.entries).filter((file) => !input.paths || input.paths.includes(file))
         return yield* Effect.forEach(
           paths,

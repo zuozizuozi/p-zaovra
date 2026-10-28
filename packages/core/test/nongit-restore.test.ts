@@ -78,6 +78,45 @@ function workspace<A, E, R>(run: (directory: string) => Effect.Effect<A, E, R>) 
   )
 }
 
+for (const existing of [false, true])
+  for (const prior of [false, true])
+    it.live(`publish journals both rename paths: existing=${existing}, prior=${prior}`, () =>
+      workspace(() =>
+        Effect.gen(function* () {
+          const snapshots = yield* Snapshot.Service
+          const mutation = yield* LocationMutation.Service
+          const files = yield* FileMutation.Service
+          const candidate = yield* mutation.resolve({ path: "candidate.txt" })
+          const target = yield* mutation.resolve({ path: "final.txt" })
+          const backup = yield* mutation.resolve({ path: "final.backup" })
+          if (existing) yield* Effect.promise(() => Bun.write(target.canonical, "old"))
+          if (prior) yield* files.create({ target: candidate, content: "verified", sessionID })
+          const before = (yield* snapshots.capture({ sessionID }))!
+          if (!prior) yield* files.create({ target: candidate, content: "verified", sessionID })
+          yield* files.publish({
+            sessionID,
+            candidate,
+            target,
+            backup,
+            validate: Effect.void,
+            expected: existing ? new TextEncoder().encode("old") : null,
+            verified: new TextEncoder().encode("verified"),
+          })
+          const after = (yield* snapshots.capture({ sessionID }))!
+          expect([...(yield* snapshots.files({ from: before, to: after }))].sort()).toEqual(
+            (prior ? ["candidate.txt", "final.txt"] : ["final.txt"]).map((file) => RelativePath.make(file)).sort(),
+          )
+          const paths = ["candidate.txt", "final.txt"].map((file) => RelativePath.make(file))
+          yield* snapshots.restore({ files: new Map(paths.map((file) => [file, before])) })
+          expect(yield* Effect.promise(() => Bun.file(candidate.canonical).exists())).toBe(prior)
+          expect(yield* Effect.promise(() => Bun.file(target.canonical).exists())).toBe(existing)
+          yield* snapshots.restore({ files: new Map(paths.map((file) => [file, after])) })
+          expect(yield* Effect.promise(() => Bun.file(candidate.canonical).exists())).toBe(false)
+          expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("verified")
+        }),
+      ),
+    )
+
 it.live("new-file absence and deleted BOM bytes survive undo and redo", () =>
   workspace((directory) =>
     Effect.gen(function* () {
@@ -438,8 +477,121 @@ it.live("saving a backup cannot make replacement or deletion overwrite a late ex
               : yield* files.remove({ target, sessionID }).pipe(Effect.result)
           expect(result._tag).toBe("Failure")
           expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("external")
+          const snapshots = yield* Snapshot.Service
+          const before = yield* snapshots.capture({ sessionID })
+          expect(before).toBeDefined()
+          yield* files.writeTextPreservingBom({ target, content: "retry", expected: "external", sessionID })
+          const after = (yield* snapshots.capture({ sessionID }))!
+          expect((yield* snapshots.diff({ from: before!, to: after })).map((item) => item.path)).toEqual([
+            RelativePath.make(`${operation}.txt`),
+          ])
+          yield* snapshots.restore({ files: new Map([[RelativePath.make(`${operation}.txt`), before!]]) })
+          expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("external")
+          yield* snapshots.restore({ files: new Map([[RelativePath.make(`${operation}.txt`), after]]) })
+          expect(yield* Effect.promise(() => Bun.file(target.canonical).text())).toBe("retry")
         }
       }).pipe(provide(temp.path, filesystem))
     }),
   ),
 )
+
+for (const completed of [false, true])
+  it.live(`uncertain rename isolates only its two paths, without adopting external bytes: completed=${completed}`, () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const temp = yield* Effect.acquireRelease(Effect.promise(tmpdir), (tmp) =>
+          Effect.promise(() => tmp[Symbol.asyncDispose]()),
+        )
+        const candidatePath = path.join(temp.path, "candidate.txt")
+        const finalPath = path.join(temp.path, "final.txt")
+        const filesystem = Layer.effect(
+          FSUtil.Service,
+          Effect.gen(function* () {
+            const fs = yield* FSUtil.Service
+            return FSUtil.Service.of({
+              ...fs,
+              rename: (from, to) =>
+                from !== candidatePath
+                  ? fs.rename(from, to)
+                  : Effect.gen(function* () {
+                      if (completed) {
+                        yield* fs.rename(from, to)
+                        yield* Effect.promise(() => Bun.write(finalPath, "external"))
+                      }
+                      return yield* fs.rename(path.join(temp.path, "missing-source"), to)
+                    }),
+            })
+          }),
+        ).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))
+        yield* Effect.gen(function* () {
+          const mutation = yield* LocationMutation.Service
+          const files = yield* FileMutation.Service
+          const snapshots = yield* Snapshot.Service
+          const before = (yield* snapshots.capture({ sessionID }))!
+          yield* Effect.promise(() => Bun.write(candidatePath, "verified"))
+          yield* Effect.promise(() => Bun.write(finalPath, "old"))
+          expect(
+            (yield* files
+              .publish({
+                sessionID,
+                target: yield* mutation.resolve({ path: "final.txt" }),
+                candidate: yield* mutation.resolve({ path: "candidate.txt" }),
+                backup: yield* mutation.resolve({ path: "old.backup" }),
+                expected: new TextEncoder().encode("old"),
+                verified: new TextEncoder().encode("verified"),
+                validate: Effect.void,
+              })
+              .pipe(Effect.result))._tag,
+          ).toBe("Failure")
+          expect(yield* snapshots.capture({ sessionID })).toBeDefined()
+          expect(
+            (yield* files
+              .write({ target: yield* mutation.resolve({ path: "final.txt" }), content: "wrong", sessionID })
+              .pipe(Effect.result))._tag,
+          ).toBe("Failure")
+          const good = yield* mutation.resolve({ path: "good.txt" })
+          yield* files.create({ target: good, content: "good", sessionID })
+          const after = (yield* snapshots.capture({ sessionID }))!
+          expect((yield* snapshots.diff({ from: before, to: after })).map((item) => item.path)).toEqual([
+            RelativePath.make("good.txt"),
+          ])
+          yield* snapshots.restore({ files: new Map([[RelativePath.make("good.txt"), before]]) })
+          yield* snapshots.restore({ files: new Map([[RelativePath.make("good.txt"), after]]) })
+          expect(yield* Effect.promise(() => Bun.file(finalPath).text())).toBe(completed ? "external" : "old")
+          const folder = FileBackup.directory(path.join(temp.path, "private-data"), sessionID)
+          const placements = yield* Effect.promise(() => fs.readdir(folder))
+          const journal = yield* Effect.promise(() => Bun.file(path.join(folder, placements[0], "journal.json")).json())
+          expect(journal.pending).toHaveLength(2)
+          expect(journal.pending.every((item: { phase: string }) => item.phase === "isolated")).toBe(true)
+          expect(
+            journal.entries.some(
+              (item: { path: string }) => item.path === "final.txt" || item.path === "candidate.txt",
+            ),
+          ).toBe(false)
+        }).pipe(provide(temp.path, filesystem))
+        // A new service instance models restart: pending originals stay quarantined, not adopted.
+        yield* Effect.gen(function* () {
+          const snapshots = yield* Snapshot.Service
+          const files = yield* FileMutation.Service
+          const mutation = yield* LocationMutation.Service
+          expect(yield* snapshots.capture({ sessionID })).toBeDefined()
+          const point = (yield* snapshots.capture({ sessionID }))!
+          expect(
+            (yield* snapshots
+              .restore({ files: new Map([[RelativePath.make("final.txt"), point]]) })
+              .pipe(Effect.result))._tag,
+          ).toBe("Failure")
+          yield* files.create({
+            target: yield* mutation.resolve({ path: "after-restart.txt" }),
+            content: "ok",
+            sessionID,
+          })
+          expect(
+            (yield* snapshots.diff({ from: point, to: (yield* snapshots.capture({ sessionID }))! })).map(
+              (item) => item.path,
+            ),
+          ).toEqual([RelativePath.make("after-restart.txt")])
+        }).pipe(provide(temp.path))
+      }),
+    ),
+  )
