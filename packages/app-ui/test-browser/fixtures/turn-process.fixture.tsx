@@ -47,7 +47,7 @@ const failure: ToolPart = {
     status: "error",
     input: { filePath: "missing.html" },
     error: "File not found: missing.html",
-    metadata: { reason: "not_found" },
+    metadata: { readFailure: "not_found" },
     time: { start: 2, end: 3 },
   },
 }
@@ -281,7 +281,7 @@ for (const text of ["缺少必需规格文件，无法完成，请提供。", "�
         ...failure.state,
         input: { path: "customer-spec.md" },
         error: "Unable to read customer-spec.md",
-        metadata: { reason: "not_found" },
+        metadata: { readFailure: "not_found" },
       },
     }
     const listing: ToolPart = { ...success, tool: "list", state: { ...success.state, input: { path: "." } } }

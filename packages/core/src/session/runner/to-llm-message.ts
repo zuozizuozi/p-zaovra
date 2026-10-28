@@ -87,12 +87,10 @@ const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: Provid
   }
   if (tool.state.status === "error") {
     const error = { ...tool.state.error }
-    if (tool.name === "read" && ["not_found", "permission", "unknown"].includes(error.metadata?.reason ?? "")) {
+    if (tool.name === "read" && error.metadata?.readFailure !== undefined) {
       // UI-only read classification must not change historical tool text seen by a provider.
       const metadata = { ...error.metadata }
-      delete metadata.reason
-      delete metadata.permissionReason
-      if (error.metadata?.permissionReason) metadata.reason = error.metadata.permissionReason
+      delete metadata.readFailure
       if (Object.keys(metadata).length) error.metadata = metadata
       if (!Object.keys(metadata).length) delete error.metadata
     }

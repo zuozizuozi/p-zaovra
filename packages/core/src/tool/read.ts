@@ -119,8 +119,7 @@ const layer = Layer.effectDiscard(
                   message: safety?.message ?? message,
                   metadata: {
                     ...safety?.metadata,
-                    ...(safety?.metadata?.reason ? { permissionReason: safety.metadata.reason } : {}),
-                    reason: readFailureReason(error),
+                    readFailure: readFailureReason(error),
                   },
                 })
               }),

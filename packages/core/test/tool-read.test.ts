@@ -589,7 +589,7 @@ describe("ReadTool", () => {
           call: { type: "tool-call", id: "call-read-reason", name: "read", input: { path: "missing.html" } },
         })
         expect(result.result).toEqual({ type: "error", value: "Unable to read missing.html" })
-        expect(result.errorMetadata?.reason).toBe(reason)
+        expect(result.errorMetadata).toEqual({ readFailure: reason })
       }),
     )
 

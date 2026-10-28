@@ -176,7 +176,7 @@ test("a missing exploratory read is quiet after a successful same-target creatio
       ...failure.state,
       input: { filePath: "missing.html" },
       error: "Unable to read missing.html",
-      metadata: { reason: "not_found" },
+      metadata: { readFailure: "not_found" },
     },
   }
   const created: ToolPart = {
@@ -226,7 +226,7 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
       ...failure.state,
       input: { filePath: "missing.html" },
       error: "Unable to read missing.html",
-      metadata: { reason: "not_found" },
+      metadata: { readFailure: "not_found" },
     },
   }
   const answer: Part = { id: "answer", messageID: last.id, sessionID: last.sessionID, type: "text", text: "Done" }
@@ -254,8 +254,10 @@ test("exploration cannot hide verification, permissions, uncertain effects, a fi
     { phase: "mutation", reason: "target-changed" },
     { verification: true },
     { timeout: true },
-    { reason: "permission" },
-    { reason: "unknown" },
+    { readFailure: "permission" },
+    { readFailure: "unknown" },
+    { reason: "not_found" },
+    { phase: "permission", reason: "PermissionV2.BlockedError" },
     {},
   ])
     expect(
@@ -315,7 +317,7 @@ test("required missing reads need later evidence for the same agent and path", (
       ...failure.state,
       input: { path: "customer-spec.md" },
       error: "Unable to read customer-spec.md",
-      metadata: { reason: "not_found" },
+      metadata: { readFailure: "not_found" },
     },
   }
   const answer: Part = {

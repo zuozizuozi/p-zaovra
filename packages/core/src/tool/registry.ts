@@ -75,17 +75,13 @@ const registryLayer = Layer.effect(
           Effect.succeed({
             result: { type: "error" as const, value: failure.message },
             inputRejected: failure.metadata?.phase === "input",
-            // Read classification is host display data; result.value above stays model-facing text only.
+            // Keep existing safety metadata exact; UI classification cannot replace its reason or shape.
             errorMetadata:
-              input.call.name === "read" &&
-              ["not_found", "permission", "unknown"].includes(String(failure.metadata?.reason))
-                ? {
-                    ...(failure.metadata?.phase === "permission"
-                      ? { phase: "permission", permissionReason: String(failure.metadata.permissionReason) }
-                      : {}),
-                    reason: String(failure.metadata?.reason),
-                  }
-                : safetyMetadata(failure.metadata),
+              safetyMetadata(failure.metadata) ??
+              (input.call.name === "read" &&
+              ["not_found", "permission", "unknown"].includes(String(failure.metadata?.readFailure))
+                ? { readFailure: String(failure.metadata?.readFailure) }
+                : undefined),
           }),
         ),
       )

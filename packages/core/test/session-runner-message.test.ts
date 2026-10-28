@@ -635,37 +635,47 @@ Recent work
   })
 })
 
-test("read presentation reasons do not change any replayed model error bytes", () => {
-  for (const reason of ["not_found", "permission", "unknown"]) {
-    const original = reason === "permission" ? { phase: "permission", reason: "PermissionV2.BlockedError" } : undefined
-    const history = (metadata?: Record<string, string>): SessionMessage.Message[] => [
-      {
-        id: id("read-error"),
-        type: "assistant",
-        agent: "build",
-        model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
-        time: { created, completed: created },
-        content: [
-          {
-            type: "tool",
-            id: "read",
-            name: "read",
-            time: { created, completed: created },
-            state: {
-              status: "error",
-              input: { path: "missing.html" },
-              error: { type: "unknown", message: "Unable to read missing.html", ...(metadata ? { metadata } : {}) },
-              content: [],
-              structured: {},
+test("read presentation classification preserves all original model error bytes and reasons", () => {
+  const originals: Array<Record<string, string> | undefined> = [
+    undefined,
+    { phase: "permission", reason: "PermissionV2.BlockedError" },
+    { phase: "permission", reason: "PermissionV2.CorrectedError" },
+    { phase: "mutation", reason: "target-changed" },
+    { phase: "mutation", reason: "partial-application", appliedFiles: '["first.txt"]' },
+    { phase: "execution", reason: "timeout" },
+    { reason: "unknown", detail: "original metadata" },
+  ]
+  for (const readFailure of ["not_found", "permission", "unknown"]) {
+    for (const original of originals) {
+      const history = (metadata?: Record<string, string>): SessionMessage.Message[] => [
+        {
+          id: id("read-error"),
+          type: "assistant",
+          agent: "build",
+          model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+          time: { created, completed: created },
+          content: [
+            {
+              type: "tool",
+              id: "read",
+              name: "read",
+              time: { created, completed: created },
+              state: {
+                status: "error",
+                input: { path: "missing.html" },
+                error: { type: "unknown", message: "Unable to read missing.html", ...(metadata ? { metadata } : {}) },
+                content: [],
+                structured: {},
+              },
             },
-          },
-        ],
-      },
-    ]
-    const before = history(original)
-    const after = history({ ...original, reason, ...(original ? { permissionReason: original.reason } : {}) })
-    const snapshot = JSON.stringify(after)
-    expect(JSON.stringify(toLLMMessages(after, model))).toBe(JSON.stringify(toLLMMessages(before, model)))
-    expect(JSON.stringify(after)).toBe(snapshot)
+          ],
+        },
+      ]
+      const before = history(original)
+      const after = history({ ...original, readFailure })
+      const snapshot = JSON.stringify(after)
+      expect(JSON.stringify(toLLMMessages(after, model))).toBe(JSON.stringify(toLLMMessages(before, model)))
+      expect(JSON.stringify(after)).toBe(snapshot)
+    }
   }
 })

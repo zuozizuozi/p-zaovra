@@ -43,7 +43,7 @@ export function recoveredToolFailures(input: RecoveryInput) {
 function recoveries(tools: ToolPart[]) {
   return tools.filter((part, index) => {
     if (part.state.status !== "error" || verification(part)) return false
-    if (part.tool === "read" && part.state.metadata?.reason !== "not_found") return false
+    if (part.tool === "read" && part.state.metadata?.readFailure !== "not_found") return false
     if (part.tool === "edit" && /^\s*(?:Error:\s*)?No changes to apply:/i.test(part.state.error)) return true
     const metadata = part.state.metadata
     if (/\bOutcome may have occurred\b|\btimeout\b|\btimed out\b|\bpartial/i.test(part.state.error)) return false
@@ -74,7 +74,7 @@ export function quietToolFailures(input: RecoveryInput) {
     !verification(part) &&
     !uncertain(part) &&
     (part.tool === "read"
-      ? part.state.metadata?.reason === "not_found"
+      ? part.state.metadata?.readFailure === "not_found"
       : ["list", "glob", "grep", "websearch"].includes(part.tool) &&
         /\b(?:ENOENT|file not found|no such file|does not exist|no (?:results|matches)(?: found)?)\b/i.test(
           part.state.error,
