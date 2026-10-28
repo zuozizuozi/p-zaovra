@@ -8,6 +8,7 @@ export const Mark = (props: { class?: string }) => {
   return (
     <svg
       data-component="logo-mark"
+      width="16"
       classList={{ [props.class ?? ""]: !!props.class }}
       viewBox="0 0 512 512"
       fill="none"

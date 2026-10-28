@@ -1,6 +1,28 @@
 [data-component="logo-mark"] {
-  width: 16px;
   aspect-ratio: 1;
+}
+
+@keyframes brand-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-component="logo-splash"][class*="animate-pulse"] {
+    animation: brand-breathe 2s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="logo-splash"][class*="animate-pulse"] {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 [data-component="logo-lockup"],
