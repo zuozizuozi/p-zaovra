@@ -1,5 +1,5 @@
 import { type ComponentProps } from "solid-js"
-import brandLogo from "../assets/brand/zaovra-logo.png"
+import brandLogo from "../assets/brand/zaovra-mascot.png"
 import lockupLight from "../assets/brand/zaovra-lockup-light.png"
 import lockupDark from "../assets/brand/zaovra-lockup-dark.png"
 import "./logo.css"

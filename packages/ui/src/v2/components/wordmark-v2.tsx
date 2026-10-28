@@ -1,5 +1,5 @@
 import { type ComponentProps } from "solid-js"
-import brandLogo from "../../assets/brand/zaovra-logo.png"
+import brandLogo from "../../assets/brand/zaovra-mascot.png"
 
 export function WordmarkV2(props: Pick<ComponentProps<"svg">, "class">) {
   return (

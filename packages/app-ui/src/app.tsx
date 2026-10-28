@@ -455,7 +455,7 @@ function AccountGate(props: ParentProps) {
       {/* Onboarding mounts behind this account gate, so its splash must not cover sign-in. */}
       <Show when={startup && !startupReady()}>
         <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <Splash class="w-16 h-20 opacity-80 motion-safe:animate-pulse" />
         </div>
       </Show>
     </Show>
@@ -629,7 +629,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; start
       </Show>
       <Show when={checking()}>
         <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <Splash class="w-16 h-20 opacity-80 motion-safe:animate-pulse" />
         </div>
       </Show>
     </>
