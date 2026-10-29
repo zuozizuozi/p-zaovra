@@ -4,6 +4,7 @@ import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
 import { dict } from "../../../ui/src/i18n/zh"
 import type { Feedback } from "@zaovra-ai/schema/feedback"
 import { openFeedback } from "../../src/feedback"
+import { redactionInputs, redactionSamples } from "../../../schema/test/fixtures/feedback-redaction"
 
 const saves: Feedback.Snapshot[] = []
 const links: string[] = []
@@ -160,3 +161,78 @@ test("returning from a settings suggestion keeps the description and permits fee
   expect(button("继续反馈")).toBeTruthy()
   expect(links).toHaveLength(0)
 })
+
+for (const sample of redactionSamples) {
+  for (const input of redactionInputs) {
+    test(sample.name + " through " + input + ": Host preview/copy/save/mail share a clean snapshot", async () => {
+      mount()
+      openFeedback({
+        description: input === "description" ? sample.text : "APPROVED_NOTE_409",
+        ...(input === "details" ? { error: sample.text } : {}),
+        ...(input === "conversation" ? { readConversation: () => sample.text } : {}),
+      })
+      await settle()
+      if (input === "details" || input === "conversation") {
+        const label = input === "details" ? "原始详情" : "对话正文"
+        ;[...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")]
+          .find((item) => item.parentElement!.textContent!.includes(label))!
+          .click()
+      }
+      if (input === "code") {
+        const file = document.querySelector<HTMLInputElement>('input[accept^="text/"]')!
+        Object.defineProperty(file, "files", {
+          configurable: true,
+          value: [new File([sample.text], "synthetic.json", { type: "application/json" })],
+        })
+        file.dispatchEvent(new Event("change", { bubbles: true }))
+        await settle()
+      }
+      button("继续反馈").click()
+      await settle()
+      const preview = document.querySelector("[data-component=feedback-dialog]")!.textContent!
+      const copies: string[] = []
+      const copy = spyOn(navigator.clipboard, "writeText").mockImplementation(async (value) => {
+        copies.push(value)
+      })
+      try {
+        button("复制报告").click()
+        await settle()
+        button("保存诊断包 ZIP").click()
+        await settle()
+        button("打开邮件草稿").click()
+      } finally {
+        copy.mockRestore()
+      }
+      const snapshot = saves[0]
+      const mail = decodeURIComponent(links[0].split("&body=")[1])
+      // Capture the actual Host save payload for separate native archive validation.
+      const directory = Bun.env.ZAOVRA_FEEDBACK_EVIDENCE_DIR
+      if (directory) {
+        await Bun.write(
+          directory + "/" + sample.name + "-" + input + ".json",
+          JSON.stringify({ marker: sample.marker, preview, copied: copies[0], mail, snapshot }, null, 2),
+        )
+      }
+      expect([preview, copies[0], mail, ...snapshot.files.map((file) => file.text)].join("\n")).not.toContain(
+        sample.marker,
+      )
+      expect(copies[0]).toBe(mail)
+      expect(copies[0]).toContain(snapshot.text)
+      expect(copies[0]).toContain("APPROVED_NOTE_409")
+      button("返回修改").click()
+      if (input === "details" || input === "conversation") {
+        const label = input === "details" ? "原始详情" : "对话正文"
+        ;[...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")]
+          .find((item) => item.parentElement!.textContent!.includes(label))!
+          .click()
+      }
+      if (input === "code") button("移除 主动选择代码或文本文件").click()
+      button("继续反馈").click()
+      await settle()
+      button("保存诊断包 ZIP").click()
+      await settle()
+      expect(saves[1].files.map((file) => file.name)).toEqual(["report.json"])
+      expect(saves[1].image).toBeUndefined()
+    })
+  }
+}

@@ -16,9 +16,45 @@ export namespace Feedback {
 
   // Free text is never part of the automatic projection. Explicitly included
   // text still needs review: redaction cannot recognize every private phrase.
-  export function redact(value: string) {
+  const credentialNames =
+    "access[-_]*token|refresh[-_]*token|id[-_]*token|client[-_]*secret|api[-_]*key|token|secret|password|passwd|authorization|proxy[-_]*authorization|cookie|set[-_]*cookie|private[-_]*key"
+  const credentialKey = new RegExp("^(?:" + credentialNames + ")$", "i")
+  const quotedValue = /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[\[{][\s\S]*|[^\r\n]+/
+  const credentialFields = new RegExp(
+    "((?:\\\\)*[\"']?)(" + credentialNames + ")\\1\\s*[:=]\\s*(?:" + quotedValue.source + ")",
+    "gi",
+  )
+  const environmentFields = new RegExp(
+    "((?:\\\\)*[\"']?)([A-Z][A-Z0-9_]{2,})\\1\\s*[:=]\\s*(?:" + quotedValue.source + ")",
+    "g",
+  )
+
+  // Parse before matching text so escaped quotes and nested credential values
+  // cannot leave a suffix behind. Malformed/truncated JSON still uses redaction.
+  export function redact(value: string): string {
+    const text = value.slice(0, 32_000)
+    try {
+      return JSON.stringify(redactJSON(JSON.parse(text), 0), null, 2)
+    } catch {
+      return redactText(text)
+    }
+  }
+
+  function redactJSON(value: unknown, depth: number): unknown {
+    if (depth > 64) return "[nested-content-omitted]"
+    if (typeof value === "string") return redactText(value)
+    if (Array.isArray(value)) return value.map((item) => redactJSON(item, depth + 1))
+    if (!value || typeof value !== "object") return value
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        redactText(key),
+        credentialKey.test(key) || /^[A-Z][A-Z0-9_]{2,}$/.test(key) ? "[redacted]" : redactJSON(item, depth + 1),
+      ]),
+    )
+  }
+
+  function redactText(value: string) {
     return value
-      .slice(0, 32_000)
       .replace(/https?:(?:\\?\/){2}[^\s<>"')]+/gi, (value) => {
         const normalized = value.replace(/\\\//g, "/")
         if (!URL.canParse(normalized)) return "[url]"
@@ -28,14 +64,8 @@ export namespace Feedback {
       .replace(/\b(?:Bearer|Basic)\s+[^\s,"';}\]]+/gi, "[credential]")
       .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential]")
       .replace(/^([ \t]*)(cookie|set-cookie)\s*:[^\r\n]*/gim, "$1$2: [redacted]")
-      .replace(
-        /((?:\\)*["']?)(authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|token|secret|password)\1\s*[:=]\s*(?:\\+"[^\r\n]*?\\+"|\\+'[^\r\n]*?\\+'|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/gi,
-        maskField,
-      )
-      .replace(
-        /((?:\\)*["']?)([A-Z][A-Z0-9_]{2,})\1\s*[:=]\s*(?:\\+"[^\r\n]*?\\+"|\\+'[^\r\n]*?\\+'|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/g,
-        maskField,
-      )
+      .replace(credentialFields, maskField)
+      .replace(environmentFields, maskField)
       .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
       .replace(/(?:[A-Z]:[\\/]|\\\\)[^\r\n"<>|]*/gi, "[local-path]")
       .replace(/\/(?:Users|home|tmp|var|workspace|projects?)\/[^\s"<>]*/gi, "[local-path]")

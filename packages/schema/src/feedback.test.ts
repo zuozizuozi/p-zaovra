@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { Feedback } from "./feedback"
+import { credentialFields, redactionInputs, redactionSamples } from "../test/fixtures/feedback-redaction"
 
 test("default automatic snapshot projects bounded fields and excludes free text and nested secrets", () => {
   const now = 1_000_000
@@ -86,5 +87,65 @@ test("explicitly included JSON and code redact quoted nested credentials while p
   expect(code).toContain("APPROVED_CODE")
   expect(Feedback.redact('escaped: {\\"token\\":\\"SYNTHETIC_ESCAPED_SECRET\\"}')).not.toContain(
     "SYNTHETIC_ESCAPED_SECRET",
+  )
+})
+
+for (const sample of redactionSamples) {
+  for (const input of redactionInputs) {
+    test(sample.name + " is removed from the frozen " + input + " snapshot and copied text", () => {
+      const snapshot = Feedback.snapshot({
+        now: 0,
+        context: {},
+        include: { environment: true, events: true, errors: true },
+        description: "APPROVED_NOTE_409",
+        [input]: sample.text,
+      })
+      expect(snapshot.text).not.toContain(sample.marker)
+      expect(Feedback.copy(snapshot)).not.toContain(sample.marker)
+      expect(Feedback.copy(snapshot)).toContain("APPROVED_NOTE_409")
+      expect(Object.isFrozen(snapshot)).toBe(true)
+      expect(Feedback.validSnapshot(snapshot)).toBe(true)
+    })
+  }
+}
+test("credential keys and separator/case variants recursively replace their whole JSON value", () => {
+  for (const field of credentialFields) {
+    const camel = field.replace(/_([a-z])/g, (_match, value: string) => value.toUpperCase())
+    for (const key of [field, field.replaceAll("_", "-"), field.toUpperCase(), camel]) {
+      const json = JSON.stringify({
+        message: "ordinary text",
+        nested: [{ [key]: { tokenValue: ["SENTINEL_VARIANT_409"] } }],
+      })
+      const result = Feedback.redact(json)
+      expect(result).not.toContain("SENTINEL_VARIANT_409")
+      expect(JSON.parse(result).message).toBe("ordinary text")
+    }
+  }
+})
+test("malformed and escaped JSON still receive conservative credential text redaction", () => {
+  for (const sample of redactionSamples) {
+    for (const text of [
+      sample.text + " trailing prose",
+      sample.text.slice(0, -1),
+      "escaped: " + sample.text.replaceAll('"', '\\"'),
+    ])
+      expect(Feedback.redact(text)).not.toContain(sample.marker)
+  }
+  expect(Feedback.redact('password="prefix\\"SENTINEL_TEXT_409\\"tail"\nordinary text')).not.toContain(
+    "SENTINEL_TEXT_409",
+  )
+  expect(Feedback.redact('private-key="line one\nSENTINEL_MULTILINE_409\nline three"\nordinary text')).not.toContain(
+    "SENTINEL_MULTILINE_409",
+  )
+  expect(Feedback.redact('{"\\u0061ccess_token":"SENTINEL_UNICODE_409"}')).not.toContain("SENTINEL_UNICODE_409")
+})
+test("ordinary text survives and truncation/deep JSON cannot expose a credential suffix", () => {
+  const ordinary = '用户点击后没有响应。Password reset failed; tokenization is normal.\nconst ordinary="APPROVED_CODE"'
+  expect(Feedback.redact(ordinary)).toBe(ordinary)
+  const json = JSON.stringify({ title: "普通说明", data: ['safe quoted \\" text', 7, false, null] })
+  expect(JSON.parse(Feedback.redact(json))).toEqual(JSON.parse(json))
+  expect(Feedback.redact('{"access_token":"SENTINEL_LONG_409' + "x".repeat(40_000))).not.toContain("SENTINEL_LONG_409")
+  expect(Feedback.redact("[".repeat(150) + '{"private_key":"SENTINEL_DEEP_409"}' + "]".repeat(150))).not.toContain(
+    "SENTINEL_DEEP_409",
   )
 })
