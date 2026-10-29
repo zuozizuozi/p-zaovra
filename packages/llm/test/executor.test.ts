@@ -9,6 +9,7 @@ import { dynamicResponse } from "./lib/http"
 import { deltaChunk } from "./lib/openai-chunks"
 import { sseRaw } from "./lib/sse"
 import { it } from "./lib/effect"
+import cerebrasThrottle from "./fixture/cerebras-throttle.json"
 
 const request = HttpClientRequest.post("https://provider.test/v1/chat?api_key=secret&key=secret&debug=1").pipe(
   HttpClientRequest.setHeaders(Headers.fromInput({ authorization: "Bearer secret", "x-safe": "visible" })),
@@ -71,6 +72,31 @@ const expectLLMError = (error: unknown) => {
 }
 
 const errorHttp = (error: LLMError) => ("http" in error.reason ? error.reason.http : undefined)
+
+it.effect("84-R1 retries the official Cerebras token throttle only after Retry-After", () =>
+  Effect.gen(function* () {
+    const attempts = yield* Ref.make(0)
+    return yield* Effect.gen(function* () {
+      const executor = yield* RequestExecutor.Service
+      const fiber = yield* executor.execute(request).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      expect(yield* Ref.get(attempts)).toBe(1)
+      yield* TestClock.adjust(1_999)
+      yield* Effect.yieldNow
+      expect(yield* Ref.get(attempts)).toBe(1)
+      yield* TestClock.adjust(1)
+      expect((yield* Fiber.join(fiber)).status).toBe(200)
+      expect(yield* Ref.get(attempts)).toBe(2)
+    }).pipe(
+      Effect.provide(
+        countedResponsesLayer(attempts, [
+          new Response(JSON.stringify(cerebrasThrottle), { status: 429, headers: { "retry-after": "2" } }),
+          new Response("ok", { status: 200 }),
+        ]),
+      ),
+    )
+  }),
+)
 
 for (const [code, category] of [
   ["insufficient_quota", "QuotaExceeded"],
