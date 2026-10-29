@@ -23,7 +23,6 @@ export const layer = Layer.effect(
     const coordinator = yield* SessionRunCoordinator.make<Work.GoalID, never>({
       drain: (goalID, force) => runner.run({ goalID, force }),
     })
-    const running = new Set<Work.GoalID>()
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
 
     const interrupt = Effect.fn("WorkExecution.interruptLocal")(function* (goalID: Work.GoalID) {
@@ -38,8 +37,6 @@ export const layer = Layer.effect(
     })
 
     const execute = Effect.fn("WorkExecution.executeDispatch")(function* (claim: WorkController.Claim) {
-      if (running.has(claim.goalID)) return
-      running.add(claim.goalID)
       yield* controllers
         .run(
           claim,
@@ -67,7 +64,6 @@ export const layer = Layer.effect(
               fence: error.fence,
             }),
           ),
-          Effect.ensuring(Effect.sync(() => running.delete(claim.goalID))),
         )
     })
 
