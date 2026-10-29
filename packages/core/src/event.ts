@@ -1,6 +1,6 @@
 export * as EventV2 from "./event"
 
-import { Cause, Context, Effect, Layer, Option, PubSub, Queue, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, PubSub, Queue, Schema, Scope, Stream } from "effect"
 import { Event } from "@zaovra-ai/schema/event"
 import type { Data, Definition, Payload } from "@zaovra-ai/schema/event"
 import { and, asc, eq, gt, inArray } from "drizzle-orm"
@@ -135,7 +135,11 @@ export interface Interface {
   readonly durable: (input: { readonly aggregateID: string; readonly after?: number }) => Stream.Stream<Payload>
   /** @deprecated Use `all()` and consume the returned stream. */
   readonly listen: (listener: Subscriber) => Effect.Effect<Unsubscribe>
-  readonly project: <D extends Definition>(definition: D, projector: Subscriber<D>) => Effect.Effect<void>
+  /** Register a projector for the lifetime of the current scope. */
+  readonly project: <D extends Definition>(
+    definition: D,
+    projector: Subscriber<D>,
+  ) => Effect.Effect<void, never, Scope.Scope>
   readonly replay: (
     event: SerializedEvent,
     options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
@@ -620,12 +624,22 @@ export const layerWith = (options?: LayerOptions) =>
           })
         })
 
-      const project = <D extends Definition>(definition: D, projector: Subscriber<D>): Effect.Effect<void> =>
-        Effect.sync(() => {
-          const list = projectors.get(definition.type) ?? []
-          list.push((event) => projector(event as Payload<D>))
-          projectors.set(definition.type, list)
-        })
+      const project = <D extends Definition>(definition: D, projector: Subscriber<D>) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const subscriber: Subscriber = (event) => projector(event as Payload<D>)
+            projectors.set(definition.type, [...(projectors.get(definition.type) ?? []), subscriber])
+            return subscriber
+          }),
+          (subscriber) =>
+            Effect.sync(() => {
+              // Preserve the projector snapshot of an in-flight publication.
+              projectors.set(
+                definition.type,
+                (projectors.get(definition.type) ?? []).filter((item) => item !== subscriber),
+              )
+            }),
+        ).pipe(Effect.asVoid)
 
       const recentAfter = (id?: ID) => {
         if (!id) return { events: [] as ReadonlyArray<Payload>, complete: false }

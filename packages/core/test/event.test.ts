@@ -183,6 +183,20 @@ describe("EventV2", () => {
     }),
   )
 
+  it.effect("removes closed-scope projectors without removing live registrations", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const received = new Array<string>()
+      const record = () => Effect.sync(() => received.push("projected"))
+      yield* events.project(SyncMessage, record)
+      yield* events.project(SyncMessage, record).pipe(Effect.scoped)
+
+      yield* events.publish(SyncMessage, { id: "scope", text: "after scope closed" })
+
+      expect(received).toEqual(["projected"])
+    }),
+  )
+
   it.effect("commits local operational state inside a new durable event transaction", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service
