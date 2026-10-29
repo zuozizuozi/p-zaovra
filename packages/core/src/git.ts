@@ -2,7 +2,7 @@ export * as Git from "./git"
 
 import path from "path"
 import { randomUUID } from "crypto"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
+import { Context, Effect, Exit, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { AbsolutePath, RelativePath } from "./schema"
 import { FSUtil } from "./fs-util"
@@ -373,60 +373,66 @@ const layer = Layer.effect(
       })
     })
 
-    const create = Effect.fn("Git.repo.create")(function* (input: {
-      worktree: AbsolutePath
-      gitDirectory: AbsolutePath
-      seed?: Repository
-    }) {
-      yield* fs.ensureDir(input.gitDirectory).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OperationError({
-              operation: "create",
-              directory: input.gitDirectory,
-              message: "Failed to create Git storage",
-              cause,
-            }),
-        ),
-      )
-      const repository = new Repository({
-        worktree: input.worktree,
-        gitDirectory: input.gitDirectory,
-        commonDirectory: input.gitDirectory,
-      })
-      yield* repositoryOperation("create", repository, ["init"])
-      yield* Effect.forEach(
-        [
-          ["core.autocrlf", "false"],
-          ["core.longpaths", "true"],
-          ["core.symlinks", "true"],
-          ["core.fsmonitor", "false"],
-          ["feature.manyFiles", "true"],
-          ["index.version", "4"],
-          ["index.threads", "true"],
-          ["core.untrackedCache", "true"],
-        ],
-        ([key, value]) => repositoryOperation("create", repository, ["config", key, value]),
-        { discard: true },
-      )
-      if (!input.seed) return repository
-      yield* fs.ensureDir(path.join(input.gitDirectory, "objects", "info")).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OperationError({
-              operation: "create",
-              directory: input.gitDirectory,
-              message: "Failed to configure shared Git objects",
-              cause,
-            }),
-        ),
-      )
-      yield* fs
-        .writeFileString(
-          path.join(input.gitDirectory, "objects", "info", "alternates"),
-          path.join(input.seed.commonDirectory, "objects") + "\n",
+    const create = Effect.fn("Git.repo.create")(
+      function* (input: { worktree: AbsolutePath; gitDirectory: AbsolutePath; seed?: Repository }) {
+        yield* fs.ensureDir(input.gitDirectory).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OperationError({
+                operation: "create",
+                directory: input.gitDirectory,
+                message: "Failed to create Git storage",
+                cause,
+              }),
+          ),
         )
-        .pipe(
+        if (input.seed) {
+          const directories = yield* Effect.all([
+            fs.realPath(input.gitDirectory),
+            fs.realPath(input.seed.gitDirectory),
+          ]).pipe(
+            Effect.mapError(
+              (cause) => new OperationError({ operation: "create", message: "Cannot resolve seed storage", cause }),
+            ),
+          )
+          if (directories[0] === directories[1])
+            return yield* new OperationError({
+              operation: "create",
+              message: "Seed storage must be separate from the source repository",
+            })
+        }
+        const repository = new Repository({
+          worktree: input.worktree,
+          gitDirectory: input.gitDirectory,
+          commonDirectory: input.gitDirectory,
+        })
+        if (
+          input.seed &&
+          (yield* fs.existsSafe(path.join(input.gitDirectory, "HEAD"))) &&
+          (yield* fs.existsSafe(path.join(input.gitDirectory, "index"))) &&
+          (yield* repositoryOperation("list_files", repository, ["rev-parse", "--shared-index-path"]).pipe(
+            Effect.isSuccess,
+          ))
+        )
+          return repository
+        yield* repositoryOperation("create", repository, ["init"])
+        yield* Effect.forEach(
+          [
+            ["core.autocrlf", "false"],
+            ["core.longpaths", "true"],
+            ["core.symlinks", "true"],
+            ["core.fsmonitor", "false"],
+            ["feature.manyFiles", "true"],
+            ["index.version", "4"],
+            ["index.threads", "true"],
+            ["core.untrackedCache", "true"],
+            ["core.splitIndex", "false"],
+          ],
+          ([key, value]) => repositoryOperation("create", repository, ["config", key, value]),
+          { discard: true },
+        )
+        if (!input.seed) return repository
+        yield* fs.ensureDir(path.join(input.gitDirectory, "objects", "info")).pipe(
           Effect.mapError(
             (cause) =>
               new OperationError({
@@ -437,11 +443,67 @@ const layer = Layer.effect(
               }),
           ),
         )
-      yield* fs
-        .copyFile(path.join(input.seed.gitDirectory, "index"), path.join(input.gitDirectory, "index"))
-        .pipe(Effect.catch(() => Effect.void))
-      return repository
-    })
+        yield* fs
+          .writeFileString(
+            path.join(input.gitDirectory, "objects", "info", "alternates"),
+            path.join(input.seed.commonDirectory, "objects") + "\n",
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OperationError({
+                  operation: "create",
+                  directory: input.gitDirectory,
+                  message: "Failed to configure shared Git objects",
+                  cause,
+                }),
+            ),
+          )
+        const index = path.join(input.gitDirectory, "index")
+        if (!(yield* fs.existsSafe(path.join(input.seed.gitDirectory, "index")))) {
+          yield* fs
+            .remove(index, { force: true })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OperationError({ operation: "create", message: "Cannot reset an unavailable seed index", cause }),
+              ),
+            )
+          return repository
+        }
+        const shared = (yield* fs
+          .readDirectory(input.seed.gitDirectory)
+          .pipe(
+            Effect.mapError(
+              (cause) => new OperationError({ operation: "create", message: "Cannot read seed index storage", cause }),
+            ),
+          )).filter((name) => /^sharedindex\.[0-9a-f]+$/.test(name))
+        yield* Effect.gen(function* () {
+          yield* fs.copyFile(path.join(input.seed!.gitDirectory, "index"), index)
+          // A split index refers to immutable shared files in its own Git directory.
+          // Copy them only into the store, then make the copied index independent.
+          yield* Effect.forEach(shared, (name) =>
+            fs.copyFile(path.join(input.seed!.gitDirectory, name), path.join(input.gitDirectory, name)),
+          )
+          yield* repositoryOperation("create", repository, ["update-index", "--no-split-index"])
+        }).pipe(
+          Effect.onExit((exit) =>
+            Effect.forEach(shared, (name) =>
+              fs.remove(path.join(input.gitDirectory, name), { force: true }).pipe(Effect.ignore),
+            ).pipe(
+              Effect.andThen(
+                Exit.isFailure(exit) ? fs.remove(index, { force: true }).pipe(Effect.ignore) : Effect.void,
+              ),
+            ),
+          ),
+          Effect.mapError(
+            (cause) => new OperationError({ operation: "create", message: "Failed to seed Git index", cause }),
+          ),
+        )
+        return repository
+      },
+      (effect, input) => locks.withLock(input.gitDirectory)(effect),
+    )
 
     const refresh = Effect.fn("Git.index.refresh")(function* (input: {
       repository: Repository
