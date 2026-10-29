@@ -12,6 +12,8 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { Database } from "@zaovra-ai/core/database/database"
 import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
 import { Work } from "@zaovra-ai/schema/work"
+import { WorkControllerTable, WorkControllerDispatchTable, WorkGoalTable, WorkLeaseTable, WorkWorkerTable } from "@zaovra-ai/core/work/sql"
+import { eq } from "drizzle-orm"
 import { DateTime, Effect, ManagedRuntime } from "effect"
 
 test.each([
@@ -34,6 +36,24 @@ test.each([
       if (traced.get(phase) === value) return
       traced.set(phase, value)
       console.info("merge-wake-trace", { mode, phase, elapsedMs: Date.now() - traceStart, ...state })
+    }
+    // This separate read-only runtime adds no Controller/Worker or projector scope.
+    const observations = ManagedRuntime.make(AppNodeBuilder.build(Database.node), { memoMap })
+    await using observationCleanup = { [Symbol.asyncDispose]: () => observations.dispose() }
+    const observe = async (phase: string) => {
+      const state = await observations.runPromise(
+        Effect.gen(function* () {
+          const db = (yield* Database.Service).db
+          const goalID = Work.GoalID.make(id)
+          const goal = yield* db.select({ workerID: WorkGoalTable.worker_id }).from(WorkGoalTable).where(eq(WorkGoalTable.id, goalID)).get().pipe(Effect.orDie)
+          const dispatch = yield* db.select().from(WorkControllerDispatchTable).where(eq(WorkControllerDispatchTable.goal_id, goalID)).get().pipe(Effect.orDie)
+          const lease = yield* db.select().from(WorkLeaseTable).where(eq(WorkLeaseTable.goal_id, goalID)).get().pipe(Effect.orDie)
+          const controllers = yield* db.select({ id: WorkControllerTable.id, runtimeID: WorkControllerTable.runtime_id, draining: WorkControllerTable.draining, heartbeatAt: WorkControllerTable.time_heartbeat, expiresAt: WorkControllerTable.expires_at }).from(WorkControllerTable).all().pipe(Effect.orDie)
+          const workers = yield* db.select({ id: WorkWorkerTable.id, mode: WorkWorkerTable.execution_mode, draining: WorkWorkerTable.draining, heartbeatAt: WorkWorkerTable.time_heartbeat, expiresAt: WorkWorkerTable.expires_at, capabilities: WorkWorkerTable.capabilities }).from(WorkWorkerTable).all().pipe(Effect.orDie)
+          return { now: Date.now(), workerID: goal?.workerID, dispatch, lease, controllers, workers }
+        }),
+      )
+      console.info("merge-wake-ownership", { mode, phase, calls, ...state })
     }
     const pause =
       mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused" || mode === "cancel-paused"
@@ -112,6 +132,7 @@ test.each([
     await request(`/api/work/${id}/resume`, {})
     const deadline = Date.now() + 20000
     trace("budget-start", { calls, remainingMs: deadline - Date.now() })
+    await observe("resume-admitted")
     let pending = false
     while (Date.now() < deadline) {
       const state = await (await request(`/api/work/${id}`)).json()
@@ -124,6 +145,7 @@ test.each([
       await sleep(50)
     }
     trace("pending-result", { pending, calls, remainingMs: deadline - Date.now() })
+    if (!pending) await observe("pending-expired")
     expect(pending).toBe(true)
     const review = await (await request(`/api/work/${id}/merge/${task}`)).json()
     const before = calls
