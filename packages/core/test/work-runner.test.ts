@@ -23,16 +23,20 @@ import { SessionInputTable, SessionMessageTable } from "@zaovra-ai/core/session/
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionStore } from "@zaovra-ai/core/session/store"
 import { WorkExecution } from "@zaovra-ai/core/work/execution"
+import { WorkExecutionLocal } from "@zaovra-ai/core/work/execution-local"
+import { WorkController } from "@zaovra-ai/core/work/controller"
+import { WorkRecovery } from "@zaovra-ai/core/work/recovery"
 import { WorkArchitect } from "@zaovra-ai/core/work/architect"
 import { WorkPlanner } from "@zaovra-ai/core/work/planner"
 import { WorkProjector } from "@zaovra-ai/core/work/projector"
 import { WorkReviewer } from "@zaovra-ai/core/work/reviewer"
 import { WorkRemoteJob } from "@zaovra-ai/core/work/remote-job"
 import { WorkRunner } from "@zaovra-ai/core/work/runner"
-import { WorkGoalTable, WorkWorkerTable } from "@zaovra-ai/core/work/sql"
+import { WorkGoalTable, WorkTaskTable, WorkWorkerTable } from "@zaovra-ai/core/work/sql"
 import { WorkStore } from "@zaovra-ai/core/work/store"
 import { WorkVerifier } from "@zaovra-ai/core/work/verifier"
 import { DateTime, Effect, Fiber, Layer } from "effect"
+import { adjust } from "effect/testing/TestClock"
 import { eq } from "drizzle-orm"
 import fs from "fs/promises"
 import os from "os"
@@ -178,6 +182,7 @@ const runnerNodes = LayerNode.group([
   WorkProjector.node,
   WorkRemoteJob.node,
   WorkStore.node,
+  WorkController.node,
   Work.node,
   WorkRunner.node,
   WorkMergeReview.node,
@@ -2083,3 +2088,77 @@ planningFeedbackIt.effect("supplies the prior planning rejection to the next adm
     expect((yield* work.get(created.goal.id))?.status).toBe("completed")
   }),
 )
+
+for (const status of ["draft", "paused"] as const)
+  for (const command of ["resume", "wake"] as const)
+    for (const expired of [true, false])
+      it.effect(`442 ${expired ? "retains" : "settles"} ${status} ${command} across Worker admission`, () =>
+        Effect.gen(function* () {
+          const db = (yield* Database.Service).db
+          const work = yield* Work.Service
+          const store = yield* WorkStore.Service
+          const controller = yield* WorkController.Service
+          const id = Work.GoalID.make(`goal_442_${status}_${command}_${expired}`)
+          yield* work.create({
+            id,
+            location: { directory: AbsolutePath.make("/project") },
+            objective: "Retain a wake that has not acquired its execution lease",
+            acceptanceCriteria: [],
+          })
+          // Terminal Tasks avoid provider execution while exercising the actual
+          // Runner, Goal lease, projector and Controller settlement together.
+          yield* db
+            .update(WorkTaskTable)
+            .set({ status: "superseded" })
+            .where(eq(WorkTaskTable.goal_id, id))
+            .run()
+            .pipe(Effect.orDie)
+          yield* db.update(WorkGoalTable).set({ status }).where(eq(WorkGoalTable.id, id)).run().pipe(Effect.orDie)
+          yield* db
+            .update(WorkWorkerTable)
+            .set({ expires_at: expired ? -1 : 60_000 })
+            .where(eq(WorkWorkerTable.id, Work.WorkerID.make("worker_local")))
+            .run()
+            .pipe(Effect.orDie)
+          yield* Effect.gen(function* () {
+            const execution = yield* WorkExecution.Service
+            yield* execution[command](id)
+            yield* adjust(0)
+            if (expired) {
+              expect((yield* store.getGoal(id))?.status).toBe(status)
+              expect(yield* controller.dispatches(id)).toMatchObject([
+                { signal: "wake", revision: 1, processedRevision: 0, status: "pending" },
+              ])
+              // A heartbeat restores eligibility. No second wake or resume is sent.
+              yield* db
+                .update(WorkWorkerTable)
+                .set({ expires_at: 60_000 })
+                .where(eq(WorkWorkerTable.id, Work.WorkerID.make("worker_local")))
+                .run()
+                .pipe(Effect.orDie)
+              yield* adjust(250)
+            }
+            expect((yield* store.getGoal(id))?.status).toBe("completed")
+            expect(yield* controller.dispatches(id)).toMatchObject([
+              { revision: 1, processedRevision: 1, status: "settled" },
+            ])
+          }).pipe(
+            Effect.provide(
+              WorkExecutionLocal.layer.pipe(
+                Layer.provide(
+                  Layer.mock(WorkRecovery.Service, {
+                    recover: () =>
+                      Effect.succeed({
+                        woken: [],
+                        paused: [],
+                        cancelled: [],
+                        recoveredAttempts: [],
+                        unknownAttempts: [],
+                      }),
+                  }),
+                ),
+              ),
+            ),
+          )
+        }).pipe(Effect.timeout("5 seconds")),
+      )

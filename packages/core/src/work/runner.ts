@@ -5,7 +5,7 @@ export * as WorkRunner from "./runner"
 import { WorkAcceptance } from "./acceptance"
 import { Work } from "@zaovra-ai/schema/work"
 import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
-import { Cause, Context, DateTime, Effect, Exit, Layer } from "effect"
+import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import path from "path"
 import { AgentV2 } from "../agent"
 import { Database } from "../database/database"
@@ -40,8 +40,15 @@ import { WorkStateMachine } from "./state-machine"
 import { WorkStore } from "./store"
 import { WorkVerifier } from "./verifier"
 
+export class NotAdmittedError extends Schema.TaggedErrorClass<NotAdmittedError>()("WorkRunner.NotAdmitted", {
+  goalID: Work.GoalID,
+}) {}
+
 export interface Interface {
-  readonly run: (input: { readonly goalID: Work.GoalID; readonly force: boolean }) => Effect.Effect<void>
+  readonly run: (input: {
+    readonly goalID: Work.GoalID
+    readonly force: boolean
+  }) => Effect.Effect<void, NotAdmittedError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/WorkRunner") {}
@@ -2260,6 +2267,8 @@ export const layer = Layer.effect(
 
               while (yield* step(input.goalID, claim)) {}
             }).pipe(
+              // Distinguish a completed drain from a lease that never admitted it.
+              Effect.as(true),
               Effect.provideService(SessionOwnership.Current, {
                 id: `${claim.ownerID}:${claim.fence}`,
                 check: leases.assert(claim).pipe(Effect.catchTag("WorkLease.Lost", () => Effect.interrupt)),
@@ -2267,6 +2276,9 @@ export const layer = Layer.effect(
             ),
           )
           .pipe(
+            Effect.flatMap((admitted) =>
+              admitted === undefined ? Effect.fail(new NotAdmittedError({ goalID: input.goalID })) : Effect.void,
+            ),
             Effect.catchTag("WorkLease.Lost", (error) =>
               Effect.logWarning("Work lease lost; stopping stale Goal owner", {
                 goalID: error.goalID,

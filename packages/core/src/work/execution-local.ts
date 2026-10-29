@@ -22,7 +22,7 @@ export const layer = Layer.effect(
     const sessions = yield* SessionV2.Service
     const store = yield* WorkStore.Service
     const commands = KeyedMutex.makeUnsafe<Work.GoalID>()
-    const coordinator = yield* SessionRunCoordinator.make<Work.GoalID, never>({
+    const coordinator = yield* SessionRunCoordinator.make<Work.GoalID, WorkRunner.NotAdmittedError>({
       drain: (goalID, force) => runner.run({ goalID, force }),
     })
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
@@ -63,6 +63,9 @@ export const layer = Layer.effect(
                 ),
         )
         .pipe(
+          // Catch after Controller.run releases the claim, so a refused Goal
+          // lease leaves its durable wake pending for the existing poll to retry.
+          Effect.catchTag("WorkRunner.NotAdmitted", () => Effect.void),
           Effect.catchTag("WorkController.Lost", (error) =>
             Effect.logWarning("Work dispatch ownership lost; stopping stale controller", {
               goalID: error.goalID,
