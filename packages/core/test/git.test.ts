@@ -2,7 +2,8 @@ import { describe, expect } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
-import { Effect } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
+import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { Git } from "@zaovra-ai/core/git"
 import { AbsolutePath, RelativePath } from "@zaovra-ai/core/schema"
@@ -13,6 +14,96 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(LayerNode.compile(Git.node))
 
 describe("Git", () => {
+  for (const mode of ["failure", "cancellation"] as const)
+    it.live(
+      `84-S1 cleans incomplete split-index seed after ${mode}`,
+      () =>
+        Effect.gen(function* () {
+          const root = yield* Effect.acquireRelease(
+            Effect.promise(() => tmpdir()),
+            (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+          )
+          yield* Effect.promise(() => initRepo(root.path))
+          yield* Effect.promise(async () => {
+            await fs.writeFile(path.join(root.path, "tracked.txt"), "source\n")
+            await $`git add .`.cwd(root.path).quiet()
+            await $`git commit -m initial`.cwd(root.path).quiet()
+            await $`git update-index --split-index`.cwd(root.path).quiet()
+          })
+          const git = yield* Git.Service
+          const source = yield* git.repo.discover(AbsolutePath.make(root.path))
+          if (!source) throw new Error("Source repository missing")
+          const before = yield* Effect.promise(() => fs.readFile(path.join(source.gitDirectory, "index")))
+          const config = yield* Effect.promise(() => fs.readFile(path.join(source.gitDirectory, "config")))
+          if (mode === "failure") {
+            const same = yield* git.repo
+              .create({ worktree: source.worktree, gitDirectory: source.gitDirectory, seed: source })
+              .pipe(Effect.exit)
+            expect(Exit.isFailure(same)).toBe(true)
+            expect(yield* Effect.promise(() => fs.readFile(path.join(source.gitDirectory, "config")))).toEqual(config)
+          }
+          const shared = yield* Effect.promise(() =>
+            fs.readdir(source.gitDirectory).then((names) => names.filter((name) => name.startsWith("sharedindex."))),
+          )
+          const originals = yield* Effect.promise(() =>
+            Promise.all(shared.map((name) => fs.readFile(path.join(source.gitDirectory, name)))),
+          )
+          const filesystem = yield* FSUtil.Service.pipe(Effect.provide(LayerNode.compile(FSUtil.node)))
+          const storage = AbsolutePath.make(path.join(root.path, "storage"))
+          const result = yield* Git.Service.use((service) =>
+            service.repo.create({ worktree: source.worktree, gitDirectory: storage, seed: source }),
+          ).pipe(
+            Effect.provide(
+              Layer.fresh(
+                LayerNode.compile(Git.node, [
+                  [
+                    FSUtil.node,
+                    Layer.succeed(FSUtil.Service, {
+                      ...filesystem,
+                      // Fail only after a real temporary shared-index copy exists.
+                      copyFile: (from, to) =>
+                        filesystem
+                          .copyFile(from, to)
+                          .pipe(
+                            Effect.andThen(
+                              path.basename(to).startsWith("sharedindex.")
+                                ? mode === "cancellation"
+                                  ? Effect.interrupt
+                                : filesystem.copyFile(path.join(root.path, "missing-seed-source"), to)
+                                : Effect.void,
+                            ),
+                          ),
+                    }),
+                  ],
+                ]),
+              ),
+            ),
+            Effect.exit,
+          )
+          expect(Exit.isFailure(result)).toBe(true)
+          if (Exit.isFailure(result) && mode === "cancellation") expect(Cause.hasInterrupts(result.cause)).toBe(true)
+          expect(
+            (yield* Effect.promise(() => fs.readdir(storage))).filter(
+              (name) => name === "index" || name.startsWith("sharedindex."),
+            ),
+          ).toEqual([])
+          expect(yield* Effect.promise(() => fs.readFile(path.join(source.gitDirectory, "index")))).toEqual(before)
+          expect(
+            yield* Effect.promise(() =>
+              Promise.all(shared.map((name) => fs.readFile(path.join(source.gitDirectory, name)))),
+            ),
+          ).toEqual(originals)
+          const repository = yield* git.repo.create({ worktree: source.worktree, gitDirectory: storage, seed: source })
+          expect(
+            yield* git.tree.capture({ repository, scopes: [RelativePath.make(".")], ignores: source }),
+          ).toBeString()
+          expect(
+            (yield* Effect.promise(() => fs.readdir(storage))).filter((name) => name.startsWith("sharedindex.")),
+          ).toEqual([])
+        }),
+      15000,
+    )
+
   it.live("clones a remote and reads checkout metadata", () =>
     withRemote((fixture) =>
       Effect.gen(function* () {

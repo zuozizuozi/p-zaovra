@@ -13,6 +13,131 @@ import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 describe("Snapshot", () => {
+  for (const split of [false, true])
+    for (const repair of [false, true])
+      testEffect(Layer.empty).live(
+        `84-S1 captures and restores ${split ? "split-index" : "ordinary index"} source, repair=${repair}`,
+        () =>
+          Effect.acquireUseRelease(
+            Effect.promise(() => tmpdir()),
+            (tmp) =>
+              Effect.gen(function* () {
+                const project = path.join(tmp.path, "project")
+                const data = path.join(tmp.path, "data")
+                yield* Effect.promise(async () => {
+                  await fs.mkdir(project)
+                  await fs.writeFile(path.join(project, "tracked.txt"), "committed\n")
+                  await fs.writeFile(path.join(project, ".gitignore"), "ignored.txt\nforce.txt\n")
+                  await $`git init`.cwd(project).quiet()
+                  await $`git config core.autocrlf false`.cwd(project).quiet()
+                  await $`git config commit.gpgsign false`.cwd(project).quiet()
+                  await $`git config user.email test@zaovra.test`.cwd(project).quiet()
+                  await $`git config user.name Test`.cwd(project).quiet()
+                  await $`git add .`.cwd(project).quiet()
+                  await $`git commit -m initial`.cwd(project).quiet()
+                  await fs.writeFile(path.join(project, "staged.txt"), "staged\n")
+                  await fs.writeFile(path.join(project, "force.txt"), "staged ignored file\n")
+                  await $`git add staged.txt`.cwd(project).quiet()
+                  await $`git add -f force.txt`.cwd(project).quiet()
+                  if (split) await $`git update-index --split-index`.cwd(project).quiet()
+                  await fs.writeFile(path.join(project, "tracked.txt"), "unstaged before\n")
+                  await fs.writeFile(path.join(project, "ignored.txt"), "leave ignored\n")
+                })
+                const source = async () => {
+                  const files = [
+                    "tracked.txt",
+                    "staged.txt",
+                    "force.txt",
+                    "ignored.txt",
+                    ".gitignore",
+                    ".git/index",
+                    ...(await fs.readdir(path.join(project, ".git")))
+                      .filter((name) => name.startsWith("sharedindex."))
+                      .map((name) => `.git/${name}`),
+                  ]
+                  return {
+                    files: await Promise.all(
+                      files
+                        .sort()
+                        .map(async (file) => [file, (await fs.readFile(path.join(project, file))).toString("hex")]),
+                    ),
+                    refs: await $`git show-ref`.cwd(project).text(),
+                  }
+                }
+                const original = yield* Effect.promise(source)
+                yield* Effect.gen(function* () {
+                  const snapshot = yield* Snapshot.Service
+                  const captures = yield* Effect.all([snapshot.capture(), snapshot.capture()], { concurrency: 2 })
+                  const before = captures[0]
+                  expect(before).toBeDefined()
+                  if (!before) throw new Error("Snapshot seed failed")
+                  expect(captures[1]).toBe(before)
+                  expect(yield* Effect.promise(source)).toEqual(original)
+                  const projects = yield* Effect.promise(() => fs.readdir(path.join(data, "snapshot")))
+                  const repository = path.join(data, "snapshot", projects[0], Hash.fast(project))
+                  expect(
+                    (yield* Effect.promise(() =>
+                      $`git --git-dir ${repository} show ${`${before}:force.txt`}`.text(),
+                    )).trim(),
+                  ).toBe("staged ignored file")
+                  expect(
+                    (yield* Effect.promise(() => fs.readdir(repository))).filter((name) =>
+                      name.startsWith("sharedindex."),
+                    ),
+                  ).toEqual([])
+                  if (repair) {
+                    yield* Effect.promise(() => fs.writeFile(path.join(repository, "index"), "broken historical index"))
+                    const reopened = yield* Effect.acquireUseRelease(
+                      Effect.sync(() =>
+                        Bun.spawn(
+                          [process.execPath, path.join(import.meta.dir, "fixture/snapshot-reopen.ts"), project, data],
+                          {
+                            stdout: "pipe",
+                            stderr: "pipe",
+                          },
+                        ),
+                      ),
+                      (child) =>
+                        Effect.promise(async () => {
+                          const [code, stdout, stderr] = await Promise.all([
+                            child.exited,
+                            new Response(child.stdout).text(),
+                            new Response(child.stderr).text(),
+                          ])
+                          expect(code, stderr).toBe(0)
+                          return JSON.parse(stdout.trim()).id
+                        }),
+                      (child) =>
+                        Effect.promise(async () => {
+                          if (child.exitCode === null) child.kill()
+                          await child.exited
+                        }),
+                    )
+                    expect(reopened).toBe(before)
+                    expect(yield* Effect.promise(source)).toEqual(original)
+                  }
+                  yield* Effect.promise(() => fs.writeFile(path.join(project, "tracked.txt"), "after\n"))
+                  const changed = yield* Effect.promise(source)
+                  const after = yield* snapshot.capture()
+                  expect(after).toBeDefined()
+                  if (!after) throw new Error("Snapshot capture failed")
+                  expect(yield* Effect.promise(source)).toEqual(changed)
+                  expect(yield* snapshot.files({ from: before, to: after })).toEqual([RelativePath.make("tracked.txt")])
+                  yield* snapshot.restore({ files: new Map([[RelativePath.make("tracked.txt"), before]]) })
+                  expect(yield* read(path.join(project, "tracked.txt"))).toBe("unstaged before\n")
+                  expect(yield* Effect.promise(source)).toEqual(original)
+                  expect(
+                    (yield* Effect.promise(() => fs.readdir(repository))).filter((name) =>
+                      name.startsWith("sharedindex."),
+                    ),
+                  ).toEqual([])
+                }).pipe(Effect.provide(snapshotLayer(data, project)))
+              }),
+            (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+          ),
+        20000,
+      )
+
   testEffect(Layer.empty).live("captures and restores Location-scoped changes", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

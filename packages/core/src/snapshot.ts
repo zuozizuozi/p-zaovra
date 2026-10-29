@@ -114,12 +114,6 @@ const layer = Layer.effect(
 
     const repository = Effect.fnUntraced(function* () {
       if (!source) return yield* new Error({ operation: "capture", message: "Project is not a Git repository" })
-      if (yield* fs.existsSafe(path.join(gitDirectory, "HEAD")))
-        return new Git.Repository({
-          worktree,
-          gitDirectory,
-          commonDirectory: gitDirectory,
-        })
       return yield* git.repo
         .create({
           worktree,
