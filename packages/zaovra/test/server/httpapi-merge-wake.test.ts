@@ -27,6 +27,14 @@ test.each([
 ])(
   "merge approval dispatch: %s",
   async (mode) => {
+    const traceStart = Date.now()
+    const traced = new Map<string, string>()
+    const trace = (phase: string, state: Record<string, unknown>) => {
+      const value = JSON.stringify(state)
+      if (traced.get(phase) === value) return
+      traced.set(phase, value)
+      console.info("merge-wake-trace", { mode, phase, elapsedMs: Date.now() - traceStart, ...state })
+    }
     const pause =
       mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused" || mode === "cancel-paused"
     const cancel = mode === "cancel-approval" || mode === "cancel-paused"
@@ -103,16 +111,19 @@ test.each([
     const task = created.data.tasks[0].id
     await request(`/api/work/${id}/resume`, {})
     const deadline = Date.now() + 20000
+    trace("budget-start", { calls, remainingMs: deadline - Date.now() })
     let pending = false
     while (Date.now() < deadline) {
       const state = await (await request(`/api/work/${id}`)).json()
       const active = await (await request("/api/work/active")).json()
+      trace("pending-state", { goal: state.data.goal.status, task: state.data.tasks[0].status, active: Boolean(active.data[id]), calls })
       if (state.data.tasks[0].status === "merging" && !active.data[id]) {
         pending = true
         break
       }
       await sleep(50)
     }
+    trace("pending-result", { pending, calls, remainingMs: deadline - Date.now() })
     expect(pending).toBe(true)
     const review = await (await request(`/api/work/${id}/merge/${task}`)).json()
     const before = calls
@@ -148,6 +159,7 @@ test.each([
         await runtime.dispose()
       },
     }
+    trace("runtime-ready", { calls, remainingMs: deadline - Date.now() })
     const goalID = Work.GoalID.make(id)
     const leased = mode === "leased-wake" || mode === "leased-continue"
     const prior = mode === "leased-continue" ? "continue" : "wake"
@@ -174,6 +186,7 @@ test.each([
     if (mode === "queued-wake" || mode === "wake-paused")
       await runtime.runPromise(WorkController.Service.use((controller) => controller.signal(goalID, "wake")))
     if (cancel) {
+      trace("cancel-request", { calls, remainingMs: deadline - Date.now() })
       await fetch(`http://127.0.0.1:${http.port}/api/work/${id}/merge/${task}`, {
         headers,
         method: "POST",
@@ -187,10 +200,12 @@ test.each([
           expect(error.name).toBe("AbortError")
         },
       )
+      trace("cancel-aborted", { calls, remainingMs: deadline - Date.now() })
       while (Date.now() < deadline) {
         const dispatches = await runtime.runPromise(
           WorkController.Service.use((controller) => controller.dispatches(goalID)),
         )
+        trace("dispatch-state", { calls, dispatches: dispatches.map((dispatch) => ({ signal: dispatch.signal, status: dispatch.status, revision: dispatch.revision })) })
         if (dispatches.some((dispatch) => dispatch.signal === (pause ? "interrupt" : "continue"))) break
         await sleep(25)
       }
@@ -279,15 +294,18 @@ test.each([
       expect(calls).toBe(before)
       await request(`/api/work/${id}/resume`, {})
     }
+    trace("completion-wait-start", { calls, remainingMs: deadline - Date.now() })
     let completed = false
     while (Date.now() < deadline) {
       const state = await (await request(`/api/work/${id}`)).json()
+      trace("completion-state", { goal: state.data.goal.status, task: state.data.tasks[0].status, calls })
       if (state.data.goal.status === "completed") {
         completed = true
         break
       }
       await sleep(50)
     }
+    trace("completed-result", { completed, calls, remainingMs: deadline - Date.now() })
     expect(completed).toBe(true)
     expect((await Bun.file(path.join(tmp.path, "feature.txt")).text()).replaceAll("\r\n", "\n")).toBe(
       "isolated change\n".repeat(6000),
