@@ -61,7 +61,7 @@ export function providerFailure(input: {
 }
 
 export const isQuotaExceeded = (value: string) =>
-  /insufficient[-_\s]?(?:quota|balance|credits)|quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|free-models-per-day|openrouter_free_tier_daily|余额不足|额度不足/i.test(
+  /insufficient[-_\s]?(?:quota|balance|credits)|(?<!token_)quota[-_\s]?exceeded|billing[-_\s]?hard[-_\s]?limit|free-models-per-day|openrouter_free_tier_daily|余额不足|额度不足/i.test(
     value,
   )
 
