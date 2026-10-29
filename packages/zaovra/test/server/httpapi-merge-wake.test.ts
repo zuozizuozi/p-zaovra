@@ -12,7 +12,7 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { Database } from "@zaovra-ai/core/database/database"
 import { DurableEventManifest } from "@zaovra-ai/schema/durable-event-manifest"
 import { Work } from "@zaovra-ai/schema/work"
-import { WorkControllerTable, WorkControllerDispatchTable, WorkGoalTable, WorkLeaseTable, WorkWorkerTable } from "@zaovra-ai/core/work/sql"
+import { WorkControllerTable, WorkControllerDispatchTable, WorkGoalTable, WorkLeaseTable, WorkTaskTable, WorkWorkerTable } from "@zaovra-ai/core/work/sql"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, ManagedRuntime } from "effect"
 
@@ -45,15 +45,16 @@ test.each([
         Effect.gen(function* () {
           const db = (yield* Database.Service).db
           const goalID = Work.GoalID.make(id)
-          const goal = yield* db.select({ workerID: WorkGoalTable.worker_id }).from(WorkGoalTable).where(eq(WorkGoalTable.id, goalID)).get().pipe(Effect.orDie)
+          const goal = yield* db.select({ workerID: WorkGoalTable.worker_id, status: WorkGoalTable.status }).from(WorkGoalTable).where(eq(WorkGoalTable.id, goalID)).get().pipe(Effect.orDie)
+          const tasks = yield* db.select({ id: WorkTaskTable.id, status: WorkTaskTable.status }).from(WorkTaskTable).where(eq(WorkTaskTable.goal_id, goalID)).all().pipe(Effect.orDie)
           const dispatch = yield* db.select().from(WorkControllerDispatchTable).where(eq(WorkControllerDispatchTable.goal_id, goalID)).get().pipe(Effect.orDie)
           const lease = yield* db.select().from(WorkLeaseTable).where(eq(WorkLeaseTable.goal_id, goalID)).get().pipe(Effect.orDie)
           const controllers = yield* db.select({ id: WorkControllerTable.id, runtimeID: WorkControllerTable.runtime_id, draining: WorkControllerTable.draining, heartbeatAt: WorkControllerTable.time_heartbeat, expiresAt: WorkControllerTable.expires_at }).from(WorkControllerTable).all().pipe(Effect.orDie)
           const workers = yield* db.select({ id: WorkWorkerTable.id, mode: WorkWorkerTable.execution_mode, draining: WorkWorkerTable.draining, heartbeatAt: WorkWorkerTable.time_heartbeat, expiresAt: WorkWorkerTable.expires_at, capabilities: WorkWorkerTable.capabilities }).from(WorkWorkerTable).all().pipe(Effect.orDie)
-          return { now: Date.now(), workerID: goal?.workerID, dispatch, lease, controllers, workers }
+          return { now: Date.now(), goal: goal?.status, tasks, workerID: goal?.workerID, dispatch, lease, controllers, workers }
         }),
       )
-      console.info("merge-wake-ownership", { mode, phase, calls, ...state })
+      console.info("merge-wake-ownership", { mode, phase, calls, remainingMs: deadline - Date.now(), ...state })
     }
     const pause =
       mode === "queued-pause" || mode === "approval-race" || mode === "wake-paused" || mode === "cancel-paused"
@@ -131,10 +132,17 @@ test.each([
     const task = created.data.tasks[0].id
     await request(`/api/work/${id}/resume`, {})
     const deadline = Date.now() + 20000
+    const observedWaits = new Set<string>()
+    const observeWait = async (phase: string) => {
+      if (deadline - Date.now() > 1000 || observedWaits.has(phase)) return
+      observedWaits.add(phase)
+      await observe(phase)
+    }
     trace("budget-start", { calls, remainingMs: deadline - Date.now() })
     await observe("resume-admitted")
     let pending = false
     while (Date.now() < deadline) {
+      await observeWait("pending-before-timeout")
       const state = await (await request(`/api/work/${id}`)).json()
       const active = await (await request("/api/work/active")).json()
       trace("pending-state", { goal: state.data.goal.status, task: state.data.tasks[0].status, active: Boolean(active.data[id]), calls })
@@ -224,6 +232,7 @@ test.each([
       )
       trace("cancel-aborted", { calls, remainingMs: deadline - Date.now() })
       while (Date.now() < deadline) {
+        await observeWait("cancel-dispatch-before-timeout")
         const dispatches = await runtime.runPromise(
           WorkController.Service.use((controller) => controller.dispatches(goalID)),
         )
@@ -231,6 +240,7 @@ test.each([
         if (dispatches.some((dispatch) => dispatch.signal === (pause ? "interrupt" : "continue"))) break
         await sleep(25)
       }
+      if (Date.now() >= deadline) await observe("cancel-dispatch-expired")
       expect(
         await runtime.runPromise(WorkController.Service.use((controller) => controller.dispatches(goalID))),
       ).toMatchObject([{ signal: pause ? "interrupt" : "continue", status: "pending" }])
@@ -295,6 +305,7 @@ test.each([
       await runtime.runPromise(WorkController.Service.use((controller) => controller.setDraining(false)))
       let settled = false
       while (Date.now() < deadline) {
+        await observeWait("pause-settlement-before-timeout")
         const dispatches = await runtime.runPromise(
           WorkController.Service.use((controller) => controller.dispatches(goalID)),
         )
@@ -304,6 +315,7 @@ test.each([
         }
         await sleep(25)
       }
+      if (!settled) await observe("pause-settlement-expired")
       expect(settled).toBe(true)
       if (mode === "wake-paused")
         console.info("wake-paused boundary", {
@@ -315,10 +327,12 @@ test.each([
       expect(await Bun.file(path.join(tmp.path, "feature.txt")).exists()).toBe(false)
       expect(calls).toBe(before)
       await request(`/api/work/${id}/resume`, {})
+      await observe("resume-after-pause")
     }
     trace("completion-wait-start", { calls, remainingMs: deadline - Date.now() })
     let completed = false
     while (Date.now() < deadline) {
+      await observeWait("completion-before-timeout")
       const state = await (await request(`/api/work/${id}`)).json()
       trace("completion-state", { goal: state.data.goal.status, task: state.data.tasks[0].status, calls })
       if (state.data.goal.status === "completed") {
@@ -328,6 +342,7 @@ test.each([
       await sleep(50)
     }
     trace("completed-result", { completed, calls, remainingMs: deadline - Date.now() })
+    if (!completed) await observe("completion-expired")
     expect(completed).toBe(true)
     expect((await Bun.file(path.join(tmp.path, "feature.txt")).text()).replaceAll("\r\n", "\n")).toBe(
       "isolated change\n".repeat(6000),
