@@ -19,15 +19,10 @@ export namespace Feedback {
   const credentialNames =
     "access[-_]*token|refresh[-_]*token|id[-_]*token|client[-_]*secret|api[-_]*key|token|secret|password|passwd|authorization|proxy[-_]*authorization|cookie|set[-_]*cookie|private[-_]*key"
   const credentialKey = new RegExp("^(?:" + credentialNames + ")$", "i")
-  const quotedValue = /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[\[{][\s\S]*|[^\r\n]+/
-  const credentialFields = new RegExp(
-    "((?:\\\\)*[\"']?)(" + credentialNames + ")\\1\\s*[:=]\\s*(?:" + quotedValue.source + ")",
-    "gi",
-  )
-  const environmentFields = new RegExp(
-    "((?:\\\\)*[\"']?)([A-Z][A-Z0-9_]{2,})\\1\\s*[:=]\\s*(?:" + quotedValue.source + ")",
-    "g",
-  )
+  const credentialFields = new RegExp("((?:\\\\)*[\"']?)(" + credentialNames + ")\\1\\s*[:=]\\s*", "gi")
+  // Only assignments identify arbitrary environment variables; ERROR: is diagnostic text.
+  const environmentFields = /((?:\\)*["']?)([A-Z][A-Z0-9_]{2,})\1\s*=\s*/g
+  const pairs: Record<string, string> = { "[": "]", "{": "}", "(": ")" }
 
   // Parse before matching text so escaped quotes and nested credential values
   // cannot leave a suffix behind. Malformed/truncated JSON still uses redaction.
@@ -54,7 +49,7 @@ export namespace Feedback {
   }
 
   function redactText(value: string) {
-    return value
+    const text = value
       .replace(/https?:(?:\\?\/){2}[^\s<>"')]+/gi, (value) => {
         const normalized = value.replace(/\\\//g, "/")
         if (!URL.canParse(normalized)) return "[url]"
@@ -64,11 +59,62 @@ export namespace Feedback {
       .replace(/\b(?:Bearer|Basic)\s+[^\s,"';}\]]+/gi, "[credential]")
       .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential]")
       .replace(/^([ \t]*)(cookie|set-cookie)\s*:[^\r\n]*/gim, "$1$2: [redacted]")
-      .replace(credentialFields, maskField)
-      .replace(environmentFields, maskField)
+    return redactFields(redactFields(text, credentialFields), environmentFields)
       .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
       .replace(/(?:[A-Z]:[\\/]|\\\\)[^\r\n"<>|]*/gi, "[local-path]")
       .replace(/\/(?:Users|home|tmp|var|workspace|projects?)\/[^\s"<>]*/gi, "[local-path]")
+  }
+
+  function redactFields(value: string, fields: RegExp) {
+    const parts: string[] = []
+    let end = 0
+    for (const match of value.matchAll(fields)) {
+      if (match.index < end) continue
+      parts.push(value.slice(end, match.index), maskField(match[0], match[1], match[2]))
+      end = fieldEnd(value, match.index + match[0].length)
+    }
+    return parts.join("") + value.slice(end)
+  }
+
+  function fieldEnd(value: string, start: number) {
+    const quoted = /^\\*(["'])/.exec(value.slice(start))
+    const stack = pairs[value[start]] ? [pairs[value[start]]] : []
+    if (!quoted && !stack.length) {
+      const newline = value.indexOf("\n", start)
+      return newline < 0 ? value.length : newline
+    }
+    let quote = quoted?.[1] ?? ""
+    let parity = quoted ? (quoted[0].length - 1) % 2 : 0
+    let slashes = 0
+    for (let index = start + (quoted?.[0].length ?? 1); index < value.length; index++) {
+      const char = value[index]
+      if (char === "\\") {
+        slashes++
+        continue
+      }
+      if (quote) {
+        if (char === quote && slashes % 2 === parity) {
+          quote = ""
+          if (!stack.length) return index + 1
+        }
+        slashes = 0
+        continue
+      }
+      if (char === '"' || char === "'") {
+        quote = char
+        parity = slashes % 2
+        slashes = 0
+        continue
+      }
+      if (pairs[char]) stack.push(pairs[char])
+      if (char === stack.at(-1) && slashes % 2 === 0) {
+        stack.pop()
+        if (!stack.length) return index + 1
+      }
+      slashes = 0
+    }
+    // Unterminated structured credentials have no trustworthy boundary.
+    return value.length
   }
 
   function maskField(_value: string, quote: string, key: string) {

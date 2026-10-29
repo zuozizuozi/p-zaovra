@@ -103,6 +103,7 @@ for (const sample of redactionSamples) {
       expect(snapshot.text).not.toContain(sample.marker)
       expect(Feedback.copy(snapshot)).not.toContain(sample.marker)
       expect(Feedback.copy(snapshot)).toContain("APPROVED_NOTE_409")
+      for (const text of sample.preserve) expect(Feedback.copy(snapshot)).toContain(text)
       expect(Object.isFrozen(snapshot)).toBe(true)
       expect(Feedback.validSnapshot(snapshot)).toBe(true)
     })
@@ -148,4 +149,35 @@ test("ordinary text survives and truncation/deep JSON cannot expose a credential
   expect(Feedback.redact("[".repeat(150) + '{"private_key":"SENTINEL_DEEP_409"}' + "]".repeat(150))).not.toContain(
     "SENTINEL_DEEP_409",
   )
+})
+
+test("diagnostic colon lines survive while environment assignments remain private", () => {
+  for (const line of [
+    "ERROR: request failed with status 503; retry after 30 seconds",
+    "ENOENT: required file missing",
+    "HTTP 503: service unavailable",
+  ]) {
+    expect(Feedback.redact(line)).toBe(line)
+    const text = Feedback.redact('CUSTOM_PRIVATE="SENTINEL_ENV_410"\n' + line)
+    expect(text).not.toContain("SENTINEL_ENV_410")
+    expect(text).toContain(line)
+  }
+})
+test("paired credential ranges preserve the following reproduction and expected result", () => {
+  const suffix = "\nReproduction: click export twice\nExpected: archive saved"
+  for (const value of [
+    "[one,two]",
+    '{"nested":["one",{"value":"SENTINEL_PAIRED_410 and ] } )"}]}',
+    '("SENTINEL_PAIRED_410 and )", [one,two])',
+    '"prefix\\"SENTINEL_PAIRED_410\\"suffix"',
+    "'prefix\\'SENTINEL_PAIRED_410\\'suffix'",
+    '["SENTINEL_PAIRED_410",\n{"nested":["quoted \\" ] still a value"]}]',
+  ]) {
+    const text = Feedback.redact("token=" + value + suffix)
+    expect(text).not.toContain("SENTINEL_PAIRED_410")
+    expect(text).not.toContain("one,two")
+    expect(text).toContain(suffix)
+  }
+  // An unterminated structured credential has no safe end: omit its remainder.
+  expect(Feedback.redact('token=[one,\n"SENTINEL_UNTERMINATED_410"')).not.toContain("SENTINEL_UNTERMINATED_410")
 })

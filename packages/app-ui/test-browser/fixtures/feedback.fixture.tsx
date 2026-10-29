@@ -210,12 +210,20 @@ for (const sample of redactionSamples) {
       if (directory) {
         await Bun.write(
           directory + "/" + sample.name + "-" + input + ".json",
-          JSON.stringify({ marker: sample.marker, preview, copied: copies[0], mail, snapshot }, null, 2),
+          JSON.stringify(
+            { marker: sample.marker, preserve: sample.preserve, preview, copied: copies[0], mail, snapshot },
+            null,
+            2,
+          ),
         )
       }
       expect([preview, copies[0], mail, ...snapshot.files.map((file) => file.text)].join("\n")).not.toContain(
         sample.marker,
       )
+      for (const content of [preview, copies[0], mail, ...snapshot.files.map((file) => file.text)]) {
+        if (content === snapshot.text && input !== "description") continue
+        for (const text of sample.preserve) expect(content).toContain(text)
+      }
       expect(copies[0]).toBe(mail)
       expect(copies[0]).toContain(snapshot.text)
       expect(copies[0]).toContain("APPROVED_NOTE_409")

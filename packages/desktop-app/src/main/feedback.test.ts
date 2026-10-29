@@ -51,6 +51,7 @@ for (const sample of redactionSamples) {
         await reader.close()
       }
       expect(Feedback.copy(snapshot)).not.toContain(sample.marker)
+      for (const text of sample.preserve) expect(Feedback.copy(snapshot)).toContain(text)
     })
   }
 }
