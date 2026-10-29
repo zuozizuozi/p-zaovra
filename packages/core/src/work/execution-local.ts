@@ -3,6 +3,7 @@ export * as WorkExecutionLocal from "./execution-local"
 import { Effect, FiberSet, Layer, Schedule } from "effect"
 import { Work } from "@zaovra-ai/schema/work"
 import { makeGlobalNode } from "../effect/app-node"
+import { KeyedMutex } from "../effect/keyed-mutex"
 import { SessionV2 } from "../session"
 import { SessionRunCoordinator } from "../session/run-coordinator"
 import { TaskTool } from "../tool/task"
@@ -20,6 +21,7 @@ export const layer = Layer.effect(
     const recovery = yield* WorkRecovery.Service
     const sessions = yield* SessionV2.Service
     const store = yield* WorkStore.Service
+    const commands = KeyedMutex.makeUnsafe<Work.GoalID>()
     const coordinator = yield* SessionRunCoordinator.make<Work.GoalID, never>({
       drain: (goalID, force) => runner.run({ goalID, force }),
     })
@@ -51,9 +53,14 @@ export const layer = Layer.effect(
                   ),
                 ),
               )
-            : recovery
-                .recover(claim.goalID)
-                .pipe(Effect.andThen(claim.signal === "interrupt" ? Effect.void : coordinator.run(claim.goalID))),
+            : claim.signal === "interrupt"
+              ? recovery.recover(claim.goalID).pipe(Effect.asVoid)
+              : coordinator.exclusive(
+                  claim.goalID,
+                  recovery
+                    .recover(claim.goalID)
+                    .pipe(Effect.andThen(runner.run({ goalID: claim.goalID, force: true }))),
+                ),
         )
         .pipe(
           Effect.catchTag("WorkController.Lost", (error) =>
@@ -72,7 +79,15 @@ export const layer = Layer.effect(
     })
 
     yield* Effect.gen(function* () {
-      for (const goalID of yield* controllers.interrupts) yield* interrupt(goalID)
+      for (const goalID of yield* controllers.interrupts)
+        yield* commands.withLock(goalID)(
+          Effect.gen(function* () {
+            // The poll's SQL snapshot can predate a later explicit resume.
+            // Recheck under the same admission lock before interrupting its owner.
+            const current = (yield* controllers.dispatches(goalID))[0]
+            if (current?.signal === "interrupt" && current.status !== "settled") yield* interrupt(goalID)
+          }),
+        )
       yield* dispatch()
     }).pipe(Effect.repeat(Schedule.spaced("250 millis")), Effect.forkScoped)
 
@@ -81,18 +96,21 @@ export const layer = Layer.effect(
         Effect.map(([local, cluster]) => new Set([...local, ...cluster])),
       ),
       resume: Effect.fn("WorkExecution.resume")(function* (goalID) {
-        yield* controllers.signal(goalID, "wake")
+        yield* commands.withLock(goalID)(controllers.signal(goalID, "wake"))
         const claim = (yield* controllers.claim({ goalID, limit: 1 }))[0]
         if (claim) yield* execute(claim)
       }),
       wake: Effect.fn("WorkExecution.wake")(function* (goalID) {
-        yield* controllers.signal(goalID, "wake")
+        yield* commands.withLock(goalID)(controllers.signal(goalID, "wake"))
         yield* dispatch(goalID)
       }),
-      interrupt: Effect.fn("WorkExecution.interrupt")(function* (goalID) {
-        yield* controllers.signal(goalID, "interrupt")
-        yield* interrupt(goalID)
-      }),
+      interrupt: Effect.fn("WorkExecution.interrupt")(
+        function* (goalID) {
+          yield* controllers.signal(goalID, "interrupt")
+          yield* interrupt(goalID)
+        },
+        (effect, goalID) => commands.withLock(goalID)(effect),
+      ),
     })
   }),
 )
