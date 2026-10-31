@@ -8,8 +8,11 @@ import { FSUtil } from "./fs-util"
 import { Formatter } from "./formatter"
 import { FileBackup } from "./file-backup"
 import { SessionSchema } from "./session/schema"
+import { LocationMutation } from "./location-mutation"
+import { open, statfs } from "node:fs/promises"
 
 export interface Target {
+  readonly identity?: string
   readonly canonical: string
   readonly resource: string
 }
@@ -214,7 +217,7 @@ const layer = Layer.effect(
       ),
     )
 
-    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")(function* (input: TextWriteInput) {
+    const writeText = Effect.fn("FileMutation.writeText")(function* (input: TextWriteInput) {
       if (input.validate) yield* input.validate
       if (input.expected === null) {
         const next = splitBom(input.content)
@@ -283,6 +286,52 @@ const layer = Layer.effect(
           if (input.validate) yield* input.validate
           return yield* formattedResult({ ...input, content: bytes }, current !== undefined)
         }),
+      )
+    })
+
+    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")(function* (input: TextWriteInput) {
+      if (process.platform !== "linux" || !input.target.identity || !input.validate || input.expected === null)
+        return yield* writeText(input)
+      const overlay = yield* Effect.promise(() =>
+        statfs(input.target.canonical)
+          .then((value) => value.type === 0x794c7630)
+          .catch(() => false),
+      )
+      if (!overlay) return yield* writeText(input)
+      yield* input.validate
+      // Keep both original objects open across r+ copy-up and the final check.
+      // This prevents inode reuse from turning a same-content replacement into
+      // an approved object. No path/hash-only identity fallback is introduced.
+      return yield* Effect.acquireUseRelease(
+        Effect.tryPromise(async () => {
+          const parent = await open(dirname(input.target.canonical), "r")
+          const file = await open(input.target.canonical, "r").catch(async (error: unknown) => {
+            await parent.close()
+            throw error
+          })
+          return { parent, file }
+        }).pipe(Effect.mapError(() => new TargetChangedError({ path: input.target.canonical }))),
+        ({ parent, file }) =>
+          Effect.gen(function* () {
+            const [directory, original] = yield* Effect.promise(() => Promise.all([parent.stat(), file.stat()]))
+            const key = JSON.stringify([
+              dirname(input.target.canonical),
+              directory.dev,
+              directory.ino,
+              [original.dev, original.ino],
+            ])
+            if (key !== LocationMutation.identityKey(input.target.identity!))
+              return yield* new TargetChangedError({ path: input.target.canonical })
+            yield* input.validate!
+            return yield* writeText(input).pipe(
+              Effect.provideService(LocationMutation.PinnedIdentity, {
+                canonical: input.target.canonical,
+                identity: input.target.identity!,
+                key,
+              }),
+            )
+          }),
+        ({ parent, file }) => Effect.promise(() => Promise.all([parent.close(), file.close()])),
       )
     })
 

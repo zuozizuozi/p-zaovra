@@ -123,7 +123,7 @@ import type {
   PtyUpdateErrors,
   PtyUpdateResponses,
   QuestionV2Reply,
-  SessionOutcomeBudget,
+  SessionOutcomeBudgetUpdate,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
   SyncReplayErrors,
@@ -3707,7 +3707,7 @@ export class Session extends HeyApiClient {
       sessionID: string
       title?: string
       archived?: boolean
-      budget?: SessionOutcomeBudget
+      budget?: SessionOutcomeBudgetUpdate
     },
     options?: Options<never, ThrowOnError>,
   ) {

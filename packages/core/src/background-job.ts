@@ -62,6 +62,8 @@ type ExtendResult =
     }
 
 export type StartInput = {
+  /** User-delivered services retain their own scope until explicit cancellation or process exit. */
+  detached?: boolean
   id?: string
   type: string
   title?: string
@@ -214,7 +216,7 @@ export const make = Effect.gen(function* () {
             if (existing?.info.status === "running") {
               return [{ info: snapshot(existing) }, jobs] as readonly [StartResult, Map<string, Active>]
             }
-            const scope = yield* Scope.fork(state.scope, "parallel")
+            const scope = yield* input.detached ? Scope.make() : Scope.fork(state.scope, "parallel")
             const token = {}
             const job = {
               info: {

@@ -188,3 +188,26 @@ for (const [protocol, npm, version] of [
     expect(result?.config.options).not.toHaveProperty("apiKey")
   })
 }
+
+for (const images of [undefined, true, false]) {
+  test(`469 custom visual capability is explicit: ${images}`, () => {
+    const result = validateCustomProvider({
+      form: {
+        providerID: "custom",
+        name: "Custom",
+        baseURL: "http://127.0.0.1:1/v1",
+        apiKey: "",
+        models: [{ row: "m", id: "alias", name: "Alias", images, err: {} }],
+        headers: [],
+        err: {},
+      },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set(),
+    })
+    const model = result.result?.config.models.alias
+    expect(model).toBeDefined()
+    if (images === undefined) expect(model).not.toHaveProperty("modalities")
+    else expect(model).toMatchObject({ modalities: { input: images ? ["text", "image"] : ["text"], output: ["text"] } })
+  })
+}

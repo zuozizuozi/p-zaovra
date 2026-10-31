@@ -32,6 +32,7 @@ import { AppProcess } from "./process"
 import { BackgroundJob } from "./background-job"
 import { ToolOutputStore } from "./tool-output-store"
 import { BrowserSession } from "./tool/browser-session"
+import { PreviewProcess } from "./preview-process"
 import { Global } from "./global"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { fromRow } from "./session/info"
@@ -99,6 +100,7 @@ export type ListInput = typeof ListInput.Type
 type CreateInput = {
   id?: SessionSchema.ID
   parentID?: SessionSchema.ID
+  budgetMode?: "interactive" | "autonomous"
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
@@ -112,7 +114,7 @@ type UpdateInput = {
   sessionID: SessionSchema.ID
   title?: string
   archived?: boolean
-  budget?: { tokens?: number; durationMs?: number }
+  budget?: { tokens?: number | null; durationMs?: number | null }
 }
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Session.NotFoundError", {
@@ -367,6 +369,7 @@ const layer = Layer.effect(
               timestamp: DateTime.makeUnsafe(now),
               projectID: project.id,
               parentID: input.parentID,
+              budgetMode: input.budgetMode ?? "interactive",
               agent: input.agent,
               model: input.model,
               location: input.location,
@@ -436,6 +439,14 @@ const layer = Layer.effect(
                   )
                     return yield* new OperationUnavailableError({ operation: "recover" })
                   if (input.action === "abandon") {
+                    yield* Effect.promise(() =>
+                      PreviewProcess.archive(
+                        global.data,
+                        input.sessionID,
+                        session.location.directory,
+                        session.location.workspaceID,
+                      ),
+                    )
                     for (const pending of yield* SessionInput.pending(db, input.sessionID))
                       yield* result.cancelInput({ sessionID: input.sessionID, messageID: pending.id })
                     // Recovery already owns the coordinator; interrupting it here would wait on itself.
@@ -476,8 +487,16 @@ const layer = Layer.effect(
         const background = (yield* jobs.list()).filter(
           (job) => job.status === "running" && job.metadata?.sessionID === sessionID,
         )
-        const liveShells = new Set(
-          background.filter((job) => job.type === "bash" && job.metadata?.kind === "preview").map((job) => job.id),
+        const liveShells = yield* Effect.promise(() =>
+          PreviewProcess.live(
+            global.data,
+            sessionID,
+            session.location.directory,
+            session.location.workspaceID,
+            new Set(
+              background.filter((job) => job.type === "bash" && job.metadata?.kind === "preview").map((job) => job.id),
+            ),
+          ),
         )
         const active =
           (yield* execution.active).has(sessionID) ||
@@ -577,10 +596,18 @@ const layer = Layer.effect(
           JSON.stringify(current) === JSON.stringify(messages) ? snapshot : undefined,
           JSON.stringify(current) === JSON.stringify(messages) ? targets : [],
           required,
-          new Set(
-            currentBackground
-              .filter((job) => job.type === "bash" && job.metadata?.kind === "preview")
-              .map((job) => job.id),
+          yield* Effect.promise(() =>
+            PreviewProcess.live(
+              global.data,
+              sessionID,
+              session.location.directory,
+              session.location.workspaceID,
+              new Set(
+                currentBackground
+                  .filter((job) => job.type === "bash" && job.metadata?.kind === "preview")
+                  .map((job) => job.id),
+              ),
+            ),
           ),
           session.location.directory,
           JSON.stringify(current) === JSON.stringify(messages) ? artifacts : [],
@@ -611,11 +638,20 @@ const layer = Layer.effect(
               title: input.title,
               archived: input.archived,
               budget: input.budget,
+              budgetUpdate: input.budget === undefined ? undefined : "patch",
             },
             { location: session.location },
           )
           .pipe(titleLocks.withLock(input.sessionID))
         if (input.archived) {
+          yield* Effect.promise(() =>
+            PreviewProcess.archive(
+              global.data,
+              input.sessionID,
+              session.location.directory,
+              session.location.workspaceID,
+            ),
+          )
           yield* result.interrupt(input.sessionID)
           yield* Effect.forEach(
             (yield* jobs.list()).filter(

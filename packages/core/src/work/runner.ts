@@ -1312,6 +1312,7 @@ export const layer = Layer.effect(
       const attemptID = Work.AttemptID.create()
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
       yield* sessions.create({
+        budgetMode: "autonomous",
         id: sessionID,
         location: task.location ?? goal.location,
         agent: AgentV2.ID.make("review"),
@@ -1598,7 +1599,12 @@ export const layer = Layer.effect(
       }
       const attemptID = Work.AttemptID.create()
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
-      yield* sessions.create({ id: sessionID, location: goal.location, agent: AgentV2.ID.make("work-planner") })
+      yield* sessions.create({
+        budgetMode: "autonomous",
+        id: sessionID,
+        location: goal.location,
+        agent: AgentV2.ID.make("work-planner"),
+      })
       yield* sessions
         .update({ sessionID, title: `${task.title} · Planner · #${task.attemptCount + 1}` })
         .pipe(Effect.orDie)
@@ -1841,7 +1847,12 @@ export const layer = Layer.effect(
       }
       const attemptID = Work.AttemptID.create()
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
-      yield* sessions.create({ id: sessionID, location: goal.location, agent: AgentV2.ID.make("work-architect") })
+      yield* sessions.create({
+        budgetMode: "autonomous",
+        id: sessionID,
+        location: goal.location,
+        agent: AgentV2.ID.make("work-architect"),
+      })
       yield* sessions
         .update({ sessionID, title: `${task.title} · Architect · #${task.attemptCount + 1}` })
         .pipe(Effect.orDie)
@@ -1940,6 +1951,7 @@ export const layer = Layer.effect(
         return false
       }
       yield* sessions.create({
+        budgetMode: "autonomous",
         id: sessionID,
         location: task.location ?? goal.location,
         agent: agentID,

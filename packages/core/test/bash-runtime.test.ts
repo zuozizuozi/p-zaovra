@@ -35,6 +35,86 @@ import { testEffect } from "./lib/effect"
 import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
+for (const foreground of [false, true]) {
+  it.live(
+    `462 delivered service survives Stop and stops on archive after ${foreground ? "foreground yield" : "background launch"}`,
+    () =>
+      withRuntime((directory, sessions, registry, jobs) =>
+        Effect.gen(function* () {
+          const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+          const ready = path.join(directory, "service-ready.json")
+          const script = path.join(directory, "service.cjs")
+          const log = path.join(directory, "service.log")
+          yield* Effect.promise(() =>
+            Bun.write(
+              script,
+              `const s=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response('delivered')}); Bun.write(${JSON.stringify(ready)},JSON.stringify({pid:process.pid,port:s.port}));`,
+            ),
+          )
+          const result = yield* settleTool(registry, {
+            sessionID: session.id,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "delivered-service",
+              name: "bash",
+              input: {
+                command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}" > "${log}" 2>&1`,
+                background_kind: "preview",
+                run_in_background: !foreground,
+                timeout: 50,
+                workdir: directory,
+              },
+            },
+          })
+          const job = (result.output?.structured as { job_id?: string } | undefined)?.job_id
+          expect(result.output).toBeDefined()
+          expect(job).toBeDefined()
+          yield* Effect.gen(function* () {
+            yield* Effect.promise(async () => {
+              const deadline = Date.now() + 5000
+              while (!(await Bun.file(ready).exists())) {
+                if (Date.now() >= deadline)
+                  throw new Error(
+                    `Delivered service did not listen: ${await Bun.file(log)
+                      .text()
+                      .catch(() => "no launch log")}`,
+                  )
+                await Bun.sleep(10)
+              }
+            })
+            const child = yield* Effect.promise(() => Bun.file(ready).json() as Promise<{ port: number }>)
+            yield* sessions.interrupt(session.id)
+            const response = yield* Effect.promise(() => fetch(`http://127.0.0.1:${child.port}`))
+            expect(yield* Effect.promise(() => response.text())).toBe("delivered")
+            yield* sessions.update({ sessionID: session.id, archived: true })
+            expect((yield* jobs.get(job!))?.status).toBe("cancelled")
+            expect(
+              yield* Effect.promise(() =>
+                fetch(`http://127.0.0.1:${child.port}`).then(
+                  () => true,
+                  () => false,
+                ),
+              ),
+            ).toBe(false)
+          }).pipe(
+            Effect.ensuring(
+              settleTool(registry, {
+                sessionID: session.id,
+                ...toolIdentity,
+                call: {
+                  type: "tool-call",
+                  id: "stop-delivered",
+                  name: "bash_job",
+                  input: { action: "cancel", job_id: job },
+                },
+              }).pipe(Effect.orDie),
+            ),
+          )
+        }),
+      ),
+  )
+}
 it.effect("378 prompt admission consumes decoded DateTime and clears Stop for new background completion", () =>
   Effect.gen(function* () {
     const logs: unknown[] = []
@@ -155,6 +235,170 @@ it.effect("S1 completion races notify once, previews stay quiet, and Stop suppre
     }),
   ),
 )
+
+it.effect("469 an unobserved completion still wakes after a visible final answer", () =>
+  withRuntime((directory, sessions, registry, jobs) =>
+    Effect.gen(function* () {
+      const bash = yield* BashJob.Service
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const input = yield* sessions.prompt({ sessionID: session.id, prompt: { text: "Deliver once" }, resume: false })
+      yield* SessionInput.promoteSteers(database.db, events, session.id, input.admittedSeq)
+      const gate = yield* Deferred.make<void>()
+      const id = yield* bash.start(
+        "late completion",
+        Deferred.await(gate).pipe(Effect.as("recorded")),
+        { sessionID: session.id, ...toolIdentity, toolCallID: "late" },
+        Effect.void,
+      )
+      yield* bash.watch(id)
+      const messageID = SessionMessage.ID.create()
+      const timestamp = yield* DateTime.now
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID: session.id,
+        assistantMessageID: messageID,
+        timestamp,
+        agent: AgentV2.defaultID,
+        model: { id: ModelV2.ID.make("fixed"), providerID: ProviderV2.ID.make("fixed") },
+      })
+      yield* events.publish(SessionEvent.Text.Started, {
+        sessionID: session.id,
+        assistantMessageID: messageID,
+        timestamp,
+        textID: "final",
+      })
+      yield* events.publish(SessionEvent.Text.Ended, {
+        sessionID: session.id,
+        assistantMessageID: messageID,
+        timestamp,
+        textID: "final",
+        text: "Delivered; the optional background check is recorded separately.",
+      })
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID: session.id,
+        assistantMessageID: messageID,
+        timestamp,
+        finish: "stop",
+        cost: 0,
+        requestPerformed: false,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      const wakes: string[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === SessionExecution.Wake.type) wakes.push(session.id)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      yield* Deferred.succeed(gate, undefined)
+      yield* jobs.wait({ id, timeout: 1000 })
+      yield* bash.watch(id)
+      expect((yield* jobs.get(id))?.status).toBe("completed")
+      expect((yield* sessions.message({ sessionID: session.id, messageID: SessionMessage.ID.make(id) }))?.type).toBe(
+        "shell",
+      )
+      expect(yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))).toBeDefined()
+      expect(wakes).toEqual([session.id])
+    }),
+  ),
+)
+
+for (const timing of ["late-watch", "queued-before-final"] as const)
+  it.effect(`469 delivered result suppresses only its duplicate completion: ${timing}`, () =>
+    withRuntime((_directory, sessions, registry, jobs) =>
+      Effect.gen(function* () {
+        const bash = yield* BashJob.Service
+        const events = yield* EventV2.Service
+        const database = yield* Database.Service
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(_directory) } })
+        const prompt = yield* sessions.prompt({
+          sessionID: session.id,
+          prompt: { text: "Read the background result before delivery" },
+          resume: false,
+        })
+        yield* SessionInput.promoteSteers(database.db, events, session.id, prompt.admittedSeq)
+        const gate = yield* Deferred.make<void>()
+        const id = yield* bash.start(
+          "record once",
+          Deferred.await(gate).pipe(Effect.as("finished result")),
+          { sessionID: session.id, ...toolIdentity, toolCallID: timing },
+          Effect.void,
+        )
+        if (timing === "queued-before-final") yield* bash.watch(id)
+        yield* Deferred.succeed(gate, undefined)
+        yield* jobs.wait({ id, timeout: 1000 })
+        const timestamp = yield* DateTime.now
+        const messageID = SessionMessage.ID.create()
+        const model = { id: ModelV2.ID.make("fixed"), providerID: ProviderV2.ID.make("fixed") }
+        const context = { sessionID: session.id, assistantMessageID: messageID, agent: toolIdentity.agent }
+        yield* events.publish(SessionEvent.Step.Started, { ...context, timestamp, model })
+        yield* events.publish(SessionEvent.Tool.Input.Started, {
+          ...context,
+          timestamp,
+          callID: "observed",
+          name: "bash_job",
+        })
+        yield* events.publish(SessionEvent.Tool.Called, {
+          ...context,
+          timestamp,
+          callID: "observed",
+          tool: "bash_job",
+          input: { job_id: id, action: "get" },
+          provider: { executed: false },
+        })
+        const observed = yield* settleTool(registry, {
+          ...context,
+          call: { type: "tool-call", id: "observed", name: "bash_job", input: { job_id: id, action: "get" } },
+        })
+        expect(observed.output?.structured).toMatchObject({ status: "completed" })
+        yield* events.publish(SessionEvent.Tool.Success, {
+          ...context,
+          timestamp,
+          callID: "observed",
+          structured: Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(
+            observed.output?.structured,
+          ),
+          content: observed.output?.content ?? [],
+          provider: { executed: false },
+        })
+        yield* events.publish(SessionEvent.Step.Ended, {
+          ...context,
+          timestamp,
+          finish: "tool-calls",
+          cost: 0,
+          requestPerformed: false,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+        const final = { ...context, assistantMessageID: SessionMessage.ID.create() }
+        yield* events.publish(SessionEvent.Step.Started, { ...final, timestamp, model })
+        yield* events.publish(SessionEvent.Text.Started, { ...final, timestamp, textID: "final" })
+        yield* events.publish(SessionEvent.Text.Ended, {
+          ...final,
+          timestamp,
+          textID: "final",
+          text: "The completed result has been read and delivered.",
+        })
+        yield* events.publish(SessionEvent.Step.Ended, {
+          ...final,
+          timestamp,
+          finish: "stop",
+          cost: 0,
+          requestPerformed: false,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+        if (timing === "late-watch") {
+          yield* bash.watch(id)
+          expect(yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))).toBeUndefined()
+        } else {
+          expect(yield* SessionInput.promoteNextQueued(database.db, events, session.id)).toBe(false)
+          expect(
+            (yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`)))?.cancelledSeq,
+          ).toBeDefined()
+        }
+      }),
+    ),
+  )
 
 it.effect("S1 completion admission failure retains a safe diagnostic and permits retry", () =>
   Effect.gen(function* () {

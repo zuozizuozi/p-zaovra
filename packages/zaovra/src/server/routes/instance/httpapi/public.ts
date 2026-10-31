@@ -94,6 +94,10 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
       if (schema.properties?.[key]) schema.properties[key] = nullable(schema.properties[key])
     }
   }
+  const budgetUpdate = spec.components?.schemas?.SessionOutcomeBudgetUpdate
+  for (const key of ["tokens", "durationMs"]) {
+    if (budgetUpdate?.properties?.[key]) budgetUpdate.properties[key] = nullable(budgetUpdate.properties[key])
+  }
   normalizeComponentDescriptions(spec)
   addLegacyErrorSchemas(spec)
   delete spec.components?.securitySchemes

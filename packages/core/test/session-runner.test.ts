@@ -1,3 +1,6 @@
+import path from "node:path"
+import { ChildProcess } from "effect/unstable/process"
+import { PreviewProcess } from "../src/preview-process"
 import { evidenceScope } from "./fixture/evidence-scope"
 import { createHash } from "node:crypto"
 import { BackgroundJob } from "@zaovra-ai/core/background-job"
@@ -458,6 +461,7 @@ const insertSession = (id: SessionV2.ID) =>
         directory: "/project",
         title: "test",
         version: "test",
+        metadata: { budgetMode: "interactive" },
       })
       .onConflictDoNothing()
       .run()
@@ -1802,9 +1806,10 @@ describe("S2 fixed recovery matrix", () => {
     }),
   )
 
-  it.effect("S2 stops structured hard timeouts without replaying a possibly applied operation", () =>
+  it.effect("469 returned structured timeout permits inspection without automatic replay", () =>
     Effect.gen(function* () {
       yield* setup
+      verificationEnabled = false
       const session = yield* SessionV2.Service
       const registry = yield* ToolRegistry.Service
       let dispatched = 0
@@ -1821,22 +1826,30 @@ describe("S2 fixed recovery matrix", () => {
         }),
       })
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Write before timeout" }), resume: false })
-      response = [
-        LLMEvent.toolCall({ id: "hard-timeout", name: "hard_timeout", input: {} }),
-        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      responses = [
+        [
+          LLMEvent.toolCall({ id: "hard-timeout", name: "hard_timeout", input: {} }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        [
+          LLMEvent.toolCall({ id: "inspect-timeout", name: "echo", input: { text: "Inspect timeout effects" } }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "timeout-final", ["The timeout response is retained; effects were inspected."])
+          .completeEvents,
       ]
-      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
       yield* session.resume(sessionID)
       expect(dispatched).toBe(1)
-      expect(requests).toHaveLength(1)
-      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+      expect(requests).toHaveLength(3)
+      expect(JSON.stringify(requests[1].messages)).toContain("timeout")
+      expect(executions).toContain("Inspect timeout effects")
     }),
   )
 
-  it.effect("S2 stops an executed tool whose output cannot be confirmed against its schema", () =>
+  it.effect("469 returned invalid-output response permits inspection and preserves the error", () =>
     Effect.gen(function* () {
       yield* setup
+      verificationEnabled = false
       const session = yield* SessionV2.Service
       const registry = yield* ToolRegistry.Service
       let dispatched = 0
@@ -1857,16 +1870,27 @@ describe("S2 fixed recovery matrix", () => {
         prompt: Prompt.make({ text: "Write once with acknowledgement" }),
         resume: false,
       })
-      response = [
-        LLMEvent.toolCall({ id: "invalid-ack", name: "invalid_output", input: {} }),
-        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+      responses = [
+        [
+          LLMEvent.toolCall({ id: "invalid-output", name: "invalid_output", input: {} }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        [
+          LLMEvent.toolCall({
+            id: "inspect-invalid",
+            name: "echo",
+            input: { text: "Inspect retained invalid output" },
+          }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        ],
+        fragmentFixture("text", "invalid-final", ["The invalid response is retained; effects were inspected."])
+          .completeEvents,
       ]
-      expect((yield* session.resume(sessionID).pipe(Effect.exit))._tag).toBe("Failure")
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
       yield* session.resume(sessionID)
       expect(dispatched).toBe(1)
-      expect(requests).toHaveLength(1)
-      expect((yield* session.outcome(sessionID)).state).toBe("stopped")
+      expect(requests).toHaveLength(3)
+      expect(JSON.stringify(requests[1].messages)).toContain("output")
+      expect(executions).toContain("Inspect retained invalid output")
     }),
   )
 
@@ -5766,6 +5790,160 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const reason of ["target-changed", "partial-application", "timeout", "cancelled", "output-unconfirmed"] as const)
+    it.effect(`466 returned ${reason} tool error permits inspection and continuation`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        let attempts = 0
+        yield* registry.register({
+          guarded_write: Tool.make({
+            description: "Write with a returned safety error",
+            input: Schema.Struct({}),
+            output: Schema.Struct({}),
+            execute: () =>
+              Effect.sync(() => attempts++).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new Tool.Failure({
+                      message: "Write stopped; inspect the file and any partial effects before retrying.",
+                      metadata: { phase: "mutation", reason },
+                    }),
+                  ),
+                ),
+              ),
+          }),
+        })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Update the file safely" }), resume: false })
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "guard-error", name: "guarded_write", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: "inspect-effects", name: "echo", input: { text: "inspect retained effects" } }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ],
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.textStart({ id: "after-inspection" }),
+            LLMEvent.textDelta({
+              id: "after-inspection",
+              text: "The write was not confirmed; inspection is recorded.",
+            }),
+            LLMEvent.textEnd({ id: "after-inspection" }),
+            LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+            LLMEvent.finish({ reason: "stop" }),
+          ],
+        ]
+        yield* session.resume(sessionID)
+        expect(attempts).toBe(1)
+        expect(requests).toHaveLength(3)
+        expect(JSON.stringify(requests[1].messages)).toContain("inspect the file")
+        expect(executions).toContain("inspect retained effects")
+        expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+      }),
+    )
+
+  for (const reason of ["before-write", "after-write", "partial-application"] as const)
+    it.effect(`469 returned ${reason} response survives stream recovery without re-execution`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        const events = yield* EventV2.Service
+        const returned = yield* Deferred.make<void>()
+        let attempts = 0
+        yield* registry.register({
+          returned_write: Tool.make({
+            description: "Returned mutation response",
+            input: Schema.Struct({}),
+            output: Schema.Struct({}),
+            execute: () =>
+              Effect.sync(() => attempts++).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new Tool.Failure({
+                      message: `Retained ${reason} error; inspect effects and backup`,
+                      metadata: {
+                        phase: "mutation",
+                        reason: reason === "partial-application" ? reason : "target-changed",
+                        stage: reason,
+                      },
+                    }),
+                  ),
+                ),
+              ),
+          }),
+        })
+        const unsubscribe = yield* events.listen((event) =>
+          Effect.gen(function* () {
+            if (event.type !== SessionEvent.QualityProgress.type) return
+            const progress = Schema.decodeUnknownSync(Schema.toType(SessionEvent.QualityProgress.data))(event.data)
+            if (
+              progress.category !== "operation" ||
+              !progress.details ||
+              typeof progress.details !== "object" ||
+              !("callID" in progress.details) ||
+              progress.details.callID !== "first-returned" ||
+              !("status" in progress.details) ||
+              progress.details.status !== "settled"
+            )
+              return
+            expect("effects" in progress.details && progress.details.effects).toBe("uncertain")
+            yield* Deferred.succeed(returned, undefined)
+          }),
+        )
+        yield* Effect.addFinalizer(() => unsubscribe)
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({ text: "Inspect the retained failed write" }),
+          resume: false,
+        })
+        const drop = new LLMError({
+          module: "fixed",
+          method: "read",
+          reason: new TransportReason({ message: "stream interrupted after response", kind: "StreamReadError" }),
+        })
+        responseStream = Stream.make(
+          LLMEvent.toolCall({ id: "first-returned", name: "returned_write", input: {} }),
+        ).pipe(
+          Stream.concat(Stream.fromEffect(Deferred.await(returned)).pipe(Stream.drain)),
+          Stream.concat(Stream.fail(drop)),
+        )
+        responses = [
+          [
+            LLMEvent.toolCall({ id: "recovered-call-id", name: "returned_write", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          ],
+          [
+            LLMEvent.toolCall({
+              id: "inspect-returned",
+              name: "echo",
+              input: { text: "Inspect the backup and current file" },
+            }),
+            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          ],
+          fragmentFixture("text", "returned-final", ["The error and inspection are preserved."]).completeEvents,
+        ]
+        const fiber = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        yield* awaitRetry(1)
+        yield* adjust(5000)
+        yield* Fiber.join(fiber)
+        expect(attempts).toBe(1)
+        expect(executions).toContain("Inspect the backup and current file")
+        expect(JSON.stringify(yield* session.context(sessionID))).toContain(`Retained ${reason} error`)
+        expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+      }),
+    )
+
   it.effect("stops unknown local tool defects without resending side effects", () =>
     Effect.gen(function* () {
       yield* setup
@@ -8038,9 +8216,17 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("S1 omitted budgets enforce the default token ceiling without another request", () =>
+  it.effect("465 autonomous delegation retains its default token ceiling and requests renewal", () =>
     Effect.gen(function* () {
       yield* setup
+      const database = yield* Database.Service
+      yield* insertSession(otherSessionID)
+      yield* database.db
+        .update(SessionTable)
+        .set({ parent_id: otherSessionID, metadata: { budgetMode: "autonomous" } })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
       const session = yield* SessionV2.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Default ceiling" }), resume: false })
       response = [
@@ -8055,10 +8241,43 @@ describe("SessionRunnerLLM", () => {
       ]
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(1)
+      expect(JSON.stringify((yield* session.context(sessionID)).at(-1))).toContain("续授")
       expect((yield* session.context(sessionID)).at(-1)).toMatchObject({
         finish: "stopped",
         termination: { category: "budget" },
       })
+    }),
+  )
+
+  it.effect("465 ordinary interaction continues beyond 30M reported tokens", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Ordinary interaction" }), resume: false })
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "over-30M", name: "echo", input: { text: "retained" } }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "tool-calls",
+            usage: { inputTokens: 30_000_001, nonCachedInputTokens: 30_000_001, outputTokens: 0 },
+          }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "complete" }),
+          LLMEvent.textDelta({ id: "complete", text: "Complete." }),
+          LLMEvent.textEnd({ id: "complete" }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+      expect((yield* session.outcome(sessionID)).termination?.category).not.toBe("budget")
     }),
   )
 
@@ -8128,7 +8347,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(0)
       expect(yield* session.outcome(sessionID)).toMatchObject({ state: "stopped", termination: { category: "budget" } })
-      yield* session.update({ sessionID, budget: {} })
+      yield* session.update({ sessionID, budget: { tokens: null, durationMs: null } })
       responses = [fragmentFixture("text", "continued", ["Resumed"]).completeEvents]
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(1)
@@ -8192,7 +8411,35 @@ describe("SessionRunnerLLM", () => {
       yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
       yield* session.update({ sessionID, budget: { durationMs: 1000 } })
       const task = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
-      const preview = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "preview" }, run: Effect.never })
+      const location = yield* Location.Service
+      const ready = path.join(location.directory, "budget-preview-ready.json")
+      const owner = { root: location.directory, directory: location.directory, sessionID, jobID: "budget-preview" }
+      yield* Effect.addFinalizer(() => Effect.promise(() => PreviewProcess.cancel(owner)))
+      const admitted = yield* Deferred.make<void>()
+      const preview = yield* jobs.start({
+        id: owner.jobID,
+        type: "bash",
+        metadata: { sessionID, kind: "preview" },
+        run: PreviewProcess.run(
+          ChildProcess.make(
+            process.execPath,
+            [path.resolve(import.meta.dir, "fixture/service-server.ts"), ready, "http"],
+            { cwd: location.directory, extendEnv: true },
+          ),
+          owner,
+          undefined,
+          () => Deferred.succeed(admitted, undefined),
+        ).pipe(Effect.as("ended")),
+      })
+      yield* Deferred.await(admitted)
+      yield* Effect.promise(async () => {
+        const deadline = Date.now() + 5000
+        while (!(await Bun.file(ready).exists())) {
+          if (Date.now() > deadline) throw new Error("Budget service did not listen")
+          await Bun.sleep(20)
+        }
+      })
+      const service = yield* Effect.promise(() => Bun.file(ready).json() as Promise<{ port: number }>)
       const waiting = yield* Deferred.make<void>()
       yield* registry.register({
         wait_fixture: Tool.make({
@@ -8219,6 +8466,9 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(run)
       expect((yield* jobs.get(task.id))?.status).toBe("cancelled")
       expect((yield* jobs.get(preview.id))?.status).toBe("running")
+      expect(
+        yield* Effect.promise(() => fetch(`http://127.0.0.1:${service.port}`).then((response) => response.text())),
+      ).toBe("service-alive")
       expect(
         (yield* session.context(sessionID)).filter(
           (message) => message.type === "assistant" && message.finish === "stopped",
@@ -8364,7 +8614,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.update({ sessionID, budget: { durationMs: 5000 } })
       yield* adjust(1000)
       expect(run.pollUnsafe()).toBeUndefined()
-      yield* session.update({ sessionID, budget: {} })
+      yield* session.update({ sessionID, budget: { tokens: null, durationMs: null } })
       yield* adjust(5000)
       expect(run.pollUnsafe()).toBeUndefined()
       yield* Deferred.succeed(streamGate, undefined)

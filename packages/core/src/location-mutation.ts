@@ -62,6 +62,24 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/LocationMutation") {}
 
+/** Available only while FileMutation holds the approved file and parent open. */
+export class PinnedIdentity extends Context.Service<
+  PinnedIdentity,
+  { canonical: string; identity: string; key: string }
+>()("@zaovra/LocationMutation/PinnedIdentity") {}
+
+const Identity = Schema.Tuple([
+  Schema.String,
+  Schema.Number,
+  Schema.NullOr(Schema.Number),
+  Schema.Unknown,
+  Schema.NullOr(Schema.Tuple([Schema.Number, Schema.NullOr(Schema.Number), Schema.Unknown])),
+])
+export function identityKey(identity: string) {
+  const value = Schema.decodeUnknownSync(Schema.fromJsonString(Identity))(identity)
+  return JSON.stringify([value[0], value[1], value[2], value[4] && [value[4][0], value[4][1]]])
+}
+
 interface ResolvedPath {
   readonly canonical: string
   readonly type?:
@@ -140,16 +158,21 @@ const layer = Layer.effect(
       const externalResource = slash(path.join(externalDirectory, "*"))
       const directoryIdentity = yield* fs.stat(resolved.directory)
       const fileIdentity = resolved.type === "File" ? yield* fs.stat(resolved.canonical) : undefined
+      const identity = JSON.stringify([
+        resolved.directory,
+        directoryIdentity.dev,
+        Option.getOrNull(directoryIdentity.ino),
+        Option.getOrNull(directoryIdentity.birthtime),
+        fileIdentity
+          ? [fileIdentity.dev, Option.getOrNull(fileIdentity.ino), Option.getOrNull(fileIdentity.birthtime)]
+          : null,
+      ])
+      const pinned = Option.getOrUndefined(yield* Effect.serviceOption(PinnedIdentity))
       return {
-        identity: JSON.stringify([
-          resolved.directory,
-          directoryIdentity.dev,
-          Option.getOrNull(directoryIdentity.ino),
-          Option.getOrNull(directoryIdentity.birthtime),
-          fileIdentity
-            ? [fileIdentity.dev, Option.getOrNull(fileIdentity.ino), Option.getOrNull(fileIdentity.birthtime)]
-            : null,
-        ]),
+        // Overlay copy-up changes btime while preserving the pinned object. A
+        // different inode, parent, canonical path or permission resource still fails.
+        identity:
+          pinned?.canonical === resolved.canonical && pinned.key === identityKey(identity) ? pinned.identity : identity,
         canonical: resolved.canonical,
         resource,
         externalDirectory: external

@@ -2,7 +2,7 @@ export * as BashTool from "./bash"
 
 import path from "path"
 import { ToolFailure } from "@zaovra-ai/llm"
-import { Clock, DateTime, Deferred, Duration, Effect, Layer, Schema, Option } from "effect"
+import { Clock, DateTime, Deferred, Duration, Effect, Exit, Layer, Schema, Option } from "effect"
 import { Snapshot } from "../snapshot"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { fingerprint, assertionPath, singleCommand } from "../session/outcome"
@@ -14,6 +14,8 @@ import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { Location } from "../location"
+import { Global } from "../global"
+import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
 import { ShellIdentity } from "../shell-identity"
 import { PermissionV2 } from "../permission"
@@ -29,14 +31,14 @@ import { createHash, randomUUID } from "node:crypto"
 let executionSequence = 0
 
 export const name = "bash"
-export const DEFAULT_TIMEOUT_MS = 2 * 60 * 1_000
+export const DEFAULT_TIMEOUT_MS = 120 * 1_000
 export const MAX_TIMEOUT_MS = 10 * 60 * 1_000
 export const MAX_CAPTURE_BYTES = 1024 * 1024
 
 export const Input = Schema.Struct({
   background_kind: Schema.optional(Schema.Literals(["task", "preview"])).annotate({
     description:
-      "For background commands only. Use preview for a service the user requests to start and keep running (Web, API, database, or virtual machine). Its lifetime remains tied to the Session and owning backend; archive or bash_job cancel closes it. Other work defaults to task and stops with execution.",
+      "Use preview for a long-lived service the user requests to deliver and keep running after the Session or CLI exits. Its process is detached; redirect stdout/stderr to a log file. Temporary probes and helpers use task and stop with execution. Archive and explicit cancellation still stop the owned service. Applies both to explicit background launch and foreground-to-background yield.",
   }),
   run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
@@ -95,7 +97,7 @@ export const Input = Schema.Struct({
   timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
     .annotate({
-      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Prefer a short yield for long work, then observe bash_job with bounded backoff. Timeout hands the same live process to a background job; running or unknown does not authorize retrying it. hard_timeout_ms is a separate process deadline.`,
+      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Wait for the result, or use background execution and one blocking bash_job wait. Timeout hands the same live process to a background job; running or unknown does not authorize retrying it. hard_timeout_ms is a separate process deadline.`,
     }),
 })
 
@@ -180,12 +182,13 @@ const layer = Layer.effectDiscard(
     const permission = yield* PermissionV2.Service
     const events = yield* EventV2.Service
     const jobs = yield* BashJob.Service
+    const global = yield* Global.Service
     const database = yield* Database.Service
 
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. Preview jobs survive Stop but close on archive, cancellation or owner scope closure. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use run_in_background=true with background_kind=preview, then verify its business interface from an independent process, not just whether a port is listening. Stop it with bash_job cancel using the returned job_id; its lifetime remains tied to the Session and owning backend. Do not detach services with Start-Process, nohup, or shell ampersand backgrounding. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. Preview jobs survive normal completion, Stop and CLI normal exit, but explicit cancellation, archive and final container cleanup still stop them. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. It survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input:
             Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log !== false
               ? Schema.Struct({
@@ -230,8 +233,6 @@ const layer = Layer.effectDiscard(
                 messageID: context.assistantMessageID,
                 callID: context.toolCallID,
               }
-              if (input.background_kind && !input.run_in_background)
-                return yield* new ToolFailure({ message: "background_kind requires run_in_background=true" })
               const target = yield* mutation.resolve({ path: input.workdir ?? ".", kind: "directory" })
               const directory = yield* fs
                 .stat(target.canonical)
@@ -385,7 +386,7 @@ const layer = Layer.effectDiscard(
                 : []
               let lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
               let partial = ""
-              const started = yield* Deferred.make<void>()
+              const started = yield* Deferred.make<void, ToolFailure>()
               const run = Effect.gen(function* () {
                 const before = verification ? yield* snapshots.capture() : undefined
                 const filesBefore = yield* fingerprint(fs, targets)
@@ -444,9 +445,37 @@ const layer = Layer.effectDiscard(
                     ? { jobID: "msg_bash_" + context.assistantMessageID + "_" + context.toolCallID }
                     : {}),
                 }
-                yield* Deferred.succeed(started, undefined)
+                if (input.background_kind !== "preview") yield* Deferred.succeed(started, undefined)
                 const result = yield* appProcess
                   .run(command, {
+                    persistent: input.background_kind === "preview",
+                    owner:
+                      input.background_kind === "preview"
+                        ? {
+                            root: global.data,
+                            jobID: `msg_bash_${context.assistantMessageID}_${context.toolCallID}`,
+                            sessionID: context.sessionID,
+                            directory: location.directory,
+                            workspaceID: location.workspaceID,
+                          }
+                        : undefined,
+                    onSpawn:
+                      input.background_kind === "preview"
+                        ? () =>
+                            Effect.gen(function* () {
+                              const owner = yield* Effect.promise(() =>
+                                PreviewProcess.get({
+                                  root: global.data,
+                                  jobID: `msg_bash_${context.assistantMessageID}_${context.toolCallID}`,
+                                  sessionID: context.sessionID,
+                                  directory: location.directory,
+                                  workspaceID: location.workspaceID,
+                                }),
+                              )
+                              if (capture) yield* capture.append(new TextEncoder().encode(`${owner?.output}\n`))
+                              yield* Deferred.succeed(started, undefined)
+                            })
+                        : undefined,
                     combineOutput: true,
                     timeout: input.hard_timeout_ms === undefined ? undefined : Duration.millis(input.hard_timeout_ms),
                     maxOutputBytes: MAX_CAPTURE_BYTES,
@@ -680,7 +709,7 @@ const layer = Layer.effectDiscard(
                   ),
                   context,
                   capture ? capture.append(new Uint8Array()) : Effect.void,
-                  { kind: "task", workdir: target.canonical },
+                  { kind: input.background_kind ?? "task", workdir: target.canonical },
                   Deferred.succeed(done, {
                     job_id: `msg_bash_${context.assistantMessageID}_${context.toolCallID}`,
                     output:
@@ -698,11 +727,11 @@ const layer = Layer.effectDiscard(
                       timeout ? timeout - (now - began) : Infinity,
                     )
                     if (remaining <= 0) {
-                      yield* jobs.watch(job_id)
+                      if (input.background_kind !== "preview") yield* jobs.watch(job_id)
                       return {
                         job_id,
                         shell: identity,
-                        output: `${partial || "(no output yet)"}\nCommand moved to the background under Session ownership; completion will notify this Session. Use bash_job get/wait/cancel when needed. No check has passed yet.`,
+                        output: `${partial || "(no output yet)"}\nCommand moved to the background with its declared lifetime. Tasks notify this Session on completion; services do not block delivery. Use bash_job get/wait/cancel when needed. No check has passed yet.`,
                         truncated: false,
                       }
                     }
@@ -726,6 +755,16 @@ const layer = Layer.effectDiscard(
               const job_id = yield* jobs.start(
                 input.command,
                 run.pipe(
+                  Effect.onExit((exit) =>
+                    Exit.isFailure(exit)
+                      ? Deferred.fail(
+                          started,
+                          new ToolFailure({
+                            message: "Command launch failed; inspect the retained log before retrying.",
+                          }),
+                        )
+                      : Effect.void,
+                  ),
                   Effect.tap((output) =>
                     jobs.record("msg_bash_" + context.assistantMessageID + "_" + context.toolCallID, {
                       executionRecord: output.executionRecord,
@@ -744,6 +783,7 @@ const layer = Layer.effectDiscard(
                 capture ? capture.append(new Uint8Array()) : Effect.void,
                 { kind: input.background_kind ?? "task", workdir: target.canonical },
               )
+              if (input.background_kind === "preview") yield* Deferred.await(started)
               if (input.background_kind !== "preview") yield* jobs.watch(job_id)
               return {
                 job_id,
@@ -795,5 +835,6 @@ export const node = makeLocationNode({
     PermissionV2.node,
     EventV2.node,
     Database.node,
+    Global.node,
   ],
 })

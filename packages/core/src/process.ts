@@ -6,6 +6,7 @@ import { CrossSpawnSpawner } from "./cross-spawn-spawner"
 import { ShellIdentity } from "./shell-identity"
 import { randomUUID } from "node:crypto"
 import { makeGlobalNode } from "./effect/app-node"
+import { PreviewProcess } from "./preview-process"
 
 export class AppProcessError extends Schema.TaggedErrorClass<AppProcessError>()("AppProcessError", {
   command: Schema.String,
@@ -34,6 +35,10 @@ export class AppProcessError extends Schema.TaggedErrorClass<AppProcessError>()(
 }
 
 export interface RunOptions {
+  /** Pair with an independently owned job scope; detached stdio cannot keep the CLI alive. */
+  readonly persistent?: boolean
+  readonly owner?: PreviewProcess.Owner
+  readonly onSpawn?: (pid: number) => Effect.Effect<void, unknown>
   readonly combineOutput?: boolean
   readonly maxOutputBytes?: number
   readonly maxErrorBytes?: number
@@ -260,6 +265,8 @@ const layer = Layer.effect(
         const collect = Effect.scoped(
           Effect.gen(function* () {
             const handle = yield* spawner.spawn(command)
+            if (options?.onSpawn) yield* options.onSpawn(handle.pid)
+            if (options?.persistent) yield* handle.unref
             if (options?.combineOutput) {
               const [output, exitCode] = yield* Effect.all(
                 [
@@ -346,6 +353,45 @@ const layer = Layer.effect(
       })
 
     const run = Effect.fn("AppProcess.run")(function* (command: ChildProcess.Command, options?: RunOptions) {
+      if (options?.persistent && options.owner) {
+        if (command._tag !== "StandardCommand")
+          return yield* new AppProcessError({
+            command: describeCommand(command),
+            cause: new Error("A persistent preview requires one command"),
+          })
+        const state = yield* PreviewProcess.run(
+          command,
+          options.owner,
+          options.timeout === undefined ? undefined : Duration.toMillis(Duration.fromInputUnsafe(options.timeout)),
+          options.onSpawn,
+        ).pipe(Effect.mapError((cause) => new AppProcessError({ command: describeCommand(command), cause })))
+        if (state?.exit === 124 && options.timeout !== undefined)
+          return yield* new AppProcessError({
+            command: describeCommand(command),
+            exitCode: 124,
+            reason: "timeout",
+            output: state.output,
+          })
+        if (!state || state.exit === undefined)
+          return yield* new AppProcessError({
+            command: describeCommand(command),
+            cause: new Error(state?.output ?? "Preview outcome is unknown; do not rerun"),
+          })
+        return {
+          command: describeCommand(command),
+          exitCode: state.exit,
+          stdout: Buffer.from(state.output),
+          stderr: Buffer.alloc(0),
+          output: Buffer.from(state.output),
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        }
+      }
+      if (options?.persistent)
+        return yield* new AppProcessError({
+          command: describeCommand(command),
+          cause: new Error("A persistent preview requires a durable owner"),
+        })
       if (options?.stdin === undefined) return yield* runCommand(command, options)
       if (command._tag !== "StandardCommand") {
         return yield* new AppProcessError({

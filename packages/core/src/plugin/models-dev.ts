@@ -2,6 +2,7 @@ import { define } from "./internal"
 import type { ModelV2Info } from "@zaovra-ai/sdk/v2/types"
 import { Effect, Stream } from "effect"
 import { EventV2 } from "../event"
+import { ModelV2 } from "../model"
 import { ModelsDev } from "../models-dev"
 import { ProviderV2 } from "../provider"
 import { accountEnabled } from "../account-enabled"
@@ -120,7 +121,7 @@ function applyModel(
     tools: model.tool_call,
     // Field-based reasoning transport is not a declaration of native manual interleaved thinking.
     interleavedThinking: model.interleaved === true,
-    input: [...(model.modalities?.input ?? [])],
+    input: [...(model.modalities?.input ?? ModelV2.defaultInput(draft.providerID, model.id))],
     output: [...(model.modalities?.output ?? [])],
   }
   draft.variants = []

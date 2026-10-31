@@ -838,6 +838,7 @@ export type GlobalEvent = {
           sessionID: string
           projectID: string
           parentID?: string
+          budgetMode?: "interactive" | "autonomous"
           agent?: string
           model?: ModelRef
           location: LocationRef
@@ -885,7 +886,8 @@ export type GlobalEvent = {
           sessionID: string
           title?: string
           archived?: boolean
-          budget?: SessionOutcomeBudget
+          budget?: SessionOutcomeBudgetUpdate
+          budgetUpdate?: "patch"
         }
       }
     | {
@@ -3447,9 +3449,9 @@ export type LocationRef = {
   workspaceID?: string
 }
 
-export type SessionOutcomeBudget = {
-  tokens?: number
-  durationMs?: number
+export type SessionOutcomeBudgetUpdate = {
+  tokens?: number | null
+  durationMs?: number | null
 }
 
 export type SessionOutcomeExecutionContract = {
@@ -4140,6 +4142,7 @@ export type SyncEventSessionNextCreated = {
       sessionID: string
       projectID: string
       parentID?: string
+      budgetMode?: "interactive" | "autonomous"
       agent?: string
       model?: ModelRef
       location: LocationRef
@@ -4215,7 +4218,8 @@ export type SyncEventSessionNextUpdated = {
       sessionID: string
       title?: string
       archived?: boolean
-      budget?: SessionOutcomeBudget
+      budget?: SessionOutcomeBudgetUpdate
+      budgetUpdate?: "patch"
     }
   }
 }
@@ -5883,6 +5887,7 @@ export type SessionNextCreated = {
     sessionID: string
     projectID: string
     parentID?: string
+    budgetMode?: "interactive" | "autonomous"
     agent?: string
     model?: ModelRef
     location: LocationRef
@@ -5970,7 +5975,8 @@ export type SessionNextUpdated = {
     sessionID: string
     title?: string
     archived?: boolean
-    budget?: SessionOutcomeBudget
+    budget?: SessionOutcomeBudgetUpdate
+    budgetUpdate?: "patch"
   }
 }
 
@@ -6626,7 +6632,7 @@ export type SessionNextRevertCommitted = {
   }
 }
 
-export type SessionOutcomeExecutionRecord3 = {
+export type SessionOutcomeExecutionRecord5 = {
   scope: {
     cwd: string
     command: string
@@ -6643,7 +6649,7 @@ export type SessionOutcomeExecutionRecord3 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeExecutionRecord4 = {
+export type SessionOutcomeExecutionRecord6 = {
   scope: {
     cwd: string
     command: string
@@ -6660,8 +6666,8 @@ export type SessionOutcomeExecutionRecord4 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeCheck1 = {
-  executionRecord?: SessionOutcomeExecutionRecord4
+export type SessionOutcomeCheck2 = {
+  executionRecord?: SessionOutcomeExecutionRecord6
   resultDigest?: string
   sample?: {
     id: string
@@ -6689,7 +6695,7 @@ export type SessionOutcomeCheck1 = {
   contractDigest?: string
 }
 
-export type SessionOutcomeTermination3 = {
+export type SessionOutcomeTermination5 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -6711,7 +6717,7 @@ export type SessionOutcomeTermination3 = {
   source?: "user" | "permission" | "process-exit" | "placement-change"
 }
 
-export type SessionOutcomeTermination4 = {
+export type SessionOutcomeTermination6 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -6797,6 +6803,11 @@ export type SessionOutcomeInfo = {
   missing: Array<string>
   review?: SessionOutcomeReview
   messageID?: string
+}
+
+export type SessionOutcomeBudget = {
+  tokens?: number
+  durationMs?: number
 }
 
 export type SessionOutcomeBudgetStatus = {
@@ -9162,6 +9173,7 @@ export type EventSessionNextCreated = {
     sessionID: string
     projectID: string
     parentID?: string
+    budgetMode?: "interactive" | "autonomous"
     agent?: string
     model?: ModelRef
     location: LocationRef
@@ -9213,7 +9225,8 @@ export type EventSessionNextUpdated = {
     sessionID: string
     title?: string
     archived?: boolean
-    budget?: SessionOutcomeBudget
+    budget?: SessionOutcomeBudgetUpdate
+    budgetUpdate?: "patch"
   }
 }
 
@@ -9297,7 +9310,7 @@ export type EventSessionNextShellStarted = {
   }
 }
 
-export type SessionOutcomeExecutionRecord5 = {
+export type SessionOutcomeExecutionRecord7 = {
   scope: {
     cwd: string
     command: string
@@ -9314,7 +9327,7 @@ export type SessionOutcomeExecutionRecord5 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeExecutionRecord6 = {
+export type SessionOutcomeExecutionRecord8 = {
   scope: {
     cwd: string
     command: string
@@ -9331,8 +9344,8 @@ export type SessionOutcomeExecutionRecord6 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeCheck2 = {
-  executionRecord?: SessionOutcomeExecutionRecord6
+export type SessionOutcomeCheck3 = {
+  executionRecord?: SessionOutcomeExecutionRecord8
   resultDigest?: string
   sample?: {
     id: string
@@ -9368,8 +9381,8 @@ export type EventSessionNextShellEnded = {
     sessionID: string
     callID: string
     output: string
-    executionRecord?: SessionOutcomeExecutionRecord5
-    checks?: Array<SessionOutcomeCheck2>
+    executionRecord?: SessionOutcomeExecutionRecord7
+    checks?: Array<SessionOutcomeCheck3>
   }
 }
 
@@ -9390,7 +9403,7 @@ export type EventSessionNextStepStarted = {
   }
 }
 
-export type SessionOutcomeTermination6 = {
+export type SessionOutcomeTermination8 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -9420,7 +9433,7 @@ export type EventSessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
-    termination?: SessionOutcomeTermination6
+    termination?: SessionOutcomeTermination8
     error?: SessionErrorUnknown
     cost: number
     usageReported?: boolean
@@ -9439,7 +9452,7 @@ export type EventSessionNextStepEnded = {
   }
 }
 
-export type SessionOutcomeTermination7 = {
+export type SessionOutcomeTermination9 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -9469,7 +9482,7 @@ export type EventSessionNextStepFailed = {
     sessionID: string
     assistantMessageID: string
     error: SessionErrorUnknown
-    termination?: SessionOutcomeTermination7
+    termination?: SessionOutcomeTermination9
   }
 }
 
@@ -13509,7 +13522,7 @@ export type V2SessionUpdateData = {
   body: {
     title?: string
     archived?: boolean
-    budget?: SessionOutcomeBudget
+    budget?: SessionOutcomeBudgetUpdate
   }
   path: {
     sessionID: string

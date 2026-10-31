@@ -439,6 +439,14 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
                         error={m.err.name}
                       />
                     </div>
+                    <label class="mt-2 flex items-center gap-1 text-12-regular">
+                      <input
+                        type="checkbox"
+                        checked={m.images ?? false}
+                        onChange={(event) => setForm("models", i(), "images", event.currentTarget.checked)}
+                      />
+                      {language.t("provider.custom.models.images")}
+                    </label>
                     <IconButton
                       type="button"
                       icon="trash"

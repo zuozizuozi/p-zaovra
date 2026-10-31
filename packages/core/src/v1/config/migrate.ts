@@ -1,5 +1,6 @@
 export * as ConfigMigrateV1 from "./migrate"
 
+import { ModelV2 } from "../../model"
 import { ConfigV1 } from "./config"
 import { ConfigAgentV1 } from "./agent"
 import { ConfigMCPV1 } from "./mcp"
@@ -170,10 +171,10 @@ function migrateMcp(info: ConfigMCPV1.Info) {
 
 function providers(info?: Readonly<Record<string, ConfigProviderV1.Info>>) {
   if (!info) return undefined
-  return Object.fromEntries(Object.entries(info).map(([name, provider]) => [name, migrateProvider(provider)]))
+  return Object.fromEntries(Object.entries(info).map(([name, provider]) => [name, migrateProvider(provider, name)]))
 }
 
-function migrateProvider(info: ConfigProviderV1.Info) {
+function migrateProvider(info: ConfigProviderV1.Info, providerID: string) {
   const lowerer = ConfigProviderOptionsV1.get(info.npm)
   const options = lowerer.provider(info.options ?? {})
   const url = info.api ?? options.url
@@ -195,11 +196,18 @@ function migrateProvider(info: ConfigProviderV1.Info) {
     request: info.options && { headers: options.headers, body: options.body },
     models:
       info.models &&
-      Object.fromEntries(Object.entries(info.models).map(([name, model]) => [name, migrateModel(model, info.npm)])),
+      Object.fromEntries(
+        Object.entries(info.models).map(([name, model]) => [name, migrateModel(model, info.npm, providerID, name)]),
+      ),
   }
 }
 
-function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: string) {
+function migrateModel(
+  info: typeof ConfigProviderV1.Model.Type,
+  packageName: string | undefined,
+  providerID: string,
+  modelID: string,
+) {
   const packageID = info.provider?.npm ?? packageName
   const lowerer = ConfigProviderOptionsV1.get(packageID)
   const request = info.options && lowerer.request(info.options)
@@ -224,7 +232,9 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: st
     info.tool_call !== undefined || info.modalities?.input !== undefined || info.modalities?.output !== undefined
       ? {
           tools: info.tool_call ?? false,
-          input: info.modalities?.input ?? ["text"],
+          input:
+            info.modalities?.input ??
+            (ModelV2.defaultInput(providerID, modelID).length ? ModelV2.defaultInput(providerID, modelID) : ["text"]),
           output: info.modalities?.output ?? ["text"],
         }
       : undefined

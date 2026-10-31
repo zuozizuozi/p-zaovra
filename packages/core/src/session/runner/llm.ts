@@ -1,5 +1,7 @@
 import path from "node:path"
 import { createHash } from "node:crypto"
+import { Global } from "../../global"
+import { PreviewProcess } from "../../preview-process"
 import { BackgroundJob } from "../../background-job"
 import { EventTable } from "../../event/sql"
 import { SessionBudget } from "../budget"
@@ -141,6 +143,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const backgroundJobs = yield* BackgroundJob.Service
+    const global = yield* Global.Service
     const llm = yield* LLMClient.Service
     const agents = yield* AgentV2.Service
     const tools = yield* ToolRegistry.Service
@@ -197,8 +200,16 @@ const layer = Layer.effect(
         snapshot,
         targets,
         required,
-        new Set(
-          background.filter((job) => job.type === "bash" && job.metadata?.kind === "preview").map((job) => job.id),
+        yield* Effect.promise(() =>
+          PreviewProcess.live(
+            global.data,
+            sessionID,
+            location.directory,
+            location.workspaceID,
+            new Set(
+              background.filter((job) => job.type === "bash" && job.metadata?.kind === "preview").map((job) => job.id),
+            ),
+          ),
         ),
         location.directory,
         artifacts,
@@ -311,12 +322,14 @@ const layer = Layer.effect(
       yield* Effect.forEach(
         (yield* backgroundJobs.list()).filter(
           (job) =>
-            job.metadata?.sessionID === session.id && job.metadata.kind !== "preview" && job.status === "running",
+            job.metadata?.sessionID === session.id &&
+            job.status === "running" &&
+            (job.type !== "bash" || job.metadata?.kind !== "preview"),
         ),
         (job) => backgroundJobs.cancel(job.id),
         { discard: true },
       )
-      const message = `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}可在会话界面提高或移除预算后直接继续，无需重启；这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
+      const message = `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}需要明确续授：可在会话界面提高或移除预算后直接继续，无需重启；已保留成果和未完成事项，这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
       const context = yield* getContext(session.id)
       const last = context.at(-1)
       if (last?.type !== "assistant" || last.finish !== "stopped" || last.termination?.category !== "budget") {
@@ -503,7 +516,12 @@ const layer = Layer.effect(
         step?: number
         operations: Map<
           string,
-          { id: string; status: "dispatched" | "settled" | "unknown"; settlement?: ToolRegistry.Settlement }
+          {
+            id: string
+            status: "dispatched" | "settled" | "unknown"
+            effects?: "reported" | "uncertain"
+            settlement?: ToolRegistry.Settlement
+          }
         >
       },
     ) {
@@ -546,7 +564,12 @@ const layer = Layer.effect(
         string,
         {
           fingerprint: string
-          operation: { id: string; status: "dispatched" | "settled" | "unknown"; settlement?: ToolRegistry.Settlement }
+          operation: {
+            id: string
+            status: "dispatched" | "settled" | "unknown"
+            effects?: "reported" | "uncertain"
+            settlement?: ToolRegistry.Settlement
+          }
         }
       >()
       const hostedOperations = new Map<string, { id: string; fingerprint: string }>()
@@ -961,13 +984,14 @@ const layer = Layer.effect(
         fingerprint: string,
         status: "dispatched" | "settled" | "unknown",
         callID: string,
+        effects: "reported" | "uncertain" = "uncertain",
       ) =>
         Effect.gen(function* () {
           yield* events.publish(SessionEvent.QualityProgress, {
             sessionID: session.id,
             timestamp: yield* DateTime.now,
             category: "operation",
-            details: { operationID, fingerprint, status, callID, sourceMessageID: operationSource ?? null },
+            details: { operationID, fingerprint, status, effects, callID, sourceMessageID: operationSource ?? null },
           })
         })
       if (
@@ -1284,8 +1308,11 @@ const layer = Layer.effect(
                             )
                             const active = activeOperations.get(event.id)
                             if (active) {
+                              // A returned tool response is settled even when it reports uncertain
+                              // effects. Preserve that error for inspection; do not replay the operation.
                               const structured = settlement.output?.structured
-                              active.operation.status =
+                              active.operation.effects =
+                                settlement.result.type === "error" ||
                                 [
                                   "partial-application",
                                   "target-changed",
@@ -1297,13 +1324,15 @@ const layer = Layer.effect(
                                   typeof structured === "object" &&
                                   (("timeout" in structured && structured.timeout === true) ||
                                     ("reason" in structured && structured.reason === "cancelled")))
-                                  ? "unknown"
-                                  : "settled"
+                                  ? "uncertain"
+                                  : "reported"
+                              active.operation.status = "settled"
                               yield* recordOperation(
                                 active.operation.id,
                                 active.fingerprint,
                                 active.operation.status,
                                 event.id,
+                                active.operation.effects,
                               )
                               active.operation.settlement = settlement
                             }
@@ -1503,12 +1532,6 @@ const layer = Layer.effect(
               publisher.failAssistant("工具效果不确定，请核对现场后继续。", { category: "Internal" }),
             )
             return yield* Effect.failCause(settled.cause)
-          }
-          if ([...activeOperations.values()].some((active) => active.operation.status !== "settled")) {
-            yield* withPublication(
-              publisher.failAssistant("工具效果不确定，请核对现场后继续。", { category: "Internal" }),
-            )
-            return yield* Effect.die("工具效果不确定，请核对现场后继续。")
           }
           if (hostedOperations.size && publisher.stepSettlement()) {
             const message = "工具效果不确定，已停止自动恢复；请核对现场后继续。"
@@ -2245,7 +2268,12 @@ const layer = Layer.effect(
         repeated: 0,
         operations: new Map<
           string,
-          { id: string; status: "dispatched" | "settled" | "unknown"; settlement?: ToolRegistry.Settlement }
+          {
+            id: string
+            status: "dispatched" | "settled" | "unknown"
+            effects?: "reported" | "uncertain"
+            settlement?: ToolRegistry.Settlement
+          }
         >(),
       }
       const recordRecovery = (phase: string, details: Record<string, string | number | boolean>) =>
@@ -2514,7 +2542,7 @@ const layer = Layer.effect(
             const pending = (yield* backgroundJobs.list()).filter(
               (job) =>
                 job.metadata?.sessionID === input.sessionID &&
-                job.metadata.kind !== "preview" &&
+                (job.type !== "bash" || job.metadata?.kind !== "preview") &&
                 job.status === "running",
             )
             if (pending.length) {
@@ -2619,7 +2647,7 @@ const layer = Layer.effect(
           (yield* backgroundJobs.list()).some(
             (job) =>
               job.metadata?.sessionID === input.sessionID &&
-              job.metadata.kind !== "preview" &&
+              (job.type !== "bash" || job.metadata?.kind !== "preview") &&
               job.status === "running",
           )
         ) {
@@ -2636,7 +2664,7 @@ const layer = Layer.effect(
               !(yield* backgroundJobs.list()).some(
                 (job) =>
                   job.metadata?.sessionID === input.sessionID &&
-                  job.metadata.kind !== "preview" &&
+                  (job.type !== "bash" || job.metadata?.kind !== "preview") &&
                   job.status === "running",
               )
             )
@@ -2683,6 +2711,7 @@ export const node = makeLocationNode({
   deps: [
     EventV2.node,
     BackgroundJob.node,
+    Global.node,
     llmClient,
     AgentV2.node,
     ToolRegistry.node,

@@ -37,7 +37,7 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   session_token_budget: Schema.NullOr(PositiveInt).pipe(Schema.optional).annotate({
     description:
-      "Cumulative reported token limit per session (default 30000000; null explicitly disables), including cache and compaction. Unreported in-flight usage may exceed it. Not a monetary or cross-session budget. Session budget updates replace these defaults without restarting.",
+      "Cumulative reported token limit per session (ordinary interaction defaults to no token ceiling; delegated/WorkGraph Sessions default to 30000000; null explicitly disables), including cache and compaction. Unreported in-flight usage may exceed it. Not a monetary or cross-session budget. Session budget updates replace these defaults without restarting.",
   }),
   session_duration_ms: Schema.NullOr(PositiveInt).pipe(Schema.optional).annotate({
     description:
