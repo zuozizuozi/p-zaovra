@@ -1,0 +1,73 @@
+export * as PreviewNative from "./preview-native.node"
+
+import { execFile } from "node:child_process"
+import { writeFile } from "node:fs/promises"
+import { scheduler } from "node:timers/promises"
+import { PreviewWindows } from "./preview-windows"
+
+const quote = (value: string) => `'${value.replaceAll("'", "''")}'`
+
+function powershell(script: string, directory?: string, env?: NodeJS.ProcessEnv) {
+  return new Promise<string>((resolve, reject) => {
+    execFile(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { cwd: directory, env, windowsHide: true, encoding: "utf8", maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve(stdout.trim())),
+    )
+  })
+}
+
+export async function windowsProcess(pid: number, stop?: string) {
+  const identity = await powershell(
+    `$ErrorActionPreference='Stop'; ${PreviewWindows.script}
+$handle=[PreviewNative]::OpenProcess(${0x101000} -bor ${stop ? 1 : 0},$false,${pid})
+if($handle -eq [IntPtr]::Zero){exit 0}
+$created=Native-Buffer 8; $exited=Native-Buffer 8; $kernel=Native-Buffer 8; $user=Native-Buffer 8
+try {
+ if([PreviewNative]::WaitForSingleObject($handle,0) -ne 258){exit 0}
+ if(![PreviewNative]::GetProcessTimes($handle,$created,$exited,$kernel,$user)){Native-Error}
+ $identity=[string][Runtime.InteropServices.Marshal]::ReadInt64($created)
+ ${stop ? `if($identity -eq ${quote(stop)}) { if(![PreviewNative]::TerminateProcess($handle,143) -or [PreviewNative]::WaitForSingleObject($handle,5000) -ne 0){throw 'Owned preview cancellation did not complete'} }` : ""}
+ [Console]::Write($identity)
+} finally {
+ $null=[PreviewNative]::CloseHandle($handle)
+ foreach($buffer in @($created,$exited,$kernel,$user)){[Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)}
+}`,
+  )
+  return identity || undefined
+}
+
+export async function launchWindows(line: string, directory: string, env?: NodeJS.ProcessEnv) {
+  const output = await powershell(
+    `$ErrorActionPreference='Stop'; ${PreviewWindows.script}
+[Console]::Write([string](Native-Launch ${quote(line)} ${quote(directory)} $true 0 ''))`,
+    directory,
+    env,
+  )
+  const pid = Number(output)
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Independent preview supervisor did not return a PID")
+  return pid
+}
+
+export async function cancelLinux(
+  _pid: number,
+  expected: string,
+  request: string,
+  verify: () => Promise<string | undefined>,
+) {
+  // The owned supervisor compares this to its own boot/start identity, then
+  // signals its own group. No Node-side PID lookup/signalling race is possible.
+  await writeFile(request, expected, { mode: 0o600 })
+  for (let count = 0; count < 100; count++) {
+    if ((await verify()) !== expected) return
+    await scheduler.wait(20)
+  }
+  throw new Error("Owned preview supervisor did not acknowledge cancellation")
+}

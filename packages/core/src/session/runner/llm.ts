@@ -1320,25 +1320,30 @@ const layer = Layer.effect(
                             )
                             const active = activeOperations.get(event.id)
                             if (active) {
-                              // A returned tool response is settled even when it reports uncertain
-                              // effects. Preserve that error for inspection; do not replay the operation.
+                              // Local responses may be inspected without replay. A returned remote
+                              // response does not reconcile an action whose external effects are unknown.
                               const structured = settlement.output?.structured
                               active.operation.effects =
-                                settlement.result.type === "error" ||
-                                [
-                                  "partial-application",
-                                  "target-changed",
-                                  "timeout",
-                                  "cancelled",
-                                  "output-unconfirmed",
-                                ].includes(settlement.errorMetadata?.reason ?? "") ||
-                                (structured !== null &&
-                                  typeof structured === "object" &&
-                                  (("timeout" in structured && structured.timeout === true) ||
-                                    ("reason" in structured && structured.reason === "cancelled")))
+                                !settlement.inputRejected &&
+                                (settlement.result.type === "error" ||
+                                  [
+                                    "partial-application",
+                                    "target-changed",
+                                    "timeout",
+                                    "cancelled",
+                                    "output-unconfirmed",
+                                  ].includes(settlement.errorMetadata?.reason ?? "") ||
+                                  (structured !== null &&
+                                    typeof structured === "object" &&
+                                    (("timeout" in structured && structured.timeout === true) ||
+                                      ("reason" in structured && structured.reason === "cancelled"))))
                                   ? "uncertain"
                                   : "reported"
-                              active.operation.status = "settled"
+                              active.operation.status =
+                                active.operation.effects === "uncertain" &&
+                                toolMaterialization.effectLocation?.(event) === "remote"
+                                  ? "unknown"
+                                  : "settled"
                               yield* recordOperation(
                                 active.operation.id,
                                 active.fingerprint,
@@ -1544,6 +1549,12 @@ const layer = Layer.effect(
               publisher.failAssistant("工具效果不确定，请核对现场后继续。", { category: "Internal" }),
             )
             return yield* Effect.failCause(settled.cause)
+          }
+          if ([...activeOperations.values()].some((active) => active.operation.status !== "settled")) {
+            yield* withPublication(
+              publisher.failAssistant("工具效果不确定，请核对现场后继续。", { category: "Internal" }),
+            )
+            return yield* Effect.die("工具效果不确定，请核对现场后继续。")
           }
           if (hostedOperations.size && publisher.stepSettlement()) {
             const message = "工具效果不确定，已停止自动恢复；请核对现场后继续。"

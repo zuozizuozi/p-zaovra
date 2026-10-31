@@ -513,6 +513,7 @@ function canonicalTool(
         : `${dialect}#`,
   }
   return Tool.make({
+    effectLocation: "remote",
     description: definition.description ?? `Call ${definition.name} on an MCP server`,
     input: Schema.Record(Schema.String, Schema.Unknown),
     inputJsonSchema: definition.inputSchema,
@@ -601,6 +602,7 @@ function registerCatalogTools(
 
   return tools.register({
     list_mcp_resources: Tool.make({
+      effectLocation: "remote",
       description: "List resources exposed by connected MCP servers.",
       input: ListServerInput,
       output: Schema.String,
@@ -632,6 +634,7 @@ function registerCatalogTools(
         }).pipe(Effect.mapError(toolFailure)),
     }),
     list_mcp_resource_templates: Tool.make({
+      effectLocation: "remote",
       description: "List resource templates exposed by connected MCP servers.",
       input: ListServerInput,
       output: Schema.String,
@@ -663,6 +666,7 @@ function registerCatalogTools(
         }).pipe(Effect.mapError(toolFailure)),
     }),
     read_mcp_resource: Tool.make({
+      effectLocation: "remote",
       description: "Read a resource from a connected MCP server using its exact URI.",
       input: ReadResourceInput,
       output: Schema.String,
@@ -679,6 +683,7 @@ function registerCatalogTools(
         }),
     }),
     list_mcp_prompts: Tool.make({
+      effectLocation: "remote",
       description: "List reusable prompts exposed by connected MCP servers.",
       input: ListServerInput,
       output: Schema.String,
@@ -710,6 +715,7 @@ function registerCatalogTools(
         }).pipe(Effect.mapError(toolFailure)),
     }),
     get_mcp_prompt: Tool.make({
+      effectLocation: "remote",
       description: "Render one reusable prompt from a connected MCP server.",
       input: GetPromptInput,
       output: Schema.String,

@@ -28,6 +28,7 @@ export interface Materialization {
   readonly custom?: ReadonlyArray<string>
   readonly definitions: ReadonlyArray<ToolDefinition>
   readonly observation?: (call: ToolCall) => boolean
+  readonly effectLocation?: (call: ToolCall) => "local" | "remote"
   readonly settle: (input: ExecuteInput) => Effect.Effect<Settlement, ToolOutputStore.Error>
 }
 
@@ -196,6 +197,10 @@ const registryLayer = Layer.effect(
           }
         return {
           custom: Array.from(applications.entries().keys()),
+          effectLocation: (call) => {
+            const registration = registrations.get(call.name)
+            return registration ? Tool.effectLocation(registration.tool, call.name) : "remote"
+          },
           observation: (call) => {
             const registration = registrations.get(call.name)
             return registration !== undefined && Tool.observation(registration.tool, call.input)

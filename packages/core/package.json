@@ -38,6 +38,11 @@
       "bun": "./src/filesystem/fff.bun.ts",
       "node": "./src/filesystem/fff.node.ts",
       "default": "./src/filesystem/fff.bun.ts"
+    },
+    "#preview-native": {
+      "bun": "./src/preview-native.bun.ts",
+      "node": "./src/preview-native.node.ts",
+      "default": "./src/preview-native.node.ts"
     }
   },
   "devDependencies": {

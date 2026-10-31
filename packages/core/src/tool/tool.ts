@@ -48,6 +48,8 @@ type Config<
   readonly description: string
   /** Trusted capability: fresh observations may be repeated during network recovery. */
   readonly observation?: boolean | ((input: Schema.Schema.Type<Input>) => boolean)
+  /** Trusted execution boundary; returned remote failures still require reconciliation. */
+  readonly effectLocation?: "local" | "remote"
   readonly input: Input
   /** External producers such as MCP may override only the model-facing schema. Runtime input still crosses this Tool's canonical input codec. */
   readonly inputJsonSchema?: ToolDefinition["inputSchema"]
@@ -69,6 +71,7 @@ type Config<
 
 type Runtime = {
   readonly permission?: string
+  readonly effectLocation?: "local" | "remote"
   readonly observation: (input: unknown) => boolean
   readonly definition: (name: string) => ToolDefinition
   readonly settle: (call: ToolCall, context: Context) => Effect.Effect<ToolOutput, ToolFailure>
@@ -84,6 +87,7 @@ export function make<
   const tool = Object.freeze({}) as Definition<Input, Structured>
   const definitions = new Map<string, ToolDefinition>()
   runtimes.set(tool, {
+    effectLocation: config.effectLocation,
     observation: (input) => {
       if (typeof config.observation !== "function") return config.observation ?? false
       const decoded = Schema.decodeUnknownOption(config.input)(input)
@@ -164,6 +168,8 @@ export const withPermission = <Input extends SchemaType<any>, Output extends Sch
 export const permission = (tool: AnyTool, name: string) => runtimeOf(tool).permission ?? name
 export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
 export const observation = (tool: AnyTool, input: unknown) => runtimeOf(tool).observation(input)
+export const effectLocation = (tool: AnyTool, name: string) =>
+  runtimeOf(tool).effectLocation ?? (name === "browser" ? "remote" : "local")
 export const settle = (tool: AnyTool, call: ToolCall, context: Context) => runtimeOf(tool).settle(call, context)
 
 function runtimeOf(tool: AnyTool) {

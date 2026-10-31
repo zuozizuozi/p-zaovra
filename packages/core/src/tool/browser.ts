@@ -295,6 +295,7 @@ const layer = Layer.effect(
     yield* tools
       .register({
         browser: Tool.make({
+          effectLocation: "remote",
           observation: (input) =>
             input.action === "snapshot" || input.action === "screenshot" || input.action === "console",
           description:
