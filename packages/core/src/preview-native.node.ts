@@ -46,16 +46,24 @@ try {
   return identity || undefined
 }
 
-export async function launchWindows(line: string, directory: string, env?: NodeJS.ProcessEnv) {
+export async function launchWindows(
+  line: string,
+  directory: string,
+  env?: NodeJS.ProcessEnv,
+  admission?: { file: string; timeout: number },
+): Promise<{ pid: number; admittedBirth?: string }> {
   const output = await powershell(
     `$ErrorActionPreference='Stop'; ${PreviewWindows.script}
-[Console]::Write([string](Native-Launch ${quote(line)} ${quote(directory)} $true 0 ''))`,
+[Console]::Write([string](Native-Launch ${quote(line)} ${quote(directory)} $true 0 ''${admission ? ` ${quote(admission.file)} ${admission.timeout}` : ""}))`,
     directory,
     env,
   )
-  const pid = Number(output)
+  const parts = output.split("|")
+  const pid = Number(parts[0])
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Independent preview supervisor did not return a PID")
-  return pid
+  if (admission && (parts.length !== 2 || !/^\d+$/.test(parts[1] ?? "")))
+    throw new Error("Independent preview supervisor did not verify its creation handle")
+  return { pid, ...(parts[1] ? { admittedBirth: parts[1] } : {}) }
 }
 
 export async function cancelLinux(

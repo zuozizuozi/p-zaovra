@@ -27,7 +27,7 @@ Import-Native GetLastError ([uint32]) @()
 $null=$type.CreateType()
 function Native-Error { throw [ComponentModel.Win32Exception]::new([int][PreviewNative]::GetLastError()) }
 function Native-Buffer([int]$size) { $memory=[Runtime.InteropServices.Marshal]::AllocHGlobal($size); [Runtime.InteropServices.Marshal]::Copy([byte[]]::new($size),0,$memory,$size); return $memory }
-function Native-Launch([string]$line,[string]$directory,[bool]$independent,[int]$deadline,[string]$log) {
+function Native-Launch([string]$line,[string]$directory,[bool]$independent,[int]$deadline,[string]$log,[string]$admission='',[int]$admissionTimeout=5000) {
  if([IntPtr]::Size -ne 8){throw 'Persistent previews require 64-bit Windows'}
  $si=Native-Buffer 104; $pi=Native-Buffer 24; $limits=Native-Buffer 144; $sa=Native-Buffer 24
  $processHandle=[IntPtr]::Zero; $thread=[IntPtr]::Zero; $job=[IntPtr]::Zero; $outputHandle=[IntPtr]::Zero; $inputHandle=[IntPtr]::Zero
@@ -53,7 +53,18 @@ function Native-Launch([string]$line,[string]$directory,[bool]$independent,[int]
   $processHandle=[Runtime.InteropServices.Marshal]::ReadIntPtr($pi,0); $thread=[Runtime.InteropServices.Marshal]::ReadIntPtr($pi,8); $processID=[Runtime.InteropServices.Marshal]::ReadInt32($pi,16)
   $clock=[Diagnostics.Stopwatch]::StartNew()
   $null=[PreviewNative]::ResumeThread($thread)
-  if($independent){return $processID}
+  if($independent){
+   if($admission){
+    while(![IO.File]::Exists($admission)){
+     if($clock.ElapsedMilliseconds -ge $admissionTimeout -or [PreviewNative]::WaitForSingleObject($processHandle,0) -ne 258){throw 'Preview supervisor did not publish its owner; never retry automatically'}
+     [Threading.Thread]::Sleep(20)
+    }
+    if(![PreviewNative]::GetProcessTimes($processHandle,$limits,[IntPtr]::Add($limits,8),[IntPtr]::Add($limits,16),[IntPtr]::Add($limits,24))){Native-Error}
+    if([PreviewNative]::WaitForSingleObject($processHandle,0) -ne 258){throw 'Preview supervisor exited before admission'}
+    return ([string]$processID+'|'+[string][Runtime.InteropServices.Marshal]::ReadInt64($limits))
+   }
+   return $processID
+  }
   $wait=[uint32]::MaxValue; if($deadline -gt 0){$wait=[uint32]$deadline}
   if([PreviewNative]::WaitForSingleObject($processHandle,$wait) -eq 258){[IO.File]::WriteAllText([IO.Path]::Combine([IO.Path]::GetDirectoryName($log),'result.json'),'124');$null=[PreviewNative]::TerminateJobObject($job,124); $null=[PreviewNative]::WaitForSingleObject($processHandle,5000);return 124}
   if(![PreviewNative]::GetExitCodeProcess($processHandle,$limits)){Native-Error};$code=[Runtime.InteropServices.Marshal]::ReadInt32($limits)

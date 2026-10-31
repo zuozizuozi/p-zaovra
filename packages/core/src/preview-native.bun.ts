@@ -33,7 +33,12 @@ export async function windowsProcess(pid: number, stop?: string, cancelled?: str
   }
 }
 
-export async function launchWindows(line: string, directory: string, env?: NodeJS.ProcessEnv) {
+export async function launchWindows(
+  line: string,
+  directory: string,
+  env?: NodeJS.ProcessEnv,
+  _admission?: { file: string; timeout: number },
+): Promise<{ pid: number; admittedBirth?: string }> {
   const { dlopen, FFIType, ptr } = await import("bun:ffi")
   const lib = dlopen("kernel32.dll", {
     CreateProcessW: {
@@ -87,7 +92,7 @@ export async function launchWindows(line: string, directory: string, env?: NodeJ
       )
     )
       throw new Error(`Cannot launch independent preview supervisor: Windows ${lib.symbols.GetLastError()}`)
-    return processInfo.readUInt32LE(16)
+    return { pid: processInfo.readUInt32LE(16) }
   } finally {
     for (const offset of [0, 8]) {
       const handle = Number(processInfo.readBigUInt64LE(offset))

@@ -227,7 +227,7 @@ export const run = (
         const args = shell ? (cmd ? ["/d", "/s", "/c", script] : ["-c", script]) : command.args.map(String)
         const env = command.options.extendEnv ? { ...process.env, ...command.options.env } : command.options.env
         const cwd = command.options.cwd ?? owner.directory
-        const pid = await (async () => {
+        const launched: { pid: number; admittedBirth?: string } = await (async () => {
           if (process.platform === "win32") {
             // Invoke exactly the selected executable. Encoding applies only to an
             // already selected PowerShell command, never changes the user's shell.
@@ -259,7 +259,7 @@ export const run = (
             ]
               .map(winquote)
               .join(" ")
-            return PreviewNative.launchWindows(line, cwd, env)
+            return PreviewNative.launchWindows(line, cwd, env, { file: destination, timeout: 5000 })
           }
           if (process.platform !== "linux") throw new Error("Unsupported persistent preview platform")
           const supervisor = path.join(dir, "supervisor.sh")
@@ -337,13 +337,14 @@ exit "$code"
               child.once("error", reject)
             })
             child.unref()
-            return child.pid!
+            return { pid: child.pid! }
           } finally {
             await output.close()
           }
         })()
         const deadline = Date.now() + 5000
         while (
+          !launched.admittedBirth &&
           !(await access(destination).then(
             () => true,
             () => false,
@@ -356,9 +357,15 @@ exit "$code"
           await scheduler.wait(20)
         }
         const record = await load(owner)
-        if (!record || record.pid !== pid || (await birth(pid)) !== record.birth)
+        // Node's launcher holds the original creation handle through owner publication
+        // and checks liveness/FILETIME there. Other backends query fresh birth here.
+        if (
+          !record ||
+          record.pid !== launched.pid ||
+          (launched.admittedBirth ?? (await birth(launched.pid))) !== record.birth
+        )
           throw new Error("Preview owner identity is unavailable; never retry automatically")
-        return pid
+        return launched.pid
       })
       if (onSpawn) yield* onSpawn(pid)
       return yield* restore(
