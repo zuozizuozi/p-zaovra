@@ -8422,8 +8422,9 @@ describe("SessionRunnerLLM", () => {
       yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
       yield* session.update({ sessionID, budget: { durationMs: 1000 } })
       const location = yield* Location.Service
-      const ready = path.join(location.directory, "budget-preview-ready.json")
-      const owner = { root: location.directory, directory: location.directory, sessionID, jobID: "budget-preview" }
+      expect(location.directory).toBe(AbsolutePath.make(directory.path))
+      const ready = path.join(directory.path, "budget-preview-ready.json")
+      const owner = { root: directory.path, directory: location.directory, sessionID, jobID: "budget-preview" }
       yield* Effect.addFinalizer(() => Effect.promise(() => PreviewProcess.cancel(owner)))
       const admitted = yield* Deferred.make<void, unknown>()
       const preview = yield* jobs.start({
