@@ -1,12 +1,12 @@
-export * as ToolProfile from "./profile"
+export * as ToolProfile from "./tool-profile"
 import type { ToolDefinition } from "@zaovra-ai/llm"
 import { and, eq, sql } from "drizzle-orm"
 import { Effect, Option, Schema } from "effect"
 import type { Database } from "../database/database"
-import type { SessionSchema } from "../session/schema"
-import { SessionMessageTable } from "../session/sql"
+import type { SessionSchema } from "./schema"
+import { SessionMessageTable } from "./sql"
 import type { PermissionV2 } from "../permission"
-import type { SessionMessage } from "../session/message"
+import type { SessionMessage } from "./message"
 const deferred = new Set(["edit", "write", "browser", "task", "webfetch", "websearch", "question", "todowrite", "publish_artifact"])
 /** Select advertisements only. Canonical registration, validation and execution stay unchanged. */
 export function select(definitions: readonly ToolDefinition[], input: {

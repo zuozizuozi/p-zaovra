@@ -4,7 +4,7 @@ import { ToolDefinition } from "@zaovra-ai/llm"
 import { SessionMessage } from "../src/session/message"
 import { ProviderV2 } from "../src/provider"
 import { ModelV2 } from "../src/model"
-import { ToolProfile } from "../src/tool/profile"
+import { ToolProfile } from "../src/session/tool-profile"
 import { DeliveryContract } from "../src/session/delivery-contract"
 const definitions = ["apply_patch", "bash", "bash_job", "browser", "edit", "evidence_read", "evidence_search", "glob", "grep", "read", "skill", "task", "tool_search", "verification_review", "webfetch", "websearch", "write", "custom_tool"].map((name) => new ToolDefinition({ name, description: name, inputSchema: { type: "object", properties: { retained: { type: "string" } } }, outputSchema: { type: "object" } }))
 const names = (items: readonly ToolDefinition[]) => items.map((tool) => tool.name)
