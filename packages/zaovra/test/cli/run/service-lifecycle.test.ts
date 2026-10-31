@@ -104,7 +104,7 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
         zaovra.expectExit(result, 0)
         expect(yield* llm.calls).toBe(2)
         const until = Date.now() + 5000
-        while (owner !== "local" && !(yield* Effect.promise(() => Bun.file(identity).exists())) && Date.now() < until)
+        while (!(yield* Effect.promise(() => Bun.file(identity).exists())) && Date.now() < until)
           yield* Effect.sleep("100 millis")
         if (!(yield* Effect.promise(() => Bun.file(identity).exists())))
           throw new Error(`Business service never became ready:\n${result.stdout}\n${result.stderr}`)
