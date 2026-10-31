@@ -2,6 +2,7 @@ export * as BuiltInTools from "./builtins"
 
 import { makeLocationNode } from "../effect/app-node"
 import { Layer } from "effect"
+import { ToolSearch } from "./tool-search"
 import { BashTool } from "./bash"
 import { BrowserTool } from "./browser"
 import { VerificationReviewTool } from "./verification-review"
@@ -36,6 +37,7 @@ export const node = makeLocationNode({
   name: "built-in-tools",
   layer: Layer.empty,
   deps: [
+    ToolSearch.node,
     ApplyPatchTool.node,
     BashTool.node,
     BrowserTool.node,

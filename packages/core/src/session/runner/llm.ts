@@ -52,6 +52,7 @@ import { AccuracyGuidance } from "../../system-context/accuracy"
 import { SkillGuidance } from "../../skill/guidance"
 import { ReferenceGuidance } from "../../reference/guidance"
 import { ToolRegistry } from "../../tool/registry"
+import { ToolProfile } from "../../tool/profile"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
@@ -756,9 +757,20 @@ const layer = Layer.effect(
       }
       const toolMaterialization =
         isLastStep || textOnlyRecovery || deliveryReport ? undefined : yield* tools.materialize(agent.info?.permissions)
-      const deliveryTools = deliveryReview
-        ? (toolMaterialization?.definitions.filter((tool) => DeliveryContract.repairTools.has(tool.name)) ?? [])
-        : (toolMaterialization?.definitions ?? [])
+      const deliveryTools = ToolProfile.select(
+        deliveryReview
+          ? (toolMaterialization?.definitions.filter((tool) => DeliveryContract.repairTools.has(tool.name)) ?? [])
+          : (toolMaterialization?.definitions ?? []),
+        {
+          model: model.id,
+          history: durableHistory,
+          permissions: agent.info?.permissions,
+          custom: toolMaterialization?.custom,
+          recalled: /^gpt-/i.test(model.id) && !deliveryReview && toolMaterialization ? yield* ToolProfile.recalled(db, session.id) : [],
+          explicit: !!agent.info && ("tools" in agent.info.request.body || "tool_choice" in agent.info.request.body),
+          repair: deliveryReview,
+        },
+      )
       let deliveryToolCalls = 0
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id)
         ? session.id.slice(4)

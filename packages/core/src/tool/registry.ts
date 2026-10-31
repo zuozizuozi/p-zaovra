@@ -24,6 +24,8 @@ export interface Interface {
 }
 
 export interface Materialization {
+  /** Explicit application registrations retain their advertised tools in compact profiles. */
+  readonly custom?: ReadonlyArray<string>
   readonly definitions: ReadonlyArray<ToolDefinition>
   readonly observation?: (call: ToolCall) => boolean
   readonly settle: (input: ExecuteInput) => Effect.Effect<Settlement, ToolOutputStore.Error>
@@ -193,6 +195,7 @@ const registryLayer = Layer.effect(
             registrations.delete(name)
           }
         return {
+          custom: Array.from(applications.entries().keys()),
           observation: (call) => {
             const registration = registrations.get(call.name)
             return registration !== undefined && Tool.observation(registration.tool, call.input)
