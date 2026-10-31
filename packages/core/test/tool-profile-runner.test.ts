@@ -9,6 +9,10 @@ import { LayerNodePlatform } from "../src/effect/app-node-platform"
 import { ToolRegistry } from "../src/tool/registry"
 import { ToolSearch } from "../src/tool/tool-search"
 import { Tool } from "../src/tool/tool"
+import { ApplicationTools } from "../src/tool/application-tools"
+import { BrowserTool } from "../src/tool/browser"
+import { Database } from "../src/database/database"
+import { EventTable } from "../src/event/sql"
 import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
 import { SessionRunner } from "../src/session/runner/index"
@@ -27,10 +31,12 @@ import { tempLocationLayer } from "./fixture/location"
 import { testEffect } from "./lib/effect"
 const requests: LLMRequest[] = []
 const executed: string[] = []
+let scripted: LLMEvent[][] | undefined
 const model = Model.make({ id: "gpt-6-luna", provider: "offline", route })
 const client = Layer.mock(LLMClient.Service, {
   stream: (request: LLMRequest) => {
     requests.push(request)
+    if (scripted) return Stream.fromIterable(scripted.shift() ?? [])
     const call =
       requests.length === 1
         ? { id: "discover", name: "tool_search", input: { names: ["browser"] } }
@@ -139,6 +145,8 @@ const it = testEffect(
       node,
       ToolSearch.node,
       ToolRegistry.node,
+      ApplicationTools.node,
+      Database.node,
       leaves,
       Location.node,
     ]),
@@ -147,6 +155,7 @@ const it = testEffect(
 )
 it.live("GPT runner persists discovery, advertises it next turn and keeps it on explicit continuation", () =>
   Effect.gen(function* () {
+    scripted = undefined
     requests.length = 0
     executed.length = 0
     const sessions = yield* SessionV2.Service
@@ -178,3 +187,122 @@ it.live("GPT runner persists discovery, advertises it next turn and keeps it on 
     expect(executed).toEqual(["browser"])
   }),
 )
+
+for (const partial of [false, true])
+  it.live(
+    `481 discovery preserves custom tools and local recovery before remote ${partial ? "partial" : "unknown"} gate`,
+    () =>
+      Effect.gen(function* () {
+        requests.length = 0
+        executed.length = 0
+        const sessions = yield* SessionV2.Service
+        const location = yield* Location.Service
+        const applications = yield* ApplicationTools.Service
+        const registry = yield* ToolRegistry.Service
+        const database = yield* Database.Service
+        const inspection = Tool.make({
+          description: "Application inspection of a retained local error",
+          effectLocation: "local",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          execute: () =>
+            Effect.sync(() => {
+              executed.push("inspect")
+              return "retained local error inspected without repeating the edit"
+            }),
+        })
+        yield* applications.register({ write: inspection })
+        yield* registry.register({
+          write: inspection,
+          edit: Tool.make({
+            description: "Local edit with a returned partial result",
+            effectLocation: "local",
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () =>
+              Effect.sync(() => executed.push("edit")).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new Tool.Failure({
+                      message: "Local partial result; inspect before another edit.",
+                      metadata: { phase: "mutation", reason: "partial-application" },
+                    }),
+                  ),
+                ),
+              ),
+          }),
+          browser: Tool.make({
+            description: "Remote action with an unconfirmed observation",
+            effectLocation: "remote",
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () =>
+              Effect.sync(() => executed.push("browser")).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    BrowserTool.failure(
+                      "remote observation lost",
+                      !partial,
+                      partial ? [{ status: "executed" }, { status: "not_executed" }] : [],
+                    ),
+                  ),
+                ),
+              ),
+          }),
+        })
+        const call = (id: string, name: string, input: Record<string, unknown> = {}) => [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id, name, input }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ]
+        scripted = [
+          call("481-discover", "tool_search", { names: ["edit", "browser"] }),
+          call("481-local", "edit"),
+          call("481-inspect", "write"),
+          call("481-remote", "browser"),
+          call("481-new-call-id", "browser"),
+        ]
+        const session = yield* sessions.create({ location: { directory: location.directory } })
+        yield* sessions.prompt({ sessionID: session.id, prompt: { text: "Inspect the fixture once." }, resume: false })
+        expect((yield* sessions.resume(session.id).pipe(Effect.exit))._tag).toBe("Failure")
+        expect(requests).toHaveLength(4)
+        expect(requests[0]!.tools.map((tool) => tool.name)).toContain("write")
+        expect(requests[0]!.tools.map((tool) => tool.name)).not.toContain("edit")
+        expect(requests[0]!.tools.map((tool) => tool.name)).not.toContain("browser")
+        expect(requests[1]!.tools.map((tool) => tool.name)).toEqual(
+          expect.arrayContaining(["edit", "browser", "write"]),
+        )
+        expect(JSON.stringify(requests[2]!.messages)).toContain("Local partial result")
+        expect(executed).toEqual(["edit", "inspect", "browser"])
+        const ledger = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+        expect(
+          ledger.some(
+            (row) =>
+              row.data.category === "operation" &&
+              (row.data.details as Record<string, unknown>).callID === "481-local" &&
+              (row.data.details as Record<string, unknown>).status === "settled",
+          ),
+        ).toBe(true)
+        expect(
+          ledger.some(
+            (row) =>
+              row.data.category === "operation" &&
+              (row.data.details as Record<string, unknown>).callID === "481-remote" &&
+              (row.data.details as Record<string, unknown>).status === "unknown",
+          ),
+        ).toBe(true)
+        expect(
+          (yield* sessions.context(session.id)).flatMap((message) =>
+            message.type === "assistant"
+              ? message.content.filter((part) => part.type === "tool" && part.name === "tool_search")
+              : [],
+          ),
+        ).toMatchObject([{ state: { status: "completed", structured: { activated: ["browser", "edit"] } } }])
+        yield* sessions.prompt({ sessionID: session.id, prompt: { text: "continue" }, resume: false })
+        yield* sessions.resume(session.id)
+        expect(requests).toHaveLength(4)
+        expect(executed).toEqual(["edit", "inspect", "browser"])
+        expect(scripted).toHaveLength(1)
+      }),
+  )
