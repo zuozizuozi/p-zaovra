@@ -8421,7 +8421,6 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Wait within budget" }), resume: false })
       yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created))
       yield* session.update({ sessionID, budget: { durationMs: 1000 } })
-      const task = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
       const location = yield* Location.Service
       const ready = path.join(location.directory, "budget-preview-ready.json")
       const owner = { root: location.directory, directory: location.directory, sessionID, jobID: "budget-preview" }
@@ -8454,6 +8453,15 @@ describe("SessionRunnerLLM", () => {
         }
       })
       const service = yield* Effect.promise(() => Bun.file(ready).json() as Promise<{ port: number }>)
+      verificationEnabled = false
+      response = fragmentFixture("text", "preview-delivered", ["The preview service is delivered."]).completeEvents
+      yield* session.resume(sessionID)
+      expect((yield* session.context(sessionID)).at(-1)).toMatchObject({ finish: "stop" })
+      expect(
+        yield* Effect.promise(() => fetch(`http://127.0.0.1:${service.port}`).then((response) => response.text())),
+      ).toBe("service-alive")
+      const task = yield* jobs.start({ type: "bash", metadata: { sessionID, kind: "task" }, run: Effect.never })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Wait within budget" }), resume: false })
       const waiting = yield* Deferred.make<void>()
       yield* registry.register({
         wait_fixture: Tool.make({
@@ -8488,7 +8496,7 @@ describe("SessionRunnerLLM", () => {
           (message) => message.type === "assistant" && message.finish === "stopped",
         ),
       ).toHaveLength(1)
-      expect(requests).toHaveLength(1)
+      expect(requests).toHaveLength(2)
     }),
   )
 
