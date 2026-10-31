@@ -240,9 +240,11 @@ export const run = (
                 ? `${winquote(executable)} /d /s /c "${script}"`
                 : [executable, ...argv].map(winquote).join(" ")
             const supervisor = path.join(dir, "supervisor.ps1")
+            // The prefix is already JSON-encoded; append only OS decimal identities
+            // without loading PowerShell's JSON/member cmdlets during cold startup.
             await writeFile(
               supervisor,
-              `\uFEFF${setup}${PreviewWindows.script}\n$ownership=${psquote(ownership)} | ConvertFrom-Json\n$ownership | Add-Member -NotePropertyName pid -NotePropertyValue $PID\n$ownership | Add-Member -NotePropertyName birth -NotePropertyValue ([string][Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc())\n[IO.File]::WriteAllText(${psquote(temporary)},($ownership | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))\n[IO.File]::Move(${psquote(temporary)},${psquote(destination)})\n$code=Native-Launch ${psquote(child)} ${psquote(cwd)} $false ${timeout ?? 0} ${psquote(log)}\n[IO.File]::WriteAllText(${psquote(result)},[string]$code)\nexit $code`,
+              `\uFEFF${setup}${PreviewWindows.script}\n$identity=[string][Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc()\n[IO.File]::WriteAllText(${psquote(temporary)},(${psquote(ownership.slice(0, -1))} + ',"pid":' + $PID + ',"birth":"' + $identity + '"}'),[Text.UTF8Encoding]::new($false))\n[IO.File]::Move(${psquote(temporary)},${psquote(destination)})\n$code=Native-Launch ${psquote(child)} ${psquote(cwd)} $false ${timeout ?? 0} ${psquote(log)}\n[IO.File]::WriteAllText(${psquote(result)},[string]$code)\nexit $code`,
               { mode: 0o600 },
             )
             const line = [
@@ -347,7 +349,9 @@ exit "$code"
             () => false,
           ))
         ) {
-          if (Date.now() >= deadline || !(await birth(pid)))
+          // The owner is published before executing the command. Keep this bounded
+          // wait and the final birth check below without a cold OS query per poll.
+          if (Date.now() >= deadline)
             throw new Error("Preview supervisor did not complete durable admission; never retry automatically")
           await scheduler.wait(20)
         }
