@@ -80,5 +80,18 @@ try {
   )
 } finally {
   await PreviewProcess.cancel(owner)
-  await completion
+  // The product poll is unref'ed so normal CLI exit can leave previews alive.
+  // This standalone fixture must keep its event loop alive until that poll settles.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const settled = await Promise.race([
+      completion,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Node preview drain did not settle after cancellation")), 5000)
+      }),
+    ])
+    assert.equal("error" in settled, false)
+  } finally {
+    clearTimeout(timer)
+  }
 }
