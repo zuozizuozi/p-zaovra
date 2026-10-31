@@ -472,7 +472,7 @@ const layer = Layer.effectDiscard(
                                   workspaceID: location.workspaceID,
                                 }),
                               )
-                              if (capture) yield* capture.append(new TextEncoder().encode(`${owner?.output}\n`))
+                              if (capture && owner) yield* capture.append(new TextEncoder().encode(`${owner.output}\n`))
                               yield* Deferred.succeed(started, undefined)
                             })
                         : undefined,

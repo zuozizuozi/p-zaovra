@@ -80,6 +80,11 @@ export type Interface = ChildProcessSpawner["Service"] & {
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/AppProcess") {}
 
+/** Allows platform capability tests without changing the host's OS identity. */
+export const PreviewPlatform = Context.Reference<NodeJS.Platform>("@zaovra/AppProcess/PreviewPlatform", {
+  defaultValue: () => process.platform,
+})
+
 /** Shared shell process lifecycle; callers retain their own authorization and output policy. */
 export const resolveShell = (configured?: string) => {
   return ShellIdentity.resolve(configured).path
@@ -353,6 +358,16 @@ const layer = Layer.effect(
       })
 
     const run = Effect.fn("AppProcess.run")(function* (command: ChildProcess.Command, options?: RunOptions) {
+      const platform = yield* PreviewPlatform
+      if (options?.persistent && platform !== "win32" && platform !== "linux") {
+        const notice = "Preview is backend-scoped on this platform; survival across CLI exit is not guaranteed."
+        yield* Effect.logWarning(notice)
+        if (options.onChunk)
+          yield* options
+            .onChunk(Buffer.from(notice + "\n"))
+            .pipe(Effect.mapError((cause) => wrapError(describeCommand(command), cause)))
+        return yield* runCommand(command, { ...options, persistent: false })
+      }
       if (options?.persistent && options.owner) {
         if (command._tag !== "StandardCommand")
           return yield* new AppProcessError({

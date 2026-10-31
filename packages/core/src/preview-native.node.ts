@@ -1,6 +1,7 @@
 export * as PreviewNative from "./preview-native.node"
 
 import { execFile } from "node:child_process"
+import { constants } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import { scheduler } from "node:timers/promises"
 import { PreviewWindows } from "./preview-windows"
@@ -64,7 +65,10 @@ export async function cancelLinux(
 ) {
   // The owned supervisor compares this to its own boot/start identity, then
   // signals its own group. No Node-side PID lookup/signalling race is possible.
-  await writeFile(request, expected, { mode: 0o600 })
+  await writeFile(request, expected, {
+    mode: 0o600,
+    flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+  })
   for (let count = 0; count < 100; count++) {
     if ((await verify()) !== expected) return
     await scheduler.wait(20)

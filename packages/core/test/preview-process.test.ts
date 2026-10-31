@@ -18,6 +18,7 @@ test("479 real Node preview launches, queries, refuses stale ownership and cance
     platform: "node",
     format: "esm",
     bundle: true,
+    banner: { js: 'var require = (await import("node:module")).createRequire(import.meta.url);' },
     metafile: true,
     outfile: output,
     plugins: [
@@ -29,7 +30,10 @@ test("479 real Node preview launches, queries, refuses stale ownership and cance
             handler: (args: { path: string; resolveDir: string }) => unknown,
           ) => void
         }) {
-          build.onResolve({ filter: /^effect(?:\/|$)/ }, (args) => ({
+          build.onResolve({ filter: /^jsonc-parser$/ }, (args) => ({
+            path: Bun.resolveSync(args.path, args.resolveDir).replace(/lib[\\/]umd[\\/]main.js$/, "lib/esm/main.js"),
+          }))
+          build.onResolve({ filter: /^(effect(?:\/|$)|@effect\/)/ }, (args) => ({
             path: pathToFileURL(Bun.resolveSync(args.path, args.resolveDir)).href,
             external: true,
           }))

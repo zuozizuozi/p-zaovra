@@ -56,13 +56,14 @@ const registryLayer = Layer.effect(
         local.get(input.call.name)?.at(-1)?.registration ?? applications.entries().get(input.call.name)
       if (!registration)
         return {
+          inputRejected: true,
           result: {
             type: "error" as const,
             value: advertised ? `Stale tool call: ${input.call.name}` : `Unknown tool: ${input.call.name}`,
           },
         }
       if (advertised && registration.identity !== advertised)
-        return { result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
+        return { inputRejected: true, result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
       const capture = resources.capture()
       const pending = yield* settle(registration.tool, input.call, {
         sessionID: input.sessionID,
@@ -211,6 +212,7 @@ const registryLayer = Layer.effect(
           settle: (input) => {
             if (disabled.has(input.call.name))
               return Effect.succeed({
+                inputRejected: true,
                 result: {
                   type: "error",
                   value: `Tool ${input.call.name} is disabled by the selected agent's permissions. Nothing was executed. Continue with the available tools; an execution-enabled mode requires user authorization.`,
@@ -218,7 +220,10 @@ const registryLayer = Layer.effect(
               })
             const registration = registrations.get(input.call.name)
             if (registration) return settleWith(input, registration.identity)
-            return Effect.succeed({ result: { type: "error", value: `Unknown tool: ${input.call.name}` } })
+            return Effect.succeed({
+              inputRejected: true,
+              result: { type: "error", value: `Unknown tool: ${input.call.name}` },
+            })
           },
         }
       }),

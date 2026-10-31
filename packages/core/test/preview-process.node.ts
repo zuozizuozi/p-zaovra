@@ -1,9 +1,11 @@
 import assert from "node:assert/strict"
-import { readFile, writeFile, access, readdir } from "node:fs/promises"
+import { readFile, writeFile, access, readdir, symlink, unlink } from "node:fs/promises"
 import path from "node:path"
-import { Effect } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { PreviewProcess } from "../src/preview-process"
+import { AppProcess } from "../src/process"
+import { LayerNode } from "../src/effect/layer-node"
 
 const root = process.argv[2]
 assert.ok(root, "A parent-owned temporary root is required")
@@ -59,6 +61,19 @@ try {
   } finally {
     await writeFile(record, original)
   }
+  if (process.platform === "linux") {
+    const sentinel = path.join(root, "cancel-sentinel")
+    const request = path.join(path.dirname(record), "cancel.request")
+    await writeFile(sentinel, "must-not-change")
+    await symlink(sentinel, request)
+    try {
+      await assert.rejects(PreviewProcess.cancel(owner), { code: "ELOOP" })
+      assert.equal(await readFile(sentinel, "utf8"), "must-not-change")
+      assert.equal(await (await observe()).text(), "node-preview-alive")
+    } finally {
+      await unlink(request)
+    }
+  }
   assert.equal((await PreviewProcess.cancel(owner))?.status, "cancelled")
   assert.equal(
     await observe().then(
@@ -66,6 +81,50 @@ try {
       () => false,
     ),
     false,
+  )
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* AppProcess.Service
+        const spawned = yield* Deferred.make<number>()
+        const ready = yield* Deferred.make<void>()
+        const notices: string[] = []
+        const run = yield* service
+          .run(
+            ChildProcess.make(process.execPath, [
+              "-e",
+              "process.stdout.write('fallback-ready');setInterval(()=>{},1000)",
+            ]),
+            {
+              persistent: true,
+              combineOutput: true,
+              owner: { ...owner, jobID: "platform-fallback" },
+              onSpawn: (pid) => Deferred.succeed(spawned, pid).pipe(Effect.asVoid),
+              onChunk: (chunk) =>
+                Effect.gen(function* () {
+                  notices.push(Buffer.from(chunk).toString())
+                  if (Buffer.from(chunk).toString().includes("fallback-ready"))
+                    yield* Deferred.succeed(ready, undefined)
+                }),
+            },
+          )
+          .pipe(Effect.forkChild)
+        const pid = yield* Deferred.await(spawned)
+        yield* Deferred.await(ready)
+        assert.ok(yield* Effect.promise(() => PreviewProcess.birth(pid)))
+        assert.match(notices.join(""), /backend-scoped.*survival across CLI exit is not guaranteed/)
+        assert.equal(
+          yield* Effect.promise(() => PreviewProcess.get({ ...owner, jobID: "platform-fallback" })),
+          undefined,
+        )
+        yield* Fiber.interrupt(run)
+        assert.equal(yield* Effect.promise(() => PreviewProcess.birth(pid)), undefined)
+      }),
+    ).pipe(
+      Effect.provideService(AppProcess.PreviewPlatform, "darwin"),
+      Effect.provide(LayerNode.compile(AppProcess.node)),
+      Effect.timeout("5 seconds"),
+    ),
   )
   console.log(
     JSON.stringify({
@@ -76,6 +135,8 @@ try {
       otherSessionRefused: true,
       cancelled: true,
       businessClosed: true,
+      unsupportedPlatform: "darwin",
+      scopedFallbackStartedAndClosed: true,
     }),
   )
 } finally {
