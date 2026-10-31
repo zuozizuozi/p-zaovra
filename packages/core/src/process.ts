@@ -380,6 +380,7 @@ const layer = Layer.effect(
           options.timeout === undefined ? undefined : Duration.toMillis(Duration.fromInputUnsafe(options.timeout)),
           options.onSpawn,
         ).pipe(Effect.mapError((cause) => new AppProcessError({ command: describeCommand(command), cause })))
+        if (state?.status === "cancelled") return yield* Effect.interrupt
         if (state?.exit === 124 && options.timeout !== undefined)
           return yield* new AppProcessError({
             command: describeCommand(command),

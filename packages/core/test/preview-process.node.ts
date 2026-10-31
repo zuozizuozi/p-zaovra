@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile, writeFile, access, readdir, symlink, unlink } from "node:fs/promises"
 import path from "node:path"
-import { Deferred, Effect, Fiber } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { PreviewProcess } from "../src/preview-process"
 import { AppProcess } from "../src/process"
@@ -81,6 +81,30 @@ try {
       () => false,
     ),
     false,
+  )
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* AppProcess.Service
+        const started = yield* Deferred.make<void>()
+        const cancelledOwner = { ...owner, jobID: "cancelled-run" }
+        const run = yield* service
+          .run(
+            ChildProcess.make(process.execPath, ["-e", "setInterval(()=>{},1000)"], { cwd: root, extendEnv: true }),
+            {
+              persistent: true,
+              owner: cancelledOwner,
+              onSpawn: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
+            },
+          )
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
+        yield* Effect.promise(() => PreviewProcess.cancel(cancelledOwner))
+        const exit = yield* Fiber.await(run).pipe(Effect.timeout("1 second"))
+        assert.equal(Exit.isFailure(exit), true)
+        if (Exit.isFailure(exit)) assert.equal(Cause.hasInterruptsOnly(exit.cause), true, Cause.pretty(exit.cause))
+      }),
+    ).pipe(Effect.provide(LayerNode.compile(AppProcess.node))),
   )
   await Effect.runPromise(
     Effect.scoped(

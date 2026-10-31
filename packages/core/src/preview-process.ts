@@ -117,13 +117,28 @@ export async function cancel(owner: Owner) {
   const record = await load(owner)
   if (!record || (await birth(record.pid)) !== record.birth) return get(owner)
   if (process.platform === "win32") {
-    if ((await PreviewNative.windowsProcess(record.pid, record.birth)) !== record.birth) return get(owner)
-  } else {
-    await PreviewNative.cancelLinux(record.pid, record.birth, path.join(folder(owner), "cancel.request"), () =>
-      birth(record.pid),
+    if (
+      (await PreviewNative.windowsProcess(record.pid, record.birth, path.join(folder(owner), "cancelled"))) !==
+      record.birth
     )
+      return get(owner)
+  } else {
+    if (
+      !(await PreviewNative.cancelLinux(
+        record.pid,
+        record.birth,
+        path.join(folder(owner), "cancel.request"),
+        () => birth(record.pid),
+        path.join(folder(owner), "cancelled"),
+      ))
+    )
+      return get(owner)
   }
-  await writeFile(path.join(folder(owner), "cancelled"), "cancelled", { mode: 0o600 })
+  await writeFile(path.join(folder(owner), "cancelled"), "cancelled", { mode: 0o600, flag: "wx" }).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error
+    },
+  )
   for (let count = 0; count < 100 && (await birth(record.pid)) === record.birth; count++) await scheduler.wait(20)
   return get(owner)
 }
@@ -266,7 +281,10 @@ birth="$boot:$1"
 check_cancel() {
  [ -f ${quote(path.join(dir, "cancel.request"))} ] || return 0
  IFS= read -r request < ${quote(path.join(dir, "cancel.request"))} || :
- [ "$request" != "$birth" ] || stop_group
+ if [ "$request" = "$birth" ]; then
+  [ -f ${quote(path.join(dir, "cancelled"))} ] || (set -C; printf cancelled > ${quote(path.join(dir, "cancelled"))}) || return 1
+  stop_group
+ fi
 }
 printf '%s,"pid":%s,"birth":"%s:%s"}' ${quote(ownership.slice(0, -1))} "$$" "$boot" "$1" > ${quote(temporary)}
 mv ${quote(temporary)} ${quote(destination)} || exit 125

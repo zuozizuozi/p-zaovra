@@ -644,6 +644,15 @@ const layer = Layer.effect(
           )
           .pipe(titleLocks.withLock(input.sessionID))
         if (input.archived) {
+          yield* result.interrupt(input.sessionID)
+          // Record cancellation before closing the OS owner; its poll may settle concurrently.
+          yield* Effect.forEach(
+            (yield* jobs.list()).filter(
+              (job) => job.metadata?.sessionID === input.sessionID && job.status === "running",
+            ),
+            (job) => jobs.cancel(job.id),
+            { discard: true },
+          )
           yield* Effect.promise(() =>
             PreviewProcess.archive(
               global.data,
@@ -651,14 +660,6 @@ const layer = Layer.effect(
               session.location.directory,
               session.location.workspaceID,
             ),
-          )
-          yield* result.interrupt(input.sessionID)
-          yield* Effect.forEach(
-            (yield* jobs.list()).filter(
-              (job) => job.metadata?.sessionID === input.sessionID && job.status === "running",
-            ),
-            (job) => jobs.cancel(job.id),
-            { discard: true },
           )
           for (const pending of yield* SessionInput.pending(db, input.sessionID))
             yield* result

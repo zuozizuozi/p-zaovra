@@ -1,6 +1,8 @@
 export * as PreviewNative from "./preview-native.bun"
 
-export async function windowsProcess(pid: number, stop?: string) {
+import { writeFile } from "node:fs/promises"
+
+export async function windowsProcess(pid: number, stop?: string, cancelled?: string) {
   const { dlopen, FFIType, ptr } = await import("bun:ffi")
   const lib = dlopen("kernel32.dll", {
     OpenProcess: { args: [FFIType.u32, FFIType.bool, FFIType.u32], returns: FFIType.ptr },
@@ -20,6 +22,7 @@ export async function windowsProcess(pid: number, stop?: string) {
       throw new Error("Cannot read preview creation identity; no process was signalled")
     const identity = created.readBigUInt64LE().toString()
     if (stop && identity === stop) {
+      if (cancelled) await markCancelled(cancelled)
       if (!lib.symbols.TerminateProcess(handle, 143) || lib.symbols.WaitForSingleObject(handle, 5000) !== 0)
         throw new Error("Owned preview cancellation did not complete")
     }
@@ -99,6 +102,7 @@ export async function cancelLinux(
   expected: string,
   _request: string,
   verify: () => Promise<string | undefined>,
+  cancelled: string,
 ) {
   const { dlopen, FFIType } = await import("bun:ffi")
   const libc = dlopen("libc.so.6", {
@@ -108,10 +112,18 @@ export async function cancelLinux(
   const fd = Number(libc.symbols.syscall(434, pid, 0, 0, 0))
   try {
     if (fd < 0) throw new Error("Cannot acquire pidfd; preview was not signalled")
-    if ((await verify()) !== expected) return
+    if ((await verify()) !== expected) return false
+    await markCancelled(cancelled)
     if (Number(libc.symbols.syscall(424, fd, 15, 0, 0)) !== 0) throw new Error("Preview signal failed")
+    return true
   } finally {
     if (fd >= 0) libc.symbols.close(fd)
     libc.close()
   }
+}
+
+async function markCancelled(file: string) {
+  await writeFile(file, "cancelled", { mode: 0o600, flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error
+  })
 }

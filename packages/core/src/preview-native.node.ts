@@ -2,7 +2,7 @@ export * as PreviewNative from "./preview-native.node"
 
 import { execFile } from "node:child_process"
 import { constants } from "node:fs"
-import { writeFile } from "node:fs/promises"
+import { access, writeFile } from "node:fs/promises"
 import { scheduler } from "node:timers/promises"
 import { PreviewWindows } from "./preview-windows"
 
@@ -25,7 +25,7 @@ function powershell(script: string, directory?: string, env?: NodeJS.ProcessEnv)
   })
 }
 
-export async function windowsProcess(pid: number, stop?: string) {
+export async function windowsProcess(pid: number, stop?: string, cancelled?: string) {
   const identity = await powershell(
     `$ErrorActionPreference='Stop'; ${PreviewWindows.script}
 $handle=[PreviewNative]::OpenProcess(${0x101000} -bor ${stop ? 1 : 0},$false,${pid})
@@ -35,7 +35,7 @@ try {
  if([PreviewNative]::WaitForSingleObject($handle,0) -ne 258){exit 0}
  if(![PreviewNative]::GetProcessTimes($handle,$created,$exited,$kernel,$user)){Native-Error}
  $identity=[string][Runtime.InteropServices.Marshal]::ReadInt64($created)
- ${stop ? `if($identity -eq ${quote(stop)}) { if(![PreviewNative]::TerminateProcess($handle,143) -or [PreviewNative]::WaitForSingleObject($handle,5000) -ne 0){throw 'Owned preview cancellation did not complete'} }` : ""}
+ ${stop ? `if($identity -eq ${quote(stop)}) { ${cancelled ? `try { $marker=[IO.File]::Open(${quote(cancelled)},[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read); $marker.Dispose() } catch [IO.IOException] { if(![IO.File]::Exists(${quote(cancelled)})){throw} };` : ""} if(![PreviewNative]::TerminateProcess($handle,143) -or [PreviewNative]::WaitForSingleObject($handle,5000) -ne 0){throw 'Owned preview cancellation did not complete'} }` : ""}
  [Console]::Write($identity)
 } finally {
  $null=[PreviewNative]::CloseHandle($handle)
@@ -62,15 +62,21 @@ export async function cancelLinux(
   expected: string,
   request: string,
   verify: () => Promise<string | undefined>,
+  cancelled: string,
 ) {
   // The owned supervisor compares this to its own boot/start identity, then
   // signals its own group. No Node-side PID lookup/signalling race is possible.
+  if ((await verify()) !== expected) return false
   await writeFile(request, expected, {
     mode: 0o600,
     flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
   })
   for (let count = 0; count < 100; count++) {
-    if ((await verify()) !== expected) return
+    if ((await verify()) !== expected)
+      return access(cancelled).then(
+        () => true,
+        () => false,
+      )
     await scheduler.wait(20)
   }
   throw new Error("Owned preview supervisor did not acknowledge cancellation")
