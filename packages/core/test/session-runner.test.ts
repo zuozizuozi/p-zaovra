@@ -8404,6 +8404,17 @@ describe("SessionRunnerLLM", () => {
   it.effect("S1 wall budget covers background waits, stops task jobs and preserves previews", () =>
     Effect.gen(function* () {
       yield* setup
+      const directory = yield* Effect.acquireRelease(Effect.promise(tmpdir), (directory) =>
+        Effect.promise(() => directory[Symbol.asyncDispose]()),
+      )
+      fixtureDirectory = directory.path
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ directory: directory.path })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
       const session = yield* SessionV2.Service
       const jobs = yield* BackgroundJob.Service
       const registry = yield* ToolRegistry.Service
@@ -8415,7 +8426,7 @@ describe("SessionRunnerLLM", () => {
       const ready = path.join(location.directory, "budget-preview-ready.json")
       const owner = { root: location.directory, directory: location.directory, sessionID, jobID: "budget-preview" }
       yield* Effect.addFinalizer(() => Effect.promise(() => PreviewProcess.cancel(owner)))
-      const admitted = yield* Deferred.make<void>()
+      const admitted = yield* Deferred.make<void, unknown>()
       const preview = yield* jobs.start({
         id: owner.jobID,
         type: "bash",
@@ -8429,7 +8440,10 @@ describe("SessionRunnerLLM", () => {
           owner,
           undefined,
           () => Deferred.succeed(admitted, undefined),
-        ).pipe(Effect.as("ended")),
+        ).pipe(
+          Effect.onExit((exit) => (Exit.isFailure(exit) ? Deferred.failCause(admitted, exit.cause) : Effect.void)),
+          Effect.as("ended"),
+        ),
       })
       yield* Deferred.await(admitted)
       yield* Effect.promise(async () => {
