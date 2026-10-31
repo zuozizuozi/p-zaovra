@@ -5,6 +5,7 @@ import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { deliveredBackgroundResult, history, requested } from "../session/outcome"
 import { Global } from "../global"
 import { PreviewProcess } from "../preview-process"
+import { AppProcess } from "../process"
 import { BackgroundJob } from "../background-job"
 import { Database } from "../database/database"
 import { SessionInput } from "../session/input"
@@ -175,11 +176,13 @@ const layer = Layer.effect(
               command,
               timestamp: yield* DateTime.now,
             })
-            if (background?.kind !== "preview") owned.add(id)
+            const persistent =
+              background?.kind === "preview" && AppProcess.supportsPersistentPreview(yield* AppProcess.PreviewPlatform)
+            if (!persistent) owned.add(id)
             const source = requested(yield* history(database.db, context.sessionID)).sourceMessageID
             yield* jobs.start({
               id,
-              detached: background?.kind === "preview",
+              detached: persistent,
               type: "bash",
               title: command,
               metadata: {

@@ -85,6 +85,8 @@ export const PreviewPlatform = Context.Reference<NodeJS.Platform>("@zaovra/AppPr
   defaultValue: () => process.platform,
 })
 
+export const supportsPersistentPreview = (platform: NodeJS.Platform) => platform === "win32" || platform === "linux"
+
 /** Shared shell process lifecycle; callers retain their own authorization and output policy. */
 export const resolveShell = (configured?: string) => {
   return ShellIdentity.resolve(configured).path
@@ -359,7 +361,7 @@ const layer = Layer.effect(
 
     const run = Effect.fn("AppProcess.run")(function* (command: ChildProcess.Command, options?: RunOptions) {
       const platform = yield* PreviewPlatform
-      if (options?.persistent && platform !== "win32" && platform !== "linux") {
+      if (options?.persistent && !supportsPersistentPreview(platform)) {
         const notice = "Preview is backend-scoped on this platform; survival across CLI exit is not guaranteed."
         yield* Effect.logWarning(notice)
         if (options.onChunk)
