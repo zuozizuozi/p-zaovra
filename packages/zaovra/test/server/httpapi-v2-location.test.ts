@@ -92,9 +92,9 @@ describe("v2 location HttpApi", () => {
     const route = `/api/session/${session.id}/budget`
     const defaults = await request(route, tmp.path)
     expect(defaults.status).toBe(200)
-    expect(await defaults.json()).toMatchObject({
-      data: { limits: { tokens: 30_000_000, durationMs: 43_200_000 }, used: { tokens: 0 }, unreported: 0 },
-    })
+    const defaultBudget = await defaults.json()
+    expect(defaultBudget).toMatchObject({ data: { used: { tokens: 0 }, unreported: 0 } })
+    expect(defaultBudget.data.limits).toEqual({ durationMs: 43_200_000 })
     const update = await request(`/api/session/${session.id}`, tmp.path, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -113,7 +113,25 @@ describe("v2 location HttpApi", () => {
         })
       ).status,
     ).toBe(200)
-    expect(await (await request(route, tmp.path)).json()).toMatchObject({ data: { limits: {} } })
+    expect((await (await request(route, tmp.path)).json()).data.limits).toEqual({
+      tokens: 40_000_000,
+      durationMs: 86_400_000,
+    })
+    for (const [budget, limits] of [
+      [{ tokens: null }, { durationMs: 86_400_000 }],
+      [{ durationMs: null }, {}],
+    ]) {
+      expect(
+        (
+          await request(`/api/session/${session.id}`, tmp.path, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ budget }),
+          })
+        ).status,
+      ).toBe(200)
+      expect((await (await request(route, tmp.path)).json()).data.limits).toEqual(limits)
+    }
     expect((await request("/api/session/ses_missing_budget/budget", tmp.path)).status).toBe(404)
   }, 30000)
 

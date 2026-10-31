@@ -129,19 +129,31 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
             afterCli: { exit: afterCli.exit, response: afterCli.stdout.trim() },
           }),
         )
-        expect(afterCli.exit).toBe(owner === "local" ? 3 : 0)
-        if (owner === "local") return
+        expect(afterCli.exit).toBe(0)
         expect(JSON.parse(afterCli.stdout)).toEqual({ nonce, pid: record.pid, value: 42 })
+        // A local CLI now leaves the preview alive. Reopen its durable Session
+        // in a new backend before exercising the same explicit archive gate.
+        const cleanupServer =
+          server ?? (yield* zaovra.serve({ env: { ZAOVRA_CONFIG_CONTENT: JSON.stringify(config) } }))
+        const cleanupClient = client ?? createZaovraClient({ baseUrl: cleanupServer.url, directory: home })
+        const sessionID =
+          session?.id ??
+          zaovra.parseJsonEvents(result.stdout).find((event) => typeof event.sessionID === "string")?.sessionID
+        if (typeof sessionID !== "string") throw new Error("CLI did not report its durable Session identity")
+        const reopened = yield* Effect.promise(() =>
+          cleanupClient.v2.session.get({ sessionID }, { throwOnError: true }),
+        )
+        expect(reopened.data.data.id).toBe(sessionID)
         // Archiving this exact Session closes its previews. Never kill by
         // process name, port or a command-line pattern.
         yield* Effect.promise(() =>
-          client!.v2.session.update({ sessionID: session!.id, archived: true }, { throwOnError: true }),
+          cleanupClient.v2.session.update({ sessionID, archived: true }, { throwOnError: true }),
         )
         const afterCleanup = yield* observe()
         console.info(
           JSON.stringify({
             owner,
-            cleanup: { type: "exact-session-archive", sessionID: session!.id, observerExit: afterCleanup.exit },
+            cleanup: { type: "exact-session-archive", sessionID, observerExit: afterCleanup.exit },
           }),
         )
         expect(afterCleanup.exit).toBe(3)
