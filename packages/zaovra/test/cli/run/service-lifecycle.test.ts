@@ -38,6 +38,12 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
           ),
         )
         const config = { ...testProviderConfig(llm.url), snapshot: false, experimental: { verification: false } }
+        const runtimeEnv = {
+          ZAOVRA_CONFIG_CONTENT: JSON.stringify(config),
+          // The test preload uses :memory:. A different backend must reopen
+          // this fixture's own database, never the user's normal profile.
+          ...(owner === "local" ? { ZAOVRA_DB: path.join(home, "business-session.db") } : {}),
+        }
         yield* Effect.addFinalizer(() =>
           Effect.promise(async () => {
             if (!(await Bun.file(identity).exists())) return
@@ -55,7 +61,7 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
         )
         const server =
           owner === "attach"
-            ? yield* zaovra.serve({ env: { ZAOVRA_CONFIG_CONTENT: JSON.stringify(config) } })
+            ? yield* zaovra.serve({ env: runtimeEnv })
             : owner === "desktop"
               ? yield* desktopOwner(home, JSON.stringify(config))
               : undefined
@@ -91,7 +97,7 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
             ...(server && session ? ["--attach", server.url, "--session", session.id] : []),
           ],
           env: {
-            ZAOVRA_CONFIG_CONTENT: JSON.stringify(config),
+            ...runtimeEnv,
             ...(owner === "desktop" ? { ZAOVRA_SERVER_PASSWORD: "fixture" } : {}),
           },
         })
@@ -133,8 +139,7 @@ server.listen(0, "127.0.0.1", () => fs.writeFileSync(${JSON.stringify(identity)}
         expect(JSON.parse(afterCli.stdout)).toEqual({ nonce, pid: record.pid, value: 42 })
         // A local CLI now leaves the preview alive. Reopen its durable Session
         // in a new backend before exercising the same explicit archive gate.
-        const cleanupServer =
-          server ?? (yield* zaovra.serve({ env: { ZAOVRA_CONFIG_CONTENT: JSON.stringify(config) } }))
+        const cleanupServer = server ?? (yield* zaovra.serve({ env: runtimeEnv }))
         const cleanupClient = client ?? createZaovraClient({ baseUrl: cleanupServer.url, directory: home })
         const sessionID =
           session?.id ??
