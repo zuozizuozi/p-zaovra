@@ -223,11 +223,8 @@ export const run = (
               : "/bin/sh"
           : command.command
         const script = [command.command, ...command.args].join(" ")
-        const args = shell
-          ? process.platform === "win32"
-            ? ["/d", "/s", "/c", script]
-            : ["-c", script]
-          : command.args.map(String)
+        const cmd = process.platform === "win32" && /(?:^|[\\/])cmd(?:\.exe)?$/i.test(executable)
+        const args = shell ? (cmd ? ["/d", "/s", "/c", script] : ["-c", script]) : command.args.map(String)
         const env = command.options.extendEnv ? { ...process.env, ...command.options.env } : command.options.env
         const cwd = command.options.cwd ?? owner.directory
         const pid = await (async () => {
@@ -238,9 +235,10 @@ export const run = (
               /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && args.at(-2)?.toLowerCase() === "-command"
                 ? [...args.slice(0, -2), "-EncodedCommand", Buffer.from(args.at(-1)!, "utf16le").toString("base64")]
                 : args
-            const child = shell
-              ? `${winquote(executable)} /d /s /c "${script}"`
-              : [executable, ...argv].map(winquote).join(" ")
+            const child =
+              shell && cmd
+                ? `${winquote(executable)} /d /s /c "${script}"`
+                : [executable, ...argv].map(winquote).join(" ")
             const supervisor = path.join(dir, "supervisor.ps1")
             await writeFile(
               supervisor,
@@ -248,7 +246,7 @@ export const run = (
               { mode: 0o600 },
             )
             const line = [
-              "powershell.exe",
+              path.join(process.env.SystemRoot ?? "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe"),
               "-NoLogo",
               "-NoProfile",
               "-NonInteractive",

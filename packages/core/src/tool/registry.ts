@@ -200,7 +200,8 @@ const registryLayer = Layer.effect(
           custom: Array.from(applications.entries().keys()),
           effectLocation: (call) => {
             const registration = registrations.get(call.name)
-            return registration ? Tool.effectLocation(registration.tool, call.name) : "remote"
+            // An absent/disabled registration can only produce a local rejection.
+            return registration ? Tool.effectLocation(registration.tool, call.name) : "local"
           },
           observation: (call) => {
             const registration = registrations.get(call.name)
@@ -221,7 +222,6 @@ const registryLayer = Layer.effect(
             const registration = registrations.get(input.call.name)
             if (registration) return settleWith(input, registration.identity)
             return Effect.succeed({
-              inputRejected: true,
               result: { type: "error", value: `Unknown tool: ${input.call.name}` },
             })
           },

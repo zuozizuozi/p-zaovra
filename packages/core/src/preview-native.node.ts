@@ -1,6 +1,7 @@
 export * as PreviewNative from "./preview-native.node"
 
 import { execFile } from "node:child_process"
+import path from "node:path"
 import { constants } from "node:fs"
 import { access, writeFile } from "node:fs/promises"
 import { scheduler } from "node:timers/promises"
@@ -11,7 +12,7 @@ const quote = (value: string) => `'${value.replaceAll("'", "''")}'`
 function powershell(script: string, directory?: string, env?: NodeJS.ProcessEnv) {
   return new Promise<string>((resolve, reject) => {
     execFile(
-      "powershell.exe",
+      path.join(process.env.SystemRoot ?? "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe"),
       [
         "-NoLogo",
         "-NoProfile",

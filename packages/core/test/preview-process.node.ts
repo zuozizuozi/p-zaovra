@@ -6,9 +6,12 @@ import { ChildProcess } from "effect/unstable/process"
 import { PreviewProcess } from "../src/preview-process"
 import { AppProcess } from "../src/process"
 import { LayerNode } from "../src/effect/layer-node"
+import { ShellIdentity } from "../src/shell-identity"
 
 const root = process.argv[2]
 assert.ok(root, "A parent-owned temporary root is required")
+// A backend normally keeps the event loop alive; this standalone fixture owns that lifetime.
+const lifetime = setInterval(() => {}, 1000)
 const owner = { root, directory: root, sessionID: "node-session", jobID: "node-preview" }
 const ready = path.join(root, "ready.json")
 const server = `const http=require('node:http');const fs=require('node:fs');const server=http.createServer((req,res)=>res.end('node-preview-alive'));server.listen(0,'127.0.0.1',()=>fs.writeFileSync(${JSON.stringify(ready)},JSON.stringify({port:server.address().port})));`
@@ -150,6 +153,58 @@ try {
       Effect.timeout("5 seconds"),
     ),
   )
+  const shells =
+    process.platform === "win32"
+      ? [
+          { shell: path.join(process.env.SystemRoot ?? "C:\\Windows", "System32/cmd.exe"), cmd: true },
+          { shell: ShellIdentity.gitBash(), cmd: false },
+        ]
+      : [{ shell: "/bin/sh", cmd: false }]
+  await Effect.runPromise(
+    Effect.scoped(
+      AppProcess.Service.use((service) =>
+        Effect.gen(function* () {
+          for (const [index, item] of shells.entries()) {
+            assert.ok(item.shell, "The selected shell must exist")
+            const script = path.join(root, `selected-shell-${index}.cjs`)
+            const ready = path.join(root, `selected-shell-${index}.ready`)
+            yield* Effect.promise(() =>
+              writeFile(
+                script,
+                `require('fs').writeFileSync(${JSON.stringify(ready)},'selected-shell-ok');setInterval(()=>{},1000)`,
+              ),
+            )
+            const command = [process.execPath, script]
+              .map((value) => (item.cmd ? `"${value}"` : `'${value.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`))
+              .join(" ")
+            const selectedOwner = { ...owner, jobID: `selected-shell-${index}` }
+            const started = yield* Deferred.make<void>()
+            const run = yield* service
+              .run(ChildProcess.make(command, [], { shell: item.shell, cwd: root, extendEnv: true }), {
+                persistent: true,
+                owner: selectedOwner,
+                timeout: "30 seconds",
+                onSpawn: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
+              })
+              .pipe(Effect.forkChild)
+            yield* Deferred.await(started)
+            yield* Effect.promise(async () => {
+              const deadline = Date.now() + 5000
+              while ((await readFile(ready, "utf8").catch(() => "")) !== "selected-shell-ok") {
+                if (Date.now() >= deadline) throw new Error("Selected shell did not start its preview command")
+                await new Promise((resolve) => setTimeout(resolve, 20))
+              }
+            })
+            assert.equal((yield* Effect.promise(() => PreviewProcess.get(selectedOwner)))?.status, "running")
+            yield* Effect.promise(() => PreviewProcess.cancel(selectedOwner))
+            const exit = yield* Fiber.await(run)
+            assert.equal(Exit.isFailure(exit), true)
+            if (Exit.isFailure(exit)) assert.equal(Cause.hasInterruptsOnly(exit.cause), true, Cause.pretty(exit.cause))
+          }
+        }),
+      ),
+    ).pipe(Effect.provide(LayerNode.compile(AppProcess.node))),
+  )
   console.log(
     JSON.stringify({
       node: process.versions.node,
@@ -161,6 +216,7 @@ try {
       businessClosed: true,
       unsupportedPlatform: "darwin",
       scopedFallbackStartedAndClosed: true,
+      selectedShells: shells.length,
     }),
   )
 } finally {
@@ -178,5 +234,6 @@ try {
     assert.equal("error" in settled, false)
   } finally {
     clearTimeout(timer)
+    clearInterval(lifetime)
   }
 }
