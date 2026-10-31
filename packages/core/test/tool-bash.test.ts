@@ -165,7 +165,7 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
-  it.live("335 services requested to stay running use preview and independent business verification", () =>
+  it.live("466 services requested to stay running use preview and independent business verification", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => {
@@ -176,6 +176,7 @@ describe("BashTool", () => {
             expect(definition.description).toContain("start and keep running")
             expect(definition.description).toContain("Web, API, database, or virtual machine")
             expect(definition.description).toContain("background_kind=preview")
+            expect(definition.description).toContain("Session archival")
             expect(definition.description).toContain("independent process")
             expect(definition.description).toContain("business interface")
             expect(definition.description).toContain("not just whether a port is listening")

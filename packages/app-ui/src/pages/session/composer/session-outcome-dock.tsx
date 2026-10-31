@@ -136,14 +136,14 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
       const terminal = outcome()
       const messageID = terminal?.state === "stopped" ? terminal.messageID : undefined
       const tokens = remove || !budget.tokens.trim() ? null : Number(budget.tokens)
-      const durationMs = remove || !budget.minutes.trim() ? null : Number(budget.minutes) * 60_000
+      const durationMs = !budget.minutes.trim() ? null : Number(budget.minutes) * 60_000
       if ([tokens, durationMs].some((value) => value !== null && (!Number.isSafeInteger(value) || value <= 0)))
         throw new Error(language.t("session.budget.invalid"))
       const sessionID = current.sessionID!
       await current.client.v2.session.update(
         {
           sessionID,
-          budget: { ...(tokens === null ? {} : { tokens }), ...(durationMs === null ? {} : { durationMs }) },
+          budget: { tokens, ...(remove ? {} : { durationMs }) },
         },
         { throwOnError: true },
       )

@@ -314,3 +314,13 @@ describe("PublicApi OpenAPI v2 errors", () => {
     )
   })
 })
+
+test("469 public budget updates preserve explicit null independently of omitted axes", () => {
+  const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
+  const update = spec.components.schemas.SessionOutcomeBudgetUpdate
+  for (const key of ["tokens", "durationMs"]) {
+    expect(update.properties?.[key]?.anyOf).toContainEqual({ type: "null" })
+    expect(update.required ?? []).not.toContain(key)
+  }
+  expect(spec.components.schemas.SessionOutcomeBudget.properties?.tokens?.anyOf).toBeUndefined()
+})

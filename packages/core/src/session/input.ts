@@ -157,10 +157,11 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     const stored = fromRow(updated)
     if (!matchesProjection(stored, input)) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
     // The event transaction rolls back this promotion if a newer User changed the task root.
+    const messages = input.completion ? yield* SessionOutcome.history(db, input.sessionID) : []
     if (
       input.completion &&
-      SessionOutcome.requested(yield* SessionOutcome.history(db, input.sessionID)).sourceMessageID !==
-        input.completion.sourceMessageID
+      (SessionOutcome.requested(messages).sourceMessageID !== input.completion.sourceMessageID ||
+        SessionOutcome.deliveredBackgroundResult(messages, input.completion.jobID))
     )
       return yield* Effect.die(new CompletionExpired({ id: input.id }))
     return
@@ -173,10 +174,11 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     return
   }
 
+  const messages = input.completion ? yield* SessionOutcome.history(db, input.sessionID) : []
   if (
     input.completion &&
-    SessionOutcome.requested(yield* SessionOutcome.history(db, input.sessionID)).sourceMessageID !==
-      input.completion.sourceMessageID
+    (SessionOutcome.requested(messages).sourceMessageID !== input.completion.sourceMessageID ||
+      SessionOutcome.deliveredBackgroundResult(messages, input.completion.jobID))
   )
     return yield* Effect.die(new CompletionExpired({ id: input.id }))
   yield* db

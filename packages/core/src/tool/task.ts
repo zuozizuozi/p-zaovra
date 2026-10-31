@@ -198,6 +198,7 @@ export const run = Effect.fn("TaskTool.execute")(function* (
         id: SessionV2.ID.make(`ses_task_${parent.id}_${context.assistantMessageID}_${context.toolCallID}`),
         location: parent.location,
         parentID: parent.id,
+        budgetMode: "autonomous",
         agent: targetID,
       })
   if (child.parentID !== parent.id)

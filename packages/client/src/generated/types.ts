@@ -1373,6 +1373,7 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly projectID: string
           readonly parentID?: string
+          readonly budgetMode?: "interactive" | "autonomous"
           readonly agent?: string
           readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
           readonly location: { readonly directory: string; readonly workspaceID?: string }
@@ -1432,7 +1433,8 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly title?: string
           readonly archived?: boolean
-          readonly budget?: { readonly tokens?: number; readonly durationMs?: number }
+          readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null }
+          readonly budgetUpdate?: "patch"
         }
       }
     | {
@@ -2221,6 +2223,7 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly projectID: string
         readonly parentID?: string
+        readonly budgetMode?: "interactive" | "autonomous"
         readonly agent?: string
         readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
         readonly location: { readonly directory: string; readonly workspaceID?: string }
@@ -2280,7 +2283,8 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly title?: string
         readonly archived?: boolean
-        readonly budget?: { readonly tokens?: number; readonly durationMs?: number }
+        readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null }
+        readonly budgetUpdate?: "patch"
       }
     }
   | {
@@ -4149,17 +4153,17 @@ export type SessionsUpdateInput = {
   readonly title?: {
     readonly title?: string | null
     readonly archived?: boolean | null
-    readonly budget?: { readonly tokens?: number; readonly durationMs?: number } | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["title"]
   readonly archived?: {
     readonly title?: string | null
     readonly archived?: boolean | null
-    readonly budget?: { readonly tokens?: number; readonly durationMs?: number } | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["archived"]
   readonly budget?: {
     readonly title?: string | null
     readonly archived?: boolean | null
-    readonly budget?: { readonly tokens?: number; readonly durationMs?: number } | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["budget"]
 }
 

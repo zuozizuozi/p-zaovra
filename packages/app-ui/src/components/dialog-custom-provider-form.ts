@@ -18,6 +18,7 @@ export type ModelRow = {
   id: string
   name: string
   protocol?: "openai" | "responses"
+  images?: boolean
   err: ModelErr
 }
 
@@ -107,6 +108,14 @@ export function validateCustomProvider(input: ValidateArgs) {
       m.id.trim(),
       {
         name: m.name.trim() || m.id.trim(),
+        ...(m.images === undefined
+          ? {}
+          : {
+              modalities: {
+                input: m.images ? ["text" as const, "image" as const] : ["text" as const],
+                output: ["text" as const],
+              },
+            }),
         ...((input.form.protocol === undefined ||
           input.form.protocol === "openai" ||
           input.form.protocol === "responses") &&

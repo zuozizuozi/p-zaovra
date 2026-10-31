@@ -221,6 +221,7 @@ const layer = Layer.effectDiscard(
             project_id: event.data.projectID,
             workspace_id: event.data.location.workspaceID ?? null,
             parent_id: event.data.parentID,
+            metadata: event.data.budgetMode ? { budgetMode: event.data.budgetMode } : undefined,
             slug: event.data.slug,
             directory: event.data.location.directory,
             path: event.data.subpath,

@@ -8,12 +8,19 @@ import { showToast } from "@/utils/toast"
 export function SettingsSessionBudget() {
   const sync = useServerSync()
   const language = useLanguage()
-  const [state, setState] = createStore({ tokens: "30000000", minutes: "720", pending: false, dirty: false })
+  const [state, setState] = createStore({
+    tokens: "",
+    minutes: "720",
+    pending: false,
+    dirty: false,
+    tokenDirty: false,
+    durationDirty: false,
+  })
   createEffect(() => {
     const config = sync().data.config
     if (state.dirty) return
     setState({
-      tokens: config.session_token_budget === null ? "" : String(config.session_token_budget ?? 30_000_000),
+      tokens: config.session_token_budget == null ? "" : String(config.session_token_budget),
       minutes: config.session_duration_ms === null ? "" : String((config.session_duration_ms ?? 43_200_000) / 60_000),
     })
   })
@@ -26,8 +33,11 @@ export function SettingsSessionBudget() {
     }
     setState("pending", true)
     await sync()
-      .updateConfig({ session_token_budget: tokens, session_duration_ms: duration })
-      .then(() => setState("dirty", false))
+      .updateConfig({
+        ...(state.tokenDirty ? { session_token_budget: tokens } : {}),
+        ...(state.durationDirty ? { session_duration_ms: duration } : {}),
+      })
+      .then(() => setState({ dirty: false, tokenDirty: false, durationDirty: false }))
       .catch((error: unknown) =>
         showToast({
           title: language.t("common.requestFailed"),
@@ -50,7 +60,12 @@ export function SettingsSessionBudget() {
             step="1"
             disabled={state.pending}
             value={state.tokens}
-            onInput={(event) => setState({ tokens: event.currentTarget.value, dirty: true })}
+            placeholder={
+              sync().data.config.session_token_budget === undefined
+                ? language.t("session.budget.modeDefaults")
+                : language.t("session.budget.unlimited")
+            }
+            onInput={(event) => setState({ tokens: event.currentTarget.value, dirty: true, tokenDirty: true })}
           />
         </label>
         <label>
@@ -62,10 +77,10 @@ export function SettingsSessionBudget() {
             step="1"
             disabled={state.pending}
             value={state.minutes}
-            onInput={(event) => setState({ minutes: event.currentTarget.value, dirty: true })}
+            onInput={(event) => setState({ minutes: event.currentTarget.value, dirty: true, durationDirty: true })}
           />
         </label>
-        <Button size="small" disabled={state.pending} onClick={() => void save()}>
+        <Button size="small" disabled={state.pending || !state.dirty} onClick={() => void save()}>
           {language.t("session.budget.save")}
         </Button>
       </div>

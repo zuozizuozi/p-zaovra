@@ -2,7 +2,9 @@ export * as BashJob from "./bash-job"
 
 import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
-import { history, requested } from "../session/outcome"
+import { deliveredBackgroundResult, history, requested } from "../session/outcome"
+import { Global } from "../global"
+import { PreviewProcess } from "../preview-process"
 import { BackgroundJob } from "../background-job"
 import { Database } from "../database/database"
 import { SessionInput } from "../session/input"
@@ -46,6 +48,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const jobs = yield* BackgroundJob.Service
+    const global = yield* Global.Service
     const database = yield* Database.Service
     const events = yield* EventV2.Service
     const sessions = yield* SessionStore.Service
@@ -93,7 +96,12 @@ const layer = Layer.effect(
             notified.add(id)
             return
           }
-          const source = requested(yield* history(database.db, record.sessionID)).sourceMessageID
+          const messages = yield* history(database.db, record.sessionID)
+          if (deliveredBackgroundResult(messages, id)) {
+            watched.delete(id)
+            return
+          }
+          const source = requested(messages).sourceMessageID
           if (source && job.metadata?.sourceMessageID && source !== job.metadata.sourceMessageID) {
             watched.delete(id)
             return
@@ -167,10 +175,11 @@ const layer = Layer.effect(
               command,
               timestamp: yield* DateTime.now,
             })
-            owned.add(id)
+            if (background?.kind !== "preview") owned.add(id)
             const source = requested(yield* history(database.db, context.sessionID)).sourceMessageID
             yield* jobs.start({
               id,
+              detached: background?.kind === "preview",
               type: "bash",
               title: command,
               metadata: {
@@ -229,7 +238,7 @@ const layer = Layer.effect(
           Tool.make({
             observation: (input) => input.action === "get" || input.action === "wait",
             description:
-              "Inspect, wait for, or cancel a background Bash command owned by this Session and Location. Use explicit short wait timeouts with bounded backoff, or await completion notification; do not poll unchanged output indefinitely. Running or unknown is not failure and must not trigger an automatic command retry. Wait defaults to ten minutes and accepts a longer timeout; cancelling the wait does not cancel the command. Task completion durably notifies and wakes the Session once unless the user has stopped it; preview completion does not notify. Task jobs also stop with budget termination, archive or owner scope closure. Jobs are process-local and never automatically rerun after restart.",
+              "Manage a background shell job: call bash_job with job_id and action get, wait, or cancel. wait blocks until the job finishes or timeout expires (default 600000 ms); it does not cancel the process. Use one blocking wait instead of polling unchanged output. A running job is not a failure and must not be restarted. Task completion records results and notifies once while the task is active; after a final answer it suppresses only results already read in that request. Services (preview) do not notify. Preview ownership persists across host restarts; other jobs are process-local. Unknown jobs are never rerun automatically.",
             input: Schema.Struct({
               job_id: Schema.String,
               action: Schema.Literals(["get", "wait", "cancel"]),
@@ -299,7 +308,43 @@ const layer = Layer.effect(
                     source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                   })
                   .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
-                if (!job)
+                if (!job) {
+                  const owner = {
+                    root: global.data,
+                    jobID: input.job_id,
+                    sessionID: context.sessionID,
+                    directory: location.directory,
+                    workspaceID: location.workspaceID,
+                  }
+                  const preview = yield* Effect.tryPromise(() =>
+                    input.action === "cancel" ? PreviewProcess.cancel(owner) : PreviewProcess.get(owner),
+                  ).pipe(Effect.mapError((cause) => new Tool.Failure({ message: String(cause) })))
+                  if (preview) {
+                    const completed = record.message.time.completed
+                    const report = (state: NonNullable<Awaited<ReturnType<typeof PreviewProcess.get>>>) =>
+                      Effect.gen(function* () {
+                        if (state.status !== "running" && state.status !== "unavailable" && !completed)
+                          yield* events.publish(SessionEvent.Shell.Ended, {
+                            sessionID: context.sessionID,
+                            callID: input.job_id,
+                            output: `${state.status}: ${state.output}`,
+                            timestamp: yield* DateTime.now,
+                          })
+                        return { status: state.status, kind: "preview", output: state.output }
+                      })
+                    if (input.action === "wait") {
+                      const deadline = Date.now() + (input.timeout ?? 600_000)
+                      while (preview.status === "running" && Date.now() < deadline) {
+                        yield* Effect.sleep(Math.min(250, deadline - Date.now()))
+                        const current = yield* Effect.tryPromise(() => PreviewProcess.get(owner)).pipe(
+                          Effect.mapError((cause) => new Tool.Failure({ message: String(cause) })),
+                        )
+                        if (!current) return { status: "unavailable", kind: "preview", output: preview.output }
+                        if (current.status !== "running") return yield* report(current)
+                      }
+                    }
+                    return yield* report(preview)
+                  }
                   return {
                     status: record.message.time.completed ? "finished" : "unavailable",
                     executionRecord: record.message.executionRecord,
@@ -308,6 +353,7 @@ const layer = Layer.effect(
                       record.message.output ||
                       "The owning process is unavailable. Do not assume completion or retry automatically; inspect the command log and workspace.",
                   }
+                }
                 const result =
                   input.action === "cancel"
                     ? yield* jobs.cancel(input.job_id)
@@ -363,5 +409,6 @@ export const node = makeLocationNode({
     PermissionV2.node,
     ToolRegistry.node,
     Database.node,
+    Global.node,
   ],
 })

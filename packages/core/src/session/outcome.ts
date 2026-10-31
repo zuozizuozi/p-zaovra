@@ -248,6 +248,34 @@ export const requirements = (fs: FSUtil.Interface, directory: string) =>
 export function requested(messages: readonly SessionMessage.Message[]) {
   return SessionRequest.requested(messages, (text) => createHash("sha256").update(text).digest("hex"))
 }
+/** Suppress only a completion whose terminal result this request already consumed. */
+export function deliveredBackgroundResult(messages: readonly SessionMessage.Message[], jobID: string) {
+  const final = messages.findLastIndex((message) => message.type === "user" || message.type === "assistant")
+  const last = messages[final]
+  if (
+    last?.type !== "assistant" ||
+    last.finish !== "stop" ||
+    last.content.some((part) => part.type === "tool") ||
+    !last.content.some((part) => part.type === "text" && part.text.trim())
+  )
+    return false
+  const start = messages.findLastIndex((message) => message.type === "user")
+  return messages
+    .slice(Math.max(0, start), final)
+    .some(
+      (message) =>
+        message.type === "assistant" &&
+        message.content.some(
+          (part) =>
+            part.type === "tool" &&
+            part.name === "bash_job" &&
+            part.state.status === "completed" &&
+            part.state.input.job_id === jobID &&
+            ["completed", "error", "cancelled", "finished"].includes(String(part.state.structured.status)),
+        ),
+    )
+}
+
 // Shell completion records are durable execution evidence, independent of observers.
 function executionTools(messages: readonly SessionMessage.Message[]): SessionMessage.AssistantTool[] {
   return messages

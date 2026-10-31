@@ -141,7 +141,10 @@ const layer = Layer.effect(
               }
               const model =
                 record.models.get(modelID) ?? (ModelV2.Info.empty(providerID, modelID) as ModelV2.MutableInfo)
-              if (!record.models.has(modelID)) record.models.set(modelID, model)
+              if (!record.models.has(modelID)) {
+                model.capabilities.input = ModelV2.defaultInput(providerID, modelID)
+                record.models.set(modelID, model)
+              }
               fn(model)
               model.id = modelID
               model.providerID = providerID

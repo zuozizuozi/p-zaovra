@@ -30,6 +30,11 @@ export type MutableInfo = Omit<Types.DeepMutable<Info>, "api"> & {
   api: ProviderV2.MutableApi<Api>
 }
 
+/** Built-in declarations only; custom endpoints must declare their capabilities. */
+export function defaultInput(providerID: string, modelID: string) {
+  return providerID === "openai" && modelID === "gpt-6-luna" ? ["text", "image"] : []
+}
+
 export function parse(input: string): { providerID: ProviderV2.ID; modelID: ID } {
   const [providerID, ...modelID] = input.split("/")
   return {
