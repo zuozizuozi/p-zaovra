@@ -2403,7 +2403,14 @@ const layer = Layer.effect(
       admissionRequired: boolean,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts, contextWindow, admissionRequired) {
+    const runTurn: RunTurn = Effect.fnUntraced(function* (
+      sessionID,
+      promotion,
+      step,
+      toolCallAttempts,
+      contextWindow,
+      admissionRequired,
+    ) {
       const budgetStop: TurnBudget = {
         admissionRequired,
         expired: false,
@@ -2779,7 +2786,14 @@ const layer = Layer.effect(
         let needsContinuation = true
         while (needsContinuation) {
           if ((yield* getSession(input.sessionID)).time.archived) return
-          const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts, contextWindow, admissionRequired)
+          const result = yield* runTurn(
+            input.sessionID,
+            promotion,
+            step,
+            toolCallAttempts,
+            contextWindow,
+            admissionRequired,
+          )
           admissionRequired = !result.needsContinuation
           needsContinuation = result.needsContinuation
           step = result.step + 1

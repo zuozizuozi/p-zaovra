@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test"
 import { analyzeCommand } from "../src/tool/bash-preflight"
 
+test("502 preflight includes plain relative and flag operands without treating switches as files", () => {
+  for (const shell of ["cmd", "powershell", "posix"] as const) {
+    expect(
+      analyzeCommand('cat sub/file.txt linked/file --file=sub/../../outside.txt bare.txt "a b.txt" -q', shell).paths,
+    ).toEqual(["sub/file.txt", "linked/file", "sub/../../outside.txt", "bare.txt", "a b.txt"])
+    expect(analyzeCommand('cat --file="sub/file.txt"', shell).paths).toEqual(["sub/file.txt"])
+  }
+})
+
 test("490 preflight finds literal parent operands and treats unsupported syntax as uncertain", () => {
   expect(analyzeCommand('cat "../outside/a b.txt"', "posix")).toEqual({
     paths: ["../outside/a b.txt"],

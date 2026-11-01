@@ -11,6 +11,69 @@ import { tmpdir } from "../fixture/fixture"
 
 const Probe = EventV2.define({ type: "test.490.backpressure", schema: { index: Schema.Number } })
 
+for (const layout of ["slow-first", "slow-middle", "two-slow"] as const)
+  test(`502 instance ${layout} overflow preserves every healthy neighbor notification and cursor`, async () => {
+    await using tmp = await tmpdir()
+    const directory = AbsolutePath.make(tmp.path)
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const events = yield* EventV2.Service
+        const first: string[] = []
+        const second: string[] = []
+        const published: string[] = []
+        const slow = { calls: 0 }
+        const measured: Pick<EventV2.Interface, "listen" | "recentAfter"> = {
+          recentAfter: events.recentAfter,
+          listen: (listener) =>
+            events.listen((event) => Effect.sync(() => slow.calls++).pipe(Effect.andThen(listener(event)))),
+        }
+        const outcome = yield* Effect.exit(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const streams = []
+              if (layout !== "slow-middle") streams.push(yield* instanceEventStream(measured, { directory }))
+              yield* Effect.acquireRelease(
+                events.listen((event) =>
+                  Effect.sync(() => {
+                    first.push(event.id)
+                  }),
+                ),
+                (unsubscribe) => unsubscribe,
+              )
+              if (layout !== "slow-first") streams.push(yield* instanceEventStream(measured, { directory }))
+              yield* Effect.acquireRelease(
+                events.listen((event) =>
+                  Effect.sync(() => {
+                    second.push(event.id)
+                  }),
+                ),
+                (unsubscribe) => unsubscribe,
+              )
+              for (let index = 0; index < 258; index++) {
+                const event = yield* events.publish(Probe, { index }, { location: { directory } })
+                published.push(event.id)
+              }
+              expect(first).toEqual(published)
+              expect(second).toEqual(published)
+              expect(slow.calls).toBe(257 * streams.length)
+              for (const stream of streams)
+                expect(Exit.isFailure(yield* Effect.exit(Stream.runCollect(stream)))).toBe(true)
+              expect(events.recentAfter(published[255]!).events.map((event) => event.id)).toEqual(published.slice(256))
+              if (layout === "two-slow") return yield* Effect.fail("scope-error-cleanup")
+            }),
+          ),
+        )
+        expect(Exit.isFailure(outcome)).toBe(layout === "two-slow")
+        yield* events.publish(Probe, { index: 999 }, { location: { directory } })
+        expect(first).toEqual(published)
+        expect(second).toEqual(published)
+        expect(slow.calls).toBe(257 * (layout === "two-slow" ? 2 : 1))
+      }).pipe(
+        Effect.provide(AppNodeBuilder.build(EventV2.node, [[Global.node, Global.layerWith({ data: tmp.path })]])),
+      ),
+    )
+  })
+
 test("490 global slow subscriber closes at its bound and unregisters before it is read", async () => {
   const before = GlobalBus.listenerCount("event")
   await Effect.runPromise(

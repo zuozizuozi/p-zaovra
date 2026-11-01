@@ -1157,6 +1157,70 @@ describe("BashTool", () => {
     ),
   )
 
+  it.live("502 canonicalizes ordinary relative operands before external approval and rechecks their identity", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => Promise.all([tmpdir(), tmpdir()])),
+      ([active, outside]) =>
+        Effect.gen(function* () {
+          const work = path.join(active.path, "work")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(work, "sub"), { recursive: true })
+            await Bun.write(path.join(active.path, "outside.txt"), "outside")
+            await Bun.write(path.join(outside.path, "file.txt"), "original")
+            await Bun.write(path.join(work, "sub", "file.txt"), "inside")
+            await fs.symlink(outside.path, path.join(work, "linked"), process.platform === "win32" ? "junction" : "dir")
+          })
+          for (const command of [
+            "cat sub/../../outside.txt",
+            'cat "sub/../../outside.txt"',
+            "cat --file=sub/../../outside.txt",
+          ]) {
+            reset()
+            denyAction = "external_directory"
+            const rejected = yield* withTool(work, (registry) => settleTool(registry, call({ command })))
+            expect(assertions.map((item) => item.action)).toEqual(["external_directory"])
+            expect(rejected.result.type).toBe("error")
+            expect(runs).toHaveLength(0)
+          }
+          for (const command of [
+            "cat linked/file.txt",
+            'cat "linked/file.txt"',
+            "cat --file=linked/file.txt",
+            ...(process.platform === "win32" ? ["type linked\\file.txt"] : []),
+          ]) {
+            reset()
+            denyAction = "external_directory"
+            const rejected = yield* withTool(work, (registry) => settleTool(registry, call({ command })))
+            expect(assertions).toEqual([])
+            expect(rejected.result.type).toBe("error")
+            expect(runs).toHaveLength(0)
+          }
+          reset()
+          yield* withTool(work, (registry) => executeTool(registry, call({ command: "cat sub/file.txt" })))
+          expect(assertions.map((item) => item.action)).toEqual(["bash"])
+          expect(runs).toHaveLength(1)
+          reset()
+          afterPermission = (input) =>
+            input.action === "bash"
+              ? Effect.promise(async () => {
+                  await fs.rename(path.join(active.path, "outside.txt"), path.join(active.path, "original.txt"))
+                  await Bun.write(path.join(active.path, "outside.txt"), "replacement")
+                }).pipe(Effect.orDie)
+              : Effect.void
+          const changed = yield* withTool(work, (registry) =>
+            settleTool(registry, call({ command: "cat sub/../../outside.txt" })),
+          )
+          expect(assertions.map((item) => item.action)).toEqual(["external_directory", "bash"])
+          expect(changed.inputRejected).toBe(true)
+          expect(runs).toHaveLength(0)
+        }),
+      ([active, outside]) =>
+        Effect.promise(() =>
+          Promise.all([active[Symbol.asyncDispose](), outside[Symbol.asyncDispose]()]).then(() => undefined),
+        ),
+    ),
+  )
+
   it.live("keeps non-zero exits useful", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

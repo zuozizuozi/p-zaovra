@@ -13,12 +13,14 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     /^(?:python[\d.]*|node|ruby|perl)(?:\.exe)?$/i.test(path.basename(token.replace(/^(["'])(.*)\1$/, "$2"))),
   )
   const inline = interpreter && tokens.some((token) => token === "-c" || token === "-e")
-  const paths = tokens.flatMap((token) => {
+  const paths = tokens.flatMap((token, index) => {
     const quoted = /^["']/.test(token)
     const value = token.replace(/^(["'])(.*)\1$/, "$2").replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-[A-Za-z]+:/, "")
+    if (!value || value.startsWith("-")) return []
     if (/[\r\n$`%]/.test(value) || (!quoted && /[?*\[\]{}]/.test(value))) return []
     if (shell === "cmd" && /^\/[A-Za-z](?::|$)/.test(value)) return []
-    return path.isAbsolute(value) || /^\.\.?[\\/]/.test(value) ? [value] : []
+    // Ordinary operands can traverse or name an external symlink too. The command name still uses PATH lookup.
+    return (index > 0 && !/[?*\[\]{}]/.test(value)) || path.isAbsolute(value) || /[\\/]/.test(value) ? [value] : []
   })
   const foreignSyntax =
     process.platform === "win32" &&
