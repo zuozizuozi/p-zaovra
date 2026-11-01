@@ -165,6 +165,64 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live(
+    "490 real shell omits synthetic host credentials and retains build environment",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          const values = {
+            ZAOVRA_FIXTURE_API_KEY: "synthetic-key",
+            ZAOVRA_FIXTURE_TOKEN: "synthetic-token",
+            ZAOVRA_FIXTURE_BUILD: "kept-build",
+          }
+          return Effect.acquireUseRelease(
+            Effect.sync(() => {
+              for (const key of Object.keys(values))
+                if (Object.hasOwn(process.env, key)) throw new Error("Synthetic fixture variable already exists")
+              Object.assign(process.env, values)
+            }),
+            () =>
+              Effect.promise(() =>
+                Bun.write(
+                  path.join(tmp.path, "environment.mjs"),
+                  `console.log(JSON.stringify({ key: Object.hasOwn(process.env, 'ZAOVRA_FIXTURE_API_KEY'), token: Object.hasOwn(process.env, 'ZAOVRA_FIXTURE_TOKEN'), build: process.env.ZAOVRA_FIXTURE_BUILD, path: !!process.env.PATH, home: !!process.env.HOME }))`,
+                ),
+              ).pipe(
+                Effect.andThen(
+                  withTool(
+                    tmp.path,
+                    (registry) => settleTool(registry, call({ command: "bun environment.mjs" })),
+                    LayerNode.compile(AppProcess.node),
+                  ),
+                ),
+                Effect.andThen((settled) =>
+                  Effect.sync(() => {
+                    expect(settled.output?.structured).toMatchObject({ exit: 0 })
+                    const text = settled.output?.content.find((part) => part.type === "text")
+                    if (text?.type !== "text") throw new Error("Missing actual shell output")
+                    expect(JSON.parse(text.text.trim().split(/\r?\n/)[0]!)).toEqual({
+                      key: false,
+                      token: false,
+                      build: "kept-build",
+                      path: true,
+                      home: true,
+                    })
+                  }),
+                ),
+              ),
+            () =>
+              Effect.sync(() => {
+                for (const key of Object.keys(values)) delete process.env[key]
+              }),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    30000,
+  )
+
   it.live("466 services requested to stay running use preview and independent business verification", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

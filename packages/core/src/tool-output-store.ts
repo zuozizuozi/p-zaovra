@@ -157,7 +157,7 @@ const layer = Layer.effect(
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
-        .writeFileString(file, content, { flag: "wx" })
+        .writeFileString(file, content, { flag: "wx", mode: 0o600 })
         .pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       return file
     })

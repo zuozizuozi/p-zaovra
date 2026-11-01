@@ -14,7 +14,7 @@ import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
 import { ApplicationTools } from "@zaovra-ai/core/tool/application-tools"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
-import { Effect, Fiber, Layer } from "effect"
+import { Cause, Effect, Fiber, Layer } from "effect"
 import { executeTool, toolIdentity } from "./lib/tool"
 import { testEffect } from "./lib/effect"
 import { SessionV2 } from "@zaovra-ai/core/session"
@@ -192,6 +192,57 @@ it.live(
       expect(yield* Fiber.join(long)).toEqual({
         type: "text",
         value: JSON.stringify({ arguments: { ...input, text: "long-argument".repeat(80) }, calls: 3 }),
+      })
+      const tools = yield* registry.materialize()
+      const invocation = (id: string) => ({
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call" as const, id, name: "mcp_fixture_echo", input: { text: id } },
+      })
+      yield* agents.transform((editor) =>
+        editor.update(AgentV2.ID.make("build"), (agent) => {
+          agent.permissions = [{ action: "*", resource: "*", effect: "deny" }]
+        }),
+      )
+      const blocked = yield* tools.settle(invocation("490-blocked"))
+      expect(blocked.inputRejected).toBe(true)
+      expect(blocked.result.type).toBe("error")
+      expect(requests).toHaveLength(4)
+      yield* agents.transform((editor) =>
+        editor.update(AgentV2.ID.make("build"), (agent) => {
+          agent.permissions = [{ action: "*", resource: "*", effect: "ask" }]
+        }),
+      )
+      const corrected = yield* tools.settle(invocation("490-corrected")).pipe(Effect.forkScoped)
+      yield* Effect.repeat(Effect.sleep("10 millis"), { until: () => requests.length === 5 })
+      yield* permission.reply({ requestID: requests[4]!.id, reply: "reject", message: "Use a fresh corrected call" })
+      const correction = yield* Fiber.join(corrected)
+      expect(correction.inputRejected).toBe(true)
+      expect(correction.result).toEqual({ type: "error", value: "Use a fresh corrected call" })
+      const declined = yield* tools.settle(invocation("490-declined")).pipe(Effect.forkScoped)
+      yield* Effect.repeat(Effect.sleep("10 millis"), { until: () => requests.length === 6 })
+      yield* permission.reply({ requestID: requests[5]!.id, reply: "reject" })
+      const decline = yield* Fiber.await(declined)
+      expect(decline._tag).toBe("Failure")
+      if (decline._tag === "Failure")
+        expect(
+          decline.cause.reasons.some(
+            (reason) => Cause.isDieReason(reason) && reason.defect instanceof PermissionV2.DeclinedError,
+          ),
+        ).toBe(true)
+      const stopped = yield* tools.settle(invocation("490-stopped")).pipe(Effect.forkScoped)
+      yield* Effect.repeat(Effect.sleep("10 millis"), { until: () => requests.length === 7 })
+      yield* Fiber.interrupt(stopped)
+      const stop = yield* Fiber.await(stopped)
+      expect(stop._tag === "Failure" && Cause.hasInterrupts(stop.cause)).toBe(true)
+      expect(yield* permission.list()).toEqual([])
+      const after = yield* call("490-after-rejections", { ...input, text: "after-rejections" }).pipe(Effect.forkScoped)
+      yield* Effect.repeat(Effect.sleep("10 millis"), { until: () => requests.length === 8 })
+      yield* permission.reply({ requestID: requests[7]!.id, reply: "once" })
+      // Three earlier real calls plus this one: all four rejected operations dispatched zero times.
+      expect(yield* Fiber.join(after)).toEqual({
+        type: "text",
+        value: JSON.stringify({ arguments: { ...input, text: "after-rejections" }, calls: 4 }),
       })
       if (process.env.W_MCP_EVIDENCE)
         yield* Effect.promise(() => Bun.write(process.env.W_MCP_EVIDENCE!, JSON.stringify(requests, null, 2)))

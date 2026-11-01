@@ -289,7 +289,22 @@ const layer = Layer.effectDiscard(
               const shell = identity.path
               const previousExecutions = yield* history(database.db, context.sessionID, true)
               const approvedContract = ExecutionContext.approved(previousExecutions)
-              const launchEnvironment = { ...process.env, ...approvedContract?.value.environment, ...input.environment }
+              const launchEnvironment = {
+                // Drop ambient credentials before reading their values; the
+                // complete map is passed with extendEnv=false to all owners.
+                ...Object.fromEntries(
+                  Object.keys(process.env)
+                    .filter(
+                      (name) =>
+                        !/(^|_)(API_?KEY|ACCESS_?KEY(_ID)?|SECRET(_ACCESS_?KEY)?|TOKEN|PASSWORD|CREDENTIALS?)($|_)/i.test(
+                          name,
+                        ) && !["SSH_AUTH_SOCK", "SSH_AGENT_PID", "KRB5CCNAME"].includes(name.toUpperCase()),
+                    )
+                    .map((name) => [name, process.env[name]]),
+                ),
+                ...approvedContract?.value.environment,
+                ...input.environment,
+              }
               const command = AppProcess.shellCommand(input.command, target.canonical, shell, launchEnvironment)
               const silence = input.run_in_background
                 ? undefined

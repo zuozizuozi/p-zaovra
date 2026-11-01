@@ -45,6 +45,28 @@ const withStore = <A, E, R>(
 const it = testEffect(Layer.empty)
 
 describe("ToolOutputStore", () => {
+  it.live("490 new text output is private on POSIX and never changes older output permissions", () =>
+    withStore(({ root, store, fs }) =>
+      Effect.gen(function* () {
+        const older = path.join(root, "tool-output", "tool_older")
+        yield* fs.ensureDir(path.dirname(older))
+        yield* fs.writeFileString(older, "older synthetic output", { flag: "wx", mode: 0o644 })
+        const previous = yield* fs.stat(older)
+        const result = yield* store.bound({
+          sessionID,
+          toolCallID: "private-text",
+          output: { structured: {}, content: [{ type: "text", text: "synthetic ".repeat(6000) }] },
+        })
+        expect(result.outputPaths).toHaveLength(1)
+        const info = yield* fs.stat(result.outputPaths[0]!)
+        // POSIX mode is not an NTFS ACL claim. Windows ACL is measured separately.
+        if (process.platform !== "win32") expect(info.mode & 0o777).toBe(0o600)
+        expect((yield* fs.stat(older)).mode).toBe(previous.mode)
+        expect(yield* fs.readFileString(older)).toBe("older synthetic output")
+      }),
+    ),
+  )
+
   it.live("retains session PNG bytes in managed storage and expires them", () =>
     withStore(({ root, store, fs }) =>
       Effect.gen(function* () {
