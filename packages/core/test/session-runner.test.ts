@@ -8725,6 +8725,48 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  for (const delivery of ["steer", "queue"] as const)
+    it.effect(`490 expired ${delivery} observation promotion cannot create a provider turn`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const sessions = yield* SessionV2.Service
+        const database = yield* Database.Service
+        const events = yield* EventV2.Service
+        const runner = yield* SessionRunner.Service
+        responses = [
+          fragmentFixture("text", "real-first", ["Initial response"]).completeEvents,
+          fragmentFixture("text", "real-queue", ["Queued response"]).completeEvents,
+        ]
+        yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Current task" }), resume: false })
+        yield* sessions.resume(sessionID)
+        expect(requests).toHaveLength(1)
+        const stale = yield* SessionInput.admit(database.db, events, {
+          id: SessionMessage.ID.create(),
+          sessionID,
+          delivery,
+          completion: {
+            type: "bash-completion",
+            sourceMessageID: SessionMessage.ID.make("msg_replaced_task"),
+            jobID: "old-job",
+          },
+          prompt: Prompt.make({ text: "Obsolete host observation" }),
+        })
+        yield* runner.run({ sessionID, force: false })
+        expect(requests).toHaveLength(1)
+        expect((yield* SessionInput.find(database.db, stale.id))?.cancelledSeq).toBeDefined()
+        yield* sessions.prompt({
+          sessionID,
+          delivery: "queue",
+          prompt: Prompt.make({ text: "Real queued user request" }),
+          resume: false,
+        })
+        yield* runner.run({ sessionID, force: false })
+        expect(requests).toHaveLength(2)
+        expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Real queued user request")
+      }),
+    )
+
   it.effect("S1 background completion continues once through the durable queue", () =>
     Effect.gen(function* () {
       yield* setup

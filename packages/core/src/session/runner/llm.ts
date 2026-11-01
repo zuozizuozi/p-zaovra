@@ -497,6 +497,7 @@ const layer = Layer.effect(
       )
 
     type TurnBudget = {
+      admissionRequired?: boolean
       expired: boolean
       repairExpired?: boolean
       model?: { id: string; provider: string }
@@ -585,6 +586,9 @@ const layer = Layer.effect(
           promoted += Number(yield* SessionInput.promoteNextQueued(db, events, sessionID))
           promoted += yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         }
+        if (budgetStop?.admissionRequired && promoted === 0)
+          return { needsContinuation: false, step: currentStep }
+        if (budgetStop && promoted > 0) budgetStop.admissionRequired = false
         if (promoted > 0 && SessionOutcome.requested(yield* store.context(sessionID)).userMessageID !== previousUser) {
           // A new task cannot reuse side effects belonging to the interrupted task.
           networkRecovery?.operations.clear()
@@ -2283,10 +2287,12 @@ const layer = Layer.effect(
       step: number,
       toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
       contextWindow: SessionContextWindow.State,
+      admissionRequired: boolean,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts, contextWindow) {
+    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts, contextWindow, admissionRequired) {
       const budgetStop: TurnBudget = {
+        admissionRequired,
         expired: false,
         repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
       }
@@ -2646,12 +2652,14 @@ const layer = Layer.effect(
       const contextWindow = SessionContextWindow.make()
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
+      let admissionRequired = !input.force
       let step = 1
       while (shouldRun) {
         let needsContinuation = true
         while (needsContinuation) {
           if ((yield* getSession(input.sessionID)).time.archived) return
-          const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts, contextWindow)
+          const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts, contextWindow, admissionRequired)
+          admissionRequired = !result.needsContinuation
           needsContinuation = result.needsContinuation
           step = result.step + 1
           promotion = "steer"

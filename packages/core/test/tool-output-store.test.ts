@@ -45,6 +45,24 @@ const withStore = <A, E, R>(
 const it = testEffect(Layer.empty)
 
 describe("ToolOutputStore", () => {
+  it.live("490 capture tail is byte bounded while its retained raw log remains complete", () =>
+    withStore(({ store, fs }) =>
+      Effect.gen(function* () {
+        const capture = store.capture()
+        const text = "中文".repeat(2000) + "\nlatest line"
+        yield* capture.append(new TextEncoder().encode(text))
+        const snapshot = capture.snapshot()
+        expect(snapshot.cursor).toBe(Buffer.byteLength(text))
+        expect(snapshot.truncated).toBe(true)
+        expect(Buffer.byteLength(snapshot.output)).toBeLessThanOrEqual(8192)
+        expect(snapshot.output).toEndWith("latest line")
+        expect(snapshot.output).not.toContain("\uFFFD")
+        expect(yield* fs.readFileString(capture.paths()[0]!)).toBe(text)
+        yield* capture.append(new Uint8Array())
+        expect(capture.snapshot()).toEqual(snapshot)
+      }),
+    ),
+  )
   it.live("490 new text output is private on POSIX and never changes older output permissions", () =>
     withStore(({ root, store, fs }) =>
       Effect.gen(function* () {

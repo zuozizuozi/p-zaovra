@@ -45,3 +45,7 @@ The team will send a response indicating the next steps in handling your report.
 ## Escalation
 
 If you do not receive an acknowledgement of your report within 6 business days, email support@zaovra.com.
+
+# Retained tool output
+
+Tool output is retained under the Zaovra data directory (`XDG_DATA_HOME/zaovra`, or `~/.local/share/zaovra` when unset). New output files use exclusive creation and POSIX mode `0600`; existing files are not rewritten to change their permissions. On Windows, access is governed by the directory's inherited ACL. If you configure the data directory in a shared location, that location's ACL determines who can read the retained output. Check that directory's permissions before storing private task output there.

@@ -29,12 +29,51 @@ import { ModelV2 } from "@zaovra-ai/core/model"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
+import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
+it.effect("490 running get exposes bounded capture progress without claiming completion", () =>
+  withRuntime((directory, sessions, registry, jobs) =>
+    Effect.gen(function* () {
+      const bash = yield* BashJob.Service
+      const store = yield* ToolOutputStore.Service
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const capture = store.capture()
+      const gate = yield* Deferred.make<void>()
+      const id = yield* bash.start(
+        "capture fixture",
+        Deferred.await(gate).pipe(Effect.as("terminal result")),
+        { sessionID: session.id, ...toolIdentity, toolCallID: "running-tail" },
+        capture.append(new TextEncoder().encode("x".repeat(12_000) + "\nfirst progress")),
+        { kind: "task", workdir: directory, observe: () => capture.snapshot() },
+      )
+      const get = (callID: string) =>
+        settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: { type: "tool-call", id: callID, name: "bash_job", input: { job_id: id, action: "get" } },
+        })
+      const first = yield* get("tail-1")
+      expect(first.output?.structured).toMatchObject({ status: "running", truncated: true, cursor: 12_015 })
+      expect(JSON.stringify(first.output?.content)).toContain("first progress")
+      expect(Buffer.byteLength(JSON.stringify(first.output?.content))).toBeLessThan(9000)
+      expect(first.output?.structured).not.toHaveProperty("exit")
+      yield* capture.append(new TextEncoder().encode("\nnext progress"))
+      const second = yield* get("tail-2")
+      expect(second.output?.structured).toMatchObject({ status: "running", cursor: 12_029 })
+      expect(JSON.stringify(second.output?.content)).toContain("next progress")
+      yield* Deferred.succeed(gate, undefined)
+      yield* jobs.wait({ id, timeout: 1000 })
+      const terminal = yield* get("tail-final")
+      expect(terminal.output?.structured).toMatchObject({ status: "completed" })
+      expect(JSON.stringify(terminal.output?.content)).toContain("terminal result")
+    }),
+  ),
+)
 for (const foreground of [false, true]) {
   it.live(
     `462 delivered service survives Stop and stops on archive after ${foreground ? "foreground yield" : "background launch"}`,
@@ -304,7 +343,7 @@ it.effect("469 an unobserved completion still wakes after a visible final answer
   ),
 )
 
-for (const timing of ["late-watch", "queued-before-final"] as const)
+for (const timing of ["late-watch", "queued-before-final", "after-continuation"] as const)
   it.effect(`469 delivered result suppresses only its duplicate completion: ${timing}`, () =>
     withRuntime((_directory, sessions, registry, jobs) =>
       Effect.gen(function* () {
@@ -387,7 +426,15 @@ for (const timing of ["late-watch", "queued-before-final"] as const)
           requestPerformed: false,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         })
-        if (timing === "late-watch") {
+        if (timing === "after-continuation") {
+          const continuation = yield* sessions.prompt({
+            sessionID: session.id,
+            prompt: { text: "continue" },
+            resume: false,
+          })
+          yield* SessionInput.promoteSteers(database.db, events, session.id, continuation.admittedSeq)
+        }
+        if (timing !== "queued-before-final") {
           yield* bash.watch(id)
           expect(yield* SessionInput.find(database.db, SessionMessage.ID.make(`${id}_completed`))).toBeUndefined()
         } else {
@@ -535,6 +582,7 @@ const withRuntime = <A, E, R>(
               BashJob.node,
               AgentV2.node,
               ToolRegistry.node,
+              ToolOutputStore.node,
               BackgroundJob.node,
               Database.node,
               EventV2.node,
@@ -1336,6 +1384,8 @@ it.live("367 S1 foreground timeout retains the same process identity without ret
       })
       const job = (first.output?.structured as { job_id?: string })?.job_id
       expect(job).toBeDefined()
+      expect(first.output?.structured).toMatchObject({ kind: "task" })
+      expect(JSON.stringify(first.output?.content)).toContain("Omitting background_kind selects task")
       yield* Effect.promise(async () => {
         const deadline = Date.now() + 5000
         while (!(await Bun.file(marker).exists())) {
@@ -1355,6 +1405,7 @@ it.live("367 S1 foreground timeout retains the same process identity without ret
         },
       })
       expect(done.output?.structured).toMatchObject({ status: "completed" })
+      expect(done.output?.structured).toMatchObject({ exit: 0 })
       expect(JSON.stringify(done.output?.content)).toContain("survived")
       expect(JSON.stringify(done.output?.content)).toContain(originalPID.trim())
       expect(yield* Effect.promise(() => Bun.file(marker).text())).toBe(originalPID)
@@ -1364,6 +1415,9 @@ it.live("367 S1 foreground timeout retains the same process identity without ret
       const notification = yield* SessionInput.find(database.db, SessionMessage.ID.make(`${job}_completed`))
       expect(notification?.delivery).toBe("queue")
       expect(notification?.prompt.text).toContain(job!)
+      expect(notification?.prompt.text).toContain("exit=0")
+      expect(notification?.prompt.text).toContain("survived")
+      expect(notification?.prompt.text).toContain("Background command")
     }),
   ),
 )

@@ -141,7 +141,14 @@ export function resolve(
       if (configured) throw new Unavailable(configured)
       continue
     }
-    if (inspect && !configured && windows && type === "powershell" && name === "pwsh" && Number(version.split(".")[0]) < 7)
+    if (
+      inspect &&
+      !configured &&
+      windows &&
+      type === "powershell" &&
+      name === "pwsh" &&
+      Number(version.split(".")[0]) < 7
+    )
       continue
     return { path: executable, type, version, source: configured ? source : "auto" }
   }
@@ -186,7 +193,7 @@ function probe(executable: string, type: Identity["type"]) {
 export function guidance(shell: Identity) {
   const identity = `Execution shell: ${shell.type} ${shell.version}; ${shell.path}; source=${shell.source}.`
   if (shell.type === "powershell")
-    return `${identity} ${Number(shell.version.split(".")[0]) >= 7 ? "Supports && and ||." : "Does not support && or ||; use if ($?) { } for dependent commands."} Use curl.exe, $env:NAME, and explicit -Encoding utf8 when writing files. Quote literal @ arguments. For multiline embedded code write a script file and invoke it.`
+    return `${identity} ${Number(shell.version.split(".")[0]) >= 7 ? "Supports && and ||. PowerShell 7 text writers default to UTF-8 without BOM." : "Does not support && or ||; use if ($?) { } for dependent commands. Windows PowerShell 5.1 Out-File and > default to UTF-16LE; other writers may use ANSI. -Encoding utf8 includes a BOM; use an explicit UTF8Encoding(false) writer when BOM-free UTF-8 is required."} Use curl.exe, $env:NAME, and explicit encoding when writing files. Respect existing encodings and explicit Encoding arguments; do not silently recode files or strip BOMs. Quote literal @ arguments. For multiline embedded code write a script file and invoke it.`
   if (shell.type === "cmd")
     return `${identity} Use %NAME% for environment variables. No Bash/PowerShell syntax. For multiple lines write and invoke a .cmd file.`
   return `${identity} Use POSIX quoting and $NAME for environment variables. No PowerShell syntax.`

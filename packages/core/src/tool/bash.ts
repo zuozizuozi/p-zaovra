@@ -38,7 +38,7 @@ export const MAX_CAPTURE_BYTES = 1024 * 1024
 export const Input = Schema.Struct({
   background_kind: Schema.optional(Schema.Literals(["task", "preview"])).annotate({
     description:
-      "preview keeps a user-requested service after Session/CLI exit; redirect its logs. task is temporary and stops with execution. Archive/cancel still stop owned previews. Applies to explicit launch and foreground yield.",
+      "preview delivers a user-requested long-lived service. On Windows and Linux it survives normal turn and CLI exit; other platforms use backend lifetime. Redirect logs. task is temporary and stops with execution; a listening port never selects preview. Explicit cancellation and archive stop owned previews. Applies to explicit launch and foreground yield.",
   }),
   run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
@@ -110,6 +110,7 @@ const StructuredOutput = Schema.Struct({
   verification: Schema.optional(SessionOutcome.Check),
   verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
   job_id: Schema.String.pipe(Schema.optional),
+  kind: Schema.Literals(["task", "preview"]).pipe(Schema.optional),
   exit: Schema.Number.pipe(Schema.optional),
   truncated: Schema.Boolean,
   timeout: Schema.Boolean.pipe(Schema.optional),
@@ -128,7 +129,7 @@ const modelOutput = (output: Output) => {
     ? `\n\nWarnings:\n${output.warnings.map((warning) => `- ${warning}`).join("\n")}`
     : ""
   if (output.job_id)
-    return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Background command started: ${output.job_id}. Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
+    return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Background command started: ${output.job_id}. ${output.kind === "task" ? "Lifetime: task. Omitting background_kind selects task even when a port is listening; Stop, budget, archive or owner closure can stop it. A service intended to remain available requires background_kind=preview at launch; do not restart this live job automatically. " : output.kind === "preview" ? "Lifetime: preview (persistent on Windows/Linux; backend-scoped on other platforms). " : "Inspect the retained job's declared lifetime; this retry did not create a new process. "}Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
   if (output.timeout) return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command timed out before completion.`
   if (output.verification?.execution === "not-run")
     return "Verification did not run successfully; inspect the diagnostic and correct its setup."
@@ -188,7 +189,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. Preview jobs survive normal completion, Stop and CLI normal exit, but explicit cancellation, archive and final container cleanup still stop them. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. It survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. On Windows and Linux, preview jobs survive normal completion, Stop and CLI normal exit; macOS and other platforms have backend-scoped ownership and cannot guarantee survival after CLI exit. Explicit cancellation, archive and final container cleanup still stop owned services. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. On supported Windows/Linux hosts it survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input:
             Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log !== false
               ? Schema.Struct({
@@ -212,6 +213,7 @@ const layer = Layer.effectDiscard(
             ...(output.verifications ? { verifications: output.verifications } : {}),
             truncated: output.truncated,
             ...(output.job_id ? { job_id: output.job_id } : {}),
+            ...(output.kind ? { kind: output.kind } : {}),
             ...(output.exit === undefined ? {} : { exit: output.exit }),
             ...(output.timeout === undefined ? {} : { timeout: output.timeout }),
           }),
@@ -724,7 +726,7 @@ const layer = Layer.effectDiscard(
                   ),
                   context,
                   capture ? capture.append(new Uint8Array()) : Effect.void,
-                  { kind: input.background_kind ?? "task", workdir: target.canonical },
+                  { kind: input.background_kind ?? "task", workdir: target.canonical, observe: capture?.snapshot },
                   Deferred.succeed(done, {
                     job_id: `msg_bash_${context.assistantMessageID}_${context.toolCallID}`,
                     output:
@@ -745,6 +747,7 @@ const layer = Layer.effectDiscard(
                       if (input.background_kind !== "preview") yield* jobs.watch(job_id)
                       return {
                         job_id,
+                        kind: input.background_kind ?? "task",
                         shell: identity,
                         output: `${partial || "(no output yet)"}\nCommand moved to the background with its declared lifetime. Tasks notify this Session on completion; services do not block delivery. Use bash_job get/wait/cancel when needed. No check has passed yet.`,
                         truncated: false,
@@ -796,12 +799,13 @@ const layer = Layer.effectDiscard(
                 ),
                 context,
                 capture ? capture.append(new Uint8Array()) : Effect.void,
-                { kind: input.background_kind ?? "task", workdir: target.canonical },
+                { kind: input.background_kind ?? "task", workdir: target.canonical, observe: capture?.snapshot },
               )
               if (input.background_kind === "preview") yield* Deferred.await(started)
               if (input.background_kind !== "preview") yield* jobs.watch(job_id)
               return {
                 job_id,
+                kind: input.background_kind ?? "task",
                 shell: identity,
                 output: "Command log is retained while the job runs.",
                 truncated: false,

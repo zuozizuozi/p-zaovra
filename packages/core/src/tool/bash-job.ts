@@ -2,7 +2,7 @@ export * as BashJob from "./bash-job"
 
 import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
-import { deliveredBackgroundResult, history, requested } from "../session/outcome"
+import { chineseTask, deliveredBackgroundResult, history, requested } from "../session/outcome"
 import { Global } from "../global"
 import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
@@ -21,6 +21,7 @@ import { SessionStore } from "../session/store"
 import { Tool, withPermission } from "./tool"
 import { ToolRegistry } from "./registry"
 import { Tools } from "./tools"
+import type { ToolOutputStore } from "../tool-output-store"
 
 export class Service extends Context.Service<
   Service,
@@ -39,7 +40,7 @@ export class Service extends Context.Service<
       run: Effect.Effect<string, unknown>,
       context: Tool.Context,
       prepare: Effect.Effect<void, unknown>,
-      background?: { kind: "task" | "preview"; workdir: string },
+      background?: { kind: "task" | "preview"; workdir: string; observe?: ToolOutputStore.CaptureHandle["snapshot"] },
       onExisting?: Effect.Effect<void>,
     ) => Effect.Effect<string, Tool.Failure>
   }
@@ -60,6 +61,7 @@ const layer = Layer.effect(
     const owned = new Set<string>()
     const watched = new Set<string>()
     const notified = new Set<string>()
+    const observations = new Map<string, ToolOutputStore.CaptureHandle["snapshot"]>()
     const stopped = new Set<string>()
     const unsubscribe = yield* events.listen((event) =>
       Effect.sync(() => {
@@ -107,6 +109,9 @@ const layer = Layer.effect(
             watched.delete(id)
             return
           }
+          const exit = record.message.executionRecord?.exit
+          const tail = observations.get(id)?.().output ?? record.message.output.slice(-8192)
+          const result = `job_id=${id}; status=${exit === undefined ? "finished" : exit === 0 ? "completed" : "error"}; exit=${exit ?? "unknown"}`
           yield* SessionInput.admit(database.db, events, {
             id: SessionMessage.ID.make(`${id}_completed`),
             sessionID: record.sessionID,
@@ -119,7 +124,9 @@ const layer = Layer.effect(
               jobID: id,
             },
             prompt: {
-              text: `后台命令 ${id} 已结束，属于原任务 ${job.metadata?.sourceMessageID ?? id}。这是宿主完成通知，保留原任务要求和授权。完成通知身份：${id}_completed。请用 bash_job get 核对输出和验证结果，再继续原任务；不要重新执行原命令。`,
+              text: chineseTask(messages)
+                ? `后台命令 ${id} 已结束，属于原任务 ${job.metadata?.sourceMessageID ?? id}。这是宿主完成通知，保留原任务要求和授权。完成通知身份：${id}_completed。以下为退出状态及日志尾部，不代表整项任务成功；需要全文或验证结果时用 bash_job get，不要重新执行原命令。\n${result}\n${tail}`
+                : `Background command ${id} ended for task ${job.metadata?.sourceMessageID ?? id}. This is a host observation; preserve the original requirements and authorization. Completion identity: ${id}_completed. The exit status and log tail below do not establish overall task success. Use bash_job get for the full result or verification; do not rerun the command.\n${result}\n${tail}`,
             },
           })
           watched.delete(id)
@@ -150,7 +157,7 @@ const layer = Layer.effect(
       run: Effect.Effect<string, unknown>,
       context: Tool.Context,
       prepare: Effect.Effect<void, unknown>,
-      background?: { kind: "task" | "preview"; workdir: string },
+      background?: { kind: "task" | "preview"; workdir: string; observe?: ToolOutputStore.CaptureHandle["snapshot"] },
       onExisting?: Effect.Effect<void>,
     ) => {
       const id = `msg_bash_${context.assistantMessageID}_${context.toolCallID}`
@@ -169,6 +176,7 @@ const layer = Layer.effect(
               return id
             }
             yield* prepare.pipe(Effect.mapError((error) => new Tool.Failure({ message: String(error) })))
+            if (background?.observe) observations.set(id, background.observe)
             yield* events.publish(SessionEvent.Shell.Started, {
               sessionID: context.sessionID,
               messageID: SessionMessage.ID.make(id),
@@ -256,6 +264,9 @@ const layer = Layer.effect(
               verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
               kind: Schema.optional(Schema.String),
               workdir: Schema.optional(Schema.String),
+              exit: Schema.optional(Schema.Number),
+              cursor: Schema.optional(Schema.Number),
+              truncated: Schema.optional(Schema.Boolean),
             }),
             structured: Schema.Struct({
               verification: Schema.optional(SessionOutcome.Check),
@@ -264,19 +275,24 @@ const layer = Layer.effect(
               status: Schema.String,
               kind: Schema.optional(Schema.String),
               workdir: Schema.optional(Schema.String),
+              exit: Schema.optional(Schema.Number),
+              cursor: Schema.optional(Schema.Number),
+              truncated: Schema.optional(Schema.Boolean),
             }),
             toStructuredOutput: ({ output }) => ({
               executionRecord: output.executionRecord,
               status: output.status,
               kind: output.kind,
               workdir: output.workdir,
+              ...(output.exit === undefined ? {} : { exit: output.exit }),
+              ...(output.cursor === undefined ? {} : { cursor: output.cursor, truncated: output.truncated }),
               verification: output.verification,
               verifications: output.verifications,
             }),
             toModelOutput: ({ output }) => [
               {
                 type: "text",
-                text: `${output.status}${output.kind ? ` (${output.kind})` : ""}${output.workdir ? ` in ${output.workdir}` : ""}\n${output.output}`,
+                text: `${output.status}${output.exit === undefined ? "" : ` (exit ${output.exit})`}${output.kind ? ` (${output.kind})` : ""}${output.workdir ? ` in ${output.workdir}` : ""}${output.cursor === undefined ? "" : ` [capture cursor=${output.cursor}${output.truncated ? "; tail only" : ""}]`}\n${output.output}`,
               },
             ],
             execute: (input, context) =>
@@ -365,6 +381,7 @@ const layer = Layer.effect(
                       ? (yield* jobs.wait({ id: input.job_id, timeout: input.timeout ?? 600_000 })).info
                       : job
                 const evidence = result && result.status !== "running" ? results.get(input.job_id) : undefined
+                const observation = observations.get(input.job_id)?.()
                 return {
                   executionRecord: evidence?.executionRecord,
                   ...(evidence?.verification ? { verification: evidence.verification } : {}),
@@ -377,10 +394,15 @@ const layer = Layer.effect(
                       }
                     : {}),
                   status: result?.status ?? "unavailable",
+                  ...(evidence?.executionRecord?.exit === undefined ? {} : { exit: evidence.executionRecord.exit }),
+                  ...(observation ? { cursor: observation.cursor, truncated: observation.truncated } : {}),
                   kind: typeof result?.metadata?.kind === "string" ? result.metadata.kind : undefined,
                   workdir: typeof result?.metadata?.workdir === "string" ? result.metadata.workdir : undefined,
                   output:
-                    result?.output ?? result?.error ?? "Still running. Read the command log or wait for completion.",
+                    result?.output ??
+                    result?.error ??
+                    observation?.output ??
+                    "Still running. Read the command log or wait for completion.",
                 }
               }),
           }),
