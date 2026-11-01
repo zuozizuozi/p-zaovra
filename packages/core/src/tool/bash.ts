@@ -18,6 +18,7 @@ import { Global } from "../global"
 import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
 import { ShellIdentity } from "../shell-identity"
+import { analyzeCommand } from "./bash-preflight"
 import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
@@ -153,22 +154,25 @@ const isTimeout = (error: AppProcess.AppProcessError) =>
 // TODO: Revisit process-group cleanup and platform coverage with shell-specific tests if current AppProcess semantics do not fully cover it.
 // TODO: Revisit binary output handling if stdout/stderr decoding is text-only.
 
-const shellTokens = (command: string) => command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
-const unquote = (value: string) => value.replace(/^(['"])(.*)\1$/, "$2")
-const externalCommandDirectories = Effect.fn("BashTool.externalCommandDirectories")(function* (
+const commandPreflight = Effect.fn("BashTool.commandPreflight")(function* (
   fs: FSUtil.Interface,
+  mutation: LocationMutation.Interface,
   command: string,
   cwd: string,
+  shell: ShellIdentity.Identity["type"],
 ) {
-  const directories = new Set<string>()
-  for (const token of shellTokens(command)) {
-    const value = unquote(token).replace(/[;,|&]+$/, "")
-    if (!path.isAbsolute(value)) continue
-    const resolved = yield* fs.resolve(value)
-    if (FSUtil.contains(cwd, resolved)) continue
-    directories.add(yield* fs.resolve(path.dirname(resolved)))
-  }
-  return [...directories]
+  const syntax = analyzeCommand(command, shell)
+  const targets = yield* Effect.forEach(syntax.paths, (value) =>
+    Effect.gen(function* () {
+      const resolved = path.resolve(cwd, value)
+      const kind = yield* fs.stat(resolved).pipe(
+        Effect.map((stat) => (stat.type === "Directory" ? ("directory" as const) : ("file" as const))),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed("file" as const)),
+      )
+      return yield* mutation.resolve({ path: resolved, kind })
+    }),
+  )
+  return { syntax, targets }
 })
 
 const layer = Layer.effectDiscard(
@@ -189,7 +193,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. On Windows and Linux, preview jobs survive normal completion, Stop and CLI normal exit; macOS and other platforms have backend-scoped ownership and cannot guarantee survival after CLI exit. Explicit cancellation, archive and final container cleanup still stop owned services. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. On supported Windows/Linux hosts it survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; Literal external operands also require separate external_directory approval and a fresh path-identity check. Variable/compound/nested or unsupported shell syntax requires confirmation of the full exact command; a default bash allow is insufficient. This preflight is not an OS sandbox and does not inspect program/script contents. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. On Windows and Linux, preview jobs survive normal completion, Stop and CLI normal exit; macOS and other platforms have backend-scoped ownership and cannot guarantee survival after CLI exit. Explicit cancellation, archive and final container cleanup still stop owned services. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. On supported Windows/Linux hosts it survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input:
             Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log !== false
               ? Schema.Struct({
@@ -252,12 +256,38 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
-              const warnings = (yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
-                (directory) =>
-                  `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
+              const preflight = yield* commandPreflight(
+                fs,
+                mutation,
+                input.command,
+                target.canonical,
+                frozen.identity.type,
               )
+              const checked = new Set<string>()
+              const warnings: string[] = []
+              for (const item of preflight.targets) {
+                if (!item.externalDirectory || checked.has(item.externalDirectory.resource)) continue
+                checked.add(item.externalDirectory.resource)
+                warnings.push(
+                  `Command operand references external directory ${item.externalDirectory.resource}; separate external_directory approval is required. This literal-path preflight is not an OS sandbox and cannot inspect program or script contents.`,
+                )
+                yield* permission.assert({
+                  ...LocationMutation.externalDirectoryPermission(item.externalDirectory),
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source,
+                })
+              }
+              if (preflight.syntax.uncertain)
+                warnings.push(
+                  "Shell syntax or path expansion cannot be certified by this narrow preflight. Confirm the entire exact command; default bash allow is not that confirmation. No shell rewrite or prefix approval is performed.",
+                )
               yield* permission.assert({
-                metadata: { shell: frozen.identity },
+                metadata: {
+                  shell: frozen.identity,
+                  preflight: preflight.syntax.uncertain ? "uncertain" : "literal-operands-only",
+                },
+                ...(preflight.syntax.uncertain ? { requireConfirmation: true as const } : {}),
                 action: name,
                 resources: [input.command],
                 save: [input.command],
@@ -268,6 +298,23 @@ const layer = Layer.effectDiscard(
 
               if ((yield* fs.stat(target.canonical)).type !== "Directory")
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
+
+              const rechecked = yield* commandPreflight(
+                fs,
+                mutation,
+                input.command,
+                target.canonical,
+                frozen.identity.type,
+              )
+              if (
+                JSON.stringify(preflight.targets.map((item) => [item.canonical, item.identity])) !==
+                JSON.stringify(rechecked.targets.map((item) => [item.canonical, item.identity]))
+              )
+                return yield* new ToolFailure({
+                  message:
+                    "Not executed: a literal command path changed while awaiting approval. Regenerate the command and confirm its current paths.",
+                  metadata: { phase: "input", reason: "path-preflight-changed" },
+                })
 
               const entries = yield* config.entries()
               const current = ShellIdentity.snapshot(entries, location)

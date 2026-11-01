@@ -105,6 +105,43 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
+  it.effect("490 uncertain shell syntax requires explicit literal confirmation even under default allow", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "bash", resource: "*", effect: "allow" }])
+      const permissions = yield* PermissionV2.Service
+      const first = yield* permissions.ask(
+        assertion({
+          id: PermissionV2.ID.create(),
+          action: "bash",
+          resources: ["echo $HOME"],
+          save: ["echo $HOME"],
+          requireConfirmation: true,
+        }),
+      )
+      const second = yield* permissions.ask(
+        assertion({
+          id: PermissionV2.ID.create(),
+          action: "bash",
+          resources: ["echo $HOME; echo second"],
+          requireConfirmation: true,
+        }),
+      )
+      expect(first.effect).toBe("ask")
+      expect(second.effect).toBe("ask")
+      yield* permissions.reply({ requestID: first.id, reply: "always" })
+      expect((yield* permissions.list()).map((item) => item.id)).toEqual([second.id])
+      const exact = yield* permissions.ask(
+        assertion({ action: "bash", resources: ["echo $HOME"], requireConfirmation: true }),
+      )
+      expect(exact.effect).toBe("allow")
+      yield* permissions.reply({ requestID: second.id, reply: "reject" })
+      yield* setRules([{ action: "bash", resource: "*", effect: "deny" }])
+      expect(
+        (yield* permissions.ask(assertion({ action: "bash", resources: ["echo $HOME"], requireConfirmation: true })))
+          .effect,
+      ).toBe("deny")
+    }),
+  )
   for (const resource of [
     "ls example.py; echo unexpected.py",
     "ls example.py\necho unexpected.py",
