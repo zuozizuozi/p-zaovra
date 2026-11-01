@@ -1,6 +1,6 @@
 export * as BashJob from "./bash-job"
 
-import { Cause, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
+import { Cause, Clock, Context, DateTime, Effect, Exit, Layer, Schema } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { chineseTask, deliveredBackgroundResult, history, requested } from "../session/outcome"
 import { Global } from "../global"
@@ -8,6 +8,8 @@ import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
 import { BackgroundJob } from "../background-job"
 import { Database } from "../database/database"
+import { Config } from "../config"
+import { SessionBudget } from "../session/budget"
 import { SessionInput } from "../session/input"
 import { SessionExecution } from "../session/execution"
 import { EventV2 } from "../event"
@@ -52,6 +54,7 @@ const layer = Layer.effect(
     const jobs = yield* BackgroundJob.Service
     const global = yield* Global.Service
     const database = yield* Database.Service
+    const config = yield* Config.Service
     const events = yield* EventV2.Service
     const sessions = yield* SessionStore.Service
     const location = yield* Location.Service
@@ -328,6 +331,19 @@ const layer = Layer.effect(
                     source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                   })
                   .pipe(Effect.mapError((error) => new Tool.Failure({ message: error.message })))
+                const bound =
+                  input.action === "wait"
+                    ? yield* SessionBudget.bounds(database.db, config, context.sessionID)
+                    : undefined
+                const remaining =
+                  bound?.deadline === undefined ? undefined : bound.deadline - (yield* Clock.currentTimeMillis)
+                if (remaining !== undefined && remaining <= 0)
+                  return yield* new Tool.Failure({
+                    message:
+                      "The host deadline expired; no observation wait was admitted. get and cancel remain available.",
+                  })
+                const timeout =
+                  remaining === undefined ? (input.timeout ?? 600_000) : Math.min(input.timeout ?? 600_000, remaining)
                 if (!job) {
                   const owner = {
                     root: global.data,
@@ -353,9 +369,9 @@ const layer = Layer.effect(
                         return { status: state.status, kind: "preview", output: state.output }
                       })
                     if (input.action === "wait") {
-                      const deadline = Date.now() + (input.timeout ?? 600_000)
-                      while (preview.status === "running" && Date.now() < deadline) {
-                        yield* Effect.sleep(Math.min(250, deadline - Date.now()))
+                      const deadline = (yield* Clock.currentTimeMillis) + timeout
+                      while (preview.status === "running" && (yield* Clock.currentTimeMillis) < deadline) {
+                        yield* Effect.sleep(Math.max(1, Math.min(250, deadline - (yield* Clock.currentTimeMillis))))
                         const current = yield* Effect.tryPromise(() => PreviewProcess.get(owner)).pipe(
                           Effect.mapError((cause) => new Tool.Failure({ message: String(cause) })),
                         )
@@ -378,7 +394,7 @@ const layer = Layer.effect(
                   input.action === "cancel"
                     ? yield* jobs.cancel(input.job_id)
                     : input.action === "wait"
-                      ? (yield* jobs.wait({ id: input.job_id, timeout: input.timeout ?? 600_000 })).info
+                      ? (yield* jobs.wait({ id: input.job_id, timeout })).info
                       : job
                 const evidence = result && result.status !== "running" ? results.get(input.job_id) : undefined
                 const observation = observations.get(input.job_id)?.()
@@ -435,6 +451,7 @@ export const node = makeLocationNode({
     PermissionV2.node,
     ToolRegistry.node,
     Database.node,
+    Config.node,
     Global.node,
   ],
 })

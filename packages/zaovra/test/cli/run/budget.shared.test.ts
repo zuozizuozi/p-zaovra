@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { applyRunDuration, runDuration } from "@/cli/cmd/run/budget.shared"
+import { applyRunDuration, runDuration, runHostPolicy } from "@/cli/cmd/run/budget.shared"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2"
 
 describe("run duration selection", () => {
+  test("headless mode is explicit; no closing reserve is inferred and only a supplied absolute deadline enables it", () => {
+    expect(runHostPolicy(false)).toEqual({ mode: "unattended" })
+    expect(runHostPolicy(true)).toEqual({ mode: "interactive" })
+    expect(runHostPolicy(false, 0, 0)).toEqual({ mode: "unattended", deadline: 0, closingReserveMs: 0 })
+    expect(runHostPolicy(false, 12000, 1000)).toEqual({ mode: "unattended", deadline: 12000, closingReserveMs: 1000 })
+    for (const value of [-1, 0.5, Infinity, NaN])
+      expect(() => runHostPolicy(false, 12000, value)).toThrow("--closing-reserve-ms")
+    expect(() => runHostPolicy(false, undefined, 1000)).toThrow("--closing-reserve-ms")
+    expect(() => runHostPolicy(false, Infinity)).toThrow("--deadline-ms")
+  })
   test("separates mode defaults, explicit unlimited and a positive duration", () => {
     expect(runDuration(undefined)).toBeUndefined()
     expect(runDuration("unlimited")).toEqual({ durationMs: null })

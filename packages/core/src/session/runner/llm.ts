@@ -265,7 +265,12 @@ const layer = Layer.effect(
       }
     })
 
-    const readBudget = (sessionID: SessionSchema.ID) => SessionBudget.read(db, config, sessionID)
+    const readBudget = Effect.fn("SessionRunner.readBudget")(function* (sessionID: SessionSchema.ID) {
+      return {
+        ...(yield* SessionBudget.read(db, config, sessionID)),
+        ...(yield* SessionBudget.requestPolicy(db, sessionID)),
+      }
+    })
 
     // Account from durable settlements, like the UI, not compacted/forked history.
     const checkBudget = Effect.fn("SessionRunner.checkBudget")(function* (
@@ -277,10 +282,15 @@ const layer = Layer.effect(
     ) {
       const limits = yield* readBudget(session.id)
       const limit = limits.limit
-      const deadline = SessionBudget.deadline(session, limits.duration)
+      const deadline = SessionBudget.deadline(session, limits.duration, limits.policy?.deadline)
       const duration = deadline === undefined ? undefined : deadline - DateTime.toEpochMillis(session.time.created)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
       const expired = !!stopMessage || (duration !== undefined && elapsed >= duration)
+      const reserveReached =
+        !expired &&
+        deadline !== undefined &&
+        limits.policy?.closingReserveMs !== undefined &&
+        (yield* Clock.currentTimeMillis) >= deadline - limits.policy.closingReserveMs
       const checkpoint = notify ? AccuracyGuidance.checkpoint({ elapsed, limit: duration }) : undefined
       if (checkpoint) {
         // Durable events survive compaction and explicit resumes: one notice per Session.
@@ -308,11 +318,13 @@ const layer = Layer.effect(
             text: checkpoint,
           })
       }
-      if (limit === undefined && !expired) return
+      if (limit === undefined && !expired && !reserveReached) return
       const usage = yield* SessionUsageQuery.readTotal(session.id).pipe(
         Effect.provideService(Database.Service, database),
       )
-      if (!expired && limit !== undefined && usage.total < limit) {
+      const closing = reserveReached && (limit === undefined || usage.total < limit)
+      const phase = closing ? ("closing" as const) : ("expired" as const)
+      if (!expired && !closing && limit !== undefined && usage.total < limit) {
         if (!notify || usage.total < limit * 0.75) return
         const prefix = `Session token budget notice (limit=${limit}):`
         const context = yield* getContext(session.id)
@@ -325,18 +337,79 @@ const layer = Layer.effect(
         })
         return
       }
-      if (!settle) return true
-      yield* Effect.forEach(
-        (yield* backgroundJobs.list()).filter(
-          (job) =>
-            job.metadata?.sessionID === session.id &&
-            job.status === "running" &&
-            (job.type !== "bash" || job.metadata?.kind !== "preview"),
-        ),
-        (job) => backgroundJobs.cancel(job.id),
-        { discard: true },
+      if (!settle) return phase
+      const sessionDeadline = SessionBudget.deadline(session, limits.duration)
+      const sessionExpired = sessionDeadline !== undefined && (yield* Clock.currentTimeMillis) >= sessionDeadline
+      const scoped =
+        closing ||
+        (limits.policy?.deadline !== undefined && !sessionExpired && (limit === undefined || usage.total < limit))
+      const taskHistory = scoped ? yield* SessionOutcome.history(db, session.id) : []
+      const source = scoped ? SessionOutcome.requested(taskHistory).sourceMessageID : undefined
+      const jobs = yield* backgroundJobs.list()
+      const cancelled = jobs.filter(
+        (job) =>
+          job.metadata?.sessionID === session.id &&
+          job.status === "running" &&
+          (job.type !== "bash" || job.metadata?.kind !== "preview") &&
+          (!scoped ||
+            (!!source &&
+              job.metadata?.sourceMessageID === source &&
+              job.metadata.directory === location.directory &&
+              job.metadata.workspaceID === location.workspaceID)),
       )
-      const message = `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}需要明确续授：可在会话界面提高或移除预算后直接继续，无需重启；已保留成果和未完成事项，这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
+      yield* Effect.forEach(cancelled, (job) => backgroundJobs.cancel(job.id), {
+        discard: true,
+      })
+      const receipt = `[host.run.closing] ${source ?? limits.requestID}:${limits.requestID} `
+      if (closing) {
+        const previous = yield* db
+          .select({ seq: EventTable.seq })
+          .from(EventTable)
+          .where(
+            and(
+              eq(EventTable.aggregate_id, session.id),
+              eq(
+                EventTable.type,
+                EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
+              ),
+              sql`substr(json_extract(${EventTable.data}, '$.text'), 1, ${receipt.length}) = ${receipt}`,
+            ),
+          )
+          .limit(1)
+          .get()
+          .pipe(Effect.orDie)
+        if (previous) return phase
+        yield* events.publish(SessionEvent.Synthetic, {
+          sessionID: session.id,
+          timestamp: yield* DateTime.now,
+          messageID: SessionMessage.ID.create(),
+          text:
+            receipt +
+            JSON.stringify({
+              requestID: limits.requestID,
+              sourceMessageID: source,
+              deadline,
+              closingReserveMs: limits.policy?.closingReserveMs,
+              state: "stopped_unverified",
+              cancelled: cancelled.map((job) => job.id),
+              preserved: jobs
+                .filter(
+                  (job) =>
+                    job.status === "running" && job.metadata?.sessionID === session.id && !cancelled.includes(job),
+                )
+                .map((job) => job.id),
+            }),
+        })
+      }
+      const message = closing
+        ? SessionOutcome.chineseTask(taskHistory)
+          ? `宿主显式收尾余量已到，硬截止为 ${deadline}。已停止新请求与新操作，只取消当前来源的临时任务；保留的服务和其他请求不代表交付完成。本任务未验证，请核查已有结果及未完事项，这不是成功。`
+          : `Host closing reserve reached before absolute deadline ${deadline}. New provider requests and operations have stopped; only temporary jobs owned by this request were cancelled. Preserved services and other requests are not proof of completion. The work remains unverified; inspect retained results and unfinished requirements. This is not task success.`
+        : scoped
+          ? SessionOutcome.chineseTask(taskHistory)
+            ? `宿主请求绝对截止 ${limits.policy?.deadline} 已到，已停止新模型工作，仅取消当前验收来源的临时任务。其他来源及服务仍保留归属。本请求已停止、未验证，不是任务完成。`
+            : `The absolute host request deadline ${limits.policy?.deadline} was reached. New provider work has stopped; only temporary jobs for this acceptance source were cancelled. Other sources and services remain owned. This request is stopped and unverified, not completed.`
+          : `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}需要明确续授：可在会话界面提高或移除预算后直接继续，无需重启；已保留成果和未完成事项，这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
       const context = yield* getContext(session.id)
       const last = context.at(-1)
       if (last?.type !== "assistant" || last.finish !== "stopped" || last.termination?.category !== "budget") {
@@ -348,7 +421,10 @@ const layer = Layer.effect(
               assistantMessageID,
               timestamp: yield* DateTime.now,
               agent: session.agent ?? AgentV2.defaultID,
-              model: { id: ModelV2.ID.make(model.id), providerID: ProviderV2.ID.make(model.provider) },
+              model: {
+                id: ModelV2.ID.make(model.id),
+                providerID: ProviderV2.ID.make(model.provider),
+              },
             })
             yield* events.publish(SessionEvent.Text.Started, {
               sessionID: session.id,
@@ -368,15 +444,23 @@ const layer = Layer.effect(
               assistantMessageID,
               timestamp: yield* DateTime.now,
               finish: "stopped",
-              termination: { category: "budget", message: stopMessage ?? message },
+              termination: {
+                category: "budget",
+                message: stopMessage ?? message,
+              },
               cost: 0,
               requestPerformed: false,
-              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              tokens: {
+                input: 0,
+                output: 0,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
             })
           }),
         )
       }
-      return true
+      return phase
     })
     const settleInterruptedTurn = Effect.fn("SessionRunner.settleInterruptedTurn")(function* (
       sessionID: SessionSchema.ID,
@@ -504,6 +588,7 @@ const layer = Layer.effect(
     type TurnBudget = {
       admissionRequired?: boolean
       expired: boolean
+      closing?: boolean
       repairExpired?: boolean
       model?: { id: string; provider: string }
       repairScope: Deferred.Deferred<typeof DeliveryContract.Receipt.Type | undefined>
@@ -875,7 +960,7 @@ const layer = Layer.effect(
             unreported: progressUsage.unreported,
             budget: progressBudget?.limit,
             advisoryDeadline: quality?.deadline,
-            deadline: SessionBudget.deadline(session, progressBudget?.duration),
+            deadline: SessionBudget.deadline(session, progressBudget?.duration, progressBudget?.policy?.deadline),
             epoch: system.baselineSeq,
           }
         : undefined
@@ -1206,15 +1291,29 @@ const layer = Layer.effect(
             if (event.type !== "tool-call" || event.providerExecuted) return
             // Streaming and approval waits may outlive the admission check for
             // this provider turn. Expired time is a rejection, never timeout=0.
-            if (yield* checkBudget(yield* getSession(session.id), model, false, false)) {
-              if (budgetStop) budgetStop.expired = true
+            const budgetPhase = yield* checkBudget(yield* getSession(session.id), model, false, false)
+            if (budgetPhase) {
+              if (budgetStop) {
+                budgetStop.expired = budgetPhase === "expired"
+                budgetStop.closing = budgetPhase === "closing"
+              }
               needsContinuation = false
-              return yield* publish(LLMEvent.toolResult({
-                id: event.id,
-                name: event.name,
-                result: { type: "error", value: "Tool not dispatched: the authorized Session deadline or budget has expired." },
-                providerMetadata: { zaovra: { inputRejected: true } },
-              }), [], { phase: "input", reason: "budget-before-dispatch" })
+              return yield* publish(
+                LLMEvent.toolResult({
+                  id: event.id,
+                  name: event.name,
+                  result: {
+                    type: "error",
+                    value:
+                      budgetPhase === "closing"
+                        ? "Tool not dispatched: the explicit host closing reserve was reached; the task is unverified."
+                        : "Tool not dispatched: the authorized Session deadline or budget has expired.",
+                  },
+                  providerMetadata: { zaovra: { inputRejected: true } },
+                }),
+                [],
+                { phase: "input", reason: "budget-before-dispatch" },
+              )
             }
             if (
               !toolMaterialization ||
@@ -1578,7 +1677,7 @@ const layer = Layer.effect(
             yield* withPublication(
               settleInterruptedTurn(session.id, {
                 publisher,
-                budget: budgetStop?.expired || budgetStop?.repairExpired,
+                budget: budgetStop?.expired || budgetStop?.closing || budgetStop?.repairExpired,
                 requestPerformed: !(subtask?.type === "user" && subtask.subtask),
               }),
             )
@@ -2311,25 +2410,31 @@ const layer = Layer.effect(
         repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
       }
       const deadline = Effect.gen(function* () {
-        while (true) {
-          const session = yield* getSession(sessionID)
-          if (!budgetStop.model) {
-            yield* Effect.sleep("1 second")
-            continue
+          while (true) {
+            const session = yield* getSession(sessionID)
+            if (!budgetStop.model) {
+              yield* Effect.sleep("1 second")
+              continue
+            }
+            const budget = yield* readBudget(sessionID)
+            const bound = SessionBudget.deadline(session, budget.duration, budget.policy?.deadline)
+            const closingAt =
+              bound === undefined || budget.policy?.closingReserveMs === undefined
+                ? bound
+                : bound - budget.policy.closingReserveMs
+            const remaining = closingAt === undefined ? undefined : closingAt - (yield* Clock.currentTimeMillis)
+            if (remaining === undefined || remaining > 0) {
+              yield* Effect.sleep(remaining === undefined ? 1000 : Math.min(1000, remaining))
+              continue
+            }
+            const phase = yield* checkBudget(session, budgetStop.model, false, false)
+            if (!phase) continue
+            budgetStop.expired = phase === "expired"
+            budgetStop.closing = phase === "closing"
+            return { needsContinuation: false, step }
           }
-          const budget = yield* readBudget(sessionID)
-          const bound = SessionBudget.deadline(session, budget.duration)
-          const remaining = bound === undefined ? undefined : bound - (yield* Clock.currentTimeMillis)
-          if (remaining === undefined || remaining > 0) {
-            yield* Effect.sleep(remaining === undefined ? 1000 : Math.min(1000, remaining))
-            continue
-          }
-          if (!(yield* checkBudget(session, budgetStop.model, false, false))) continue
-          budgetStop.expired = true
-          return { needsContinuation: false, step }
-        }
-      })
-      const recovery = {
+        })
+        const recovery = {
         id: SessionMessage.ID.create(),
         attempt: 0,
         started: undefined as number | undefined,
@@ -2430,7 +2535,7 @@ const layer = Layer.effect(
               ))
           const budget = yield* readBudget(sessionID)
           const now = yield* Clock.currentTimeMillis
-          const bound = SessionBudget.deadline(session, budget.duration)
+          const bound = SessionBudget.deadline(session, budget.duration, budget.policy?.deadline)
           const failureKey = `${error.reason._tag}:${"status" in error.reason ? error.reason.status : ""}:${error.reason.message}`
           recovery.repeated = recovery.failureKey === failureKey ? recovery.repeated + 1 : 0
           recovery.failureKey = failureKey
@@ -2484,7 +2589,7 @@ const layer = Layer.effect(
         Effect.onInterrupt(() =>
           Effect.gen(function* () {
             if (recovery.started === undefined) return
-            yield* recordRecovery(budgetStop.expired ? "stopped" : "interrupted", {
+            yield* recordRecovery(budgetStop.expired || budgetStop.closing ? "stopped" : "interrupted", {
               ended: yield* Clock.currentTimeMillis,
             })
             if (!recovery.waiting) return
@@ -2505,8 +2610,8 @@ const layer = Layer.effect(
               assistantMessageID,
               timestamp: yield* DateTime.now,
               finish: "interrupted",
-              termination: budgetStop.expired
-                ? { category: "budget", message: "预算到期，已取消退避等待。" }
+              termination: budgetStop.expired || budgetStop.closing
+                ? { category: "budget", message: budgetStop.closing ? "进入显式收尾余量，已取消退避等待；硬截止尚未到达，任务未完成。" : "预算到期，已取消退避等待。" }
                 : { category: "interrupted", source: "user", message: "已取消退避等待，未发起新的模型请求。" },
               requestPerformed: false,
               cost: 0,
@@ -2557,7 +2662,7 @@ const layer = Layer.effect(
             Effect.raceFirst(Fiber.join(fiber), deadline).pipe(
               Effect.tap(
                 Effect.gen(function* () {
-                  if (!budgetStop.expired) return
+                  if (!budgetStop.expired && !budgetStop.closing) return
                   yield* Fiber.interrupt(fiber)
                   yield* checkBudget(yield* getSession(sessionID), budgetStop.model!)
                 }),
@@ -2719,14 +2824,18 @@ const layer = Layer.effect(
         }
         // Task work still belongs to this drain after a provider returns. Keep its
         // wall deadline alive while waiting; completion inputs enter the usual loop.
-        if (
-          (yield* backgroundJobs.list()).some(
-            (job) =>
-              job.metadata?.sessionID === input.sessionID &&
-              (job.type !== "bash" || job.metadata?.kind !== "preview") &&
-              job.status === "running",
-          )
-        ) {
+        const pendingJobs = yield* backgroundJobs.list()
+        const request = yield* SessionBudget.requestPolicy(db, input.sessionID)
+        const source = SessionOutcome.requested(yield* SessionOutcome.history(db, input.sessionID)).sourceMessageID
+        const belongs = (job: (typeof pendingJobs)[number]) =>
+          job.metadata?.sessionID === input.sessionID &&
+          (job.type !== "bash" || job.metadata?.kind !== "preview") &&
+          job.status === "running" &&
+          (request?.policy?.mode !== "unattended" ||
+            !source ||
+            !job.metadata?.sourceMessageID ||
+            job.metadata.sourceMessageID === source)
+        if ((yield* backgroundJobs.list()).some(belongs)) {
           const model = yield* models.resolve(yield* getSession(input.sessionID))
           while (true) {
             const session = yield* getSession(input.sessionID)
@@ -2736,15 +2845,7 @@ const layer = Layer.effect(
               (yield* SessionInput.hasPending(db, input.sessionID, "queue"))
             )
               break
-            if (
-              !(yield* backgroundJobs.list()).some(
-                (job) =>
-                  job.metadata?.sessionID === input.sessionID &&
-                  (job.type !== "bash" || job.metadata?.kind !== "preview") &&
-                  job.status === "running",
-              )
-            )
-              break
+            if (!(yield* backgroundJobs.list()).some(belongs)) break
             yield* Effect.sleep("1 second")
           }
         }

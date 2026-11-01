@@ -65,7 +65,7 @@ const layer = Layer.effect(
         yield* sessions.prompt({
           id: promptID(input.attempt.id),
           sessionID,
-          prompt: { text: prompt(input) },
+          prompt: { text: prompt(input), runPolicy: { mode: "unattended" } },
           resume: false,
         })
         yield* sessions.resume(sessionID)

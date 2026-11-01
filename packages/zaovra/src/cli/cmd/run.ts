@@ -23,7 +23,7 @@ import { Filesystem } from "@/util/filesystem"
 import { createZaovraClient, type Event, type ZaovraClient } from "@zaovra-ai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
-import { applyRunDuration, runDuration } from "./run/budget.shared"
+import { applyRunDuration, runDuration, runHostPolicy } from "./run/budget.shared"
 
 type ModelInput = {
   providerID: string
@@ -167,9 +167,18 @@ export const RunCommand = effectCmd({
         type: "boolean",
         describe: "show thinking blocks",
       })
+      .option("deadline-ms", {
+        type: "number",
+        describe: "absolute Unix millisecond deadline for this request, shared with tools and children",
+      })
+      .option("closing-reserve-ms", {
+        type: "number",
+        describe: "explicit calibrated closing reserve before --deadline-ms; no default",
+      })
       .option("duration-ms", {
         type: "string",
-        describe: "total duration from session creation: positive milliseconds or unlimited; omission preserves existing limits",
+        describe:
+          "total duration from session creation: positive milliseconds or unlimited; omission preserves existing limits",
       })
       .option("mini", {
         type: "boolean",
@@ -226,6 +235,7 @@ export const RunCommand = effectCmd({
       const budget = runDuration(args["duration-ms"])
       const rawMessage = [...args.message, ...(args["--"] || [])].join(" ")
       const interactive = args.mini
+      const runPolicy = runHostPolicy(interactive, args["deadline-ms"], args["closing-reserve-ms"])
       const auto = args.auto || args.yolo || args["dangerously-skip-permissions"]
       const thinking = interactive ? (args.thinking ?? true) : (args.thinking ?? false)
       const die = (message: string): never => {
@@ -837,6 +847,7 @@ export const RunCommand = effectCmd({
             sessionID,
             prompt: {
               text: message,
+              runPolicy,
               files: files.map((file) => ({ uri: file.url, name: file.filename })),
             },
             delivery: "steer",
@@ -986,6 +997,10 @@ export async function runMini(input: MiniCommandInput) {
     port: undefined,
     variant: undefined,
     thinking: undefined,
+    "deadline-ms": undefined,
+    deadlineMs: undefined,
+    "closing-reserve-ms": undefined,
+    closingReserveMs: undefined,
     "duration-ms": undefined,
     durationMs: undefined,
     mini: true,

@@ -649,6 +649,7 @@ export type Part =
 export type Prompt = {
   text: string
   executionContract?: SessionOutcomeExecutionContract
+  runPolicy?: SessionOutcomeRunPolicy
   invocation?: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
@@ -2992,6 +2993,7 @@ export type SessionNotFoundError = {
 export type PromptInput = {
   text: string
   executionContract?: SessionOutcomeExecutionContract
+  runPolicy?: SessionOutcomeRunPolicy
   invocation?: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
@@ -3477,6 +3479,18 @@ export type SessionOutcomeExecutionContract = {
     BLIS_NUM_THREADS?: string
   }
 }
+
+export type SessionOutcomeRunPolicy =
+  | {
+      mode: "interactive" | "unattended"
+      deadline: number
+      closingReserveMs?: number
+    }
+  | {
+      mode: "interactive" | "unattended"
+      deadline?: unknown
+      closingReserveMs?: unknown
+    }
 
 export type PromptSource = {
   start: number
@@ -5668,6 +5682,7 @@ export type SessionMessageUser = {
   }
   text: string
   executionContract?: SessionOutcomeExecutionContract
+  runPolicy?: SessionOutcomeRunPolicy
   invocation?: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>

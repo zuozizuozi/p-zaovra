@@ -1,7 +1,9 @@
 export * as TaskTool from "./task"
 
 import { ToolFailure } from "@zaovra-ai/llm"
-import { Clock, Effect, Layer, Schema } from "effect"
+import { Clock, Effect, Layer, Option, Schema } from "effect"
+import { Database } from "../database/database"
+import { SessionBudget } from "../session/budget"
 import { AgentV2 } from "../agent"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocationServiceMap } from "../location-service-map"
@@ -196,6 +198,8 @@ export const run = Effect.fn("TaskTool.execute")(function* (
     .pipe(Effect.mapError(() => failure(`Permission denied: task ${input.subagent_type}`)))
 
   const deadline = yield* parentDeadline(sessions, parent)
+  const database = Option.getOrUndefined(yield* Effect.serviceOption(Database.Service))
+  const policy = database ? (yield* SessionBudget.requestPolicy(database.db, parent.id))?.policy : undefined
   const child = input.task_id
     ? yield* sessions
         .get(input.task_id)
@@ -233,6 +237,7 @@ export const run = Effect.fn("TaskTool.execute")(function* (
         text: input.prompt,
         files: input.files,
         agents: input.agents,
+        ...(policy ? { runPolicy: deadline === undefined ? { mode: policy.mode } : { ...policy, deadline } } : {}),
         ...(model ? { selection: { agent: targetID, model } } : {}),
       },
       resume: input.run_in_background === true,
@@ -422,6 +427,16 @@ const parentDeadline = Effect.fnUntraced(function* (sessions: SessionOps, parent
   if (deadline !== undefined && deadline <= (yield* Clock.currentTimeMillis))
     return yield* failure(
       `Parent Session deadline expired; no new child execution was admitted. task_status and task_cancel remain available.`,
+    )
+  const database = Option.getOrUndefined(yield* Effect.serviceOption(Database.Service))
+  const policy = database ? (yield* SessionBudget.requestPolicy(database.db, parent.id))?.policy : undefined
+  if (
+    policy?.closingReserveMs !== undefined &&
+    deadline !== undefined &&
+    deadline - (yield* Clock.currentTimeMillis) <= policy.closingReserveMs
+  )
+    return yield* failure(
+      "The parent request is closing; no new child execution was admitted. task_status and task_cancel remain available.",
     )
   return deadline
 })

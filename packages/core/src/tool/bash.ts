@@ -26,6 +26,7 @@ import { Tools } from "./tools"
 import { BashJob } from "./bash-job"
 import { ExecutionContext } from "../session/execution-context"
 import { Database } from "../database/database"
+import { SessionBudget } from "../session/budget"
 import { history, latestExecutionSequence } from "../session/outcome"
 import { createHash, randomUUID } from "node:crypto"
 
@@ -358,7 +359,19 @@ const layer = Layer.effectDiscard(
               const silence = input.run_in_background
                 ? undefined
                 : Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms
-              const timeout = input.timeout ?? (input.run_in_background || silence ? 0 : DEFAULT_TIMEOUT_MS)
+              const bound = yield* SessionBudget.bounds(database.db, config, context.sessionID)
+              const remaining =
+                bound?.deadline === undefined ? undefined : bound.deadline - (yield* Clock.currentTimeMillis)
+              if (remaining !== undefined && remaining <= (bound?.policy?.closingReserveMs ?? 0))
+                return yield* new ToolFailure({
+                  message: "The host deadline or closing reserve prevents a new command; no process was started.",
+                  metadata: { phase: "input", reason: "deadline-expired" },
+                })
+              const requestedTimeout = input.timeout ?? (input.run_in_background || silence ? 0 : DEFAULT_TIMEOUT_MS)
+              const timeout =
+                input.run_in_background || remaining === undefined
+                  ? requestedTimeout
+                  : Math.min(requestedTimeout || remaining, remaining)
               if (input.timeout === 0 && !input.run_in_background)
                 return yield* new ToolFailure({ message: "A zero timeout requires run_in_background=true" })
               let lastProgress = Number.NEGATIVE_INFINITY
@@ -473,6 +486,16 @@ const layer = Layer.effectDiscard(
                   return yield* new ToolFailure({
                     message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
                     metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
+                  })
+                const admitted = yield* SessionBudget.bounds(database.db, config, context.sessionID)
+                if (
+                  admitted?.deadline !== undefined &&
+                  admitted.deadline - (yield* Clock.currentTimeMillis) <= (admitted.policy?.closingReserveMs ?? 0)
+                )
+                  return yield* new ToolFailure({
+                    message:
+                      "The host deadline or closing reserve was reached during preparation; no process was started.",
+                    metadata: { phase: "input", reason: "deadline-expired" },
                   })
                 lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
                 const executionContext = ExecutionContext.bind(

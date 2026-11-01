@@ -54,9 +54,11 @@ export const requestOriginLayer = HttpRouter.middleware()(
       allowedOrigins: (origin) => isAllowedCorsOrigin(origin, cors),
       maxAge: 86_400,
     })
+    // Password-protected desktop/serve requests keep the original CORS path.
+    // The authority guard is only installed for an unprotected server.
+    if (ServerAuth.required(auth)) return corsMiddleware
     return (effect) =>
       Effect.gen(function* () {
-        if (ServerAuth.required(auth)) return yield* corsMiddleware(effect)
         const request = yield* HttpServerRequest.HttpServerRequest
         const absolute = URL.canParse(request.originalUrl) ? new URL(request.originalUrl) : undefined
         if (

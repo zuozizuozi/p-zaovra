@@ -80,6 +80,40 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("490 HTTP host run policy rejects an unbound reserve and preserves explicit deadline without starting execution", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: { directory: tmp.path } }),
+    })
+    expect(created.status).toBe(200)
+    const session = (await created.json()).data
+    const submit = (runPolicy: object) =>
+      request(`/api/session/${session.id}/prompt`, tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: { text: "Admit policy only; no model", runPolicy },
+          delivery: "queue",
+          resume: false,
+        }),
+      })
+    const invalid = await submit({ mode: "unattended", closingReserveMs: 1000 })
+    expect(invalid.status).toBe(400)
+    const negative = await submit({ mode: "unattended", deadline: 0, closingReserveMs: -1 })
+    expect(negative.status).toBe(400)
+    const runPolicy = { mode: "unattended", deadline: 0, closingReserveMs: 0 }
+    const admitted = await submit(runPolicy)
+    expect(admitted.status).toBe(200)
+    expect((await admitted.json()).data.prompt.runPolicy).toEqual(runPolicy)
+    const pending = await request(`/api/session/${session.id}/input/pending`, tmp.path)
+    const inputs = (await pending.json()).data
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0].prompt.runPolicy).toEqual(runPolicy)
+    expect((await (await request("/api/session/active", tmp.path)).json()).data).toEqual({})
+  })
+
   test("490 HTTP creation and patches distinguish ordinary, autonomous and explicit durations without resuming", async () => {
     await using tmp = await tmpdir({ git: true })
     const create = async (selection: object) => {
@@ -109,7 +143,10 @@ describe("v2 location HttpApi", () => {
         body: JSON.stringify({ budget }),
       })
       expect(patched.status).toBe(200)
-      expect(await limits(chosen.id)).toEqual({ tokens: 30_000_000, ...(Object.keys(budget).length ? {} : { durationMs: 60_000 }) })
+      expect(await limits(chosen.id)).toEqual({
+        tokens: 30_000_000,
+        ...(Object.keys(budget).length ? {} : { durationMs: 60_000 }),
+      })
     }
     const active = await request("/api/session/active", tmp.path)
     expect((await active.json()).data).toEqual({})

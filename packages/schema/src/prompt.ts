@@ -50,6 +50,7 @@ export interface Prompt extends Schema.Schema.Type<typeof Prompt> {}
 export const Prompt = Schema.Struct({
   text: Schema.String,
   executionContract: SessionOutcome.ExecutionContract.pipe(optional),
+  runPolicy: SessionOutcome.RunPolicy.pipe(optional),
   // Preserve the editable invocation while text contains the expanded model input.
   invocation: Schema.String.pipe(optional),
   files: Schema.Array(FileAttachment).pipe(optional),
@@ -62,11 +63,15 @@ export const Prompt = Schema.Struct({
     statics((schema) => ({
       equivalence: Schema.toEquivalence(schema),
       fromUserMessage: (
-        input: Pick<Prompt, "text" | "invocation" | "files" | "agents" | "selection" | "subtask" | "executionContract">,
+        input: Pick<
+          Prompt,
+          "text" | "invocation" | "files" | "agents" | "selection" | "subtask" | "executionContract" | "runPolicy"
+        >,
       ) =>
         schema.make({
           text: input.text,
           ...(input.executionContract === undefined ? {} : { executionContract: input.executionContract }),
+          ...(input.runPolicy === undefined ? {} : { runPolicy: input.runPolicy }),
           ...(input.invocation === undefined ? {} : { invocation: input.invocation }),
           ...(input.files === undefined ? {} : { files: input.files }),
           ...(input.agents === undefined ? {} : { agents: input.agents }),

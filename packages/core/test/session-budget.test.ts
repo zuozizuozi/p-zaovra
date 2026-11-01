@@ -6,6 +6,10 @@ import { LayerNode } from "../src/effect/layer-node"
 import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
 import { SessionBudget } from "../src/session/budget"
+import { SessionInput } from "../src/session/input"
+import { SessionMessage } from "../src/session/message"
+import { Prompt } from "../src/session/prompt"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { SessionTable } from "../src/session/sql"
 import { Config } from "../src/config"
 import { Database } from "../src/database/database"
@@ -37,52 +41,170 @@ const withRuntime = <A, E, R>(body: (directory: string) => Effect.Effect<A, E, R
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   )
 
-it.live("490 creation budget chooses each axis before any prompt; old interaction retains its wall default", () =>
-  withRuntime((directory) => Effect.gen(function* () {
-    const sessions = yield* SessionV2.Service
-    const database = yield* Database.Service
-    const config = Config.Service.of({ entries: () => Effect.succeed([]) })
-    for (const mode of ["interactive", "autonomous"] as const)
-      for (const budget of [undefined, {}, { durationMs: null }, { tokens: 73, durationMs: 5000 }]) {
-        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) }, budgetMode: mode, budget })
-        const expectedDuration = budget?.durationMs === null ? undefined : budget?.durationMs ?? (mode === "interactive" ? undefined : 43_200_000)
-        expect(yield* SessionBudget.read(database.db, config, session.id)).toEqual({
-          limit: budget?.tokens ?? (mode === "interactive" ? undefined : 30_000_000), duration: expectedDuration,
+it.live(
+  "490 request host policy follows durable real user promotion, excluding completion and conflicting retries",
+  () =>
+    withRuntime((directory) =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionV2.Service
+        const db = (yield* Database.Service).db
+        const events = yield* EventV2.Service
+        const config = Config.Service.of({ entries: () => Effect.succeed([]) })
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const policy = { mode: "unattended" as const, deadline: Date.now() + 60_000, closingReserveMs: 1000 }
+        const original = yield* sessions.prompt({
+          sessionID: session.id,
+          prompt: Prompt.make({ text: "Run the required checks", runPolicy: policy }),
+          resume: false,
         })
-        yield* sessions.update({ sessionID: session.id, budget: {} })
-        expect((yield* SessionBudget.read(database.db, config, session.id)).duration).toBe(expectedDuration)
-        yield* sessions.update({ sessionID: session.id, budget: { durationMs: null } })
-        expect((yield* SessionBudget.read(database.db, config, session.id)).duration).toBeUndefined()
-      }
-    const legacy = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
-    yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "interactive" } }).where(eq(SessionTable.id, legacy.id)).run().pipe(Effect.orDie)
-    expect(yield* SessionBudget.read(database.db, config, legacy.id)).toEqual({ limit: undefined, duration: 43_200_000 })
-  })),
+        expect(yield* SessionBudget.requestPolicy(db, session.id)).toBeUndefined()
+        yield* SessionInput.promoteSteers(db, events, session.id, Number.MAX_SAFE_INTEGER)
+        expect(yield* SessionBudget.requestPolicy(db, session.id)).toEqual({ requestID: original.id, policy })
+        expect(yield* sessions.deadline(session.id)).toBe(policy.deadline)
+        expect((yield* SessionBudget.bounds(db, config, session.id))?.deadline).toBe(policy.deadline)
+        const retry = yield* sessions.prompt({
+          sessionID: session.id,
+          id: original.id,
+          prompt: Prompt.make({ text: "Run the required checks", runPolicy: policy }),
+          resume: false,
+        })
+        expect(retry.id).toBe(original.id)
+        const conflict = yield* sessions
+          .prompt({
+            sessionID: session.id,
+            id: original.id,
+            prompt: Prompt.make({
+              text: "Run the required checks",
+              runPolicy: { ...policy, deadline: policy.deadline + 1 },
+            }),
+            resume: false,
+          })
+          .pipe(Effect.exit)
+        expect(conflict._tag).toBe("Failure")
+        expect((yield* sessions.context(session.id)).find((message) => message.id === original.id)).toMatchObject({
+          runPolicy: policy,
+        })
+        const host = yield* SessionInput.admit(db, events, {
+          id: SessionMessage.ID.create(),
+          sessionID: session.id,
+          prompt: Prompt.make({ text: "Background command completed" }),
+          delivery: "queue",
+          completion: { type: "bash-completion", jobID: "job_host_policy", sourceMessageID: original.id },
+        })
+        // Exact projection of a host observation cannot change execution policy.
+        yield* events.publish(SessionEvent.Prompted, {
+          sessionID: session.id,
+          messageID: host.id,
+          prompt: host.prompt,
+          delivery: host.delivery,
+          completion: host.completion,
+          timestamp: host.timeCreated,
+        })
+        expect(yield* SessionBudget.requestPolicy(db, session.id)).toEqual({ requestID: original.id, policy })
+        const user = yield* sessions.prompt({
+          sessionID: session.id,
+          prompt: Prompt.make({ text: "A new ordinary request" }),
+          resume: false,
+        })
+        yield* SessionInput.promoteSteers(db, events, session.id, Number.MAX_SAFE_INTEGER)
+        expect(yield* SessionBudget.requestPolicy(db, session.id)).toEqual({ requestID: user.id, policy: undefined })
+        expect(yield* sessions.deadline(session.id)).toBeUndefined()
+      }),
+    ),
+)
+
+it.live("490 closing reserve requires an explicit finite deadline and has no inferred default", () =>
+  Effect.sync(() => {
+    expect(SessionOutcome.RunPolicy.make({ mode: "unattended" })).toEqual({ mode: "unattended" })
+    expect(() => SessionOutcome.RunPolicy.make({ mode: "unattended", closingReserveMs: 1000 })).toThrow()
+    expect(() => SessionOutcome.RunPolicy.make({ mode: "interactive", deadline: Infinity })).toThrow()
+    expect(() => SessionOutcome.RunPolicy.make({ mode: "unattended", deadline: 0, closingReserveMs: -1 })).toThrow()
+    expect(SessionOutcome.RunPolicy.make({ mode: "unattended", deadline: 0, closingReserveMs: 0 })).toMatchObject({
+      deadline: 0,
+    })
+  }),
+)
+
+it.live("490 creation budget chooses each axis before any prompt; old interaction retains its wall default", () =>
+  withRuntime((directory) =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const config = Config.Service.of({ entries: () => Effect.succeed([]) })
+      for (const mode of ["interactive", "autonomous"] as const)
+        for (const budget of [undefined, {}, { durationMs: null }, { tokens: 73, durationMs: 5000 }]) {
+          const session = yield* sessions.create({
+            location: { directory: AbsolutePath.make(directory) },
+            budgetMode: mode,
+            budget,
+          })
+          const expectedDuration =
+            budget?.durationMs === null
+              ? undefined
+              : (budget?.durationMs ?? (mode === "interactive" ? undefined : 43_200_000))
+          expect(yield* SessionBudget.read(database.db, config, session.id)).toEqual({
+            limit: budget?.tokens ?? (mode === "interactive" ? undefined : 30_000_000),
+            duration: expectedDuration,
+          })
+          yield* sessions.update({ sessionID: session.id, budget: {} })
+          expect((yield* SessionBudget.read(database.db, config, session.id)).duration).toBe(expectedDuration)
+          yield* sessions.update({ sessionID: session.id, budget: { durationMs: null } })
+          expect((yield* SessionBudget.read(database.db, config, session.id)).duration).toBeUndefined()
+        }
+      const legacy = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      yield* database.db
+        .update(SessionTable)
+        .set({ metadata: { budgetMode: "interactive" } })
+        .where(eq(SessionTable.id, legacy.id))
+        .run()
+        .pipe(Effect.orDie)
+      expect(yield* SessionBudget.read(database.db, config, legacy.id)).toEqual({
+        limit: undefined,
+        duration: 43_200_000,
+      })
+    }),
+  ),
 )
 
 it.live("490 durable parent deadline caps child axes without upgrading legacy defaults or resuming work", () =>
-  withRuntime((directory) => Effect.gen(function* () {
-    const sessions = yield* SessionV2.Service
-    const database = yield* Database.Service
-    const config = Config.Service.of({ entries: () => Effect.succeed([]) })
-    const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) }, budget: { durationMs: 5000 } })
-    const deadline = yield* sessions.deadline(parent.id)
-    expect(deadline).toBe(DateTime.toEpochMillis(parent.time.created) + 5000)
-    const child = yield* sessions.create({ location: parent.location, parentID: parent.id, budgetMode: "autonomous", budget: { durationMs: null }, inheritedDeadline: deadline })
-    expect(yield* sessions.deadline(child.id)).toBe(deadline)
-    yield* sessions.update({ sessionID: child.id, budget: { durationMs: 1_000_000 } })
-    expect(yield* sessions.deadline(child.id)).toBe(deadline)
-    yield* sessions.update({ sessionID: child.id, budget: { durationMs: null } })
-    expect(yield* sessions.deadline(child.id)).toBe(deadline)
-    const legacy = yield* sessions.create({ location: parent.location })
-    yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "interactive" } }).where(eq(SessionTable.id, legacy.id)).run().pipe(Effect.orDie)
-    yield* sessions.update({ sessionID: legacy.id, inheritedDeadline: 0 })
-    expect((yield* SessionBudget.read(database.db, config, legacy.id)).duration).toBe(43_200_000)
-    expect(yield* sessions.deadline(legacy.id)).toBe(0)
-    yield* sessions.update({ sessionID: legacy.id, inheritedDeadline: null })
-    expect(yield* sessions.deadline(legacy.id)).toBe(DateTime.toEpochMillis(legacy.time.created) + 43_200_000)
-    expect((yield* sessions.active).size).toBe(0)
-  })),
+  withRuntime((directory) =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const config = Config.Service.of({ entries: () => Effect.succeed([]) })
+      const parent = yield* sessions.create({
+        location: { directory: AbsolutePath.make(directory) },
+        budget: { durationMs: 5000 },
+      })
+      const deadline = yield* sessions.deadline(parent.id)
+      expect(deadline).toBe(DateTime.toEpochMillis(parent.time.created) + 5000)
+      const child = yield* sessions.create({
+        location: parent.location,
+        parentID: parent.id,
+        budgetMode: "autonomous",
+        budget: { durationMs: null },
+        inheritedDeadline: deadline,
+      })
+      expect(yield* sessions.deadline(child.id)).toBe(deadline)
+      yield* sessions.update({ sessionID: child.id, budget: { durationMs: 1_000_000 } })
+      expect(yield* sessions.deadline(child.id)).toBe(deadline)
+      yield* sessions.update({ sessionID: child.id, budget: { durationMs: null } })
+      expect(yield* sessions.deadline(child.id)).toBe(deadline)
+      const legacy = yield* sessions.create({ location: parent.location })
+      yield* database.db
+        .update(SessionTable)
+        .set({ metadata: { budgetMode: "interactive" } })
+        .where(eq(SessionTable.id, legacy.id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* sessions.update({ sessionID: legacy.id, inheritedDeadline: 0 })
+      expect((yield* SessionBudget.read(database.db, config, legacy.id)).duration).toBe(43_200_000)
+      expect(yield* sessions.deadline(legacy.id)).toBe(0)
+      yield* sessions.update({ sessionID: legacy.id, inheritedDeadline: null })
+      expect(yield* sessions.deadline(legacy.id)).toBe(DateTime.toEpochMillis(legacy.time.created) + 43_200_000)
+      expect((yield* sessions.active).size).toBe(0)
+    }),
+  ),
 )
 
 for (const source of [

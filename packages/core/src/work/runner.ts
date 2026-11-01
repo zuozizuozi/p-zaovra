@@ -377,7 +377,7 @@ export const layer = Layer.effect(
             .prompt({
               id: promptID(attempt.id),
               sessionID: attempt.sessionID!,
-              prompt: { text: prompt },
+              prompt: { text: prompt, runPolicy: { mode: "unattended" } },
               resume: false,
             })
             .pipe(Effect.andThen(sessions.resume(attempt.sessionID!))),

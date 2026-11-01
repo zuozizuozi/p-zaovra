@@ -584,6 +584,9 @@ export type SessionsPromptInput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -628,6 +631,9 @@ export type SessionsPromptInput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -672,6 +678,9 @@ export type SessionsPromptInput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -716,6 +725,9 @@ export type SessionsPromptInput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -765,6 +777,9 @@ export type SessionsPromptOutput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -820,6 +835,9 @@ export type SessionsPendingInputsOutput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -893,6 +911,9 @@ export type SessionsCancelInputOutput = {
           readonly BLIS_NUM_THREADS?: string
         }
       }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
       readonly invocation?: string
       readonly files?: ReadonlyArray<{
         readonly uri: string
@@ -1027,6 +1048,17 @@ export type SessionsContextOutput = {
             readonly BLIS_NUM_THREADS?: string
           }
         }
+        readonly runPolicy?:
+          | {
+              readonly mode: "interactive" | "unattended"
+              readonly deadline: number
+              readonly closingReserveMs?: number
+            }
+          | {
+              readonly mode: "interactive" | "unattended"
+              readonly deadline?: never
+              readonly closingReserveMs?: never
+            }
         readonly invocation?: string
         readonly files?: ReadonlyArray<{
           readonly uri: string
@@ -1505,6 +1537,17 @@ export type SessionsHistoryOutput = {
                 readonly BLIS_NUM_THREADS?: string
               }
             }
+            readonly runPolicy?:
+              | {
+                  readonly mode: "interactive" | "unattended"
+                  readonly deadline: number
+                  readonly closingReserveMs?: number
+                }
+              | {
+                  readonly mode: "interactive" | "unattended"
+                  readonly deadline?: never
+                  readonly closingReserveMs?: never
+                }
             readonly invocation?: string
             readonly files?: ReadonlyArray<{
               readonly uri: string
@@ -1563,6 +1606,17 @@ export type SessionsHistoryOutput = {
                 readonly BLIS_NUM_THREADS?: string
               }
             }
+            readonly runPolicy?:
+              | {
+                  readonly mode: "interactive" | "unattended"
+                  readonly deadline: number
+                  readonly closingReserveMs?: number
+                }
+              | {
+                  readonly mode: "interactive" | "unattended"
+                  readonly deadline?: never
+                  readonly closingReserveMs?: never
+                }
             readonly invocation?: string
             readonly files?: ReadonlyArray<{
               readonly uri: string
@@ -2360,6 +2414,17 @@ export type SessionsEventsOutput =
               readonly BLIS_NUM_THREADS?: string
             }
           }
+          readonly runPolicy?:
+            | {
+                readonly mode: "interactive" | "unattended"
+                readonly deadline: number
+                readonly closingReserveMs?: number
+              }
+            | {
+                readonly mode: "interactive" | "unattended"
+                readonly deadline?: never
+                readonly closingReserveMs?: never
+              }
           readonly invocation?: string
           readonly files?: ReadonlyArray<{
             readonly uri: string
@@ -2418,6 +2483,17 @@ export type SessionsEventsOutput =
               readonly BLIS_NUM_THREADS?: string
             }
           }
+          readonly runPolicy?:
+            | {
+                readonly mode: "interactive" | "unattended"
+                readonly deadline: number
+                readonly closingReserveMs?: number
+              }
+            | {
+                readonly mode: "interactive" | "unattended"
+                readonly deadline?: never
+                readonly closingReserveMs?: never
+              }
           readonly invocation?: string
           readonly files?: ReadonlyArray<{
             readonly uri: string
@@ -3846,6 +3922,17 @@ export type SessionsMessageOutput = {
             readonly BLIS_NUM_THREADS?: string
           }
         }
+        readonly runPolicy?:
+          | {
+              readonly mode: "interactive" | "unattended"
+              readonly deadline: number
+              readonly closingReserveMs?: number
+            }
+          | {
+              readonly mode: "interactive" | "unattended"
+              readonly deadline?: never
+              readonly closingReserveMs?: never
+            }
         readonly invocation?: string
         readonly files?: ReadonlyArray<{
           readonly uri: string
@@ -6823,6 +6910,17 @@ export type MessagesListOutput = {
             readonly BLIS_NUM_THREADS?: string
           }
         }
+        readonly runPolicy?:
+          | {
+              readonly mode: "interactive" | "unattended"
+              readonly deadline: number
+              readonly closingReserveMs?: number
+            }
+          | {
+              readonly mode: "interactive" | "unattended"
+              readonly deadline?: never
+              readonly closingReserveMs?: never
+            }
         readonly invocation?: string
         readonly files?: ReadonlyArray<{
           readonly uri: string

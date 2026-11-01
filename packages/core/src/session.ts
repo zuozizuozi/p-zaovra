@@ -416,7 +416,11 @@ const layer = Layer.effect(
         const current = yield* result.get(sessionID)
         return yield* Effect.gen(function* () {
           const config = yield* Config.Service
-          return SessionBudget.deadline(current, (yield* SessionBudget.read(db, config, sessionID)).duration)
+          return SessionBudget.deadline(
+            current,
+            (yield* SessionBudget.read(db, config, sessionID)).duration,
+            (yield* SessionBudget.requestPolicy(db, sessionID))?.policy?.deadline,
+          )
         }).pipe(Effect.provide(locations.get(current.location)))
       }),
       recover: Effect.fn("V2Session.recover")(function* (input) {
@@ -656,7 +660,7 @@ const layer = Layer.effect(
               archived: input.archived,
               budget: input.budget,
               budgetUpdate: input.budget === undefined ? undefined : "patch",
-                inheritedDeadline: input.inheritedDeadline,
+              inheritedDeadline: input.inheritedDeadline,
             },
             { location: session.location },
           )
@@ -1135,6 +1139,7 @@ const resolvePrompt = (input: PromptInput.Prompt) =>
   Prompt.make({
     text: input.text,
     executionContract: input.executionContract,
+    runPolicy: input.runPolicy,
     invocation: input.invocation,
     agents: input.agents,
     selection: input.selection,
