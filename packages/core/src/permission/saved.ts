@@ -23,6 +23,8 @@ export const AddInput = Schema.Struct({
   projectID: ProjectV2.ID,
   action: Schema.String,
   resources: Schema.Array(Schema.String),
+  matchMode: Schema.Literals(["literal", "pattern"]),
+  origin: Schema.Literals(["internal", "api"]),
 }).annotate({ identifier: "PermissionSaved.AddInput" })
 export type AddInput = typeof AddInput.Type
 
@@ -47,7 +49,15 @@ const layer = Layer.effect(
         .all()
         .pipe(Effect.orDie)
       return rows.map(
-        (row): Info => ({ id: row.id, projectID: row.project_id, action: row.action, resource: row.resource }),
+        (row): Info => ({
+          id: row.id,
+          projectID: row.project_id,
+          action: row.action,
+          resource: row.resource,
+          matchMode: row.match_mode,
+          origin: row.origin,
+          version: row.version,
+        }),
       )
     })
 
@@ -61,6 +71,9 @@ const layer = Layer.effect(
             project_id: input.projectID,
             action: input.action,
             resource,
+            match_mode: input.matchMode,
+            origin: input.origin,
+            version: 2,
           })),
         )
         .onConflictDoNothing()

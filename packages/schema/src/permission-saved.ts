@@ -11,10 +11,16 @@ export const ID = Schema.String.pipe(
 )
 export type ID = typeof ID.Type
 
+export const MatchMode = Schema.Literals(["literal", "pattern", "legacy"])
+export const Origin = Schema.Literals(["internal", "api", "legacy"])
+
 export const Info = Schema.Struct({
   id: ID,
   projectID: ProjectID,
   action: Schema.String,
   resource: Schema.String,
+  matchMode: MatchMode,
+  origin: Origin,
+  version: Schema.Int.check(Schema.isGreaterThan(0)),
 }).annotate({ identifier: "PermissionSaved.Info" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}

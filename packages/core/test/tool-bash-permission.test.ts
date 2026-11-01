@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import fs from "node:fs/promises"
-import { DateTime, Effect, Layer } from "effect"
+import { DateTime, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Config } from "@zaovra-ai/core/config"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -133,6 +133,50 @@ test("real Bash permission denial prevents a process while allowed success and n
         expect(allowed.output?.structured).toMatchObject({ exit })
         expect(yield* Effect.promise(() => Bun.file(marker).text())).toBe(String(exit))
         expect(JSON.stringify(allowed.result)).not.toContain("permission policy blocked")
+      }
+
+      // Exercise the real saved-permission + BashTool boundary. The alternate
+      // shell is harmless even if a regression dispatches the command.
+      yield* Effect.promise(() => Bun.write(configPath, JSON.stringify({ shell: probe.executable })))
+      yield* agents.transform((draft) =>
+        draft.update(toolIdentity.agent, (agent) => {
+          agent.permissions = [{ action: "bash", resource: "*", effect: "ask" }]
+        }),
+      )
+      const approved = yield* permission.ask({ sessionID, action: "bash", resources: ["ls *.py"], save: ["ls *.py"] })
+      expect(approved.effect).toBe("ask")
+      yield* permission.reply({ requestID: approved.id, reply: "always" })
+      for (const command of [
+        "ls *.py",
+        "ls example.py; echo harmless.py",
+        "ls example.py\necho harmless.py",
+        "ls $(echo harmless).py",
+        "ls example.py > harmless.py",
+      ]) {
+        if (yield* Effect.promise(() => Bun.file(probe.marker).exists()))
+          yield* Effect.promise(() => fs.unlink(probe.marker))
+        const fiber = yield* settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: `literal-${command}`, name: "bash", input: { command } },
+        }).pipe(Effect.forkScoped)
+        if (command === "ls *.py") {
+          const result = yield* Fiber.join(fiber)
+          expect(result.output?.structured).toMatchObject({ exit: 0 })
+          expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(true)
+          continue
+        }
+        yield* Effect.repeat(Effect.sleep("10 millis"), {
+          until: () => permission.forSession(sessionID).pipe(Effect.map((items) => items.length > 0)),
+        })
+        expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
+        const pending = yield* permission.forSession(sessionID)
+        expect(pending).toHaveLength(1)
+        expect(pending[0]?.saveMode).toBe("literal")
+        yield* permission.reply({ requestID: pending[0]!.id, reply: "reject", message: "Not approved" })
+        const result = yield* Fiber.join(fiber)
+        expect(result.result.type).toBe("error")
+        expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(false)
       }
     }).pipe(
       Effect.scoped,

@@ -1,4 +1,5 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "@zaovra-ai/core/agent"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -18,6 +19,7 @@ import { SessionStore } from "@zaovra-ai/core/session/store"
 import { eq } from "drizzle-orm"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
+import { tmpdir } from "./fixture/tmpdir"
 
 const current = Layer.succeed(
   Location.Service,
@@ -103,6 +105,207 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
+  for (const resource of [
+    "ls example.py; echo unexpected.py",
+    "ls example.py\necho unexpected.py",
+    "ls $(echo unexpected).py",
+    "ls example.py > unexpected.py",
+    "ls example.py",
+  ]) {
+    it.effect(`490 saved shell literal does not authorize ${JSON.stringify(resource)}`, () =>
+      Effect.gen(function* () {
+        yield* setup()
+        const service = yield* PermissionV2.Service
+        const approved = yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"], save: ["ls *.py"] }))
+        yield* service.reply({ requestID: approved.id, reply: "always" })
+        expect(yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"] }))).toMatchObject({
+          effect: "allow",
+        })
+        expect(yield* service.ask(assertion({ action: "bash", resources: [resource] }))).toMatchObject({
+          effect: "ask",
+        })
+      }),
+    )
+  }
+
+  for (const resource of ["LS *.py", "ls /folder/*.py", "ls \\folder\\*.py", "ls *.py "]) {
+    it.effect(`490 literal keeps case, slashes and whitespace ${JSON.stringify(resource)}`, () =>
+      Effect.gen(function* () {
+        yield* setup()
+        const service = yield* PermissionV2.Service
+        const approved = yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"], save: ["ls *.py"] }))
+        yield* service.reply({ requestID: approved.id, reply: "always" })
+        expect(yield* service.ask(assertion({ action: "bash", resources: [resource] }))).toMatchObject({
+          effect: "ask",
+        })
+      }),
+    )
+  }
+
+  it.effect("490 preserves unclassified legacy rows and requires a new approval", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(PermissionTable)
+        .values({ id: PermissionSaved.ID.create(), project_id: Project.ID.global, action: "bash", resource: "ls *.py" })
+        .run()
+        .pipe(Effect.orDie)
+      const service = yield* PermissionV2.Service
+      const approved = yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"], save: ["ls *.py"] }))
+      expect(approved.effect).toBe("ask")
+      yield* service.reply({ requestID: approved.id, reply: "always" })
+      const saved = yield* PermissionSaved.Service
+      expect(yield* saved.list()).toMatchObject([
+        { action: "bash", resource: "ls *.py", matchMode: "legacy", origin: "legacy", version: 1 },
+        { action: "bash", resource: "ls *.py", matchMode: "literal", origin: "internal", version: 2 },
+      ])
+      expect(yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"] }))).toMatchObject({
+        effect: "allow",
+      })
+      expect(yield* service.ask(assertion({ action: "bash", resources: ["ls x.py"] }))).toMatchObject({ effect: "ask" })
+    }),
+  )
+
+  it.effect("490 new API approvals cannot become wildcard actions or commands", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const service = yield* PermissionV2.Service
+      const approved = yield* service.ask(
+        assertion({ action: "*", resources: ["*"], save: ["*"], saveMode: "literal", origin: "api" }),
+      )
+      yield* service.reply({ requestID: approved.id, reply: "always" })
+      expect(yield* service.ask(assertion({ action: "bash", resources: ["pwd"] }))).toMatchObject({ effect: "ask" })
+    }),
+  )
+
+  it.effect("490 same-directory pending requests in a different project remain isolated", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.make("project_other"), worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make("ses_project_other"),
+          project_id: Project.ID.make("project_other"),
+          slug: "other",
+          directory: "/project",
+          title: "other",
+          version: "test",
+          agent: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const original = yield* PermissionV2.Service
+      const first = yield* original.ask(assertion({ action: "bash", resources: ["pwd"], save: ["pwd"] }))
+      yield* Effect.gen(function* () {
+        yield* setRules([])
+        const other = yield* PermissionV2.Service
+        const second = yield* other.ask(
+          assertion({
+            id: PermissionV2.ID.create("per_other_project"),
+            sessionID: SessionV2.ID.make("ses_project_other"),
+            action: "bash",
+            resources: ["pwd"],
+          }),
+        )
+        yield* original.reply({ requestID: first.id, reply: "always" })
+        expect(yield* other.get(second.id)).toBeDefined()
+        expect(yield* original.get(second.id)).toBeUndefined()
+        yield* other.reply({ requestID: second.id, reply: "reject" })
+      }).pipe(
+        Effect.provide(Layer.fresh(PermissionV2.locationLayer)),
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of({
+            ...location({ directory: AbsolutePath.make("/project") }),
+            project: { id: Project.ID.make("project_other"), directory: AbsolutePath.make("/project") },
+          }),
+        ),
+      )
+    }),
+  )
+
+  it.effect("490 literal Windows paths never normalize backslashes into slashes", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const service = yield* PermissionV2.Service
+      const command = "echo C:\\temp\\*.py"
+      const approved = yield* service.ask(assertion({ action: "bash", resources: [command], save: [command] }))
+      yield* service.reply({ requestID: approved.id, reply: "always" })
+      expect(yield* service.ask(assertion({ action: "bash", resources: [command] }))).toMatchObject({ effect: "allow" })
+      expect(yield* service.ask(assertion({ action: "bash", resources: ["echo C:/temp/*.py"] }))).toMatchObject({
+        effect: "ask",
+      })
+    }),
+  )
+
+  it.effect("490 exact pending replies coalesce, but a changed deny still blocks", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const service = yield* PermissionV2.Service
+      const first = yield* service.ask(assertion({ action: "bash", resources: ["pwd"], save: ["pwd"] }))
+      const second = yield* service.ask(
+        assertion({ id: PermissionV2.ID.create("per_exact"), action: "bash", resources: ["pwd"] }),
+      )
+      yield* service.reply({ requestID: first.id, reply: "always" })
+      expect(yield* service.get(second.id)).toBeUndefined()
+      yield* setRules([{ action: "bash", resource: "pwd", effect: "deny" }])
+      expect(yield* service.ask(assertion({ action: "bash", resources: ["pwd"] }))).toMatchObject({ effect: "deny" })
+    }),
+  )
+
+  it.effect("490 cancelling a pending command removes its approval before always can save it", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const waiting = yield* waitForRequest()
+      yield* Fiber.interrupt(waiting.fiber)
+      expect(yield* waiting.service.get(waiting.request.id)).toBeUndefined()
+      expect(
+        yield* waiting.service.reply({ requestID: waiting.request.id, reply: "always" }).pipe(Effect.flip),
+      ).toBeInstanceOf(PermissionV2.NotFoundError)
+      const saved = yield* PermissionSaved.Service
+      expect(yield* saved.list()).toEqual([])
+    }),
+  )
+
+  it.effect("490 always reply leaves another Session's expanded command pending", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make("ses_second"),
+          project_id: Project.ID.global,
+          slug: "second",
+          directory: "/project",
+          title: "second",
+          version: "test",
+          agent: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const service = yield* PermissionV2.Service
+      const expanded = yield* service.ask(
+        assertion({
+          id: PermissionV2.ID.create("per_expanded"),
+          sessionID: SessionV2.ID.make("ses_second"),
+          action: "bash",
+          resources: ["ls x.py; echo unexpected.py"],
+        }),
+      )
+      const approved = yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"], save: ["ls *.py"] }))
+      yield* service.reply({ requestID: approved.id, reply: "always" })
+      expect(yield* service.get(expanded.id)).toBeDefined()
+    }),
+  )
+
   it.effect("rejects an approval after its configured rules change to deny", () =>
     Effect.gen(function* () {
       yield* setup()
@@ -273,7 +476,13 @@ describe("PermissionV2", () => {
     Effect.gen(function* () {
       yield* setup()
       const saved = yield* PermissionSaved.Service
-      yield* saved.add({ projectID: Project.ID.global, action: "bash", resources: ["pwd"] })
+      yield* saved.add({
+        projectID: Project.ID.global,
+        action: "bash",
+        resources: ["pwd"],
+        matchMode: "literal",
+        origin: "internal",
+      })
 
       const service = yield* PermissionV2.Service
       expect(yield* service.ask(assertion({ action: "bash", resources: ["pwd"] }))).toEqual({
@@ -346,10 +555,84 @@ describe("PermissionV2", () => {
       ).toMatchObject([{ action: "read", resource: "src/*" }])
       const saved = yield* PermissionSaved.Service
       const id = (yield* saved.list())[0]!.id
-      expect(yield* saved.list()).toEqual([{ id, projectID: Project.ID.global, action: "read", resource: "src/*" }])
+      expect(yield* saved.list()).toEqual([
+        {
+          id,
+          projectID: Project.ID.global,
+          action: "read",
+          resource: "src/*",
+          matchMode: "pattern",
+          origin: "internal",
+          version: 2,
+        },
+      ])
       yield* service.assert(assertion({ id: PermissionV2.ID.create("per_next"), resources: ["src/next.ts"] }))
       yield* saved.remove(id)
       expect(yield* saved.list()).toEqual([])
     }),
   )
+})
+
+test("490 saved literal and unclassified legacy survive database close and restart", async () => {
+  await using root = await tmpdir()
+  for (const phase of ["save", "restart"]) {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* setup()
+        const service = yield* PermissionV2.Service
+        const saved = yield* PermissionSaved.Service
+        if (phase === "save") {
+          const { db } = yield* Database.Service
+          yield* db
+            .insert(PermissionTable)
+            .values({
+              id: PermissionSaved.ID.create(),
+              project_id: Project.ID.global,
+              action: "bash",
+              resource: "ls *.py",
+            })
+            .run()
+            .pipe(Effect.orDie)
+          const approved = yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"], save: ["ls *.py"] }))
+          yield* service.reply({ requestID: approved.id, reply: "always" })
+          return
+        }
+        expect(yield* saved.list()).toMatchObject([
+          { matchMode: "legacy", origin: "legacy", version: 1 },
+          { matchMode: "literal", origin: "internal", version: 2 },
+        ])
+        expect(yield* service.ask(assertion({ action: "bash", resources: ["ls *.py"] }))).toMatchObject({
+          effect: "allow",
+        })
+        expect(yield* service.ask(assertion({ action: "bash", resources: ["ls unexpected.py"] }))).toMatchObject({
+          effect: "ask",
+        })
+        const literal = (yield* saved.list()).find((item) => item.matchMode === "literal")!
+        yield* saved.remove(literal.id)
+        expect(
+          yield* service.ask(
+            assertion({ id: PermissionV2.ID.create("per_restart"), action: "bash", resources: ["ls *.py"] }),
+          ),
+        ).toMatchObject({ effect: "ask" })
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          AppNodeBuilder.build(
+            LayerNode.group([
+              Database.node,
+              EventV2.node,
+              SessionStore.node,
+              PermissionSaved.node,
+              AgentV2.node,
+              PermissionV2.node,
+            ]),
+            [
+              [Location.node, current],
+              [Database.node, Database.layerFromPath(path.join(root.path, "permissions.sqlite"))],
+            ],
+          ),
+        ),
+      ),
+    )
+  }
 })

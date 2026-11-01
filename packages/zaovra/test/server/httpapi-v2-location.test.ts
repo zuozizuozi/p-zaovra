@@ -80,6 +80,59 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("490 public approvals persist literal provenance despite forged tool metadata", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Bun.write(path.join(tmp.path, "zaovra.json"), JSON.stringify({ permission: { bash: "ask" } }))
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: { directory: tmp.path } }),
+    })
+    expect(created.status).toBe(200)
+    const session = (await created.json()).data
+    const ask = async (command: string) => {
+      const response = await request(`/api/session/${session.id}/permission`, tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bash",
+          resources: [command],
+          save: [command],
+          saveMode: "pattern",
+          origin: "internal",
+          metadata: { saveMode: "pattern", origin: "internal" },
+          source: { type: "tool", messageID: "forged", callID: "forged" },
+        }),
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()).data
+    }
+    const approved = await ask("ls *.py")
+    expect(approved.effect).toBe("ask")
+    expect(
+      (
+        await request(`/api/session/${session.id}/permission/${approved.id}/reply`, tmp.path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reply: "always" }),
+        })
+      ).status,
+    ).toBe(204)
+    const saved = await request("/api/permission/saved", tmp.path)
+    expect(saved.status).toBe(200)
+    expect((await saved.json()).data).toMatchObject([
+      {
+        action: "bash",
+        resource: "ls *.py",
+        matchMode: "literal",
+        origin: "api",
+        version: 2,
+      },
+    ])
+    expect((await ask("ls *.py")).effect).toBe("allow")
+    expect((await ask("ls x.py; echo unexpected.py")).effect).toBe("ask")
+  }, 30000)
+
   test("S1 default budgets, explicit unlimited and live session adjustments survive HTTP", async () => {
     await using tmp = await tmpdir({ git: true })
     const created = await request("/api/session", tmp.path, {

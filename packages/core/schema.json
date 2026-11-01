@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "14ec857a-2ac1-4c56-9688-02f6561d6c6b",
+  "id": "e4a7bd12-cb34-4b4c-8b5a-1a8c8d59e5ab",
   "prevIds": [
-    "d235c5e0-fdec-497d-ab78-0e5251f68774"
+    "14ec857a-2ac1-4c56-9688-02f6561d6c6b"
   ],
   "ddl": [
     {
@@ -647,6 +647,36 @@
       "default": null,
       "generated": null,
       "name": "resource",
+      "entityType": "columns",
+      "table": "permission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'legacy'",
+      "generated": null,
+      "name": "match_mode",
+      "entityType": "columns",
+      "table": "permission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'legacy'",
+      "generated": null,
+      "name": "origin",
+      "entityType": "columns",
+      "table": "permission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "version",
       "entityType": "columns",
       "table": "permission"
     },
@@ -4404,12 +4434,20 @@
         {
           "value": "resource",
           "isExpression": false
+        },
+        {
+          "value": "match_mode",
+          "isExpression": false
+        },
+        {
+          "value": "origin",
+          "isExpression": false
         }
       ],
       "isUnique": true,
       "where": null,
       "origin": "manual",
-      "name": "permission_project_action_resource_idx",
+      "name": "permission_project_action_resource_mode_origin_idx",
       "entityType": "indexes",
       "table": "permission"
     },

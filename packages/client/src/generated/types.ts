@@ -7637,6 +7637,7 @@ export type PermissionsListRequestsOutput = {
     readonly action: string
     readonly resources: ReadonlyArray<string>
     readonly save?: ReadonlyArray<string>
+    readonly saveMode?: "literal" | "pattern"
     readonly metadata?: { readonly [x: string]: JsonValue }
     readonly source?: { readonly type: "tool"; readonly messageID: string; readonly callID: string }
   }>
@@ -7652,6 +7653,9 @@ export type PermissionsListSavedOutput = {
     readonly projectID: string
     readonly action: string
     readonly resource: string
+    readonly matchMode: "literal" | "pattern" | "legacy"
+    readonly origin: "internal" | "api" | "legacy"
+    readonly version: number
   }>
 }["data"]
 
@@ -7739,6 +7743,7 @@ export type PermissionsListOutput = {
     readonly action: string
     readonly resources: ReadonlyArray<string>
     readonly save?: ReadonlyArray<string>
+    readonly saveMode?: "literal" | "pattern"
     readonly metadata?: { readonly [x: string]: JsonValue }
     readonly source?: { readonly type: "tool"; readonly messageID: string; readonly callID: string }
   }>
@@ -7756,6 +7761,7 @@ export type PermissionsGetOutput = {
     readonly action: string
     readonly resources: ReadonlyArray<string>
     readonly save?: ReadonlyArray<string>
+    readonly saveMode?: "literal" | "pattern"
     readonly metadata?: { readonly [x: string]: JsonValue }
     readonly source?: { readonly type: "tool"; readonly messageID: string; readonly callID: string }
   }
