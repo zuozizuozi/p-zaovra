@@ -235,7 +235,9 @@ describe("v2 location HttpApi", () => {
     expect(defaults.status).toBe(200)
     const defaultBudget = await defaults.json()
     expect(defaultBudget).toMatchObject({ data: { used: { tokens: 0 }, unreported: 0 } })
-    expect(defaultBudget.data.limits).toEqual({ durationMs: 43_200_000 })
+    // 490: new ordinary interaction is unlimited; autonomous/legacy policy
+    // and explicit numeric/null/omitted axes are tested independently.
+    expect(defaultBudget.data.limits).toEqual({})
     const update = await request(`/api/session/${session.id}`, tmp.path, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
