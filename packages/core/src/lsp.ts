@@ -1,6 +1,6 @@
 export * as LSP from "./lsp"
 
-import { Context, Data, Effect, Layer, Option, Schema, ScopedCache } from "effect"
+import { Context, Data, Effect, Exit, Fiber, Layer, Option, Schema, Scope, ScopedCache } from "effect"
 import path from "path"
 import { Config } from "./config"
 import { makeLocationNode } from "./effect/app-node"
@@ -18,6 +18,7 @@ import { LspEvent } from "@zaovra-ai/schema/lsp-event"
 export interface Result {
   readonly diagnostics: Record<string, LSPClient.Diagnostic[]>
   readonly failed: string[]
+  readonly pending?: string[]
 }
 
 const Position = Schema.Struct({ line: Schema.Number, character: Schema.Number })
@@ -34,6 +35,7 @@ export const Report = Schema.Struct({
     ),
   ),
   failed: Schema.Array(Schema.String),
+  pending: Schema.Array(Schema.String).pipe(Schema.optional),
 })
 
 export function describe(report: typeof Report.Type | undefined) {
@@ -50,11 +52,15 @@ export function describe(report: typeof Report.Type | undefined) {
     ...(report.failed.length
       ? [`Language diagnostics unavailable: ${report.failed.join(", ")}. File changes remain saved.`]
       : []),
+    ...(report.pending?.length
+      ? [`Language servers initializing in background: ${report.pending.join(", ")}. Diagnostics are not verified yet.`]
+      : []),
   ].join("\n")
 }
 
 export interface Interface {
-  readonly changed: (file: string) => Effect.Effect<Result>
+  readonly changed: (file: string, source?: string) => Effect.Effect<Result>
+  readonly release?: (source: string) => Effect.Effect<void>
   readonly removed: (file: string) => Effect.Effect<Result>
   readonly status: () => Effect.Effect<Status[]>
 }
@@ -131,42 +137,63 @@ const layer = Layer.effect(
         { location: Location.Ref.make({ directory: location.directory, workspaceID: location.workspaceID }) },
       )
     })
+    const owners = new Map<string, Set<string>>()
     const clients = yield* ScopedCache.make({
       capacity: Number.POSITIVE_INFINITY,
       lookup: (key: { name: string; root: string }) =>
         Effect.gen(function* () {
-          const runtime = yield* LSPRuntime.make()
-          const configured = overrides[key.name]
-          if (configured && !configured.disabled)
-            return yield* LSPProcess.open({
-              serverID: key.name,
-              root: key.root,
-              directory: location.directory,
-              command: configured.command,
-              environment: configured.env,
-              initialization: configured.initialization,
-            })
-          const definition = Object.values(LSPBuiltins.create(runtime)).find((server) => server.id === key.name)
-          if (!definition) return undefined
-          const server = yield* Effect.tryPromise(() => definition.spawn(key.root, context, flags))
-          if (!server) return undefined
-          return yield* LSPProcess.open({ serverID: key.name, root: key.root, directory: location.directory, server })
-        }).pipe(
-          Effect.provideService(FSUtil.Service, fs),
-          Effect.provideService(AppProcess.Service, processService),
-          Effect.tap((client) =>
-            Effect.gen(function* () {
-              if (!client) return
-              client.connection.onDispose(() => runFork(setStatus(key, "error")))
-              yield* setStatus(key, "connected")
-            }),
-          ),
-          Effect.tapError(() => setStatus(key, "error")),
-          Effect.onInterrupt(() => setStatus(key, "error")),
-        ),
+          const scope = yield* Scope.Scope
+          const resources = yield* Scope.fork(scope)
+          return yield* Effect.gen(function* () {
+            const runtime = yield* LSPRuntime.make()
+            const configured = overrides[key.name]
+            if (configured && !configured.disabled)
+              return yield* LSPProcess.open({
+                serverID: key.name,
+                root: key.root,
+                directory: location.directory,
+                command: configured.command,
+                environment: configured.env,
+                initialization: configured.initialization,
+              })
+            const definition = Object.values(LSPBuiltins.create(runtime)).find((server) => server.id === key.name)
+            if (!definition) return undefined
+            const server = yield* Effect.tryPromise(() => definition.spawn(key.root, context, flags))
+            if (!server) return undefined
+            return yield* LSPProcess.open({ serverID: key.name, root: key.root, directory: location.directory, server })
+          }).pipe(
+            Effect.provideService(FSUtil.Service, fs),
+            Effect.provideService(AppProcess.Service, processService),
+            Effect.tap((client) =>
+              Effect.gen(function* () {
+                if (!client) return
+                client.connection.onDispose(() => runFork(setStatus(key, "error")))
+                yield* setStatus(key, "connected")
+              }),
+            ),
+            Scope.provide(resources),
+            Effect.onError(() => Scope.close(resources, Exit.void)),
+            Effect.tapError(() => setStatus(key, "error")),
+            Effect.onInterrupt(() => setStatus(key, "error")),
+            Effect.ensuring(Effect.sync(() => owners.delete(JSON.stringify([key.name, key.root])))),
+            Effect.forkIn(scope),
+          )
+        }),
+    })
+    const release = Effect.fn("LSP.release")(function* (source: string, only?: ClientKey) {
+      for (const key of only ? [only] : yield* ScopedCache.keys(clients)) {
+        const id = JSON.stringify([key.name, key.root])
+        const sources = owners.get(id)
+        if (!sources?.delete(source) || sources.size) continue
+        owners.delete(id)
+        const cached = yield* ScopedCache.getSuccess(clients, key)
+        if (Option.isSome(cached) && cached.value.pollUnsafe() === undefined)
+          yield* ScopedCache.invalidate(clients, key)
+      }
     })
     const locks = KeyedMutex.makeUnsafe<string>()
     return Service.of({
+      release,
       status: () => Effect.sync(() => Array.from(states.values())),
       removed: Effect.fn("LSP.removed")((file) =>
         Effect.gen(function* () {
@@ -177,7 +204,8 @@ const layer = Layer.effect(
             if (!FSUtil.contains(key.root, file)) continue
             yield* Effect.gen(function* () {
               const cached = yield* ScopedCache.getSuccess(clients, key)
-              const client = Option.getOrUndefined(cached)
+              const ready = Option.getOrUndefined(cached)?.pollUnsafe()
+              const client = ready && Exit.isSuccess(ready) ? ready.value : undefined
               if (!client) return
               yield* Effect.tryPromise(() => client.notify.remove({ path: file }))
               result.diagnostics[file] = []
@@ -196,9 +224,10 @@ const layer = Layer.effect(
           Effect.catch(() => Effect.succeed({ diagnostics: {}, failed: ["diagnostic timeout"] })),
         ),
       ),
-      changed: Effect.fn("LSP.changed")((file) =>
+      changed: Effect.fn("LSP.changed")((file, source) =>
         Effect.gen(function* () {
-          const result: Result = { diagnostics: {}, failed: [] }
+          const pending: string[] = []
+          const result: Result = { diagnostics: {}, failed: [], ...(source ? { pending } : {}) }
           if (!FSUtil.contains(location.directory, file) && !FSUtil.contains(location.project.directory, file))
             return result
           for (const [name, server] of Object.entries(servers)) {
@@ -211,7 +240,18 @@ const layer = Layer.effect(
             )
             if (!root) continue
             const key = new ClientKey({ name, root })
-            const update = yield* ScopedCache.get(clients, key).pipe(
+            const fiber = yield* ScopedCache.get(clients, key)
+            if (fiber.pollUnsafe() === undefined) {
+              const id = JSON.stringify([name, root])
+              const sources = owners.get(id) ?? new Set<string>()
+              sources.add(source ?? "legacy")
+              owners.set(id, sources)
+              if (source) {
+                pending.push(name)
+                continue
+              }
+            }
+            const update = yield* Fiber.join(fiber).pipe(
               Effect.flatMap((client) =>
                 !client
                   ? ScopedCache.invalidate(clients, key).pipe(Effect.as(undefined))
@@ -229,7 +269,7 @@ const layer = Layer.effect(
                 return true
               }),
               Effect.catch(() => ScopedCache.invalidate(clients, key).pipe(Effect.as(false))),
-              Effect.onInterrupt(() => ScopedCache.invalidate(clients, key)),
+              Effect.onInterrupt(() => release(source ?? "legacy", key)),
               locks.withLock(JSON.stringify([name, root])),
             )
             if (!update) result.failed.push(name)

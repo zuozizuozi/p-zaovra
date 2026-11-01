@@ -255,10 +255,10 @@ const layer = Layer.effectDiscard(
                     format: !mixed,
                   }),
                 )
-                const diagnostics = yield* lsp.changed(result.target)
+                const diagnostics = yield* lsp.changed(result.target, context.sessionID)
                 return {
                   ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
-                  ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                  ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length || diagnostics.pending?.length
                     ? { lsp: diagnostics, target: result.target }
                     : {}),
                   files: [

@@ -116,9 +116,9 @@ const layer = Layer.effectDiscard(
                   expected: input.expectedContent ?? null,
                   format: true,
                 })
-                const diagnostics = yield* lsp.changed(result.target)
+                const diagnostics = yield* lsp.changed(result.target, context.sessionID)
                 return {
-                  ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                  ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length || diagnostics.pending?.length
                     ? { lsp: diagnostics }
                     : {}),
                   operation: result.operation,

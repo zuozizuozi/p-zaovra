@@ -22,6 +22,10 @@ If you need true isolation, run Zaovra inside a Docker container or VM.
 
 Server mode is opt-in only. When enabled, set `ZAOVRA_SERVER_PASSWORD` to require HTTP Basic Auth. Without this, the server runs unauthenticated (with a warning). It is the end user's responsibility to secure the server - any functionality it provides is not a vulnerability.
 
+Without a password, HTTP and WebSocket/PTY requests also pass a server-side Host/Origin gate before dispatch, including preflights. Numeric IPs, localhost and an explicitly configured listening hostname are accepted authorities; an arbitrary DNS name is rejected even when Origin matches it. Known application/local development origins and explicit CORS origins remain supported. CLI requests without Origin still require an accepted Host. This is browser rebinding/foreign-origin protection, not authentication or an OS sandbox.
+
+Forwarded and X-Forwarded-Host headers never grant authority. A trusted reverse proxy must enforce access itself and preserve the configured Host, or use server password authentication. Include IPv6 brackets and the actual port in an Origin; a browser's `null` Origin is rejected. Password-protected desktop connections retain their existing authentication boundary.
+
 ### Out of Scope
 
 | Category                        | Rationale                                                               |

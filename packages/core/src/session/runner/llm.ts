@@ -78,6 +78,7 @@ import { TextRecovery } from "./text-recovery"
 import { maxStepsPrompt } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { FSUtil } from "../../fs-util"
+import { LSP } from "../../lsp"
 import { SessionMessage } from "../message"
 import { SessionUsageQuery } from "../usage"
 import { SessionEfficiency } from "../efficiency"
@@ -158,6 +159,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
     const fs = yield* FSUtil.Service
+    const lsp = yield* LSP.Service
     const plugins = yield* PluginV2.Service
     const database = yield* Database.Service
     const db = database.db
@@ -2571,6 +2573,7 @@ const layer = Layer.effect(
       readonly force: boolean
     }) {
       if ((yield* getSession(input.sessionID)).time.archived) return
+      yield* Effect.addFinalizer(() => lsp.release?.(input.sessionID) ?? Effect.void)
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
@@ -2798,6 +2801,7 @@ export const node = makeLocationNode({
     Config.node,
     Snapshot.node,
     FSUtil.node,
+    LSP.node,
     Database.node,
     PluginV2.node,
   ],

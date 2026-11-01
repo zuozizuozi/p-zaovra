@@ -220,10 +220,10 @@ const layer = Layer.effectDiscard(
                               ? change.contents
                               : `${change.contents}\n`,
                         })
-                        const diagnostics = yield* lsp.changed(result.target)
+                        const diagnostics = yield* lsp.changed(result.target, context.sessionID)
                         applied.push({
                           ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
-                          ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                          ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length || diagnostics.pending?.length
                             ? { lsp: diagnostics }
                             : {}),
                           type: change.type,
@@ -242,7 +242,7 @@ const layer = Layer.effectDiscard(
                           type: change.type,
                           resource: result.resource,
                           target: result.target,
-                          ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                          ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length || diagnostics.pending?.length
                             ? { lsp: diagnostics }
                             : {}),
                         })
@@ -256,10 +256,10 @@ const layer = Layer.effectDiscard(
                         content: change.content,
                         format: !change.mixed,
                       })
-                      const diagnostics = yield* lsp.changed(result.target)
+                      const diagnostics = yield* lsp.changed(result.target, context.sessionID)
                       applied.push({
                         ...(result.backup?.reversible === false ? { backup: result.backup } : {}),
-                        ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length
+                        ...(Object.keys(diagnostics.diagnostics).length || diagnostics.failed.length || diagnostics.pending?.length
                           ? { lsp: diagnostics }
                           : {}),
                         type: change.type,

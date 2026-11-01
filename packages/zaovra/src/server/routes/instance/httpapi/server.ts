@@ -1,6 +1,6 @@
 import { Config as EffectConfig, Context, Effect, Layer } from "effect"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
-import { HttpClient, HttpMiddleware, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
+import { HttpClient, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import * as Observability from "@zaovra-ai/core/observability"
@@ -59,7 +59,7 @@ import { WorkRemoteJob } from "@zaovra-ai/core/work/remote-job"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
 import { TaskRecovery } from "@zaovra-ai/core/tool/task-recovery"
 import { lazy } from "@/util/lazy"
-import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@zaovra-ai/server/cors"
+import { CorsConfig, type CorsOptions } from "@zaovra-ai/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
 import { ServerAuth } from "@/server/auth"
 import { InstanceHttpApi, RootHttpApi } from "./api"
@@ -103,17 +103,9 @@ import { corsVaryFix } from "./middleware/cors-vary"
 import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
+import { RequestAuthority, requestOriginLayer } from "@zaovra-ai/server/middleware/request-origin"
 
 export const context = Context.makeUnsafe<unknown>(new Map())
-
-const cors = (corsOptions?: CorsOptions) =>
-  HttpRouter.middleware(
-    HttpMiddleware.cors({
-      allowedOrigins: (origin) => isAllowedCorsOrigin(origin, corsOptions),
-      maxAge: 86_400,
-    }),
-    { global: true },
-  )
 
 // Route tree:
 // - rootApiRoutes: typed /global/* and control routes; auth is declared by RootHttpApi.
@@ -231,7 +223,7 @@ const app = LayerNode.group([
 ])
 
 export function createRoutes(
-  corsOptions?: CorsOptions,
+  corsOptions?: CorsOptions & { readonly hostname?: string },
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
   const v2Runtime = AppNodeBuilderV1.build(
@@ -268,11 +260,12 @@ export function createRoutes(
       compressionLayer,
       corsVaryFix,
       fenceLayer,
-      cors(corsOptions),
+      requestOriginLayer.pipe(Layer.provide(ServerAuth.Config.layer)),
       AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, sharedLocationServiceMap]]),
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
+    Layer.provide(Layer.succeed(RequestAuthority)({ hostname: corsOptions?.hostname })),
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
