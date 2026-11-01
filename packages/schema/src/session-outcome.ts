@@ -35,7 +35,7 @@ export const RunPolicy = Schema.Union([
     closingReserveMs: Schema.Never.pipe(optional),
   }),
 ]).annotate({ identifier: "SessionOutcome.RunPolicy" })
-export interface RunPolicy extends Schema.Schema.Type<typeof RunPolicy> {}
+export type RunPolicy = typeof RunPolicy.Type
 
 export const ExecutionContract = Schema.Struct({
   version: Schema.Literal(1),

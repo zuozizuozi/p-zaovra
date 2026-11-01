@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { Effect, Layer, DateTime } from "effect"
+import { Effect, Layer, DateTime, Schema } from "effect"
 import { eq } from "drizzle-orm"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
@@ -116,7 +116,7 @@ it.live(
 it.live("490 closing reserve requires an explicit finite deadline and has no inferred default", () =>
   Effect.sync(() => {
     expect(SessionOutcome.RunPolicy.make({ mode: "unattended" })).toEqual({ mode: "unattended" })
-    expect(() => SessionOutcome.RunPolicy.make({ mode: "unattended", closingReserveMs: 1000 })).toThrow()
+    expect(() => Schema.decodeUnknownSync(SessionOutcome.RunPolicy)({ mode: "unattended", closingReserveMs: 1000 })).toThrow()
     expect(() => SessionOutcome.RunPolicy.make({ mode: "interactive", deadline: Infinity })).toThrow()
     expect(() => SessionOutcome.RunPolicy.make({ mode: "unattended", deadline: 0, closingReserveMs: -1 })).toThrow()
     expect(SessionOutcome.RunPolicy.make({ mode: "unattended", deadline: 0, closingReserveMs: 0 })).toMatchObject({
