@@ -25,6 +25,7 @@ import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionSchema } from "@zaovra-ai/core/session/schema"
 import { SessionTable } from "@zaovra-ai/core/session/sql"
 import sessionMetadataMigration from "@zaovra-ai/core/database/migration/20260511173437_session-metadata"
+import permissionLiteralMigration from "@zaovra-ai/core/database/migration/20261101073309_permission-literal-origin"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@zaovra-ai/core/database/database"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
@@ -39,6 +40,40 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
 
 describe("DatabaseMigration", () => {
+  test("490 versions saved approvals without inferring or deleting their old origins", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE permission (id text PRIMARY KEY, project_id text NOT NULL, action text NOT NULL, resource text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)`,
+        )
+        yield* db.run(
+          sql`CREATE UNIQUE INDEX permission_project_action_resource_idx ON permission(project_id, action, resource)`,
+        )
+        yield* db.run(sql`INSERT INTO permission VALUES ('old', 'global', 'bash', 'ls *.py', 1, 2)`)
+        yield* DatabaseMigration.applyOnly(db, [permissionLiteralMigration])
+        yield* DatabaseMigration.applyOnly(db, [permissionLiteralMigration])
+        expect(yield* db.all(sql`SELECT * FROM permission`)).toEqual([
+          {
+            id: "old",
+            project_id: "global",
+            action: "bash",
+            resource: "ls *.py",
+            time_created: 1,
+            time_updated: 2,
+            match_mode: "legacy",
+            origin: "legacy",
+            version: 1,
+          },
+        ])
+        yield* db.run(
+          sql`INSERT INTO permission VALUES ('confirmed', 'global', 'bash', 'ls *.py', 3, 3, 'literal', 'internal', 2)`,
+        )
+        expect(yield* db.get(sql`SELECT count(*) AS count FROM permission`)).toEqual({ count: 2 })
+      }),
+    )
+  })
+
   test("removes V1 sessions without migrating them into SessionV2", async () => {
     await run(
       Effect.gen(function* () {

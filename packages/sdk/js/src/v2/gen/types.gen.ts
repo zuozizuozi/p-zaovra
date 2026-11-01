@@ -1770,6 +1770,7 @@ export type GlobalEvent = {
           action: string
           resources: Array<string>
           save?: Array<string>
+          saveMode?: "literal" | "pattern"
           metadata?: {
             [key: string]: unknown
           }
@@ -6632,7 +6633,7 @@ export type SessionNextRevertCommitted = {
   }
 }
 
-export type SessionOutcomeExecutionRecord5 = {
+export type SessionOutcomeExecutionRecord3 = {
   scope: {
     cwd: string
     command: string
@@ -6649,7 +6650,7 @@ export type SessionOutcomeExecutionRecord5 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeExecutionRecord6 = {
+export type SessionOutcomeExecutionRecord4 = {
   scope: {
     cwd: string
     command: string
@@ -6666,8 +6667,8 @@ export type SessionOutcomeExecutionRecord6 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeCheck2 = {
-  executionRecord?: SessionOutcomeExecutionRecord6
+export type SessionOutcomeCheck1 = {
+  executionRecord?: SessionOutcomeExecutionRecord4
   resultDigest?: string
   sample?: {
     id: string
@@ -6695,7 +6696,7 @@ export type SessionOutcomeCheck2 = {
   contractDigest?: string
 }
 
-export type SessionOutcomeTermination5 = {
+export type SessionOutcomeTermination3 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -6717,7 +6718,7 @@ export type SessionOutcomeTermination5 = {
   source?: "user" | "permission" | "process-exit" | "placement-change"
 }
 
-export type SessionOutcomeTermination6 = {
+export type SessionOutcomeTermination4 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -7083,6 +7084,7 @@ export type PermissionV2Request = {
   action: string
   resources: Array<string>
   save?: Array<string>
+  saveMode?: "literal" | "pattern"
   metadata?: {
     [key: string]: unknown
   }
@@ -7094,6 +7096,9 @@ export type PermissionSavedInfo = {
   projectID: string
   action: string
   resource: string
+  matchMode: "literal" | "pattern" | "legacy"
+  origin: "internal" | "api" | "legacy"
+  version: number
 }
 
 export type FileSystemEntry = {
@@ -8331,6 +8336,7 @@ export type PermissionV2Asked = {
     action: string
     resources: Array<string>
     save?: Array<string>
+    saveMode?: "literal" | "pattern"
     metadata?: {
       [key: string]: unknown
     }
@@ -9310,7 +9316,7 @@ export type EventSessionNextShellStarted = {
   }
 }
 
-export type SessionOutcomeExecutionRecord7 = {
+export type SessionOutcomeExecutionRecord5 = {
   scope: {
     cwd: string
     command: string
@@ -9327,7 +9333,7 @@ export type SessionOutcomeExecutionRecord7 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeExecutionRecord8 = {
+export type SessionOutcomeExecutionRecord6 = {
   scope: {
     cwd: string
     command: string
@@ -9344,8 +9350,8 @@ export type SessionOutcomeExecutionRecord8 = {
   exit?: number | "NaN" | "Infinity" | "-Infinity"
 }
 
-export type SessionOutcomeCheck3 = {
-  executionRecord?: SessionOutcomeExecutionRecord8
+export type SessionOutcomeCheck2 = {
+  executionRecord?: SessionOutcomeExecutionRecord6
   resultDigest?: string
   sample?: {
     id: string
@@ -9381,8 +9387,8 @@ export type EventSessionNextShellEnded = {
     sessionID: string
     callID: string
     output: string
-    executionRecord?: SessionOutcomeExecutionRecord7
-    checks?: Array<SessionOutcomeCheck3>
+    executionRecord?: SessionOutcomeExecutionRecord5
+    checks?: Array<SessionOutcomeCheck2>
   }
 }
 
@@ -9403,7 +9409,7 @@ export type EventSessionNextStepStarted = {
   }
 }
 
-export type SessionOutcomeTermination8 = {
+export type SessionOutcomeTermination6 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -9433,7 +9439,7 @@ export type EventSessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
-    termination?: SessionOutcomeTermination8
+    termination?: SessionOutcomeTermination6
     error?: SessionErrorUnknown
     cost: number
     usageReported?: boolean
@@ -9452,7 +9458,7 @@ export type EventSessionNextStepEnded = {
   }
 }
 
-export type SessionOutcomeTermination9 = {
+export type SessionOutcomeTermination7 = {
   category:
     | "provider-turn-limit"
     | "budget"
@@ -9482,7 +9488,7 @@ export type EventSessionNextStepFailed = {
     sessionID: string
     assistantMessageID: string
     error: SessionErrorUnknown
-    termination?: SessionOutcomeTermination9
+    termination?: SessionOutcomeTermination7
   }
 }
 
@@ -10295,6 +10301,7 @@ export type EventPermissionV2Asked = {
     action: string
     resources: Array<string>
     save?: Array<string>
+    saveMode?: "literal" | "pattern"
     metadata?: {
       [key: string]: unknown
     }

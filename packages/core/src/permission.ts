@@ -25,6 +25,7 @@ const RequestFields = {
   action: Permission.Request.fields.action,
   resources: Permission.Request.fields.resources,
   save: Permission.Request.fields.save,
+  saveMode: Permission.Request.fields.saveMode,
   metadata: Permission.Request.fields.metadata,
   source: Permission.Request.fields.source,
 }
@@ -39,6 +40,8 @@ export const AssertInput = Schema.Struct({
   id: ID.pipe(Schema.optional),
   ...RequestFields,
   agent: AgentV2.ID.pipe(Schema.optional),
+  // Set by the HTTP boundary itself, never copied from client metadata/source.
+  origin: Schema.Literals(["internal", "api"]).pipe(Schema.optional),
 }).annotate({ identifier: "PermissionV2.AssertInput" })
 export type AssertInput = typeof AssertInput.Type
 
@@ -73,11 +76,17 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Per
 
 export type Error = BlockedError | CorrectedError
 
-export function evaluate(action: string, resource: string, ...rulesets: Permission.Ruleset[]): Permission.Rule {
+type SavedRule = Permission.Rule & { readonly matchMode?: "literal" | "pattern" }
+
+export function evaluate(action: string, resource: string, ...rulesets: ReadonlyArray<SavedRule>[]): Permission.Rule {
   return (
     rulesets
       .flat()
-      .findLast((rule) => Wildcard.match(action, rule.action) && Wildcard.match(resource, rule.resource)) ?? {
+      .findLast((rule) =>
+        rule.matchMode === "literal"
+          ? action === rule.action && resource === rule.resource
+          : Wildcard.match(action, rule.action) && Wildcard.match(resource, rule.resource),
+      ) ?? {
       action,
       resource: "*",
       effect: "ask",
@@ -105,6 +114,7 @@ interface Pending {
   readonly agent?: AgentV2.ID
   readonly locationID: string
   readonly owner: symbol
+  readonly origin: "internal" | "api"
   readonly deferred: Deferred.Deferred<void, DeclinedError | CorrectedError>
 }
 
@@ -122,7 +132,7 @@ const layer = Layer.effect(
     const sessions = yield* SessionStore.Service
     const saved = yield* PermissionSaved.Service
     const owner = Symbol()
-    const locationID = `${location.directory}\0${location.workspaceID ?? ""}`
+    const locationID = `${location.project.id}\0${location.directory}\0${location.workspaceID ?? ""}`
 
     yield* EffectRuntime.addFinalizer(() =>
       EffectRuntime.forEach(
@@ -141,8 +151,12 @@ const layer = Layer.effect(
     )
 
     const savedRules = EffectRuntime.fnUntraced(function* () {
-      return (yield* saved.list({ projectID: location.project.id })).map(
-        (item): Permission.Rule => ({ action: item.action, resource: item.resource, effect: "allow" }),
+      // Old records cannot prove whether a glob came from a command, API or a
+      // deliberate pattern. Keep them visible/removable, but require approval.
+      return (yield* saved.list({ projectID: location.project.id })).flatMap((item): SavedRule[] =>
+        item.version === 2 && item.matchMode !== "legacy" && item.origin !== "legacy"
+          ? [{ action: item.action, resource: item.resource, effect: "allow", matchMode: item.matchMode }]
+          : [],
       )
     })
 
@@ -180,16 +194,17 @@ const layer = Layer.effect(
         action: input.action,
         resources: input.resources,
         save: input.save,
+        saveMode: input.saveMode ?? (input.action === "bash" ? "literal" : "pattern"),
         metadata: input.metadata,
         source: input.source,
       }
     }
 
-    const create = (request: Request, agent?: AgentV2.ID) =>
+    const create = (request: Request, agent?: AgentV2.ID, origin: "internal" | "api" = "internal") =>
       EffectRuntime.uninterruptible(
         EffectRuntime.gen(function* () {
           const deferred = yield* Deferred.make<void, DeclinedError | CorrectedError>()
-          const item = { request, agent, deferred, locationID, owner }
+          const item = { request, agent, deferred, locationID, owner, origin }
           if (pending.has(request.id)) return yield* EffectRuntime.die(`Duplicate pending permission ID: ${request.id}`)
           pending.set(request.id, item)
           yield* events
@@ -202,7 +217,7 @@ const layer = Layer.effect(
     const ask = EffectRuntime.fn("PermissionV2.ask")(function* (input: AssertInput) {
       const result = yield* evaluateInput(input)
       const value = request(input)
-      if (result.effect === "ask") yield* create(value, input.agent)
+      if (result.effect === "ask") yield* create(value, input.agent, input.origin)
       return { id: value.id, effect: result.effect }
     })
 
@@ -216,7 +231,7 @@ const layer = Layer.effect(
             })
           }
           if (result.effect === "allow") return
-          const item = yield* create(request(input), input.agent)
+          const item = yield* create(request(input), input.agent, input.origin)
           return yield* restore(Deferred.await(item.deferred)).pipe(
             EffectRuntime.catchTag("PermissionV2.DeclinedError", (error) => EffectRuntime.die(error)),
             EffectRuntime.ensuring(
@@ -285,6 +300,8 @@ const layer = Layer.effect(
               projectID: location.project.id,
               action: existing.request.action,
               resources: existing.request.save,
+              matchMode: existing.request.saveMode ?? "literal",
+              origin: existing.origin,
             })
           }
           yield* Deferred.succeed(existing.deferred, undefined)
