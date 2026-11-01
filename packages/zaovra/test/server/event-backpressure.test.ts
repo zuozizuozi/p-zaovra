@@ -18,9 +18,9 @@ for (const layout of ["slow-first", "slow-middle", "two-slow"] as const)
     await Effect.runPromise(
       Effect.gen(function* () {
         const events = yield* EventV2.Service
-        const first: string[] = []
-        const second: string[] = []
-        const published: string[] = []
+        const first: EventV2.ID[] = []
+        const second: EventV2.ID[] = []
+        const published: EventV2.ID[] = []
         const slow = { calls: 0 }
         const measured: Pick<EventV2.Interface, "listen" | "recentAfter"> = {
           recentAfter: events.recentAfter,
