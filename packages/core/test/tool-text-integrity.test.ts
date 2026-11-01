@@ -347,3 +347,114 @@ it.live("K39 does not reinterpret an authorized raw deletion as a text update", 
     }),
   ),
 )
+
+function patchRoundTrip(before: string, body: string, expected: string) {
+  const untouched = Buffer.from("untouched\r\n保留\nlast")
+  return workspace({ "source.txt": before, "untouched.txt": untouched }, (directory) =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const snapshots = yield* Snapshot.Service
+      const initial = yield* snapshots.capture({ sessionID })
+      expect(initial).toBeDefined()
+      expect(
+        (yield* call(registry, "apply_patch", {
+          patchText: `*** Begin Patch\n*** Update File: source.txt\n${body}\n*** End Patch`,
+        })).result.type,
+      ).not.toBe("error")
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+        Buffer.from(expected),
+      )
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "untouched.txt")))).toEqual(untouched)
+      const applied = yield* snapshots.capture({ sessionID })
+      expect(applied).toBeDefined()
+      yield* snapshots.restore({ files: new Map([[RelativePath.make("source.txt"), initial!]]) })
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(Buffer.from(before))
+      yield* snapshots.restore({ files: new Map([[RelativePath.make("source.txt"), applied!]]) })
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+        Buffer.from(expected),
+      )
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "untouched.txt")))).toEqual(untouched)
+    }),
+  )
+}
+
+for (const bom of ["", "\uFEFF", "\uFEFF\uFEFF"])
+  for (const region of [
+    { name: "no-neighbor", prefix: "", ending: "\n" },
+    { name: "LF", prefix: "head\nkeep\n", ending: "\n" },
+    { name: "CRLF", prefix: "head\r\nkeep\r\n", ending: "\r\n" },
+    { name: "mixed-nearest-LF", prefix: "head\r\nkeep\n", ending: "\n" },
+    { name: "mixed-nearest-CRLF", prefix: "head\nkeep\r\n", ending: "\r\n" },
+  ])
+    for (const fuzzy of [false, true])
+      for (const added of [["b"], ["b", "c"]])
+        for (const multipleChunks of region.prefix ? [false, true] : [false])
+          it.live(
+            `K39 EOF context append ${region.name}/BOM${Buffer.byteLength(bom)}/fuzzy${fuzzy}/${added.length} lines/multi${multipleChunks} preserves bytes and undo-redo`,
+            () => {
+              const tail = fuzzy ? "  a  " : "a"
+              const before = bom + region.prefix + tail
+              const body =
+                (multipleChunks ? "@@\n-keep\n+KEEP\n" : "") +
+                "@@\n a\n" +
+                added.map((line) => "+" + line).join("\n") +
+                (added.length > 1 ? "\n*** End of File" : "")
+              const expected =
+                bom +
+                (multipleChunks ? region.prefix.replace("keep", "KEEP") : region.prefix) +
+                tail +
+                region.ending +
+                added.join(region.ending) +
+                region.ending
+              return patchRoundTrip(before, body, expected)
+            },
+          )
+
+for (const bom of ["", "\uFEFF", "\uFEFF\uFEFF"])
+  for (const endings of [
+    ["\r\n", "\n"],
+    ["\n", "\r\n"],
+  ])
+    for (const fuzzy of [false, true])
+      for (const deleteFirst of [false, true])
+        it.live(
+          `K39 repeated context retains its actual line/BOM${Buffer.byteLength(bom)}/${JSON.stringify(endings)}/fuzzy${fuzzy}/deleteFirst${deleteFirst}`,
+          () => {
+            const first = (fuzzy ? "same  " : "same") + endings[0]!
+            const second = (fuzzy ? "  same" : "same") + endings[1]!
+            return patchRoundTrip(
+              bom + "head\r\n" + first + second,
+              "@@\n" + (deleteFirst ? "-same\n same" : " same\n-same"),
+              bom + "head\r\n" + (deleteFirst ? second : first),
+            )
+          },
+        )
+
+for (const bom of ["", "\uFEFF", "\uFEFF\uFEFF"])
+  it.live(`K39 retained EOF without additions stays unterminated/BOM${Buffer.byteLength(bom)}`, () =>
+    workspace({ "source.txt": bom + "head\r\n  a  " }, (directory) =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const snapshots = yield* Snapshot.Service
+        const before = yield* snapshots.capture({ sessionID })
+        expect(
+          (yield* call(registry, "apply_patch", {
+            patchText: "*** Begin Patch\n*** Update File: source.txt\n@@\n a\n*** End Patch",
+          })).result.type,
+        ).not.toBe("error")
+        expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+          Buffer.from(bom + "head\r\n  a  "),
+        )
+        const after = yield* snapshots.capture({ sessionID })
+        expect(yield* snapshots.files({ from: before!, to: after! })).toEqual([])
+      }),
+    ),
+  )
+
+for (const [label, before, body, expected] of [
+  ["virtual EOF context", "a\n", "@@\n a\n \n+b", "a\n\nb\n"],
+  ["retained empty context", "head\r\n\r\nlast", "@@\n-head\n+HEAD\n \n last\n+b", "HEAD\r\n\r\nlast\r\nb\r\n"],
+])
+  it.live(`K39 EOF ${label} keeps context offsets and local line boundaries`, () =>
+    patchRoundTrip(before!, body!, expected!),
+  )

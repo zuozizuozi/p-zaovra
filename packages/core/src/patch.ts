@@ -1,7 +1,5 @@
 export * as Patch from "./patch"
 
-import { diffArrays } from "diff"
-
 export type Hunk =
   | { readonly type: "add"; readonly path: string; readonly contents: string }
   | { readonly type: "delete"; readonly path: string }
@@ -15,6 +13,8 @@ export type Hunk =
 export interface UpdateFileChunk {
   readonly oldLines: ReadonlyArray<string>
   readonly newLines: ReadonlyArray<string>
+  /** Original and replacement offsets of lines explicitly retained by the patch. */
+  readonly contextLines?: ReadonlyArray<readonly [before: number, after: number]>
   readonly changeContext?: string
   readonly endOfFile?: boolean
 }
@@ -87,35 +87,32 @@ export function derive(
   if (preserveLineEndings) {
     const raw = source.text.match(/[^\n]*(?:\n|$)/g)?.filter(Boolean) ?? []
     const ending = (line: string | undefined) => (line?.endsWith("\r\n") ? "\r\n" : line?.endsWith("\n") ? "\n" : "")
-    for (const [start, remove, insert, pattern] of replacements.toReversed()) {
+    for (const [start, remove, insert, context] of replacements.toReversed()) {
       const written: string[] = []
       let cursor = start
-      let removed: readonly string[] = []
-      for (const change of diffArrays([...pattern], [...insert])) {
-        if (change.removed) {
-          removed = raw.slice(cursor, cursor + change.value.length)
-          cursor += change.value.length
-          continue
-        }
-        if (!change.added) {
-          written.push(...raw.slice(cursor, cursor + change.value.length))
-          cursor += change.value.length
-          removed = []
-          continue
-        }
-        for (const [index, line] of change.value.entries()) {
+      let next = 0
+      // Retain parser provenance: re-diffing equal text can select the wrong LF/CRLF row.
+      for (const [before, after] of [...context, [remove, insert.length] as const]) {
+        const removed = raw.slice(cursor, start + before)
+        const added = insert.slice(next, after)
+        for (const [index, line] of added.entries()) {
           const originalLine = removed[index] ?? removed.at(-1) ?? raw[cursor - 1] ?? raw[cursor]
           const selected = ending(originalLine)
           const finalUnterminated =
-            selected === "" && cursor === raw.length && index === change.value.length - 1 && remove > 0
-          written.push(
-            line.replace(/\r$/, "") +
-              (finalUnterminated
-                ? ""
-                : selected || ending(raw[cursor]) || ending(raw[cursor - 1]) || ending(raw[cursor - 2]) || "\n"),
-          )
+            removed.length > 0 &&
+            ending(removed.at(-1)) === "" &&
+            cursor + removed.length === raw.length &&
+            after === insert.length &&
+            index === added.length - 1
+          const separator =
+            selected || ending(raw[cursor]) || ending(raw[cursor - 1]) || ending(raw[cursor - 2]) || "\n"
+          // An unchanged unterminated EOF row needs a boundary only when a new row follows it.
+          if (written.length > 0 && ending(written.at(-1)) === "") written[written.length - 1] += separator
+          written.push(line.replace(/\r$/, "") + (finalUnterminated ? "" : separator))
         }
-        removed = []
+        if (before < remove && after < insert.length) written.push(raw[start + before]!)
+        cursor = start + before + 1
+        next = after + 1
       }
       if (start > 0 && written.length > 0 && ending(raw[start - 1]) === "") raw[start - 1] += ending(written[0]) || "\n"
       raw.splice(start, remove, ...written)
@@ -155,6 +152,7 @@ function parseUpdate(lines: ReadonlyArray<string>, start: number) {
     const changeContext = lines[index]!.slice(2).trim() || undefined
     const oldLines: string[] = []
     const newLines: string[] = []
+    const contextLines: Array<readonly [number, number]> = []
     let endOfFile = false
     index++
     while (index < lines.length && !lines[index]!.startsWith("@@")) {
@@ -166,6 +164,7 @@ function parseUpdate(lines: ReadonlyArray<string>, start: number) {
       }
       if (line.startsWith("***")) break
       if (line.startsWith(" ")) {
+        contextLines.push([oldLines.length, newLines.length])
         oldLines.push(line.slice(1))
         newLines.push(line.slice(1))
       } else if (line.startsWith("-")) oldLines.push(line.slice(1))
@@ -173,14 +172,25 @@ function parseUpdate(lines: ReadonlyArray<string>, start: number) {
       else throw new Error(`Invalid update chunk line: ${line}`)
       index++
     }
-    chunks.push({ oldLines, newLines, changeContext, endOfFile: endOfFile || undefined })
+    chunks.push({
+      oldLines,
+      newLines,
+      ...(contextLines.length ? { contextLines } : {}),
+      changeContext,
+      endOfFile: endOfFile || undefined,
+    })
   }
   return { chunks, next: index }
 }
 
 function computeReplacements(lines: ReadonlyArray<string>, path: string, chunks: ReadonlyArray<UpdateFileChunk>) {
   const replacements: Array<
-    readonly [start: number, remove: number, insert: ReadonlyArray<string>, pattern: ReadonlyArray<string>]
+    readonly [
+      start: number,
+      remove: number,
+      insert: ReadonlyArray<string>,
+      context: ReadonlyArray<readonly [before: number, after: number]>,
+    ]
   > = []
   let lineIndex = 0
   for (const chunk of chunks) {
@@ -202,7 +212,12 @@ function computeReplacements(lines: ReadonlyArray<string>, path: string, chunks:
       found = seek(lines, oldLines, lineIndex, chunk.endOfFile)
     }
     if (found === -1) throw new Error(`Failed to find expected lines in ${path}:\n${chunk.oldLines.join("\n")}`)
-    replacements.push([found, oldLines.length, newLines, oldLines])
+    replacements.push([
+      found,
+      oldLines.length,
+      newLines,
+      (chunk.contextLines ?? []).filter(([before, after]) => before < oldLines.length && after < newLines.length),
+    ])
     lineIndex = found + oldLines.length
   }
   return replacements.toSorted((left, right) => left[0] - right[0])
