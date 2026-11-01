@@ -10692,6 +10692,61 @@ for (const remaining of [0, -1])
     }),
   )
 
+it.effect("490 closing reserve preserves a dispatched remote operation as unknown across continue", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const registry = yield* ToolRegistry.Service
+    const database = yield* Database.Service
+    const started = yield* Deferred.make<void>()
+    let operations = 0
+    yield* registry.register({
+      browser: Tool.make({
+        description: "A remote operation whose acknowledgement is lost",
+        input: Schema.Struct({}),
+        output: Schema.String,
+        execute: () =>
+          Effect.sync(() => operations++).pipe(
+            Effect.andThen(Deferred.succeed(started, undefined)),
+            Effect.andThen(Effect.never),
+          ),
+      }),
+    })
+    const now = yield* Clock.currentTimeMillis
+    yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Perform the remote operation once",
+        runPolicy: { mode: "unattended", deadline: now + 10_000, closingReserveMs: 2000 },
+      }),
+      resume: false,
+    })
+    response = [
+      LLMEvent.toolCall({ id: "closing-remote-operation", name: "browser", input: {} }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+    ]
+    const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Deferred.await(started)
+    yield* adjust(8001)
+    yield* Fiber.join(run)
+    const ledger = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+    expect(
+      ledger.some(
+        (row) =>
+          row.data.category === "operation" && (row.data.details as Record<string, unknown>).status === "unknown",
+      ),
+    ).toBe(true)
+    expect(operations).toBe(1)
+    expect(requests).toHaveLength(1)
+    expect((yield* session.outcome(sessionID)).state).not.toMatch(/^completed/)
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "continue" }), resume: false })
+    yield* session.resume(sessionID)
+    expect(operations).toBe(1)
+    expect(requests).toHaveLength(1)
+  }),
+)
+
 it.effect("490 explicit closing reserve cancels only same-source tasks and retains a durable unverified receipt", () =>
   Effect.gen(function* () {
     yield* setup

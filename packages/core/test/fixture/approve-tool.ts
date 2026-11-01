@@ -1,5 +1,11 @@
 import { Effect, Fiber } from "effect"
 import { PermissionV2 } from "../../src/permission"
+import { LocationServiceMap } from "../../src/location-service-map"
+import { Location } from "../../src/location"
+import { PluginV2 } from "../../src/plugin"
+import { PluginInternal } from "../../src/plugin/internal"
+import type { AbsolutePath } from "../../src/schema"
+import type { SessionV2 } from "../../src/session"
 import type { ToolRegistry } from "../../src/tool/registry"
 import { settleTool } from "../lib/tool"
 
@@ -46,4 +52,32 @@ export const settleToolApproved = Effect.fn("fixture.settleToolApproved")(functi
       }),
     (fiber) => Fiber.interrupt(fiber),
   )
+})
+
+/** Explicit fixture-user consent to one fixed literal, before crash/replay phases. */
+export const grantFixtureCommand = Effect.fn("fixture.grantFixtureCommand")(function* (
+  sessionID: SessionV2.ID,
+  directory: AbsolutePath,
+  command: string,
+) {
+  const locations = yield* LocationServiceMap.Service
+  return yield* Effect.gen(function* () {
+    // The real Location installs built-in/configured agent permissions
+    // asynchronously. Ask after that same readiness boundary as the runner.
+    const plugins = yield* PluginV2.Service
+    yield* plugins.wait(PluginInternal.agentReadyID)
+    const permissions = yield* PermissionV2.Service
+    const request = yield* permissions.ask({
+      sessionID,
+      action: "bash",
+      resources: [command],
+      save: [command],
+      saveMode: "literal",
+      origin: "api",
+      requireConfirmation: true,
+    })
+    if (request.effect === "deny") return yield* Effect.die("Fixture consent cannot override deny")
+    if (request.effect === "ask") yield* permissions.reply({ requestID: request.id, reply: "always" })
+    console.error("FIXTURE_EXACT_APPROVAL", JSON.stringify({ sessionID, command, effect: request.effect }))
+  }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory }))))
 })

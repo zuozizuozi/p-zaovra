@@ -402,11 +402,12 @@ describe("WorkRunner", () => {
           expect(session?.inheritedDeadline).toBe(DateTime.toEpochMillis(created.goal.time.created) + 43_200_000)
           if (!attempt.sessionID) throw new Error("Local Attempt must own a Session")
           expect(yield* sessions.deadline(attempt.sessionID)).toBe(session?.inheritedDeadline)
-          expect(
-            (yield* sessions.messages({ sessionID: attempt.sessionID, limit: 20, order: "asc" })).find(
-              (message) => message.type === "user",
-            ),
-          ).toMatchObject({ runPolicy: { mode: "unattended" } })
+          // This graph uses noop SessionExecution and fixed Planner/Reviewer.
+          // Execute admits a durable prompt; it does not promote model history.
+          if (attempt.kind === "execute")
+            expect(yield* sessions.pendingInputs(attempt.sessionID)).toMatchObject([
+              { prompt: { runPolicy: { mode: "unattended" } } },
+            ])
         }
       }
     }),

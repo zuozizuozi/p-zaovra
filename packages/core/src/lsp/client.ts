@@ -118,6 +118,7 @@ export async function create(input: {
   server: { process: ChildProcessWithoutNullStreams; initialization?: Record<string, unknown> }
   root: string
   directory: string
+  signal?: AbortSignal
   runtime: {
     normalizePath: (path: string) => string
     readText: (path: string) => Promise<string>
@@ -134,6 +135,15 @@ export async function create(input: {
     new StreamMessageReader(input.server.process.stdout),
     new StreamMessageWriter(input.server.process.stdin),
   )
+  // Effect cancellation must dispose the handshake before its scoped OS owner
+  // closes stdin. Otherwise the detached initialize continuation can still write.
+  const interrupted = () => connection.dispose()
+  input.signal?.addEventListener("abort", interrupted, { once: true })
+  connection.onDispose(() => input.signal?.removeEventListener("abort", interrupted))
+  if (input.signal?.aborted) {
+    connection.dispose()
+    input.signal.throwIfAborted()
+  }
   input.server.process.once("exit", () => connection.dispose())
   input.server.process.once("close", () => connection.dispose())
   input.server.process.once("error", () => connection.dispose())
@@ -259,6 +269,7 @@ export async function create(input: {
     }),
     INITIALIZE_TIMEOUT_MS,
   ).catch((err) => {
+    connection.dispose()
     throw new InitializeError({ serverID: input.serverID, cause: err })
   })
 

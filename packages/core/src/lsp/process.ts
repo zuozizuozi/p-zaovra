@@ -56,7 +56,7 @@ export const open = Effect.fn("LSPProcess.open")(function* (input: {
   )
   if (!child.stdin || !child.stdout || !child.stderr)
     return yield* Effect.fail(new Error("Language server streams are unavailable"))
-  const client = yield* Effect.tryPromise(() =>
+  const client = yield* Effect.tryPromise((signal) =>
     LSPClient.create({
       serverID: input.serverID,
       server: {
@@ -65,6 +65,7 @@ export const open = Effect.fn("LSPProcess.open")(function* (input: {
       },
       root: input.root,
       directory: input.directory,
+      signal,
       runtime: {
         normalizePath: (file) => {
           if (process.platform !== "win32") return file

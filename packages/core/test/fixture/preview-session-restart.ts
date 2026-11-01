@@ -113,6 +113,9 @@ await Effect.runPromise(
       )
       if (mode === "archive") yield* sessions.update({ sessionID, archived: true })
       if (mode === "wait") {
+        // Persistence of the short Session budget was asserted above. Grant only
+        // that axis before testing the separate, unchanged 8s process hard limit.
+        yield* sessions.update({ sessionID, budget: { durationMs: null } })
         if (((yield* observe(sessionID, "wait")).output?.structured as { status?: string })?.status !== "error")
           throw new Error("Persistent hard deadline was not observed by blocking wait")
         const message = yield* sessions.message({ sessionID, messageID: SessionMessage.ID.make(saved.jobID) })
