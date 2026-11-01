@@ -30,12 +30,52 @@ import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
+import { PermissionV2 } from "@zaovra-ai/core/permission"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
-import { settleTool, toolIdentity } from "./lib/tool"
+import { toolIdentity } from "./lib/tool"
+import { settleToolApproved } from "./fixture/approve-tool"
 
 const it = testEffect(Layer.empty)
+it.live("490 real fixture actor observes independent external and exact command approvals", () =>
+  withRuntime((directory, sessions, registry) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const script = path.join(directory, "approval-fixture.cjs")
+      const output = path.join(directory, "approval-output.txt")
+      yield* Effect.promise(() => Bun.write(script, "process.stdout.write('explicit approval')"))
+      const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}" > "${output}" 2>&1`
+      const observed: PermissionV2.Request[] = []
+      const result = yield* settleToolApproved(
+        registry,
+        {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: "fixture-approval",
+            name: "bash",
+            input: { command },
+          },
+        },
+        observed,
+      )
+      expect(result.output?.structured).toMatchObject({ exit: 0 })
+      expect(observed.map((request) => request.action)).toEqual(["external_directory", "bash"])
+      expect(observed[1]?.resources).toEqual([command])
+      expect(
+        observed.every(
+          (request) =>
+            request.sessionID === session.id &&
+            request.source?.type === "tool" &&
+            request.source.callID === "fixture-approval",
+        ),
+      ).toBe(true)
+      expect((yield* Effect.promise(() => Bun.file(output).text())).trimEnd()).toBe("explicit approval")
+    }),
+  ),
+)
 it.effect("490 running get exposes bounded capture progress without claiming completion", () =>
   withRuntime((directory, sessions, registry, jobs) =>
     Effect.gen(function* () {
@@ -52,7 +92,7 @@ it.effect("490 running get exposes bounded capture progress without claiming com
         { kind: "task", workdir: directory, observe: () => capture.snapshot() },
       )
       const get = (callID: string) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: { type: "tool-call", id: callID, name: "bash_job", input: { job_id: id, action: "get" } },
@@ -90,7 +130,7 @@ for (const foreground of [false, true]) {
               `const s=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response('delivered')}); Bun.write(${JSON.stringify(ready)},JSON.stringify({pid:process.pid,port:s.port}));`,
             ),
           )
-          const result = yield* settleTool(registry, {
+          const result = yield* settleToolApproved(registry, {
             sessionID: session.id,
             ...toolIdentity,
             call: {
@@ -138,7 +178,7 @@ for (const foreground of [false, true]) {
             ).toBe(false)
           }).pipe(
             Effect.ensuring(
-              settleTool(registry, {
+              settleToolApproved(registry, {
                 sessionID: session.id,
                 ...toolIdentity,
                 call: {
@@ -386,7 +426,7 @@ for (const timing of ["late-watch", "queued-before-final", "after-continuation"]
           input: { job_id: id, action: "get" },
           provider: { executed: false },
         })
-        const observed = yield* settleTool(registry, {
+        const observed = yield* settleToolApproved(registry, {
           ...context,
           call: { type: "tool-call", id: "observed", name: "bash_job", input: { job_id: id, action: "get" } },
         })
@@ -506,7 +546,7 @@ it.live(
             "require('fs').writeFileSync('pid.txt', String(process.pid)); setTimeout(() => require('fs').writeFileSync('late.txt','escaped'), 2500)",
           ),
         )
-        const result = yield* settleTool(registry, {
+        const result = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -527,7 +567,7 @@ it.live(
         expect(id).toBeString()
         const done = yield* jobs.wait({ id, timeout: 5000 })
         expect(done.info).toMatchObject({ id, status: "error" })
-        const observed = yield* settleTool(registry, {
+        const observed = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: { type: "tool-call", id: "hard-get", name: "bash_job", input: { job_id: id, action: "get" } },
@@ -583,6 +623,7 @@ const withRuntime = <A, E, R>(
               AgentV2.node,
               ToolRegistry.node,
               ToolOutputStore.node,
+              PermissionV2.node,
               BackgroundJob.node,
               Database.node,
               EventV2.node,
@@ -652,7 +693,7 @@ for (const prefix of [
           const database = yield* Database.Service
           const events = yield* EventV2.Service
           yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
-          const result = yield* settleTool(registry, {
+          const result = yield* settleToolApproved(registry, {
             sessionID: session.id,
             ...toolIdentity,
             call: {
@@ -797,7 +838,7 @@ if (process.platform === "win32")
             const database = yield* Database.Service
             const events = yield* EventV2.Service
             yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
-            const result = yield* settleTool(registry, {
+            const result = yield* settleToolApproved(registry, {
               sessionID: session.id,
               ...toolIdentity,
               call: {
@@ -849,7 +890,7 @@ it.live("K3 records the actual explicit launch environment without scanning comm
       const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
       const script = path.join(directory, "environment.cjs")
       yield* Effect.promise(() => Bun.write(script, "console.log('threads=' + process.env.OMP_NUM_THREADS)"))
-      const result = yield* settleTool(registry, {
+      const result = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -900,7 +941,7 @@ it.live("K3 user prompt execution contract reaches launch and survives durable p
       const database = yield* Database.Service
       const events = yield* EventV2.Service
       yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
-      const result = yield* settleTool(registry, {
+      const result = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -952,7 +993,7 @@ it.live("records real syntax failures and file-bound verification evidence", () 
       )
       const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`
       const run = (id: string) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -984,7 +1025,7 @@ it.live("retains bytes beyond the shell preview cap in the registry-owned log", 
       const script = path.join(directory, "verbose.js")
       const content = "HEAD" + "x".repeat(700_000) + "MIDDLE" + "y".repeat(700_000) + "TAIL"
       yield* Effect.promise(() => Bun.write(script, `process.stdout.write(${JSON.stringify(content)})`))
-      const result = yield* settleTool(registry, {
+      const result = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -1019,7 +1060,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       yield* Effect.addFinalizer(() => unsubscribe)
       yield* Effect.promise(() => Bun.write(script, "process.stdout.write('finished');"))
       const start = (id: string, timeout?: number) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -1036,7 +1077,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       const first = yield* start("background")
       const job = (first.output?.structured as { job_id: string }).job_id
       const observe = (sessionID: SessionV2.ID, action: string) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID,
           ...toolIdentity,
           call: {
@@ -1070,7 +1111,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       // Ordinary background work remains part of task execution.
       expect((yield* sessions.outcome(session.id)).state).toBe("running")
       yield* sessions.interrupt(session.id)
-      const stopped = yield* settleTool(registry, {
+      const stopped = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -1084,7 +1125,7 @@ it.live("background commands settle durably, enforce ownership, and stop with th
       const shells = (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.type === "shell")
       expect(shells.every((message) => message.time.completed !== undefined)).toBe(true)
       const bounded = yield* start("bounded", 300)
-      const timed = yield* settleTool(registry, {
+      const timed = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -1108,7 +1149,7 @@ it.live("Stop preserves explicit previews; archive closes only owned services", 
       const script = path.join(directory, "preview.js")
       yield* Effect.promise(() => Bun.write(script, "setInterval(() => {}, 1000)"))
       const start = (sessionID: SessionV2.ID) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID,
           ...toolIdentity,
           call: {
@@ -1126,7 +1167,7 @@ it.live("Stop preserves explicit previews; archive closes only owned services", 
       const first = yield* start(session.id)
       const second = yield* start(other.id)
       const observe = (sessionID: SessionV2.ID, job: typeof first, action = "get") =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID,
           ...toolIdentity,
           call: {
@@ -1168,7 +1209,7 @@ it.live("Q2 silence yields a live owned process and never certifies pending chec
             "setTimeout(() => { require('fs').writeFileSync('finished.txt', 'once'); console.log('done') }, 1800)",
           ),
         )
-        const result = yield* settleTool(registry, {
+        const result = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -1189,7 +1230,7 @@ it.live("Q2 silence yields a live owned process and never certifies pending chec
         expect((yield* jobs.get(data.job_id!))?.status).toBe("running")
         expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
         expect((yield* sessions.outcome(session.id)).state).not.toBe("completed_verified")
-        const done = yield* settleTool(registry, {
+        const done = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -1248,7 +1289,7 @@ it.live("Q2 silence yields a live owned process and never certifies pending chec
           checks: [{ ...check[0]!, executionRecord: { ...execution, jobID: restoredID } }],
           timestamp: DateTime.makeUnsafe(execution.completed!),
         })
-        const restored = yield* settleTool(registry, {
+        const restored = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -1283,7 +1324,7 @@ it.live(
             ),
           )
           const execute = (id: string, timeout?: number) =>
-            settleTool(registry, {
+            settleToolApproved(registry, {
               sessionID: session.id,
               ...toolIdentity,
               call: {
@@ -1322,7 +1363,7 @@ it.live(
             Bun.write(script, "require('fs').appendFileSync('runs.txt', 'x'); setTimeout(() => {}, 1800)"),
           )
           const invoke = () =>
-            settleTool(registry, {
+            settleToolApproved(registry, {
               sessionID: session.id,
               ...toolIdentity,
               call: {
@@ -1369,7 +1410,7 @@ it.live("367 S1 foreground timeout retains the same process identity without ret
           `require('fs').appendFileSync(${JSON.stringify(marker)}, process.pid + '\\n'); setTimeout(() => console.log('survived ' + process.pid), 1500)`,
         ),
       )
-      const first = yield* settleTool(registry, {
+      const first = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -1394,7 +1435,7 @@ it.live("367 S1 foreground timeout retains the same process identity without ret
         }
       })
       const originalPID = yield* Effect.promise(() => Bun.file(marker).text())
-      const done = yield* settleTool(registry, {
+      const done = yield* settleToolApproved(registry, {
         sessionID: session.id,
         ...toolIdentity,
         call: {
@@ -1435,7 +1476,7 @@ it.effect("S1 twenty minute job supports twelve waits and one durable completion
       )
       yield* bash.watch(id)
       for (let index = 0; index < 12; index++) {
-        const wait = yield* settleTool(registry, {
+        const wait = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {

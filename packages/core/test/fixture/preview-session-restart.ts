@@ -17,8 +17,10 @@ import { Location } from "../../src/location"
 import { AbsolutePath } from "../../src/schema"
 import { ProjectV2 } from "../../src/project"
 import { Database } from "../../src/database/database"
+import { PermissionV2 } from "../../src/permission"
 import { location } from "./location"
-import { settleTool, toolIdentity } from "../lib/tool"
+import { toolIdentity } from "../lib/tool"
+import { settleToolApproved } from "./approve-tool"
 
 const [root, mode] = process.argv.slice(2)
 const stateFile = path.join(root, "state.json")
@@ -41,7 +43,7 @@ await Effect.runPromise(
         yield* sessions.update({ sessionID: session.id, budget: { tokens: 123, durationMs: 4567 } })
         const ready = path.join(root, "ready.json")
         const script = path.resolve(import.meta.dir, "service-server.ts")
-        const result = yield* settleTool(registry, {
+        const result = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -72,7 +74,7 @@ await Effect.runPromise(
       )
       const sessionID = SessionV2.ID.make(saved.sessionID)
       const observe = (id: SessionV2.ID, action: string) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID: id,
           ...toolIdentity,
           call: {
@@ -146,6 +148,7 @@ await Effect.runPromise(
           BashJob.node,
           AgentV2.node,
           ToolRegistry.node,
+          PermissionV2.node,
           BackgroundJob.node,
           Database.node,
           Config.node,
