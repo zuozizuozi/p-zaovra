@@ -1375,6 +1375,7 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/question/${encodeURIComponent(input.requestID)}/reject`,
+            query: { reason: input["reason"] },
             successStatus: 204,
             declaredStatuses: [404, 400, 401],
             empty: true,

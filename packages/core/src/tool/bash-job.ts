@@ -174,6 +174,7 @@ const layer = Layer.effect(
               messageID: SessionMessage.ID.make(id),
               callID: id,
               command,
+              origin: "tool",
               timestamp: yield* DateTime.now,
             })
             const persistent =

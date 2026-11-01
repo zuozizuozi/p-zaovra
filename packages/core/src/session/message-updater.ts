@@ -185,6 +185,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             metadata: event.metadata,
             callID: event.data.callID,
             command: event.data.command,
+            ...(event.data.origin === undefined ? {} : { origin: event.data.origin }),
             output: "",
             time: { created: event.data.timestamp },
           }),

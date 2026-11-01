@@ -77,7 +77,18 @@ const layer = Layer.effectDiscard(
                       questions: input.questions,
                       tool: { messageID: context.assistantMessageID, callID: context.toolCallID },
                     })
-                    .pipe(Effect.orDie),
+                    .pipe(
+                      Effect.catchTag("QuestionV2.UnavailableError", () =>
+                        Effect.fail(
+                          new ToolFailure({
+                            message:
+                              "Interactive questions are unavailable in this noninteractive client. No user answer or approval was given. Continue only within the existing authorization; do not repeat the same question.",
+                            metadata: { phase: "input", reason: "interactive-unavailable" },
+                          }),
+                        ),
+                      ),
+                      Effect.catchTag("QuestionV2.RejectedError", (error) => Effect.die(error)),
+                    ),
                 ),
                 Effect.map((answers) => ({ answers })),
               ),

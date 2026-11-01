@@ -39,6 +39,12 @@ export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("Que
   }
 }
 
+export class UnavailableError extends Schema.TaggedErrorClass<UnavailableError>()("QuestionV2.UnavailableError", {}) {
+  override get message() {
+    return "Interactive questions are unavailable in this client"
+  }
+}
+
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("QuestionV2.NotFoundError", {
   requestID: ID,
 }) {}
@@ -55,9 +61,9 @@ export interface ReplyInput {
 }
 
 export interface Interface {
-  readonly ask: (input: AskInput) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
+  readonly ask: (input: AskInput) => Effect.Effect<ReadonlyArray<Answer>, RejectedError | UnavailableError>
   readonly reply: (input: ReplyInput) => Effect.Effect<void, NotFoundError>
-  readonly reject: (requestID: ID) => Effect.Effect<void, NotFoundError>
+  readonly reject: (requestID: ID, reason?: "unavailable") => Effect.Effect<void, NotFoundError>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
 
@@ -67,7 +73,7 @@ interface Pending {
   readonly request: Request
   readonly locationID: string
   readonly owner: symbol
-  readonly deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
+  readonly deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError | UnavailableError>
 }
 
 // Replies may enter through a separately materialized Location consumer from
@@ -106,7 +112,7 @@ const layer = Layer.effect(
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const id = ID.ascending()
-          const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
+          const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError | UnavailableError>()
           const request: Request = { id, ...input }
           pending.set(id, { request, deferred, locationID, owner })
           return yield* events.publish(Event.Asked, request).pipe(
@@ -137,7 +143,7 @@ const layer = Layer.effect(
       ),
     )
 
-    const reject = Effect.fn("QuestionV2.reject")((requestID: ID) =>
+    const reject = Effect.fn("QuestionV2.reject")((requestID: ID, reason?: "unavailable") =>
       Effect.uninterruptible(
         Effect.gen(function* () {
           const existing = pending.get(requestID)
@@ -145,8 +151,12 @@ const layer = Layer.effect(
           yield* events.publish(Event.Rejected, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
+            ...(reason === undefined ? {} : { reason }),
           })
-          yield* Deferred.fail(existing.deferred, new RejectedError())
+          yield* Deferred.fail(
+            existing.deferred,
+            reason === "unavailable" ? new UnavailableError() : new RejectedError(),
+          )
           pending.delete(requestID)
         }),
       ),

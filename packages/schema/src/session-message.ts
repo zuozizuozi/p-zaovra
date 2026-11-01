@@ -92,6 +92,7 @@ export interface Shell extends Schema.Schema.Type<typeof Shell> {}
 export const Shell = Schema.Struct({
   ...Base,
   type: Schema.Literal("shell"),
+  origin: Schema.Literals(["tool", "manual"]).pipe(optional),
   executionRecord: SessionOutcome.ExecutionRecord.pipe(optional),
   checks: Schema.Array(SessionOutcome.Check).pipe(optional),
   callID: Schema.String,

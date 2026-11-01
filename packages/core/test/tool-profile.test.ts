@@ -87,12 +87,19 @@ describe("model tool advertisements", () => {
     const noSearch = definitions.filter((tool) => tool.name !== "tool_search")
     expect(ToolProfile.select(noSearch, { model: "gpt-6-luna", history: [] })).toBe(noSearch)
   })
-  test("exact user requests, application overrides and allow rules remain advertised", () => {
+  test("ordinary user words do not activate deferred tools; application overrides and allow rules do", () => {
     expect(
       names(
         ToolProfile.select(definitions, { model: "gpt-6-luna", history: [user("Use browser and write explicitly.")] }),
       ),
-    ).toEqual(expect.arrayContaining(["browser", "write"]))
+    ).not.toEqual(expect.arrayContaining(["browser", "write"]))
+    const words = names(
+      ToolProfile.select(definitions, {
+        model: "gpt-6-luna",
+        history: [user("task Task question edit file write browser")],
+      }),
+    )
+    for (const name of ["task", "question", "edit", "write", "browser"]) expect(words).not.toContain(name)
     expect(names(ToolProfile.select(definitions, { model: "gpt-6-luna", history: [], custom: ["write"] }))).toContain(
       "write",
     )

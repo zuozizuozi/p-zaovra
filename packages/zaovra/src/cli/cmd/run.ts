@@ -715,9 +715,9 @@ export const RunCommand = effectCmd({
                   questions.add(question.id)
                   UI.println(
                     UI.Style.TEXT_WARNING_BOLD + "!",
-                    UI.Style.TEXT_NORMAL + "interactive question requested; rejecting in non-interactive mode",
+                    UI.Style.TEXT_NORMAL + "interactive question unavailable in non-interactive mode",
                   )
-                  await client.v2.session.question.reject({ sessionID, requestID: question.id })
+                  await client.v2.session.question.reject({ sessionID, requestID: question.id, reason: "unavailable" })
                 }),
             )
           }

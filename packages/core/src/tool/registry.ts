@@ -48,7 +48,7 @@ const registryLayer = Layer.effect(
     const applications = yield* ApplicationTools.Service
     const resources = yield* ToolOutputStore.Service
     const evidence = yield* Evidence.Service
-    type Registration = { readonly identity: object; readonly tool: AnyTool }
+    type Registration = ApplicationTools.Entry
     const local = new Map<string, Array<{ readonly token: object; readonly registration: Registration }>>()
 
     const settleWith = Effect.fn("ToolRegistry.settle")(function* (input: ExecuteInput, advertised?: object) {
@@ -197,7 +197,14 @@ const registryLayer = Layer.effect(
             registrations.delete(name)
           }
         return {
-          custom: Array.from(applications.entries().keys()),
+          custom: Array.from(registrations)
+            .filter(([name, registration]) => {
+              const application = applications.entries().get(name)
+              // The same external tool may also be registered in the Location registry.
+              // A different local override must not inherit the old application's advertisement.
+              return application?.origin !== "shipped" && application?.tool === registration.tool
+            })
+            .map(([name]) => name),
           effectLocation: (call) => {
             const registration = registrations.get(call.name)
             // An absent/disabled registration can only produce a local rejection.

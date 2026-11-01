@@ -1,6 +1,6 @@
 export * as SessionProgress from "./progress"
 
-import { DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import { createHash } from "node:crypto"
 import path from "node:path"
 import type { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
@@ -58,7 +58,7 @@ export const save = Effect.fn("SessionProgress.save")(function* (
     .pipe(Effect.orDie)
 })
 
-export function facts(input: {
+type FactsInput = {
   now: number
   state: typeof State.Type
   turns: number
@@ -69,30 +69,107 @@ export function facts(input: {
   budget?: number
   deadline?: number
   advisoryDeadline?: number
-}) {
+  epoch?: number
+}
+
+const factsPrefix = "Current task facts (host observations, not new requirements): "
+const FactsSnapshot = Schema.Struct({
+  sourceRequest: Schema.String,
+  contextEpoch: Schema.Number,
+  requestElapsedMs: Schema.Number,
+  providerTurns: Schema.Number,
+  allowanceTurn: Schema.Number,
+  allowanceLimit: Schema.optional(Schema.Number),
+  knownTokens: Schema.Number,
+  unreported: Schema.Number,
+  activeTimeUnknown: Schema.optional(Schema.Boolean),
+  budgetLimit: Schema.optional(Schema.Number),
+  hardDeadline: Schema.optional(Schema.Number),
+  advisoryDeadline: Schema.optional(Schema.Number),
+  remainingMs: Schema.optional(Schema.Number),
+  advisoryRemainingMs: Schema.optional(Schema.Number),
+})
+
+/** Throttle only future observations. Enforcement and previously sent facts are unchanged. */
+export function factsDue(input: FactsInput, previous?: string) {
+  if (input.step === 1 || !previous?.startsWith(factsPrefix)) return true
+  const decoded = Schema.decodeUnknownOption(Schema.UnknownFromJsonString.pipe(Schema.decodeTo(FactsSnapshot)))(
+    previous.slice(factsPrefix.length).split("\n", 1)[0],
+  )
+  if (Option.isNone(decoded)) return true
+  const prior = decoded.value
+  if (
+    prior.sourceRequest !== input.state.request ||
+    prior.contextEpoch !== (input.epoch ?? 0) ||
+    prior.allowanceLimit !== input.limit ||
+    prior.budgetLimit !== input.budget ||
+    prior.hardDeadline !== input.deadline ||
+    prior.advisoryDeadline !== input.advisoryDeadline ||
+    Boolean(prior.activeTimeUnknown) !== Boolean(input.state.activeTimeUnknown) ||
+    prior.unreported > 0 !== input.unreported > 0
+  )
+    return true
+  const budgetBand = (tokens: number) =>
+    input.budget === undefined || input.budget <= 0
+      ? 0
+      : tokens >= input.budget
+        ? 3
+        : tokens >= input.budget * 0.9
+          ? 2
+          : tokens >= input.budget * 0.75
+            ? 1
+            : 0
+  const timeBand = (remaining: number | undefined) =>
+    remaining === undefined ? undefined : remaining <= 0 ? 3 : remaining <= 15_000 ? 2 : remaining <= 60_000 ? 1 : 0
+  if (
+    budgetBand(prior.knownTokens) !== budgetBand(input.tokens) ||
+    timeBand(prior.remainingMs) !== timeBand(input.deadline === undefined ? undefined : input.deadline - input.now) ||
+    timeBand(prior.advisoryRemainingMs) !==
+      timeBand(input.advisoryDeadline === undefined ? undefined : input.advisoryDeadline - input.now) ||
+    (input.limit !== undefined && input.limit - input.step <= 3 && prior.allowanceTurn !== input.step)
+  )
+    return true
+  const elapsed = Math.max(0, input.now - input.state.requestStarted)
+  return (
+    input.turns < prior.providerTurns ||
+    elapsed < prior.requestElapsedMs ||
+    input.turns - prior.providerTurns >= 8 ||
+    elapsed - prior.requestElapsedMs >= 60_000
+  )
+}
+
+export function facts(input: FactsInput) {
   const reminder =
     (input.budget !== undefined && input.tokens >= input.budget * 0.75) ||
     (input.deadline !== undefined && input.deadline - input.now <= 60_000) ||
     (input.advisoryDeadline !== undefined && input.advisoryDeadline - input.now <= 60_000)
-  return `Current task facts (host observations, not new requirements): ${JSON.stringify({
-    requestElapsedMs: Math.max(0, input.now - input.state.requestStarted),
-    activeMs: input.state.activeMs,
-    ...(input.state.activeTimeUnknown ? { activeTimeUnknown: true } : {}),
-    providerTurns: input.turns,
-    allowanceTurn: input.step,
-    allowanceLimit: input.limit,
-    knownTokens: input.tokens,
-    unreported: input.unreported,
-    ...(input.budget === undefined
-      ? {}
-      : input.unreported
-        ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
-        : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
-    ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
-    ...(input.advisoryDeadline === undefined
-      ? {}
-      : { advisoryRemainingMs: Math.max(0, input.advisoryDeadline - input.now), advisoryOnly: true }),
-  })}${input.advisoryDeadline === undefined ? "" : "\nThe advisory deadline is a planning reminder, not a stop condition. remainingMs, when present, is the enforced wall-clock budget."}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
+  return (
+    factsPrefix +
+    `${JSON.stringify({
+      sourceRequest: input.state.request,
+      contextEpoch: input.epoch ?? 0,
+      requestElapsedMs: Math.max(0, input.now - input.state.requestStarted),
+      activeMs: input.state.activeMs,
+      ...(input.state.activeTimeUnknown ? { activeTimeUnknown: true } : {}),
+      providerTurns: input.turns,
+      allowanceTurn: input.step,
+      allowanceLimit: input.limit,
+      knownTokens: input.tokens,
+      unreported: input.unreported,
+      ...(input.budget === undefined ? {} : { budgetLimit: input.budget }),
+      ...(input.deadline === undefined ? {} : { hardDeadline: input.deadline }),
+      ...(input.advisoryDeadline === undefined ? {} : { advisoryDeadline: input.advisoryDeadline }),
+      ...(input.budget === undefined
+        ? {}
+        : input.unreported
+          ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
+          : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
+      ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
+      ...(input.advisoryDeadline === undefined
+        ? {}
+        : { advisoryRemainingMs: Math.max(0, input.advisoryDeadline - input.now), advisoryOnly: true }),
+    })}${input.advisoryDeadline === undefined ? "" : "\nThe advisory deadline is a planning reminder, not a stop condition. remainingMs, when present, is the enforced wall-clock budget."}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
+  )
 }
 
 export function closingKey(input: {

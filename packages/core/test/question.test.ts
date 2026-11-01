@@ -48,6 +48,32 @@ const waitForAsk = Effect.fn("QuestionV2Test.waitForAsk")(function* (
 })
 
 describe("QuestionV2", () => {
+  it.effect("K10 keeps trusted noninteractive unavailability distinct from user dismissal", () =>
+    Effect.gen(function* () {
+      const service = yield* QuestionV2.Service
+      const events = yield* EventV2.Service
+      const published: EventV2.Payload[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === QuestionV2.Event.Rejected.type) published.push(event)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const { fiber, request } = yield* waitForAsk(service, { sessionID, questions: [question] })
+      yield* service.reject(request.id, "unavailable")
+      const result = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) {
+        expect(result.cause.toString()).toContain("QuestionV2.UnavailableError")
+        expect(result.cause.toString()).not.toContain("QuestionV2.RejectedError")
+      }
+      expect(published.map((event) => event.data)).toEqual([
+        { sessionID, requestID: request.id, reason: "unavailable" },
+      ])
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
+
   it.effect("publishes lifecycle events and settles a pending reply", () =>
     Effect.gen(function* () {
       const service = yield* QuestionV2.Service

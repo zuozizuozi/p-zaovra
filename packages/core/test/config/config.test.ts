@@ -145,10 +145,16 @@ describe("Config", () => {
     }),
   )
 
-  it.effect("migrates arbitrary v1 configuration into valid v2 configuration", () =>
+  it.effect("migrates v1 configuration or reports unsupported pruning explicitly", () =>
     Effect.sync(() => {
       FastCheck.assert(
         FastCheck.property(Schema.toArbitrary(ConfigV1.Info), (info) => {
+          if (info.compaction?.prune === true) {
+            expect(() =>
+              Schema.decodeUnknownSync(Config.Info)(ConfigMigrateV1.migrate(info), { errors: "all" }),
+            ).toThrow("compaction.prune is not supported in V2")
+            return
+          }
           Schema.decodeUnknownSync(Config.Info)(ConfigMigrateV1.migrate(info), { errors: "all" })
         }),
         { numRuns: 100 },

@@ -116,6 +116,37 @@ const call = (input: typeof EditTool.Input.Type, id = "call-edit") => ({
 
 const it = testEffect(Layer.empty)
 
+it.live("K50 gives bounded candidate lines after an exact-match failure without writing", () =>
+  Effect.acquireUseRelease(
+    Effect.promise(() => tmpdir()),
+    (tmp) =>
+      Effect.gen(function* () {
+        reset()
+        const before = Array.from({ length: 12 }, () => "    return value;").join("\n") + "\n"
+        yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "candidate.txt"), before))
+        yield* withTool(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const result = yield* settleTool(
+              registry,
+              call({ path: "candidate.txt", oldString: " return   value;", newString: "return changed;" }),
+            )
+            expect(result.result.type).toBe("error")
+            if (result.result.type !== "error") throw Error("expected exact-match failure")
+            if (typeof result.result.value !== "string") throw Error("expected a readable exact-match diagnostic")
+            expect(result.result.value).toContain("Candidate lines")
+            expect(result.result.value).toContain("Line 1:")
+            expect(result.result.value).toContain("Line 5:")
+            expect(result.result.value).not.toContain("Line 6:")
+            expect(Buffer.byteLength(result.result.value)).toBeLessThan(3000)
+            expect(projectWrites()).toHaveLength(0)
+            expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "candidate.txt"), "utf8"))).toBe(before)
+          }),
+        )
+      }),
+    (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+  ),
+)
+
 describe("EditTool", () => {
   it.live("returns the formatted diff and reports formatter failures after a successful edit", () =>
     Effect.acquireUseRelease(

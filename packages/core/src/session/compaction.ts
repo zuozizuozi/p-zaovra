@@ -1,6 +1,7 @@
 import { SessionOwnership } from "./ownership"
 export * as SessionCompaction from "./compaction"
 import { SessionCache } from "./cache"
+import { SessionContextWindow } from "./context-window"
 
 import {
   AnthropicThinking,
@@ -162,6 +163,7 @@ type Input = {
   readonly model: Model
   readonly request: LLMRequest
   readonly reason?: "auto" | "manual"
+  readonly contextTokens?: number
 }
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
@@ -181,6 +183,7 @@ export const serializeToolContent = (content: SessionMessage.ToolStateCompleted[
         .join("\n")
 
 const serialize = (message: SessionMessage.Message, reduced = false) => {
+  if (SessionMessage.isToolOwnedShell(message)) return ""
   if (message.type === "user") {
     const files = message.files?.map((file) => `[Attached ${file.mime}: ${file.name ?? file.uri}]`) ?? []
     return [`[User]: ${message.text}`, ...files].join("\n")
@@ -449,7 +452,7 @@ export const make = (dependencies: Dependencies) => {
     if (context === undefined || !Number.isFinite(context) || context <= 0) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     if (
-      estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools }) <=
+      (input.contextTokens ?? SessionContextWindow.estimateInput(input.request)) <=
       context - Math.max(output, config.buffer)
     )
       return false

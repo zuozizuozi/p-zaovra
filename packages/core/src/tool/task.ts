@@ -67,85 +67,88 @@ const layer = Layer.effectDiscard(
     const sessions = yield* SessionV2.Service
 
     yield* applications
-      .register({
-        [name]: Tool.make({
-          description,
-          input: Input,
-          output: Output,
-          toModelOutput: ({ input, output }) => [
-            {
-              type: "text",
-              text: input.run_in_background
-                ? `Subagent @${input.subagent_type} started in background. task_id=${output.task_id}\n\n${output.content}`
-                : `Subagent @${input.subagent_type} execution ended (${output.outcome ?? "completed_unverified"}). task_id=${output.task_id}\n\n${output.content}`,
-            },
-          ],
-          execute: (input, context) =>
-            Effect.gen(function* () {
-              const parent = yield* sessions
-                .get(context.sessionID)
-                .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
-              return yield* run(sessions, parent, input, context).pipe(Effect.provide(locations.get(parent.location)))
-            }),
-        }),
-        [statusName]: Tool.make({
-          observation: true,
-          description: "Inspect one child subagent Session without restarting it.",
-          input: StatusInput,
-          output: StatusOutput,
-          execute: (input, context) =>
-            Effect.gen(function* () {
-              const parent = yield* sessions
-                .get(context.sessionID)
-                .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
-              return yield* status(sessions, parent, input.task_id, context).pipe(
-                Effect.provide(locations.get(parent.location)),
-              )
-            }),
-        }),
-        [listName]: Tool.make({
-          observation: true,
-          description: "List child subagent Sessions owned by the current parent Session.",
-          input: Schema.Struct({}),
-          output: ListOutput,
-          execute: (_input, context) =>
-            Effect.gen(function* () {
-              const parent = yield* sessions
-                .get(context.sessionID)
-                .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
-              return yield* list(sessions, parent, context).pipe(Effect.provide(locations.get(parent.location)))
-            }),
-        }),
-        [cancelName]: Tool.make({
-          description: "Interrupt one running child subagent Session owned by the current parent Session.",
-          input: StatusInput,
-          output: StatusOutput,
-          execute: (input, context) =>
-            Effect.gen(function* () {
-              const parent = yield* sessions
-                .get(context.sessionID)
-                .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
-              return yield* cancel(sessions, parent, input.task_id, context).pipe(
-                Effect.provide(locations.get(parent.location)),
-              )
-            }),
-        }),
-        [resumeName]: Tool.make({
-          description:
-            "Explicitly resume a child subagent Session after an interrupted or unknown execution and wait for it.",
-          input: StatusInput,
-          output: StatusOutput,
-          execute: (input, context) =>
-            Effect.gen(function* () {
-              const parent = yield* sessions
-                .get(context.sessionID)
-                .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
-              return yield* resume(sessions, parent, input.task_id, context).pipe(
-                Effect.provide(locations.get(parent.location)),
-              )
-            }),
-        }),
-      })
+      .register(
+        {
+          [name]: Tool.make({
+            description,
+            input: Input,
+            output: Output,
+            toModelOutput: ({ input, output }) => [
+              {
+                type: "text",
+                text: input.run_in_background
+                  ? `Subagent @${input.subagent_type} started in background. task_id=${output.task_id}\n\n${output.content}`
+                  : `Subagent @${input.subagent_type} execution ended (${output.outcome ?? "completed_unverified"}). task_id=${output.task_id}\n\n${output.content}`,
+              },
+            ],
+            execute: (input, context) =>
+              Effect.gen(function* () {
+                const parent = yield* sessions
+                  .get(context.sessionID)
+                  .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
+                return yield* run(sessions, parent, input, context).pipe(Effect.provide(locations.get(parent.location)))
+              }),
+          }),
+          [statusName]: Tool.make({
+            observation: true,
+            description: "Inspect one child subagent Session without restarting it.",
+            input: StatusInput,
+            output: StatusOutput,
+            execute: (input, context) =>
+              Effect.gen(function* () {
+                const parent = yield* sessions
+                  .get(context.sessionID)
+                  .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
+                return yield* status(sessions, parent, input.task_id, context).pipe(
+                  Effect.provide(locations.get(parent.location)),
+                )
+              }),
+          }),
+          [listName]: Tool.make({
+            observation: true,
+            description: "List child subagent Sessions owned by the current parent Session.",
+            input: Schema.Struct({}),
+            output: ListOutput,
+            execute: (_input, context) =>
+              Effect.gen(function* () {
+                const parent = yield* sessions
+                  .get(context.sessionID)
+                  .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
+                return yield* list(sessions, parent, context).pipe(Effect.provide(locations.get(parent.location)))
+              }),
+          }),
+          [cancelName]: Tool.make({
+            description: "Interrupt one running child subagent Session owned by the current parent Session.",
+            input: StatusInput,
+            output: StatusOutput,
+            execute: (input, context) =>
+              Effect.gen(function* () {
+                const parent = yield* sessions
+                  .get(context.sessionID)
+                  .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
+                return yield* cancel(sessions, parent, input.task_id, context).pipe(
+                  Effect.provide(locations.get(parent.location)),
+                )
+              }),
+          }),
+          [resumeName]: Tool.make({
+            description:
+              "Explicitly resume a child subagent Session after an interrupted or unknown execution and wait for it.",
+            input: StatusInput,
+            output: StatusOutput,
+            execute: (input, context) =>
+              Effect.gen(function* () {
+                const parent = yield* sessions
+                  .get(context.sessionID)
+                  .pipe(Effect.mapError(() => failure(`Parent Session not found: ${context.sessionID}`)))
+                return yield* resume(sessions, parent, input.task_id, context).pipe(
+                  Effect.provide(locations.get(parent.location)),
+                )
+              }),
+          }),
+        },
+        "shipped",
+      )
       .pipe(Effect.orDie)
   }),
 )

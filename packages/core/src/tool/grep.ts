@@ -27,18 +27,24 @@ export const Input = Schema.Struct({
     description: 'File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")',
   }),
   limit: FileSystem.GrepInput.fields.limit.annotate({
-    description: "Maximum matches to return",
+    description: "Maximum matches to return (default 100). Narrow the search if incomplete.",
   }),
 })
 
-export const Output = Schema.Array(FileSystem.Match)
+export const Output = Schema.Struct({
+  matches: Schema.Array(FileSystem.Match),
+  truncated: Schema.Boolean,
+  partial: Schema.Boolean,
+  skippedRecords: Schema.Number,
+})
 type ModelOutput = typeof Output.Encoded
 
 /** Format raw search matches into the familiar concise model output. */
 export const toModelOutput = (output: ModelOutput) => {
-  const lines = output.length === 0 ? ["No files found"] : [`Found ${output.length} matches`]
+  const lines =
+    output.matches.length === 0 && !output.partial ? ["No files found"] : [`Found ${output.matches.length} matches`]
   let current = ""
-  for (const match of output) {
+  for (const match of output.matches) {
     if (current !== match.entry.path) {
       if (current) lines.push("")
       current = match.entry.path
@@ -46,6 +52,11 @@ export const toModelOutput = (output: ModelOutput) => {
     }
     lines.push(`  Line ${match.line}: ${match.text}`)
   }
+  if (output.truncated) lines.push("Result limit reached; narrow the path/pattern or set an explicit limit.")
+  if (output.partial)
+    lines.push(
+      `Partial search: ${output.skippedRecords} overlong records skipped; some files or records may be missing. Narrow the search and read relevant files.`,
+    )
   return lines.join("\n")
 }
 
@@ -69,12 +80,13 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [
             {
               type: "text",
-              text: toModelOutput(
-                output.map((match) => ({
+              text: toModelOutput({
+                ...output,
+                matches: output.matches.map((match) => ({
                   ...match,
                   entry: { ...match.entry, path: path.resolve(location.directory, match.entry.path) },
                 })),
-              ),
+              }),
             },
           ],
           execute: (input, context) =>
@@ -96,16 +108,19 @@ const layer = Layer.effectDiscard(
               const target = path.resolve(location.directory, input.path ?? ".")
               const info = yield* fs.stat(target).pipe(Effect.catch(() => Effect.succeed(undefined)))
               return yield* ripgrep
-                .grep({
+                .grepSummary({
                   cwd: info?.type === "Directory" ? target : path.dirname(target),
                   pattern: input.pattern,
                   file: info?.type === "File" ? path.basename(target) : undefined,
                   include: input.include,
-                  limit: input.limit ?? Number.MAX_SAFE_INTEGER,
+                  limit: input.limit ?? 100,
                 })
                 .pipe(
-                  Effect.map((result) =>
-                    result.map((match) =>
+                  Effect.map((result) => ({
+                    truncated: result.truncated,
+                    partial: result.partial,
+                    skippedRecords: result.skippedRecords,
+                    matches: result.items.map((match) =>
                       FileSystem.Match.make({
                         ...match,
                         entry: FileSystem.Entry.make({
@@ -122,7 +137,7 @@ const layer = Layer.effectDiscard(
                         }),
                       }),
                     ),
-                  ),
+                  })),
                 )
             }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to grep for ${input.pattern}` }))),
         }),

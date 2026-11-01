@@ -353,7 +353,8 @@ const layer = Layer.effect(
       )
     })
 
-    yield* registerCatalogTools(tools, active, permission, defaults?.request).pipe(Effect.orDie)
+    if (Object.keys(configured).length > 0)
+      yield* registerCatalogTools(tools, active, permission, defaults?.request).pipe(Effect.orDie)
     yield* systemContext.register({
       key: SystemContext.Key.make("core/mcp"),
       load: Effect.sync(() => mcpInstructionsContext(active)),

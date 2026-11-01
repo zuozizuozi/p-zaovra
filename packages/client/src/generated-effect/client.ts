@@ -1010,11 +1010,13 @@ type Endpoint17_3Request = Parameters<RawClient["server.question"]["session.ques
 type Endpoint17_3Input = {
   readonly sessionID: Endpoint17_3Request["params"]["sessionID"]
   readonly requestID: Endpoint17_3Request["params"]["requestID"]
+  readonly reason?: Endpoint17_3Request["query"]["reason"]
 }
 const Endpoint17_3 = (raw: RawClient["server.question"]) => (input: Endpoint17_3Input) =>
-  raw["session.question.reject"]({ params: { sessionID: input["sessionID"], requestID: input["requestID"] } }).pipe(
-    Effect.mapError(mapClientError),
-  )
+  raw["session.question.reject"]({
+    params: { sessionID: input["sessionID"], requestID: input["requestID"] },
+    query: { reason: input["reason"] },
+  }).pipe(Effect.mapError(mapClientError))
 
 const adaptGroup17 = (raw: RawClient["server.question"]) => ({
   listRequests: Endpoint17_0(raw),

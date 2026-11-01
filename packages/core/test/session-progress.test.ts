@@ -3,6 +3,56 @@ import { ConfigExperimental } from "../src/config/experimental"
 import { SessionProgress } from "../src/session/progress"
 import { evidenceScope } from "./fixture/evidence-scope"
 
+test("K19 emits future facts at bounded cadence while retaining all previously emitted observations", () => {
+  let previous: string | undefined
+  const emitted: string[] = []
+  for (let turn = 0; turn < 25; turn++) {
+    const input = {
+      now: turn * 1000,
+      state: { activeMs: turn * 1000, request: "one", requestStarted: 0 },
+      turns: turn,
+      step: turn + 1,
+      tokens: turn * 100,
+      unreported: 0,
+      epoch: 1,
+    }
+    if (!SessionProgress.factsDue(input, previous)) continue
+    previous = SessionProgress.facts(input)
+    emitted.push(previous)
+  }
+  expect(emitted).toHaveLength(4)
+  expect(emitted[0]).toContain('"providerTurns":0')
+  expect(emitted[3]).toContain('"providerTurns":24')
+  expect(emitted[0]).toContain('"requestElapsedMs":0')
+})
+
+test("K19 emits source/epoch, unknown usage and critical budget/deadline changes immediately", () => {
+  const input = {
+    now: 1000,
+    state: { activeMs: 1000, request: "one", requestStarted: 0 },
+    turns: 2,
+    step: 3,
+    tokens: 1000,
+    unreported: 0,
+    epoch: 1,
+    budget: 10000,
+    deadline: 120000,
+  }
+  const previous = SessionProgress.facts(input)
+  expect(SessionProgress.factsDue({ ...input, turns: 3, step: 4, tokens: 2000 }, previous)).toBe(false)
+  for (const tokens of [7500, 9000, 10000]) expect(SessionProgress.factsDue({ ...input, tokens }, previous)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, now: 61000 }, previous)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, now: 106000 }, previous)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, epoch: 2 }, previous)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, state: { ...input.state, request: "two" } }, previous)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, unreported: 1 }, previous)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, step: 1 }, previous)).toBe(true)
+  expect(
+    SessionProgress.factsDue({ ...input, step: 8, limit: 10 }, SessionProgress.facts({ ...input, limit: 10 })),
+  ).toBe(true)
+  expect(SessionProgress.factsDue(input, "Current task facts (host observations, not new requirements): {}")).toBe(true)
+})
+
 test("13 advisory deadline remains separate from finite and unlimited wall-clock budgets", () => {
   const input = {
     now: 1_000_000,

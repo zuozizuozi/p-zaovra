@@ -16,11 +16,14 @@ type Draft = {
 export interface Entry {
   readonly identity: object
   readonly tool: Tool.AnyTool
+  /** Set only by trusted shipped registration code, never returned tool annotations. */
+  readonly origin?: "shipped"
 }
 
 export interface Interface {
   readonly register: (
     tools: Readonly<Record<string, Tool.AnyTool>>,
+    origin?: "shipped",
   ) => Effect.Effect<void, Tool.RegistrationError, Scope.Scope>
   readonly entries: () => ReadonlyMap<string, Entry>
 }
@@ -40,11 +43,11 @@ const layer = Layer.effect(
     })
 
     return Service.of({
-      register: Effect.fn("ApplicationTools.register")(function* (tools) {
+      register: Effect.fn("ApplicationTools.register")(function* (tools, origin) {
         const entries = Object.entries(tools)
         if (entries.length === 0) return
         yield* Effect.forEach(entries, ([name]) => Tool.validateName(name), { discard: true })
-        const registrations = entries.map(([name, tool]) => [name, { identity: {}, tool }] as const)
+        const registrations = entries.map(([name, tool]) => [name, { identity: {}, tool, origin }] as const)
         yield* state.transform((draft) => {
           for (const [name, entry] of registrations) draft.set(name, entry)
         })

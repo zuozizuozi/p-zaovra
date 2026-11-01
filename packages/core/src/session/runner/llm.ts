@@ -83,6 +83,7 @@ import { SessionUsageQuery } from "../usage"
 import { SessionEfficiency } from "../efficiency"
 import { SessionProgress } from "../progress"
 import { SessionCache } from "../cache"
+import { SessionContextWindow } from "../context-window"
 import { ExecutionContext } from "../execution-context"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
@@ -506,6 +507,7 @@ const layer = Layer.effect(
       promotion: SessionInput.Delivery | undefined,
       step: number,
       toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
+      contextWindow: SessionContextWindow.State,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
       allowCompaction = true,
       budgetStop?: TurnBudget,
@@ -789,7 +791,10 @@ const layer = Layer.effect(
           history: durableHistory,
           permissions: agent.info?.permissions,
           custom: toolMaterialization?.custom,
-          recalled: /^gpt-/i.test(model.id) && !deliveryReview && toolMaterialization ? yield* ToolProfile.recalled(db, session.id) : [],
+          recalled:
+            /^gpt-/i.test(model.id) && !deliveryReview && toolMaterialization
+              ? yield* ToolProfile.recalled(db, session.id)
+              : [],
           explicit: !!agent.info && ("tools" in agent.info.request.body || "tool_choice" in agent.info.request.body),
           repair: deliveryReview,
         },
@@ -850,8 +855,8 @@ const layer = Layer.effect(
           ? (yield* SessionUsageQuery.read(session.id).pipe(Effect.provideService(Database.Service, database))).total
           : undefined
       const progressBudget = progressUsage ? yield* readBudget(session.id) : undefined
-      const progressFacts = progressUsage
-        ? SessionProgress.facts({
+      const factsInput = progressUsage
+        ? {
             now: yield* Clock.currentTimeMillis,
             state: yield* checkpointProgress(session.id),
             turns: progressUsage.calls,
@@ -865,8 +870,20 @@ const layer = Layer.effect(
               progressBudget?.duration === undefined
                 ? undefined
                 : DateTime.toEpochMillis(session.time.created) + progressBudget.duration,
-          })
+            epoch: system.baselineSeq,
+          }
         : undefined
+      const progressFacts =
+        factsInput &&
+        SessionProgress.factsDue(
+          factsInput,
+          context.findLast(
+            (message): message is SessionMessage.System =>
+              message.type === "system" && message.text.startsWith("Current task facts"),
+          )?.text,
+        )
+          ? SessionProgress.facts(factsInput)
+          : undefined
       const durableMessages = toLLMMessages(context, model, originalRequests)
       const baseRequest = LLM.request({
         model,
@@ -1006,10 +1023,17 @@ const layer = Layer.effect(
             details: { operationID, fingerprint, status, effects, callID, sourceMessageID: operationSource ?? null },
           })
         })
+      const windowEpoch = `${system.baselineSeq}/${entries.findLast((entry) => entry.message.type === "compaction")?.seq ?? 0}`
       if (
         !deliveryReview &&
         allowCompaction &&
-        (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
+        (yield* compaction.compactIfNeeded({
+          sessionID: session.id,
+          entries,
+          model,
+          request,
+          contextTokens: contextWindow.estimate(request, windowEpoch).tokens,
+        }))
       )
         return yield* Effect.die(continueAfterCompaction(currentStep))
       // A failed compaction can still consume tokens before falling back to the original request.
@@ -1119,6 +1143,7 @@ const layer = Layer.effect(
               sessionID: session.id,
               db,
               events,
+              onStart: () => contextWindow.start(request, windowEpoch),
             })
       ).pipe(
         (stream) =>
@@ -2257,9 +2282,10 @@ const layer = Layer.effect(
       promotion: SessionInput.Delivery | undefined,
       step: number,
       toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number },
+      contextWindow: SessionContextWindow.State,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts) {
+    const runTurn: RunTurn = Effect.fnUntraced(function* (sessionID, promotion, step, toolCallAttempts, contextWindow) {
       const budgetStop: TurnBudget = {
         expired: false,
         repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
@@ -2337,6 +2363,7 @@ const layer = Layer.effect(
             recovery.attempt ? "steer" : promotion,
             recovery.step,
             toolCallAttempts,
+            contextWindow,
             compaction.compactAfterOverflow,
             true,
             budgetStop,
@@ -2351,6 +2378,7 @@ const layer = Layer.effect(
                   undefined,
                   defect.transition.step,
                   toolCallAttempts,
+                  contextWindow,
                   undefined,
                   false,
                   budgetStop,
@@ -2615,6 +2643,7 @@ const layer = Layer.effect(
       }
       yield* settleInterruptedTurn(input.sessionID)
       const toolCallAttempts: { input?: string; result?: string; fingerprint?: string; count: number } = { count: 0 }
+      const contextWindow = SessionContextWindow.make()
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue
       let step = 1
@@ -2622,7 +2651,7 @@ const layer = Layer.effect(
         let needsContinuation = true
         while (needsContinuation) {
           if ((yield* getSession(input.sessionID)).time.archived) return
-          const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts)
+          const result = yield* runTurn(input.sessionID, promotion, step, toolCallAttempts, contextWindow)
           needsContinuation = result.needsContinuation
           step = result.step + 1
           promotion = "steer"

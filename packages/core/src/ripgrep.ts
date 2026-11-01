@@ -80,6 +80,15 @@ export interface Interface {
   readonly find: (input: FindInput) => Effect.Effect<readonly Entry[], Error>
   readonly glob: (input: GlobInput) => Effect.Effect<readonly Entry[], Error>
   readonly grep: (input: GrepInput) => Effect.Effect<readonly Match[], Error | InvalidPatternError>
+  readonly globSummary: (input: GlobInput) => Effect.Effect<SearchResult<Entry>, Error>
+  readonly grepSummary: (input: GrepInput) => Effect.Effect<SearchResult<Match>, Error | InvalidPatternError>
+}
+
+export interface SearchResult<A> {
+  readonly items: readonly A[]
+  readonly truncated: boolean
+  readonly partial: boolean
+  readonly skippedRecords: number
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/Ripgrep") {}
@@ -114,9 +123,35 @@ const layer = Layer.effect(
             Effect.forkScoped,
           )
           let observed = 0
-          const rows = yield* Stream.decodeText(handle.stdout).pipe(
-            Stream.splitLines,
-            Stream.filter((line) => line.length > 0),
+          let pending = Buffer.alloc(0)
+          let dropping = false
+          let skippedRecords = 0
+          const rows = yield* Stream.concat(handle.stdout, Stream.succeed(Buffer.from("\n"))).pipe(
+            Stream.map((chunk) => {
+              const lines: string[] = []
+              let offset = 0
+              while (offset < chunk.length) {
+                const newline = chunk.indexOf(10, offset)
+                const end = newline === -1 ? chunk.length : newline
+                if (!dropping) {
+                  if (pending.length + end - offset > MAX_RECORD_BYTES) {
+                    skippedRecords++
+                    dropping = true
+                    pending = Buffer.alloc(0)
+                  } else {
+                    pending = Buffer.concat([pending, chunk.subarray(offset, end)])
+                  }
+                }
+                if (newline !== -1) {
+                  if (!dropping && pending.length > 0) lines.push(pending.toString("utf8"))
+                  pending = Buffer.alloc(0)
+                  dropping = false
+                }
+                offset = end + 1
+              }
+              return lines
+            }),
+            Stream.flatMap((lines) => Stream.fromIterable(lines)),
             Stream.mapEffect(input.parse),
             Stream.filter((row): row is A => row !== undefined),
             Stream.tap((row) => {
@@ -128,7 +163,8 @@ const layer = Layer.effect(
             Effect.map((chunk) => [...chunk]),
           )
           const truncated = rows.length > input.limit
-          if (truncated) return { items: rows.slice(0, input.limit), truncated, partial: false }
+          if (truncated)
+            return { items: rows.slice(0, input.limit), truncated, partial: skippedRecords > 0, skippedRecords }
 
           const code = yield* handle.exitCode
           const stderr = yield* Fiber.join(stderrFiber)
@@ -138,7 +174,12 @@ const layer = Layer.effect(
           if (code !== 0 && code !== 1 && code !== 2) {
             return yield* failure(stderr.trim() || `ripgrep failed with code ${code}`)
           }
-          return { items: code === 1 ? [] : rows, truncated: false, partial: code === 2 }
+          return {
+            items: code === 1 ? [] : rows,
+            truncated: false,
+            partial: code === 2 || skippedRecords > 0,
+            skippedRecords,
+          }
         }),
       )
       const abortable = input.signal ? program.pipe(Effect.raceFirst(waitForAbort(input.signal))) : program
@@ -151,8 +192,8 @@ const layer = Layer.effect(
       )
     }
 
-    return Service.of({
-      glob: (input) =>
+    const search = {
+      glob: (input: GlobInput) =>
         run<string>({
           cwd: input.cwd,
           limit: input.limit,
@@ -174,17 +215,18 @@ const layer = Layer.effect(
                 .replaceAll("\\", "/"),
             ),
         }).pipe(
-          Effect.map((result) =>
-            result.items.map((relative) =>
+          Effect.map((result) => ({
+            ...result,
+            items: result.items.map((relative) =>
               Entry.make({
                 path: RelativePath.make(relative),
                 type: "file",
               }),
             ),
-          ),
+          })),
           Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
         ),
-      find: (input) =>
+      find: (input: FindInput) =>
         run<Entry>({
           cwd: input.cwd,
           limit: input.limit,
@@ -215,7 +257,7 @@ const layer = Layer.effect(
           Effect.map((result) => result.items),
           Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
         ),
-      grep: (input) =>
+      grep: (input: GrepInput) =>
         run<RawMatchData>({
           ...input,
           args: [
@@ -230,13 +272,10 @@ const layer = Layer.effect(
             input.file ?? ".",
           ],
           parse: (line) =>
-            (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
-              ? Effect.fail(failure(`Ripgrep JSON record exceeded ${MAX_RECORD_BYTES} bytes`))
-              : Effect.try({
-                  try: () => JSON.parse(line) as unknown,
-                  catch: (cause) => failure("Invalid ripgrep JSON output", cause),
-                })
-            ).pipe(
+            Effect.try({
+              try: () => JSON.parse(line) as unknown,
+              catch: (cause) => failure("Invalid ripgrep JSON output", cause),
+            }).pipe(
               Effect.flatMap((json) => {
                 if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
                   return Effect.succeed(undefined)
@@ -251,8 +290,9 @@ const layer = Layer.effect(
               }),
             ),
         }).pipe(
-          Effect.map((result) =>
-            result.items.map((match) => {
+          Effect.map((result) => ({
+            ...result,
+            items: result.items.map((match) => {
               const relative = match.path.text
                 .replace(/^(?:\.[\\/])+/u, "")
                 .replace(/^[\\/]+/u, "")
@@ -272,8 +312,15 @@ const layer = Layer.effect(
                 })),
               })
             }),
-          ),
+          })),
         ),
+    }
+    return Service.of({
+      find: search.find,
+      glob: (input) => search.glob(input).pipe(Effect.map((result) => result.items)),
+      grep: (input) => search.grep(input).pipe(Effect.map((result) => result.items)),
+      globSummary: search.glob,
+      grepSummary: search.grep,
     })
   }),
 )

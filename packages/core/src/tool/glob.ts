@@ -21,16 +21,25 @@ export const Input = Schema.Struct({
     description: "Relative directory to search. Defaults to the active Location.",
   }),
   limit: FileSystem.GlobInput.fields.limit.annotate({
-    description: "Maximum results to return",
+    description: "Maximum results to return (default 100). Narrow the search if incomplete.",
   }),
 })
 
-export const Output = Schema.Array(FileSystem.Entry)
+export const Output = Schema.Struct({
+  entries: Schema.Array(FileSystem.Entry),
+  truncated: Schema.Boolean,
+  partial: Schema.Boolean,
+  skippedRecords: Schema.Number,
+})
 type ModelOutput = typeof Output.Encoded
 
 /** Format raw search results into the concise line-oriented output models expect. */
 export const toModelOutput = (output: ModelOutput) => {
-  const lines = output.length === 0 ? ["No files found"] : output.map((item) => item.path)
+  const lines =
+    output.entries.length === 0 && !output.partial ? ["No files found"] : output.entries.map((item) => item.path)
+  if (output.truncated) lines.push("Result limit reached; narrow the path/pattern or set an explicit limit.")
+  if (output.partial)
+    lines.push(`Partial search: ${output.skippedRecords} overlong records skipped; some files may be missing.`)
   return lines.join("\n")
 }
 
@@ -53,9 +62,13 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [
             {
               type: "text",
-              text: toModelOutput(
-                output.map((entry) => ({ ...entry, path: path.resolve(location.directory, entry.path) })),
-              ),
+              text: toModelOutput({
+                ...output,
+                entries: output.entries.map((entry) => ({
+                  ...entry,
+                  path: path.resolve(location.directory, entry.path),
+                })),
+              }),
             },
           ],
           execute: (input, context) =>
@@ -75,20 +88,23 @@ const layer = Layer.effectDiscard(
               })
               const cwd = path.resolve(location.directory, input.path ?? ".")
               return yield* ripgrep
-                .glob({
+                .globSummary({
                   cwd,
                   pattern: input.pattern,
-                  limit: input.limit ?? Number.MAX_SAFE_INTEGER,
+                  limit: input.limit ?? 100,
                 })
                 .pipe(
-                  Effect.map((result) =>
-                    result.map((entry) =>
+                  Effect.map((result) => ({
+                    truncated: result.truncated,
+                    partial: result.partial,
+                    skippedRecords: result.skippedRecords,
+                    entries: result.items.map((entry) =>
                       FileSystem.Entry.make({
                         ...entry,
                         path: RelativePath.make(path.relative(location.directory, path.resolve(cwd, entry.path))),
                       }),
                     ),
-                  ),
+                  })),
                 )
             }).pipe(
               Effect.mapError(() => new ToolFailure({ message: `Unable to find files matching ${input.pattern}` })),

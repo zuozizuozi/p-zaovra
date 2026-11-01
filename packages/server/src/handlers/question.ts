@@ -52,7 +52,7 @@ export const QuestionHandler = HttpApiBuilder.group(Api, "server.question", (han
         Effect.fn(function* (ctx) {
           yield* withOwnedQuestion(ctx.params.sessionID, ctx.params.requestID, (question) =>
             question
-              .reject(ctx.params.requestID)
+              .reject(ctx.params.requestID, ctx.query.reason)
               .pipe(Effect.catchTag("QuestionV2.NotFoundError", () => missingRequest(ctx.params.requestID))),
           )
           return HttpApiSchema.NoContent.make()

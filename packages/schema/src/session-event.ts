@@ -180,6 +180,7 @@ export namespace Shell {
       messageID: SessionMessage.ID,
       callID: Schema.String,
       command: Schema.String,
+      origin: SessionMessage.Shell.fields.origin,
     },
   })
   export type Started = typeof Started.Type

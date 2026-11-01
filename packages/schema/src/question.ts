@@ -81,6 +81,7 @@ const Rejected = define({
   schema: {
     sessionID: SessionID,
     requestID: ID,
+    reason: Schema.Literal("unavailable").pipe(Schema.optional),
   },
 })
 export const Event = { Asked, Replied, Rejected, Definitions: inventory(Asked, Replied, Rejected) }

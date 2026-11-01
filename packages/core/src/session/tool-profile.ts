@@ -12,6 +12,15 @@ const deferred = new Set([
   "write",
   "browser",
   "task",
+  "task_status",
+  "task_list",
+  "task_cancel",
+  "task_resume",
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+  "list_mcp_prompts",
+  "get_mcp_prompt",
   "webfetch",
   "websearch",
   "question",
@@ -39,10 +48,6 @@ export function select(
   )
     return definitions
   const active = new Set([...(input.custom ?? []), ...(input.recalled ?? [])])
-  const requests = input.history
-    .filter((message) => message.type === "user")
-    .map((message) => message.text)
-    .join("\n")
   for (const message of input.history) {
     if (message.type !== "assistant") continue
     for (const part of message.content) {
@@ -54,7 +59,6 @@ export function select(
       if (Array.isArray(names)) for (const name of names) if (typeof name === "string") active.add(name)
     }
   }
-  const words = new Set(requests.split(/[^a-zA-Z0-9_]+/))
   for (const tool of definitions) {
     const action = ["edit", "write", "apply_patch"].includes(tool.name) ? "edit" : tool.name
     if (
@@ -63,8 +67,9 @@ export function select(
       )
     )
       active.add(tool.name)
-    if (words.has(tool.name)) active.add(tool.name)
   }
+  if (active.has("task"))
+    for (const name of ["task_status", "task_list", "task_cancel", "task_resume"]) active.add(name)
   // A replacement patch tool is not assumed when patch is unavailable (including deny rules).
   if (!definitions.some((tool) => tool.name === "apply_patch")) {
     active.add("edit")

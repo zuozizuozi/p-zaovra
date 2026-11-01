@@ -202,6 +202,7 @@ export function track<E, R>(
     sessionID: SessionSchema.ID
     db: Database.Interface["db"]
     events: EventV2.Interface
+    onStart?: () => (usage: Usage | undefined) => void
   },
 ) {
   return Stream.unwrap(
@@ -237,6 +238,7 @@ export function track<E, R>(
         ...compare(prior, current),
       })
       let reported: Usage | undefined
+      const finish = input.onStart?.()
       let responseModel: string | null = null
       let systemFingerprint: string | null = null
       return stream.pipe(
@@ -265,7 +267,7 @@ export function track<E, R>(
               ...usage(reported),
               responseModel,
               systemFingerprint,
-            }),
+            }).pipe(Effect.andThen(Effect.sync(() => finish?.(reported)))),
           ),
         ),
       )

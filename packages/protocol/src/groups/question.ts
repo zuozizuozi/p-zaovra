@@ -67,6 +67,7 @@ export const makeQuestionGroup = <
     .add(
       HttpApiEndpoint.post("session.question.reject", "/api/session/:sessionID/question/:requestID/reject", {
         params: { sessionID: Session.ID, requestID: Question.ID },
+        query: { reason: Schema.Literal("unavailable").pipe(Schema.optional) },
         success: HttpApiSchema.NoContent,
         error: [SessionNotFoundError, QuestionNotFoundError],
       })
@@ -75,7 +76,8 @@ export const makeQuestionGroup = <
           OpenApi.annotations({
             identifier: "v2.session.question.reject",
             summary: "Reject pending question request",
-            description: "Reject a pending question request owned by a session.",
+            description:
+              "Dismiss a pending question, or report trusted client unavailability with reason=unavailable. No answer or permission is granted.",
           }),
         ),
     )

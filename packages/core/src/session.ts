@@ -931,6 +931,7 @@ const layer = Layer.effect(
                     messageID: SessionMessage.ID.create(),
                     callID,
                     command: input.command,
+                    origin: "manual",
                     timestamp: yield* DateTime.now,
                   },
                   { id: callID, location: session.location },

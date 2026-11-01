@@ -95,6 +95,25 @@ const previewLines = (value: string, prefix: "+" | "-") => {
   return shown
 }
 
+function candidateLines(content: string, search: string) {
+  const anchor = search
+    .split("\n", 32)
+    .find((line) => line.trim())
+    ?.trim()
+    .replace(/\s+/gu, " ")
+  if (!anchor || anchor.length > 256) return ""
+  const candidates = content
+    .slice(0, 256 * 1024)
+    .split("\n", 10_000)
+    .flatMap((line, index) =>
+      line.slice(0, 1024).trim().replace(/\s+/gu, " ") === anchor ? [`Line ${index + 1}: ${line.slice(0, 160)}`] : [],
+    )
+    .slice(0, 5)
+  return candidates.length === 0
+    ? ""
+    : `\nCandidate lines (bounded hints only; no fuzzy replacement was performed). Read the file and retry with exact text:\n${candidates.join("\n")}`
+}
+
 export const toModelOutput = (output: Output, oldString: string, newString: string) =>
   [
     `Edited file successfully: ${output.files[0]?.file}`,
@@ -207,7 +226,8 @@ const layer = Layer.effectDiscard(
                 if (replacements === 0) {
                   return yield* new ToolFailure({
                     message:
-                      "Could not find oldString in the file. It must match exactly, including whitespace and indentation.",
+                      "Could not find oldString in the file. It must match exactly, including whitespace and indentation." +
+                      candidateLines(source.text, oldString),
                     metadata: { phase: "mutation", reason: "match-failed" },
                   })
                 }

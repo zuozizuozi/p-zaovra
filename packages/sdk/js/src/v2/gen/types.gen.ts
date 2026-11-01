@@ -961,6 +961,7 @@ export type GlobalEvent = {
           messageID: string
           callID: string
           command: string
+          origin?: "tool" | "manual"
         }
       }
     | {
@@ -1865,6 +1866,7 @@ export type GlobalEvent = {
         properties: {
           sessionID: string
           requestID: string
+          reason?: "unavailable"
         }
       }
     | {
@@ -4343,6 +4345,7 @@ export type SyncEventSessionNextShellStarted = {
       messageID: string
       callID: string
       command: string
+      origin?: "tool" | "manual"
     }
   }
 }
@@ -5701,6 +5704,7 @@ export type SessionMessageShell = {
     completed?: number
   }
   type: "shell"
+  origin?: "tool" | "manual"
   executionRecord?: SessionOutcomeExecutionRecord
   checks?: Array<SessionOutcomeCheck>
   callID: string
@@ -6121,6 +6125,7 @@ export type SessionNextShellStarted = {
     messageID: string
     callID: string
     command: string
+    origin?: "tool" | "manual"
   }
 }
 
@@ -8541,6 +8546,7 @@ export type QuestionV2Rejected = {
   data: {
     sessionID: string
     requestID: string
+    reason?: "unavailable"
   }
 }
 
@@ -9313,6 +9319,7 @@ export type EventSessionNextShellStarted = {
     messageID: string
     callID: string
     command: string
+    origin?: "tool" | "manual"
   }
 }
 
@@ -10407,6 +10414,7 @@ export type EventQuestionV2Rejected = {
   properties: {
     sessionID: string
     requestID: string
+    reason?: "unavailable"
   }
 }
 
@@ -16641,7 +16649,9 @@ export type V2SessionQuestionRejectData = {
     sessionID: string
     requestID: string
   }
-  query?: never
+  query?: {
+    reason?: "unavailable"
+  }
   url: "/api/session/{sessionID}/question/{requestID}/reject"
 }
 

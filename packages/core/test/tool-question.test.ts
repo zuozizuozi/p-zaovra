@@ -15,6 +15,7 @@ const sessionID = SessionV2.ID.make("ses_question_tool_test")
 const assertions: PermissionV2.AssertInput[] = []
 let captured: QuestionV2.AskInput | undefined
 let reject = false
+let unavailable = false
 let deny = false
 const capturedInput = () => captured
 const permission = Layer.succeed(
@@ -37,7 +38,13 @@ const question = Layer.succeed(
     ask: (input: QuestionV2.AskInput) =>
       Effect.sync(() => {
         captured = input
-      }).pipe(Effect.andThen(reject ? Effect.fail(new QuestionV2.RejectedError()) : Effect.succeed([["Build"], []]))),
+      }).pipe(
+        Effect.andThen(
+          unavailable || reject
+            ? Effect.fail(unavailable ? new QuestionV2.UnavailableError() : new QuestionV2.RejectedError())
+            : Effect.succeed([["Build"], []]),
+        ),
+      ),
     reply: () => Effect.die("unused"),
     reject: () => Effect.die("unused"),
     list: () => Effect.die("unused"),
@@ -52,6 +59,24 @@ const it = testEffect(
 )
 
 describe("QuestionTool", () => {
+  it.effect("K10 settles trusted client unavailability as recoverable local input failure", () =>
+    Effect.gen(function* () {
+      unavailable = true
+      reject = false
+      deny = false
+      const registry = yield* ToolRegistry.Service
+      const result = yield* settleTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "unavailable-question", name: "question", input: { questions: [] } },
+      })
+      expect(result).toMatchObject({
+        inputRejected: true,
+        result: { type: "error", value: expect.stringContaining("No user answer or approval was given") },
+      })
+      unavailable = false
+    }),
+  )
   it.effect("omits a denied built-in question and terminally settles a stale call", () =>
     Effect.gen(function* () {
       captured = undefined

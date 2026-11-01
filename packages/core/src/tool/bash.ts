@@ -38,7 +38,7 @@ export const MAX_CAPTURE_BYTES = 1024 * 1024
 export const Input = Schema.Struct({
   background_kind: Schema.optional(Schema.Literals(["task", "preview"])).annotate({
     description:
-      "Use preview for a long-lived service the user requests to deliver and keep running after the Session or CLI exits. Its process is detached; redirect stdout/stderr to a log file. Temporary probes and helpers use task and stop with execution. Archive and explicit cancellation still stop the owned service. Applies both to explicit background launch and foreground-to-background yield.",
+      "preview keeps a user-requested service after Session/CLI exit; redirect its logs. task is temporary and stops with execution. Archive/cancel still stop owned previews. Applies to explicit launch and foreground yield.",
   }),
   run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
@@ -46,27 +46,27 @@ export const Input = Schema.Struct({
   }),
   verification: Schema.optional(SessionOutcome.Check.fields.kind).annotate({
     description:
-      "Declare a verification command only when executing actual checks. Omit this field for ordinary commands; do not use 'none'. The host records its actual exit and workspace snapshot; this is not a claim that acceptance criteria passed.",
+      "Kind of actual check being executed; omit for ordinary commands (no 'none'). The host records exit/snapshot; declaring a kind does not certify acceptance.",
   }),
   verification_report: Schema.optional(Schema.Boolean).annotate({
     description:
-      'Legacy compatibility only: leave unset for ordinary checks and prefer verification_requirements. Set true only for an EXISTING runner that already emits only JSON: {"checks":[{"kind":"test","status":"passed","requirements":["User requirement and boundary cases actually asserted"]}]}. Allowed kinds: build, test, lint, typecheck, syntax, smoke, interaction (not acceptance). Each kind occurs once; status is passed, failed or skipped. requirements describes actual assertions against user requirements, not a claim that all work is complete. Include the checked source and test script files in verification_targets. Nonzero exit, malformed/truncated output or changed targets cannot certify success.',
+      'Legacy existing JSON runner only; prefer verification_requirements. Shape: {"checks":[{"kind":"test","status":"passed","requirements":["actual asserted requirement"]}]}. Kinds: build/test/lint/typecheck/syntax/smoke/interaction, once each; status passed/failed/skipped. Include source/tests in targets. Invalid/truncated JSON, nonzero exit or changed targets cannot certify success.',
   }),
   verification_requirements: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))).annotate({
     description:
-      "Preferred: describe requirements actually asserted by this command. Use verification plus verification_targets and verification_assertions. Run a normal command, e.g. npm test; ordinary stdout is accepted. Never put report JSON in command or claim unchecked requirements.",
+      "Requirements actually asserted by this normal command. Use verification, targets and assertion file paths; ordinary stdout is accepted. Never embed report JSON or claim unchecked requirements.",
   }),
   verification_assertions: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
-      "File paths, not descriptive text. Existing files defining assertions, fixtures and test configuration for this check, relative to workdir or absolute. Invalid entries are ignored with a warning. Include these in verification_targets. The host retains their fingerprints on failures; changing a failed test does not prove the original requirement was fixed.",
+      "Existing assertion/test/fixture/config file paths, relative to workdir or absolute; include them in targets. Invalid entries warn. Failed assertion fingerprints remain binding; changing tests does not resolve their original failure.",
   }),
   verification_replaces: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
-      "Optional call IDs of previous checks this execution revalidates. The host only resolves failures with the same category, directory and covered targets; actual failures additionally require the original assertion files unchanged. This is not permission to waive a failure.",
+      "Prior check call IDs actually revalidated: same category/directory/covered targets and unchanged original failed assertions are required. Does not waive failures.",
   }),
   verification_targets: Schema.optional(Schema.Array(Schema.String)).annotate({
     description:
-      "Actual dependencies of this check: source, assertions, fixtures and runtime/build configuration, relative to workdir or absolute. A changed target invalidates the check. Do not list every deliverable: include documentation only when this command reads or validates it (including doctests/docs builds). Verify documentation separately when independent of code tests. Never omit a real dependency or retroactively narrow a stale check. Required for standalone/external artifacts. HTML acceptance needs syntax, smoke (actual browser startup), and interaction checks. Do not claim a check without executing assertions; an exit code alone is not proof of functionality.",
+      "Actual source/assertion/fixture/runtime/build dependencies, relative to workdir or absolute; required for external artifacts. Changed targets invalidate checks; never omit dependencies or narrow stale coverage. Independent docs need separate checks. HTML needs syntax, actual browser startup and interaction assertions; exit zero alone is insufficient.",
   }),
   command: Schema.String.annotate({ description: "Shell command string to execute" }),
   verification_sample: Schema.String.pipe(Schema.optional).annotate({
@@ -84,7 +84,7 @@ export const Input = Schema.Struct({
     .pipe(Schema.optional)
     .annotate({
       description:
-        "Optional numeric-library launch environment overrides. The host applies and records these temporary diagnostic conditions; they do not establish user approval or effective worker counts. Prefer this field to inline shell assignments when verifying a result.",
+        "Temporary numeric-library launch overrides, recorded as diagnostic conditions, not user approval or proof of worker counts. Prefer this to inline assignments for verification.",
     }),
   workdir: Schema.String.pipe(Schema.optional).annotate({
     description:

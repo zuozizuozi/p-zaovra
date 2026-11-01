@@ -53,6 +53,7 @@ import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
 import { DeliveryContract } from "@zaovra-ai/core/session/delivery-contract"
 import { SessionOutputRecovery } from "@zaovra-ai/core/session/output-recovery"
 import { TextRecovery } from "@zaovra-ai/core/session/runner/text-recovery"
+import { toLLMMessages } from "@zaovra-ai/core/session/runner/to-llm-message"
 import { SessionUsageQuery } from "@zaovra-ai/core/session/usage"
 import { Prompt } from "@zaovra-ai/core/session/prompt"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
@@ -73,6 +74,7 @@ import { ConfigCompaction } from "@zaovra-ai/core/config/compaction"
 import { ConfigExperimental } from "@zaovra-ai/core/config/experimental"
 import { Tool } from "@zaovra-ai/core/tool/tool"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
+import { ToolSearch } from "@zaovra-ai/core/tool/tool-search"
 import { VerificationReviewTool } from "@zaovra-ai/core/tool/verification-review"
 import { BashTool } from "@zaovra-ai/core/tool/bash"
 import { BrowserTool } from "@zaovra-ai/core/tool/browser"
@@ -540,10 +542,10 @@ const repairStop = (id: string, usage = repairUsage) => [
   LLMEvent.stepFinish({ index: 0, reason: "stop", usage }),
   LLMEvent.finish({ reason: "stop" }),
 ]
-const repairCall = (id: string, name: string, input: Record<string, unknown>) => [
+const repairCall = (id: string, name: string, input: Record<string, unknown>, usage = repairUsage) => [
   LLMEvent.stepStart({ index: 0 }),
   LLMEvent.toolCall({ id, name, input }),
-  LLMEvent.stepFinish({ index: 0, reason: "tool-calls", usage: repairUsage }),
+  LLMEvent.stepFinish({ index: 0, reason: "tool-calls", usage }),
   LLMEvent.finish({ reason: "tool-calls" }),
 ]
 
@@ -3897,6 +3899,129 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("K12 real discovery updates the next request, survives compaction/replay and respects revocation", () =>
+    Effect.gen(function* () {
+      yield* setup
+      executions.length = 0
+      verificationEnabled = false
+      currentModel = Model.make({ id: "gpt-6-luna", provider: "fake", route: OpenAIChat.route })
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* AgentV2.Service
+      const session = yield* SessionV2.Service
+      const discovery = AppNodeBuilder.build(ToolSearch.node, [
+        [ToolRegistry.node, Layer.succeed(ToolRegistry.Service, registry)],
+        [AgentV2.node, Layer.succeed(AgentV2.Service, agents)],
+        [PermissionV2.node, Layer.mock(PermissionV2.Service, { assert: () => Effect.void })],
+        [Location.node, fixtureLocation],
+      ])
+      yield* Effect.gen(function* () {
+        yield* registry.register({
+          browser: Tool.make({
+            description: "Fixed local observation used only to test discovery state",
+            input: Schema.Struct({}),
+            output: Schema.String,
+            observation: true,
+            execute: () =>
+              Effect.sync(() => {
+                executions.push("visited-once")
+                return "observed"
+              }),
+          }),
+        })
+        responses = [
+          repairCall("discover-browser", "tool_search", { names: ["browser"] }),
+          repairCall("use-browser", "browser", {}),
+          repairStop("discovery-done"),
+        ]
+        yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({
+            text: "Inspect the page; ordinary task/edit words must not activate capabilities. ".repeat(80),
+          }),
+          resume: false,
+        })
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(3)
+        expect(requests[0]!.tools.some((tool) => tool.name === "browser")).toBe(false)
+        expect(requests[0]!.tools.some((tool) => tool.name === "tool_search")).toBe(true)
+        expect(requests[1]!.tools.some((tool) => tool.name === "browser")).toBe(true)
+        expect(executions).toEqual(["visited-once"])
+        const initialTools = requests.map((request) => request.tools.map((tool) => tool.name))
+        const initialCache = (yield* SessionUsageQuery.read(sessionID)).cache
+        expect(initialCache?.points[1]?.reason).toBe("tools")
+        response = fragmentFixture("text", "discovery-summary", [
+          handoff("Keep discovered capabilities"),
+        ]).completeEvents
+        responses = undefined
+        expect(yield* (yield* SessionRunner.Service).compact(sessionID)).toBe(true)
+        yield* replaySessionProjection(sessionID)
+        requests.length = 0
+        response = repairStop("discovery-recalled")
+        yield* session.resume(sessionID)
+        expect(requests[0]!.tools.some((tool) => tool.name === "browser")).toBe(true)
+        const recalledTools = requests[0]!.tools.map((tool) => tool.name)
+        yield* agents.transform((draft) =>
+          draft.update(AgentV2.ID.make("build"), (agent) => {
+            agent.permissions.push({ action: "browser", resource: "*", effect: "deny" })
+          }),
+        )
+        requests.length = 0
+        yield* session.resume(sessionID)
+        expect(requests[0]!.tools.some((tool) => tool.name === "browser")).toBe(false)
+        expect(executions).toEqual(["visited-once"])
+        if (process.env.ZAOVRA_PROFILE_DYNAMIC_REPORT)
+          yield* Effect.promise(() =>
+            Bun.write(
+              process.env.ZAOVRA_PROFILE_DYNAMIC_REPORT!,
+              JSON.stringify(
+                {
+                  fixedProvider: true,
+                  initialTools,
+                  recalledTools,
+                  revokedTools: requests[0]!.tools.map((tool) => tool.name),
+                  initialCacheBreaks: initialCache?.points.map((point) => point.reason),
+                  prefixChangesReported: true,
+                  actualObservationCalls: executions.length,
+                },
+                null,
+                2,
+              ),
+            ),
+          )
+      }).pipe(Effect.provide(discovery))
+    }),
+  )
+
+  it.effect("K55 uses the paired last request input usage for compaction even when character estimates are small", () =>
+    Effect.gen(function* () {
+      yield* setup
+      executions.length = 0
+      currentModel = Model.make({
+        id: "measured-window",
+        provider: "fake",
+        route: OpenAIChat.route.with({ limits: { context: 12000, output: 1000 } }),
+      })
+      responses = [
+        repairCall(
+          "measured-once",
+          "echo",
+          { text: "once" },
+          { inputTokens: 9500, nonCachedInputTokens: 500, cacheReadInputTokens: 9000, outputTokens: 100 },
+        ),
+        fragmentFixture("text", "measured-summary", [handoff("Continue measured context")]).completeEvents,
+        fragmentFixture("text", "measured-final", ["Continued"]).completeEvents,
+      ]
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Earlier request ".repeat(600) }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(3)
+      expect(requests[1]!.tools).toEqual([])
+      expect(JSON.stringify(requests[1]!.system)).toContain("conversation summarizer, not the task execution agent")
+      expect(JSON.stringify(requests[2]!.messages)).toContain("<summary>")
+      expect(executions).toEqual(["once"])
+    }),
+  )
+
   it.effect("automatically compacts into a completed summary and retained recent turn", () =>
     Effect.gen(function* () {
       yield* setup
@@ -3987,6 +4112,85 @@ describe("SessionRunnerLLM", () => {
       expect(yield* runner.compact(sessionID)).toBe(false)
       expect(yield* session.context(sessionID)).toEqual(before)
     }),
+  )
+
+  it.effect(
+    "K01 K33 preserve durable shell data while excluding only tool-owned duplicates from model and compaction views",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* setupOverflowRecovery
+        const events = yield* EventV2.Service
+        const rows = [
+          { id: "msg_tool_origin", callID: "tool-job", origin: "tool" as const, output: "TOOL_DUPLICATE_MODERN" },
+          { id: "msg_bash_msg_prior_call", callID: "msg_bash_msg_prior_call", output: "TOOL_DUPLICATE_LEGACY" },
+          { id: "msg_bash_manual", callID: "msg_bash_manual", origin: "manual" as const, output: "MANUAL_PRESERVED" },
+          { id: "msg_unknown_shell", callID: "unknown-job", output: "UNKNOWN_PRESERVED" },
+          { id: "msg_bash_unproven", callID: "other-call", output: "UNPROVEN_PREFIX_PRESERVED" },
+        ]
+        for (const row of rows) {
+          yield* events.publish(SessionEvent.Shell.Started, {
+            sessionID,
+            messageID: SessionMessage.ID.make(row.id),
+            callID: row.callID,
+            command: "record-only fixture",
+            ...("origin" in row ? { origin: row.origin } : {}),
+            timestamp: yield* DateTime.now,
+          })
+          yield* events.publish(SessionEvent.Shell.Ended, {
+            sessionID,
+            callID: row.callID,
+            output: row.output,
+            timestamp: yield* DateTime.now,
+          })
+        }
+        yield* replaySessionProjection(sessionID)
+        const stored = yield* session.messages({ sessionID })
+        const durable = JSON.stringify(stored)
+        for (const row of rows) expect(durable).toContain(row.output)
+        const canonical = toLLMMessages(yield* session.context(sessionID), currentModel)
+        const rendered = JSON.stringify(canonical)
+        expect(rendered).not.toContain("TOOL_DUPLICATE_")
+        for (const marker of ["MANUAL_PRESERVED", "UNKNOWN_PRESERVED", "UNPROVEN_PREFIX_PRESERVED"])
+          expect(rendered).toContain(marker)
+        const prepared = yield* LLMClient.prepare(
+          LLM.request({
+            model: OpenAIResponses.route.with({ auth: Auth.bearer("offline-fixture") }).model({ id: "fake-model" }),
+            messages: canonical,
+          }),
+        )
+        const wire = JSON.stringify(prepared.body)
+        expect(wire).not.toContain("TOOL_DUPLICATE_")
+        expect(wire).toContain("MANUAL_PRESERVED")
+        requests.length = 0
+        response = fragmentFixture("text", "projection-summary", [handoff("Preserve shell provenance")]).completeEvents
+        const runner = yield* SessionRunner.Service
+        expect(yield* runner.compact(sessionID)).toBe(true)
+        const summaryView =
+          JSON.stringify(requests[0]?.messages) + JSON.stringify((yield* session.context(sessionID))[0])
+        expect(summaryView).not.toContain("TOOL_DUPLICATE_")
+        for (const marker of ["MANUAL_PRESERVED", "UNKNOWN_PRESERVED", "UNPROVEN_PREFIX_PRESERVED"])
+          expect(summaryView).toContain(marker)
+        const after = JSON.stringify(yield* session.messages({ sessionID }))
+        for (const row of rows) expect(after).toContain(row.output)
+        if (process.env.ZAOVRA_PROJECTION_REPORT)
+          yield* Effect.promise(() =>
+            Bun.write(
+              process.env.ZAOVRA_PROJECTION_REPORT!,
+              JSON.stringify(
+                {
+                  storageBytes: Buffer.byteLength(durable),
+                  canonicalBytes: Buffer.byteLength(rendered),
+                  wireBytes: Buffer.byteLength(wire),
+                  unit: "UTF-8 JSON bytes at separate layers; not provider tokens",
+                  storagePreserved: true,
+                  afterCompactionPreserved: true,
+                },
+                null,
+                2,
+              ),
+            ),
+          )
+      }),
   )
 
   for (const context of [undefined, 0]) {
@@ -9699,6 +9903,48 @@ for (const verify of [false, true])
       ).toHaveLength(2)
     }),
   )
+
+it.effect("K19 a real drain throttles only future facts and preserves every sent observation across restart", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { facts: true }
+    responses = [
+      ...Array.from({ length: 17 }, (_, index) => repairCall(`facts-${index}`, "echo", { text: `observed-${index}` })),
+      repairStop("facts-done"),
+    ]
+    const session = yield* SessionV2.Service
+    yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({ text: "Keep the existing artifact and verify each observation" }),
+      resume: false,
+    })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(18)
+    const before = (yield* session.context(sessionID)).filter(
+      (message): message is SessionMessage.System =>
+        message.type === "system" && message.text.startsWith("Current task facts"),
+    )
+    expect(before).toHaveLength(3)
+    expect(before.map((message) => message.text)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('"providerTurns":0'),
+        expect.stringContaining('"providerTurns":8'),
+        expect.stringContaining('"providerTurns":16'),
+      ]),
+    )
+    response = repairStop("facts-after-restart")
+    responses = undefined
+    yield* session.resume(sessionID)
+    const after = (yield* session.context(sessionID)).filter(
+      (message): message is SessionMessage.System =>
+        message.type === "system" && message.text.startsWith("Current task facts"),
+    )
+    expect(after).toHaveLength(4)
+    expect(after.slice(0, 3)).toEqual(before)
+    expect(after[3]?.text).toContain('"allowanceTurn":1')
+  }),
+)
 
 it.live("352 an observation checkpoint does not claim concurrently admitted input", () =>
   Effect.gen(function* () {

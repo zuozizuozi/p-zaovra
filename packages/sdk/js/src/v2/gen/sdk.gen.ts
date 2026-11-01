@@ -3486,12 +3486,13 @@ export class Question extends HeyApiClient {
   /**
    * Reject pending question request
    *
-   * Reject a pending question request owned by a session.
+   * Dismiss a pending question, or report trusted client unavailability with reason=unavailable. No answer or permission is granted.
    */
   public reject<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
       requestID: string
+      reason?: "unavailable"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3502,6 +3503,7 @@ export class Question extends HeyApiClient {
           args: [
             { in: "path", key: "sessionID" },
             { in: "path", key: "requestID" },
+            { in: "query", key: "reason" },
           ],
         },
       ],

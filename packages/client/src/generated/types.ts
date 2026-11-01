@@ -1055,6 +1055,7 @@ export type SessionsContextOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "shell"
+        readonly origin?: "tool" | "manual"
         readonly executionRecord?: {
           readonly scope: {
             readonly cwd: string
@@ -1614,6 +1615,7 @@ export type SessionsHistoryOutput = {
           readonly messageID: string
           readonly callID: string
           readonly command: string
+          readonly origin?: "tool" | "manual"
         }
       }
     | {
@@ -2464,6 +2466,7 @@ export type SessionsEventsOutput =
         readonly messageID: string
         readonly callID: string
         readonly command: string
+        readonly origin?: "tool" | "manual"
       }
     }
   | {
@@ -3863,6 +3866,7 @@ export type SessionsMessageOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "shell"
+        readonly origin?: "tool" | "manual"
         readonly executionRecord?: {
           readonly scope: {
             readonly cwd: string
@@ -6838,6 +6842,7 @@ export type MessagesListOutput = {
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
         readonly type: "shell"
+        readonly origin?: "tool" | "manual"
         readonly executionRecord?: {
           readonly scope: {
             readonly cwd: string
@@ -8078,6 +8083,7 @@ export type QuestionsReplyOutput = void
 export type QuestionsRejectInput = {
   readonly sessionID: { readonly sessionID: string; readonly requestID: string }["sessionID"]
   readonly requestID: { readonly sessionID: string; readonly requestID: string }["requestID"]
+  readonly reason?: { readonly reason?: "unavailable" | undefined }["reason"]
 }
 
 export type QuestionsRejectOutput = void

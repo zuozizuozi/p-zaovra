@@ -242,6 +242,7 @@ export const toLLMMessages = (
   originalRequests?: string,
 ) =>
   messages
+    .filter((message) => !SessionMessage.isToolOwnedShell(message))
     .flatMap((message) => toLLMMessage(message, model, originalRequests))
     .map((message) =>
       Message.make({

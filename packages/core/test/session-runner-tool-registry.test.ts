@@ -464,7 +464,9 @@ describe("ToolRegistry", () => {
       const service = yield* ToolRegistry.Service
       yield* applications.register({ echo: make() })
       const materialized = yield* service.materialize()
+      expect(materialized.custom).toContain("echo")
       yield* service.register({ echo: make() })
+      expect((yield* service.materialize()).custom).not.toContain("echo")
 
       expect((yield* materialized.settle(call("echo"))).result).toEqual({
         type: "error",
@@ -488,6 +490,21 @@ describe("ToolRegistry", () => {
         value: "Stale tool call: echo",
       })
     }),
+  )
+
+  integrated.effect(
+    "K07 preserves the same external tool across registries without advertising shipped tools as custom",
+    () =>
+      Effect.gen(function* () {
+        const applications = yield* ApplicationTools.Service
+        const service = yield* ToolRegistry.Service
+        for (const origin of [undefined, "shipped"] as const) {
+          const tool = make()
+          yield* applications.register({ task: tool }, origin)
+          yield* service.register({ task: tool })
+          expect(((yield* service.materialize()).custom ?? []).includes("task")).toBe(origin === undefined)
+        }
+      }),
   )
 
   it.effect("keeps captured execution running after registration mutation", () =>
