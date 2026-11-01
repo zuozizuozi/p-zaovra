@@ -43,9 +43,19 @@ jobs:
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/zaovra-test-chromium
       - name: Run package unit tests
+        env:
+          ZAOVRA_TEST_REPORT_DIR: ${{ runner.temp }}/zaovra-test-reports
         shell: bash
         run: |
           set -euo pipefail
           for package in core schema llm protocol client zaovra; do
             (cd "packages/$package" && bun run test)
           done
+      - name: Preserve ZA test inventories and results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zaovra-test-reports
+          path: ${{ runner.temp }}/zaovra-test-reports
+          if-no-files-found: warn
+          retention-days: 7
