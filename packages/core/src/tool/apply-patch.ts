@@ -71,6 +71,7 @@ type Prepared =
   | (Extract<Patch.Hunk, { readonly type: "update" }> & {
       readonly target: LocationMutation.Target
       readonly source: Uint8Array
+      readonly mixed: boolean
       readonly content: string
       readonly before: string
       readonly after: string
@@ -90,7 +91,7 @@ const layer = Layer.effectDiscard(
         [name]: Tool.withPermission(
           Tool.make({
             description:
-              "Apply one patch containing add, update, and delete file operations. All targets are resolved and approved before target contents are read. All updates must pass UTF-8 and line-ending preflight before any file is written. Invalid UTF-8 and mixed LF/CRLF updates are rejected; do not automatically transcode or normalize them. Operations apply sequentially; if a later operation fails, earlier operations remain applied and the failure reports them explicitly. Moves and atomic rollback are not supported yet.",
+              "Apply one patch containing add, update, and delete file operations. All targets are resolved and approved before target contents are read. All updates must pass strict UTF-8 preflight before any file is written; do not automatically transcode invalid input. Preserve untouched lines byte-for-byte, including mixed LF/CRLF, and inherit local line endings for changed lines. Operations apply sequentially; if a later operation fails, earlier operations remain applied and the failure reports them explicitly. Moves and atomic rollback are not supported yet.",
             input: Input,
             output: Output,
             toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
@@ -183,12 +184,8 @@ const layer = Layer.effectDiscard(
                           message: `File is not valid UTF-8: ${hunk.path}. No patch operations were applied. Do not automatically transcode or rewrite this file.`,
                         }),
                     })
-                    if (original.includes("\r\n") && original.replaceAll("\r\n", "").includes("\n"))
-                      return yield* new ToolFailure({
-                        message: `File has mixed LF/CRLF line endings: ${hunk.path}. No patch operations were applied. Do not automatically normalize or rewrite this file.`,
-                      })
                     const update = yield* Effect.try({
-                      try: () => Patch.derive(hunk.path, hunk.chunks, original.replaceAll("\r\n", "\n")),
+                      try: () => Patch.derive(hunk.path, hunk.chunks, original, true),
                       catch: () =>
                         new ToolFailure({
                           message: `Patch did not match ${hunk.path}. Read the file before retrying.`,
@@ -196,13 +193,12 @@ const layer = Layer.effectDiscard(
                         }),
                     })
                     const content = update.content
-                      .replaceAll("\r\n", "\n")
-                      .replaceAll("\n", original.includes("\r\n") ? "\r\n" : "\n")
                     prepared.push({
                       ...hunk,
                       target,
                       source,
-                      content: Patch.joinBom(content, update.bom),
+                      content: (update.bom ? "\uFEFF" : "") + content,
+                      mixed: original.includes("\r\n") && original.replaceAll("\r\n", "").includes("\n"),
                       before: original.replace(/^\uFEFF/, ""),
                       after: content,
                     })
@@ -258,7 +254,7 @@ const layer = Layer.effectDiscard(
                         target: change.target,
                         expected: change.source,
                         content: change.content,
-                        format: true,
+                        format: !change.mixed,
                       })
                       const diagnostics = yield* lsp.changed(result.target)
                       applied.push({

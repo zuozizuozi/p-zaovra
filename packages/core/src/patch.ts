@@ -1,5 +1,7 @@
 export * as Patch from "./patch"
 
+import { diffArrays } from "diff"
+
 export type Hunk =
   | { readonly type: "add"; readonly path: string; readonly contents: string }
   | { readonly type: "delete"; readonly path: string }
@@ -68,11 +70,58 @@ export function parse(patchText: string): ReadonlyArray<Hunk> {
   return hunks
 }
 
-export function derive(path: string, chunks: ReadonlyArray<UpdateFileChunk>, original: string): FileUpdate {
+export function derive(
+  path: string,
+  chunks: ReadonlyArray<UpdateFileChunk>,
+  original: string,
+  preserveLineEndings = false,
+): FileUpdate {
   const source = splitBom(original)
   const lines = source.text.split("\n")
   if (lines.at(-1) === "") lines.pop()
-  const replacements = computeReplacements(lines, path, chunks)
+  const replacements = computeReplacements(
+    preserveLineEndings ? lines.map((line) => line.replace(/\r$/, "")) : lines,
+    path,
+    chunks,
+  )
+  if (preserveLineEndings) {
+    const raw = source.text.match(/[^\n]*(?:\n|$)/g)?.filter(Boolean) ?? []
+    const ending = (line: string | undefined) => (line?.endsWith("\r\n") ? "\r\n" : line?.endsWith("\n") ? "\n" : "")
+    for (const [start, remove, insert, pattern] of replacements.toReversed()) {
+      const written: string[] = []
+      let cursor = start
+      let removed: readonly string[] = []
+      for (const change of diffArrays([...pattern], [...insert])) {
+        if (change.removed) {
+          removed = raw.slice(cursor, cursor + change.value.length)
+          cursor += change.value.length
+          continue
+        }
+        if (!change.added) {
+          written.push(...raw.slice(cursor, cursor + change.value.length))
+          cursor += change.value.length
+          removed = []
+          continue
+        }
+        for (const [index, line] of change.value.entries()) {
+          const originalLine = removed[index] ?? removed.at(-1) ?? raw[cursor - 1] ?? raw[cursor]
+          const selected = ending(originalLine)
+          const finalUnterminated =
+            selected === "" && cursor === raw.length && index === change.value.length - 1 && remove > 0
+          written.push(
+            line.replace(/\r$/, "") +
+              (finalUnterminated
+                ? ""
+                : selected || ending(raw[cursor]) || ending(raw[cursor - 1]) || ending(raw[cursor - 2]) || "\n"),
+          )
+        }
+        removed = []
+      }
+      if (start > 0 && written.length > 0 && ending(raw[start - 1]) === "") raw[start - 1] += ending(written[0]) || "\n"
+      raw.splice(start, remove, ...written)
+    }
+    return { content: raw.join(""), bom: source.bom }
+  }
   const updated = [...lines]
   for (const [start, remove, insert] of replacements.toReversed()) updated.splice(start, remove, ...insert)
   if (updated.at(-1) !== "") updated.push("")
@@ -130,7 +179,9 @@ function parseUpdate(lines: ReadonlyArray<string>, start: number) {
 }
 
 function computeReplacements(lines: ReadonlyArray<string>, path: string, chunks: ReadonlyArray<UpdateFileChunk>) {
-  const replacements: Array<readonly [start: number, remove: number, insert: ReadonlyArray<string>]> = []
+  const replacements: Array<
+    readonly [start: number, remove: number, insert: ReadonlyArray<string>, pattern: ReadonlyArray<string>]
+  > = []
   let lineIndex = 0
   for (const chunk of chunks) {
     if (chunk.changeContext) {
@@ -139,7 +190,7 @@ function computeReplacements(lines: ReadonlyArray<string>, path: string, chunks:
       lineIndex = context + 1
     }
     if (chunk.oldLines.length === 0) {
-      replacements.push([lines.length, 0, chunk.newLines])
+      replacements.push([lines.length, 0, chunk.newLines, []])
       continue
     }
     let oldLines = chunk.oldLines
@@ -151,7 +202,7 @@ function computeReplacements(lines: ReadonlyArray<string>, path: string, chunks:
       found = seek(lines, oldLines, lineIndex, chunk.endOfFile)
     }
     if (found === -1) throw new Error(`Failed to find expected lines in ${path}:\n${chunk.oldLines.join("\n")}`)
-    replacements.push([found, oldLines.length, newLines])
+    replacements.push([found, oldLines.length, newLines, oldLines])
     lineIndex = found + oldLines.length
   }
   return replacements.toSorted((left, right) => left[0] - right[0])

@@ -30,7 +30,14 @@ const invalid = {
   latin1: Buffer.concat([Buffer.from("// caf"), Buffer.from([0xe9]), Buffer.from("\nint x=1;\n")]),
 }
 
-const patch = (file: string, from = "int x=1;", to = "int x=2;") => `*** Update File: ${file}\n@@\n-${from}\n+${to}\n`
+const patch = (file: string, from = "int x=1;", to = "int x=2;") =>
+  `*** Update File: ${file}\n@@\n${from
+    .split("\n")
+    .map((line) => "-" + line)
+    .join("\n")}\n${to
+    .split("\n")
+    .map((line) => "+" + line)
+    .join("\n")}\n`
 
 const call = (registry: ToolRegistry.Interface, name: string, input: Record<string, unknown>, id = "call_text") =>
   settleTool(registry, { sessionID, ...toolIdentity, call: { type: "tool-call", id, name, input } })
@@ -118,10 +125,10 @@ for (const tool of ["edit", "apply_patch"])
     )
 
 for (const tool of ["edit", "apply_patch"])
-  for (const bom of ["", "\uFEFF"])
+  for (const bom of ["", "\uFEFF", "\uFEFF\uFEFF"])
     for (const ending of ["\n", "\r\n"])
       it.live(
-        `K39 ${tool} preserves UTF-8 Chinese/BOM=${!!bom}/${JSON.stringify(ending)} across consecutive edits and restore`,
+        `K39 ${tool} preserves UTF-8 Chinese/BOMbytes=${Buffer.byteLength(bom)}/${JSON.stringify(ending)} across consecutive edits and restore`,
         () =>
           workspace({ "source.txt": `${bom}// 中文注释${ending}int x=1;${ending}` }, (directory) =>
             Effect.gen(function* () {
@@ -153,21 +160,142 @@ for (const tool of ["edit", "apply_patch"])
       )
 
 for (const tool of ["edit", "apply_patch"])
-  it.live(`K39 ${tool} explicitly rejects mixed LF/CRLF without normalizing the file`, () =>
-    workspace({ "source.txt": "// 中文\r\nint x=1;\n" }, (directory, writes) =>
+  for (const bom of ["", "\uFEFF", "\uFEFF\uFEFF"])
+    it.live(
+      `K39 ${tool} preserves mixed endings and BOMbytes=${Buffer.byteLength(bom)} across regional edits and undo/redo`,
+      () =>
+        workspace(
+          {
+            "source.txt": `${bom}// 中文\nint x=1;\r\nint y=1;\n// 尾部\r\nlast`,
+            "zaovra.json": JSON.stringify({
+              formatter: {
+                normalize: {
+                  extensions: [".txt"],
+                  command: [
+                    process.execPath,
+                    "-e",
+                    "require('fs').writeFileSync(process.argv[1], 'NORMALIZED\\n')",
+                    "$FILE",
+                  ],
+                },
+              },
+            }),
+          },
+          (directory) =>
+            Effect.gen(function* () {
+              const registry = yield* ToolRegistry.Service
+              const snapshots = yield* Snapshot.Service
+              const before = yield* snapshots.capture({ sessionID })
+              for (const [from, to] of [
+                ["int x=1;", "int x=2;\n// added CRLF"],
+                ["int y=1;", "int y=2;\n// added LF"],
+                ["int x=2;", "int x=3;"],
+              ]) {
+                expect((yield* change(registry, tool, from, to)).result.type).not.toBe("error")
+              }
+              const expected = `${bom}// 中文\nint x=3;\r\n// added CRLF\r\nint y=2;\n// added LF\n// 尾部\r\nlast`
+              expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+                Buffer.from(expected),
+              )
+              const after = yield* snapshots.capture({ sessionID })
+              yield* snapshots.restore({ files: new Map([[RelativePath.make("source.txt"), before!]]) })
+              expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+                Buffer.from(`${bom}// 中文\nint x=1;\r\nint y=1;\n// 尾部\r\nlast`),
+              )
+              yield* snapshots.restore({ files: new Map([[RelativePath.make("source.txt"), after!]]) })
+              expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+                Buffer.from(expected),
+              )
+            }),
+        ),
+    )
+
+for (const [label, before, from, to, expected] of [
+  ["majority CRLF", "header\na\r\nb\r\nc\nsuffix\r\n", "a\r\nb\r\nc\n", "x\ny\n", "header\nx\r\ny\r\nsuffix\r\n"],
+  ["CRLF fallback", "header\na\r\nb\r\nsuffix\n", "a\nb\n", "x\ny\n", "header\nx\r\ny\r\nsuffix\n"],
+  ["LF fallback", "header\r\na\nb\nsuffix\r\n", "a\r\nb\r\n", "x\r\ny\r\n", "header\r\nx\ny\nsuffix\r\n"],
+  ["tie, first LF", "header\r\na\nb\r\nsuffix\n", "a\nb\r\n", "x\ny\n", "header\r\nx\ny\nsuffix\n"],
+  ["tie, first CRLF", "header\na\r\nb\nsuffix\r\n", "a\r\nb\n", "x\ny\n", "header\nx\r\ny\r\nsuffix\r\n"],
+  [
+    "raw exact priority",
+    "header\nsame\r\nx\r\nsame\nx\nsuffix\r\n",
+    "same\nx\n",
+    "changed\n",
+    "header\nsame\r\nx\r\nchanged\nsuffix\r\n",
+  ],
+])
+  it.live(`K39 edit matches the original region first and uses ${label}`, () =>
+    workspace({ "source.txt": before! }, (directory) =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
-        const result = yield* change(registry, tool)
-        expect(result.result).toMatchObject({ type: "error", value: expect.stringContaining("mixed") })
-        expect(writes).toHaveLength(0)
+        expect((yield* change(registry, "edit", from!, to!)).result.type).not.toBe("error")
         expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
-          Buffer.from("// 中文\r\nint x=1;\n"),
+          Buffer.from(expected!),
         )
       }),
     ),
   )
 
-for (const [encoding, bytes] of Object.entries({ ...invalid, mixed: Buffer.from("// 中文\r\nint x=1;\n") }))
+it.live("K39 edit replaceAll inherits the style of each occurrence without normalizing other lines", () =>
+  workspace({ "source.txt": "same\r\nsame\nlast" }, (directory) =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      expect(
+        (yield* call(registry, "edit", {
+          path: "source.txt",
+          oldString: "same",
+          newString: "new\nextra",
+          replaceAll: true,
+        })).result.type,
+      ).not.toBe("error")
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+        Buffer.from("new\r\nextra\r\nnew\nextra\nlast"),
+      )
+    }),
+  ),
+)
+
+it.live("K39 apply_patch preserves fuzzy-matched context bytes and only changes the requested line", () =>
+  workspace({ "source.txt": "  keep;  \r\nint x=1;\nnext\r\nlast" }, (directory) =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      expect(
+        (yield* call(registry, "apply_patch", {
+          patchText:
+            "*** Begin Patch\n*** Update File: source.txt\n@@\n keep;\n-int x=1;\n+int x=2;\n next\n*** End Patch",
+        })).result.type,
+      ).not.toBe("error")
+      expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+        Buffer.from("  keep;  \r\nint x=2;\nnext\r\nlast"),
+      )
+    }),
+  ),
+)
+
+for (const [label, before, body, expected] of [
+  ["append after unterminated CRLF neighbor", "head\r\nlast", "+added", "head\r\nlast\r\nadded\r\n"],
+  ["replace unterminated EOF", "head\r\nlast", "-last\n+last2", "head\r\nlast2"],
+  ["expand unterminated EOF", "head\r\nlast", "-last\n+one\n+two", "head\r\none\r\ntwo"],
+  ["delete a middle LF line", "head\r\nremove\nlast", "-remove", "head\r\nlast"],
+  ["empty file insertion", "", "+added", "added\n"],
+])
+  it.live(`K39 apply_patch ${label} preserves untouched boundaries`, () =>
+    workspace({ "source.txt": before! }, (directory) =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        expect(
+          (yield* call(registry, "apply_patch", {
+            patchText: `*** Begin Patch\n*** Update File: source.txt\n@@\n${body}\n*** End Patch`,
+          })).result.type,
+        ).not.toBe("error")
+        expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "source.txt")))).toEqual(
+          Buffer.from(expected!),
+        )
+      }),
+    ),
+  )
+
+for (const [encoding, bytes] of Object.entries(invalid))
   for (const position of ["first", "last"])
     it.live(`K39 multi-file patch ${encoding}/${position} preflights before add, delete or valid update`, () =>
       workspace({ "bad.txt": bytes, "good.txt": "int x=1;\n", "removed.txt": "keep me\n" }, (directory, writes) =>
@@ -179,7 +307,7 @@ for (const [encoding, bytes] of Object.entries({ ...invalid, mixed: Buffer.from(
           })
           expect(result.result).toMatchObject({
             type: "error",
-            value: expect.stringContaining(encoding === "mixed" ? "mixed" : "UTF-8"),
+            value: expect.stringContaining("UTF-8"),
           })
           expect(writes).toHaveLength(0)
           expect(yield* Effect.promise(() => fs.readFile(path.join(directory, "bad.txt")))).toEqual(bytes)

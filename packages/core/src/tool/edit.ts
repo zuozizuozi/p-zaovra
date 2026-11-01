@@ -48,16 +48,33 @@ export const Output = Schema.Struct({
 export type Output = typeof Output.Type
 
 const normalizeLineEndings = (text: string) => text.replaceAll("\r\n", "\n")
-const detectLineEnding = (text: string): "\n" | "\r\n" => (text.includes("\r\n") ? "\r\n" : "\n")
 const convertToLineEnding = (text: string, ending: "\n" | "\r\n") =>
   ending === "\n" ? normalizeLineEndings(text) : normalizeLineEndings(text).replaceAll("\n", "\r\n")
+
+function regionLineEnding(content: string, offset: number, length: number) {
+  const region = content.slice(offset, offset + length)
+  const crlf = region.match(/\r\n/g)?.length ?? 0
+  const lf = region.match(/(?<!\r)\n/g)?.length ?? 0
+  if (crlf > lf) return "\r\n"
+  if (lf > crlf) return "\n"
+  if (crlf + lf > 0)
+    return region.includes("\r\n") && region.indexOf("\r\n") === region.indexOf("\n") - 1 ? "\r\n" : "\n"
+  const next = content.indexOf("\n", offset + length)
+  if (next !== -1) return content[next - 1] === "\r" ? "\r\n" : "\n"
+  const previous = content.lastIndexOf("\n", offset)
+  return previous > 0 && content[previous - 1] === "\r" ? "\r\n" : "\n"
+}
 
 const splitBom = (text: string) =>
   text.startsWith("\uFEFF") ? { bom: true, text: text.slice(1) } : { bom: false, text }
 const joinBom = (text: string, bom: boolean) => (bom ? `\uFEFF${text}` : text)
 const decodeUtf8 = (content: Uint8Array) => {
   const bom = content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf
-  return { bom, content, text: new TextDecoder("utf-8", { fatal: true }).decode(bom ? content.slice(3) : content) }
+  return {
+    bom,
+    content,
+    text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bom ? content.slice(3) : content),
+  }
 }
 
 const countOccurrences = (content: string, search: string) => {
@@ -117,7 +134,7 @@ const layer = Layer.effectDiscard(
         [name]: Tool.withPermission(
           Tool.make({
             description:
-              "Replace exact text in one UTF-8 file. Invalid UTF-8 and mixed LF/CRLF line endings are rejected without writing; do not automatically transcode or normalize them. Relative paths resolve within the active Location. Absolute paths inside the Location are accepted. Explicit external absolute paths require external_directory approval before edit approval.",
+              "Replace exact text in one UTF-8 file. Invalid UTF-8 is rejected without writing; do not automatically transcode it. Preserve untouched bytes and use the matched region's line endings for replacement text, including mixed-ending files. Relative paths resolve within the active Location. Absolute paths inside the Location are accepted. Explicit external absolute paths require external_directory approval before edit approval.",
             input: Input,
             output: Output,
             toModelOutput: ({ input, output }) => [
@@ -179,13 +196,13 @@ const layer = Layer.effectDiscard(
                       message: `File is not valid UTF-8: ${input.path}. Nothing was written. Do not automatically transcode or rewrite this file.`,
                     }),
                 })
-                if (source.text.includes("\r\n") && source.text.replaceAll("\r\n", "").includes("\n"))
-                  return yield* new ToolFailure({
-                    message: `File has mixed LF/CRLF line endings: ${input.path}. Nothing was written. Do not automatically normalize or rewrite this file.`,
-                  })
-                const ending = detectLineEnding(source.text)
-                const oldString = convertToLineEnding(input.oldString, ending)
-                const newString = convertToLineEnding(input.newString, ending)
+                const mixed = source.text.includes("\r\n") && source.text.replaceAll("\r\n", "").includes("\n")
+                const oldString =
+                  [
+                    input.oldString,
+                    convertToLineEnding(input.oldString, "\r\n"),
+                    normalizeLineEndings(input.oldString),
+                  ].find((value) => source.text.includes(value)) ?? input.oldString
                 const replacements = countOccurrences(source.text, oldString)
                 if (replacements === 0) {
                   return yield* new ToolFailure({
@@ -202,18 +219,20 @@ const layer = Layer.effectDiscard(
                   })
                 }
 
+                const replacement = (_match: string, offset: number) =>
+                  convertToLineEnding(input.newString, regionLineEnding(source.text, offset, oldString.length))
                 const replaced =
                   input.replaceAll === true
-                    ? source.text.replaceAll(oldString, newString)
-                    : source.text.replace(oldString, newString)
-                const next = splitBom(replaced)
+                    ? source.text.replaceAll(oldString, replacement)
+                    : source.text.replace(oldString, replacement)
                 const result = yield* unableToEdit(
                   files.writeIfUnchanged({
                     sessionID: context.sessionID,
                     target,
                     expected: source.content,
-                    content: joinBom(next.text, source.bom || next.bom),
-                    format: true,
+                    content: joinBom(replaced, source.bom),
+                    // A whole-file formatter could normalize unrelated mixed-ending lines.
+                    format: !mixed,
                   }),
                 )
                 const diagnostics = yield* lsp.changed(result.target)
