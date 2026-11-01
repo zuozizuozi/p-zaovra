@@ -1,10 +1,11 @@
 import { expect } from "bun:test"
-import { Clock, Deferred, Effect, Fiber, Layer } from "effect"
-import { adjust } from "effect/testing/TestClock"
+import { Clock, DateTime, Deferred, Effect, Fiber, Layer } from "effect"
+import { adjust, setTime } from "effect/testing/TestClock"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
 import { SessionV2 } from "../src/session"
 import { SessionInput } from "../src/session/input"
+import { SessionBudget } from "../src/session/budget"
 import { SessionExecution } from "../src/session/execution"
 import { Database } from "../src/database/database"
 import { EventV2 } from "../src/event"
@@ -25,6 +26,111 @@ import { settleTool, toolIdentity } from "./lib/tool"
 
 const it = testEffect(Layer.empty)
 
+it.effect("503 a 4567ms Session wall is charged from creation without becoming a process deadline", () =>
+  runtime((directory, _started, dispatched) =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const config = yield* Config.Service
+      const registry = yield* ToolRegistry.Service
+      const first = yield* sessions.create({
+        location: { directory: AbsolutePath.make(directory) },
+        budget: { tokens: 123, durationMs: 4567 },
+      })
+      const created = DateTime.toEpochMillis(first.time.created)
+      const bound = created + 4567
+      expect((yield* SessionBudget.bounds(database.db, config, first.id))?.deadline).toBe(bound)
+      expect(yield* SessionBudget.requestPolicy(database.db, first.id)).toBeUndefined()
+      expect(first.inheritedDeadline).toBeUndefined()
+      yield* setTime(bound)
+      const result = yield* settleTool(registry, {
+        sessionID: first.id,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "own-wall", name: "bash", input: { command: "echo bounded" } },
+      })
+      expect(result.result.type).toBe("error")
+      if (result.result.type === "error") expect(String(result.result.value)).toContain("deadline or closing reserve")
+      expect(dispatched).toHaveLength(0)
+      expect(yield* SessionBudget.read(database.db, config, first.id)).toEqual({ limit: 123, duration: 4567 })
+      const peer = yield* sessions.create({ location: first.location })
+      expect((yield* SessionBudget.bounds(database.db, config, peer.id))?.deadline).toBeUndefined()
+      yield* sessions.update({ sessionID: first.id, budget: { durationMs: null } })
+      expect((yield* SessionBudget.bounds(database.db, config, first.id))?.deadline).toBeUndefined()
+      expect((yield* SessionBudget.read(database.db, config, first.id)).limit).toBe(123)
+      // Clearing a local duration must still retain a trusted parent bound.
+      yield* sessions.update({ sessionID: first.id, inheritedDeadline: bound - 1 })
+      expect((yield* SessionBudget.bounds(database.db, config, first.id))?.deadline).toBe(bound - 1)
+    }),
+  ),
+)
+
+for (const phase of ["expired", "closing"] as const)
+  it.effect(`503 ${phase} request stays local to its Session and does not leak to the next request`, () =>
+    runtime((directory, started, dispatched) =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionV2.Service
+        const database = yield* Database.Service
+        const events = yield* EventV2.Service
+        const config = yield* Config.Service
+        const registry = yield* ToolRegistry.Service
+        const jobs = yield* BackgroundJob.Service
+        const first = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const now = yield* Clock.currentTimeMillis
+        const policy =
+          phase === "expired"
+            ? { mode: "unattended" as const, deadline: now - 1 }
+            : { mode: "unattended" as const, deadline: now + 10_000, closingReserveMs: 10_000 }
+        const request = yield* sessions.prompt({
+          sessionID: first.id,
+          prompt: { text: "A bounded request", runPolicy: policy },
+          resume: false,
+        })
+        yield* SessionInput.promoteSteers(database.db, events, first.id, Number.MAX_SAFE_INTEGER)
+        const call = (sessionID: SessionV2.ID, id: string) =>
+          settleTool(registry, {
+            sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id, name: "bash", input: { command: "echo isolated", run_in_background: true } },
+          })
+        expect((yield* call(first.id, "expired-source")).result.type).toBe("error")
+        expect(dispatched).toHaveLength(0)
+        expect(yield* SessionBudget.requestPolicy(database.db, first.id)).toEqual({ requestID: request.id, policy })
+
+        // The same Location/runtime has already read the rejected request.
+        // A new Session still has no request deadline and can reach OS admission.
+        const peer = yield* sessions.create({ location: first.location })
+        expect((yield* SessionBudget.bounds(database.db, config, peer.id))?.deadline).toBeUndefined()
+        expect(yield* SessionBudget.requestPolicy(database.db, peer.id)).toBeUndefined()
+        const peerResult = yield* call(peer.id, "peer")
+        yield* Deferred.await(started)
+        expect(peerResult.result.type).toBe("content")
+        expect(dispatched).toHaveLength(1)
+        expect((yield* SessionBudget.bounds(database.db, config, first.id))?.deadline).toBe(policy.deadline)
+        expect((yield* call(first.id, "still-expired")).result.type).toBe("error")
+        expect(dispatched).toHaveLength(1)
+
+        // Only promotion of a real next request clears that request's D/R.
+        const next = yield* sessions.prompt({
+          sessionID: first.id,
+          prompt: { text: "A new ordinary request" },
+          resume: false,
+        })
+        expect((yield* SessionBudget.requestPolicy(database.db, first.id))?.requestID).toBe(request.id)
+        yield* SessionInput.promoteSteers(database.db, events, first.id, Number.MAX_SAFE_INTEGER)
+        expect(yield* SessionBudget.requestPolicy(database.db, first.id)).toEqual({
+          requestID: next.id,
+          policy: undefined,
+        })
+        expect((yield* SessionBudget.bounds(database.db, config, first.id))?.deadline).toBeUndefined()
+        expect((yield* call(first.id, "next-request")).result.type).toBe("content")
+        expect(dispatched).toHaveLength(2)
+        const retained = yield* jobs.list()
+        expect(retained).toHaveLength(2)
+        for (const job of retained) yield* jobs.cancel(job.id)
+      }),
+    ),
+  )
+
 function runtime<A, E, R>(
   body: (directory: string, started: Deferred.Deferred<void>, dispatched: string[]) => Effect.Effect<A, E, R>,
 ) {
@@ -41,6 +147,7 @@ function runtime<A, E, R>(
                 SessionV2.node,
                 Database.node,
                 EventV2.node,
+                Config.node,
                 BashTool.node,
                 BashJob.node,
                 ToolRegistry.toolsNode,
