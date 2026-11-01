@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
+import { Location } from "@zaovra-ai/core/location"
+import { LocationServiceMap } from "@zaovra-ai/core/location-services"
+import { LSP } from "@zaovra-ai/core/lsp"
+import { AbsolutePath } from "@zaovra-ai/core/schema"
+import { AppRuntime } from "../../src/effect/app-runtime"
 import { Server } from "../../src/server/server"
 import { tmpdir } from "../fixture/fixture"
 
@@ -80,6 +85,19 @@ test("LSP status observes the language service used by a durable session", async
     body: JSON.stringify({ id, location: { directory: tmp.path }, model: { id: "audit-model", providerID: "audit" } }),
   })
   expect(created.status, await created.clone().text()).toBe(200)
+  // This case verifies diagnostics from an already initialized server. Cold
+  // writes report pending; warm the same shared Location after HTTP startup.
+  await Bun.write(path.join(tmp.path, "warm.audit"), "good\n")
+  const warm = await AppRuntime.runPromise(
+    Effect.gen(function* () {
+      const locations = yield* LocationServiceMap.Service
+      return yield* LSP.Service.use((lsp) => lsp.changed(path.join(tmp.path, "warm.audit"))).pipe(
+        Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }))),
+      )
+    }),
+  )
+  expect(warm.failed).toEqual([])
+  expect(warm.diagnostics).toEqual({ [path.join(tmp.path, "warm.audit")]: [] })
   const admitted = await app.request(`/api/session/${id}/prompt`, {
     method: "POST",
     headers,
