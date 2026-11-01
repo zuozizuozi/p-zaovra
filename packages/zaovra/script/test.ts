@@ -35,7 +35,7 @@ const footer = files.filter((file) => file.endsWith("/footer.view.test.tsx"))
 const batches = Array.from(
   Map.groupBy(rest, (file) => path.posix.dirname(file).split("/").slice(0, 2).join("/")).values(),
 ).flatMap((files) =>
-  Array.from({ length: Math.ceil(files.length / 64) }, (_, index) => files.slice(index * 64, (index + 1) * 64)),
+  Array.from({ length: Math.ceil(files.length / 24) }, (_, index) => files.slice(index * 24, (index + 1) * 24)),
 )
 const groups = batches
   .map((files, index) => ({ name: index ? `package-${index + 1}` : "package", files }))

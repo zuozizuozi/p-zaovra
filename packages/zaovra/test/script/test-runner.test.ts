@@ -133,8 +133,8 @@ test("bounded groups retain every discovered file exactly once", async () => {
   expect(result.exit).toBe(0)
   expect(result.executed).toHaveLength(66)
   expect(new Set(result.executed).size).toBe(66)
-  expect(result.reports?.plan.groups.map((group: { files: string[] }) => group.files.length)).toEqual([64, 1, 1])
-  expect(result.reports?.results.map((group: { code: number }) => group.code)).toEqual([0, 0, 0])
+  expect(result.reports?.plan.groups.map((group: { files: string[] }) => group.files.length)).toEqual([24, 24, 17, 1])
+  expect(result.reports?.results.map((group: { code: number }) => group.code)).toEqual([0, 0, 0, 0])
 })
 
 test("empty source files remain in the manifest with compiler and byte proof", async () => {
