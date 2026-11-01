@@ -55,22 +55,39 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/T
 export interface CaptureHandle {
   readonly append: (chunk: Uint8Array) => Effect.Effect<void, StorageError>
   readonly paths: () => ReadonlyArray<string>
+  readonly snapshot: () => { readonly output: string; readonly cursor: number; readonly truncated: boolean }
 }
 
 /** Registry-owned raw capture; producers can append bytes without choosing storage paths. */
-export class Capture extends Context.Service<Capture, Pick<CaptureHandle, "append">>()("@zaovra/ToolOutputCapture") {}
+export class Capture extends Context.Service<Capture, Pick<CaptureHandle, "append" | "snapshot">>()(
+  "@zaovra/ToolOutputCapture",
+) {}
 
 export function makeCapture(fs: FSUtil.Interface, directory: string): CaptureHandle {
   const file = path.join(directory, `tool_${Identifier.ascending()}`)
   let created = false
+  let tail = new Uint8Array()
+  let cursor = 0
   return {
     append: (chunk) =>
       Effect.gen(function* () {
         if (!created) yield* fs.ensureDir(directory)
         yield* fs.writeFile(file, chunk, { flag: created ? "a" : "wx", mode: 0o600 })
         created = true
+        cursor += chunk.byteLength
+        tail =
+          chunk.byteLength >= 8192 ? chunk.slice(-8192) : new Uint8Array(Buffer.concat([tail, chunk]).subarray(-8192))
       }).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause }))),
     paths: () => (created ? [file] : []),
+    snapshot: () => {
+      // Skip a UTF-8 continuation prefix when the byte ring starts mid-character.
+      const start = tail.findIndex((byte) => (byte & 0xc0) !== 0x80)
+      return {
+        output: new TextDecoder().decode(start < 0 ? new Uint8Array() : tail.subarray(start)),
+        cursor,
+        truncated: cursor > tail.byteLength,
+      }
+    },
   }
 }
 
@@ -157,7 +174,7 @@ const layer = Layer.effect(
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
-        .writeFileString(file, content, { flag: "wx" })
+        .writeFileString(file, content, { flag: "wx", mode: 0o600 })
         .pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       return file
     })

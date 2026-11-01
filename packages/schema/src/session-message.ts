@@ -55,6 +55,7 @@ export const User = Schema.Struct({
   ...Base,
   text: Prompt.fields.text,
   executionContract: Prompt.fields.executionContract,
+  runPolicy: Prompt.fields.runPolicy,
   invocation: Prompt.fields.invocation,
   files: Prompt.fields.files,
   agents: Prompt.fields.agents,

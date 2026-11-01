@@ -248,32 +248,39 @@ export const requirements = (fs: FSUtil.Interface, directory: string) =>
 export function requested(messages: readonly SessionMessage.Message[]) {
   return SessionRequest.requested(messages, (text) => createHash("sha256").update(text).digest("hex"))
 }
+
+/** Host prose follows the actual task, never another host notification or tool log. */
+export function chineseTask(messages: readonly SessionMessage.Message[]) {
+  const text = acceptanceHistory(messages)
+    .filter((message) => message.type === "user")
+    .map((message) => message.text.replace(/```[^]*?```/g, ""))
+    .join("\n")
+  const explicit = [
+    ...text.matchAll(
+      /(?:用|使用|请以)\s*(英文|英语|中文|汉语)|(?:answer|respond|reply|write)\s+in\s+(English|Chinese)/gi,
+    ),
+  ].at(-1)
+  if (explicit) return /中文|汉语|Chinese/i.test(explicit[0])
+  return /\p{Script=Han}/u.test(text)
+}
 /** Suppress only a completion whose terminal result this request already consumed. */
 export function deliveredBackgroundResult(messages: readonly SessionMessage.Message[], jobID: string) {
-  const final = messages.findLastIndex((message) => message.type === "user" || message.type === "assistant")
-  const last = messages[final]
-  if (
-    last?.type !== "assistant" ||
-    last.finish !== "stop" ||
-    last.content.some((part) => part.type === "tool") ||
-    !last.content.some((part) => part.type === "text" && part.text.trim())
+  // The durable tool result consumes this exact job generation for the task,
+  // independently of later host observations or explicit "continue" messages.
+  // Reading a running tail, a log file, or a different job does not consume it.
+  return acceptanceHistory(messages).some(
+    (message) =>
+      message.type === "assistant" &&
+      message.content.some(
+        (part) =>
+          part.type === "tool" &&
+          part.name === "bash_job" &&
+          !part.provider?.executed &&
+          part.state.status === "completed" &&
+          part.state.input.job_id === jobID &&
+          ["completed", "error", "cancelled", "finished"].includes(String(part.state.structured.status)),
+      ),
   )
-    return false
-  const start = messages.findLastIndex((message) => message.type === "user")
-  return messages
-    .slice(Math.max(0, start), final)
-    .some(
-      (message) =>
-        message.type === "assistant" &&
-        message.content.some(
-          (part) =>
-            part.type === "tool" &&
-            part.name === "bash_job" &&
-            part.state.status === "completed" &&
-            part.state.input.job_id === jobID &&
-            ["completed", "error", "cancelled", "finished"].includes(String(part.state.structured.status)),
-        ),
-    )
 }
 
 // Shell completion records are durable execution evidence, independent of observers.

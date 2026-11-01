@@ -115,7 +115,9 @@ describe("HttpApi CORS", () => {
         }),
       )
 
-      expect(rejected.status).toBe(204)
+      // An unprotected server rejects hostile origins before CORS preflight can
+      // short-circuit the Host/Origin gate. Allowed origins retain normal CORS.
+      expect(rejected.status).toBe(403)
       expect(rejected.headers.get("access-control-allow-origin")).not.toBe("https://evil.example")
     }),
   )

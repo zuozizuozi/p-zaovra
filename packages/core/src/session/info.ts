@@ -17,6 +17,8 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     projectID: ProjectV2.ID.make(row.project_id),
     title: row.title,
     parentID: row.parent_id ? SessionSchema.ID.make(row.parent_id) : undefined,
+    inheritedDeadline: (row.metadata?.budgetPolicy === 2 || row.metadata?.deadlinePolicy === 1) && typeof row.metadata.inheritedDeadline === "number"
+      ? row.metadata.inheritedDeadline : undefined,
     agent: row.agent ? AgentV2.ID.make(row.agent) : undefined,
     model: row.model
       ? {

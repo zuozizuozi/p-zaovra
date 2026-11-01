@@ -18,7 +18,11 @@ import { testEffect } from "./lib/effect"
 const bounds: ToolOutputStore.BoundInput[] = []
 const retentionFailure = new ToolOutputStore.StorageError({ operation: "write", cause: new Error("disk full") })
 const outputStore = Layer.mock(ToolOutputStore.Service, {
-  capture: () => ({ append: () => Effect.void, paths: () => [] }),
+  capture: () => ({
+    append: () => Effect.void,
+    paths: () => [],
+    snapshot: () => ({ output: "", cursor: 0, truncated: false }),
+  }),
   bound: (input) => {
     if (input.toolCallID === "call-retention-failure") return Effect.fail(retentionFailure)
     return Effect.sync(() => bounds.push(input)).pipe(

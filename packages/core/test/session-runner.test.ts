@@ -8725,6 +8725,87 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("490 deadline is checked again before dispatching a streamed tool", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      executions.length = 0
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const deadline = (yield* Clock.currentTimeMillis) + 500
+      yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "autonomous", budgetPolicy: 2, inheritedDeadline: deadline, creationBudget: { durationMs: null } } }).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+      yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Use the remaining interval" }), resume: false })
+      responseStream = Stream.fromIterable([
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "after-deadline", name: "echo", input: { text: "must not execute" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]).pipe(Stream.tap((event) => event.type === "tool-call" ? setTime(deadline) : Effect.void))
+      yield* sessions.resume(sessionID)
+      expect(executions).toEqual([])
+      expect(requests).toHaveLength(1)
+      expect((yield* sessions.outcome(sessionID)).termination?.category).toBe("budget")
+    }),
+  )
+
+  for (const remaining of [0, -1])
+    it.effect(`490 inherited absolute deadline rejects provider admission at remaining ${remaining}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const sessions = yield* SessionV2.Service
+        const database = yield* Database.Service
+        const deadline = (yield* Clock.currentTimeMillis) + remaining
+        yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "autonomous", budgetPolicy: 2, inheritedDeadline: deadline, creationBudget: { durationMs: null } } }).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+        yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Expired parent task" }), resume: false })
+        yield* sessions.resume(sessionID)
+        expect(requests).toHaveLength(0)
+        expect((yield* sessions.outcome(sessionID)).termination?.category).toBe("budget")
+      }),
+    )
+
+  for (const delivery of ["steer", "queue"] as const)
+    it.effect(`490 expired ${delivery} observation promotion cannot create a provider turn`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const sessions = yield* SessionV2.Service
+        const database = yield* Database.Service
+        const events = yield* EventV2.Service
+        const runner = yield* SessionRunner.Service
+        responses = [
+          fragmentFixture("text", "real-first", ["Initial response"]).completeEvents,
+          fragmentFixture("text", "real-queue", ["Queued response"]).completeEvents,
+        ]
+        yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Current task" }), resume: false })
+        yield* sessions.resume(sessionID)
+        expect(requests).toHaveLength(1)
+        const stale = yield* SessionInput.admit(database.db, events, {
+          id: SessionMessage.ID.create(),
+          sessionID,
+          delivery,
+          completion: {
+            type: "bash-completion",
+            sourceMessageID: SessionMessage.ID.make("msg_replaced_task"),
+            jobID: "old-job",
+          },
+          prompt: Prompt.make({ text: "Obsolete host observation" }),
+        })
+        yield* runner.run({ sessionID, force: false })
+        expect(requests).toHaveLength(1)
+        expect((yield* SessionInput.find(database.db, stale.id))?.cancelledSeq).toBeDefined()
+        yield* sessions.prompt({
+          sessionID,
+          delivery: "queue",
+          prompt: Prompt.make({ text: "Real queued user request" }),
+          resume: false,
+        })
+        yield* runner.run({ sessionID, force: false })
+        expect(requests).toHaveLength(2)
+        expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Real queued user request")
+      }),
+    )
+
   it.effect("S1 background completion continues once through the durable queue", () =>
     Effect.gen(function* () {
       yield* setup
@@ -10586,3 +10667,357 @@ for (const enabled of [false, true])
       expect(JSON.stringify(requests[3]).includes(SessionProgress.diagnosticReminder)).toBe(enabled)
     }),
   )
+
+for (const remaining of [0, -1])
+  it.effect(`490 absolute request deadline ${remaining} rejects provider admission without a zero timeout`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const now = yield* Clock.currentTimeMillis
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({
+          text: "A bounded host request",
+          runPolicy: { mode: "unattended", deadline: now + remaining },
+        }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(0)
+      expect(yield* session.outcome(sessionID)).toMatchObject({
+        state: "stopped",
+        termination: { category: "budget" },
+      })
+    }),
+  )
+
+it.effect("490 closing reserve preserves a dispatched remote operation as unknown across continue", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const registry = yield* ToolRegistry.Service
+    const database = yield* Database.Service
+    const started = yield* Deferred.make<void>()
+    let operations = 0
+    yield* registry.register({
+      browser: Tool.make({
+        description: "A remote operation whose acknowledgement is lost",
+        input: Schema.Struct({}),
+        output: Schema.String,
+        execute: () =>
+          Effect.sync(() => operations++).pipe(
+            Effect.andThen(Deferred.succeed(started, undefined)),
+            Effect.andThen(Effect.never),
+          ),
+      }),
+    })
+    const now = yield* Clock.currentTimeMillis
+    yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Perform the remote operation once",
+        runPolicy: { mode: "unattended", deadline: now + 10_000, closingReserveMs: 2000 },
+      }),
+      resume: false,
+    })
+    response = [
+      LLMEvent.toolCall({ id: "closing-remote-operation", name: "browser", input: {} }),
+      LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+    ]
+    const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+    yield* Deferred.await(started)
+    yield* adjust(8001)
+    yield* Fiber.join(run)
+    const ledger = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+    expect(
+      ledger.some(
+        (row) =>
+          row.data.category === "operation" && (row.data.details as Record<string, unknown>).status === "unknown",
+      ),
+    ).toBe(true)
+    expect(operations).toBe(1)
+    expect(requests).toHaveLength(1)
+    expect((yield* session.outcome(sessionID)).state).not.toMatch(/^completed/)
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "continue" }), resume: false })
+    yield* session.resume(sessionID)
+    expect(operations).toBe(1)
+    expect(requests).toHaveLength(1)
+  }),
+)
+
+it.effect("490 explicit closing reserve cancels only same-source tasks and retains a durable unverified receipt", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const jobs = yield* BackgroundJob.Service
+    const db = (yield* Database.Service).db
+    const now = yield* Clock.currentTimeMillis
+    const request = yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Verify the current task",
+        runPolicy: {
+          mode: "unattended",
+          deadline: now + 1000,
+          closingReserveMs: 1500,
+        },
+      }),
+      resume: false,
+    })
+    const owned = yield* jobs.start({
+      type: "bash",
+      metadata: {
+        sessionID,
+        sourceMessageID: request.id,
+        directory: "/project",
+        kind: "task",
+      },
+      run: Effect.never,
+    })
+    const foreign = yield* jobs.start({
+      type: "bash",
+      metadata: {
+        sessionID,
+        sourceMessageID: "msg_foreign",
+        directory: "/project",
+        kind: "task",
+      },
+      run: Effect.never,
+    })
+    const wrongLocation = yield* jobs.start({
+      type: "bash",
+      metadata: {
+        sessionID,
+        sourceMessageID: request.id,
+        directory: "/other",
+        kind: "task",
+      },
+      run: Effect.never,
+    })
+    const legacy = yield* jobs.start({
+      type: "bash",
+      metadata: { sessionID, kind: "task" },
+      run: Effect.never,
+    })
+    const preview = yield* jobs.start({
+      type: "bash",
+      metadata: {
+        sessionID,
+        sourceMessageID: request.id,
+        directory: "/project",
+        kind: "preview",
+      },
+      run: Effect.never,
+    })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(0)
+    expect((yield* jobs.get(owned.id))?.status).toBe("cancelled")
+    for (const job of [foreign, wrongLocation, legacy, preview])
+      expect((yield* jobs.get(job.id))?.status).toBe("running")
+    const receipts = (yield* session.context(sessionID)).filter(
+      (message) => message.type === "synthetic" && message.text.startsWith("[host.run.closing]"),
+    )
+    expect(receipts).toHaveLength(1)
+    const receipt = receipts[0]!
+    if (receipt.type !== "synthetic") throw new Error("Missing host receipt")
+    expect(receipt.text).toContain('"state":"stopped_unverified"')
+    expect(receipt.text).toContain(owned.id)
+    // Preserved unknown/other jobs can keep the Session runtime running. They do
+    // not turn this stopped request into successful delivery.
+    const outcome = yield* session.outcome(sessionID)
+    expect(outcome.termination?.category).toBe("budget")
+    expect(outcome.state).not.toMatch(/^completed/)
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(0)
+    expect(
+      (yield* session.context(sessionID)).filter(
+        (message) => message.type === "synthetic" && message.text.startsWith("[host.run.closing]"),
+      ),
+    ).toHaveLength(1)
+    // A lost/compacted projection must not create a second durable host notice.
+    yield* db.delete(SessionMessageTable).where(eq(SessionMessageTable.id, receipt.id)).run().pipe(Effect.orDie)
+    yield* session.resume(sessionID)
+    const notices = (yield* db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.aggregate_id, sessionID))
+      .all()
+      .pipe(Effect.orDie)).filter(
+      (event) => typeof event.data.text === "string" && event.data.text.startsWith("[host.run.closing]"),
+    )
+    expect(notices).toHaveLength(1)
+    // A request-only D cannot cancel another source. The original Session-wide
+    // cap remains independently authoritative and must still cancel temporary work.
+    yield* adjust(1001)
+    yield* session.resume(sessionID)
+    for (const job of [foreign, wrongLocation, legacy]) expect((yield* jobs.get(job.id))?.status).toBe("running")
+    yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+    yield* setTime(DateTime.toEpochMillis((yield* session.get(sessionID)).time.created) + 1001)
+    yield* session.resume(sessionID)
+    for (const job of [foreign, wrongLocation, legacy]) expect((yield* jobs.get(job.id))?.status).toBe("cancelled")
+    expect((yield* jobs.get(preview.id))?.status).toBe("running")
+  }),
+)
+
+it.effect("490 closing reserve interrupts a blocked provider before hard D without declaring success", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const now = yield* Clock.currentTimeMillis
+    yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Wait for a bounded provider",
+        runPolicy: {
+          mode: "unattended",
+          deadline: now + 10_000,
+          closingReserveMs: 2000,
+        },
+      }),
+      resume: false,
+    })
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const running = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(8001)
+    yield* Fiber.join(running)
+    expect(requests).toHaveLength(1)
+    expect(yield* session.outcome(sessionID)).toMatchObject({
+      state: "stopped",
+      termination: { category: "budget" },
+    })
+    expect(JSON.stringify(yield* session.context(sessionID))).toContain("stopped_unverified")
+  }),
+)
+
+for (const mode of [undefined, "interactive", "unattended"] as const)
+  for (const owner of ["current", "other", "unknown"] as const)
+    it.effect(`490 host ${mode ?? "legacy"} drain preserves necessary ${owner} task waiting`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const jobs = yield* BackgroundJob.Service
+        const request = yield* session.prompt({
+          sessionID,
+          prompt: Prompt.make({
+            text: "Report the retained result",
+            ...(mode ? { runPolicy: { mode } } : {}),
+          }),
+          resume: false,
+        })
+        const task = yield* jobs.start({
+          type: "bash",
+          metadata: {
+            sessionID,
+            kind: "task",
+            directory: "/project",
+            ...(owner === "unknown"
+              ? {}
+              : {
+                  sourceMessageID: owner === "current" ? request.id : "msg_other_request",
+                }),
+          },
+          run: Effect.never,
+        })
+        responses = [
+          fragmentFixture("text", "bounded-final", ["Result text does not certify completion."]).completeEvents,
+        ]
+        const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        while (
+          requests.length === 0 ||
+          !(yield* session.context(sessionID)).some(
+            (message) => message.type === "assistant" && message.finish === "stop",
+          )
+        )
+          yield* Effect.yieldNow
+        for (let i = 0; i < 20; i++) yield* Effect.yieldNow
+        if (mode === "unattended" && owner === "other") {
+          expect(run.pollUnsafe()).toBeDefined()
+          expect((yield* jobs.get(task.id))?.status).toBe("running")
+        } else {
+          expect(run.pollUnsafe()).toBeUndefined()
+          yield* jobs.cancel(task.id)
+          yield* adjust(1001)
+        }
+        yield* Fiber.join(run)
+        expect(requests).toHaveLength(1)
+        expect((yield* session.outcome(sessionID)).state).not.toBe("completed_verified")
+      }),
+    )
+
+it.effect("490 closing after an explicit continue retains the original acceptance source", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const jobs = yield* BackgroundJob.Service
+    const db = (yield* Database.Service).db
+    const events = yield* EventV2.Service
+    const original = yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({ text: "Verify the original build" }),
+      resume: false,
+    })
+    yield* SessionInput.promoteSteers(db, events, sessionID, Number.MAX_SAFE_INTEGER)
+    const task = yield* jobs.start({
+      type: "bash",
+      metadata: { sessionID, sourceMessageID: original.id, directory: "/project", kind: "task" },
+      run: Effect.never,
+    })
+    const continued = yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Continue",
+        runPolicy: { mode: "unattended", deadline: (yield* Clock.currentTimeMillis) + 1000, closingReserveMs: 1001 },
+      }),
+      resume: false,
+    })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(0)
+    expect((yield* jobs.get(task.id))?.status).toBe("cancelled")
+    const receipt = (yield* session.context(sessionID)).find(
+      (message) => message.type === "synthetic" && message.text.startsWith("[host.run.closing]"),
+    )
+    if (receipt?.type !== "synthetic") throw new Error("Missing closing receipt")
+    expect(receipt.text).toContain(`"sourceMessageID":"${original.id}"`)
+    expect(receipt.text).toContain(`"requestID":"${continued.id}"`)
+  }),
+)
+
+it.effect("490 an omitted reserve keeps a provider alive until the explicit hard deadline", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const now = yield* Clock.currentTimeMillis
+    yield* session.prompt({
+      sessionID,
+      prompt: Prompt.make({
+        text: "Wait until the declared bound",
+        runPolicy: { mode: "unattended", deadline: now + 10_000 },
+      }),
+      resume: false,
+    })
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(8001)
+    expect(run.pollUnsafe()).toBeUndefined()
+    yield* adjust(2000)
+    yield* Fiber.join(run)
+    expect(requests).toHaveLength(1)
+    expect(yield* session.outcome(sessionID)).toMatchObject({ state: "stopped", termination: { category: "budget" } })
+    expect(
+      (yield* session.context(sessionID)).some(
+        (message) => message.type === "synthetic" && message.text.startsWith("[host.run.closing]"),
+      ),
+    ).toBe(false)
+  }),
+)

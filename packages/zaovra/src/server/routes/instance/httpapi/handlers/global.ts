@@ -5,7 +5,7 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@zaovra-ai/core/installation/version"
-import { Effect, Queue, Schema } from "effect"
+import { Cause, Effect, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -36,26 +36,37 @@ function parseBody(body: string) {
   }
 }
 
+const subscriberCapacity = 256
+
+export function globalEventStream(lastEventID?: string) {
+  return Effect.gen(function* () {
+    const queue = yield* Queue.dropping<GlobalBusEvent, EventV2.SubscriberOverflowError>(subscriberCapacity)
+    const replay = GlobalBus.replayAfter(lastEventID)
+    const complete = replay.complete && replay.events.length <= subscriberCapacity
+    const handler = (event: GlobalBusEvent) => {
+      if (Queue.offerUnsafe(queue, event)) return
+      GlobalBus.off("event", handler)
+      Queue.failCauseUnsafe(queue, Cause.fail(new EventV2.SubscriberOverflowError({ capacity: subscriberCapacity })))
+    }
+    GlobalBus.on("event", handler)
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => GlobalBus.off("event", handler)).pipe(Effect.andThen(Queue.shutdown(queue))),
+    )
+    if (complete) replay.events.forEach(handler)
+    return Stream.make({
+      payload: {
+        id: EventV2.ID.create(),
+        type: "server.connected",
+        properties: { replay: complete ? "applied" : lastEventID ? "reset" : "initial" },
+      },
+    }).pipe(Stream.concat(Stream.fromQueue(queue)))
+  })
+}
+
 function eventResponse(lastEventID?: string) {
   return Effect.gen(function* () {
     yield* Effect.logInfo("global event connected")
-    const events = Stream.unwrap(
-      Effect.gen(function* () {
-        const queue = yield* Queue.unbounded<GlobalBusEvent>()
-        const replay = GlobalBus.replayAfter(lastEventID)
-        const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
-        GlobalBus.on("event", handler)
-        yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", handler)))
-        replay.events.forEach((event) => Queue.offerUnsafe(queue, event))
-        return Stream.make({
-          payload: {
-            id: EventV2.ID.create(),
-            type: "server.connected",
-            properties: { replay: replay.complete ? "applied" : lastEventID ? "reset" : "initial" },
-          },
-        }).pipe(Stream.concat(Stream.fromQueue(queue)))
-      }),
-    )
+    const events = Stream.unwrap(globalEventStream(lastEventID))
     const output = events.pipe(Stream.map(eventData), Stream.pipeThroughChannel(Sse.encode()))
     const heartbeat = Stream.tick("10 seconds").pipe(
       Stream.drop(1),

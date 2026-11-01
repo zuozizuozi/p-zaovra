@@ -43,7 +43,10 @@ export const AssertInput = Schema.Struct({
   // Set by the HTTP boundary itself, never copied from client metadata/source.
   origin: Schema.Literals(["internal", "api"]).pipe(Schema.optional),
 }).annotate({ identifier: "PermissionV2.AssertInput" })
-export type AssertInput = typeof AssertInput.Type
+export type AssertInput = typeof AssertInput.Type & {
+  /** Trusted leaf preflight only; deliberately absent from the HTTP schema. */
+  readonly requireConfirmation?: true
+}
 
 export const ReplyInput = Schema.Struct({
   requestID: ID,
@@ -115,6 +118,7 @@ interface Pending {
   readonly locationID: string
   readonly owner: symbol
   readonly origin: "internal" | "api"
+  readonly requireConfirmation?: true
   readonly deferred: Deferred.Deferred<void, DeclinedError | CorrectedError>
 }
 
@@ -181,11 +185,26 @@ const layer = Layer.effect(
     const evaluateInput = EffectRuntime.fnUntraced(function* (input: AssertInput) {
       const rules = yield* configured(input.sessionID, input.agent)
       if (denied(input, rules)) return { effect: "deny" as const, rules }
-      const all = [...rules, ...(yield* savedRules())]
+      const remembered = yield* savedRules()
+      const all = [...rules, ...remembered]
       const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
       const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
-      return { effect, rules: all }
+      return {
+        effect:
+          effect === "allow" && input.requireConfirmation && !literalApproval(input, remembered)
+            ? ("ask" as const)
+            : effect,
+        rules: all,
+      }
     })
+
+    function literalApproval(input: Pick<AssertInput, "action" | "resources">, rules: SavedRule[]) {
+      return input.resources.every((resource) =>
+        rules.some(
+          (rule) => rule.matchMode === "literal" && rule.action === input.action && rule.resource === resource,
+        ),
+      )
+    }
 
     function request(input: AssertInput): Request {
       return {
@@ -200,11 +219,16 @@ const layer = Layer.effect(
       }
     }
 
-    const create = (request: Request, agent?: AgentV2.ID, origin: "internal" | "api" = "internal") =>
+    const create = (
+      request: Request,
+      agent?: AgentV2.ID,
+      origin: "internal" | "api" = "internal",
+      requireConfirmation?: true,
+    ) =>
       EffectRuntime.uninterruptible(
         EffectRuntime.gen(function* () {
           const deferred = yield* Deferred.make<void, DeclinedError | CorrectedError>()
-          const item = { request, agent, deferred, locationID, owner, origin }
+          const item = { request, agent, deferred, locationID, owner, origin, requireConfirmation }
           if (pending.has(request.id)) return yield* EffectRuntime.die(`Duplicate pending permission ID: ${request.id}`)
           pending.set(request.id, item)
           yield* events
@@ -217,7 +241,7 @@ const layer = Layer.effect(
     const ask = EffectRuntime.fn("PermissionV2.ask")(function* (input: AssertInput) {
       const result = yield* evaluateInput(input)
       const value = request(input)
-      if (result.effect === "ask") yield* create(value, input.agent, input.origin)
+      if (result.effect === "ask") yield* create(value, input.agent, input.origin, input.requireConfirmation)
       return { id: value.id, effect: result.effect }
     })
 
@@ -231,7 +255,7 @@ const layer = Layer.effect(
             })
           }
           if (result.effect === "allow") return
-          const item = yield* create(request(input), input.agent, input.origin)
+          const item = yield* create(request(input), input.agent, input.origin, input.requireConfirmation)
           return yield* restore(Deferred.await(item.deferred)).pipe(
             EffectRuntime.catchTag("PermissionV2.DeclinedError", (error) => EffectRuntime.die(error)),
             EffectRuntime.ensuring(
@@ -317,6 +341,7 @@ const layer = Layer.effect(
             )
             if (!rules) continue
             if (denied(input, rules)) continue
+            if (item.requireConfirmation && !literalApproval(item.request, rememberedRules)) continue
             const effective = [...rules, ...rememberedRules]
             if (
               !item.request.resources.every(

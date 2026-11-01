@@ -10,7 +10,8 @@ import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionInput } from "@zaovra-ai/core/session/input"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
-import { DateTime, Deferred, Effect, Fiber, Layer } from "effect"
+import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
+import { Clock, DateTime, Deferred, Effect, Fiber, Layer } from "effect"
 import { testEffect } from "./lib/effect"
 import { toolIdentity } from "./lib/tool"
 
@@ -24,6 +25,67 @@ const childID = SessionV2.ID.make("ses_task_child")
 const location = { directory: AbsolutePath.make("/project") }
 
 describe("TaskTool", () => {
+  it.effect("490 long child results remain bound beyond one 50-message history page", () =>
+    Effect.gen(function* () {
+      yield* registerExplore()
+      let pages = 0
+      const context = { sessionID: parentID, ...toolIdentity, toolCallID: "long-source" }
+      const requestID = SessionMessage.ID.make(`msg_task_${parentID}_${context.assistantMessageID}_${context.toolCallID}`)
+      const sessions = { ...sessionOps(), messages: (input: Parameters<SessionV2.Interface["messages"]>[0]) => {
+        if (input.sessionID === parentID) return Effect.succeed([])
+        pages++
+        const messages: SessionMessage.Message[] = input.cursor
+          ? [{ id: requestID, type: "user", text: "Long task", time: { created: DateTime.makeUnsafe(1) } }]
+          : [assistant(AgentV2.ID.make("explore")), ...Array.from({ length: 49 }, (_, i): SessionMessage.Synthetic => ({ id: SessionMessage.ID.make(`msg_history_${i}`), sessionID: childID, type: "synthetic", text: "History remains retained", time: { created: DateTime.makeUnsafe(1) } }))]
+        return Effect.succeed(messages)
+      } }
+      expect(yield* TaskTool.run(sessions, info(parentID), { description: "Long task", prompt: "Long task", subagent_type: "explore" }, context)).toMatchObject({ request_id: requestID, content: "The state machine is durable." })
+      expect(pages).toBe(2)
+    }),
+  )
+
+  it.effect("490 final child prose cannot hide its authoritative budget stop", () =>
+    Effect.gen(function* () {
+      yield* registerExplore()
+      const sessions = { ...sessionOps(), outcome: () => Effect.succeed(SessionOutcome.Info.make({ state: "stopped", outcomeUnknown: false, checks: [], missing: ["unfinished"], termination: { category: "budget", message: "expired" } })) }
+      expect((yield* TaskTool.run(sessions, info(parentID), { description: "Bound result", prompt: "Inspect", subagent_type: "explore" }, { sessionID: parentID, ...toolIdentity, toolCallID: "stop-result" }).pipe(Effect.exit))._tag).toBe("Failure")
+      expect(yield* TaskTool.status(sessions, info(parentID), childID, { sessionID: parentID, ...toolIdentity, toolCallID: "stop-status" })).toMatchObject({ status: "unknown", outcome: "stopped" })
+    }),
+  )
+  for (const expired of [false, true])
+    it.effect(`490 child inherits the parent absolute deadline and expired admission is zero ${expired}`, () =>
+      Effect.gen(function* () {
+        yield* registerExplore()
+        const deadline = (yield* Clock.currentTimeMillis) + (expired ? 0 : 5000)
+        const creates: Parameters<SessionV2.Interface["create"]>[0][] = []
+        const updates: Parameters<SessionV2.Interface["update"]>[0][] = []
+        let prompts = 0
+        let resumes = 0
+        const operations = sessionOps({ create: (input) => Effect.sync(() => { creates.push(input); return info(childID, parentID, AgentV2.ID.make("explore")) }), prompt: (input) => Effect.sync(() => { prompts++; return admitted(input.sessionID, input.prompt.text) }), resume: () => Effect.sync(() => { resumes++ }) })
+        const sessions = { ...operations, deadline: () => Effect.succeed(deadline), update: (input: Parameters<SessionV2.Interface["update"]>[0]) => Effect.sync(() => { updates.push(input); return info(childID, parentID, AgentV2.ID.make("explore")) }) }
+        const result = yield* TaskTool.run(sessions, info(parentID), { description: "Inspect", prompt: "Inspect source", subagent_type: "explore" }, { sessionID: parentID, ...toolIdentity, toolCallID: "same-deadline" }).pipe(Effect.exit)
+        expect(result._tag).toBe(expired ? "Failure" : "Success")
+        expect(creates).toHaveLength(expired ? 0 : 1)
+        expect(prompts).toBe(expired ? 0 : 1)
+        expect(resumes).toBe(expired ? 0 : 1)
+        if (!expired) {
+          expect(creates[0]).toMatchObject({ budget: { durationMs: null }, inheritedDeadline: deadline })
+          expect(updates[0]).toMatchObject({ inheritedDeadline: deadline })
+        }
+        // Inspection remains available after the parent's time has elapsed.
+        expect((yield* TaskTool.status(sessions, info(parentID), childID, { sessionID: parentID, ...toolIdentity, toolCallID: "deadline-status" })).status).toBe("completed")
+      }),
+    )
+
+  it.effect("490 a child response for another request is not returned as this request's result", () =>
+    Effect.gen(function* () {
+      yield* registerExplore()
+      const sessions = { ...sessionOps(), messages: () => Effect.succeed([assistant(AgentV2.ID.make("explore"))]) }
+      const result = yield* TaskTool.run(sessions, info(parentID), { description: "Request B", prompt: "Only B", subagent_type: "explore" }, { sessionID: parentID, ...toolIdentity, toolCallID: "request-b" }).pipe(Effect.exit)
+      expect(result._tag).toBe("Failure")
+      expect((yield* TaskTool.status(sessions, info(parentID), childID, { sessionID: parentID, ...toolIdentity, toolCallID: "still-queryable" })).status).toBe("completed")
+    }),
+  )
   for (const finish of ["length", "max-steps", "interrupted", "tool-calls", undefined]) {
     it.effect(`does not report a stopped child as completed (${finish})`, () =>
       Effect.gen(function* () {
@@ -112,12 +174,12 @@ describe("TaskTool", () => {
       yield* registerExplore()
       const prompts: Parameters<SessionV2.Interface["prompt"]>[0][] = []
       const invoking = { ...assistant(AgentV2.ID.make("build")), id: toolIdentity.assistantMessageID }
+      const operations = sessionOps({
+        prompt: (input) => Effect.sync(() => prompts.push(input)).pipe(Effect.as(admitted(input.sessionID, input.prompt.text))),
+      })
       const sessions = {
-        ...sessionOps({
-          prompt: (input) =>
-            Effect.sync(() => prompts.push(input)).pipe(Effect.as(admitted(input.sessionID, input.prompt.text))),
-        }),
-        messages: () => Effect.succeed([invoking]),
+        ...operations,
+        messages: (input: Parameters<SessionV2.Interface["messages"]>[0]) => input.sessionID === parentID ? Effect.succeed([invoking]) : operations.messages(input),
       }
       const input = { description: "Inspect", prompt: "Inspect this", subagent_type: "explore" }
       const context = { sessionID: parentID, ...toolIdentity, toolCallID: "call-inherit" }
@@ -162,7 +224,7 @@ describe("TaskTool", () => {
           { description: "Inspect code", prompt: "Find the state machine", subagent_type: "explore" },
           { sessionID: parentID, ...toolIdentity, toolCallID: "call-task" },
         ),
-      ).toEqual({ task_id: childID, content: "The state machine is durable.", outcome: "completed_unverified" })
+      ).toEqual({ task_id: childID, request_id: SessionMessage.ID.make("msg_task_ses_task_parent_msg_tool_test_call-task"), content: "The state machine is durable.", outcome: "completed_unverified" })
       expect(creates).toMatchObject([{ id: "ses_task_ses_task_parent_msg_tool_test_call-task" }])
       expect(prompts).toEqual([
         {
@@ -292,19 +354,24 @@ function sessionOps(overrides?: {
   readonly pending?: Pick<SessionV2.Interface, "pending">["pending"]
 }): Pick<
   SessionV2.Interface,
-  "list" | "get" | "create" | "prompt" | "pending" | "resume" | "interrupt" | "active" | "messages"
+  "list" | "get" | "create" | "update" | "prompt" | "pending" | "resume" | "interrupt" | "active" | "messages"
 > {
   const child = overrides?.child ?? info(childID, parentID, AgentV2.ID.make("explore"))
+  const inputs: SessionInput.Admitted[] = []
   return {
     list: () => Effect.succeed([info(parentID), child]),
     get: (sessionID) => (sessionID === child.id ? Effect.succeed(child) : Effect.succeed(info(parentID))),
     create: overrides?.create ?? (() => Effect.succeed(child)),
-    prompt: overrides?.prompt ?? ((input) => Effect.succeed(admitted(input.sessionID, input.prompt.text))),
+    update: () => Effect.succeed(child),
+    prompt: (input) => (overrides?.prompt ?? ((input) => Effect.succeed(admitted(input.sessionID, input.prompt.text))))(input).pipe(
+      Effect.map((receipt) => SessionInput.Admitted.make({ ...receipt, id: input.id ?? receipt.id })),
+      Effect.tap((receipt) => Effect.sync(() => inputs.push(receipt))),
+    ),
     resume: overrides?.resume ?? (() => Effect.void),
     interrupt: overrides?.interrupt ?? (() => Effect.void),
     pending: overrides?.pending ?? (() => Effect.succeed(false)),
     active: Effect.succeed(new Set()),
-    messages: () => Effect.succeed([assistant(child.agent ?? AgentV2.ID.make("explore"))]),
+    messages: () => Effect.succeed([assistant(child.agent ?? AgentV2.ID.make("explore")), ...inputs.toReversed().map((input): SessionMessage.User => ({ ...input.prompt, id: input.id, type: "user", time: { created: input.timeCreated } }))]),
   }
 }
 

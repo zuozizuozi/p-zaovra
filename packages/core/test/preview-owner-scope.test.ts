@@ -12,6 +12,7 @@ import { Global } from "@zaovra-ai/core/global"
 import { Location } from "@zaovra-ai/core/location"
 import { AppProcess } from "@zaovra-ai/core/process"
 import { PreviewProcess } from "@zaovra-ai/core/preview-process"
+import { PermissionV2 } from "@zaovra-ai/core/permission"
 import { ProjectV2 } from "@zaovra-ai/core/project"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { SessionV2 } from "@zaovra-ai/core/session"
@@ -22,7 +23,8 @@ import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
-import { settleTool, toolIdentity } from "./lib/tool"
+import { toolIdentity } from "./lib/tool"
+import { settleToolApproved } from "./fixture/approve-tool"
 
 const it = testEffect(Layer.empty)
 
@@ -43,6 +45,7 @@ for (const action of ["owner-close", "cancel", "archive"] as const)
                   BashJob.node,
                   AgentV2.node,
                   ToolRegistry.node,
+                  PermissionV2.node,
                   BackgroundJob.node,
                   Database.node,
                   EventV2.node,
@@ -99,7 +102,7 @@ for (const action of ["owner-close", "cancel", "archive"] as const)
                     `const s=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>Response.json({name:${JSON.stringify(name)},pid:process.pid})});const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(ready + ".tmp")},JSON.stringify({pid:process.pid,port:s.port}));fs.renameSync(${JSON.stringify(ready + ".tmp")},${JSON.stringify(ready)});`,
                   ),
                 )
-                const result = yield* settleTool(registry, {
+                const result = yield* settleToolApproved(registry, {
                   sessionID: session.id,
                   ...toolIdentity,
                   call: {
@@ -137,7 +140,7 @@ for (const action of ["owner-close", "cancel", "archive"] as const)
               const first = yield* start("first")
               const other = yield* start("other")
               if (action !== "owner-close") {
-                const rejected = yield* settleTool(registry, {
+                const rejected = yield* settleToolApproved(registry, {
                   sessionID: other.session.id,
                   ...toolIdentity,
                   call: {
@@ -150,7 +153,7 @@ for (const action of ["owner-close", "cancel", "archive"] as const)
                 expect(rejected.result.type).toBe("error")
                 expect(yield* reachable(first.url)).toBe(true)
                 if (action === "cancel")
-                  yield* settleTool(registry, {
+                  yield* settleToolApproved(registry, {
                     sessionID: first.session.id,
                     ...toolIdentity,
                     call: {
@@ -175,6 +178,7 @@ for (const action of ["owner-close", "cancel", "archive"] as const)
                 expect(yield* Effect.promise(() => PreviewProcess.birth(other.pid))).toBeUndefined()
               }
             }).pipe(
+              Effect.provideService(PermissionV2.Service, Context.get(runtime, PermissionV2.Service)),
               // The failing baseline is detached; retain its actual job handle for safe fixture cleanup.
               Effect.ensuring(Effect.forEach(owned, (id) => jobs.cancel(id), { discard: true })),
               Effect.ensuring(Scope.close(owner, Exit.void)),

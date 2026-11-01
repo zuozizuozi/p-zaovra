@@ -21,6 +21,66 @@ const assistant: SessionMessage.Assistant = {
   time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
 }
 
+for (const continued of [false, true])
+  test(`490 terminal job consumption survives later host observations and continuation ${continued}`, () => {
+    const user: SessionMessage.User = {
+      id: SessionMessage.ID.make("msg_job_root"),
+      type: "user",
+      text: "Build both tasks",
+      time: assistant.time,
+    }
+    const read: SessionMessage.Assistant = {
+      ...assistant,
+      finish: "tool-calls",
+      content: [
+        {
+          type: "tool",
+          id: "read-result",
+          name: "bash_job",
+          time: assistant.time,
+          state: {
+            status: "completed",
+            input: { job_id: "job-b", action: "get" },
+            structured: { status: "completed", exit: 0 },
+            content: [],
+          },
+        },
+      ],
+    }
+    const observation: SessionMessage.Synthetic = {
+      id: SessionMessage.ID.make("msg_job-a_completed"),
+      type: "synthetic",
+      sessionID: SessionSchema.ID.make("ses_jobs"),
+      text: "Host result A",
+      completion: { type: "bash-completion", sourceMessageID: user.id, jobID: "job-a" },
+      time: assistant.time,
+    }
+    const messages: SessionMessage.Message[] = [
+      user,
+      read,
+      { ...assistant, content: [{ type: "text", id: "done", text: "Read B" }] },
+      observation,
+    ]
+    if (continued) messages.push({ ...user, id: SessionMessage.ID.make("msg_continue"), text: "continue" })
+    expect(SessionOutcome.deliveredBackgroundResult(messages, "job-b")).toBe(true)
+    expect(SessionOutcome.deliveredBackgroundResult(messages, "job-a")).toBe(false)
+    const running = {
+      ...read,
+      content: read.content.map((part) =>
+        part.type === "tool" && part.state.status === "completed"
+          ? { ...part, state: { ...part.state, structured: { status: "running" } } }
+          : part,
+      ),
+    }
+    expect(SessionOutcome.deliveredBackgroundResult([user, running, observation], "job-b")).toBe(false)
+    expect(
+      SessionOutcome.deliveredBackgroundResult(
+        [...messages, { ...user, id: SessionMessage.ID.make("msg_other"), text: "A replacement task" }],
+        "job-b",
+      ),
+    ).toBe(false)
+  })
+
 test("K3 planned samples retain new observations and do not count replay twice", () => {
   const contract = { version: 1 as const, samples: ["one", "two"] }
   const user: SessionMessage.User = {

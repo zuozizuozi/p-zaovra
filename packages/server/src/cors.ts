@@ -10,9 +10,16 @@ export const CorsConfig = Context.Reference<CorsOptions | undefined>("@zaovra/Se
 
 export function isAllowedCorsOrigin(input: string | undefined, opts?: CorsOptions) {
   if (!input) return true
-  if (input.startsWith("http://localhost:")) return true
-  if (input.startsWith("http://127.0.0.1:")) return true
-  if (input.startsWith("oc://renderer")) return true
+  if (!URL.canParse(input)) return false
+  const url = new URL(input)
+  if (url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== ""))
+    return false
+  if (
+    url.protocol === "http:" &&
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]")
+  )
+    return true
+  if (input === "oc://renderer") return true
   if (input === "tauri://localhost" || input === "http://tauri.localhost" || input === "https://tauri.localhost")
     return true
   if (zaovraOrigin.test(input)) return true

@@ -20,7 +20,8 @@ const readEvent = (reader: Queue.Dequeue<Uint8Array>) =>
         orElse: () => Effect.fail(new Error("timed out waiting for event")),
       }),
     )
-    return Schema.decodeUnknownSync(EventData)(JSON.parse(new TextDecoder().decode(value).replace(/^data: /, "")))
+    const data = new TextDecoder().decode(value).split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n")
+    return Schema.decodeUnknownSync(EventData)(JSON.parse(data))
   })
 
 const openEventStream = (directory: string) =>

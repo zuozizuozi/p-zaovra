@@ -1,3 +1,4 @@
+import { LSP } from "@zaovra-ai/core/lsp"
 import fs from "fs/promises"
 import path from "path"
 import { describe, expect } from "bun:test"
@@ -102,6 +103,7 @@ const withTool = <A, E, R>(directory: string, body: (registry: ToolRegistry.Inte
           LocationMutation.node,
           FileMutation.node,
           ApplyPatchTool.node,
+          LSP.node,
         ]),
         [
           [FSUtil.node, filesystem],
@@ -479,6 +481,10 @@ it.live("patch add and update diffs include actual formatter output", () =>
         )
         yield* withTool(tmp.path, (registry) =>
           Effect.gen(function* () {
+            // This case verifies current diagnostics on a ready server. Cold
+            // initialization is covered separately as pending, never verified.
+            const lsp = yield* LSP.Service
+            yield* lsp.changed(path.join(tmp.path, "old.audit"))
             const settled = yield* settleTool(
               registry,
               call(

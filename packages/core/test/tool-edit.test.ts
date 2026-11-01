@@ -1,3 +1,4 @@
+import { LSP } from "@zaovra-ai/core/lsp"
 import fs from "fs/promises"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -96,6 +97,7 @@ const withTool = <A, E, R>(directory: string, body: (registry: ToolRegistry.Inte
           LocationMutation.node,
           FileMutation.node,
           EditTool.node,
+          LSP.node,
         ]),
         [
           [FSUtil.node, filesystem],
@@ -548,6 +550,10 @@ it.live("returns current diagnostics after an actual edit", () =>
         )
         yield* withTool(tmp.path, (registry) =>
           Effect.gen(function* () {
+            // This case verifies current diagnostics on a ready server. Cold
+            // initialization is covered separately as pending, never verified.
+            const lsp = yield* LSP.Service
+            yield* lsp.changed(path.join(tmp.path, "sample.audit"))
             const settled = yield* settleTool(
               registry,
               call({ path: "sample.audit", oldString: "before", newString: "bad" }),

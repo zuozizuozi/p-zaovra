@@ -3568,7 +3568,7 @@ export class Session extends HeyApiClient {
   /**
    * Create session
    *
-   * Create a session at the requested location.
+   * Create a session at the requested location. New ordinary interaction has no implicit duration limit; autonomous mode uses its configured/default duration. Each budget axis may be omitted (mode default), null (unlimited), or a positive number. Existing sessions are adopted without replacing their budget or resuming them.
    */
   public create<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3576,6 +3576,8 @@ export class Session extends HeyApiClient {
       agent?: string
       model?: ModelRef
       location?: LocationRef
+      budgetMode?: "interactive" | "autonomous"
+      budget?: SessionOutcomeBudgetUpdate
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3588,6 +3590,8 @@ export class Session extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "location" },
+            { in: "body", key: "budgetMode" },
+            { in: "body", key: "budget" },
           ],
         },
       ],

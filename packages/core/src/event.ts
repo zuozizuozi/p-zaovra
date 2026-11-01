@@ -413,8 +413,9 @@ export const layerWith = (options?: LayerOptions) =>
         return Effect.gen(function* () {
           recent.push(event)
           if (recent.length > 2048) recent.splice(0, recent.length - 2048)
+          // A listener can unregister itself during this notification without skipping its neighbor.
           yield* Effect.forEach(
-            listeners,
+            [...listeners],
             (listener) => (isolateListeners ? observe(event, listener) : listener(event)),
             { discard: true },
           )

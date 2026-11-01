@@ -22,6 +22,21 @@ export const ExecutionEnvironment = Schema.Struct({
   BLIS_NUM_THREADS: ExecutionCondition.pipe(optional),
 }).annotate({ identifier: "SessionOutcome.ExecutionEnvironment" })
 export interface ExecutionEnvironment extends Schema.Schema.Type<typeof ExecutionEnvironment> {}
+/** Host request policy is separate from Session budget provenance. */
+export const RunPolicy = Schema.Union([
+  Schema.Struct({
+    mode: Schema.Literals(["interactive", "unattended"]),
+    deadline: Schema.Finite,
+    closingReserveMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(optional),
+  }),
+  Schema.Struct({
+    mode: Schema.Literals(["interactive", "unattended"]),
+    deadline: Schema.Never.pipe(optional),
+    closingReserveMs: Schema.Never.pipe(optional),
+  }),
+]).annotate({ identifier: "SessionOutcome.RunPolicy" })
+export type RunPolicy = typeof RunPolicy.Type
+
 export const ExecutionContract = Schema.Struct({
   version: Schema.Literal(1),
   entry: Schema.String.pipe(optional),

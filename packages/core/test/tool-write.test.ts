@@ -1,3 +1,4 @@
+import { LSP } from "@zaovra-ai/core/lsp"
 import fs from "fs/promises"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -91,6 +92,7 @@ const withTool = <A, E, R>(directory: string, body: (registry: ToolRegistry.Inte
           LocationMutation.node,
           FileMutation.node,
           WriteTool.node,
+          LSP.node,
         ]),
         [
           [FSUtil.node, filesystem],
@@ -399,6 +401,11 @@ it.live("formats actual write output and reports a failed formatter", () =>
         )
         yield* withTool(tmp.path, (registry) =>
           Effect.gen(function* () {
+            // This case verifies current diagnostics on a ready server. Cold
+            // initialization is covered separately as pending, never verified.
+            yield* Effect.promise(() => Bun.write(path.join(tmp.path, "warm.audit"), "before"))
+            const lsp = yield* LSP.Service
+            yield* lsp.changed(path.join(tmp.path, "warm.audit"))
             const settled = yield* settleTool(registry, call({ path: "new.audit", content: "bad" }))
             expect(settled.output?.structured).toMatchObject({ formatting: { ran: ["custom"], failed: ["failing"] } })
             expect(settled.result.type).toBe("text")
@@ -407,15 +414,70 @@ it.live("formats actual write output and reports a failed formatter", () =>
             expect(settled.output?.structured).toMatchObject({
               lsp: {
                 diagnostics: { [path.join(tmp.path, "new.audit")]: [{ message: "Bad text" }] },
-                failed: ["missing"],
+                failed: [],
+                pending: ["missing"],
               },
             })
             expect(settled.result.value).toContain("ERROR: Bad text")
             expect(settled.result.value).toContain(
-              "Language diagnostics unavailable: missing. File changes remain saved.",
+              "Language servers initializing in background: missing. Diagnostics are not verified yet.",
             )
+            // Observe the missing executable explicitly; pending must not hide
+            // its eventual failure or fabricate verified diagnostics.
+            expect(yield* lsp.changed(path.join(tmp.path, "new.audit"))).toMatchObject({
+              diagnostics: { [path.join(tmp.path, "new.audit")]: [{ message: "Bad text" }] },
+              failed: ["missing"],
+            })
           }),
         )
+      }),
+    (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+  ),
+)
+
+it.live("490 a cold diagnostic process returns pending and is closed with the actual write scope", () =>
+  Effect.acquireUseRelease(
+    Effect.promise(() => tmpdir()),
+    (tmp) =>
+      Effect.gen(function* () {
+        reset()
+        const pidFile = path.join(tmp.path, "cold.pid")
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(tmp.path, "zaovra.json"),
+            JSON.stringify({
+              formatter: false,
+              lsp: {
+                cold: {
+                  extensions: [".audit"],
+                  command: [
+                    process.execPath,
+                    "-e",
+                    `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));process.stdin.resume();setInterval(()=>{},1000)`,
+                  ],
+                },
+              },
+            }),
+          ),
+        )
+        const pid = yield* withTool(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const settled = yield* settleTool(registry, call({ path: "new.audit", content: "saved content" }))
+            expect(settled.output?.structured).toMatchObject({
+              lsp: { diagnostics: {}, failed: [], pending: ["cold"] },
+            })
+            expect(settled.result.value).not.toContain("ERROR:")
+            expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "new.audit")).text())).toBe("saved content")
+            const deadline = Date.now() + 2000
+            while (!(yield* Effect.promise(() => Bun.file(pidFile).exists())) && Date.now() < deadline)
+              yield* Effect.sleep("5 millis")
+            const pid = Number(yield* Effect.promise(() => Bun.file(pidFile).text()))
+            expect(() => process.kill(pid, 0)).not.toThrow()
+            return pid
+          }),
+        )
+        yield* Effect.sleep("100 millis")
+        expect(() => process.kill(pid, 0)).toThrow()
       }),
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   ),

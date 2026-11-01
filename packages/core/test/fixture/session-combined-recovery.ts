@@ -1,3 +1,5 @@
+import { grantFixtureCommand } from "./approve-tool"
+import { LocationServiceMap } from "../../src/location-service-map"
 import path from "node:path"
 import { Effect } from "effect"
 import { AppNodeBuilder } from "../../src/effect/app-node-builder"
@@ -26,6 +28,11 @@ await Effect.runPromise(
         location: { directory },
         model: { id: ModelV2.ID.make("audit-model"), providerID: ProviderV2.ID.make("audit") },
       })
+      yield* grantFixtureCommand(
+        sessionID,
+        directory,
+        `${process.platform === "win32" ? "& " : ""}"${process.execPath}" append.cjs`,
+      )
       yield* session.prompt({
         sessionID,
         prompt: {
@@ -77,7 +84,7 @@ await Effect.runPromise(
     Effect.timeout("45 seconds"),
     Effect.scoped,
     Effect.provide(
-      AppNodeBuilder.build(LayerNode.group([SessionV2.node, EventV2.node, Database.node]), [
+      AppNodeBuilder.build(LayerNode.group([SessionV2.node, EventV2.node, Database.node, LocationServiceMap.node]), [
         [Database.node, Database.layerFromPath(path.join(directory, "sessions.db"))],
         [SessionExecution.node, SessionExecutionLocal.node],
       ]),

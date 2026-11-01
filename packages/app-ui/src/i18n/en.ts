@@ -433,7 +433,12 @@ export const dict = {
   "session.budget.save": "Save default limits",
   "session.budget.modeDefaults": "Mode defaults",
   "session.budget.defaultHint":
-    "Ordinary interaction has no default token ceiling. Delegated and WorkGraph Sessions default to 30 million tokens; each Session defaults to 12 hours. Saving blank fields explicitly removes those limits. Session adjustments override defaults; renew authorization to continue at a limit.",
+    "New ordinary sessions have no default token or time limit. Autonomous sessions default to 30 million tokens and 12 hours; choose a goal duration when creating it. Older or unknown sessions keep their recorded limits. Editing a blank field explicitly removes that limit; parent deadlines still apply. Changing defaults does not resume stopped sessions.",
+  "work.duration.label": "Goal duration",
+  "work.duration.default": "Default · 12 hours",
+  "work.duration.custom": "Choose minutes",
+  "work.duration.hint":
+    "Shared by planning, execution and review from goal creation. A limit stops work without marking it successful.",
   "session.budget.title": "Session limits",
   "session.budget.hint": "Replace both limits. Blank means unlimited. Time is measured from session creation.",
   "session.budget.tokens": "Total tokens",

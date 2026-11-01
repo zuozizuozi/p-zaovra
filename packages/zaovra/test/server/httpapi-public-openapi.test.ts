@@ -323,4 +323,6 @@ test("469 public budget updates preserve explicit null independently of omitted 
     expect(update.required ?? []).not.toContain(key)
   }
   expect(spec.components.schemas.SessionOutcomeBudget.properties?.tokens?.anyOf).toBeUndefined()
+  expect(spec.components.schemas.WorkBudget.properties?.maxDurationMs?.anyOf).toContainEqual({ type: "null" })
+  expect(spec.components.schemas.WorkBudget.required ?? []).not.toContain("maxDurationMs")
 })

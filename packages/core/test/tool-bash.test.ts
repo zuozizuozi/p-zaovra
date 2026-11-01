@@ -165,6 +165,64 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  it.live(
+    "490 real shell omits synthetic host credentials and retains build environment",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          const values = {
+            ZAOVRA_FIXTURE_API_KEY: "synthetic-key",
+            ZAOVRA_FIXTURE_TOKEN: "synthetic-token",
+            ZAOVRA_FIXTURE_BUILD: "kept-build",
+          }
+          return Effect.acquireUseRelease(
+            Effect.sync(() => {
+              for (const key of Object.keys(values))
+                if (Object.hasOwn(process.env, key)) throw new Error("Synthetic fixture variable already exists")
+              Object.assign(process.env, values)
+            }),
+            () =>
+              Effect.promise(() =>
+                Bun.write(
+                  path.join(tmp.path, "environment.mjs"),
+                  `console.log(JSON.stringify({ key: Object.hasOwn(process.env, 'ZAOVRA_FIXTURE_API_KEY'), token: Object.hasOwn(process.env, 'ZAOVRA_FIXTURE_TOKEN'), build: process.env.ZAOVRA_FIXTURE_BUILD, path: !!process.env.PATH, home: !!process.env.HOME }))`,
+                ),
+              ).pipe(
+                Effect.andThen(
+                  withTool(
+                    tmp.path,
+                    (registry) => settleTool(registry, call({ command: "bun environment.mjs" })),
+                    LayerNode.compile(AppProcess.node),
+                  ),
+                ),
+                Effect.andThen((settled) =>
+                  Effect.sync(() => {
+                    expect(settled.output?.structured).toMatchObject({ exit: 0 })
+                    const text = settled.output?.content.find((part) => part.type === "text")
+                    if (text?.type !== "text") throw new Error("Missing actual shell output")
+                    expect(JSON.parse(text.text.trim().split(/\r?\n/)[0]!)).toEqual({
+                      key: false,
+                      token: false,
+                      build: "kept-build",
+                      path: true,
+                      home: true,
+                    })
+                  }),
+                ),
+              ),
+            () =>
+              Effect.sync(() => {
+                for (const key of Object.keys(values)) delete process.env[key]
+              }),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    30000,
+  )
+
   it.live("466 services requested to stay running use preview and independent business verification", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -1035,30 +1093,127 @@ describe("BashTool", () => {
     ),
   )
 
-  it.live("reports external command arguments as advisory warnings without enforcing approval", () =>
+  it.live(
+    "490 rejects external command operands before execution when their separate directory approval is denied",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => Promise.all([tmpdir(), tmpdir()])),
+        ([active, outside]) => {
+          reset()
+          denyAction = "external_directory"
+          const target = path.join(outside.path, "secret.txt")
+          return withTool(active.path, (registry) => settleTool(registry, call({ command: `cat ${target}` }))).pipe(
+            Effect.andThen((settled) =>
+              Effect.sync(() => {
+                expect(assertions.map((item) => item.action)).toEqual(["external_directory"])
+                expect(runs).toHaveLength(0)
+                expect(settled.result.type).toBe("error")
+                expect(settled.inputRejected).toBe(false)
+                expect(settled.result.value).toContain("permission policy blocked")
+              }),
+            ),
+          )
+        },
+        ([active, outside]) =>
+          Effect.promise(() =>
+            Promise.all([active[Symbol.asyncDispose](), outside[Symbol.asyncDispose]()]).then(() => undefined),
+          ),
+      ),
+  )
+
+  it.live("490 preflight preserves both permission gates and rejects a literal target changed during approval", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => Promise.all([tmpdir(), tmpdir()])),
-      ([active, outside]) => {
-        reset()
-        denyAction = "external_directory"
-        const target = path.join(outside.path, "secret.txt")
-        return withTool(active.path, (registry) => settleTool(registry, call({ command: `cat ${target}` }))).pipe(
-          Effect.andThen((settled) =>
-            Effect.sync(() => {
-              expect(assertions.map((item) => item.action)).toEqual(["bash"])
-              expect(runs).toHaveLength(1)
-              expect(settled.output?.structured).toMatchObject({
-                truncated: false,
-              })
-              expect(settled.output?.structured).not.toHaveProperty("warnings")
-              expect(settled.output?.content[1]).toMatchObject({
-                type: "text",
-                text: expect.stringContaining("Warnings:"),
-              })
-            }),
-          ),
-        )
-      },
+      ([active, outside]) =>
+        Effect.gen(function* () {
+          reset()
+          const target = path.join(outside.path, "operand.txt")
+          yield* Effect.promise(() => Bun.write(target, "original"))
+          yield* withTool(active.path, (registry) => executeTool(registry, call({ command: `cat "${target}"` })))
+          expect(assertions.map((item) => item.action)).toEqual(["external_directory", "bash"])
+          expect(runs).toHaveLength(1)
+          reset()
+          afterPermission = (input) =>
+            input.action === "bash"
+              ? Effect.promise(async () => {
+                  await fs.rename(target, path.join(outside.path, "preserved-original.txt"))
+                  await Bun.write(target, "replacement")
+                }).pipe(Effect.orDie)
+              : Effect.void
+          const rejected = yield* withTool(active.path, (registry) =>
+            settleTool(registry, call({ command: `cat "${target}"` })),
+          )
+          expect(rejected.result.type).toBe("error")
+          expect(rejected.inputRejected).toBe(true)
+          expect(runs).toHaveLength(0)
+          reset()
+          yield* withTool(active.path, (registry) => executeTool(registry, call({ command: "echo $DYNAMIC" })))
+          expect(assertions.find((item) => item.action === "bash")?.requireConfirmation).toBe(true)
+        }),
+      ([active, outside]) =>
+        Effect.promise(() =>
+          Promise.all([active[Symbol.asyncDispose](), outside[Symbol.asyncDispose]()]).then(() => undefined),
+        ),
+    ),
+  )
+
+  it.live("502 canonicalizes ordinary relative operands before external approval and rechecks their identity", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => Promise.all([tmpdir(), tmpdir()])),
+      ([active, outside]) =>
+        Effect.gen(function* () {
+          const work = path.join(active.path, "work")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(work, "sub"), { recursive: true })
+            await Bun.write(path.join(active.path, "outside.txt"), "outside")
+            await Bun.write(path.join(outside.path, "file.txt"), "original")
+            await Bun.write(path.join(work, "sub", "file.txt"), "inside")
+            await fs.symlink(outside.path, path.join(work, "linked"), process.platform === "win32" ? "junction" : "dir")
+          })
+          for (const command of [
+            "cat sub/../../outside.txt",
+            'cat "sub/../../outside.txt"',
+            "cat --file=sub/../../outside.txt",
+          ]) {
+            reset()
+            denyAction = "external_directory"
+            const rejected = yield* withTool(work, (registry) => settleTool(registry, call({ command })))
+            expect(assertions.map((item) => item.action)).toEqual(["external_directory"])
+            expect(rejected.result.type).toBe("error")
+            expect(runs).toHaveLength(0)
+          }
+          for (const command of [
+            "cat linked/file.txt",
+            'cat "linked/file.txt"',
+            "cat --file=linked/file.txt",
+            ...(process.platform === "win32" ? ["type linked\\file.txt"] : []),
+          ]) {
+            reset()
+            denyAction = "external_directory"
+            const rejected = yield* withTool(work, (registry) => settleTool(registry, call({ command })))
+            expect(assertions).toEqual([])
+            expect(rejected.result.type).toBe("error")
+            expect(runs).toHaveLength(0)
+          }
+          reset()
+          yield* withTool(work, (registry) => executeTool(registry, call({ command: "cat sub/file.txt" })))
+          expect(assertions.map((item) => item.action)).toEqual(["bash"])
+          expect(runs).toHaveLength(1)
+          reset()
+          afterPermission = (input) =>
+            input.action === "bash"
+              ? Effect.promise(async () => {
+                  await fs.rename(path.join(active.path, "outside.txt"), path.join(active.path, "original.txt"))
+                  await Bun.write(path.join(active.path, "outside.txt"), "replacement")
+                }).pipe(Effect.orDie)
+              : Effect.void
+          const changed = yield* withTool(work, (registry) =>
+            settleTool(registry, call({ command: "cat sub/../../outside.txt" })),
+          )
+          expect(assertions.map((item) => item.action)).toEqual(["external_directory", "bash"])
+          expect(changed.inputRejected).toBe(true)
+          expect(runs).toHaveLength(0)
+        }),
       ([active, outside]) =>
         Effect.promise(() =>
           Promise.all([active[Symbol.asyncDispose](), outside[Symbol.asyncDispose]()]).then(() => undefined),

@@ -560,6 +560,12 @@ function canonicalTool(
               (error) =>
                 new Tool.Failure({
                   message: error._tag === "PermissionV2.CorrectedError" ? error.feedback : `Permission denied: ${name}`,
+                  // Only host-typed refusal before callTool proves zero dispatch.
+                  // Declined defects and interruption never enter mapError.
+                  metadata:
+                    error instanceof PermissionV2.BlockedError || error instanceof PermissionV2.CorrectedError
+                      ? { phase: "input", reason: "permission-before-dispatch" }
+                      : undefined,
                 }),
             ),
           )

@@ -145,6 +145,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             metadata: event.metadata,
             text: event.data.prompt.text,
             executionContract: event.data.prompt.executionContract,
+            runPolicy: event.data.prompt.runPolicy,
             invocation: event.data.prompt.invocation,
             files: event.data.prompt.files,
             agents: event.data.prompt.agents,

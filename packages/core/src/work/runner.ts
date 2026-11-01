@@ -377,7 +377,7 @@ export const layer = Layer.effect(
             .prompt({
               id: promptID(attempt.id),
               sessionID: attempt.sessionID!,
-              prompt: { text: prompt },
+              prompt: { text: prompt, runPolicy: { mode: "unattended" } },
               resume: false,
             })
             .pipe(Effect.andThen(sessions.resume(attempt.sessionID!))),
@@ -1313,6 +1313,7 @@ export const layer = Layer.effect(
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
       yield* sessions.create({
         budgetMode: "autonomous",
+        ...sessionDuration(goal),
         id: sessionID,
         location: task.location ?? goal.location,
         agent: AgentV2.ID.make("review"),
@@ -1601,6 +1602,7 @@ export const layer = Layer.effect(
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
       yield* sessions.create({
         budgetMode: "autonomous",
+        ...sessionDuration(goal),
         id: sessionID,
         location: goal.location,
         agent: AgentV2.ID.make("work-planner"),
@@ -1849,6 +1851,7 @@ export const layer = Layer.effect(
       const sessionID = SessionV2.ID.make(`ses_${attemptID.slice("attempt_".length)}`)
       yield* sessions.create({
         budgetMode: "autonomous",
+        ...sessionDuration(goal),
         id: sessionID,
         location: goal.location,
         agent: AgentV2.ID.make("work-architect"),
@@ -1952,6 +1955,7 @@ export const layer = Layer.effect(
       }
       yield* sessions.create({
         budgetMode: "autonomous",
+        ...sessionDuration(goal),
         id: sessionID,
         location: task.location ?? goal.location,
         agent: agentID,
@@ -2326,7 +2330,7 @@ function repairAvailable(goal: Work.GoalInfo, task: Work.TaskInfo) {
 
 function exhaustedBudgetReason(goal: Work.GoalInfo, now: number) {
   if (
-    goal.budget?.maxDurationMs !== undefined &&
+    goal.budget?.maxDurationMs != null &&
     now - DateTime.toEpochMillis(goal.time.created) >= goal.budget.maxDurationMs
   )
     return "Goal duration budget exhausted"
@@ -2334,6 +2338,17 @@ function exhaustedBudgetReason(goal: Work.GoalInfo, now: number) {
     return "Goal provider-turn budget exhausted"
   if (goal.budget?.maxCost !== undefined && goal.usage.cost >= goal.budget.maxCost) return "Goal cost budget exhausted"
   return undefined
+}
+
+function sessionDuration(goal: Work.GoalInfo) {
+  if (goal.budget?.maxDurationMs === undefined) return {}
+  return {
+    budget: { durationMs: null },
+    inheritedDeadline:
+      goal.budget.maxDurationMs === null
+        ? undefined
+        : DateTime.toEpochMillis(goal.time.created) + goal.budget.maxDurationMs,
+  }
 }
 
 function instructions(

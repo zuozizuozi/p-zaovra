@@ -18,6 +18,7 @@ import { Global } from "../global"
 import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
 import { ShellIdentity } from "../shell-identity"
+import { analyzeCommand } from "./bash-preflight"
 import { PermissionV2 } from "../permission"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
@@ -25,6 +26,7 @@ import { Tools } from "./tools"
 import { BashJob } from "./bash-job"
 import { ExecutionContext } from "../session/execution-context"
 import { Database } from "../database/database"
+import { SessionBudget } from "../session/budget"
 import { history, latestExecutionSequence } from "../session/outcome"
 import { createHash, randomUUID } from "node:crypto"
 
@@ -38,7 +40,7 @@ export const MAX_CAPTURE_BYTES = 1024 * 1024
 export const Input = Schema.Struct({
   background_kind: Schema.optional(Schema.Literals(["task", "preview"])).annotate({
     description:
-      "preview keeps a user-requested service after Session/CLI exit; redirect its logs. task is temporary and stops with execution. Archive/cancel still stop owned previews. Applies to explicit launch and foreground yield.",
+      "preview delivers a user-requested long-lived service. On Windows and Linux it survives normal turn and CLI exit; other platforms use backend lifetime. Redirect logs. task is temporary and stops with execution; a listening port never selects preview. Explicit cancellation and archive stop owned previews. Applies to explicit launch and foreground yield.",
   }),
   run_in_background: Schema.Boolean.pipe(Schema.optional).annotate({
     description:
@@ -110,6 +112,7 @@ const StructuredOutput = Schema.Struct({
   verification: Schema.optional(SessionOutcome.Check),
   verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
   job_id: Schema.String.pipe(Schema.optional),
+  kind: Schema.Literals(["task", "preview"]).pipe(Schema.optional),
   exit: Schema.Number.pipe(Schema.optional),
   truncated: Schema.Boolean,
   timeout: Schema.Boolean.pipe(Schema.optional),
@@ -128,7 +131,7 @@ const modelOutput = (output: Output) => {
     ? `\n\nWarnings:\n${output.warnings.map((warning) => `- ${warning}`).join("\n")}`
     : ""
   if (output.job_id)
-    return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Background command started: ${output.job_id}. Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
+    return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Background command started: ${output.job_id}. ${output.kind === "task" ? "Lifetime: task. Omitting background_kind selects task even when a port is listening; Stop, budget, archive or owner closure can stop it. A service intended to remain available requires background_kind=preview at launch; do not restart this live job automatically. " : output.kind === "preview" ? "Lifetime: preview (persistent on Windows/Linux; backend-scoped on other platforms). " : "Inspect the retained job's declared lifetime; this retry did not create a new process. "}Use bash_job to get, wait, or cancel. Completion is recorded in Session history.`
   if (output.timeout) return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command timed out before completion.`
   if (output.verification?.execution === "not-run")
     return "Verification did not run successfully; inspect the diagnostic and correct its setup."
@@ -152,22 +155,25 @@ const isTimeout = (error: AppProcess.AppProcessError) =>
 // TODO: Revisit process-group cleanup and platform coverage with shell-specific tests if current AppProcess semantics do not fully cover it.
 // TODO: Revisit binary output handling if stdout/stderr decoding is text-only.
 
-const shellTokens = (command: string) => command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
-const unquote = (value: string) => value.replace(/^(['"])(.*)\1$/, "$2")
-const externalCommandDirectories = Effect.fn("BashTool.externalCommandDirectories")(function* (
+const commandPreflight = Effect.fn("BashTool.commandPreflight")(function* (
   fs: FSUtil.Interface,
+  mutation: LocationMutation.Interface,
   command: string,
   cwd: string,
+  shell: ShellIdentity.Identity["type"],
 ) {
-  const directories = new Set<string>()
-  for (const token of shellTokens(command)) {
-    const value = unquote(token).replace(/[;,|&]+$/, "")
-    if (!path.isAbsolute(value)) continue
-    const resolved = yield* fs.resolve(value)
-    if (FSUtil.contains(cwd, resolved)) continue
-    directories.add(yield* fs.resolve(path.dirname(resolved)))
-  }
-  return [...directories]
+  const syntax = analyzeCommand(command, shell)
+  const targets = yield* Effect.forEach(syntax.paths, (value) =>
+    Effect.gen(function* () {
+      const resolved = path.resolve(cwd, value)
+      const kind = yield* fs.stat(resolved).pipe(
+        Effect.map((stat) => (stat.type === "Directory" ? ("directory" as const) : ("file" as const))),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed("file" as const)),
+      )
+      return yield* mutation.resolve({ path: resolved, kind })
+    }),
+  )
+  return { syntax, targets }
 })
 
 const layer = Layer.effectDiscard(
@@ -188,7 +194,7 @@ const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. Preview jobs survive normal completion, Stop and CLI normal exit, but explicit cancellation, archive and final container cleanup still stop them. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. It survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Each call starts a new shell. Set workdir for that call; cd and environment changes do not persist to later calls or change read/write/edit paths. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; Literal external operands also require separate external_directory approval and a fresh path-identity check. Variable/compound/nested or unsupported shell syntax requires confirmation of the full exact command; a default bash allow is insufficient. This preflight is not an OS sandbox and does not inspect program/script contents. Timeout values are milliseconds (foreground default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Foreground timeout hands the live process to a background job and completion notification; it keeps the same process and job identity. Task jobs also stop with user Stop, session budget termination, archive or owner scope closure. On Windows and Linux, preview jobs survive normal completion, Stop and CLI normal exit; macOS and other platforms have backend-scoped ownership and cannot guarantee survival after CLI exit. Explicit cancellation, archive and final container cleanup still stop owned services. Use hard_timeout_ms for an explicit process deadline. For a service the user requests to start and keep running (Web, API, database, or virtual machine), use background_kind=preview (optionally run_in_background=true), then verify its business interface from an independent process, not just whether a port is listening. On supported Windows/Linux hosts it survives normal turn completion and CLI normal exit; explicit bash_job cancellation, Session archival and final container cleanup still stop it. Its PID, OS birth identity and durable log location are recorded in the command log. Redirect service output to a log file; detached stdio is not captured. bash_job can query or cancel its verified owner after this backend restarts. An unknown owner is never rerun automatically. Temporary probes and helpers use task and close with their owner. Stop only processes this task started; never terminate processes in bulk by process name or command-line pattern. The current environment context identifies the frozen execution shell and its syntax. If that environment changes, regenerate the command; do not rewrite syntax or switch shells automatically. Multiline cmd command strings are rejected before execution; write and invoke a script file instead.`,
           input:
             Config.latest(yield* config.entries(), "experimental")?.quality_progress?.stagnation_log !== false
               ? Schema.Struct({
@@ -212,6 +218,7 @@ const layer = Layer.effectDiscard(
             ...(output.verifications ? { verifications: output.verifications } : {}),
             truncated: output.truncated,
             ...(output.job_id ? { job_id: output.job_id } : {}),
+            ...(output.kind ? { kind: output.kind } : {}),
             ...(output.exit === undefined ? {} : { exit: output.exit }),
             ...(output.timeout === undefined ? {} : { timeout: output.timeout }),
           }),
@@ -250,12 +257,38 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
-              const warnings = (yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
-                (directory) =>
-                  `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
+              const preflight = yield* commandPreflight(
+                fs,
+                mutation,
+                input.command,
+                target.canonical,
+                frozen.identity.type,
               )
+              const checked = new Set<string>()
+              const warnings: string[] = []
+              for (const item of preflight.targets) {
+                if (!item.externalDirectory || checked.has(item.externalDirectory.resource)) continue
+                checked.add(item.externalDirectory.resource)
+                warnings.push(
+                  `Command operand references external directory ${item.externalDirectory.resource}; separate external_directory approval is required. This literal-path preflight is not an OS sandbox and cannot inspect program or script contents.`,
+                )
+                yield* permission.assert({
+                  ...LocationMutation.externalDirectoryPermission(item.externalDirectory),
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source,
+                })
+              }
+              if (preflight.syntax.uncertain)
+                warnings.push(
+                  "Shell syntax or path expansion cannot be certified by this narrow preflight. Confirm the entire exact command; default bash allow is not that confirmation. No shell rewrite or prefix approval is performed.",
+                )
               yield* permission.assert({
-                metadata: { shell: frozen.identity },
+                metadata: {
+                  shell: frozen.identity,
+                  preflight: preflight.syntax.uncertain ? "uncertain" : "literal-operands-only",
+                },
+                ...(preflight.syntax.uncertain ? { requireConfirmation: true as const } : {}),
                 action: name,
                 resources: [input.command],
                 save: [input.command],
@@ -266,6 +299,23 @@ const layer = Layer.effectDiscard(
 
               if ((yield* fs.stat(target.canonical)).type !== "Directory")
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
+
+              const rechecked = yield* commandPreflight(
+                fs,
+                mutation,
+                input.command,
+                target.canonical,
+                frozen.identity.type,
+              )
+              if (
+                JSON.stringify(preflight.targets.map((item) => [item.canonical, item.identity])) !==
+                JSON.stringify(rechecked.targets.map((item) => [item.canonical, item.identity]))
+              )
+                return yield* new ToolFailure({
+                  message:
+                    "Not executed: a literal command path changed while awaiting approval. Regenerate the command and confirm its current paths.",
+                  metadata: { phase: "input", reason: "path-preflight-changed" },
+                })
 
               const entries = yield* config.entries()
               const current = ShellIdentity.snapshot(entries, location)
@@ -289,12 +339,39 @@ const layer = Layer.effectDiscard(
               const shell = identity.path
               const previousExecutions = yield* history(database.db, context.sessionID, true)
               const approvedContract = ExecutionContext.approved(previousExecutions)
-              const launchEnvironment = { ...process.env, ...approvedContract?.value.environment, ...input.environment }
+              const launchEnvironment = {
+                // Drop ambient credentials before reading their values; the
+                // complete map is passed with extendEnv=false to all owners.
+                ...Object.fromEntries(
+                  Object.keys(process.env)
+                    .filter(
+                      (name) =>
+                        !/(^|_)(API_?KEY|ACCESS_?KEY(_ID)?|SECRET(_ACCESS_?KEY)?|TOKEN|PASSWORD|CREDENTIALS?)($|_)/i.test(
+                          name,
+                        ) && !["SSH_AUTH_SOCK", "SSH_AGENT_PID", "KRB5CCNAME"].includes(name.toUpperCase()),
+                    )
+                    .map((name) => [name, process.env[name]]),
+                ),
+                ...approvedContract?.value.environment,
+                ...input.environment,
+              }
               const command = AppProcess.shellCommand(input.command, target.canonical, shell, launchEnvironment)
               const silence = input.run_in_background
                 ? undefined
                 : Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms
-              const timeout = input.timeout ?? (input.run_in_background || silence ? 0 : DEFAULT_TIMEOUT_MS)
+              const bound = yield* SessionBudget.bounds(database.db, config, context.sessionID)
+              const remaining =
+                bound?.deadline === undefined ? undefined : bound.deadline - (yield* Clock.currentTimeMillis)
+              if (remaining !== undefined && remaining <= (bound?.policy?.closingReserveMs ?? 0))
+                return yield* new ToolFailure({
+                  message: "The host deadline or closing reserve prevents a new command; no process was started.",
+                  metadata: { phase: "input", reason: "deadline-expired" },
+                })
+              const requestedTimeout = input.timeout ?? (input.run_in_background || silence ? 0 : DEFAULT_TIMEOUT_MS)
+              const timeout =
+                input.run_in_background || remaining === undefined
+                  ? requestedTimeout
+                  : Math.min(requestedTimeout || remaining, remaining)
               if (input.timeout === 0 && !input.run_in_background)
                 return yield* new ToolFailure({ message: "A zero timeout requires run_in_background=true" })
               let lastProgress = Number.NEGATIVE_INFINITY
@@ -409,6 +486,16 @@ const layer = Layer.effectDiscard(
                   return yield* new ToolFailure({
                     message: "Environment changed / 环境已变化，请重新生成命令. No command executed.",
                     metadata: { phase: "execution", reason: "environment-changed", shell: frozen.identity },
+                  })
+                const admitted = yield* SessionBudget.bounds(database.db, config, context.sessionID)
+                if (
+                  admitted?.deadline !== undefined &&
+                  admitted.deadline - (yield* Clock.currentTimeMillis) <= (admitted.policy?.closingReserveMs ?? 0)
+                )
+                  return yield* new ToolFailure({
+                    message:
+                      "The host deadline or closing reserve was reached during preparation; no process was started.",
+                    metadata: { phase: "input", reason: "deadline-expired" },
                   })
                 lastOutput = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
                 const executionContext = ExecutionContext.bind(
@@ -709,7 +796,7 @@ const layer = Layer.effectDiscard(
                   ),
                   context,
                   capture ? capture.append(new Uint8Array()) : Effect.void,
-                  { kind: input.background_kind ?? "task", workdir: target.canonical },
+                  { kind: input.background_kind ?? "task", workdir: target.canonical, observe: capture?.snapshot },
                   Deferred.succeed(done, {
                     job_id: `msg_bash_${context.assistantMessageID}_${context.toolCallID}`,
                     output:
@@ -730,6 +817,7 @@ const layer = Layer.effectDiscard(
                       if (input.background_kind !== "preview") yield* jobs.watch(job_id)
                       return {
                         job_id,
+                        kind: input.background_kind ?? "task",
                         shell: identity,
                         output: `${partial || "(no output yet)"}\nCommand moved to the background with its declared lifetime. Tasks notify this Session on completion; services do not block delivery. Use bash_job get/wait/cancel when needed. No check has passed yet.`,
                         truncated: false,
@@ -781,12 +869,13 @@ const layer = Layer.effectDiscard(
                 ),
                 context,
                 capture ? capture.append(new Uint8Array()) : Effect.void,
-                { kind: input.background_kind ?? "task", workdir: target.canonical },
+                { kind: input.background_kind ?? "task", workdir: target.canonical, observe: capture?.snapshot },
               )
               if (input.background_kind === "preview") yield* Deferred.await(started)
               if (input.background_kind !== "preview") yield* jobs.watch(job_id)
               return {
                 job_id,
+                kind: input.background_kind ?? "task",
                 shell: identity,
                 output: "Command log is retained while the job runs.",
                 truncated: false,

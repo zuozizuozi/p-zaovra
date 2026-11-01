@@ -80,6 +80,94 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("490 HTTP host run policy rejects an unbound reserve and preserves explicit deadline without starting execution", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: { directory: tmp.path } }),
+    })
+    expect(created.status).toBe(200)
+    const session = (await created.json()).data
+    const submit = (runPolicy: object) =>
+      request(`/api/session/${session.id}/prompt`, tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: { text: "Admit policy only; no model", runPolicy },
+          delivery: "queue",
+          resume: false,
+        }),
+      })
+    const invalid = await submit({ mode: "unattended", closingReserveMs: 1000 })
+    expect(invalid.status).toBe(400)
+    const negative = await submit({ mode: "unattended", deadline: 0, closingReserveMs: -1 })
+    expect(negative.status).toBe(400)
+    const runPolicy = { mode: "unattended", deadline: 0, closingReserveMs: 0 }
+    const admitted = await submit(runPolicy)
+    expect(admitted.status).toBe(200)
+    expect((await admitted.json()).data.prompt.runPolicy).toEqual(runPolicy)
+    const pending = await request(`/api/session/${session.id}/input/pending`, tmp.path)
+    const inputs = (await pending.json()).data
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0].prompt.runPolicy).toEqual(runPolicy)
+    expect((await (await request("/api/session/active", tmp.path)).json()).data).toEqual({})
+  })
+
+  test("490 HTTP creation and patches distinguish ordinary, autonomous and explicit durations without resuming", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const create = async (selection: object) => {
+      const response = await request("/api/session", tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: { directory: tmp.path }, ...selection }),
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()).data
+    }
+    const limits = async (id: string) => {
+      const response = await request(`/api/session/${id}/budget`, tmp.path)
+      expect(response.status).toBe(200)
+      return (await response.json()).data.limits
+    }
+    const ordinary = await create({})
+    expect(await limits(ordinary.id)).toEqual({})
+    const delegated = await create({ budgetMode: "autonomous" })
+    expect(await limits(delegated.id)).toEqual({ tokens: 30_000_000, durationMs: 43_200_000 })
+    const chosen = await create({ budgetMode: "autonomous", budget: { durationMs: 60_000 } })
+    expect(await limits(chosen.id)).toEqual({ tokens: 30_000_000, durationMs: 60_000 })
+    for (const budget of [{}, { durationMs: null }]) {
+      const patched = await request(`/api/session/${chosen.id}`, tmp.path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ budget }),
+      })
+      expect(patched.status).toBe(200)
+      expect(await limits(chosen.id)).toEqual({
+        tokens: 30_000_000,
+        ...(Object.keys(budget).length ? {} : { durationMs: 60_000 }),
+      })
+    }
+    const active = await request("/api/session/active", tmp.path)
+    expect((await active.json()).data).toEqual({})
+    for (const duration of [undefined, null, 900_000]) {
+      const response = await request("/api/work", tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: { directory: tmp.path },
+          objective: "budget choice fixture",
+          acceptanceCriteria: [{ description: "no model execution", required: true, evidence: "test" }],
+          ...(duration === undefined ? {} : { budget: { maxDurationMs: duration } }),
+        }),
+      })
+      expect(response.status).toBe(200)
+      const goal = (await response.json()).data.goal
+      expect(goal.budget.maxDurationMs).toBe(duration === undefined ? 43_200_000 : duration)
+      expect(goal.status).toBe("draft")
+    }
+  })
+
   test("490 public approvals persist literal provenance despite forged tool metadata", async () => {
     await using tmp = await tmpdir({ git: true })
     await Bun.write(path.join(tmp.path, "zaovra.json"), JSON.stringify({ permission: { bash: "ask" } }))
@@ -147,7 +235,9 @@ describe("v2 location HttpApi", () => {
     expect(defaults.status).toBe(200)
     const defaultBudget = await defaults.json()
     expect(defaultBudget).toMatchObject({ data: { used: { tokens: 0 }, unreported: 0 } })
-    expect(defaultBudget.data.limits).toEqual({ durationMs: 43_200_000 })
+    // 490: new ordinary interaction is unlimited; autonomous/legacy policy
+    // and explicit numeric/null/omitted axes are tested independently.
+    expect(defaultBudget.data.limits).toEqual({})
     const update = await request(`/api/session/${session.id}`, tmp.path, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

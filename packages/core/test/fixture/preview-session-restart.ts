@@ -17,8 +17,10 @@ import { Location } from "../../src/location"
 import { AbsolutePath } from "../../src/schema"
 import { ProjectV2 } from "../../src/project"
 import { Database } from "../../src/database/database"
+import { PermissionV2 } from "../../src/permission"
 import { location } from "./location"
-import { settleTool, toolIdentity } from "../lib/tool"
+import { toolIdentity } from "../lib/tool"
+import { settleToolApproved } from "./approve-tool"
 
 const [root, mode] = process.argv.slice(2)
 const stateFile = path.join(root, "state.json")
@@ -41,7 +43,7 @@ await Effect.runPromise(
         yield* sessions.update({ sessionID: session.id, budget: { tokens: 123, durationMs: 4567 } })
         const ready = path.join(root, "ready.json")
         const script = path.resolve(import.meta.dir, "service-server.ts")
-        const result = yield* settleTool(registry, {
+        const result = yield* settleToolApproved(registry, {
           sessionID: session.id,
           ...toolIdentity,
           call: {
@@ -72,7 +74,7 @@ await Effect.runPromise(
       )
       const sessionID = SessionV2.ID.make(saved.sessionID)
       const observe = (id: SessionV2.ID, action: string) =>
-        settleTool(registry, {
+        settleToolApproved(registry, {
           sessionID: id,
           ...toolIdentity,
           call: {
@@ -109,6 +111,11 @@ await Effect.runPromise(
           agent.permissions = [{ action: "bash", resource: "*", effect: "allow" }]
         }),
       )
+      // Both positive observation waits need budget admission. Persistence of
+      // the original 4567ms budget and both rejection gates was asserted above.
+      // The cancel branch's 10ms wait can also occur after that original D.
+      if (mode === "wait" || mode === "cancel")
+        yield* sessions.update({ sessionID, budget: { durationMs: null } })
       if (mode === "archive") yield* sessions.update({ sessionID, archived: true })
       if (mode === "wait") {
         if (((yield* observe(sessionID, "wait")).output?.structured as { status?: string })?.status !== "error")
@@ -146,6 +153,7 @@ await Effect.runPromise(
           BashJob.node,
           AgentV2.node,
           ToolRegistry.node,
+          PermissionV2.node,
           BackgroundJob.node,
           Database.node,
           Config.node,

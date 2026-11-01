@@ -20,7 +20,7 @@ afterEach(async () => {
 
 function client(directory: string) {
   return createZaovraClient({
-    baseUrl: "http://test",
+    baseUrl: "http://localhost",
     directory,
     fetch: ((req: Request) => Server.Default().app.fetch(req)) as unknown as typeof fetch,
   })

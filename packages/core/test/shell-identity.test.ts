@@ -9,8 +9,56 @@ import { ShellIdentity } from "@zaovra-ai/core/shell-identity"
 import { Shell } from "@zaovra-ai/core/shell"
 import { AppProcess } from "@zaovra-ai/core/process"
 import { Effect, Stream } from "effect"
+import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 
 describe("shared shell identity", () => {
+  if (process.platform === "win32") {
+    for (const major of [5, 7]) {
+      test(`490 PowerShell ${major} preserves default bytes and explicit Encoding`, async () => {
+        await using dir = await tmpdir()
+        const executable =
+          major === 5
+            ? path.join(process.env.SystemRoot ?? "C:/Windows", "System32/WindowsPowerShell/v1.0/powershell.exe")
+            : ShellIdentity.resolve("pwsh").path
+        const identity = ShellIdentity.resolve(executable)
+        expect(Number(identity.version.split(".")[0])).toBe(major)
+        const command = AppProcess.shellCommand(
+          "$value='中文'; $value | Out-File -LiteralPath 'default.txt' -NoNewline; $value | Out-File -LiteralPath 'utf8.txt' -Encoding utf8 -NoNewline; $value | Out-File -LiteralPath 'explicit.txt' -Encoding unicode -NoNewline",
+          dir.path,
+          executable,
+          {
+            ...process.env,
+            ...(major === 5
+              ? {
+                  PSModulePath: path.join(
+                    process.env.SystemRoot ?? "C:/Windows",
+                    "System32/WindowsPowerShell/v1.0/Modules",
+                  ),
+                }
+              : {}),
+          },
+        )
+        expect(command.command).toBe(executable)
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const processService = yield* AppProcess.Service
+            return yield* processService.run(command, { timeout: "10 seconds" })
+          }).pipe(Effect.scoped, Effect.provide(LayerNode.compile(AppProcess.node))),
+        )
+        expect(result.exitCode).toBe(0)
+        const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("中文", "utf16le")])
+        const utf8 = Buffer.from("中文", "utf8")
+        expect(Buffer.from(await Bun.file(path.join(dir.path, "default.txt")).arrayBuffer())).toEqual(
+          major === 5 ? utf16 : utf8,
+        )
+        expect(Buffer.from(await Bun.file(path.join(dir.path, "utf8.txt")).arrayBuffer())).toEqual(
+          major === 5 ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), utf8]) : utf8,
+        )
+        expect(Buffer.from(await Bun.file(path.join(dir.path, "explicit.txt")).arrayBuffer())).toEqual(utf16)
+      }, 15000)
+    }
+  }
+
   test("O1 trusted global shell retains version and syntax guidance", async () => {
     await using dir = await tmpdir()
     const probe = await probeShell(dir.path)

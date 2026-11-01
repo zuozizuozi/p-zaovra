@@ -10,7 +10,7 @@ export function SettingsSessionBudget() {
   const language = useLanguage()
   const [state, setState] = createStore({
     tokens: "",
-    minutes: "720",
+    minutes: "",
     pending: false,
     dirty: false,
     tokenDirty: false,
@@ -21,7 +21,7 @@ export function SettingsSessionBudget() {
     if (state.dirty) return
     setState({
       tokens: config.session_token_budget == null ? "" : String(config.session_token_budget),
-      minutes: config.session_duration_ms === null ? "" : String((config.session_duration_ms ?? 43_200_000) / 60_000),
+      minutes: config.session_duration_ms == null ? "" : String(config.session_duration_ms / 60_000),
     })
   })
   const save = async () => {
@@ -77,6 +77,11 @@ export function SettingsSessionBudget() {
             step="1"
             disabled={state.pending}
             value={state.minutes}
+            placeholder={
+              sync().data.config.session_duration_ms === undefined
+                ? language.t("session.budget.modeDefaults")
+                : language.t("session.budget.unlimited")
+            }
             onInput={(event) => setState({ minutes: event.currentTarget.value, dirty: true, durationDirty: true })}
           />
         </label>

@@ -29,6 +29,7 @@ import { settleTool, toolIdentity } from "./lib/tool"
 
 test("real Bash permission denial prevents a process while allowed success and nonzero exits still execute", async () => {
   await using root = await tmpdir()
+  await using outside = await tmpdir()
   const sessionID = SessionV2.ID.make("ses_real_bash_permission")
   const marker = path.join(root.path, "executed.txt")
   const probe = await probeShell(root.path)
@@ -119,6 +120,33 @@ test("real Bash permission denial prevents a process while allowed success and n
       const permission = yield* PermissionV2.Service
       expect(yield* permission.list()).toEqual([])
 
+      yield* agents.transform((draft) =>
+        draft.update(toolIdentity.agent, (agent) => {
+          agent.permissions = [{ action: "bash", resource: "*", effect: "allow" }]
+        }),
+      )
+      const operand = path.join(outside.path, "fake-input.txt")
+      yield* Effect.promise(() => Bun.write(operand, "synthetic fixture"))
+      yield* agents.transform((draft) =>
+        draft.update(toolIdentity.agent, (agent) => {
+          agent.permissions = [
+            { action: "bash", resource: "*", effect: "allow" },
+            { action: "external_directory", resource: "*", effect: "deny" },
+          ]
+        }),
+      )
+      const external = yield* settleTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "external-denied",
+          name: "bash",
+          input: { command: `bun probe.mjs 0 "${operand}"` },
+        },
+      })
+      expect(external.result.type).toBe("error")
+      expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
       yield* agents.transform((draft) =>
         draft.update(toolIdentity.agent, (agent) => {
           agent.permissions = [{ action: "bash", resource: "*", effect: "allow" }]

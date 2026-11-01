@@ -399,6 +399,15 @@ describe("WorkRunner", () => {
           const session = listed.find((session) => session.id === attempt.sessionID)
           expect(session?.title.startsWith(`${task.title} · `)).toBe(true)
           expect(session?.title.endsWith(` · #${attempt.number}`)).toBe(true)
+          expect(session?.inheritedDeadline).toBe(DateTime.toEpochMillis(created.goal.time.created) + 43_200_000)
+          if (!attempt.sessionID) throw new Error("Local Attempt must own a Session")
+          expect(yield* sessions.deadline(attempt.sessionID)).toBe(session?.inheritedDeadline)
+          // This graph uses noop SessionExecution and fixed Planner/Reviewer.
+          // Execute admits a durable prompt; it does not promote model history.
+          if (attempt.kind === "execute")
+            expect(yield* sessions.pendingInputs(attempt.sessionID)).toMatchObject([
+              { prompt: { runPolicy: { mode: "unattended" } } },
+            ])
         }
       }
     }),

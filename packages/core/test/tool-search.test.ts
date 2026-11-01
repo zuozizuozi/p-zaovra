@@ -20,7 +20,11 @@ const it = testEffect(
     [
       ToolOutputStore.node,
       Layer.mock(ToolOutputStore.Service, {
-        capture: () => ({ append: () => Effect.void, paths: () => [] }),
+        capture: () => ({
+          append: () => Effect.void,
+          paths: () => [],
+          snapshot: () => ({ output: "", cursor: 0, truncated: false }),
+        }),
         bound: (input) => Effect.succeed({ output: input.output, outputPaths: [] }),
       }),
     ],
