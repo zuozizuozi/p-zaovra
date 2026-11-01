@@ -273,7 +273,10 @@ const layer = Layer.effect(
       settle = true,
       stopMessage?: string,
     ) {
-      const { limit, duration } = yield* readBudget(session.id)
+      const limits = yield* readBudget(session.id)
+      const limit = limits.limit
+      const deadline = SessionBudget.deadline(session, limits.duration)
+      const duration = deadline === undefined ? undefined : deadline - DateTime.toEpochMillis(session.time.created)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
       const expired = !!stopMessage || (duration !== undefined && elapsed >= duration)
       const checkpoint = notify ? AccuracyGuidance.checkpoint({ elapsed, limit: duration }) : undefined
@@ -870,10 +873,7 @@ const layer = Layer.effect(
             unreported: progressUsage.unreported,
             budget: progressBudget?.limit,
             advisoryDeadline: quality?.deadline,
-            deadline:
-              progressBudget?.duration === undefined
-                ? undefined
-                : DateTime.toEpochMillis(session.time.created) + progressBudget.duration,
+            deadline: SessionBudget.deadline(session, progressBudget?.duration),
             epoch: system.baselineSeq,
           }
         : undefined
@@ -1202,6 +1202,18 @@ const layer = Layer.effect(
               if (!uncertain) hostedOperations.delete(event.id)
             }
             if (event.type !== "tool-call" || event.providerExecuted) return
+            // Streaming and approval waits may outlive the admission check for
+            // this provider turn. Expired time is a rejection, never timeout=0.
+            if (yield* checkBudget(yield* getSession(session.id), model, false, false)) {
+              if (budgetStop) budgetStop.expired = true
+              needsContinuation = false
+              return yield* publish(LLMEvent.toolResult({
+                id: event.id,
+                name: event.name,
+                result: { type: "error", value: "Tool not dispatched: the authorized Session deadline or budget has expired." },
+                providerMetadata: { zaovra: { inputRejected: true } },
+              }), [], { phase: "input", reason: "budget-before-dispatch" })
+            }
             if (
               !toolMaterialization ||
               (deliveryReview &&
@@ -2298,15 +2310,18 @@ const layer = Layer.effect(
       }
       const deadline = Effect.gen(function* () {
         while (true) {
-          yield* Effect.sleep("1 second")
           const session = yield* getSession(sessionID)
-          if (!budgetStop.model) continue
-          const budget = yield* readBudget(sessionID)
-          if (
-            budget.duration === undefined ||
-            (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created) < budget.duration
-          )
+          if (!budgetStop.model) {
+            yield* Effect.sleep("1 second")
             continue
+          }
+          const budget = yield* readBudget(sessionID)
+          const bound = SessionBudget.deadline(session, budget.duration)
+          const remaining = bound === undefined ? undefined : bound - (yield* Clock.currentTimeMillis)
+          if (remaining === undefined || remaining > 0) {
+            yield* Effect.sleep(remaining === undefined ? 1000 : Math.min(1000, remaining))
+            continue
+          }
           if (!(yield* checkBudget(session, budgetStop.model, false, false))) continue
           budgetStop.expired = true
           return { needsContinuation: false, step }
@@ -2413,6 +2428,7 @@ const layer = Layer.effect(
               ))
           const budget = yield* readBudget(sessionID)
           const now = yield* Clock.currentTimeMillis
+          const bound = SessionBudget.deadline(session, budget.duration)
           const failureKey = `${error.reason._tag}:${"status" in error.reason ? error.reason.status : ""}:${error.reason.message}`
           recovery.repeated = recovery.failureKey === failureKey ? recovery.repeated + 1 : 0
           recovery.failureKey = failureKey
@@ -2423,10 +2439,7 @@ const layer = Layer.effect(
             cancelled: false,
             committed: !!last?.content.length,
             operations: unknown ? "unknown" : "settled",
-            remainingMs:
-              budget.duration === undefined
-                ? undefined
-                : budget.duration - (now - DateTime.toEpochMillis(session.time.created)),
+            remainingMs: bound === undefined ? undefined : bound - now,
           })
           if (decision.action === "stop") {
             yield* recordRecovery("stopped", { ended: now, category: decision.category, message: decision.message })

@@ -262,6 +262,7 @@ export type SessionsListOutput = {
   readonly data: ReadonlyArray<{
     readonly id: string
     readonly parentID?: string
+    readonly inheritedDeadline?: number
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -299,31 +300,56 @@ export type SessionsCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly budgetMode?: "interactive" | "autonomous" | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly budgetMode?: "interactive" | "autonomous" | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly budgetMode?: "interactive" | "autonomous" | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly budgetMode?: "interactive" | "autonomous" | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
   }["location"]
+  readonly budgetMode?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly budgetMode?: "interactive" | "autonomous" | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
+  }["budgetMode"]
+  readonly budget?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly budgetMode?: "interactive" | "autonomous" | null
+    readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null } | null
+  }["budget"]
 }
 
 export type SessionsCreateOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly inheritedDeadline?: number
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -489,6 +515,7 @@ export type SessionsGetOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly inheritedDeadline?: number
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -1375,6 +1402,9 @@ export type SessionsHistoryOutput = {
           readonly projectID: string
           readonly parentID?: string
           readonly budgetMode?: "interactive" | "autonomous"
+          readonly budgetPolicy?: 2
+          readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null }
+          readonly inheritedDeadline?: number
           readonly agent?: string
           readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
           readonly location: { readonly directory: string; readonly workspaceID?: string }
@@ -1436,6 +1466,7 @@ export type SessionsHistoryOutput = {
           readonly archived?: boolean
           readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null }
           readonly budgetUpdate?: "patch"
+          readonly inheritedDeadline?: number | null
         }
       }
     | {
@@ -2226,6 +2257,9 @@ export type SessionsEventsOutput =
         readonly projectID: string
         readonly parentID?: string
         readonly budgetMode?: "interactive" | "autonomous"
+        readonly budgetPolicy?: 2
+        readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null }
+        readonly inheritedDeadline?: number
         readonly agent?: string
         readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
         readonly location: { readonly directory: string; readonly workspaceID?: string }
@@ -2287,6 +2321,7 @@ export type SessionsEventsOutput =
         readonly archived?: boolean
         readonly budget?: { readonly tokens?: number | null; readonly durationMs?: number | null }
         readonly budgetUpdate?: "patch"
+        readonly inheritedDeadline?: number | null
       }
     }
   | {
@@ -4175,6 +4210,7 @@ export type SessionsUpdateOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly inheritedDeadline?: number
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -4286,7 +4322,7 @@ export type WorkListOutput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     }
     readonly usage: {
@@ -4328,7 +4364,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4369,7 +4405,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4410,7 +4446,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4451,7 +4487,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4492,7 +4528,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4533,7 +4569,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4574,7 +4610,7 @@ export type WorkCreateInput = {
       readonly maxParallelTasks?: number
       readonly maxReplans?: number
       readonly maxTurns?: number
-      readonly maxDurationMs?: number
+      readonly maxDurationMs?: number | null
       readonly maxCost?: number
     } | null
     readonly planning?: boolean | null
@@ -4644,7 +4680,7 @@ export type WorkCreateOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {
@@ -4980,7 +5016,7 @@ export type WorkGetOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {
@@ -5278,7 +5314,7 @@ export type WorkExpandOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {
@@ -5567,7 +5603,7 @@ export type WorkReplanOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {
@@ -5902,7 +5938,7 @@ export type WorkResolveMemoryOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {
@@ -6214,7 +6250,7 @@ export type WorkUpdateMemoryOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {
@@ -6502,7 +6538,7 @@ export type WorkDeleteMemoryOutput = {
         readonly maxParallelTasks?: number
         readonly maxReplans?: number
         readonly maxTurns?: number
-        readonly maxDurationMs?: number
+        readonly maxDurationMs?: number | null
         readonly maxCost?: number
       }
       readonly usage: {

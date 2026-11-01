@@ -137,13 +137,16 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           agent: Agent.ID.pipe(Schema.optional),
           model: Model.Ref.pipe(Schema.optional),
           location: Location.Ref.pipe(Schema.optional),
+          budgetMode: Schema.Literals(["interactive", "autonomous"]).pipe(Schema.optional),
+          budget: SessionOutcome.BudgetUpdate.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: Session.Info }),
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.create",
           summary: "Create session",
-          description: "Create a session at the requested location.",
+          description:
+            "Create a session at the requested location. New ordinary interaction has no implicit duration limit; autonomous mode uses its configured/default duration. Each budget axis may be omitted (mode default), null (unlimited), or a positive number. Existing sessions are adopted without replacing their budget or resuming them.",
         }),
       ),
     )

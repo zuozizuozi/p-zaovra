@@ -23,6 +23,7 @@ import { Filesystem } from "@/util/filesystem"
 import { createZaovraClient, type Event, type ZaovraClient } from "@zaovra-ai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
+import { applyRunDuration, runDuration } from "./run/budget.shared"
 
 type ModelInput = {
   providerID: string
@@ -166,6 +167,10 @@ export const RunCommand = effectCmd({
         type: "boolean",
         describe: "show thinking blocks",
       })
+      .option("duration-ms", {
+        type: "string",
+        describe: "total duration from session creation: positive milliseconds or unlimited; omission preserves existing limits",
+      })
       .option("mini", {
         type: "boolean",
         hidden: true,
@@ -218,6 +223,7 @@ export const RunCommand = effectCmd({
     const flags = yield* RuntimeFlags.Service
     const localInstance = yield* InstanceRef
     yield* Effect.promise(async () => {
+      const budget = runDuration(args["duration-ms"])
       const rawMessage = [...args.message, ...(args["--"] || [])].join(" ")
       const interactive = args.mini
       const auto = args.auto || args.yolo || args["dangerously-skip-permissions"]
@@ -388,6 +394,8 @@ export const RunCommand = effectCmd({
             process.exit(1)
           }
 
+          await applyRunDuration(sdk, current.data.data.id, budget)
+
           return {
             id: current.data.data.id,
             title: current.data.data.title,
@@ -400,6 +408,7 @@ export const RunCommand = effectCmd({
           : undefined
 
         if (base) {
+          await applyRunDuration(sdk, base.id, budget)
           return {
             id: base.id,
             title: base.title,
@@ -408,7 +417,7 @@ export const RunCommand = effectCmd({
         }
 
         const name = title()
-        const result = await sdk.v2.session.create({ location: { directory: await current(sdk) } })
+        const result = await sdk.v2.session.create({ location: { directory: await current(sdk) }, budget })
         const id = result.data?.data.id
         if (!id) {
           return
@@ -433,6 +442,7 @@ export const RunCommand = effectCmd({
       ): Promise<SessionInfo> {
         const name = args.title !== undefined && args.title !== "" ? args.title : undefined
         const result = await sdk.v2.session.create({
+          budget,
           agent: input.agent,
           model: input.model
             ? {
@@ -976,6 +986,8 @@ export async function runMini(input: MiniCommandInput) {
     port: undefined,
     variant: undefined,
     thinking: undefined,
+    "duration-ms": undefined,
+    durationMs: undefined,
     mini: true,
     interactive: false,
     replay: input.replay ?? true,

@@ -399,6 +399,9 @@ describe("WorkRunner", () => {
           const session = listed.find((session) => session.id === attempt.sessionID)
           expect(session?.title.startsWith(`${task.title} · `)).toBe(true)
           expect(session?.title.endsWith(` · #${attempt.number}`)).toBe(true)
+          expect(session?.inheritedDeadline).toBe(DateTime.toEpochMillis(created.goal.time.created) + 43_200_000)
+          if (!attempt.sessionID) throw new Error("Local Attempt must own a Session")
+          expect(yield* sessions.deadline(attempt.sessionID)).toBe(session?.inheritedDeadline)
         }
       }
     }),

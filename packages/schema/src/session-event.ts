@@ -60,6 +60,9 @@ export const Created = Event.define({
     projectID: Project.ID,
     parentID: SessionID.pipe(optional),
     budgetMode: Schema.Literals(["interactive", "autonomous"]).pipe(optional),
+    budgetPolicy: Schema.Literal(2).pipe(optional),
+    budget: SessionOutcome.BudgetUpdate.pipe(optional),
+    inheritedDeadline: Schema.Finite.pipe(optional),
     agent: Agent.ID.pipe(optional),
     model: Model.Ref.pipe(optional),
     location: Location.Ref,
@@ -116,6 +119,7 @@ export const Updated = Event.define({
     archived: Schema.Boolean.pipe(optional),
     budget: SessionOutcome.BudgetUpdate.pipe(optional),
     budgetUpdate: Schema.Literals(["patch"]).pipe(optional),
+    inheritedDeadline: Schema.NullOr(Schema.Finite).pipe(optional),
   },
 })
 export type Updated = typeof Updated.Type

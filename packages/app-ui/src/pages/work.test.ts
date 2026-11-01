@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { workGoalControlDisabled, workGoalControls } from "./work-controls"
+import { workGoalControlDisabled, workGoalControls, workGoalDuration } from "./work-controls"
 
 describe("workGoalControls", () => {
+  test("keeps omitted, unlimited and explicit goal durations separate", () => {
+    expect(workGoalDuration({ mode: "default", minutes: "" })).toEqual({})
+    expect(workGoalDuration({ mode: "unlimited", minutes: "720" })).toEqual({ maxDurationMs: null })
+    expect(workGoalDuration({ mode: "custom", minutes: "15" })).toEqual({ maxDurationMs: 900_000 })
+    for (const minutes of ["", "0", "-1", "NaN", "Infinity", "9007199254740991"]) {
+      expect(workGoalDuration({ mode: "custom", minutes })).toBeUndefined()
+    }
+  })
   test("only exposes resume and pause in states accepted by the runner", () => {
     expect(workGoalControls("draft")).toMatchObject({ resume: true, pause: false })
     expect(workGoalControls("paused")).toMatchObject({ resume: true, pause: false })

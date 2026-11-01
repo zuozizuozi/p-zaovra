@@ -41,7 +41,7 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   session_duration_ms: Schema.NullOr(PositiveInt).pipe(Schema.optional).annotate({
     description:
-      "Session wall-clock limit in milliseconds since creation (default 43200000; null explicitly disables), also checked during provider and tool waits. New session budget patches preserve omitted axes (including {}); null removes only its corresponding limit. Historical whole-object budget events retain their original replacement semantics.",
+      "Session wall-clock limit in milliseconds since creation. New ordinary interaction defaults to unlimited; autonomous and legacy unknown Sessions default to 43200000. Existing interaction with the previous implicit 12h limit keeps it until explicitly changed. null removes this local axis, but cannot extend an inherited parent/Goal deadline. Checked during provider and tool waits. Patches preserve omitted axes (including {}); null removes only its corresponding limit. Historical whole-object events keep replacement semantics.",
   }),
   session_output: Schema.Record(
     Schema.String,

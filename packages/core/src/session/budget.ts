@@ -1,6 +1,6 @@
 export * as SessionBudget from "./budget"
 
-import { Effect, Schema } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { Config } from "../config"
@@ -50,14 +50,41 @@ export const read = Effect.fn("SessionBudget.read")(function* (
   const interactive = !owner?.attempt && owner?.metadata?.budgetMode === "interactive"
   const limit =
     tokens === null ? undefined : (tokens ?? (interactive ? undefined : SessionOutcome.DefaultBudget.tokens))
-  const wall = duration === null ? undefined : (duration ?? SessionOutcome.DefaultBudget.durationMs)
+  // Existing interaction provenance predates the unlimited-duration decision.
+  // Its implicit 12h wall remains until the user changes that axis explicitly.
+  const wall =
+    duration === null
+      ? undefined
+      : (duration ??
+        (interactive && owner?.metadata?.budgetPolicy === 2 ? undefined : SessionOutcome.DefaultBudget.durationMs))
+  const initial = Option.getOrUndefined(
+    Schema.decodeUnknownOption(SessionOutcome.BudgetUpdate)(owner?.metadata?.creationBudget),
+  )
   const updates = adjustments.map((entry) => Schema.decodeUnknownSync(SessionEvent.Updated.data)(entry.data))
   const tokenUpdate = updates.find((event) => event.budgetUpdate !== "patch" || Object.hasOwn(event.budget!, "tokens"))
   const durationUpdate = updates.find(
     (event) => event.budgetUpdate !== "patch" || Object.hasOwn(event.budget!, "durationMs"),
   )
   return {
-    limit: tokenUpdate ? (tokenUpdate.budget?.tokens ?? undefined) : limit,
-    duration: durationUpdate ? (durationUpdate.budget?.durationMs ?? undefined) : wall,
+    limit: tokenUpdate
+      ? (tokenUpdate.budget?.tokens ?? undefined)
+      : initial && Object.hasOwn(initial, "tokens")
+        ? (initial.tokens ?? undefined)
+        : limit,
+    duration: durationUpdate
+      ? (durationUpdate.budget?.durationMs ?? undefined)
+      : initial && Object.hasOwn(initial, "durationMs")
+        ? (initial.durationMs ?? undefined)
+        : wall,
   }
 })
+
+/** Absolute host bound shared with children; changing a local axis cannot extend its parent. */
+export function deadline(
+  session: Pick<SessionSchema.Info, "time" | "inheritedDeadline">,
+  duration: number | undefined,
+) {
+  const parent = session.inheritedDeadline
+  const own = duration === undefined ? undefined : DateTime.toEpochMillis(session.time.created) + duration
+  return parent === undefined ? own : own === undefined ? parent : Math.min(parent, own)
+}

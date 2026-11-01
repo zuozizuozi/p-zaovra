@@ -35,15 +35,17 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.screenshot",
         Effect.fn(function* (ctx) {
           const bytes = yield* Effect.tryPromise({
-            try: () => Screenshot.read(
-              path.join(global.data, ToolOutputStore.MANAGED_DIRECTORY),
-              ctx.params.sessionID,
-              ctx.params.reference,
-            ),
-            catch: () => new InvalidRequestError({
-              message: "Screenshot unavailable, expired or not owned by this session",
-              field: "reference",
-            }),
+            try: () =>
+              Screenshot.read(
+                path.join(global.data, ToolOutputStore.MANAGED_DIRECTORY),
+                ctx.params.sessionID,
+                ctx.params.reference,
+              ),
+            catch: () =>
+              new InvalidRequestError({
+                message: "Screenshot unavailable, expired or not owned by this session",
+                field: "reference",
+              }),
           })
           return { data: bytes.toString("base64"), mime: "image/png" as const }
         }),
@@ -103,6 +105,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           return {
             data: yield* session.create({
               id: ctx.payload.id,
+              budgetMode: ctx.payload.budgetMode,
+              budget: ctx.payload.budget,
               agent: ctx.payload.agent,
               model: ctx.payload.model,
               location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },

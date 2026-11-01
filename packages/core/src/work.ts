@@ -448,6 +448,14 @@ const layer = Layer.effect(
             message: "Planning and an explicit Task graph are mutually exclusive",
           })
         const existing = yield* store.getGoal(goalID)
+        // An exact retry adopts an older Goal's recorded default, never a new one.
+        const duration =
+          input.budget?.maxDurationMs !== undefined
+            ? input.budget.maxDurationMs
+            : existing
+              ? existing.budget?.maxDurationMs
+              : 12 * 60 * 60 * 1000
+        const budget = duration === undefined ? input.budget : { ...input.budget, maxDurationMs: duration }
         const roleContracts = existing
           ? (existing.roleContracts ?? WorkRole.contracts)
           : (input.roleContracts ?? WorkRole.contracts)
@@ -470,7 +478,7 @@ const layer = Layer.effect(
               location: encodeLocation(input.location),
               objective: input.objective,
               acceptanceCriteria: acceptanceCriteria.map((criterion) => encodeCriterion(criterion)),
-              budget: input.budget ? encodeBudget(input.budget) : undefined,
+              budget: budget ? encodeBudget(budget) : undefined,
             },
           )
         ) {
@@ -540,7 +548,7 @@ const layer = Layer.effect(
               roleContracts,
               workerID: input.workerID,
               status: "draft",
-              budget: input.budget,
+              budget,
               usage: { attempts: 0, repairs: 0, turns: 0, cost: 0 },
               time: { created: timestamp, updated: timestamp },
               revision: 0,

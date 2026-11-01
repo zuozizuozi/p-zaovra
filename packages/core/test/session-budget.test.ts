@@ -37,6 +37,54 @@ const withRuntime = <A, E, R>(body: (directory: string) => Effect.Effect<A, E, R
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   )
 
+it.live("490 creation budget chooses each axis before any prompt; old interaction retains its wall default", () =>
+  withRuntime((directory) => Effect.gen(function* () {
+    const sessions = yield* SessionV2.Service
+    const database = yield* Database.Service
+    const config = Config.Service.of({ entries: () => Effect.succeed([]) })
+    for (const mode of ["interactive", "autonomous"] as const)
+      for (const budget of [undefined, {}, { durationMs: null }, { tokens: 73, durationMs: 5000 }]) {
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) }, budgetMode: mode, budget })
+        const expectedDuration = budget?.durationMs === null ? undefined : budget?.durationMs ?? (mode === "interactive" ? undefined : 43_200_000)
+        expect(yield* SessionBudget.read(database.db, config, session.id)).toEqual({
+          limit: budget?.tokens ?? (mode === "interactive" ? undefined : 30_000_000), duration: expectedDuration,
+        })
+        yield* sessions.update({ sessionID: session.id, budget: {} })
+        expect((yield* SessionBudget.read(database.db, config, session.id)).duration).toBe(expectedDuration)
+        yield* sessions.update({ sessionID: session.id, budget: { durationMs: null } })
+        expect((yield* SessionBudget.read(database.db, config, session.id)).duration).toBeUndefined()
+      }
+    const legacy = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+    yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "interactive" } }).where(eq(SessionTable.id, legacy.id)).run().pipe(Effect.orDie)
+    expect(yield* SessionBudget.read(database.db, config, legacy.id)).toEqual({ limit: undefined, duration: 43_200_000 })
+  })),
+)
+
+it.live("490 durable parent deadline caps child axes without upgrading legacy defaults or resuming work", () =>
+  withRuntime((directory) => Effect.gen(function* () {
+    const sessions = yield* SessionV2.Service
+    const database = yield* Database.Service
+    const config = Config.Service.of({ entries: () => Effect.succeed([]) })
+    const parent = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) }, budget: { durationMs: 5000 } })
+    const deadline = yield* sessions.deadline(parent.id)
+    expect(deadline).toBe(DateTime.toEpochMillis(parent.time.created) + 5000)
+    const child = yield* sessions.create({ location: parent.location, parentID: parent.id, budgetMode: "autonomous", budget: { durationMs: null }, inheritedDeadline: deadline })
+    expect(yield* sessions.deadline(child.id)).toBe(deadline)
+    yield* sessions.update({ sessionID: child.id, budget: { durationMs: 1_000_000 } })
+    expect(yield* sessions.deadline(child.id)).toBe(deadline)
+    yield* sessions.update({ sessionID: child.id, budget: { durationMs: null } })
+    expect(yield* sessions.deadline(child.id)).toBe(deadline)
+    const legacy = yield* sessions.create({ location: parent.location })
+    yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "interactive" } }).where(eq(SessionTable.id, legacy.id)).run().pipe(Effect.orDie)
+    yield* sessions.update({ sessionID: legacy.id, inheritedDeadline: 0 })
+    expect((yield* SessionBudget.read(database.db, config, legacy.id)).duration).toBe(43_200_000)
+    expect(yield* sessions.deadline(legacy.id)).toBe(0)
+    yield* sessions.update({ sessionID: legacy.id, inheritedDeadline: null })
+    expect(yield* sessions.deadline(legacy.id)).toBe(DateTime.toEpochMillis(legacy.time.created) + 43_200_000)
+    expect((yield* sessions.active).size).toBe(0)
+  })),
+)
+
 for (const source of [
   "interactive",
   "headless-root",
@@ -85,6 +133,7 @@ for (const source of [
                   budget: override === "duration-only" ? { durationMs: 1234 } : { tokens: override },
                 })
               const defaultLimit = source.startsWith("autonomous") || source === "legacy" ? 30_000_000 : undefined
+              const defaultDuration = source.startsWith("autonomous") || source === "legacy" ? 43_200_000 : undefined
               const expected =
                 override === null
                   ? undefined
@@ -95,12 +144,12 @@ for (const source of [
                       : (configured ?? defaultLimit)
               expect(yield* SessionBudget.read(database.db, config, session.id)).toEqual({
                 limit: expected,
-                duration: override === "duration-only" ? 1234 : 43_200_000,
+                duration: override === "duration-only" ? 1234 : defaultDuration,
               })
               // A fresh reader has no process-local mode/override cache to carry over.
               expect(yield* SessionBudget.read(database.db, config, session.id)).toEqual({
                 limit: expected,
-                duration: override === "duration-only" ? 1234 : 43_200_000,
+                duration: override === "duration-only" ? 1234 : defaultDuration,
               })
             }
         }),

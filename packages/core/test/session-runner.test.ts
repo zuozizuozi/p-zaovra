@@ -8725,6 +8725,45 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("490 deadline is checked again before dispatching a streamed tool", () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      executions.length = 0
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const deadline = (yield* Clock.currentTimeMillis) + 500
+      yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "autonomous", budgetPolicy: 2, inheritedDeadline: deadline, creationBudget: { durationMs: null } } }).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+      yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Use the remaining interval" }), resume: false })
+      responseStream = Stream.fromIterable([
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "after-deadline", name: "echo", input: { text: "must not execute" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]).pipe(Stream.tap((event) => event.type === "tool-call" ? setTime(deadline) : Effect.void))
+      yield* sessions.resume(sessionID)
+      expect(executions).toEqual([])
+      expect(requests).toHaveLength(1)
+      expect((yield* sessions.outcome(sessionID)).termination?.category).toBe("budget")
+    }),
+  )
+
+  for (const remaining of [0, -1])
+    it.effect(`490 inherited absolute deadline rejects provider admission at remaining ${remaining}`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const sessions = yield* SessionV2.Service
+        const database = yield* Database.Service
+        const deadline = (yield* Clock.currentTimeMillis) + remaining
+        yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "autonomous", budgetPolicy: 2, inheritedDeadline: deadline, creationBudget: { durationMs: null } } }).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+        yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Expired parent task" }), resume: false })
+        yield* sessions.resume(sessionID)
+        expect(requests).toHaveLength(0)
+        expect((yield* sessions.outcome(sessionID)).termination?.category).toBe("budget")
+      }),
+    )
+
   for (const delivery of ["steer", "queue"] as const)
     it.effect(`490 expired ${delivery} observation promotion cannot create a provider turn`, () =>
       Effect.gen(function* () {

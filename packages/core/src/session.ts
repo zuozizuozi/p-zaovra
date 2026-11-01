@@ -45,6 +45,7 @@ import { LocationServiceMap } from "./location-service-map"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
+import { SessionBudget } from "./session/budget"
 import { DeliveryAudit } from "./session/delivery-audit"
 import { Snapshot } from "./snapshot"
 import { SessionRevert } from "./session/revert"
@@ -101,6 +102,9 @@ type CreateInput = {
   id?: SessionSchema.ID
   parentID?: SessionSchema.ID
   budgetMode?: "interactive" | "autonomous"
+  budget?: { tokens?: number | null; durationMs?: number | null }
+  /** Host-derived parent/Goal bound; never a model-supplied tool argument. */
+  inheritedDeadline?: number
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
@@ -115,6 +119,8 @@ type UpdateInput = {
   title?: string
   archived?: boolean
   budget?: { tokens?: number | null; durationMs?: number | null }
+  /** Trusted host parent/Goal binding; not exposed by the HTTP update payload. */
+  inheritedDeadline?: number | null
 }
 
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Session.NotFoundError", {
@@ -152,6 +158,7 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly deadline: (sessionID: SessionSchema.ID) => Effect.Effect<number | undefined, NotFoundError>
   readonly update: (input: UpdateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
@@ -370,6 +377,9 @@ const layer = Layer.effect(
               projectID: project.id,
               parentID: input.parentID,
               budgetMode: input.budgetMode ?? "interactive",
+              budgetPolicy: 2,
+              budget: input.budget,
+              inheritedDeadline: input.inheritedDeadline,
               agent: input.agent,
               model: input.model,
               location: input.location,
@@ -401,6 +411,13 @@ const layer = Layer.effect(
         if (projected.type === "existing") return projected.session
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         return yield* result.get(sessionID).pipe(Effect.orDie)
+      }),
+      deadline: Effect.fn("V2Session.deadline")(function* (sessionID) {
+        const current = yield* result.get(sessionID)
+        return yield* Effect.gen(function* () {
+          const config = yield* Config.Service
+          return SessionBudget.deadline(current, (yield* SessionBudget.read(db, config, sessionID)).duration)
+        }).pipe(Effect.provide(locations.get(current.location)))
       }),
       recover: Effect.fn("V2Session.recover")(function* (input) {
         if (!execution.exclusive) return yield* new OperationUnavailableError({ operation: "recover" })
@@ -639,6 +656,7 @@ const layer = Layer.effect(
               archived: input.archived,
               budget: input.budget,
               budgetUpdate: input.budget === undefined ? undefined : "patch",
+                inheritedDeadline: input.inheritedDeadline,
             },
             { location: session.location },
           )

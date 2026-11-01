@@ -839,6 +839,9 @@ export type GlobalEvent = {
           projectID: string
           parentID?: string
           budgetMode?: "interactive" | "autonomous"
+          budgetPolicy?: 2
+          budget?: SessionOutcomeBudgetUpdate
+          inheritedDeadline?: number
           agent?: string
           model?: ModelRef
           location: LocationRef
@@ -888,6 +891,7 @@ export type GlobalEvent = {
           archived?: boolean
           budget?: SessionOutcomeBudgetUpdate
           budgetUpdate?: "patch"
+          inheritedDeadline?: number
         }
       }
     | {
@@ -3441,6 +3445,11 @@ export type MoveSessionDestination = {
   directory: string
 }
 
+export type SessionOutcomeBudgetUpdate = {
+  tokens?: number | null
+  durationMs?: number | null
+}
+
 export type ModelRef = {
   id: string
   providerID: string
@@ -3450,11 +3459,6 @@ export type ModelRef = {
 export type LocationRef = {
   directory: string
   workspaceID?: string
-}
-
-export type SessionOutcomeBudgetUpdate = {
-  tokens?: number | null
-  durationMs?: number | null
 }
 
 export type SessionOutcomeExecutionContract = {
@@ -3747,7 +3751,7 @@ export type WorkBudget = {
   maxParallelTasks?: number
   maxReplans?: number
   maxTurns?: number
-  maxDurationMs?: number
+  maxDurationMs?: number | null
   maxCost?: number
 }
 
@@ -4146,6 +4150,9 @@ export type SyncEventSessionNextCreated = {
       projectID: string
       parentID?: string
       budgetMode?: "interactive" | "autonomous"
+      budgetPolicy?: 2
+      budget?: SessionOutcomeBudgetUpdate
+      inheritedDeadline?: number
       agent?: string
       model?: ModelRef
       location: LocationRef
@@ -4223,6 +4230,7 @@ export type SyncEventSessionNextUpdated = {
       archived?: boolean
       budget?: SessionOutcomeBudgetUpdate
       budgetUpdate?: "patch"
+      inheritedDeadline?: number
     }
   }
 }
@@ -5542,6 +5550,7 @@ export type AgentV2Info = {
 export type SessionV2Info = {
   id: string
   parentID?: string
+  inheritedDeadline?: number
   projectID: string
   agent?: string
   model?: ModelRef
@@ -5893,6 +5902,9 @@ export type SessionNextCreated = {
     projectID: string
     parentID?: string
     budgetMode?: "interactive" | "autonomous"
+    budgetPolicy?: 2
+    budget?: SessionOutcomeBudgetUpdate
+    inheritedDeadline?: number
     agent?: string
     model?: ModelRef
     location: LocationRef
@@ -5982,6 +5994,7 @@ export type SessionNextUpdated = {
     archived?: boolean
     budget?: SessionOutcomeBudgetUpdate
     budgetUpdate?: "patch"
+    inheritedDeadline?: number
   }
 }
 
@@ -9186,6 +9199,9 @@ export type EventSessionNextCreated = {
     projectID: string
     parentID?: string
     budgetMode?: "interactive" | "autonomous"
+    budgetPolicy?: 2
+    budget?: SessionOutcomeBudgetUpdate
+    inheritedDeadline?: number
     agent?: string
     model?: ModelRef
     location: LocationRef
@@ -9239,6 +9255,7 @@ export type EventSessionNextUpdated = {
     archived?: boolean
     budget?: SessionOutcomeBudgetUpdate
     budgetUpdate?: "patch"
+    inheritedDeadline?: number
   }
 }
 
@@ -13248,6 +13265,8 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    budgetMode?: "interactive" | "autonomous"
+    budget?: SessionOutcomeBudgetUpdate
   }
   path?: never
   query?: never

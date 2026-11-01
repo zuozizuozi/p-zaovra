@@ -10,6 +10,8 @@ import { WorkExecution } from "@zaovra-ai/core/work/execution"
 import { WorkProjector } from "@zaovra-ai/core/work/projector"
 import { WorkStore } from "@zaovra-ai/core/work/store"
 import { WorkRole } from "@zaovra-ai/core/work/role"
+import { WorkGoalTable } from "@zaovra-ai/core/work/sql"
+import { eq } from "drizzle-orm"
 import { DateTime, Effect, Exit, Layer } from "effect"
 import { testEffect } from "./lib/effect"
 
@@ -45,6 +47,22 @@ const input = {
 }
 
 describe("Work.create", () => {
+  it.effect("490 autonomous duration is selected at creation and exact retries preserve old defaults", () =>
+    Effect.gen(function* () {
+      const work = yield* Work.Service
+      const database = yield* Database.Service
+      for (const duration of [undefined, null, 1234]) {
+        const request = { ...input, id: Work.GoalID.create(), ...(duration === undefined ? {} : { budget: { maxDurationMs: duration } }) }
+        const result = yield* work.create(request)
+        expect(result.goal.budget?.maxDurationMs).toBe(duration === undefined ? 43_200_000 : duration)
+        expect((yield* work.create(request)).goal.budget).toEqual(result.goal.budget)
+      }
+      const oldRequest = { ...input, id: Work.GoalID.create() }
+      yield* work.create(oldRequest)
+      yield* database.db.update(WorkGoalTable).set({ budget: null }).where(eq(WorkGoalTable.id, oldRequest.id)).run().pipe(Effect.orDie)
+      expect((yield* work.create(oldRequest)).goal.budget).toBeUndefined()
+    }),
+  )
   resumeIt.effect("accepts resumable Goals asynchronously and rejects exhausted budgets", () =>
     Effect.gen(function* () {
       executionCalls.wake = 0

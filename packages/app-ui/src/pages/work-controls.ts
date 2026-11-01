@@ -1,5 +1,13 @@
 import type { WorkGoalStatus } from "@zaovra-ai/sdk/v2/client"
 
+export function workGoalDuration(input: { mode: "default" | "unlimited" | "custom"; minutes: string }) {
+  if (input.mode === "default") return {}
+  if (input.mode === "unlimited") return { maxDurationMs: null }
+  const duration = Number(input.minutes) * 60_000
+  if (!input.minutes.trim() || !Number.isSafeInteger(duration) || duration <= 0) return
+  return { maxDurationMs: duration }
+}
+
 export function workGoalControls(status: WorkGoalStatus) {
   return {
     resume: status === "draft" || status === "paused" || status === "blocked",

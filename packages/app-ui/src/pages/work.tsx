@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "@solidjs/router"
 import { createMemo, createResource, For, onCleanup, onMount, type ParentProps, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useServerSDK } from "@/context/server-sdk"
-import { workGoalControlDisabled, workGoalControls } from "./work-controls"
+import { workGoalControlDisabled, workGoalControls, workGoalDuration } from "./work-controls"
 import { useLanguage } from "@/context/language"
 import { workVerification } from "@/utils/verification-label"
 import { useSettingsCommand, useSettingsDialog } from "@/components/settings-dialog"
@@ -27,6 +27,8 @@ export default function WorkPage() {
       objective: "",
       directory: "",
       directoryRevision: 0,
+      duration: "default" as "default" | "unlimited" | "custom",
+      minutes: "720",
     },
     expansion: {
       open: false,
@@ -100,7 +102,8 @@ export default function WorkPage() {
   const createGoal = () => {
     const objective = state.draft.objective.trim()
     const directory = state.draft.directory.trim()
-    if (!objective || !directory) return Promise.resolve()
+    const duration = workGoalDuration({ mode: state.draft.duration, minutes: state.draft.minutes })
+    if (!objective || !directory || !duration) return Promise.resolve()
     return act("create", () =>
       serverSDK()
         .client.v2.work.create({
@@ -119,6 +122,7 @@ export default function WorkPage() {
               maxRepairAttempts: 3,
               maxParallelTasks: 3,
               maxReplans: 2,
+              ...duration,
             },
             planning: true,
           },
@@ -126,7 +130,7 @@ export default function WorkPage() {
         .then((result) => {
           if (!result.data) throw new Error("WorkGraph creation returned no data")
           const goalID = result.data.data.goal.id
-          setState("draft", { open: false, objective: "", directory })
+          setState("draft", { open: false, objective: "", directory, duration: "default", minutes: "720" })
           navigate(`/work/${goalID}`)
           return serverSDK().client.v2.work.resume({ goalID })
         }),
@@ -261,9 +265,13 @@ export default function WorkPage() {
               <CreateGoal
                 objective={state.draft.objective}
                 directory={state.draft.directory}
+                duration={state.draft.duration}
+                minutes={state.draft.minutes}
                 busy={state.action === "create"}
                 error={state.error}
                 onObjective={(value) => setState("draft", "objective", value)}
+                onDuration={(value) => setState("draft", "duration", value)}
+                onMinutes={(value) => setState("draft", "minutes", value)}
                 onDirectory={(value) =>
                   setState("draft", { directory: value, directoryRevision: state.draft.directoryRevision + 1 })
                 }
@@ -922,15 +930,22 @@ export default function WorkPage() {
 function CreateGoal(props: {
   objective: string
   directory: string
+  duration: "default" | "unlimited" | "custom"
+  minutes: string
   busy: boolean
   error?: string
   onObjective: (value: string) => void
   onDirectory: (value: string) => void
+  onDuration: (value: "default" | "unlimited" | "custom") => void
+  onMinutes: (value: string) => void
   onCancel: () => void
   onCreate: () => Promise<unknown>
 }) {
   const language = useLanguage()
-  const valid = () => props.objective.trim().length > 0 && props.directory.trim().length > 0
+  const valid = () =>
+    props.objective.trim().length > 0 &&
+    props.directory.trim().length > 0 &&
+    workGoalDuration({ mode: props.duration, minutes: props.minutes }) !== undefined
 
   return (
     <div class="mx-auto flex min-h-full w-full max-w-[760px] items-center p-6">
@@ -971,6 +986,40 @@ function CreateGoal(props: {
             onInput={(event) => props.onDirectory(event.currentTarget.value)}
           />
         </label>
+        <div class="flex flex-col gap-2 text-[12px]">
+          <label class="flex flex-col gap-2 font-medium">
+            {language.t("work.duration.label")}
+            <select
+              class="h-9 rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 font-normal outline-none focus:border-v2-border-border-focus"
+              disabled={props.busy}
+              value={props.duration}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                if (value === "default" || value === "unlimited" || value === "custom") props.onDuration(value)
+              }}
+            >
+              <option value="default">{language.t("work.duration.default")}</option>
+              <option value="custom">{language.t("work.duration.custom")}</option>
+              <option value="unlimited">{language.t("session.budget.unlimited")}</option>
+            </select>
+          </label>
+          <Show when={props.duration === "custom"}>
+            <label class="flex flex-col gap-2">
+              {language.t("session.budget.minutes")}
+              <input
+                class="h-9 rounded-md border border-v2-border-border-muted bg-v2-background-bg-base px-3 tabular-nums outline-none focus:border-v2-border-border-focus"
+                type="number"
+                min="1"
+                step="1"
+                required
+                disabled={props.busy}
+                value={props.minutes}
+                onInput={(event) => props.onMinutes(event.currentTarget.value)}
+              />
+            </label>
+          </Show>
+          <p class="text-v2-text-text-muted">{language.t("work.duration.hint")}</p>
+        </div>
         <div class="p-3 text-[11px] leading-5 text-v2-text-text-muted">
           {language.t(
             "work.ui.default.guardrails.up.to.8.attempts.per.task.3.repair.passes.and.3.concurrent.isolated.tasks.the.reviewer.must.explicitly.pass.the.objective.before.completion",

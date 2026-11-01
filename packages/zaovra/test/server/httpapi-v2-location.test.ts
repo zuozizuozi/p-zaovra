@@ -80,6 +80,57 @@ afterEach(async () => {
 })
 
 describe("v2 location HttpApi", () => {
+  test("490 HTTP creation and patches distinguish ordinary, autonomous and explicit durations without resuming", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const create = async (selection: object) => {
+      const response = await request("/api/session", tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: { directory: tmp.path }, ...selection }),
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()).data
+    }
+    const limits = async (id: string) => {
+      const response = await request(`/api/session/${id}/budget`, tmp.path)
+      expect(response.status).toBe(200)
+      return (await response.json()).data.limits
+    }
+    const ordinary = await create({})
+    expect(await limits(ordinary.id)).toEqual({})
+    const delegated = await create({ budgetMode: "autonomous" })
+    expect(await limits(delegated.id)).toEqual({ tokens: 30_000_000, durationMs: 43_200_000 })
+    const chosen = await create({ budgetMode: "autonomous", budget: { durationMs: 60_000 } })
+    expect(await limits(chosen.id)).toEqual({ tokens: 30_000_000, durationMs: 60_000 })
+    for (const budget of [{}, { durationMs: null }]) {
+      const patched = await request(`/api/session/${chosen.id}`, tmp.path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ budget }),
+      })
+      expect(patched.status).toBe(200)
+      expect(await limits(chosen.id)).toEqual({ tokens: 30_000_000, ...(Object.keys(budget).length ? {} : { durationMs: 60_000 }) })
+    }
+    const active = await request("/api/session/active", tmp.path)
+    expect((await active.json()).data).toEqual({})
+    for (const duration of [undefined, null, 900_000]) {
+      const response = await request("/api/work", tmp.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: { directory: tmp.path },
+          objective: "budget choice fixture",
+          acceptanceCriteria: [{ description: "no model execution", required: true, evidence: "test" }],
+          ...(duration === undefined ? {} : { budget: { maxDurationMs: duration } }),
+        }),
+      })
+      expect(response.status).toBe(200)
+      const goal = (await response.json()).data.goal
+      expect(goal.budget.maxDurationMs).toBe(duration === undefined ? 43_200_000 : duration)
+      expect(goal.status).toBe("draft")
+    }
+  })
+
   test("490 public approvals persist literal provenance despite forged tool metadata", async () => {
     await using tmp = await tmpdir({ git: true })
     await Bun.write(path.join(tmp.path, "zaovra.json"), JSON.stringify({ permission: { bash: "ask" } }))

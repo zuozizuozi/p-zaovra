@@ -378,6 +378,8 @@ export function make(options: ClientOptions) {
               agent: input?.["agent"],
               model: input?.["model"],
               location: input?.["location"],
+              budgetMode: input?.["budgetMode"],
+              budget: input?.["budget"],
             },
             successStatus: 200,
             declaredStatuses: [401, 400],

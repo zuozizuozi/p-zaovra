@@ -1,7 +1,7 @@
 export * as TaskTool from "./task"
 
 import { ToolFailure } from "@zaovra-ai/llm"
-import { Effect, Layer, Schema } from "effect"
+import { Clock, Effect, Layer, Schema } from "effect"
 import { AgentV2 } from "../agent"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocationServiceMap } from "../location-service-map"
@@ -43,6 +43,7 @@ export const Input = Schema.Struct({
 })
 
 export const Output = Schema.Struct({
+  request_id: SessionMessage.ID.pipe(Schema.optional),
   outcome: Schema.String.pipe(Schema.optional),
   task_id: SessionV2.ID,
   content: Schema.String,
@@ -155,9 +156,9 @@ const layer = Layer.effectDiscard(
 
 type SessionOps = Pick<
   SessionV2.Interface,
-  "list" | "get" | "create" | "prompt" | "pending" | "resume" | "interrupt" | "active" | "messages"
+  "list" | "get" | "create" | "update" | "prompt" | "pending" | "resume" | "interrupt" | "active" | "messages"
 > &
-  Partial<Pick<SessionV2.Interface, "outcome">>
+  Partial<Pick<SessionV2.Interface, "outcome" | "deadline">>
 
 export const run = Effect.fn("TaskTool.execute")(function* (
   sessions: SessionOps,
@@ -169,6 +170,7 @@ export const run = Effect.fn("TaskTool.execute")(function* (
   const permission = yield* PermissionV2.Service
   if (parent.parentID)
     return yield* failure("Subagents cannot delegate nested tasks; return the finding to the parent Agent")
+  yield* parentDeadline(sessions, parent)
   const targetID = AgentV2.ID.make(input.subagent_type)
   const target = yield* agents.get(targetID)
   const command =
@@ -193,6 +195,7 @@ export const run = Effect.fn("TaskTool.execute")(function* (
     })
     .pipe(Effect.mapError(() => failure(`Permission denied: task ${input.subagent_type}`)))
 
+  const deadline = yield* parentDeadline(sessions, parent)
   const child = input.task_id
     ? yield* sessions
         .get(input.task_id)
@@ -202,6 +205,8 @@ export const run = Effect.fn("TaskTool.execute")(function* (
         location: parent.location,
         parentID: parent.id,
         budgetMode: "autonomous",
+        budget: { durationMs: null },
+        inheritedDeadline: deadline,
         agent: targetID,
       })
   if (child.parentID !== parent.id)
@@ -233,17 +238,42 @@ export const run = Effect.fn("TaskTool.execute")(function* (
       resume: input.run_in_background === true,
     })
     .pipe(Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error))))
+  const currentDeadline = yield* parentDeadline(sessions, parent)
+  yield* sessions
+    .update({ sessionID: child.id, inheritedDeadline: currentDeadline ?? null })
+    .pipe(Effect.mapError((error) => failure(error.message)))
+  yield* parentDeadline(sessions, parent)
+  const admitted = yield* admission
   if (input.run_in_background) {
-    yield* admission
-    return { task_id: child.id, content: "Use task_status to inspect progress or task_cancel to interrupt it." }
+    return {
+      task_id: child.id,
+      request_id: admitted.id,
+      content: "Use task_status to inspect progress or task_cancel to interrupt it.",
+    }
   }
-  yield* admission.pipe(
-    Effect.andThen(sessions.resume(child.id).pipe(Effect.onInterrupt(() => sessions.interrupt(child.id)))),
+  yield* sessions.resume(child.id).pipe(
+    Effect.onInterrupt(() => sessions.interrupt(child.id)),
     Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error))),
   )
   const messages = yield* sessions
     .messages({ sessionID: child.id, order: "desc", limit: 50 })
     .pipe(Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error))))
+  // A long child can have more than 50 messages. Walk bounded pages to its
+  // nearest durable user boundary without retaining or truncating its log.
+  let page = messages
+  let source = page.find((message) => message.type === "user")
+  while (!source && page.length === 50) {
+    const cursor = page.at(-1)!.id
+    page = yield* sessions
+      .messages({ sessionID: child.id, order: "desc", limit: 50, cursor: { id: cursor, direction: "next" } })
+      .pipe(Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error))))
+    if (page.at(-1)?.id === cursor) break
+    source = page.find((message) => message.type === "user")
+  }
+  if (source?.id !== admitted.id)
+    return yield* failure(
+      `Subagent Session ${child.id} has no result bound to request ${admitted.id}; inspect task_status without rerunning it`,
+    )
   const response = messages.find((message) => message.type === "assistant")
   if (!response || response.type !== "assistant")
     return yield* failure(`Subagent Session ${child.id} produced no assistant response`)
@@ -257,7 +287,14 @@ export const run = Effect.fn("TaskTool.execute")(function* (
   const outcome = sessions.outcome
     ? (yield* sessions.outcome(child.id).pipe(Effect.mapError((error) => failure(error.message)))).state
     : "completed_unverified"
-  return { task_id: child.id, outcome, content: content || "Subagent completed without a textual response." }
+  if (!["completed", "completed_verified", "completed_unverified"].includes(outcome))
+    return yield* failure(`Subagent Session ${child.id} did not complete request ${admitted.id}: ${outcome}`)
+  return {
+    task_id: child.id,
+    request_id: admitted.id,
+    outcome,
+    content: content || "Subagent completed without a textual response.",
+  }
 })
 
 export const status = Effect.fn("TaskTool.status")(function* (
@@ -302,6 +339,10 @@ export const resume = Effect.fn("TaskTool.resume")(function* (
 ) {
   const child = yield* requireChild(sessions, parent, taskID)
   yield* authorize(child, context)
+  const deadline = yield* parentDeadline(sessions, parent)
+  yield* sessions
+    .update({ sessionID: child.id, inheritedDeadline: deadline ?? null })
+    .pipe(Effect.mapError((error) => failure(error.message)))
   yield* sessions
     .resume(child.id)
     .pipe(Effect.mapError((error) => failure(error instanceof Error ? error.message : String(error))))
@@ -329,6 +370,13 @@ const inspect = Effect.fnUntraced(function* (sessions: SessionOps, child: Sessio
   const outcome = sessions.outcome
     ? (yield* sessions.outcome(child.id).pipe(Effect.mapError((error) => failure(error.message)))).state
     : "completed_unverified"
+  if (!["completed", "completed_verified", "completed_unverified"].includes(outcome))
+    return {
+      task_id: child.id,
+      status: outcome === "failed" ? ("failed" as const) : ("unknown" as const),
+      outcome,
+      ...(content ? { content } : {}),
+    }
   return latest.error
     ? { task_id: child.id, status: "failed" as const, content: latest.error.message }
     : latest.time.completed && latest.finish === "stop"
@@ -366,6 +414,17 @@ const authorize = Effect.fnUntraced(function* (child: SessionV2.Info, context: T
 function failure(message: string) {
   return new ToolFailure({ message })
 }
+
+const parentDeadline = Effect.fnUntraced(function* (sessions: SessionOps, parent: SessionV2.Info) {
+  const deadline = sessions.deadline
+    ? yield* sessions.deadline(parent.id).pipe(Effect.mapError((error) => failure(error.message)))
+    : parent.inheritedDeadline
+  if (deadline !== undefined && deadline <= (yield* Clock.currentTimeMillis))
+    return yield* failure(
+      `Parent Session deadline expired; no new child execution was admitted. task_status and task_cancel remain available.`,
+    )
+  return deadline
+})
 
 export const node = makeGlobalNode({
   name: "tool/task",

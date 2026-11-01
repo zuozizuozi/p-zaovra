@@ -156,7 +156,10 @@ export const Budget = Schema.Struct({
   maxParallelTasks: PositiveInt.pipe(optional),
   maxReplans: PositiveInt.pipe(optional),
   maxTurns: PositiveInt.pipe(optional),
-  maxDurationMs: PositiveInt.pipe(optional),
+  maxDurationMs: Schema.NullOr(PositiveInt).pipe(optional).annotate({
+    description:
+      "Goal wall-clock duration from creation; omitted on new Goals selects 12 hours, null selects unlimited. Existing Goals keep their recorded duration policy.",
+  }),
   maxCost: NonNegativeFinite.pipe(optional),
 }).annotate({ identifier: "Work.Budget" })
 export interface Budget extends Schema.Schema.Type<typeof Budget> {}

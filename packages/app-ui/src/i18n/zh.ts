@@ -412,7 +412,11 @@ export const dict = {
   "session.budget.save": "保存默认预算",
   "session.budget.modeDefaults": "模式默认值",
   "session.budget.defaultHint":
-    "普通交互默认不限累计 token；委派子任务和 WorkGraph 自主会话默认 3000 万 token，各会话默认 12 小时。留空并保存表示明确不限该项；会话内调整优先，到限后可续授继续。",
+    "新普通会话默认不限 token 和时长。自主会话默认 3000 万 token、12 小时，创建目标时可选择时长；旧会话及来源未知的会话保留原预算。编辑后留空表示取消该项上限，父任务截止仍有效；修改默认值不会恢复已停止会话。",
+  "work.duration.label": "自主目标时长",
+  "work.duration.default": "默认 · 12 小时",
+  "work.duration.custom": "指定分钟数",
+  "work.duration.hint": "从目标创建起累计，规划、执行和审查共用；到限停止，不表示任务成功。",
   "session.budget.title": "会话预算",
   "session.budget.hint": "同时替换两项上限，留空表示不限。时长从会话创建时起计算。",
   "session.budget.tokens": "总 token 上限",
