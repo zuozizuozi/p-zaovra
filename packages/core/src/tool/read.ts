@@ -109,6 +109,7 @@ const layer = Layer.effectDiscard(
               Effect.mapError((error) => {
                 const message =
                   error instanceof ReadToolFileSystem.BinaryFileError ||
+                  error instanceof ReadToolFileSystem.MalformedUtf8Error ||
                   error instanceof ReadToolFileSystem.MediaIngestLimitError ||
                   error instanceof Image.DecodeError ||
                   error instanceof Image.SizeError

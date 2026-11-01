@@ -90,7 +90,7 @@ const layer = Layer.effectDiscard(
         [name]: Tool.withPermission(
           Tool.make({
             description:
-              "Apply one patch containing add, update, and delete file operations. All targets are resolved and approved before target contents are read. Operations apply sequentially; if a later operation fails, earlier operations remain applied and the failure reports them explicitly. Moves and atomic rollback are not supported yet.",
+              "Apply one patch containing add, update, and delete file operations. All targets are resolved and approved before target contents are read. All updates must pass UTF-8 and line-ending preflight before any file is written. Invalid UTF-8 and mixed LF/CRLF updates are rejected; do not automatically transcode or normalize them. Operations apply sequentially; if a later operation fails, earlier operations remain applied and the failure reports them explicitly. Moves and atomic rollback are not supported yet.",
             input: Input,
             output: Output,
             toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
@@ -167,27 +167,44 @@ const layer = Layer.effectDiscard(
                     }
                     if ((yield* fs.stat(target.canonical)).type !== "File") yield* fail(hunk.path)
                     const source = yield* fs.readFile(target.canonical)
-                    const original = new TextDecoder("utf-8", { ignoreBOM: true }).decode(source)
-                    const before = original.replace(/^\uFEFF/, "")
                     if (hunk.type === "delete") {
-                      prepared.push({ ...hunk, target, before, after: "" })
+                      prepared.push({
+                        ...hunk,
+                        target,
+                        before: new TextDecoder("utf-8", { ignoreBOM: true }).decode(source).replace(/^\uFEFF/, ""),
+                        after: "",
+                      })
                       return
                     }
+                    const original = yield* Effect.try({
+                      try: () => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(source),
+                      catch: () =>
+                        new ToolFailure({
+                          message: `File is not valid UTF-8: ${hunk.path}. No patch operations were applied. Do not automatically transcode or rewrite this file.`,
+                        }),
+                    })
+                    if (original.includes("\r\n") && original.replaceAll("\r\n", "").includes("\n"))
+                      return yield* new ToolFailure({
+                        message: `File has mixed LF/CRLF line endings: ${hunk.path}. No patch operations were applied. Do not automatically normalize or rewrite this file.`,
+                      })
                     const update = yield* Effect.try({
-                      try: () => Patch.derive(hunk.path, hunk.chunks, original),
+                      try: () => Patch.derive(hunk.path, hunk.chunks, original.replaceAll("\r\n", "\n")),
                       catch: () =>
                         new ToolFailure({
                           message: `Patch did not match ${hunk.path}. Read the file before retrying.`,
                           metadata: { phase: "mutation", reason: "match-failed" },
                         }),
                     })
+                    const content = update.content
+                      .replaceAll("\r\n", "\n")
+                      .replaceAll("\n", original.includes("\r\n") ? "\r\n" : "\n")
                     prepared.push({
                       ...hunk,
                       target,
                       source,
-                      content: Patch.joinBom(update.content, update.bom),
-                      before,
-                      after: update.content,
+                      content: Patch.joinBom(content, update.bom),
+                      before: original.replace(/^\uFEFF/, ""),
+                      after: content,
                     })
                   }).pipe(Effect.mapError((error) => (error instanceof ToolFailure ? error : fail(hunk.path, error))))
                 }

@@ -57,7 +57,7 @@ const splitBom = (text: string) =>
 const joinBom = (text: string, bom: boolean) => (bom ? `\uFEFF${text}` : text)
 const decodeUtf8 = (content: Uint8Array) => {
   const bom = content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf
-  return { bom, content, text: new TextDecoder().decode(bom ? content.slice(3) : content) }
+  return { bom, content, text: new TextDecoder("utf-8", { fatal: true }).decode(bom ? content.slice(3) : content) }
 }
 
 const countOccurrences = (content: string, search: string) => {
@@ -117,7 +117,7 @@ const layer = Layer.effectDiscard(
         [name]: Tool.withPermission(
           Tool.make({
             description:
-              "Replace exact text in one file. Relative paths resolve within the active Location. Absolute paths inside the Location are accepted. Explicit external absolute paths require external_directory approval before edit approval.",
+              "Replace exact text in one UTF-8 file. Invalid UTF-8 and mixed LF/CRLF line endings are rejected without writing; do not automatically transcode or normalize them. Relative paths resolve within the active Location. Absolute paths inside the Location are accepted. Explicit external absolute paths require external_directory approval before edit approval.",
             input: Input,
             output: Output,
             toModelOutput: ({ input, output }) => [
@@ -171,7 +171,18 @@ const layer = Layer.effectDiscard(
                     source: permissionSource,
                   }),
                 )
-                const source = decodeUtf8(yield* unableToEdit(fs.readFile(target.canonical)))
+                const content = yield* unableToEdit(fs.readFile(target.canonical))
+                const source = yield* Effect.try({
+                  try: () => decodeUtf8(content),
+                  catch: () =>
+                    new ToolFailure({
+                      message: `File is not valid UTF-8: ${input.path}. Nothing was written. Do not automatically transcode or rewrite this file.`,
+                    }),
+                })
+                if (source.text.includes("\r\n") && source.text.replaceAll("\r\n", "").includes("\n"))
+                  return yield* new ToolFailure({
+                    message: `File has mixed LF/CRLF line endings: ${input.path}. Nothing was written. Do not automatically normalize or rewrite this file.`,
+                  })
                 const ending = detectLineEnding(source.text)
                 const oldString = convertToLineEnding(input.oldString, ending)
                 const newString = convertToLineEnding(input.newString, ending)
