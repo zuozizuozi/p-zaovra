@@ -38,44 +38,54 @@ import { toolIdentity } from "./lib/tool"
 import { settleToolApproved } from "./fixture/approve-tool"
 
 const it = testEffect(Layer.empty)
-it.live("490 real fixture actor observes independent external and exact command approvals", () =>
-  withRuntime((directory, sessions, registry) =>
-    Effect.gen(function* () {
-      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
-      const script = path.join(directory, "approval-fixture.cjs")
-      const output = path.join(directory, "approval-output.txt")
-      yield* Effect.promise(() => Bun.write(script, "process.stdout.write('explicit approval')"))
-      const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}" > "${output}" 2>&1`
-      const observed: PermissionV2.Request[] = []
-      const result = yield* settleToolApproved(
-        registry,
-        {
-          sessionID: session.id,
-          ...toolIdentity,
-          call: {
-            type: "tool-call",
-            id: "fixture-approval",
-            name: "bash",
-            input: { command },
+for (const permission of ["allow", "ask"] as const) {
+  it.live(`514 real fixture actor respects explicit bash ${permission} and independent external approval`, () =>
+    withRuntime((directory, sessions, registry) =>
+      Effect.gen(function* () {
+        const agents = yield* AgentV2.Service
+        yield* agents.transform((editor) =>
+          editor.update(AgentV2.ID.make("build"), (agent) => {
+            agent.permissions = [{ action: "bash", resource: "*", effect: permission }]
+          }),
+        )
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const script = path.join(directory, "approval-fixture.cjs")
+        const output = path.join(directory, "approval-output.txt")
+        yield* Effect.promise(() => Bun.write(script, "process.stdout.write('explicit approval')"))
+        const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}" > "${output}" 2>&1`
+        const observed: PermissionV2.Request[] = []
+        const result = yield* settleToolApproved(
+          registry,
+          {
+            sessionID: session.id,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "fixture-approval",
+              name: "bash",
+              input: { command },
+            },
           },
-        },
-        observed,
-      )
-      expect(result.output?.structured).toMatchObject({ exit: 0 })
-      expect(observed.map((request) => request.action)).toEqual(["external_directory", "bash"])
-      expect(observed[1]?.resources).toEqual([command])
-      expect(
-        observed.every(
-          (request) =>
-            request.sessionID === session.id &&
-            request.source?.type === "tool" &&
-            request.source.callID === "fixture-approval",
-        ),
-      ).toBe(true)
-      expect((yield* Effect.promise(() => Bun.file(output).text())).trimEnd()).toBe("explicit approval")
-    }),
-  ),
-)
+          observed,
+        )
+        expect(result.output?.structured).toMatchObject({ exit: 0 })
+        expect(observed.map((request) => request.action)).toEqual(
+          permission === "ask" ? ["external_directory", "bash"] : ["external_directory"],
+        )
+        if (permission === "ask") expect(observed[1]?.resources).toEqual([command])
+        expect(
+          observed.every(
+            (request) =>
+              request.sessionID === session.id &&
+              request.source?.type === "tool" &&
+              request.source.callID === "fixture-approval",
+          ),
+        ).toBe(true)
+        expect((yield* Effect.promise(() => Bun.file(output).text())).trimEnd()).toBe("explicit approval")
+      }),
+    ),
+  )
+}
 it.effect("490 running get exposes bounded capture progress without claiming completion", () =>
   withRuntime((directory, sessions, registry, jobs) =>
     Effect.gen(function* () {
