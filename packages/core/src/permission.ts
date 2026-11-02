@@ -44,7 +44,7 @@ export const AssertInput = Schema.Struct({
   origin: Schema.Literals(["internal", "api"]).pipe(Schema.optional),
 }).annotate({ identifier: "PermissionV2.AssertInput" })
 export type AssertInput = typeof AssertInput.Type & {
-  /** Trusted leaf preflight only; deliberately absent from the HTTP schema. */
+  /** Unresolved external-path risk from trusted leaf preflight; absent from the HTTP schema. */
   readonly requireConfirmation?: true
 }
 
@@ -80,6 +80,9 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Per
 export type Error = BlockedError | CorrectedError
 
 type SavedRule = Permission.Rule & { readonly matchMode?: "literal" | "pattern" }
+// Rule identity comes from the built-in constructor, never config/API fields.
+// Agent transforms replay these same objects; explicit rules are separate objects.
+const builtinRules = new WeakSet<Permission.Rule>()
 
 export function evaluate(action: string, resource: string, ...rulesets: ReadonlyArray<SavedRule>[]): Permission.Rule {
   return (
@@ -99,6 +102,13 @@ export function evaluate(action: string, resource: string, ...rulesets: Readonly
 
 export function merge(...rulesets: Permission.Ruleset[]): Permission.Ruleset {
   return rulesets.flat()
+}
+
+/** Internal built-in Agent rules only. Config and saved permissions remain explicit. */
+export function defaults(...rulesets: Permission.Ruleset[]): Permission.Ruleset {
+  const rules = merge(...rulesets)
+  for (const rule of rules) builtinRules.add(rule)
+  return rules
 }
 
 export interface Interface {
@@ -182,29 +192,26 @@ const layer = Layer.effect(
       return rules.filter((rule) => Wildcard.match(input.action, rule.action))
     }
 
-    const evaluateInput = EffectRuntime.fnUntraced(function* (input: AssertInput) {
-      const rules = yield* configured(input.sessionID, input.agent)
+    function decision(input: AssertInput, rules: Permission.Ruleset, remembered: SavedRule[]) {
       if (denied(input, rules)) return { effect: "deny" as const, rules }
-      const remembered = yield* savedRules()
       const all = [...rules, ...remembered]
-      const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
+      // A remembered shell command cannot override an effective directory deny.
+      if (input.requireConfirmation && evaluate("external_directory", "*", rules).effect === "deny")
+        return { effect: "deny" as const, rules }
+      const external = evaluate("external_directory", "*", all)
+      const externalAllowed = external.effect === "allow" && (external.action !== "*" || !builtinRules.has(external))
+      const confirm = input.requireConfirmation && !externalAllowed
+      const effects = input.resources.map((resource) => {
+        const rule = evaluate(input.action, resource, all)
+        return rule.effect === "allow" && confirm && builtinRules.has(rule) ? "ask" : rule.effect
+      })
       const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
-      return {
-        effect:
-          effect === "allow" && input.requireConfirmation && !literalApproval(input, remembered)
-            ? ("ask" as const)
-            : effect,
-        rules: all,
-      }
-    })
-
-    function literalApproval(input: Pick<AssertInput, "action" | "resources">, rules: SavedRule[]) {
-      return input.resources.every((resource) =>
-        rules.some(
-          (rule) => rule.matchMode === "literal" && rule.action === input.action && rule.resource === resource,
-        ),
-      )
+      return { effect, rules: all }
     }
+
+    const evaluateInput = EffectRuntime.fnUntraced(function* (input: AssertInput) {
+      return decision(input, yield* configured(input.sessionID, input.agent), yield* savedRules())
+    })
 
     function request(input: AssertInput): Request {
       return {
@@ -277,7 +284,11 @@ const layer = Layer.effect(
             const rules = yield* configured(existing.request.sessionID, existing.agent).pipe(
               EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),
             )
-            if (!rules || denied(existing.request, rules)) {
+            if (
+              !rules ||
+              decision({ ...existing.request, requireConfirmation: existing.requireConfirmation }, rules, []).effect ===
+                "deny"
+            ) {
               yield* events.publish(Event.Replied, {
                 sessionID: existing.request.sessionID,
                 requestID: existing.request.id,
@@ -332,23 +343,14 @@ const layer = Layer.effect(
           pending.delete(input.requestID)
           if (input.reply !== "always" || !existing.request.save?.length) return
 
-          const rememberedRules = yield* savedRules()
           for (const [id, item] of pending) {
             if (item.locationID !== locationID) continue
-            const input = { ...item.request }
-            const rules = yield* configured(item.request.sessionID, item.agent).pipe(
-              EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),
-            )
-            if (!rules) continue
-            if (denied(input, rules)) continue
-            if (item.requireConfirmation && !literalApproval(item.request, rememberedRules)) continue
-            const effective = [...rules, ...rememberedRules]
-            if (
-              !item.request.resources.every(
-                (resource) => evaluate(item.request.action, resource, effective).effect === "allow",
-              )
-            )
-              continue
+            const result = yield* evaluateInput({
+              ...item.request,
+              agent: item.agent,
+              requireConfirmation: item.requireConfirmation,
+            }).pipe(EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)))
+            if (result?.effect !== "allow") continue
             yield* events.publish(Event.Replied, {
               sessionID: item.request.sessionID,
               requestID: item.request.id,

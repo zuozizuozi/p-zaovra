@@ -279,16 +279,16 @@ const layer = Layer.effectDiscard(
                   source,
                 })
               }
-              if (preflight.syntax.uncertain)
+              if (preflight.syntax.externalRisk)
                 warnings.push(
-                  "Shell syntax or path expansion cannot be certified by this narrow preflight. Confirm the entire exact command; default bash allow is not that confirmation. No shell rewrite or prefix approval is performed.",
+                  "A shell path expansion cannot be resolved by this narrow preflight. Without explicit shell or external-directory permission, confirm the exact command. This does not inspect program contents or form an OS sandbox.",
                 )
               yield* permission.assert({
                 metadata: {
                   shell: frozen.identity,
                   preflight: preflight.syntax.uncertain ? "uncertain" : "literal-operands-only",
                 },
-                ...(preflight.syntax.uncertain ? { requireConfirmation: true as const } : {}),
+                ...(preflight.syntax.externalRisk ? { requireConfirmation: true as const } : {}),
                 action: name,
                 resources: [input.command],
                 save: [input.command],

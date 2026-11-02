@@ -105,9 +105,14 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
-  it.effect("490 uncertain shell syntax requires explicit literal confirmation even under default allow", () =>
+  it.effect("511 unresolved external paths need literal approval under built-in defaults", () =>
     Effect.gen(function* () {
-      yield* setup([{ action: "bash", resource: "*", effect: "allow" }])
+      yield* setup(
+        PermissionV2.defaults([
+          { action: "*", resource: "*", effect: "allow" },
+          { action: "external_directory", resource: "*", effect: "ask" },
+        ]),
+      )
       const permissions = yield* PermissionV2.Service
       const first = yield* permissions.ask(
         assertion({
@@ -115,6 +120,7 @@ describe("PermissionV2", () => {
           action: "bash",
           resources: ["echo $HOME"],
           save: ["echo $HOME"],
+          metadata: { permissionOrigin: "explicit", requireConfirmation: false },
           requireConfirmation: true,
         }),
       )
@@ -140,6 +146,93 @@ describe("PermissionV2", () => {
         (yield* permissions.ask(assertion({ action: "bash", resources: ["echo $HOME"], requireConfirmation: true })))
           .effect,
       ).toBe("deny")
+    }),
+  )
+  it.effect("511 explicit allow and external-directory allow survive unresolved-path confirmation", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const permissions = yield* PermissionV2.Service
+      for (const explicit of [
+        [{ action: "*", resource: "*", effect: "allow" }],
+        [{ action: "bash", resource: "*", effect: "allow" }],
+        [{ action: "external_directory", resource: "*", effect: "allow" }],
+      ] satisfies PermissionV2.Ruleset[]) {
+        yield* setRules([
+          ...PermissionV2.defaults([
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "external_directory", resource: "*", effect: "ask" },
+          ]),
+          ...explicit,
+        ])
+        expect(
+          (yield* permissions.ask(assertion({ action: "bash", resources: ["cat $HOME/f"], requireConfirmation: true })))
+            .effect,
+        ).toBe("allow")
+      }
+      expect(yield* permissions.list()).toEqual([])
+    }),
+  )
+  it.effect("511 deliberate API pattern approval releases matching pending shell requests", () =>
+    Effect.gen(function* () {
+      yield* setup([
+        ...PermissionV2.defaults([
+          { action: "bash", resource: "*", effect: "ask" },
+          { action: "external_directory", resource: "*", effect: "ask" },
+        ]),
+      ])
+      const permissions = yield* PermissionV2.Service
+      const pending = yield* permissions.ask(
+        assertion({
+          id: PermissionV2.ID.create(),
+          action: "bash",
+          resources: ["cat $HOME/f"],
+          requireConfirmation: true,
+        }),
+      )
+      const pattern = yield* permissions.ask(
+        assertion({
+          id: PermissionV2.ID.create(),
+          action: "bash",
+          resources: ["cat *"],
+          save: ["cat *"],
+          saveMode: "pattern",
+          origin: "api",
+        }),
+      )
+      expect(pending.effect).toBe("ask")
+      expect(pattern.effect).toBe("ask")
+      yield* permissions.reply({ requestID: pattern.id, reply: "always" })
+      expect(yield* permissions.list()).toEqual([])
+      expect(
+        (yield* permissions.ask(assertion({ action: "bash", resources: ["cat $HOME/f"], requireConfirmation: true })))
+          .effect,
+      ).toBe("allow")
+      yield* setRules([{ action: "bash", resource: "*", effect: "deny" }])
+      expect(
+        (yield* permissions.ask(assertion({ action: "bash", resources: ["cat $HOME/f"], requireConfirmation: true })))
+          .effect,
+      ).toBe("deny")
+    }),
+  )
+  it.effect("511 directory deny added while awaiting shell approval cannot be approved or remembered", () =>
+    Effect.gen(function* () {
+      const defaults = PermissionV2.defaults([
+        { action: "*", resource: "*", effect: "allow" },
+        { action: "external_directory", resource: "*", effect: "ask" },
+      ])
+      yield* setup(defaults)
+      const permissions = yield* PermissionV2.Service
+      const pending = yield* permissions.ask(
+        assertion({ action: "bash", resources: ["cat $HOME/f"], save: ["cat $HOME/f"], requireConfirmation: true }),
+      )
+      expect(pending.effect).toBe("ask")
+      yield* setRules([...defaults, { action: "external_directory", resource: "*", effect: "deny" }])
+      yield* permissions.reply({ requestID: pending.id, reply: "always" })
+      yield* setRules(defaults)
+      expect(
+        (yield* permissions.ask(assertion({ action: "bash", resources: ["cat $HOME/f"], requireConfirmation: true })))
+          .effect,
+      ).toBe("ask")
     }),
   )
   for (const resource of [

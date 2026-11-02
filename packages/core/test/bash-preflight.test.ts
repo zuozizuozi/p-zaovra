@@ -14,8 +14,9 @@ test("490 preflight finds literal parent operands and treats unsupported syntax 
   expect(analyzeCommand('cat "../outside/a b.txt"', "posix")).toEqual({
     paths: ["../outside/a b.txt"],
     uncertain: false,
+    externalRisk: false,
   })
-  expect(analyzeCommand("printf 'literal*'", "posix")).toEqual({ paths: [], uncertain: false })
+  expect(analyzeCommand("printf 'literal*'", "posix")).toEqual({ paths: [], uncertain: false, externalRisk: false })
   for (const command of [
     "echo $HOME",
     "cat ~/outside",
@@ -39,4 +40,15 @@ test("490 preflight finds literal parent operands and treats unsupported syntax 
   const many = analyzeCommand(Array.from({ length: 257 }, (_, index) => `../outside/${index}`).join(" "), "posix")
   expect(many.uncertain).toBe(true)
   expect(many.paths).toHaveLength(256)
+})
+
+test("511 separates ordinary shell syntax from unresolved external-path risk", () => {
+  for (const command of ["ls | grep x", "echo a > f", "python -c 'print(1)'", 'echo "a b"', "cd sub && ls"]) {
+    expect(analyzeCommand(command, "posix").externalRisk).toBe(false)
+  }
+  for (const command of ["cat $HOME/f", "cat ~/f", "cat ../outside/*.txt", "cat *.txt", 'echo "unfinished']) {
+    expect(analyzeCommand(command, "posix").externalRisk).toBe(true)
+  }
+  expect(analyzeCommand("cat %TEMP%/f", "cmd").externalRisk).toBe(true)
+  expect(analyzeCommand('Get-Content "$env:HOME/file"', "powershell").externalRisk).toBe(true)
 })

@@ -179,7 +179,7 @@ export const Plugin = define({
       { action: "read", resource: "*.env.*", effect: "deny" },
       { action: "read", resource: "*.env.example", effect: "allow" },
     ]
-    const readonlyWorkPermissions = PermissionV2.merge(
+    const readonlyWorkPermissions = PermissionV2.defaults(
       defaults,
       [
         { action: "*", resource: "*", effect: "deny" },
@@ -197,7 +197,7 @@ export const Plugin = define({
         item.system ??= BUILD_SYSTEM
         item.mode = "primary"
         item.permissions.push(
-          ...PermissionV2.merge(defaults, [
+          ...PermissionV2.defaults(defaults, [
             { action: "question", resource: "*", effect: "allow" },
             { action: "plan_enter", resource: "*", effect: "allow" },
           ]),
@@ -210,7 +210,7 @@ export const Plugin = define({
           "Inspect the workspace using the available read and search tools and explain your plan. This mode does not permit shell commands, file edits, or delegation. Return the plan in your response. Implementation requires the user to select an execution-enabled agent; do not attempt to switch modes through a tool."
         item.mode = "primary"
         item.permissions.push(
-          ...PermissionV2.merge(defaults, [
+          ...PermissionV2.defaults(defaults, [
             { action: "*", resource: "*", effect: "deny" },
             ...defaults.filter((rule) => rule.action === "read" || rule.action === "external_directory"),
             { action: "grep", resource: "*", effect: "allow" },
@@ -226,7 +226,9 @@ export const Plugin = define({
         item.description =
           "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel."
         item.mode = "subagent"
-        item.permissions.push(...PermissionV2.merge(defaults, [{ action: "todowrite", resource: "*", effect: "deny" }]))
+        item.permissions.push(
+          ...PermissionV2.defaults(defaults, [{ action: "todowrite", resource: "*", effect: "deny" }]),
+        )
       })
 
       draft.update(AgentV2.ID.make("explore"), (item) => {
@@ -235,7 +237,7 @@ export const Plugin = define({
         item.system = PROMPT_EXPLORE
         item.mode = "subagent"
         item.permissions.push(
-          ...PermissionV2.merge(
+          ...PermissionV2.defaults(
             defaults,
             [
               { action: "*", resource: "*", effect: "deny" },
@@ -257,7 +259,7 @@ export const Plugin = define({
         item.mode = "primary"
         item.hidden = true
         item.permissions.push(
-          ...PermissionV2.merge(
+          ...PermissionV2.defaults(
             defaults,
             [
               { action: "*", resource: "*", effect: "deny" },
@@ -277,7 +279,7 @@ export const Plugin = define({
         item.mode = "primary"
         item.hidden = true
         item.permissions.push(
-          ...PermissionV2.merge(
+          ...PermissionV2.defaults(
             defaults,
             [
               { action: "*", resource: "*", effect: "deny" },
@@ -297,7 +299,7 @@ export const Plugin = define({
         item.mode = "primary"
         item.hidden = true
         item.permissions.push(
-          ...PermissionV2.merge(
+          ...PermissionV2.defaults(
             defaults,
             [
               { action: "*", resource: "*", effect: "deny" },
@@ -333,7 +335,7 @@ export const Plugin = define({
         item.mode = "primary"
         item.hidden = true
         item.permissions.push(
-          ...PermissionV2.merge(
+          ...PermissionV2.defaults(
             defaults,
             [
               { action: "task", resource: "*", effect: "deny" },
@@ -364,21 +366,21 @@ export const Plugin = define({
         item.mode = "primary"
         item.hidden = true
         item.system = PROMPT_COMPACTION
-        item.permissions.push(...PermissionV2.merge(defaults, [{ action: "*", resource: "*", effect: "deny" }]))
+        item.permissions.push(...PermissionV2.defaults(defaults, [{ action: "*", resource: "*", effect: "deny" }]))
       })
 
       draft.update(AgentV2.ID.make("title"), (item) => {
         item.mode = "primary"
         item.hidden = true
         item.system = PROMPT_TITLE
-        item.permissions.push(...PermissionV2.merge(defaults, [{ action: "*", resource: "*", effect: "deny" }]))
+        item.permissions.push(...PermissionV2.defaults(defaults, [{ action: "*", resource: "*", effect: "deny" }]))
       })
 
       draft.update(AgentV2.ID.make("summary"), (item) => {
         item.mode = "primary"
         item.hidden = true
         item.system = PROMPT_SUMMARY
-        item.permissions.push(...PermissionV2.merge(defaults, [{ action: "*", resource: "*", effect: "deny" }]))
+        item.permissions.push(...PermissionV2.defaults(defaults, [{ action: "*", resource: "*", effect: "deny" }]))
       })
     })
   }),

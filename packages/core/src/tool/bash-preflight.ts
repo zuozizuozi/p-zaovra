@@ -39,8 +39,22 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     inline ||
     foreignSyntax ||
     paths.length > 256
+  // Shell control flow alone is not an external-path boundary. Keep confirmation
+  // for unresolved expansions/paths, not ordinary pipes, redirects or inline code.
+  // Literal targets are resolved independently; this never inspects program contents.
+  const externalRisk =
+    /[$`]/.test(dynamic) ||
+    /(?:^|[\s=])~(?:[\\/]|$)/.test(unquoted) ||
+    /[?*\[\]{}"']/.test(unquoted) ||
+    (shell === "powershell" && /\b[A-Za-z_][\w]+:/.test(dynamic)) ||
+    ((shell === "bash" || shell === "posix") && /\\/.test(unquoted)) ||
+    (shell === "cmd" && /[%!^']/.test(command)) ||
+    /\b(?:cd|pushd|Set-Location)\s*(?:[;&|\r\n]|$)/i.test(unquoted) ||
+    foreignSyntax ||
+    paths.length > 256
   return {
     paths: [...new Set(paths)].filter((value) => !foreignSyntax || !value.startsWith("/")).slice(0, 256),
     uncertain,
+    externalRisk,
   }
 }
