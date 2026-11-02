@@ -34,7 +34,7 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
           risk: state.risk || (state.changed && relative && /[\\/]/.test(value)),
         }
       }
-      if (state.directory) return { ...state, changed: true }
+      if (state.directory) return { ...state, changed: true, risk: state.risk || (state.changed && relative) }
       return state.changed && relative ? { ...state, risk: true } : state
     },
     { command: true, directory: false, changed: false, risk: false, redirect: false },

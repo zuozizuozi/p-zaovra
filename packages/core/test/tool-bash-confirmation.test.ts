@@ -113,6 +113,43 @@ const scenarios: {
     changedCwd: true,
     denied: true,
   })),
+  ...[
+    "cd sub && cd ../../private && ls",
+    "pushd sub && pushd ../../private && ls",
+    "Set-Location sub; Set-Location ../../private; Get-ChildItem",
+    "Push-Location sub; Push-Location ../../private; Get-ChildItem",
+    "popd && cd sub && ls",
+    "pushd sub && popd && cd sub && ls",
+    "Pop-Location; Set-Location sub; Get-ChildItem",
+    "Push-Location sub; Pop-Location; Set-Location sub; Get-ChildItem",
+  ].map((command) => ({
+    name: `519 consecutive or restored cwd cannot dispatch under a narrow directory deny: ${command}`,
+    command,
+    config: (workspace: string) => ({
+      permissions: [
+        { action: "*", resource: "*", effect: "allow" },
+        {
+          action: "external_directory",
+          resource: path.join(workspace, "../private/*").replaceAll("\\", "/"),
+          effect: "deny",
+        },
+      ],
+    }),
+    changedCwd: true,
+    denied: true,
+  })),
+  ...["cd sub", "cd sub && make"].map((command) => ({
+    name: `519 single cwd change remains allowed: ${command}`,
+    command,
+    config: {},
+  })),
+  ...["cd sub && cd ../../private && ls", "Set-Location sub; Set-Location ../../private; Get-ChildItem"].map(
+    (command) => ({
+      name: `519 harness universal allow preserves repeated directory changes: ${command}`,
+      command,
+      config: { permissions: [{ action: "*", resource: "*", effect: "allow" }] },
+    }),
+  ),
   ...["ls | grep x", "echo a > f", "cd sub && make"].map((command) => ({
     name: `515 harness universal allow preserves ${command}`,
     command,

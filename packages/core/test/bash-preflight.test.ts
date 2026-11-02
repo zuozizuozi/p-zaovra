@@ -77,3 +77,23 @@ test("515 changed cwd keeps later relative operands unresolved without escalatin
   expect(analyzeCommand("echo 'cd sub && cat f'", "cmd").externalRisk).toBe(true)
   expect(analyzeCommand("sl sub; Get-Content ../private/f", "powershell").externalRisk).toBe(true)
 })
+
+test("519 repeated directory commands retain unresolved relative target risk", () => {
+  for (const shell of ["posix", "bash", "powershell", "cmd"] as const) {
+    for (const command of [
+      "cd sub && cd ../../private && ls",
+      "pushd sub && pushd ../../private && ls",
+      "Set-Location sub; Set-Location ../../private; Get-ChildItem",
+      "Push-Location sub; Push-Location ../../private; Get-ChildItem",
+      "popd && cd sub && ls",
+      "pushd sub && popd && cd sub && ls",
+      "Pop-Location; Set-Location sub; Get-ChildItem",
+      "Push-Location sub; Pop-Location; Set-Location sub; Get-ChildItem",
+    ]) {
+      expect(analyzeCommand(command, shell).externalRisk).toBe(true)
+    }
+    for (const command of ["cd sub", "cd sub && make"]) {
+      expect(analyzeCommand(command, shell).externalRisk).toBe(false)
+    }
+  }
+})
