@@ -123,9 +123,7 @@ export function isPrivateNetworkAddress(input: string) {
   const mapped = words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff
   const compatible = words.slice(0, 6).every((word) => word === 0)
   if (!mapped && !compatible) return false
-  return isPrivateIPv4(
-    [words[6]! >> 8, words[6]! & 0xff, words[7]! >> 8, words[7]! & 0xff].join("."),
-  )
+  return isPrivateIPv4([words[6]! >> 8, words[6]! & 0xff, words[7]! >> 8, words[7]! & 0xff].join("."))
 }
 
 function isPrivateIPv4(address: string) {
@@ -167,7 +165,7 @@ function ipv6Words(address: string) {
   return words
 }
 
-const execute = (http: HttpClient.HttpClient, url: string, format: Format, userAgent = browserUserAgent) => {
+const execute = (http: HttpClient.HttpClient, url: URL, format: Format, userAgent = browserUserAgent) => {
   const loop = (current: URL, redirects: number): Effect.Effect<HttpClientResponse.HttpClientResponse, unknown> =>
     Effect.tryPromise({
       try: () => validateNetworkTarget(current),
@@ -175,7 +173,7 @@ const execute = (http: HttpClient.HttpClient, url: string, format: Format, userA
     }).pipe(
       Effect.andThen(
         http
-          .execute(request(current.toString(), format, userAgent))
+          .execute(request(current.href, format, userAgent))
           .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
       ),
       Effect.flatMap((response) => {
@@ -189,7 +187,7 @@ const execute = (http: HttpClient.HttpClient, url: string, format: Format, userA
         }).pipe(Effect.flatMap((next) => loop(next, redirects + 1)))
       }),
     )
-  return loop(new URL(url), 0)
+  return loop(url, 0)
 }
 
 const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
@@ -232,51 +230,58 @@ const layer = Layer.effectDiscard(
           output: Output,
           toModelOutput: ({ output }) => [{ type: "text", text: output.output }],
           execute: (input, context) =>
-            Effect.gen(function* () {
-              yield* Effect.tryPromise({
-                try: () => validateNetworkTarget(new URL(input.url)),
-                catch: (error) => error,
-              })
+            Effect.try({
+              try: () => new URL(input.url),
+              catch: () => new ToolFailure({ message: "Invalid URL" }),
+            }).pipe(
+              Effect.flatMap((url) =>
+                Effect.gen(function* () {
+                  yield* Effect.tryPromise({
+                    try: () => validateNetworkTarget(url),
+                    catch: (error) => error,
+                  })
 
-              yield* permission.assert({
-                action: name,
-                resources: [input.url],
-                save: ["*"],
-                metadata: input,
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-              })
+                  yield* permission.assert({
+                    action: name,
+                    resources: [url.href],
+                    save: ["*"],
+                    metadata: input,
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                  })
 
-              const { body, contentType } = yield* Effect.gen(function* () {
-                const response = yield* execute(http, input.url, input.format).pipe(
-                  Effect.catchIf(isCloudflareChallenge, () => execute(http, input.url, input.format, "zaovra")),
-                )
-                const contentType = response.headers["content-type"] || ""
-                const mime = mimeFrom(contentType)
-                if (isImageAttachment(mime))
-                  return yield* Effect.fail(new Error(`Unsupported fetched image content type: ${mime}`))
-                if (!isTextualMime(mime))
-                  return yield* Effect.fail(new Error(`Unsupported fetched file content type: ${mime}`))
-                return { body: yield* collectBody(response), contentType }
-              }).pipe(
-                Effect.timeoutOrElse({
-                  duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
-                  orElse: () => Effect.fail(new Error("Request timed out")),
-                }),
-              )
-              const content = new TextDecoder().decode(body)
-              const output = yield* Effect.try({
-                try: () => convert(content, contentType, input.format),
-                catch: (error) => error,
-              })
-              return {
-                url: input.url,
-                contentType,
-                format: input.format,
-                output,
-              }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to fetch ${input.url}` }))),
+                  const { body, contentType } = yield* Effect.gen(function* () {
+                    const response = yield* execute(http, url, input.format).pipe(
+                      Effect.catchIf(isCloudflareChallenge, () => execute(http, url, input.format, "zaovra")),
+                    )
+                    const contentType = response.headers["content-type"] || ""
+                    const mime = mimeFrom(contentType)
+                    if (isImageAttachment(mime))
+                      return yield* Effect.fail(new Error(`Unsupported fetched image content type: ${mime}`))
+                    if (!isTextualMime(mime))
+                      return yield* Effect.fail(new Error(`Unsupported fetched file content type: ${mime}`))
+                    return { body: yield* collectBody(response), contentType }
+                  }).pipe(
+                    Effect.timeoutOrElse({
+                      duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
+                      orElse: () => Effect.fail(new Error("Request timed out")),
+                    }),
+                  )
+                  const content = new TextDecoder().decode(body)
+                  const output = yield* Effect.try({
+                    try: () => convert(content, contentType, input.format),
+                    catch: (error) => error,
+                  })
+                  return {
+                    url: url.href,
+                    contentType,
+                    format: input.format,
+                    output,
+                  }
+                }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to fetch ${url.href}` }))),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)

@@ -133,7 +133,7 @@ describe("WebFetchTool registration", () => {
       for (const [index, url] of urls.entries()) {
         expect(yield* executeTool(registry, call({ url, format: "text" }, `local-${index}`))).toEqual({
           type: "error",
-          value: `Unable to fetch ${url}`,
+          value: `Unable to fetch ${new URL(url).href}`,
         })
       }
       expect(assertions).toEqual([])
