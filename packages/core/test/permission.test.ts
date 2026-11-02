@@ -87,7 +87,7 @@ function assertion(input: Partial<PermissionV2.AssertInput> = {}) {
   } satisfies PermissionV2.AssertInput
 }
 
-function waitForRequest() {
+function waitForRequest(input: Partial<PermissionV2.AssertInput> = {}) {
   return Effect.gen(function* () {
     const service = yield* PermissionV2.Service
     const events = yield* EventV2.Service
@@ -98,13 +98,135 @@ function waitForRequest() {
         : Effect.void,
     )
     yield* Effect.addFinalizer(() => unsubscribe)
-    const fiber = yield* service.assert(assertion()).pipe(Effect.forkScoped)
+    const fiber = yield* service.assert(assertion(input)).pipe(Effect.forkScoped)
     const request = yield* Deferred.await(asked)
     return { service, fiber, request }
   })
 }
 
 describe("PermissionV2", () => {
+  for (const effect of ["ask", "deny"] as const) {
+    for (const broad of [false, true]) {
+      for (const mode of ["exact", "pattern", "saved literal", "saved pattern"] as const) {
+        it.effect(`515 unresolved external ${effect} survives ${mode}, broad directory allow=${broad}`, () =>
+          Effect.gen(function* () {
+            const command = "cat $HOME/f"
+            yield* setup([
+              ...PermissionV2.defaults([
+                { action: "*", resource: "*", effect: "allow" },
+                { action: "external_directory", resource: "*", effect: "ask" },
+              ]),
+              ...(broad ? [{ action: "external_directory", resource: "*", effect: "allow" } as const] : []),
+              { action: "external_directory", resource: "/private/*", effect },
+              ...(mode === "exact" || mode === "pattern"
+                ? [{ action: "bash", resource: mode === "exact" ? command : "cat *", effect: "allow" } as const]
+                : []),
+            ])
+            if (mode === "saved literal" || mode === "saved pattern") {
+              const saved = yield* PermissionSaved.Service
+              yield* saved.add({
+                projectID: Project.ID.global,
+                action: "bash",
+                resources: [mode === "saved literal" ? command : "cat *"],
+                matchMode: mode === "saved literal" ? "literal" : "pattern",
+                origin: "api",
+              })
+            }
+            const permissions = yield* PermissionV2.Service
+            expect(
+              (yield* permissions.ask(assertion({ action: "bash", resources: [command], requireConfirmation: true })))
+                .effect,
+            ).toBe("deny")
+            expect(yield* permissions.list()).toEqual([])
+          }),
+        )
+      }
+    }
+  }
+
+  for (const reply of ["once", "always"] as const) {
+    for (const effect of ["ask", "deny"] as const) {
+      it.effect(`515 fresh narrow directory ${effect} vetoes ${reply} without saving the command`, () =>
+        Effect.gen(function* () {
+          const defaults = PermissionV2.defaults([
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "external_directory", resource: "*", effect: "ask" },
+          ])
+          yield* setup(defaults)
+          const command = "cat $HOME/f"
+          const { service, fiber, request } = yield* waitForRequest({
+            action: "bash",
+            resources: [command],
+            save: [command],
+            requireConfirmation: true,
+          })
+          yield* setRules([...defaults, { action: "external_directory", resource: "/private/*", effect }])
+          yield* service.reply({ requestID: request.id, reply })
+          expect((yield* Fiber.await(fiber))._tag).toBe("Failure")
+          const saved = yield* PermissionSaved.Service
+          expect(yield* saved.list()).toEqual([])
+          expect(yield* service.list()).toEqual([])
+        }),
+      )
+    }
+  }
+
+  it.effect("515 saved API pattern cannot batch-release an unresolved request after a narrow deny arrives", () =>
+    Effect.gen(function* () {
+      const defaults = PermissionV2.defaults([
+        { action: "bash", resource: "*", effect: "ask" },
+        { action: "external_directory", resource: "*", effect: "ask" },
+      ])
+      yield* setup(defaults)
+      const permissions = yield* PermissionV2.Service
+      const pending = yield* permissions.ask(
+        assertion({
+          id: PermissionV2.ID.create(),
+          action: "bash",
+          resources: ["cat $HOME/f"],
+          requireConfirmation: true,
+        }),
+      )
+      const pattern = yield* permissions.ask(
+        assertion({
+          id: PermissionV2.ID.create(),
+          action: "bash",
+          resources: ["cat *"],
+          save: ["cat *"],
+          saveMode: "pattern",
+          origin: "api",
+        }),
+      )
+      yield* setRules([...defaults, { action: "external_directory", resource: "/private/*", effect: "deny" }])
+      yield* permissions.reply({ requestID: pattern.id, reply: "always" })
+      expect((yield* permissions.list()).map((item) => item.id)).toEqual([pending.id])
+      yield* permissions.reply({ requestID: pending.id, reply: "once" })
+      expect(yield* permissions.list()).toEqual([])
+      expect(
+        (yield* permissions.ask(assertion({ action: "bash", resources: ["cat $HOME/f"], requireConfirmation: true })))
+          .effect,
+      ).toBe("deny")
+    }),
+  )
+
+  it.effect("515 later universal or identical directory allow supersedes an earlier narrow restriction", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const permissions = yield* PermissionV2.Service
+      for (const resource of ["*", "/private/*"]) {
+        yield* setRules([
+          { action: "*", resource: "*", effect: "allow" },
+          { action: "external_directory", resource: "/private/*", effect: "deny" },
+          { action: "external_directory", resource, effect: "allow" },
+        ])
+        expect(
+          (yield* permissions.ask(assertion({ action: "bash", resources: ["cat $HOME/f"], requireConfirmation: true })))
+            .effect,
+        ).toBe("allow")
+      }
+    }),
+  )
+
   it.effect("511 unresolved external paths need literal approval under built-in defaults", () =>
     Effect.gen(function* () {
       yield* setup(

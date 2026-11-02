@@ -198,6 +198,19 @@ const layer = Layer.effect(
       // A remembered shell command cannot override an effective directory deny.
       if (input.requireConfirmation && evaluate("external_directory", "*", rules).effect === "deny")
         return { effect: "deny" as const, rules }
+      if (input.requireConfirmation) {
+        const directories = rules.filter((rule) => Wildcard.match("external_directory", rule.action))
+        const exceptions = directories.slice(directories.findLastIndex((rule) => rule.resource === "*") + 1)
+        // Unknown targets may hit any live exception. A shell grant, including a
+        // saved literal or a UI reply, cannot approve that separate resource.
+        if (
+          exceptions.some(
+            (rule, index) =>
+              rule.effect !== "allow" && !exceptions.slice(index + 1).some((later) => later.resource === rule.resource),
+          )
+        )
+          return { effect: "deny" as const, rules, unresolvedExternal: true }
+      }
       const external = evaluate("external_directory", "*", all)
       const externalAllowed = external.effect === "allow" && (external.action !== "*" || !builtinRules.has(external))
       const confirm = input.requireConfirmation && !externalAllowed
@@ -257,6 +270,11 @@ const layer = Layer.effect(
         EffectRuntime.gen(function* () {
           const result = yield* evaluateInput(input)
           if (result.effect === "deny") {
+            if ("unresolvedExternal" in result)
+              return yield* new CorrectedError({
+                feedback:
+                  "Unresolved external paths may match a directory restriction. Use concrete paths so their targets can be authorized independently.",
+              })
             return yield* new BlockedError({
               rules: relevant(input, result.rules),
             })

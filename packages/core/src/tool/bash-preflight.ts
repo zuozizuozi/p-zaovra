@@ -13,6 +13,32 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     /^(?:python[\d.]*|node|ruby|perl)(?:\.exe)?$/i.test(path.basename(token.replace(/^(["'])(.*)\1$/, "$2"))),
   )
   const inline = interpreter && tokens.some((token) => token === "-c" || token === "-e")
+  // Track only a lexical cwd change and subsequent operands. Quoted program
+  // bodies remain single tokens; this does not interpret scripts or model cwd.
+  const changedDirectory = (command.match(/"[^"]*"|'[^']*'|[;&|\r\n(){}]+|[<>]+|[^\s"';&|<>(){}]+/g) ?? []).reduce(
+    (state, token) => {
+      if (/^[;&|\r\n(){}]+$/.test(token)) return { ...state, command: true, directory: false, redirect: false }
+      if (/^[<>]+$/.test(token)) return { ...state, redirect: true }
+      const value = token.replace(/^(["'])(.*)\1$/, "$2").replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-[A-Za-z]+:/, "")
+      const relative = value.length > 0 && !value.startsWith("-") && !path.isAbsolute(value)
+      if (state.redirect) return { ...state, redirect: false, risk: state.risk || (state.changed && relative) }
+      if (state.command) {
+        if (/^[A-Za-z_][\w]*=/.test(token) || /^(?:builtin|command|time)$/i.test(value)) return state
+        return {
+          ...state,
+          command: false,
+          directory:
+            /^(?:cd|chdir|pushd|Set-Location|Push-Location)$/i.test(value) ||
+            (shell === "powershell" && /^sl$/i.test(value)),
+          changed: state.changed || /^(?:popd|Pop-Location)$/i.test(value),
+          risk: state.risk || (state.changed && relative && /[\\/]/.test(value)),
+        }
+      }
+      if (state.directory) return { ...state, changed: true }
+      return state.changed && relative ? { ...state, risk: true } : state
+    },
+    { command: true, directory: false, changed: false, risk: false, redirect: false },
+  ).risk
   const paths = tokens.flatMap((token, index) => {
     const quoted = /^["']/.test(token)
     const value = token.replace(/^(["'])(.*)\1$/, "$2").replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-[A-Za-z]+:/, "")
@@ -43,6 +69,7 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
   // for unresolved expansions/paths, not ordinary pipes, redirects or inline code.
   // Literal targets are resolved independently; this never inspects program contents.
   const externalRisk =
+    changedDirectory ||
     /[$`]/.test(dynamic) ||
     /(?:^|[\s=])~(?:[\\/]|$)/.test(unquoted) ||
     /[?*\[\]{}"']/.test(unquoted) ||

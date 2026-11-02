@@ -52,3 +52,28 @@ test("511 separates ordinary shell syntax from unresolved external-path risk", (
   expect(analyzeCommand("cat %TEMP%/f", "cmd").externalRisk).toBe(true)
   expect(analyzeCommand('Get-Content "$env:HOME/file"', "powershell").externalRisk).toBe(true)
 })
+
+test("515 changed cwd keeps later relative operands unresolved without escalating pure cd or command names", () => {
+  for (const shell of ["posix", "bash", "powershell", "cmd"] as const) {
+    for (const command of [
+      "cd sub && cat ../../private/f",
+      "pushd sub && cat ../../private/f",
+      "Set-Location sub; Get-Content ../../private/f",
+      "Push-Location sub; Get-Content ../../private/f",
+      "Pop-Location; Get-Content ../private/f",
+      "cd sub && cat file.txt",
+      "cd sub && cat > output.txt",
+      "cd sub && > ../../private/f",
+      "cd sub && ../../private/tool",
+      "cd sub && popd && cat file.txt",
+      "(cd sub && cat file.txt)",
+    ]) {
+      expect(analyzeCommand(command, shell).externalRisk).toBe(true)
+    }
+    for (const command of ["cd sub", "cd sub && make", "cd sub && ls", 'echo "cd sub && cat f"']) {
+      expect(analyzeCommand(command, shell).externalRisk).toBe(false)
+    }
+  }
+  expect(analyzeCommand("echo 'cd sub && cat f'", "cmd").externalRisk).toBe(true)
+  expect(analyzeCommand("sl sub; Get-Content ../private/f", "powershell").externalRisk).toBe(true)
+})

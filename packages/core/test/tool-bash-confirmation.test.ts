@@ -37,9 +37,10 @@ import { settleTool, toolIdentity } from "./lib/tool"
 const scenarios: {
   name: string
   command: string
-  config: Record<string, unknown>
+  config: Record<string, unknown> | ((workspace: string) => Record<string, unknown>)
   ask?: "bash" | "external_directory"
   denied?: boolean
+  changedCwd?: boolean
 }[] = [
   { name: "default pipe", command: "ls | grep x", config: {} },
   { name: "default redirect", command: "echo a > f", config: {} },
@@ -81,14 +82,54 @@ const scenarios: {
     config: { permissions: [{ action: "bash", resource: "*", effect: "deny" }] },
     denied: true,
   },
+  ...(["ask", "deny"] as const).map((effect) => ({
+    name: `515 broad allow with narrow directory ${effect}`,
+    command: "cat $HOME/f",
+    config: {
+      permissions: [
+        { action: "*", resource: "*", effect: "allow" },
+        { action: "external_directory", resource: "/private/*", effect },
+      ],
+    },
+    denied: true,
+  })),
+  ...[
+    "cd sub && cat ../../private/f",
+    "pushd sub && cat ../../private/f",
+    "Set-Location sub; Get-Content ../../private/f",
+  ].map((command) => ({
+    name: `515 changed cwd cannot bypass its actual target deny: ${command}`,
+    command,
+    config: (workspace: string) => ({
+      permissions: [
+        { action: "*", resource: "*", effect: "allow" },
+        {
+          action: "external_directory",
+          resource: path.join(workspace, "../private/*").replaceAll("\\", "/"),
+          effect: "deny",
+        },
+      ],
+    }),
+    changedCwd: true,
+    denied: true,
+  })),
+  ...["ls | grep x", "echo a > f", "cd sub && make"].map((command) => ({
+    name: `515 harness universal allow preserves ${command}`,
+    command,
+    config: { permissions: [{ action: "*", resource: "*", effect: "allow" }] },
+  })),
 ]
 
 for (const scenario of scenarios) {
   test(`511 real built-in Agent/Config/Bash permissions: ${scenario.name}`, async () => {
     await using root = await tmpdir()
-    const workspace = path.join(root.path, "work")
+    const workspace = path.join(root.path, scenario.changedCwd ? "sandbox/work" : "work")
     await fs.mkdir(path.join(workspace, "sub"), { recursive: true })
     await Bun.write(path.join(root.path, "outside/f"), "harmless external operand")
+    if (scenario.changedCwd) {
+      await Bun.write(path.join(root.path, "private/f"), "old cwd target")
+      await Bun.write(path.join(root.path, "sandbox/private/f"), "actual changed cwd target")
+    }
     const probe = await probeShell(workspace)
     const sessionID = SessionV2.ID.make("ses_shell_confirmation_511")
     const config = Config.Service.of({
@@ -96,7 +137,12 @@ for (const scenario of scenarios) {
         Effect.succeed([
           new Config.Document({
             type: "document",
-            info: Option.getOrThrow(Config.decode({ ...scenario.config, shell: probe.executable })),
+            info: Option.getOrThrow(
+              Config.decode({
+                ...(typeof scenario.config === "function" ? scenario.config(workspace) : scenario.config),
+                shell: probe.executable,
+              }),
+            ),
           }),
         ]),
     })
