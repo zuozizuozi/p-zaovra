@@ -28,8 +28,12 @@ const files = Array.from(
   .filter((file) => !file.split(/[\\/]/).some((part) => part === "node_modules" || part === ".git"))
   .map((file) => file.replaceAll("\\", "/"))
   .sort()
-const rest = files.filter((file) => !file.endsWith("/footer.view.test.tsx"))
+const rest = files.filter(
+  (file) => !file.endsWith("/footer.view.test.tsx") && file !== "test/cli/run/scrollback.surface.test.ts",
+)
 const footer = files.filter((file) => file.endsWith("/footer.view.test.tsx"))
+// Keep a native renderer crash from hiding unrelated results; all report checks still apply.
+const scrollback = files.filter((file) => file === "test/cli/run/scrollback.surface.test.ts")
 // Keep test domains in separate processes and bound their lifetimes, retaining
 // every discovered file exactly once without sharing domain-global state.
 const batches = Array.from(
@@ -39,6 +43,7 @@ const batches = Array.from(
 )
 const groups = batches
   .map((files, index) => ({ name: index ? `package-${index + 1}` : "package", files }))
+  .concat(scrollback.length ? [{ name: "scrollback", files: scrollback }] : [])
   .concat(footer.length ? [{ name: "footer", files: footer }] : [])
 await Bun.write(path.join(directory, "plan.json"), JSON.stringify({ bun: Bun.version, cwd, files, groups }, null, 2))
 console.log(`test:reports ${directory}`)

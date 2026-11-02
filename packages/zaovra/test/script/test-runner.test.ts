@@ -7,6 +7,7 @@ import { tmpdir } from "../fixture/fixture"
 async function run(input: {
   rest?: number
   footer?: number
+  scrollback?: number
   args?: string[]
   failure?: boolean
   extra?: number
@@ -47,6 +48,11 @@ if (${input.loadError ?? false} && ${JSON.stringify(name)} === "rest") throw new
   for (const index of Array.from({ length: input.extra ?? 0 }, (_, index) => index)) {
     await Bun.write(path.join(tmp.path, `test/extra-${index}.test.ts`), fixture(`extra-${index}`))
   }
+  if (input.scrollback !== undefined)
+    await Bun.write(
+      path.join(tmp.path, "test/cli/run/scrollback.surface.test.ts"),
+      fixture("scrollback", input.scrollback),
+    )
   await Bun.write(path.join(tmp.path, "test/cli/run/footer.view.test.tsx"), fixture("footer", input.footer))
   const child = Bun.spawn([process.execPath, "--no-env-file", "run", "script/test.ts", ...(input.args ?? [])], {
     cwd: tmp.path,
@@ -162,4 +168,31 @@ test("different test directories do not share process state", async () => {
   expect(result.exit).toBe(0)
   expect(new Set(result.executed)).toEqual(new Set(["producer", "consumer", "rest", "footer"]))
   expect(result.reports?.results.every((group: { code: number }) => group.code === 0)).toBe(true)
+})
+
+test("scrollback renderer runs alone without losing other discovered files", async () => {
+  const result = await run({ domains: true, scrollback: 0 })
+  expect(result.exit).toBe(0)
+  expect(result.executed).toEqual(["producer", "consumer", "rest", "scrollback", "footer"])
+  expect(result.reports?.plan.groups).toEqual([
+    { name: "package", files: ["test/alpha/producer.test.ts"] },
+    { name: "package-2", files: ["test/beta/consumer.test.ts"] },
+    { name: "package-3", files: ["test/rest.test.ts"] },
+    { name: "scrollback", files: ["test/cli/run/scrollback.surface.test.ts"] },
+    { name: "footer", files: ["test/cli/run/footer.view.test.tsx"] },
+  ])
+  expect(result.reports?.results.map((group: { code: number }) => group.code)).toEqual([0, 0, 0, 0, 0])
+})
+
+test("missing scrollback results stay a hard failure and still run the footer", async () => {
+  const result = await run({ scrollback: 23 })
+  expect(result.exit).toBe(1)
+  expect(result.executed).toEqual(["rest", "scrollback", "footer"])
+  expect(result.reports?.plan.groups).toEqual([
+    { name: "package", files: ["test/rest.test.ts"] },
+    { name: "scrollback", files: ["test/cli/run/scrollback.surface.test.ts"] },
+    { name: "footer", files: ["test/cli/run/footer.view.test.tsx"] },
+  ])
+  expect(result.reports?.results.map((group: { code: number }) => group.code)).toEqual([0, 1, 0])
+  expect(result.output).toContain("test:scrollback exit=23 result=1 files=missing/1 tests=missing/1")
 })
