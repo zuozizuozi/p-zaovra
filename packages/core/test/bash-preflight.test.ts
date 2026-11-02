@@ -97,3 +97,29 @@ test("519 repeated directory commands retain unresolved relative target risk", (
     }
   }
 })
+
+test("522 previous-directory and stack references remain unresolved targets", () => {
+  for (const shell of ["posix", "bash", "powershell"] as const) {
+    for (const command of [
+      "cd -",
+      "cd -- -",
+      "cd '-' && pwd",
+      "builtin cd -- -",
+      "pushd +1",
+      "pushd -1",
+      "popd +1",
+      "popd -1",
+      "Set-Location -",
+      "Set-Location -- -",
+      "Push-Location -",
+      "chdir -",
+    ]) {
+      expect(analyzeCommand(command, shell).externalRisk).toBe(true)
+    }
+    for (const command of ["cd sub", "cd sub && make", "cd +1", "echo -", "echo +1", "echo 'cd -'"]) {
+      expect(analyzeCommand(command, shell).externalRisk).toBe(false)
+    }
+  }
+  expect(analyzeCommand("sl -", "powershell").externalRisk).toBe(true)
+  expect(analyzeCommand("cd -", "cmd").externalRisk).toBe(false)
+})

@@ -16,6 +16,7 @@ import { Global } from "@zaovra-ai/core/global"
 import { Integration } from "@zaovra-ai/core/integration"
 import { Location } from "@zaovra-ai/core/location"
 import { PermissionV2 } from "@zaovra-ai/core/permission"
+import { PermissionSaved } from "@zaovra-ai/core/permission/saved"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { AgentPlugin } from "@zaovra-ai/core/plugin/agent"
 import { PluginHost } from "@zaovra-ai/core/plugin/host"
@@ -41,6 +42,9 @@ const scenarios: {
   ask?: "bash" | "external_directory"
   denied?: boolean
   changedCwd?: boolean
+  previousDirectory?: boolean
+  shell?: "bash" | "pwsh"
+  fresh?: { reply: "once" | "always"; effect: "ask" | "deny" }
 }[] = [
   { name: "default pipe", command: "ls | grep x", config: {} },
   { name: "default redirect", command: "echo a > f", config: {} },
@@ -150,6 +154,64 @@ const scenarios: {
       config: { permissions: [{ action: "*", resource: "*", effect: "allow" }] },
     }),
   ),
+  ...(["ask", "deny"] as const).flatMap((effect) =>
+    [
+      { command: "cd - && pwd", shell: "bash" as const },
+      { command: "cd -- - && pwd", shell: "bash" as const },
+      { command: "pushd +1", shell: "bash" as const },
+      { command: "pushd -1", shell: "bash" as const },
+      { command: "popd +1", shell: "bash" as const },
+      { command: "popd -1", shell: "bash" as const },
+      { command: "Set-Location -; Get-Location", shell: "pwsh" as const },
+      { command: "cd -; Get-Location", shell: "pwsh" as const },
+      { command: "sl -; Get-Location", shell: "pwsh" as const },
+    ].map((item) => ({
+      name: `522 unresolved directory target with narrow ${effect}: ${item.command}`,
+      ...item,
+      config: (workspace: string) => ({
+        permissions: [
+          { action: "*", resource: "*", effect: "allow" },
+          {
+            action: "external_directory",
+            resource: path.join(workspace, "../outside/*").replaceAll("\\", "/"),
+            effect,
+          },
+        ],
+      }),
+      previousDirectory: true,
+      denied: true,
+    })),
+  ),
+  ...(["once", "always"] as const).flatMap((reply) =>
+    (["ask", "deny"] as const).flatMap((effect) =>
+      [
+        { command: "cd - && pwd", shell: "bash" as const },
+        { command: "cd -- - && pwd", shell: "bash" as const },
+        { command: "Set-Location -; Get-Location", shell: "pwsh" as const },
+      ].map((item) => ({
+        name: `522 fresh directory ${effect} vetoes ${reply}: ${item.command}`,
+        ...item,
+        config: {},
+        ask: "bash" as const,
+        previousDirectory: true,
+        fresh: { reply, effect },
+        denied: true,
+      })),
+    ),
+  ),
+  ...[
+    { command: "cd - && pwd", shell: "bash" as const },
+    { command: "cd -- - && pwd", shell: "bash" as const },
+    { command: "pushd +1", shell: "bash" as const },
+    { command: "popd -1", shell: "bash" as const },
+    { command: "Set-Location -; Get-Location", shell: "pwsh" as const },
+    { command: "cd -; Get-Location", shell: "pwsh" as const },
+  ].map((item) => ({
+    name: `522 harness universal allow preserves directory sentinel: ${item.command}`,
+    ...item,
+    config: { permissions: [{ action: "*", resource: "*", effect: "allow" }] },
+    previousDirectory: true,
+  })),
   ...["ls | grep x", "echo a > f", "cd sub && make"].map((command) => ({
     name: `515 harness universal allow preserves ${command}`,
     command,
@@ -167,7 +229,7 @@ for (const scenario of scenarios) {
       await Bun.write(path.join(root.path, "private/f"), "old cwd target")
       await Bun.write(path.join(root.path, "sandbox/private/f"), "actual changed cwd target")
     }
-    const probe = await probeShell(workspace)
+    const probe = await probeShell(workspace, "1.0.0", scenario.shell)
     const sessionID = SessionV2.ID.make("ses_shell_confirmation_511")
     const config = Config.Service.of({
       entries: () =>
@@ -218,7 +280,15 @@ for (const scenario of scenarios) {
         const fiber = yield* settleTool(registry, {
           sessionID,
           ...toolIdentity,
-          call: { type: "tool-call", id: "confirmation", name: "bash", input: { command: scenario.command } },
+          call: {
+            type: "tool-call",
+            id: "confirmation",
+            name: "bash",
+            input: {
+              command: scenario.command,
+              ...(scenario.previousDirectory ? { environment: { OLDPWD: path.join(root.path, "outside") } } : {}),
+            },
+          },
         }).pipe(Effect.exit, Effect.forkScoped)
         for (let attempt = 0; attempt < 200; attempt++) {
           if ((yield* permissions.forSession(sessionID)).length || fiber.pollUnsafe() !== undefined) break
@@ -226,12 +296,29 @@ for (const scenario of scenarios) {
         }
         const pending = yield* permissions.forSession(sessionID)
         expect(pending.map((item) => item.action)).toEqual(scenario.ask ? [scenario.ask] : [])
-        for (const item of pending) yield* permissions.reply({ requestID: item.id, reply: "reject" })
+        if (scenario.fresh) {
+          const effect = scenario.fresh.effect
+          yield* agents.transform((editor) =>
+            editor.update(toolIdentity.agent, (agent) => {
+              agent.permissions.push({
+                action: "external_directory",
+                resource: path.join(root.path, "outside/*").replaceAll("\\", "/"),
+                effect,
+              })
+            }),
+          )
+        }
+        for (const item of pending)
+          yield* permissions.reply({ requestID: item.id, reply: scenario.fresh?.reply ?? "reject" })
         const result = yield* Fiber.join(fiber)
-        expect(Exit.isSuccess(result)).toBe(!scenario.ask)
+        expect(Exit.isSuccess(result)).toBe(!scenario.ask || !!scenario.fresh)
         if (Exit.isSuccess(result)) expect(result.value.result.type).toBe(scenario.denied ? "error" : "content")
         expect(yield* Effect.promise(() => Bun.file(probe.marker).exists())).toBe(!scenario.ask && !scenario.denied)
         expect(yield* permissions.list()).toEqual([])
+        if (scenario.fresh) {
+          const saved = yield* PermissionSaved.Service
+          expect(yield* saved.list()).toEqual([])
+        }
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -243,6 +330,7 @@ for (const scenario of scenarios) {
               Database.node,
               AgentV2.node,
               PermissionV2.node,
+              PermissionSaved.node,
               Config.node,
               Global.node,
               FSUtil.node,

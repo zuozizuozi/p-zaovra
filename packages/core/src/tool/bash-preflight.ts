@@ -17,7 +17,7 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
   // bodies remain single tokens; this does not interpret scripts or model cwd.
   const changedDirectory = (command.match(/"[^"]*"|'[^']*'|[;&|\r\n(){}]+|[<>]+|[^\s"';&|<>(){}]+/g) ?? []).reduce(
     (state, token) => {
-      if (/^[;&|\r\n(){}]+$/.test(token)) return { ...state, command: true, directory: false, redirect: false }
+      if (/^[;&|\r\n(){}]+$/.test(token)) return { ...state, command: true, directory: "", redirect: false }
       if (/^[<>]+$/.test(token)) return { ...state, redirect: true }
       const value = token.replace(/^(["'])(.*)\1$/, "$2").replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-[A-Za-z]+:/, "")
       const relative = value.length > 0 && !value.startsWith("-") && !path.isAbsolute(value)
@@ -28,16 +28,28 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
           ...state,
           command: false,
           directory:
-            /^(?:cd|chdir|pushd|Set-Location|Push-Location)$/i.test(value) ||
-            (shell === "powershell" && /^sl$/i.test(value)),
+            /^(?:cd|chdir|pushd|popd|Set-Location|Push-Location|Pop-Location)$/i.test(value) ||
+            (shell === "powershell" && /^sl$/i.test(value))
+              ? value.toLowerCase()
+              : "",
           changed: state.changed || /^(?:popd|Pop-Location)$/i.test(value),
           risk: state.risk || (state.changed && relative && /[\\/]/.test(value)),
         }
       }
-      if (state.directory) return { ...state, changed: true, risk: state.risk || (state.changed && relative) }
+      if (state.directory)
+        return {
+          ...state,
+          changed: true,
+          // Previous-location and stack references are not literal directories.
+          risk:
+            state.risk ||
+            (state.changed && relative) ||
+            (shell !== "cmd" &&
+              (value === "-" || (/^(?:pushd|popd)$/.test(state.directory) && /^[+-]\d+$/.test(value)))),
+        }
       return state.changed && relative ? { ...state, risk: true } : state
     },
-    { command: true, directory: false, changed: false, risk: false, redirect: false },
+    { command: true, directory: "", changed: false, risk: false, redirect: false },
   ).risk
   const paths = tokens.flatMap((token, index) => {
     const quoted = /^["']/.test(token)
