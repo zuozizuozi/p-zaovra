@@ -6,6 +6,7 @@ import { directory, project, provider, session, sessionID } from "../performance
 
 // Fixed local data only: no provider request or real workspace file is accessed.
 export async function setupFrontend549(page: Page, baseURL: string, desktop = false) {
+  await page.setViewportSize({ width: 1600, height: 900 })
   process.env.PLAYWRIGHT_PORT = new URL(baseURL).port
   process.env.PLAYWRIGHT_SERVER_PORT = new URL(baseURL).port
   if (desktop) {

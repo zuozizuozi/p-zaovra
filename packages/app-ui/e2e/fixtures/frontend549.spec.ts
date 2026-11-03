@@ -101,7 +101,7 @@ test("550 real desktop layout shows project history and independent sidebar cont
   await expect(sidebar).toBeVisible()
   await expect(sidebar.getByText("已关闭标签的历史对话", { exact: true })).toBeVisible()
   await expect(sidebar.locator('[data-slot="new-session-project"]')).toContainText("MCN 工作区")
-  await page.screenshot({ path: root + "/screenshots/desktop-sidebar550.png" })
+  await page.screenshot({ path: root + "/screenshots/desktop-sidebar-" + (process.env.QA_549_SHOT_ID ?? Date.now()) + ".png" })
   const collapse = sidebar.locator("button[aria-expanded=true]").first()
   await collapse.click()
   await expect(sidebar.getByText("已关闭标签的历史对话", { exact: true })).toHaveCount(0)

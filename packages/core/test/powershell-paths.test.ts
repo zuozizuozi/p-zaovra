@@ -3,7 +3,7 @@ import { analyzeCommand } from "../src/tool/bash-preflight"
 import { archiveInspection } from "./fixture/powershell-archive"
 
 test("550 screenshot archive inspection binds every derived value to one literal file", () => {
-  const file = "D:\\工作电脑\\MCN\\国内社媒AI博主list-麻酱.xlsx"
+  const file = "D:\\示例项目\\资料\\示例清单.xlsx"
   for (const command of [archiveInspection(file), archiveInspection(file).replaceAll("\n", "; ")])
     expect(analyzeCommand(command, "powershell")).toEqual({ paths: [file], uncertain: true, externalRisk: false })
 })
