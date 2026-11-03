@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { analyzeCommand } from "../src/tool/bash-preflight"
 import { powerShellLiteralOperands } from "../src/tool/powershell-paths"
 
@@ -12,8 +14,14 @@ test("566 file URI operands expose external Windows targets through casts and co
     expect(analyzeCommand(command, "powershell").literalScanComplete).toBe(true)
   }
   expect(powerShellLiteralOperands("Get-Item 'file:///C:/outside/a%20b.txt'").paths).toContain("C:\\outside\\a b.txt")
+  expect(powerShellLiteralOperands("Get-Item 'file:///C:/outside/%E8%B5%84%E6%96%99.txt'").paths).toContain(
+    "C:\\outside\\资料.txt",
+  )
   expect(powerShellLiteralOperands("Get-Item 'file://server/share/private.txt'").paths).toContain(
     "\\\\server\\share\\private.txt",
+  )
+  expect(powerShellLiteralOperands("Get-Item 'file://xn--fiq228c.com/share/private.txt'").paths).toContain(
+    "\\\\中文.com\\share\\private.txt",
   )
 })
 
@@ -34,6 +42,7 @@ test("566 UNC and extended Windows path prefixes survive the scan without wildca
 test("566 malformed file URIs and unsupported device prefixes keep the scan incomplete", () => {
   for (const input of [
     "file:///%ZZ",
+    "file:///C:/%ZZ",
     "file:///C:/outside/a%2Fb",
     "file:///C:/outside/a%5Cb",
     "file:///C:/outside/a%00b",
@@ -46,4 +55,12 @@ test("566 malformed file URIs and unsupported device prefixes keep the scan inco
     expect(result.literalScanComplete, input).toBe(false)
     expect(result.externalRisk, input).toBe(true)
   }
+})
+
+test("567 native file URI strictly decodes spaces and Unicode on the current host", () => {
+  const file = path.resolve("fixture", "资料 a.txt")
+  const uri = pathToFileURL(file).href
+  const scan = powerShellLiteralOperands(`Get-Content '${uri}'`)
+  expect(scan.paths).toContain(file)
+  expect(scan.complete).toBe(true)
 })

@@ -1,5 +1,5 @@
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { domainToUnicode } from "node:url"
 
 /** Lexical literal operands only: never evaluates PowerShell, variables, types or cmdlets. */
 export function powerShellLiteralOperands(command: string) {
@@ -35,10 +35,20 @@ export function powerShellLiteralOperands(command: string) {
       }
       const url = new URL(value)
       try {
-        if (url.search || url.hash) throw new Error("Ambiguous file URI")
-        value = fileURLToPath(url, {
-          windows: process.platform === "win32" || /^\/[A-Za-z]:/.test(url.pathname) || !!url.hostname,
-        })
+        if (url.search || url.hash || /%2f|%5c/i.test(url.pathname)) throw new Error("Ambiguous file URI")
+        // Bun 1.3.14 ignores fileURLToPath's Windows option and tolerates invalid
+        // escapes. Decode strictly and retain the URI's drive/UNC identity on
+        // every host, so a Linux scan cannot silently omit a Windows literal.
+        const pathname = decodeURIComponent(url.pathname)
+        const hostname = domainToUnicode(url.hostname)
+        const drive = /^\/[A-Za-z]:\//.test(pathname)
+        const windows = process.platform === "win32" || drive || !!url.hostname
+        if ((url.hostname && !hostname) || (windows && !hostname && !drive)) throw new Error("Invalid file URI")
+        value = windows
+          ? hostname
+            ? "\\\\" + hostname + pathname.replaceAll("/", "\\")
+            : pathname.slice(1).replaceAll("/", "\\")
+          : pathname
         if (/[\r\n\0<>|?*]/.test(value) || /:/.test(value.replace(/^[A-Za-z]:/, "")))
           throw new Error("Invalid file path")
       } catch {
