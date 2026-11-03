@@ -16,6 +16,35 @@ const model = Object.assign(Model.make({ id: "model", provider: "provider", rout
 })
 
 describe("toLLMMessages", () => {
+  test("545 retains completed opaque Anthropic thinking on the same model without exposing it after a switch", () => {
+    for (const data of ["opaque+/core==", ""]) {
+      const history = [
+        SessionMessage.Assistant.make({
+          id: id("redacted"),
+          type: "assistant",
+          agent: "build",
+          model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+          time: { created, completed: created },
+          content: [
+            SessionMessage.AssistantReasoning.make({
+              type: "reasoning",
+              id: "redacted-1",
+              text: "",
+              providerMetadata: { anthropic: { redactedThinking: data } },
+              time: { created, completed: created },
+            }),
+          ],
+        }),
+      ]
+      const stored = JSON.stringify(history)
+      expect(toLLMMessages(history, model)[0]?.content).toEqual([
+        { type: "reasoning", text: "", providerMetadata: { anthropic: { redactedThinking: data } } },
+      ])
+      expect(toLLMMessages(history, Model.make({ ...Model.input(model), id: "another-model" }))).toEqual([])
+      expect(JSON.stringify(history)).toBe(stored)
+    }
+  })
+
   test("filters both attachment paths per modality without changing history, and restores images after a switch", () => {
     const history: SessionMessage.Message[] = [
       {

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "compatible-delivery-report",
+    "bytes": 463,
+    "sha256": "16accbfce535c92a01a8757e78d70180c2a8f3d9d49716296846b7908b63cfba",
+    "body": "{\"model\":\"fixture-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Inspect the fixture.\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"}}]},{\"role\":\"tool\",\"tool_call_id\":\"call-fixture\",\"content\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":\"Finish in text only: delivery-report.\"}],\"tool_choice\":\"none\",\"stream\":true,\"stream_options\":{\"include_usage\":true}}"
+  },
+  {
+    "name": "compatible-last-step",
+    "bytes": 457,
+    "sha256": "13fefe42ea6bd7262832865570dfe6a66b6e3c7d760a4433b2a012b5ee1140ed",
+    "body": "{\"model\":\"fixture-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Inspect the fixture.\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"}}]},{\"role\":\"tool\",\"tool_call_id\":\"call-fixture\",\"content\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":\"Finish in text only: last-step.\"}],\"tool_choice\":\"none\",\"stream\":true,\"stream_options\":{\"include_usage\":true}}"
+  },
+  {
+    "name": "compatible-text-recovery",
+    "bytes": 461,
+    "sha256": "ac5cecfb59e68eb591b2f86c9615f9f70e45d994ac326439b21093b35602bebc",
+    "body": "{\"model\":\"fixture-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Inspect the fixture.\"},{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call-fixture\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"}}]},{\"role\":\"tool\",\"tool_call_id\":\"call-fixture\",\"content\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":\"Finish in text only: text-recovery.\"}],\"tool_choice\":\"none\",\"stream\":true,\"stream_options\":{\"include_usage\":true}}"
+  },
+  {
+    "name": "openai-delivery-report",
+    "bytes": 452,
+    "sha256": "244dc39b375c91006767a24d1f74ec89314b712fdf0cc1c49e62e48ffc305e45",
+    "body": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: delivery-report.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
+  },
+  {
+    "name": "openai-last-step",
+    "bytes": 446,
+    "sha256": "ecc1a150e681da8f0c620ceae423cebcad35a015296972ff915aaf3ae48837b7",
+    "body": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: last-step.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
+  },
+  {
+    "name": "openai-text-recovery",
+    "bytes": 450,
+    "sha256": "e15a94fb8bed2ca152e3a973158a5c403cee2bfebab5948e67a24e62f25336c4",
+    "body": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: text-recovery.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
+  }
+]

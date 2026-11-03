@@ -356,6 +356,14 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
           continue
         }
         if (part.type === "tool-call") {
+          if (request.tools.length === 0 || request.toolChoice?.type === "none") {
+            // Converse has no tool_choice:none. Keep history as ordinary text
+            // when toolConfig is absent rather than accidentally enabling auto.
+            content.push({
+              text: `Previous tool call: ${ProviderShared.encodeJson({ id: part.id, name: part.name, input: part.input })}`,
+            })
+            continue
+          }
           content.push(lowerToolCall(part))
           continue
         }
@@ -368,6 +376,12 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
     for (const part of message.content) {
       if (!ProviderShared.supportsContent(part, ["tool-result"]))
         return yield* ProviderShared.unsupportedContent("Bedrock Converse", "tool", ["tool-result"])
+      if (request.tools.length === 0 || request.toolChoice?.type === "none") {
+        content.push({
+          text: `Previous tool result: ${ProviderShared.encodeJson({ id: part.id, name: part.name, result: part.result })}`,
+        })
+        continue
+      }
       content.push(yield* lowerToolResult(part))
       const cachePoint = BedrockCache.block(breakpoints, part.cache)
       if (cachePoint) content.push(cachePoint)

@@ -231,6 +231,14 @@ describe("Anthropic Messages route", () => {
           },
           { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: '{"forecast":"sunny"}' }] },
         ],
+        tools: [
+          {
+            name: "lookup",
+            description: "Previously used tool; unavailable for new calls in this turn.",
+            input_schema: { type: "object", properties: {}, additionalProperties: true },
+          },
+        ],
+        tool_choice: { type: "none" },
         stream: true,
         max_tokens: 4096,
       })

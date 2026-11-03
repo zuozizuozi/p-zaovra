@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Layer, LayerMap, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { LLM, type ToolDefinition } from "@zaovra-ai/llm"
+import { LLM, Message, ToolCallPart, type ToolDefinition } from "@zaovra-ai/llm"
 import { LLMClient, RequestExecutor } from "@zaovra-ai/llm/route"
 import { AmazonBedrock } from "@zaovra-ai/llm/providers"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
@@ -25,6 +25,7 @@ import { ProviderV2 } from "../src/provider"
 import { SessionRunnerModel } from "../src/session/runner/model"
 import { tempLocationLayer } from "./fixture/location"
 import { testEffect } from "./lib/effect"
+import openAIWire545 from "./fixture/provider-wire545.json"
 
 // Real shipped registry (built-ins, Task, disconnected MCP) lowered by every
 // catalog route through a local fixed HTTP server. No network, no real keys.
@@ -215,16 +216,19 @@ const shippedTools = Effect.fn("test.shippedTools")(function* () {
   return tools
 })
 
-const captureBody = (pkg: string, provider: string, tools: ReadonlyArray<ToolDefinition>) =>
+const captureRequest = (pkg: string, provider: string, input: Omit<Parameters<typeof LLM.request>[0], "model">) =>
   Effect.gen(function* () {
     const bodies: Record<string, unknown>[] = []
+    const raw: string[] = []
     const server = yield* Effect.acquireRelease(
       Effect.sync(() =>
         Bun.serve({
           hostname: "127.0.0.1",
           port: 0,
           async fetch(request) {
-            bodies.push((await request.json()) as Record<string, unknown>)
+            const text = await request.text()
+            raw.push(text)
+            bodies.push(JSON.parse(text) as Record<string, unknown>)
             return Response.json({ error: { message: "fixture stops after capture" } }, { status: 400 })
           },
         }),
@@ -253,15 +257,91 @@ const captureBody = (pkg: string, provider: string, tools: ReadonlyArray<ToolDef
       }),
       { type: "key", key: "fixture-only" },
     )
-    yield* LLMClient.generate(LLM.request({ model, prompt: "hello", tools })).pipe(
+    yield* LLMClient.generate(LLM.request({ ...input, model })).pipe(
       Effect.provide(
         LLMClient.layer.pipe(Layer.provide(RequestExecutor.layer.pipe(Layer.provide(FetchHttpClient.layer)))),
       ),
       Effect.exit,
     )
     expect(bodies).toHaveLength(1)
-    return bodies[0]!
+    return { body: bodies[0]!, raw: raw[0]! }
   })
+
+const captureBody = (pkg: string, provider: string, tools: ReadonlyArray<ToolDefinition>) =>
+  captureRequest(pkg, provider, { prompt: "hello", tools }).pipe(Effect.map((captured) => captured.body))
+
+describe("545 text-only provider wire", () => {
+  it.live("Anthropic sends serialized redacted thinking and signatures unchanged over HTTP", () =>
+    Effect.gen(function* () {
+      const messages = [
+        Message.user("Inspect the fixture."),
+        Message.assistant([
+          { type: "reasoning", text: "signed", providerMetadata: { anthropic: { signature: "fixture-signature" } } },
+          { type: "reasoning", text: "", providerMetadata: { anthropic: { redactedThinking: "opaque+/fixture==" } } },
+          { type: "reasoning", text: "", providerMetadata: { anthropic: { redactedThinking: "" } } },
+          ToolCallPart.make({ id: "call-fixture", name: "bash", input: { command: "fixture" } }),
+        ]),
+        Message.tool({ id: "call-fixture", name: "bash", result: "fixture-output" }),
+      ]
+      const captured = yield* captureRequest("@ai-sdk/anthropic", "wanyin-fixture", {
+        messages: JSON.parse(JSON.stringify(messages)),
+        tools: [],
+        toolChoice: "none",
+        cache: "none",
+      })
+      expect(captured.body.tool_choice).toEqual({ type: "none" })
+      expect((captured.body.messages as { content: unknown[] }[])[1]?.content).toEqual([
+        { type: "thinking", thinking: "signed", signature: "fixture-signature" },
+        { type: "redacted_thinking", data: "opaque+/fixture==" },
+        { type: "redacted_thinking", data: "" },
+        { type: "tool_use", id: "call-fixture", name: "bash", input: { command: "fixture" } },
+      ])
+    }),
+  )
+
+  for (const mode of ["last-step", "text-recovery", "delivery-report"]) {
+    for (const route of [
+      { pkg: "@ai-sdk/anthropic", provider: "wanyin-fixture" },
+      { pkg: "@ai-sdk/openai", provider: "openai" },
+      { pkg: "@ai-sdk/openai-compatible", provider: "compatible" },
+    ]) {
+      it.live(`${mode} keeps ${route.pkg} history valid without permitting another tool call`, () =>
+        Effect.gen(function* () {
+          const messages = [
+            Message.user("Inspect the fixture."),
+            Message.assistant([ToolCallPart.make({ id: "call-fixture", name: "bash", input: { command: "fixture" } })]),
+            Message.tool({ id: "call-fixture", name: "bash", result: "fixture-output" }),
+            Message.user(`Finish in text only: ${mode}.`),
+          ]
+          const captured = yield* captureRequest(route.pkg, route.provider, {
+            messages,
+            tools: [],
+            toolChoice: "none",
+            cache: "none",
+          })
+          if (route.pkg === "@ai-sdk/anthropic") {
+            expect(captured.body.tool_choice).toEqual({ type: "none" })
+            expect((captured.body.tools as { name: string }[]).map((tool) => tool.name)).toEqual(["bash"])
+            expect(JSON.stringify(captured.body.messages)).toContain('"type":"tool_use"')
+            expect(JSON.stringify(captured.body.messages)).toContain('"type":"tool_result"')
+          }
+          if (route.pkg !== "@ai-sdk/anthropic") {
+            expect(captured.body.tools).toBeUndefined()
+            const baseline = openAIWire545.find((entry) => entry.name === `${route.provider}-${mode}`)
+            expect(baseline).toBeDefined()
+            expect(captured.raw).toBe(baseline!.body)
+            expect(new Bun.CryptoHasher("sha256").update(captured.raw).digest("hex")).toBe(baseline!.sha256)
+            const directory = process.env.ZAOVRA_PROVIDER_WIRE_REPORT
+            if (directory) {
+              yield* Effect.promise(() => Bun.write(`${directory}/${route.provider}-${mode}.txt`, captured.raw))
+            }
+          }
+          expect(messages[1]?.content[0]?.type).toBe("tool-call")
+        }),
+      )
+    }
+  }
+})
 
 function loweredTools(pkg: string, body: Record<string, unknown>) {
   if (pkg === "@ai-sdk/anthropic")

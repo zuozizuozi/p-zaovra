@@ -160,6 +160,7 @@ describe("Bedrock Converse route", () => {
         LLM.request({
           id: "req_history",
           model,
+          tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object" } }],
           messages: [
             Message.user("What is the weather?"),
             Message.assistant([ToolCallPart.make({ id: "tool_1", name: "lookup", input: { query: "weather" } })]),
@@ -170,6 +171,7 @@ describe("Bedrock Converse route", () => {
       )
 
       expect(prepared.body).toMatchObject({
+        toolConfig: { tools: [{ toolSpec: { name: "lookup" } }] },
         messages: [
           { role: "user", content: [{ text: "What is the weather?" }] },
           {
@@ -199,6 +201,7 @@ describe("Bedrock Converse route", () => {
         LLM.request({
           id: "req_tool_image",
           model,
+          tools: [{ name: "screenshot", description: "Capture a screenshot", inputSchema: { type: "object" } }],
           messages: [
             Message.user("Capture the screen."),
             Message.assistant([ToolCallPart.make({ id: "tool_1", name: "screenshot", input: {} })]),
@@ -219,6 +222,7 @@ describe("Bedrock Converse route", () => {
       )
 
       expect(prepared.body).toMatchObject({
+        toolConfig: { tools: [{ toolSpec: { name: "screenshot" } }] },
         messages: [
           { role: "user", content: [{ text: "Capture the screen." }] },
           {

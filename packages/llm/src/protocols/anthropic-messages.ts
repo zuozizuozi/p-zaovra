@@ -63,6 +63,11 @@ const AnthropicThinkingBlock = Schema.Struct({
   cache_control: Schema.optional(AnthropicCacheControl),
 })
 
+const AnthropicRedactedThinkingBlock = Schema.Struct({
+  type: Schema.tag("redacted_thinking"),
+  data: Schema.String,
+})
+
 const AnthropicToolUseBlock = Schema.Struct({
   type: Schema.tag("tool_use"),
   id: Schema.String,
@@ -122,6 +127,7 @@ type AnthropicUserBlock = Schema.Schema.Type<typeof AnthropicUserBlock>
 const AnthropicAssistantBlock = Schema.Union([
   AnthropicTextBlock,
   AnthropicThinkingBlock,
+  AnthropicRedactedThinkingBlock,
   AnthropicToolUseBlock,
   AnthropicServerToolUseBlock,
   AnthropicServerToolResultBlock,
@@ -145,7 +151,7 @@ const AnthropicTool = Schema.Struct({
 type AnthropicTool = Schema.Schema.Type<typeof AnthropicTool>
 
 const AnthropicToolChoice = Schema.Union([
-  Schema.Struct({ type: Schema.Literals(["auto", "any"]) }),
+  Schema.Struct({ type: Schema.Literals(["auto", "any", "none"]) }),
   Schema.Struct({ type: Schema.tag("tool"), name: Schema.String }),
 ])
 
@@ -187,6 +193,7 @@ const AnthropicStreamBlock = Schema.Struct({
   text: Schema.optional(Schema.String),
   thinking: Schema.optional(Schema.String),
   signature: Schema.optional(Schema.String),
+  data: Schema.optional(Schema.String),
   input: Schema.optional(Schema.Unknown),
   // *_tool_result blocks arrive whole as content_block_start (no streaming
   // delta) with the structured payload in `content` and the originating
@@ -274,7 +281,7 @@ const lowerTool = (breakpoints: Cache.Breakpoints, tool: ToolDefinition, inputSc
 const lowerToolChoice = (toolChoice: NonNullable<LLMRequest["toolChoice"]>) =>
   ProviderShared.matchToolChoice("Anthropic Messages", toolChoice, {
     auto: () => ({ type: "auto" as const }),
-    none: () => undefined,
+    none: () => ({ type: "none" as const }),
     required: () => ({ type: "any" as const }),
     tool: (name) => ({ type: "tool" as const, name }),
   })
@@ -460,6 +467,11 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
           continue
         }
         if (part.type === "reasoning") {
+          const redacted = part.providerMetadata?.anthropic?.redactedThinking
+          if (typeof redacted === "string") {
+            content.push({ type: "redacted_thinking", data: redacted })
+            continue
+          }
           const signature = part.encrypted ?? signatureFromMetadata(part.providerMetadata)
           if (!signature) return yield* invalid("Cannot replay Anthropic thinking without its original signature")
           content.push({
@@ -551,7 +563,25 @@ const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (re
 })
 
 const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (request: LLMRequest) {
-  const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined
+  // Text-only callers may already have removed their catalog. These declarations
+  // only make historical blocks valid; they must never enable a new tool call.
+  const historyTools =
+    request.tools.length || (request.toolChoice && request.toolChoice.type !== "none")
+      ? []
+      : Array.from(
+          new Set(
+            request.messages.flatMap((message) =>
+              message.content.flatMap((part) =>
+                (part.type === "tool-call" || part.type === "tool-result") && !part.providerExecuted ? [part.name] : [],
+              ),
+            ),
+          ),
+        )
+  const toolChoice = historyTools.length
+    ? { type: "none" as const }
+    : request.toolChoice
+      ? yield* lowerToolChoice(request.toolChoice)
+      : undefined
   const generation = request.generation
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
   const outputLimit = request.model.defaults?.limits?.output ?? request.model.route.defaults.limits?.output ?? 4096
@@ -559,16 +589,21 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
   // messages. Tools live highest in the cache hierarchy, so when callers
   // over-mark we keep their tool hints and shed the message-tail ones first.
   const breakpoints = Cache.newBreakpoints(ANTHROPIC_BREAKPOINT_CAP)
-  const tools =
-    request.tools.length === 0 || request.toolChoice?.type === "none"
-      ? undefined
-      : request.tools.map((tool) =>
-          lowerTool(
-            breakpoints,
-            tool,
-            ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
-          ),
-        )
+  const tools = request.tools.length
+    ? request.tools.map((tool) =>
+        lowerTool(
+          breakpoints,
+          tool,
+          ToolSchemaProjection.modelCompatibility(tool.inputSchema, toolSchemaCompatibility),
+        ),
+      )
+    : historyTools.length
+      ? historyTools.map((name) => ({
+          name,
+          description: "Previously used tool; unavailable for new calls in this turn.",
+          input_schema: { type: "object", properties: {}, additionalProperties: true },
+        }))
+      : undefined
   const system =
     request.system.length === 0
       ? undefined
@@ -741,6 +776,25 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
           events,
           `reasoning-${event.index ?? 0}`,
           block.thinking ?? "",
+        ),
+      },
+      events,
+    ]
+  }
+
+  // This opaque block arrives whole, so close it immediately with metadata on
+  // both boundaries, including when the encrypted payload is an empty string.
+  if (block.type === "redacted_thinking" && block.data !== undefined) {
+    const events: LLMEvent[] = []
+    const metadata = anthropicMetadata({ redactedThinking: block.data })
+    return [
+      {
+        ...state,
+        lifecycle: Lifecycle.reasoningEnd(
+          Lifecycle.reasoningStart(state.lifecycle, events, `reasoning-${event.index ?? 0}`, metadata),
+          events,
+          `reasoning-${event.index ?? 0}`,
+          metadata,
         ),
       },
       events,
