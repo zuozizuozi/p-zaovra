@@ -101,6 +101,9 @@ test("550 real desktop layout shows project history and independent sidebar cont
   await expect(sidebar).toBeVisible()
   await expect(sidebar.getByText("已关闭标签的历史对话", { exact: true })).toBeVisible()
   await expect(sidebar.locator('[data-slot="new-session-project"]')).toContainText("MCN 工作区")
+  await expect.poll(() => sidebar.evaluate(element =>
+    element.getBoundingClientRect().right <= element.parentElement!.getBoundingClientRect().right + 0.5,
+  )).toBe(true)
   await page.screenshot({
     path: root + "/screenshots/desktop-sidebar-" + (process.env.QA_549_SHOT_ID ?? Date.now()) + ".png",
   })
