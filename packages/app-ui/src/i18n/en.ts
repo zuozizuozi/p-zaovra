@@ -7,7 +7,7 @@ export const dict = {
   "permission.mode.full": "Full access",
   "permission.mode.ask.description": "Ask when a command or edit needs approval.",
   "permission.mode.automatic.description":
-    "Automatically approve workspace commands and edits. Ask before external paths.",
+    "Automatically approve workspace operations; ask for detected external paths. Dynamic PowerShell scripts may still access other locations.",
   "permission.mode.full.description":
     "Automatically approve permission requests for this project. Explicit deny rules still apply.",
   "permission.mode.full.warning":
