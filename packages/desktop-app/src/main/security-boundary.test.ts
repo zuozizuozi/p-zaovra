@@ -124,6 +124,10 @@ describe("desktop renderer trust boundary", () => {
     expect(windows.rendererNavigationDisposition("file:///C:/Windows/System32/calc.exe")).toBe("deny")
     expect(windows.rendererNavigationDisposition("javascript:alert(1)")).toBe("deny")
     expect(windows.rendererNavigationDisposition("zaovra://session/1")).toBe("deny")
+    expect(windows.rendererNavigationDisposition("zaovra-beta://open-project?directory=/tmp/demo")).toBe("deny")
+    expect(windows.rendererNavigationDisposition("zaovra-dev://new-session?directory=/tmp/demo")).toBe("deny")
+    expect(windows.isAllowedExternalUrl("zaovra-beta://open-project?directory=/tmp/demo")).toBe(false)
+    expect(windows.isAllowedExternalUrl("zaovra-dev://new-session?directory=/tmp/demo")).toBe(false)
   })
 
   test("requires IPC from the trusted main frame", () => {

@@ -1,7 +1,12 @@
+import { DEEP_LINK_PROTOCOLS, hasDeepLinkProtocol } from "../../deep-link-protocol"
+
 export const deepLinkEvent = "zaovra:deep-link"
 
-const parseUrl = (input: string) => {
-  if (!input.startsWith("zaovra://")) return
+const channel = import.meta.env.VITE_ZAOVRA_CHANNEL
+const protocol = DEEP_LINK_PROTOCOLS[channel === "beta" ? "beta" : channel === "dev" ? "dev" : "prod"]
+
+const parseUrl = (input: string, scheme: string) => {
+  if (!hasDeepLinkProtocol(input, scheme)) return
   if (typeof URL.canParse === "function" && !URL.canParse(input)) return
   try {
     return new URL(input)
@@ -10,8 +15,8 @@ const parseUrl = (input: string) => {
   }
 }
 
-export const parseDeepLink = (input: string) => {
-  const url = parseUrl(input)
+export const parseDeepLink = (input: string, scheme = protocol) => {
+  const url = parseUrl(input, scheme)
   if (!url) return
   if (url.hostname !== "open-project") return
   const directory = url.searchParams.get("directory")
@@ -19,8 +24,8 @@ export const parseDeepLink = (input: string) => {
   return directory
 }
 
-export const parseNewSessionDeepLink = (input: string) => {
-  const url = parseUrl(input)
+export const parseNewSessionDeepLink = (input: string, scheme = protocol) => {
+  const url = parseUrl(input, scheme)
   if (!url) return
   if (url.hostname !== "new-session") return
   const directory = url.searchParams.get("directory")
@@ -31,10 +36,12 @@ export const parseNewSessionDeepLink = (input: string) => {
 }
 
 export const collectOpenProjectDeepLinks = (urls: string[]) =>
-  urls.map(parseDeepLink).filter((directory): directory is string => !!directory)
+  urls.map((url) => parseDeepLink(url)).filter((directory): directory is string => !!directory)
 
 export const collectNewSessionDeepLinks = (urls: string[]) =>
-  urls.map(parseNewSessionDeepLink).filter((link): link is { directory: string; prompt?: string } => !!link)
+  urls
+    .map((url) => parseNewSessionDeepLink(url))
+    .filter((link): link is { directory: string; prompt?: string } => !!link)
 
 type ZaovraWindow = Window & {
   __ZAOVRA__?: {

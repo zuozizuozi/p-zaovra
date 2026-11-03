@@ -13,7 +13,8 @@ import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
-import { CHANNEL } from "./constants"
+import { CHANNEL, DEEP_LINK_PROTOCOL } from "./constants"
+import { hasDeepLinkProtocol } from "@zaovra-ai/app/deep-link-protocol"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendLocalServerExit } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
 import { exportDebugLogs, initCrashReporter, initLogging, write as writeLog } from "./logging"
@@ -230,10 +231,10 @@ const main = Effect.gen(function* () {
 
   preferAppEnv(app.getPath("userData"))
 
-  emitDeepLinks(process.argv.filter((arg) => arg.startsWith("zaovra://")))
+  emitDeepLinks(process.argv.filter((arg) => hasDeepLinkProtocol(arg, DEEP_LINK_PROTOCOL)))
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
-    const urls = argv.filter((arg: string) => arg.startsWith("zaovra://"))
+    const urls = argv.filter((arg: string) => hasDeepLinkProtocol(arg, DEEP_LINK_PROTOCOL))
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
       emitDeepLinks(urls)
@@ -247,6 +248,7 @@ const main = Effect.gen(function* () {
 
   app.on("open-url", (event: Event, url: string) => {
     event.preventDefault()
+    if (!hasDeepLinkProtocol(url, DEEP_LINK_PROTOCOL)) return
     logger.log("deep link received via open-url", { url })
     emitDeepLinks([url])
   })
@@ -312,7 +314,7 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
-  app.setAsDefaultProtocolClient("zaovra")
+  app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL)
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater()

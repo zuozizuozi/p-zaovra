@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 
 import type { Configuration } from "electron-builder"
+import { DEEP_LINK_PROTOCOLS } from "@zaovra-ai/app/deep-link-protocol"
 
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
@@ -71,7 +72,7 @@ const getBase = (appId: string): Configuration => ({
   },
   protocols: {
     name: "Zaovra",
-    schemes: ["zaovra"],
+    schemes: [DEEP_LINK_PROTOCOLS[channel]],
   },
   win: {
     icon: `resources/icons/icon.ico`,
@@ -122,7 +123,7 @@ function getConfig() {
         ...base,
         appId,
         productName: "Zaovra Beta",
-        protocols: { name: "Zaovra Beta", schemes: ["zaovra"] },
+        protocols: { name: "Zaovra Beta", schemes: [DEEP_LINK_PROTOCOLS[channel]] },
         publish: { provider: "generic", url: "https://updates.zaovra.com/beta/", channel: "beta" },
         rpm: { packageName: "zaovra-beta" },
       }
@@ -132,7 +133,7 @@ function getConfig() {
         ...base,
         appId,
         productName: "Zaovra",
-        protocols: { name: "Zaovra", schemes: ["zaovra"] },
+        protocols: { name: "Zaovra", schemes: [DEEP_LINK_PROTOCOLS[channel]] },
         publish: { provider: "github", owner: "zuozizuozi", repo: "p-zaovra", channel: "latest" },
         deb: { fpm: [legacyDesktopEntryFpm] },
         rpm: { packageName: "zaovra", fpm: [legacyDesktopEntryFpm] },
