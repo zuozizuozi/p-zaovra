@@ -3,6 +3,15 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "artifact.externalFormat": "此格式暂不支持预览，可用本机应用打开，或在文件夹中查看。",
+  "artifact.openDefault": "用系统默认程序打开",
+  "permission.mode.ask": "请求批准",
+  "permission.mode.automatic": "自动",
+  "permission.mode.full": "完全权限",
+  "permission.mode.ask.description": "命令或编辑需要授权时询问。",
+  "permission.mode.automatic.description": "工作区内的命令与编辑自动执行，访问外部路径时询问。",
+  "permission.mode.full.description": "此项目的权限请求自动批准；显式禁止规则仍生效。",
+  "permission.mode.full.warning": "完全权限：可直接修改文件、执行命令并访问工作区外部，不再询问。显式禁止规则仍生效。",
   "session.end.checked": "已检查 {{count}} 项",
   "session.end.details": "查看本轮详情",
   "session.end.undo": "撤销",
@@ -1329,6 +1338,9 @@ export const dict = {
   "sidebar.gettingStarted.line1": "Zaovra 提供免费模型，你可以立即开始使用。",
   "sidebar.gettingStarted.line2": "连接任意提供商即可使用更多模型，如 Claude、GPT、Gemini 等。",
   "sidebar.project.recentSessions": "最近会话",
+  "sidebar.otherSessions": "其他对话",
+  "sidebar.newSessionProject": "新对话将属于：{{project}}",
+  "sidebar.sessionsRetry": "对话加载失败，点击重试",
   "sidebar.project.viewAllSessions": "查看全部会话",
   "sidebar.project.clearNotifications": "清除通知",
   "sidebar.empty.title": "没有打开的项目",

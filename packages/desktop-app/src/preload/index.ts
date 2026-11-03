@@ -108,6 +108,7 @@ const api: ElectronAPI = {
   readPickedFile: (token, path) => ipcRenderer.invoke("read-picked-file", token, path),
   cancelAttachment: (id) => ipcRenderer.invoke("cancel-attachment", id),
   artifactPreview: {
+    fileAction: (input) => ipcRenderer.invoke("artifact-file-action", input),
     readPDF: (input) => ipcRenderer.invoke("artifact-read-pdf", input),
     open: (input) => ipcRenderer.invoke("artifact-open", input),
     bounds: (input) => ipcRenderer.invoke("artifact-bounds", input),

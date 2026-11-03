@@ -1,4 +1,5 @@
 import { contextGroupTools, groupParts, sameGroups, type PartGroup } from "./message-part-groups"
+import { ReasoningBlock } from "./reasoning-block"
 export { groupParts, sameGroups, type PartGroup, type PartRef } from "./message-part-groups"
 import {
   Component,
@@ -1739,16 +1740,21 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   const data = useData()
   const part = () => props.part as ReasoningPart
   const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
+    () =>
+      props.message.role === "assistant" &&
+      typeof (props.message as AssistantMessage).time.completed !== "number" &&
+      part().time.end === undefined,
   )
   const text = () => readPartText(data.store.part_text_accum_delta, part())
 
   return (
     <Show when={text()}>
       <div data-component="reasoning-part" data-timeline-part-id={part().id}>
-        <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-          <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
-        </Show>
+        <ReasoningBlock text={text()} streaming={streaming()}>
+          <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
+            <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+          </Show>
+        </ReasoningBlock>
       </div>
     </Show>
   )

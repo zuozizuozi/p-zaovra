@@ -26,6 +26,7 @@ export interface MockServerConfig {
   fileContent?: (path: string) => unknown | Promise<unknown>
   findFiles?: (input: { query: string; dirs?: string; limit?: number }) => unknown
   sessionStatus?: unknown
+  activeSessions?: unknown
 }
 
 export async function mockZaovraServer(page: Page, config: MockServerConfig) {
@@ -113,7 +114,8 @@ export async function mockZaovraServer(page: Page, config: MockServerConfig) {
     if (path === "/global/event" || path === "/event") return sse(route, config.events?.(), config.eventRetry)
     if (path === "/global/health") return json(route, { healthy: true })
     if (path === "/api/location") return json(route, { data: [] })
-    if (path === "/api/session/active") return json(route, { data: config.sessionStatus ?? {} })
+    if (path === "/api/session/active")
+      return json(route, { data: config.activeSessions ?? config.sessionStatus ?? {} })
     if (path === "/api/session")
       return json(route, {
         data: config.sessions.map((session) => v2Session(session, config.directory)),
@@ -270,6 +272,8 @@ function v2Session(session: { id: string } & Record<string, unknown>, fallbackDi
 // Existing scenarios describe the desktop's legacy presentation shape. Serve
 // the V2 wire shape so production builds exercise the real session adapter.
 function v2Message(value: unknown): SessionMessage {
+  // New V2 scenarios retain durable shell/completion identity and error metadata.
+  if (value && typeof value === "object" && "type" in value) return value as SessionMessage
   const item = value as { info: Message; parts: Part[] }
   if (
     item.info.role === "user" &&

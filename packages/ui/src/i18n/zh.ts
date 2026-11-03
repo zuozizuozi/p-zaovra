@@ -3,6 +3,8 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.reasoning.active": "思考中…",
+  "ui.reasoning.completed": "思考过程",
   "ui.toolErrorCard.commandAction": "命令没有成功执行。请展开结果查看原因，修复后重试。",
   "ui.toolErrorCard.readAction": "无法读取 {{target}}。请检查文件是否可访问，或告诉我改用其他文件。",
   "ui.toolRecovery.exploratory": "{{count}}次尝试失败 · 原始记录",

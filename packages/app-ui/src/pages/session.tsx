@@ -399,7 +399,10 @@ export default function Page() {
       })
       return
     }
-    if (artifactPreviewable(target.path)) {
+    if (
+      artifactPreviewable(target.path) ||
+      /\.(?:docx?|xlsx?|pptx?|odt|ods|odp|zip|7z|rar|tar|gz|exe|dll|bin)$/i.test(target.path)
+    ) {
       setArtifactTarget({ path: target.path })
       tabs().open("artifacts")
       tabs().setActive("artifacts")

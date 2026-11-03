@@ -6,12 +6,10 @@ export function desktopProjectGroup<T extends { server: string; project: { workt
   directory?: string,
 ) {
   const candidates = groups.filter((group) => group.server === server)
-  if (!directory) return candidates[0]
-  return (
-    candidates.find(
-      (group) =>
-        pathsEqual(group.project.worktree, directory) ||
-        group.project.sandboxes?.some((sandbox) => pathsEqual(sandbox, directory)),
-    ) ?? candidates[0]
+  if (!directory) return
+  return candidates.find(
+    (group) =>
+      pathsEqual(group.project.worktree, directory) ||
+      group.project.sandboxes?.some((sandbox) => pathsEqual(sandbox, directory)),
   )
 }

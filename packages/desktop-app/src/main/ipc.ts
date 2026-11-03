@@ -1,4 +1,5 @@
 import { createArtifactPreview } from "./artifact-preview"
+import { artifactFileAction } from "./artifact-server"
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/app/provider-discovery"
@@ -123,6 +124,13 @@ export function registerIpcHandlers(deps: Deps) {
   handle("artifact-bounds", (event, input: Parameters<ArtifactPreviewAPI["bounds"]>[0]) => preview(event).bounds(input))
   handle("artifact-action", (event, input: Parameters<ArtifactPreviewAPI["action"]>[0]) => preview(event).action(input))
   handle("artifact-state", (event, id: string) => preview(event).state(id))
+  handle("artifact-file-action", (_event, input: Parameters<typeof artifactFileAction>[0]) =>
+    artifactFileAction(input, async (file, action) => {
+      if (action === "reveal") return shell.showItemInFolder(file)
+      const error = await shell.openPath(file)
+      if (error) throw new Error("无法使用本机应用打开文件")
+    }),
+  )
   const rememberResolvedApp = (event: IpcMainInvokeEvent, value: string) => {
     const current = resolvedApps.get(event.sender.id)
     if (current) {

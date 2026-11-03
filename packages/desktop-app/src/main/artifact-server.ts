@@ -28,6 +28,45 @@ const types: Record<string, string> = {
   ".md": "text/plain",
 }
 
+export async function artifactFileAction(
+  input: { target: string; directory: string; action: "open" | "reveal" },
+  run: (file: string, action: "open" | "reveal") => Promise<void>,
+) {
+  if (
+    !input ||
+    typeof input.target !== "string" ||
+    typeof input.directory !== "string" ||
+    !["open", "reveal"].includes(input.action) ||
+    /[\r\n\0]/.test(input.target) ||
+    /^[a-z][\w+.-]*:/i.test(input.target)
+  )
+    throw new Error("请选择当前项目中的文件")
+  const root = await realpath(input.directory)
+  const resolve = async () => {
+    const file = await realpath(path.resolve(root, input.target))
+    const relative = path.relative(root, file)
+    if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative))
+      throw new Error("请选择当前项目中的文件")
+    const info = await stat(file)
+    if (!info.isFile()) throw new Error("请选择文件")
+    return { file, identity: [info.dev, info.ino, info.birthtimeMs].join(":") }
+  }
+  const before = await resolve()
+  const current = await resolve()
+  if (
+    input.action === "open" &&
+    /\.(?:exe|com|bat|cmd|ps1|psm1|msi|lnk|url|reg|vbs|vbe|js|jse|scr|pif|hta|scf)$/i.test(current.file)
+  )
+    throw new Error("此文件请在文件夹中查看，不在预览中执行")
+  if (
+    (await realpath(input.directory)) !== root ||
+    before.file !== current.file ||
+    before.identity !== current.identity
+  )
+    throw new Error("文件已变化，请重新选择")
+  await run(current.file, input.action)
+}
+
 export function previewURL(target: string) {
   const url = new URL(target)
   if (url.username || url.password) throw new Error("预览地址不能包含账号密码")

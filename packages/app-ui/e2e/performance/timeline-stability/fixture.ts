@@ -591,7 +591,7 @@ function eventSchema<
   })
 }
 
-function provider() {
+export function provider() {
   return {
     all: [
       {

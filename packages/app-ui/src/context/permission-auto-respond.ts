@@ -1,5 +1,22 @@
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 
+export type PermissionMode = "ask" | "automatic" | "full"
+
+export function modeAllowsPermission(
+  mode: PermissionMode,
+  request: { permission: string; metadata?: Record<string, unknown> },
+) {
+  if (mode === "ask") return false
+  if (mode === "full") return true
+  // The server evaluates deny before creating a request and rechecks after approval.
+  if (request.permission === "external_directory") return false
+  if (request.permission === "bash")
+    return request.metadata?.externalRisk === false || request.metadata?.preflight === "literal-operands-only"
+  return ["read", "write", "edit", "apply_patch", "list", "glob", "grep", "todowrite", "todoread"].includes(
+    request.permission,
+  )
+}
+
 export function acceptKey(sessionID: string, directory?: string) {
   if (!directory) return sessionID
   return `${base64Encode(directory)}/${sessionID}`

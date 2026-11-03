@@ -1,8 +1,14 @@
 import path from "node:path"
 import type { ShellIdentity } from "../shell-identity"
+import { powerShellArchivePath, powerShellLiterals } from "./powershell-paths"
 
 /** Narrow literal-operand scan, never a shell parser or an OS sandbox. */
 export function analyzeCommand(command: string, shell: ShellIdentity.Identity["type"]) {
+  if (shell === "powershell") {
+    const archive = powerShellArchivePath(command)
+    if (archive) return { paths: [archive], uncertain: true, externalRisk: false }
+    command = powerShellLiterals(command)
+  }
   const tokens = command.match(/"[^"]*"|'[^']*'|[^\s"';&|<>]+/g) ?? []
   const unquoted = command.replace(/"[^"]*"|'[^']*'/g, "")
   const dynamic = shell === "cmd" ? command : command.replace(/'[^']*'/g, "")
@@ -88,7 +94,7 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     (shell === "powershell" && /\b[A-Za-z_][\w]+:/.test(dynamic)) ||
     ((shell === "bash" || shell === "posix") && /\\/.test(unquoted)) ||
     (shell === "cmd" && /[%!^']/.test(command)) ||
-    /\b(?:cd|pushd|Set-Location)\s*(?:[;&|\r\n]|$)/i.test(unquoted) ||
+    /\b(?:cd|pushd|Set-Location)\s*(?:[;&|\r\n]|$)/i.test(command.replace(/"[^"]*"|'[^']*'/g, "__literal__")) ||
     foreignSyntax ||
     paths.length > 256
   return {

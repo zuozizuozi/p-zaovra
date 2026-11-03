@@ -2,6 +2,7 @@ import { createEffect, createMemo, createResource, For, Show, on } from "solid-j
 import { createStore } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
+import { Icon } from "@zaovra-ai/ui/icon"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useCommand } from "@/context/command"
 import { useGlobal, type ServerCtx } from "@/context/global"
@@ -81,8 +82,13 @@ export function DesktopSidebar() {
   const layout = useLayout()
   const tabs = useTabs()
   const dialog = useDialog()
-  const [view, setView] = createStore({ expanded: "" })
+  const [view, setView] = createStore({
+    collapsed: {} as Record<string, boolean>,
+    loadErrors: {} as Record<string, boolean>,
+  })
   const groupKey = (group: ProjectGroup) => `${group.server}:${group.project.worktree}`
+  const expanded = (group: ProjectGroup) => !view.collapsed[groupKey(group)]
+  const loaded = new Set<string>()
 
   const groups = createMemo(() =>
     global.servers.list().flatMap((connection) => {
@@ -107,12 +113,43 @@ export function DesktopSidebar() {
       const owner = groupForTab(tab)
       return owner?.server === group.server && owner.project.worktree === group.project.worktree
     })
+  const groupSessions = (group: ProjectGroup) => {
+    const open = new Set(tabsForGroup(group).flatMap((tab) => (tab.type === "session" ? [tab.sessionId] : [])))
+    return [...new Set([group.project.worktree, ...(group.project.sandboxes ?? [])])]
+      .flatMap((directory) => group.ctx.sync.child(directory, { bootstrap: false })[0].session)
+      .filter((session) => !session.parentID && !session.time.archived && !open.has(session.id))
+      .filter((session) => desktopProjectGroup(groups(), group.server, session.directory) === group)
+      .filter((session, index, all) => all.findIndex((item) => item.id === session.id) === index)
+      .toSorted((a, b) => b.time.updated - a.time.updated)
+  }
+  const loadGroup = (group: ProjectGroup, more = false) => {
+    const key = groupKey(group)
+    setView("loadErrors", key, false)
+    void Promise.all(
+      [...new Set([group.project.worktree, ...(group.project.sandboxes ?? [])])].map((directory) =>
+        group.ctx.sync.project.loadSessions(
+          directory,
+          more ? { limit: group.ctx.sync.child(directory, { bootstrap: false })[0].limit + 20 } : undefined,
+        ),
+      ),
+    ).catch(() => setView("loadErrors", key, true))
+  }
+  createEffect(() => {
+    groups()
+      .filter(expanded)
+      .forEach((group) => {
+        const key = groupKey(group)
+        if (loaded.has(key)) return
+        loaded.add(key)
+        loadGroup(group)
+      })
+  })
   const recent = createMemo(() =>
     tabs.store
       .filter((tab): tab is SessionTab => tab.type === "session")
       .filter((tab) => {
         const group = groupForTab(tab)
-        return !group || view.expanded !== groupKey(group)
+        return !group
       })
       .map((tab) => {
         const connection = global.servers.list().find((item) => ServerConnection.key(item) === tab.server)
@@ -133,12 +170,9 @@ export function DesktopSidebar() {
     )
   }
   const selectProject = (group: ProjectGroup) => {
-    // Changing the selection synchronously expands the active group below.
-    // Decide the user's toggle before that effect runs, not after it.
-    const expanded = view.expanded === groupKey(group) ? "" : groupKey(group)
     layout.home.setSelection({ server: group.server, directory: group.project.worktree })
-    setView("expanded", expanded)
-    if (!currentTab()) navigate("/")
+    setView("collapsed", groupKey(group), false)
+    navigate("/")
   }
   const activeGroup = createMemo(() => {
     const tab = currentTab()
@@ -150,7 +184,7 @@ export function DesktopSidebar() {
     on(
       () => activeGroup() && groupKey(activeGroup()!),
       (key) => {
-        if (key) setView("expanded", key)
+        if (key) setView("collapsed", key, false)
       },
     ),
   )
@@ -181,10 +215,21 @@ export function DesktopSidebar() {
           size="normal"
           variant="ghost-muted"
           icon="edit"
-          onClick={() => command.trigger("tab.new")}
+          onClick={() => {
+            const group = activeGroup()
+            if (!group) return command.trigger("tab.new")
+            void tabs.newDraft({ server: group.server, directory: group.project.worktree })
+          }}
         >
           {language.t("command.session.new")}
         </ButtonV2>
+        <Show when={activeGroup()}>
+          {(group) => (
+            <p data-slot="new-session-project" class="px-2 pt-1 text-xs text-v2-text-text-faint truncate">
+              {language.t("sidebar.newSessionProject", { project: displayName(group().project) })}
+            </p>
+          )}
+        </Show>
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col px-3">
@@ -205,6 +250,7 @@ export function DesktopSidebar() {
                     class="flex min-w-0 flex-1 items-center gap-2 px-2 text-left"
                     onClick={() => selectProject(group)}
                     title={group.project.worktree}
+                    data-slot="project-heading"
                   >
                     <span class="size-5 shrink-0">
                       <ProjectGlyph project={group.project} />
@@ -229,14 +275,11 @@ export function DesktopSidebar() {
                     type="button"
                     data-slot="project-action"
                     class="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-v2-icon-icon-muted hover:bg-v2-background-bg-layer-03"
-                    aria-label={
-                      view.expanded === groupKey(group)
-                        ? language.t("home.server.collapse")
-                        : language.t("home.server.expand")
-                    }
-                    onClick={() => selectProject(group)}
+                    aria-expanded={expanded(group)}
+                    aria-label={expanded(group) ? language.t("home.server.collapse") : language.t("home.server.expand")}
+                    onClick={() => setView("collapsed", groupKey(group), expanded(group))}
                   >
-                    <IconV2 name={view.expanded === groupKey(group) ? "chevron-down" : "chevron-right"} size="small" />
+                    <IconV2 name={expanded(group) ? "chevron-down" : "chevron-right"} size="small" />
                   </button>
                   <MenuV2 modal={false} placement="bottom-end">
                     <MenuV2.Trigger
@@ -268,8 +311,11 @@ export function DesktopSidebar() {
                   </MenuV2>
                 </div>
 
-                <Show when={view.expanded === groupKey(group)}>
-                  <div class="flex min-w-0 flex-col gap-0.5">
+                <Show when={expanded(group)}>
+                  <div
+                    class="ml-3 flex min-w-0 flex-col gap-0.5 border-l border-border-weak-base pl-2"
+                    data-slot="project-conversations"
+                  >
                     <For each={tabsForGroup(group)}>
                       {(tab) => {
                         const close = () => tabs.closeTab(tabs.store.findIndex((item) => item === tab))
@@ -296,6 +342,43 @@ export function DesktopSidebar() {
                         )
                       }}
                     </For>
+                    <For each={groupSessions(group)}>
+                      {(session) => (
+                        <button
+                          type="button"
+                          data-slot="project-session"
+                          class="flex min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-v2-text-text-faint hover:bg-v2-background-bg-layer-02"
+                          title={session.title}
+                          onClick={() => {
+                            const tab: SessionTab = { type: "session", server: group.server, sessionId: session.id }
+                            tabs.rememberSessionInfo(tab, session)
+                            tabs.select(tab)
+                          }}
+                        >
+                          <Icon name="speech-bubble" size="small" />
+                          <span class="truncate">{session.title}</span>
+                        </button>
+                      )}
+                    </For>
+                    <Show when={view.loadErrors[groupKey(group)]}>
+                      <button type="button" class="p-2 text-xs text-text-weak" onClick={() => loadGroup(group)}>
+                        {language.t("sidebar.sessionsRetry")}
+                      </button>
+                    </Show>
+                    <Show
+                      when={
+                        group.ctx.sync.child(group.project.worktree, { bootstrap: false })[0].sessionTotal >
+                        group.ctx.sync.child(group.project.worktree, { bootstrap: false })[0].session.length
+                      }
+                    >
+                      <button
+                        type="button"
+                        class="p-2 text-left text-xs text-text-weak"
+                        onClick={() => loadGroup(group, true)}
+                      >
+                        {language.t("common.loadMore")}
+                      </button>
+                    </Show>
                   </div>
                 </Show>
               </section>
@@ -303,9 +386,7 @@ export function DesktopSidebar() {
           </For>
           <Show when={recent().length}>
             <section data-slot="sidebar-recent" class="mt-3 flex flex-col gap-1">
-              <div class="px-2 py-2 text-xs text-v2-text-text-faint">
-                {language.t("sidebar.project.recentSessions")}
-              </div>
+              <div class="px-2 py-2 text-xs text-v2-text-text-faint">{language.t("sidebar.otherSessions")}</div>
               <For each={recent()}>
                 {(item) => (
                   <DesktopSessionTab

@@ -287,6 +287,7 @@ const layer = Layer.effectDiscard(
                 metadata: {
                   shell: frozen.identity,
                   preflight: preflight.syntax.uncertain ? "uncertain" : "literal-operands-only",
+                  externalRisk: preflight.syntax.externalRisk,
                 },
                 ...(preflight.syntax.externalRisk ? { requireConfirmation: true as const } : {}),
                 action: name,

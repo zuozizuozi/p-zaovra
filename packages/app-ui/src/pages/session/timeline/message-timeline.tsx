@@ -58,7 +58,6 @@ import { SessionRetry } from "@zaovra-ai/session-ui/session-retry"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@zaovra-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@zaovra-ai/ui/sticky-accordion-header"
 import { TextField } from "@zaovra-ai/ui/text-field"
-import { TextReveal } from "@zaovra-ai/ui/text-reveal"
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -156,7 +155,7 @@ function TimelineThinkingRow(props: {
         <span>{language.t("session.status.verifying")}</span>
       </Show>
       <Show when={!props.showReasoningSummaries}>
-        <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
+        <span class="session-turn-thinking-heading block min-w-0 truncate">{props.reasoningHeading}</span>
       </Show>
     </div>
   )
@@ -1494,7 +1493,8 @@ export function MessageTimeline(props: {
             const part = getMsgPart(ref.messageID, ref.partID)
             if (part?.type === "text")
               return ref.messageID !== answerMessages().get(displayTurn(assistantPartRow().userMessageID))
-            if (part?.type === "reasoning") return true
+            // Its own collapsed summary is the affordance for revealing reasoning.
+            if (part?.type === "reasoning") return false
             if (part?.type !== "tool") return false
             return (
               part.state.status !== "error" ||
