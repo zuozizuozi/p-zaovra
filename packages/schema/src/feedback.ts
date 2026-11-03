@@ -6,7 +6,7 @@ export namespace Feedback {
     provider?: string
     model?: string
     events?: Event[]
-    errors?: { at: number; status?: number; category?: string }[]
+    errors?: { at: number; status?: number; category?: string; message?: string; requestID?: string }[]
   }
   export type Snapshot = Readonly<{
     text: string
@@ -199,6 +199,8 @@ export namespace Feedback {
                 status:
                   Number.isInteger(item.status) && item.status! >= 400 && item.status! <= 599 ? item.status : undefined,
                 category: allowed(item.category, ["auth", "credit", "rate", "network", "model", "unknown"]),
+                ...(item.message ? { message: redact(item.message.slice(0, 2000)) } : {}),
+                ...(item.requestID ? { requestID: redact(item.requestID.slice(0, 128)) } : {}),
               })),
           }
         : {}),

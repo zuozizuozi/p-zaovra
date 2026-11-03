@@ -2092,7 +2092,9 @@ ToolRegistry.register({
     const sawPending = pending()
     const text = createMemo(() => {
       const cmd = props.input.command ?? props.metadata.command ?? ""
-      const out = stripAnsi(props.output || props.metadata.output || "").replace(/\r\n?/g, "\n")
+      const out = stripAnsi(
+        props.metadata.zaovraBackgroundOutput ?? props.output ?? props.metadata.output ?? "",
+      ).replace(/\r\n?/g, "\n")
       return `$ ${cmd}${out ? "\n\n" + out : ""}`
     })
     const [copied, setCopied] = createSignal(false)
@@ -2116,6 +2118,11 @@ ToolRegistry.register({
               <span data-slot="basic-tool-tool-title">
                 <TextShimmer text={i18n.t("ui.tool.shell")} active={pending()} />
               </span>
+              <Show when={props.metadata.zaovraBackgroundState}>
+                <span data-slot="background-command-state">
+                  {props.metadata.zaovraBackgroundState === "running" ? "后台运行中" : "后台已结束"}
+                </span>
+              </Show>
               <Show when={!pending() && !open() && props.input.command}>
                 <ShellSubmessage text={props.input.command} animate={sawPending} />
               </Show>

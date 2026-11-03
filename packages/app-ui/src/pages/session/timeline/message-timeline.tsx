@@ -42,7 +42,8 @@ import { Icon } from "@zaovra-ai/ui/icon"
 import { type MascotState } from "@/components/task-mascot"
 import { TaskActivity } from "@/components/task-activity"
 import { runningTool } from "@/utils/running-tool"
-import { isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
+import { ProcessMessages } from "./process-messages-view"
+import { processMessages } from "./process-messages"
 import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
@@ -1367,15 +1368,6 @@ export function MessageTimeline(props: {
               {(message) => (
                 <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
                   <div data-slot="session-turn-message-content" aria-live="off">
-                    <Show when={isContinuation(getMsgParts(message().id))}>
-                      <div data-component="system-followup" class="text-xs text-text-weak">
-                        {language.t(
-                          displayTurn(message().id) === message().id
-                            ? "session.process.unknownOwner"
-                            : "session.process.followup",
-                        )}
-                      </div>
-                    </Show>
                     <Message
                       message={message()}
                       parts={getMsgParts(userMessageRow().userMessageID)}
@@ -1392,6 +1384,33 @@ export function MessageTimeline(props: {
                 </div>
               )}
             </Show>
+          </TimelineRowFrame>
+        )
+      }
+      case "ProcessMessages": {
+        const processRow = row as Accessor<TimelineRowByTag<"ProcessMessages">>
+        const entries = createMemo(() =>
+          processMessages(
+            processRow().messageIDs.flatMap(getMsgParts),
+            new Set(
+              (assistantMessagesByTurn().get(processRow().userMessageID) ?? emptyAssistantMessages).flatMap((message) =>
+                getMsgParts(message.id).flatMap((part) =>
+                  part.type === "tool" &&
+                  part.tool === "bash" &&
+                  part.state.status === "completed" &&
+                  typeof part.state.metadata.job_id === "string"
+                    ? [part.state.metadata.job_id]
+                    : [],
+                ),
+              ),
+            ),
+          ),
+        )
+        return (
+          <TimelineRowFrame row={processRow}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <ProcessMessages entries={entries()} />
+            </div>
           </TimelineRowFrame>
         )
       }

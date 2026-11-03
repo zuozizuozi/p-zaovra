@@ -3,6 +3,7 @@ import { useParams } from "@solidjs/router"
 import { useServerSync } from "@/context/server-sync"
 import type { FeedbackRequest } from "@/feedback"
 import { useSettingsDialog } from "./settings-dialog"
+import { sessionFeedback } from "./feedback-session"
 
 export function FeedbackScene() {
   const params = useParams()
@@ -14,31 +15,9 @@ export function FeedbackScene() {
     input.configure = configure
     const id = params.id
     const messages = sync().session.data.message[id] ?? []
-    const last = messages.findLast((message) => message.role === "assistant")
-    const parts = messages.slice(-50).flatMap((message) => sync().session.data.part[message.id] ?? [])
-    input.context = {
-      provider: last?.providerID,
-      model: last?.modelID,
-      events: parts.flatMap((part) =>
-        part.type !== "tool"
-          ? []
-          : [
-              {
-                at:
-                  part.state.status === "completed" || part.state.status === "error"
-                    ? part.state.time.end
-                    : part.state.status === "running"
-                      ? part.state.time.start
-                      : 0,
-                kind: part.tool,
-                state: part.state.status,
-              },
-            ],
-      ),
-      errors: parts.flatMap((part) =>
-        part.type === "tool" && part.state.status === "error" ? [{ at: part.state.time.end, category: "unknown" }] : [],
-      ),
-    }
+    const diagnostics = sessionFeedback(messages, (id) => sync().session.data.part[id] ?? [], Date.now())
+    input.context = diagnostics.context
+    input.error ??= diagnostics.error
     // No transcript text or tool arguments are read until the user opts in.
     input.readConversation = () =>
       (sync().session.data.message[id] ?? [])

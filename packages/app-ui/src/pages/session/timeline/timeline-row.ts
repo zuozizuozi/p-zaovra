@@ -15,6 +15,10 @@ export namespace TimelineRow {
     userMessageID: string
     anchor: boolean
   }> {}
+  export class ProcessMessages extends Data.TaggedClass("ProcessMessages")<{
+    userMessageID: string
+    messageIDs: string[]
+  }> {}
   export class AssistantHeading extends Data.TaggedClass("AssistantHeading")<{
     userMessageID: string
   }> {}
@@ -48,6 +52,7 @@ export namespace TimelineRow {
     | TurnGap
     | CommentStrip
     | UserMessage
+    | ProcessMessages
     | AssistantHeading
     | TurnDivider
     | AssistantPart
@@ -64,6 +69,8 @@ export namespace TimelineRow {
         return `comment-strip:${row.userMessageID}`
       case "UserMessage":
         return `user-message:${row.userMessageID}`
+      case "ProcessMessages":
+        return `process-messages:${row.userMessageID}`
       case "AssistantHeading":
         return `assistant-heading:${row.userMessageID}`
       case "TurnDivider":

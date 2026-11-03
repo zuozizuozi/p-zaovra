@@ -3,7 +3,8 @@ import type { AssistantMessage, Message, Part, SessionStatus, UserMessage } from
 import { createMemo, mapArray, type Accessor } from "solid-js"
 import { reuseTimelineRows } from "./row-reconciliation"
 import { Timeline, TimelineRow } from "./rows"
-import { displayTurnOwners } from "@zaovra-ai/session-ui/turn-ownership"
+import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
+import { processMessages } from "./process-messages"
 import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 import { placeToolFailuresAfterAnswer } from "./tool-failure-rows"
 
@@ -126,11 +127,39 @@ export function createTimelineProjection(input: {
           (messageByID().get(a)?.time.created ?? 0) - (messageByID().get(b)?.time.created ?? 0) || a.localeCompare(b),
       )
       .flatMap(([owner, rows]) => {
+        const continuations = rows.flatMap((row) =>
+          row._tag === "UserMessage" && isContinuation(input.parts(row.userMessageID)) ? [row.userMessageID] : [],
+        )
+        const continuationIDs = new Set(continuations)
+        const jobs = new Set(
+          (assistantMessagesByTurn().get(owner) ?? []).flatMap((message) =>
+            input
+              .parts(message.id)
+              .flatMap((part) =>
+                part.type === "tool" &&
+                part.tool === "bash" &&
+                part.state.status === "completed" &&
+                typeof part.state.metadata.job_id === "string"
+                  ? [part.state.metadata.job_id]
+                  : [],
+              ),
+          ),
+        )
+        const process = processMessages(continuations.flatMap(input.parts), jobs)
+        const filtered = rows.filter(
+          (row) =>
+            !(
+              (row._tag === "UserMessage" || row._tag === "TurnGap" || row._tag === "CommentStrip") &&
+              continuationIDs.has(row.userMessageID)
+            ),
+        )
+        if (process.length)
+          filtered.push(new TimelineRow.ProcessMessages({ userMessageID: owner, messageIDs: continuations }))
         const last = assistantMessagesByTurn().get(owner)?.at(-1)
         const working =
           input.status().type !== "idle" && (displayTurns().get(activeMessageID() ?? "") ?? activeMessageID()) === owner
         return placeToolFailuresAfterAnswer(
-          rows,
+          filtered,
           input.parts,
           quietParts(),
           !working && typeof last?.time.completed === "number" && last.finish !== "tool-calls",
@@ -144,7 +173,11 @@ export function createTimelineProjection(input: {
     return reuseTimelineRows(
       previous,
       projected.flatMap<TimelineRow.TimelineRow>((row) => {
-        if (row._tag === "AssistantHeading") return []
+        if (row._tag === "AssistantHeading")
+          return isContinuation(input.parts(row.userMessageID)) &&
+            (displayTurns().get(row.userMessageID) ?? row.userMessageID) === row.userMessageID
+            ? [row]
+            : []
         if (row._tag === "UserMessage" && headings.has(row.userMessageID))
           return [row, new TimelineRow.AssistantHeading({ userMessageID: row.userMessageID })]
         return [row]
