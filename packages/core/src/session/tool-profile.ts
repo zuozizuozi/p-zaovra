@@ -21,8 +21,6 @@ const deferred = new Set([
   "read_mcp_resource",
   "list_mcp_prompts",
   "get_mcp_prompt",
-  "webfetch",
-  "websearch",
   "question",
   "todowrite",
   "publish_artifact",

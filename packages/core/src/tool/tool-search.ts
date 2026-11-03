@@ -17,7 +17,7 @@ const layer = Layer.effectDiscard(
       .register({
         [name]: Tool.make({
           description:
-            "Discover additional tools before using them (browser, task/delegation, web, publishing and other registered capabilities). Supply exact names or a short query. Empty input lists the available catalog without activating every tool. Successful matches are offered with their full input schemas on the next turn and remain available on continuation. This only discovers tools; it does not execute them or grant permissions.",
+            "Discover additional tools before using them (browser, task/delegation, web, publishing and other registered capabilities). Supply exact names or query words. Queries return up to ten matches ranked by matching words. Empty or unmatched queries list the available catalog without activating tools. Successful matches are offered with their full input schemas on the next turn and remain available on continuation. This only discovers tools; it does not execute them or grant permissions.",
           observation: true,
           input: Schema.Struct({
             names: Schema.optional(Schema.Array(Schema.String)),
@@ -48,16 +48,25 @@ const layer = Layer.effectDiscard(
                 return yield* new Tool.Failure({
                   message: "Unknown or unavailable tool requested. List the catalog or use a different query.",
                 })
-              const query = input.query?.trim().toLowerCase()
-              const matches = catalog.filter(
-                (tool) =>
-                  input.names?.includes(tool.name) ||
-                  (!input.names?.length &&
-                    (!query || (tool.name + " " + tool.description).toLowerCase().includes(query))),
-              )
+              const terms = [...new Set(input.query?.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
+              const matches = input.names?.length
+                ? catalog.filter((tool) => input.names!.includes(tool.name))
+                : terms.length
+                  ? catalog
+                      .map((tool) => {
+                        const words = new Set(
+                          (tool.name + " " + tool.description).toLowerCase().match(/[\p{L}\p{N}]+/gu),
+                        )
+                        return { tool, score: terms.filter((term) => words.has(term)).length }
+                      })
+                      .filter((match) => match.score > 0)
+                      .sort((a, b) => b.score - a.score)
+                      .slice(0, 10)
+                      .map((match) => match.tool)
+                  : []
               return {
-                activated: input.names?.length || query ? matches.map((tool) => tool.name) : [],
-                available: matches.map((tool) => ({
+                activated: matches.map((tool) => tool.name),
+                available: (matches.length ? matches : catalog).map((tool) => ({
                   name: tool.name,
                   description: tool.description.split("\n")[0]!.slice(0, 200),
                 })),

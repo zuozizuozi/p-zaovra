@@ -1,0 +1,200 @@
+[
+  {
+    "task": "build-pov-ray",
+    "attempt": "c414-zaovra-982b509a2bd84cd9",
+    "callID": "call_xw7Hu47XuhVac8W2B0VWFEAc",
+    "input": {
+      "query": "web search internet to locate/download historic source archive"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "compile-compcert",
+    "attempt": "c414-zaovra-6e150c78a2284992",
+    "callID": "call_33M5y1FyjkFycxSRPUq6kYWF",
+    "input": {
+      "query": "external_directory approval grant access to /tmp paths or browse source download internet"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "count-dataset-tokens",
+    "attempt": "c414-zaovra-5974b82c7d2b4062",
+    "callID": "call_VuEVvt2XZRhdSQxVJEnzKGaL",
+    "input": {
+      "query": "Hugging Face dataset repository API, download dataset files/README, or web search; Python execution"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "dna-assembly",
+    "attempt": "c414-zaovra-18790187723f4a83",
+    "callID": "call_ZH5XE0EwUVKvR88hdhdagP38",
+    "input": {
+      "query": "web search browse internet official NEB BsaI-HFv2 Golden Gate overhang primer design requirements"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "dna-assembly",
+    "attempt": "c414-zaovra-2e8d7121334e4fcb",
+    "callID": "call_DxQykuVdK4phmGmEzN5dMfQT",
+    "input": {
+      "query": "web search NEB BsaI-HF v2 Golden Gate PCR primer overhang requirements check NEB official page; browser or web"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "dna-assembly",
+    "attempt": "c414-zaovra-2e8d7121334e4fcb",
+    "callID": "call_jMpouROzOvwQoDbpXZKeFkgA",
+    "input": {
+      "query": "Primer3 oligotm oligo Tm tool execute or install package"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "dna-assembly",
+    "attempt": "c414-zaovra-f28cea994d854068",
+    "callID": "call_1oxMurTMAC7LUquDo4eFE4Vf",
+    "input": {
+      "query": "web search or browser for NEB BsaI-HF v2 Golden Gate assembly requirements and cut site recommendations"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "extract-moves-from-video",
+    "attempt": "c414-zaovra-6725820fa7814b61",
+    "callID": "call_xtRsBMtlunUlR1jr47TeJsCY",
+    "input": {
+      "query": "video inspect extract frames OCR image visual understanding transcribe video local file"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "extract-moves-from-video",
+    "attempt": "c414-zaovra-6725820fa7814b61",
+    "callID": "call_HMLGKU4Ds1GQSLtCeUj65pz7",
+    "input": {
+      "query": "open local video file watch playback frames screenshot video OCR"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "extract-moves-from-video",
+    "attempt": "c414-zaovra-a7b9e88057604686",
+    "callID": "call_wKtgptb2nrzYK20HUaLBbUsU",
+    "input": {
+      "query": "Inspect or view video frames / video transcription OCR"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "extract-moves-from-video",
+    "attempt": "c414-zaovra-a7b9e88057604686",
+    "callID": "call_SNAj2Wd9bUPbDLtHru2s7vxh",
+    "input": {
+      "query": "browser image viewing video playback OCR computer vision"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "feal-linear-cryptanalysis",
+    "attempt": "c414-zaovra-16e06b3dd87e4579",
+    "callID": "call_zVfX7gStz83IOSRwdQFKaCYW",
+    "input": {
+      "query": "web search for FEAL linear cryptanalysis approximation"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "financial-document-processor",
+    "attempt": "c414-zaovra-035da9a9420e40cb",
+    "callID": "call_buUB4pceVFC32rW1UTqh1DYw",
+    "input": {
+      "query": "OCR or inspect PDF file contents/images from local filesystem"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "financial-document-processor",
+    "attempt": "c414-zaovra-5c079c3b89444444",
+    "callID": "call_ESpGfDHK1V2r14EDF1sUDuEc",
+    "input": {
+      "query": "OCR read text from image or PDF document classify invoice; vision image document understanding"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "financial-document-processor",
+    "attempt": "c414-zaovra-fa41e90f076941e2",
+    "callID": "call_pzbNHIKalgDNMSqv6eIgZnGm",
+    "input": {
+      "query": "Open or inspect image and PDF files, OCR document images, or convert PDF/image pages for visual inspection"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "gcode-to-text",
+    "attempt": "c414-zaovra-03af9ccce9614c20",
+    "callID": "call_HTBywcB3TGXqIYSGLfoHSZ9m",
+    "input": {
+      "query": "browser screenshot local SVG webpage"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "install-windows-3.11",
+    "attempt": "c414-zaovra-115aeb998d39489e",
+    "callID": "call_EczjnMAGfkWcoQANEU2MhEpT",
+    "input": {
+      "query": "browser open local website screenshot interact browser UI"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "mteb-leaderboard",
+    "attempt": "c414-zaovra-42b3cbfa618846b6",
+    "callID": "call_Qi9M8IECGVe5gAQUaDlT0jTF",
+    "input": {
+      "query": "web search internet browser open webpages search results"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "path-tracing",
+    "attempt": "c414-zaovra-1da244ebeae04f50",
+    "callID": "call_iTZX58Z69I4bLfaQ7rEy9y4P",
+    "input": {
+      "query": "view or display image file from workspace image preview browser"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "path-tracing",
+    "attempt": "c414-zaovra-1da244ebeae04f50",
+    "callID": "call_mDSWZ5afjaua5H9mDuheCn2w",
+    "input": {
+      "query": "browser open workspace file image preview screenshot"
+    },
+    "webIntent": false
+  },
+  {
+    "task": "polyglot-rust-c",
+    "attempt": "c414-zaovra-92df35842d174864",
+    "callID": "call_lCuylRhhUy7trzoDHPRp4kQE",
+    "input": {
+      "query": "web search internet search the web"
+    },
+    "webIntent": true
+  },
+  {
+    "task": "protein-assembly",
+    "attempt": "c414-zaovra-7c89cbc2e83c495c",
+    "callID": "call_WZzwwFmhvZvICqfgriNzlmIr",
+    "input": {
+      "query": "web search fetch URL APIs HTTP request internet"
+    },
+    "webIntent": true
+  }
+]
