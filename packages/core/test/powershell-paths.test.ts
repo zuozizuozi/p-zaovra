@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test"
+import path from "node:path"
 import { analyzeCommand } from "../src/tool/bash-preflight"
-import { archiveInspection } from "./fixture/powershell-archive"
+import { powerShellLiteralOperands } from "../src/tool/powershell-paths"
+import { powerShellVariants } from "./fixture/powershell-variants"
 
-test("550 screenshot archive inspection binds every derived value to one literal file", () => {
+test("562 common forms expose literal paths without command-specific recognition", () => {
   const file = "D:\\示例项目\\资料\\示例清单.xlsx"
-  for (const command of [archiveInspection(file), archiveInspection(file).replaceAll("\n", "; ")])
-    expect(analyzeCommand(command, "powershell")).toEqual({ paths: [file], uncertain: true, externalRisk: false })
+  for (const [index, command] of powerShellVariants(file).entries()) {
+    expect(powerShellLiteralOperands(command).paths, command).toContain(index === 2 ? path.dirname(file) : file)
+    expect(analyzeCommand(command, "powershell").literalScanComplete).toBe(true)
+  }
 })
 
 test("550 constant PowerShell bindings expose canonical operands without unresolved expansion", () => {
@@ -15,7 +19,7 @@ test("550 constant PowerShell bindings expose canonical operands without unresol
     "$limit=10; Write-Output $limit",
     "$p='data'; Set-Location $p",
   ]) {
-    expect(analyzeCommand(command, "powershell").externalRisk, command).toBe(false)
+    expect(analyzeCommand(command, "powershell").literalScanComplete, command).toBe(true)
   }
   expect(analyzeCommand("$p='../outside/file.txt'; Get-Content $p", "powershell").paths).toContain(
     "../outside/file.txt",
@@ -38,19 +42,26 @@ test("550 unknown assignments, mutators, scopes and script evaluation retain con
   }
 })
 
-test("550 archive recognition cannot hide added effects, different APIs, rebinding or identity aliases", () => {
-  const base = archiveInspection("input.xlsx")
+test("562 external literal prefixes and incomplete scans remain observable", () => {
   for (const command of [
-    base + "\nGet-Content $env:HOME",
-    base.replace("::OpenRead", "::Open"),
-    base.replace("$z.Dispose()", "$z.ExtractToDirectory($env:TEMP)"),
-    base.replace("$z.Entries | Select", "$z=Get-Content path.txt; $z.Entries | Select"),
-    base.replaceAll("$e", "$z"),
-    base.replace("System.IO.Compression.FileSystem", "evil.dll"),
+    "$renamed='../outside/file.txt'; [IO.File]::ReadAllText($renamed)",
+    "Import-Csv -LiteralPath '../outside/file.csv'",
+    "Get-ChildItem '../outside/*.txt'",
+    'Get-Content "../outside/$name"',
   ]) {
+    expect(
+      powerShellLiteralOperands(command).paths.some((value) => value.startsWith("../outside")),
+      command,
+    ).toBe(true)
+  }
+  expect(powerShellLiteralOperands("$p='../outside/it''s.txt'; Get-Content $p").paths).toContain("../outside/it's.txt")
+  expect(powerShellLiteralOperands('Get-Item --file="sub/file.txt"').paths).toEqual(["sub/file.txt"])
+  for (const command of [
+    'Get-Content "unfinished',
+    "x".repeat(16_385),
+    Array.from({ length: 258 }, (_, i) => `file${i}`).join(" "),
+  ]) {
+    expect(analyzeCommand(command, "powershell").literalScanComplete).toBe(false)
     expect(analyzeCommand(command, "powershell").externalRisk).toBe(true)
   }
-  expect(analyzeCommand(archiveInspection("../outside/input.xlsx"), "powershell").paths).toEqual([
-    "../outside/input.xlsx",
-  ])
 })

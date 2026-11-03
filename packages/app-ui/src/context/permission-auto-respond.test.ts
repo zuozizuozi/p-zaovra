@@ -22,6 +22,10 @@ test("550 three modes distinguish workspace requests from external and unresolve
     { permission: "read" },
     { permission: "write" },
     { permission: "bash", metadata: { preflight: "uncertain", externalRisk: false } },
+    {
+      permission: "bash",
+      metadata: { preflight: "uncertain", externalRisk: true, powerShellLiteralsWithinWorkspace: true },
+    },
   ]) {
     expect(modeAllowsPermission("ask", request)).toBe(false)
     expect(modeAllowsPermission("automatic", request)).toBe(true)

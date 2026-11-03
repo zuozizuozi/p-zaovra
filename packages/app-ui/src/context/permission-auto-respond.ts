@@ -11,7 +11,11 @@ export function modeAllowsPermission(
   // The server evaluates deny before creating a request and rechecks after approval.
   if (request.permission === "external_directory") return false
   if (request.permission === "bash")
-    return request.metadata?.externalRisk === false || request.metadata?.preflight === "literal-operands-only"
+    return (
+      request.metadata?.powerShellLiteralsWithinWorkspace === true ||
+      request.metadata?.externalRisk === false ||
+      request.metadata?.preflight === "literal-operands-only"
+    )
   return ["read", "write", "edit", "apply_patch", "list", "glob", "grep", "todowrite", "todoread"].includes(
     request.permission,
   )

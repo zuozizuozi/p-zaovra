@@ -288,6 +288,17 @@ const layer = Layer.effectDiscard(
                   shell: frozen.identity,
                   preflight: preflight.syntax.uncertain ? "uncertain" : "literal-operands-only",
                   externalRisk: preflight.syntax.externalRisk,
+                  ...(frozen.identity.type === "powershell"
+                    ? {
+                        // UI mode affects automatic replies only. Keep the
+                        // requireConfirmation bit below for 515 deny guards.
+                        powerShellLiteralsWithinWorkspace:
+                          "literalScanComplete" in preflight.syntax &&
+                          preflight.syntax.literalScanComplete === true &&
+                          !external &&
+                          !preflight.targets.some((item) => item.externalDirectory),
+                      }
+                    : {}),
                 },
                 ...(preflight.syntax.externalRisk ? { requireConfirmation: true as const } : {}),
                 action: name,

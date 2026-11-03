@@ -1,14 +1,10 @@
 import path from "node:path"
 import type { ShellIdentity } from "../shell-identity"
-import { powerShellArchivePath, powerShellLiterals } from "./powershell-paths"
+import { powerShellLiteralOperands } from "./powershell-paths"
 
 /** Narrow literal-operand scan, never a shell parser or an OS sandbox. */
 export function analyzeCommand(command: string, shell: ShellIdentity.Identity["type"]) {
-  if (shell === "powershell") {
-    const archive = powerShellArchivePath(command)
-    if (archive) return { paths: [archive], uncertain: true, externalRisk: false }
-    command = powerShellLiterals(command)
-  }
+  const literals = shell === "powershell" ? powerShellLiteralOperands(command) : undefined
   const tokens = command.match(/"[^"]*"|'[^']*'|[^\s"';&|<>]+/g) ?? []
   const unquoted = command.replace(/"[^"]*"|'[^']*'/g, "")
   const dynamic = shell === "cmd" ? command : command.replace(/'[^']*'/g, "")
@@ -57,20 +53,23 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     },
     { command: true, directory: "", changed: false, risk: false, redirect: false },
   ).risk
-  const paths = tokens.flatMap((token, index) => {
-    const quoted = /^["']/.test(token)
-    const value = token.replace(/^(["'])(.*)\1$/, "$2").replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-[A-Za-z]+:/, "")
-    if (!value || value.startsWith("-")) return []
-    if (/[\r\n$`%]/.test(value) || (!quoted && /[?*\[\]{}]/.test(value))) return []
-    if (shell === "cmd" && /^\/[A-Za-z](?::|$)/.test(value)) return []
-    // Ordinary operands can traverse or name an external symlink too. The command name still uses PATH lookup.
-    return (index > 0 && !/[?*\[\]{}]/.test(value)) || path.isAbsolute(value) || /[\\/]/.test(value) ? [value] : []
-  })
+  const paths =
+    literals?.paths ??
+    tokens.flatMap((token, index) => {
+      const quoted = /^["']/.test(token)
+      const value = token.replace(/^(["'])(.*)\1$/, "$2").replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-[A-Za-z]+:/, "")
+      if (!value || value.startsWith("-")) return []
+      if (/[\r\n$`%]/.test(value) || (!quoted && /[?*\[\]{}]/.test(value))) return []
+      if (shell === "cmd" && /^\/[A-Za-z](?::|$)/.test(value)) return []
+      // Ordinary operands can traverse or name an external symlink too. The command name still uses PATH lookup.
+      return (index > 0 && !/[?*\[\]{}]/.test(value)) || path.isAbsolute(value) || /[\\/]/.test(value) ? [value] : []
+    })
   const foreignSyntax =
     process.platform === "win32" &&
     (shell === "bash" || shell === "posix") &&
     paths.some((value) => value.startsWith("/"))
   const uncertain =
+    literals?.complete === false ||
     /[\r\n\u2028\u2029;&|<>()`"'~]/.test(unquoted) ||
     /[$`]/.test(dynamic) ||
     (shell === "powershell" && /\b[A-Za-z_][\w]+:/.test(dynamic)) ||
@@ -87,6 +86,7 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
   // for unresolved expansions/paths, not ordinary pipes, redirects or inline code.
   // Literal targets are resolved independently; this never inspects program contents.
   const externalRisk =
+    literals?.complete === false ||
     changedDirectory ||
     /[$`]/.test(dynamic) ||
     /(?:^|[\s=])~(?:[\\/]|$)/.test(unquoted) ||
@@ -101,5 +101,6 @@ export function analyzeCommand(command: string, shell: ShellIdentity.Identity["t
     paths: [...new Set(paths)].filter((value) => !foreignSyntax || !value.startsWith("/")).slice(0, 256),
     uncertain,
     externalRisk,
+    ...(literals ? { literalScanComplete: literals.complete } : {}),
   }
 }

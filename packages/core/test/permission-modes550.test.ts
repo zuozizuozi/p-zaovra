@@ -22,6 +22,7 @@ import { tmpdir } from "./fixture/tmpdir"
 import { location } from "./fixture/location"
 import { probeShell } from "./fixture/probe-shell"
 import { archiveInspection } from "./fixture/powershell-archive"
+import { powerShellVariants } from "./fixture/powershell-variants"
 import { settleTool, toolIdentity } from "./lib/tool"
 import { modeAllowsPermission, type PermissionMode } from "../../app-ui/src/context/permission-auto-respond"
 
@@ -55,7 +56,7 @@ test("550 screenshot through real Bash/Permission: workspace automatic, full acc
         const execute = Effect.fn("fixture.execute550")(function* (
           command: string,
           mode: PermissionMode,
-          freshDeny = false,
+          freshDeny: boolean | "directory" = false,
         ) {
           const before = runs.length
           const state = { visible: 0, requests: 0 }
@@ -70,7 +71,19 @@ test("550 screenshot through real Bash/Permission: workspace automatic, full acc
                 )
                 const automatic = modeAllowsPermission(mode, { permission: request.action, metadata: request.metadata })
                 if (!automatic) state.visible++
-                if (freshDeny) yield* policy([{ action: "*", resource: "*", effect: "deny" }])
+                if (freshDeny)
+                  yield* policy(
+                    freshDeny === "directory"
+                      ? [
+                          { action: "*", resource: "*", effect: "allow" },
+                          {
+                            action: "external_directory",
+                            resource: outside.path.replaceAll("\\", "/") + "/*",
+                            effect: "deny",
+                          },
+                        ]
+                      : [{ action: "*", resource: "*", effect: "deny" }],
+                  )
                 yield* permission
                   .reply({ requestID: request.id, reply: automatic ? "once" : "reject" })
                   .pipe(Effect.catch(() => Effect.void))
@@ -121,6 +134,56 @@ test("550 screenshot through real Bash/Permission: workspace automatic, full acc
         yield* policy([{ action: "*", resource: "*", effect: "deny" }])
         expect(yield* execute(archiveInspection(local), "full")).toMatchObject({
           visible: 0,
+          dispatch: 0,
+          type: "error",
+        })
+        expect(yield* permission.forSession(session.id)).toEqual([])
+        const variants = []
+        for (const command of powerShellVariants(local)) {
+          yield* policy(askRules)
+          const result = yield* execute(command, "automatic")
+          variants.push(result)
+        }
+        console.error("VARIANTS_562", JSON.stringify(variants))
+        for (const result of variants) expect(result).toMatchObject({ visible: 0, dispatch: 1, type: "content" })
+        for (const command of powerShellVariants(external)) {
+          yield* policy(askRules)
+          expect(yield* execute(command, "automatic")).toMatchObject({ visible: 1, dispatch: 0, type: "error" })
+          yield* policy([
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "external_directory", resource: outside.path.replaceAll("\\", "/") + "/*", effect: "deny" },
+          ])
+          expect(yield* execute(command, "full")).toMatchObject({ visible: 0, dispatch: 0, type: "error" })
+        }
+        for (const mode of ["automatic", "full"] as const) {
+          for (const rules of [
+            [{ action: "*", resource: "*", effect: "deny" }],
+            [
+              { action: "*", resource: "*", effect: "allow" },
+              { action: "external_directory", resource: "*", effect: "deny" },
+            ],
+            [
+              { action: "*", resource: "*", effect: "allow" },
+              { action: "external_directory", resource: outside.path.replaceAll("\\", "/") + "/*", effect: "deny" },
+            ],
+          ] satisfies PermissionV2.Ruleset[]) {
+            yield* policy(rules)
+            expect(yield* execute("Get-Content $unknown", mode)).toMatchObject({
+              visible: 0,
+              dispatch: 0,
+              type: "error",
+            })
+          }
+        }
+        yield* policy(askRules)
+        expect(yield* execute(powerShellVariants(local)[4], "automatic", "directory")).toMatchObject({
+          visible: 0,
+          dispatch: 0,
+          type: "error",
+        })
+        yield* policy(askRules)
+        expect(yield* execute(powerShellVariants(local)[4], "ask")).toMatchObject({
+          visible: 1,
           dispatch: 0,
           type: "error",
         })
