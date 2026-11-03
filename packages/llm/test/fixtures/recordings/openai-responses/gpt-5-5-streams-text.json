@@ -3,7 +3,12 @@
   "metadata": {
     "name": "openai-responses/gpt-5-5-streams-text",
     "recordedAt": "2026-05-06T00:26:10.447Z",
-    "tags": ["prefix:openai-responses", "provider:openai", "protocol:openai-responses", "flagship"]
+    "tags": [
+      "prefix:openai-responses",
+      "provider:openai",
+      "protocol:openai-responses",
+      "flagship"
+    ]
   },
   "interactions": [
     {
@@ -14,7 +19,7 @@
         "headers": {
           "content-type": "application/json"
         },
-        "body": "{\"model\":\"gpt-5.5\",\"input\":[{\"role\":\"system\",\"content\":\"You are concise.\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Reply with exactly: Hello!\"}]}],\"stream\":true,\"max_output_tokens\":80}"
+        "body": "{\"model\":\"gpt-5.5\",\"input\":[{\"type\":\"message\",\"role\":\"system\",\"content\":\"You are concise.\"},{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Reply with exactly: Hello!\"}]}],\"stream\":true,\"max_output_tokens\":80}"
       },
       "response": {
         "status": 200,

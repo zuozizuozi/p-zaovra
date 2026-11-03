@@ -75,10 +75,20 @@ const OpenAIResponsesFunctionCallOutput = Schema.Union([
   Schema.Array(OpenAIResponsesFunctionCallOutputContent),
 ])
 
+// Compatible gateways may require the message discriminator even for role-based input items.
 const OpenAIResponsesInputItem = Schema.Union([
-  Schema.Struct({ role: Schema.tag("system"), content: Schema.String }),
-  Schema.Struct({ role: Schema.tag("user"), content: Schema.Array(OpenAIResponsesInputContent) }),
-  Schema.Struct({ role: Schema.tag("assistant"), content: Schema.Array(OpenAIResponsesOutputText) }),
+  Schema.Struct({ type: Schema.tag("message"), role: Schema.tag("system"), content: Schema.String }),
+  Schema.Struct({ type: Schema.tag("message"), role: Schema.tag("developer"), content: Schema.String }),
+  Schema.Struct({
+    type: Schema.tag("message"),
+    role: Schema.tag("user"),
+    content: Schema.Array(OpenAIResponsesInputContent),
+  }),
+  Schema.Struct({
+    type: Schema.tag("message"),
+    role: Schema.tag("assistant"),
+    content: Schema.Array(OpenAIResponsesOutputText),
+  }),
   OpenAIResponsesReasoningItem,
   OpenAIResponsesItemReference,
   Schema.Struct({
@@ -347,7 +357,9 @@ const lowerToolResultOutput = Effect.fn("OpenAIResponses.lowerToolResultOutput")
 
 const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (request: LLMRequest) {
   const system: OpenAIResponsesInputItem[] =
-    request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
+    request.system.length === 0
+      ? []
+      : [{ type: "message", role: "system", content: ProviderShared.joinText(request.system) }]
   const input: OpenAIResponsesInputItem[] = [...system]
   const store = OpenAIOptions.store(request)
 
@@ -355,17 +367,18 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
     if (message.role === "system") {
       const part = yield* ProviderShared.wrappedSystemUpdate("OpenAI Responses", message)
       const previous = input.at(-1)
-      if (previous && "role" in previous && previous.role === "user")
+      if (previous?.type === "message" && previous.role === "user")
         input[input.length - 1] = {
+          type: "message",
           role: "user",
           content: [...previous.content, { type: "input_text", text: part.text }],
         }
-      else input.push({ role: "user", content: [{ type: "input_text", text: part.text }] })
+      else input.push({ type: "message", role: "user", content: [{ type: "input_text", text: part.text }] })
       continue
     }
 
     if (message.role === "user") {
-      input.push({ role: "user", content: yield* Effect.forEach(message.content, lowerUserContent) })
+      input.push({ type: "message", role: "user", content: yield* Effect.forEach(message.content, lowerUserContent) })
       continue
     }
 
@@ -376,7 +389,11 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
       const hostedToolReferences = new Set<string>()
       const flushText = () => {
         if (content.length === 0) return
-        input.push({ role: "assistant", content: content.map((part) => ({ type: "output_text", text: part.text })) })
+        input.push({
+          type: "message",
+          role: "assistant",
+          content: content.map((part) => ({ type: "output_text", text: part.text })),
+        })
         content.splice(0, content.length)
       }
       for (const part of message.content) {
@@ -449,9 +466,7 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
   // complete item has encrypted state. Summary blocks for one item may carry
   // that state only on the last block, so filter after they have been joined.
   return store === false
-    ? input.filter(
-        (item) => !("type" in item) || item.type !== "reasoning" || typeof item.encrypted_content === "string",
-      )
+    ? input.filter((item) => item.type !== "reasoning" || typeof item.encrypted_content === "string")
     : input
 })
 
