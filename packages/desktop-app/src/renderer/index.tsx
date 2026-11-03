@@ -1,3 +1,4 @@
+import { prepareDesktopAttachment } from "./attachments"
 // @refresh reload
 
 import notificationIcon from "../../icons/prod/128x128.png?url"
@@ -178,36 +179,23 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     getPathForFile(file) {
       return attachmentPaths.get(file) ?? window.api.getPathForFile(file)
     },
-    async prepareAttachment(file, signal) {
-      if (!/\.(docx|xlsx|pptx|pdf|zip|wav|mp3|m4a|ogg|flac|aac|mp4|webm|mov|mkv)$/i.test(file.name)) return [file]
-      if (!window.api.convertAttachment) throw new Error("附件组件已更新，请下次启动造物后使用文档解析")
-      const task = attachmentQueue.then(async () => {
-        signal?.throwIfAborted()
-        const bytes = await file.arrayBuffer()
-        signal?.throwIfAborted()
-        const id = crypto.randomUUID()
-        const abort = () => void window.api.cancelAttachment(id).catch(() => undefined)
-        signal?.addEventListener("abort", abort, { once: true })
-        const result = await window.api
-          .convertAttachment({ id, name: file.name, bytes })
-          .finally(() => signal?.removeEventListener("abort", abort))
-        signal?.throwIfAborted()
-        return [
-          new File(
-            [`# ${file.name}\n\n${result.warnings.map((warning) => `> ${warning}`).join("\n")}\n\n${result.text}`],
-            `${file.name}.md`,
-            { type: "text/plain" },
-          ),
-          ...result.images.map(
-            (image) =>
-              new File(
-                [Uint8Array.from(atob(image.data), (character) => character.charCodeAt(0))],
-                `${file.name}-${image.name}`,
-                { type: image.mime },
-              ),
-          ),
-        ]
-      })
+    async readClipboardFiles() {
+      const result = await window.api.readClipboardFiles()
+      if (!result) return null
+      const files: File[] = []
+      try {
+        for (const file of result.files) {
+          const selected = new File([await window.api.readPickedFile(result.token, file.path)], file.name)
+          attachmentPaths.set(selected, file.path)
+          files.push(selected)
+        }
+        return files
+      } finally {
+        await window.api.releasePickedFiles(result.token)
+      }
+    },
+    prepareAttachment(file, signal, directory) {
+      const task = attachmentQueue.then(() => prepareDesktopAttachment(file, window.api, signal, directory))
       attachmentQueue = task.then(
         () => undefined,
         () => undefined,
@@ -324,6 +312,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     },
 
     parseMarkdown: (markdown: string) => window.api.parseMarkdownCommand(markdown),
+    detectProviderProtocol: (input) => window.api.detectProviderProtocol(input),
     discoverProviderModels: (input) => {
       if (!window.api.discoverProviderModels) return Promise.reject(new Error("restart"))
       return window.api.discoverProviderModels(input)

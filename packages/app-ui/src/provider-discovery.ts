@@ -30,6 +30,73 @@ export const providerDiscoveryPresets: Record<string, { baseURL: string; kind?: 
   google: { baseURL: "https://generativelanguage.googleapis.com/v1beta", kind: "google" },
 }
 
+export function providerServiceKey(value?: string) {
+  if (!value) return ""
+  try {
+    return providerBaseURL(value)
+  } catch {
+    return value.trim().replace(/\/+$/, "")
+  }
+}
+
+export function providerPresetProtocol(value: string): ProviderProtocol | undefined {
+  const base = providerServiceKey(value)
+  if (!URL.canParse(base)) return
+  const known = Object.entries(providerDiscoveryPresets).find(
+    ([, preset]) => new URL(preset.baseURL).hostname === new URL(base).hostname,
+  )?.[0]
+  if (known === "openai") return "responses"
+  if (known === "anthropic" || known === "google") return known
+  if (known === "deepseek" || known === "openrouter") return "openai"
+}
+
+export async function detectProviderProtocol(
+  input: ProviderDiscoveryInput & { modelID: string },
+): Promise<ProviderProtocol> {
+  const known = providerPresetProtocol(input.baseURL)
+  const base = providerBaseURL(input.baseURL, known)
+  if (known) return known
+  if (input.apiKey.trim().startsWith("{env:")) throw new Error("请在高级中指定协议，环境变量凭据无法在连接界面自动检测")
+  const headers = new Headers(input.headers)
+  headers.set("Content-Type", "application/json")
+  if (input.apiKey.trim() && !headers.has("Authorization"))
+    headers.set("Authorization", `Bearer ${input.apiKey.trim()}`)
+  const signal = AbortSignal.timeout(15000)
+  for (const protocol of ["responses", "openai"] as const) {
+    const response = await fetch(`${base}/${protocol === "responses" ? "responses" : "chat/completions"}`, {
+      method: "POST",
+      headers,
+      signal,
+      redirect: "error",
+      credentials: "omit",
+      body: JSON.stringify(
+        protocol === "responses"
+          ? { model: input.modelID, input: "Reply OK", max_output_tokens: 16, store: false }
+          : { model: input.modelID, messages: [{ role: "user", content: "Reply OK" }], max_tokens: 1 },
+      ),
+    })
+    if (response.ok) {
+      const body: unknown = await response.json()
+      if (!body || typeof body !== "object" || !(protocol === "responses" ? "output" in body : "choices" in body))
+        throw new Error("服务返回了无效的协议检测结果，请在高级中指定协议")
+      return protocol
+    }
+    const body = await response.text()
+    // Authentication, quota, rate limit, context and server faults must never trigger a second protocol call.
+    if (
+      protocol === "responses" &&
+      ([404, 405, 501].includes(response.status) ||
+        (response.status === 400 &&
+          /responses.{0,60}(?:not supported|unsupported|not implemented)|(?:not supported|unsupported|not implemented).{0,60}responses|convert_request_failed/i.test(
+            body,
+          )))
+    )
+      continue
+    throw new Error(`协议检测失败（HTTP ${response.status}），请检查服务和模型，或在高级中指定协议`)
+  }
+  throw new Error("此模型的 Responses 和 Chat 接口均不可用，请检查模型名称")
+}
+
 export function providerBaseURL(value: string, kind: ProviderProtocol = "openai") {
   const input = value
     .trim()

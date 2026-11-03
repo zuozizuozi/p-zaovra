@@ -36,6 +36,10 @@ type PromptAttachmentsCoreInput = {
   warn?: () => void
   readClipboardImage?: () => Promise<File | null>
   getPathForFile?: (file: File) => string
+  prepare?: (file: File, signal?: AbortSignal, directory?: string) => Promise<File[]>
+  directory?: () => string
+  readClipboardFiles?: () => Promise<File[] | null>
+  onError?: (error: unknown) => void
 }
 
 export type PromptAttachmentsInput = {
@@ -47,6 +51,10 @@ export type PromptAttachmentsInput = {
   addPart: (part: ContentPart) => boolean
   readClipboardImage?: () => Promise<File | null>
   getPathForFile?: (file: File) => string
+  prepare?: (file: File, signal?: AbortSignal, directory?: string) => Promise<File[]>
+  directory?: () => string
+  readClipboardFiles?: () => Promise<File[] | null>
+  onError?: (error: unknown) => void
 }
 
 export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
@@ -57,7 +65,7 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     return { prompt, cursor: prompt.cursor() ?? getCursorPosition(editor) }
   }
 
-  const add = async (file: File, toast = true, target = capture()) => {
+  const addReady = async (file: File, toast = true, target = capture()) => {
     if (!target) return false
     const mime = await attachmentMime(file)
     if (!mime) {
@@ -80,6 +88,18 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     return true
   }
 
+  const add = async (file: File, toast = true, target = capture()) => {
+    try {
+      if (file.size > 100 * 1024 * 1024) throw new Error("文件过大，请选择 100 MB 以内的附件")
+      const files = input.prepare ? await input.prepare(file, undefined, input.directory?.()) : [file]
+      let found = false
+      for (const prepared of files) if (await addReady(prepared, toast, target)) found = true
+      return found
+    } catch (error) {
+      input.onError?.(error)
+      return false
+    }
+  }
   const addAttachment = (file: File) => add(file)
 
   const addAttachments = async (files: File[], toast = true, target = capture()) => {
@@ -128,6 +148,16 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     }
 
     const plainText = clipboardData.getData("text/plain") ?? ""
+    if (input.readClipboardFiles) {
+      const files = await input.readClipboardFiles().catch((error) => {
+        input.onError?.(error)
+        return []
+      })
+      if (files) {
+        if (files.length) await addAttachments(files, true, target)
+        return
+      }
+    }
 
     // Desktop: Browser clipboard has no images and no text, try platform's native clipboard for images
     if (input.readClipboardImage && !plainText) {
@@ -202,6 +232,10 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
 
     event.preventDefault()
     input.setDraggingType(null)
+    if (event.dataTransfer?.files.length) {
+      await attachments.addAttachments(Array.from(event.dataTransfer.files))
+      return
+    }
 
     const plainText = event.dataTransfer?.getData("text/plain")
     const filePrefix = "file:"

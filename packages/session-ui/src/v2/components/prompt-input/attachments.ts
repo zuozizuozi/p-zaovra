@@ -5,9 +5,17 @@ import type { PromptInputV2Attachment, PromptInputV2Prompt } from "./types"
 
 const accepted = [
   ".docx",
+  ".doc",
   ".xlsx",
+  ".xls",
+  ".ods",
   ".pptx",
+  ".ppt",
   ".zip",
+  ".7z",
+  ".rar",
+  ".tar",
+  ".gz",
   ".wav",
   ".mp3",
   ".m4a",
@@ -82,7 +90,7 @@ type PromptTarget = {
 }
 
 export type PromptInputV2AttachmentConfig = {
-  prepare?: (file: File, signal?: AbortSignal) => Promise<File[]>
+  prepare?: (file: File, signal?: AbortSignal, directory?: string) => Promise<File[]>
   identity?: () => unknown
   picker?: (
     options: { defaultPath?: string; multiple?: boolean; accept?: string[] },
@@ -93,6 +101,7 @@ export type PromptInputV2AttachmentConfig = {
   warn: () => void
   onError: (error: unknown) => void
   readClipboardImage?: () => Promise<File | null>
+  readClipboardFiles?: () => Promise<File[] | null>
   getPathForFile?: (file: File) => string
 }
 
@@ -153,14 +162,14 @@ export function createPromptInputV2Attachments(
         { id, name: file.name, state: "processing", retry: () => void attempt() },
       ])
       try {
-        if (file.size > 20 * 1024 * 1024) throw new Error("附件不能超过 20 MB")
-        const files = input.prepare ? await input.prepare(file, controller.signal) : [file]
+        if (file.size > 100 * 1024 * 1024) throw new Error("文件过大，请选择 100 MB 以内的附件")
+        const files = input.prepare ? await input.prepare(file, controller.signal, input.directory()) : [file]
         if (!jobs.some((item) => item.id === id)) return false
         if (input.identity?.() !== identity) throw new Error("已切换会话，请移除此附件并在目标会话重新添加")
         const parts: PromptInputV2Attachment[] = []
         for (const prepared of files) {
           const part = await addReady(prepared, false, target)
-          if (!part) throw new Error("此文件无法读取，请检查格式或安装附件组件")
+          if (!part) throw new Error("此文件暂不支持，可转换为文本后添加")
           parts.push(part)
         }
         if (!jobs.some((item) => item.id === id)) return false
@@ -181,8 +190,8 @@ export function createPromptInputV2Attachments(
     return attempt()
   }
   const addAttachments = async (files: File[], toast = true, target = capture()) => {
-    if (files.reduce((size, file) => size + file.size, 0) > 20 * 1024 * 1024) {
-      input.onError(new Error("每批附件合计不能超过 20 MB，请分批添加"))
+    if (files.reduce((size, file) => size + file.size, 0) > 100 * 1024 * 1024) {
+      input.onError(new Error("每批附件合计不能超过 100 MB，请分批添加"))
       return false
     }
     const found = await files.reduce(async (result, file) => {
@@ -209,6 +218,16 @@ export function createPromptInputV2Attachments(
       return
     }
     const plainText = clipboardData.getData("text/plain") ?? ""
+    if (input.readClipboardFiles) {
+      const files = await input.readClipboardFiles().catch((error) => {
+        input.onError(error)
+        return []
+      })
+      if (files) {
+        if (files.length) await addAttachments(files, true, target)
+        return
+      }
+    }
     if (input.readClipboardImage && !plainText) {
       const file = await input.readClipboardImage()
       if (file && (await add(file, true, target))) return
@@ -232,6 +251,11 @@ export function createPromptInputV2Attachments(
     event.preventDefault()
     event.stopPropagation()
     input.setDraggingType(null)
+    const dropped = event.dataTransfer?.files
+    if (dropped?.length) {
+      await addAttachments(Array.from(dropped))
+      return
+    }
     const plainText = event.dataTransfer?.getData("text/plain")
     if (plainText?.startsWith("file:")) {
       const path = plainText.slice("file:".length)

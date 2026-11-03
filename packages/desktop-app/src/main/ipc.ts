@@ -1,13 +1,19 @@
 import { createArtifactPreview } from "./artifact-preview"
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
-import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/app/provider-discovery"
+import {
+  discoverProviderModels,
+  detectProviderProtocol,
+  type ProviderDiscoveryInput,
+} from "@zaovra-ai/app/provider-discovery"
 import { readFile, stat, writeFile } from "node:fs/promises"
 import { feedbackArchive } from "./feedback"
 import { feedbackDiagnostics } from "./logging"
 import { Feedback } from "@zaovra-ai/schema/feedback"
 import { basename, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { convertAttachment } from "./attachment-convert"
+import { storeAttachment } from "./attachment-store"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@zaovra-ai/app/desktop-menu"
@@ -144,26 +150,63 @@ export function registerIpcHandlers(deps: Deps) {
     conversions.set(event.sender.id, { id: input.id, controller })
     const destroyed = () => controller.abort()
     event.sender.once("destroyed", destroyed)
-    const runtime = app.isPackaged
-      ? join(process.resourcesPath, "attachments")
-      : join(app.getAppPath(), "../../.cache/attachment-python")
     try {
-      return await convertAttachment(
-        input,
-        {
-          python: join(runtime, process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
-          script: join(
-            app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources"),
-            "attachments/convert.py",
-          ),
-          models: join(runtime, "models"),
-        },
-        controller.signal,
-      )
+      return await convertAttachment(input, controller.signal)
     } finally {
       event.sender.removeListener("destroyed", destroyed)
       if (conversions.get(event.sender.id)?.id === input.id) conversions.delete(event.sender.id)
     }
+  })
+  handle("store-attachment", (_event, input: Parameters<typeof storeAttachment>[0]) => storeAttachment(input))
+  handle("read-clipboard-files", async (event) => {
+    const formats = clipboard.availableFormats()
+    if (!formats.some((format) => /FileName|FileDrop|CF_HDROP|uri-list|NSFilenamesPboardType/i.test(format)))
+      return null
+    const paths =
+      process.platform === "win32"
+        ? await new Promise<string[]>((resolve, reject) => {
+            execFile(
+              "powershell.exe",
+              [
+                "-NoProfile",
+                "-NonInteractive",
+                "-STA",
+                "-Command",
+                "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; $files=@(Get-Clipboard -Format FileDropList); ConvertTo-Json -Compress -InputObject @($files | ForEach-Object { $_.FullName })",
+              ],
+              { windowsHide: true, timeout: 10000, maxBuffer: 1024 * 1024 },
+              (error, stdout) => {
+                if (error) return reject(new Error("无法读取剪贴板文件，请重新复制或拖入文件"))
+                void Promise.resolve()
+                  .then((): unknown => JSON.parse(stdout.replace(/^\uFEFF/, "").trim() || "[]"))
+                  .then(
+                    (value) =>
+                      resolve(
+                        Array.isArray(value)
+                          ? value.filter((item): item is string => typeof item === "string" && !!item)
+                          : [],
+                      ),
+                    () => reject(new Error("无法读取剪贴板文件，请重新复制或拖入文件")),
+                  )
+              },
+            )
+          })
+        : clipboard
+            .readBuffer("text/uri-list")
+            .toString("utf8")
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith("file://"))
+            .map((line) => fileURLToPath(line))
+    if (!paths.length) {
+      if (formats.some((format) => /FileName|FileDrop|CF_HDROP|uri-list/i.test(format)))
+        throw new Error("无法读取剪贴板文件，请重新复制或拖入文件")
+      return null
+    }
+    const files = await Promise.all(
+      paths.map(async (path) => ({ path, name: basename(path), size: (await stat(path)).size })),
+    )
+    assertAttachmentBudget(files)
+    return { token: pickedFiles.add(event.sender.id, paths), files }
   })
   app.once("will-quit", updaterSubscriptions.clear)
 
@@ -186,6 +229,9 @@ export function registerIpcHandlers(deps: Deps) {
   handle("parse-markdown", (_event: IpcMainInvokeEvent, markdown: string) => deps.parseMarkdown(markdown))
   handle("provider-discover-models", (_event: IpcMainInvokeEvent, input: ProviderDiscoveryInput) =>
     discoverProviderModels(input),
+  )
+  handle("provider-detect-protocol", (_event, input: ProviderDiscoveryInput & { modelID: string }) =>
+    detectProviderProtocol(input),
   )
   handle("check-app-exists", (_event: IpcMainInvokeEvent, appName: string) =>
     isAllowedOpenApp(appName) ? deps.checkAppExists(appName) : false,

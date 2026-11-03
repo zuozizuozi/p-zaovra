@@ -1,6 +1,4 @@
-import { useModelService } from "@/hooks/use-model-service"
 import { useModels } from "@/context/models"
-import { useServerSync } from "@/context/server-sync"
 import { modelSource } from "@/utils/model-source"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show, ValidComponent } from "solid-js"
@@ -31,18 +29,6 @@ type ModelItem = ReturnType<ModelState["list"]>[number]
 
 const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
 const manageKey = "action:manage"
-
-const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { category: string; items: ModelItem[] }) => {
-  const aIndex = popularProviders.indexOf(a.category)
-  const bIndex = popularProviders.indexOf(b.category)
-  const aPopular = aIndex >= 0
-  const bPopular = bIndex >= 0
-
-  if (aPopular && !bPopular) return -1
-  if (!aPopular && bPopular) return 1
-  if (aPopular && bPopular) return aIndex - bIndex
-  return a.items[0].provider.name.localeCompare(b.items[0].provider.name)
-}
 
 const ModelList: Component<{
   provider?: string
@@ -232,41 +218,20 @@ export function ModelSelectorPopoverV2(props: {
 }) {
   const model = props.model ?? useLocal().model
   const catalog = useModels().catalog
-  const service = useModelService()
-  const sync = useServerSync()
   const language = useLanguage()
   const dialog = useDialog()
   const local = useLocal()
-  const [store, setStore] = createStore({ open: false, search: "", active: "", source: "own" as "own" | "official" })
+  const [store, setStore] = createStore({ open: false, search: "", active: "", source: "own" as const })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   let restoreTrigger = true
 
-  const services = createMemo(() => [
-    ...new Map(
-      model
-        .list()
-        .filter((item) => modelSource(item.provider) === "own")
-        .map((item) => [item.provider.id, item.provider]),
-    ).values(),
-  ])
-  const selectedService = () =>
-    props.provider ??
-    [
-      service.current(),
-      ...Object.keys(sync().data.config.provider ?? {}).reverse(),
-      model.current()?.provider.id,
-      services()[0]?.id,
-    ].find((id) => services().some((item) => item.id === id))
   const allModels = createMemo(() =>
     model
       .list()
-      .filter((item) => modelSource(item.provider) === store.source)
-      .filter((item) =>
-        store.source === "own"
-          ? item.provider.id === selectedService()
-          : !props.provider || item.provider.id === props.provider,
-      ),
+      .filter((item) => modelSource(item.provider) === "own")
+      .filter((item) => !props.provider || item.provider.id === props.provider)
+      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id })),
   )
   const models = createMemo(() => {
     const search = store.search.trim()
@@ -275,13 +240,6 @@ export function ModelSelectorPopoverV2(props: {
       : allModels()
 
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name))
-  })
-  const groups = createMemo(() => {
-    const byProvider = new Map<string, ModelItem[]>()
-    for (const item of models()) {
-      byProvider.set(item.provider.id, [...(byProvider.get(item.provider.id) ?? []), item])
-    }
-    return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
   })
   const keys = () => [...models().map(modelKey), ...(store.source === "own" ? [manageKey] : [])]
   const current = () => {
@@ -311,7 +269,6 @@ export function ModelSelectorPopoverV2(props: {
       // Reconcile catalogs that changed during startup or outside this window.
       void catalog.refresh()
       restoreTrigger = true
-      setStore("source", model.current() ? modelSource(model.current()!.provider) : "own")
       setStore({ open: true, active: initialActive() })
       setTimeout(() =>
         requestAnimationFrame(() => {
@@ -392,42 +349,6 @@ export function ModelSelectorPopoverV2(props: {
             if (!restoreTrigger) event.preventDefault()
           }}
         >
-          <div class="flex gap-1 p-2" role="group" aria-label={language.t("model.source.label")}>
-            <For each={["own", "official"] as const}>
-              {(source) => (
-                <button
-                  type="button"
-                  aria-pressed={store.source === source}
-                  class="h-9 min-w-0 flex-1 rounded-md px-3 text-[13px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2"
-                  classList={{ "bg-v2-overlay-simple-overlay-hover": store.source === source }}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setStore({ source, search: "", active: "" })
-                    setStore("active", initialActive())
-                  }}
-                >
-                  {language.t(source === "own" ? "model.source.own" : "model.source.official")}
-                </button>
-              )}
-            </For>
-          </div>
-          <Show when={store.source === "own" && services().length > 0}>
-            <label class="flex items-center gap-2 px-3 pb-2 text-xs text-v2-text-text-muted">
-              {language.t("model.service.label")}
-              <select
-                aria-label={language.t("model.service.label")}
-                value={selectedService()}
-                class="min-w-0 flex-1 rounded bg-v2-background-bg-layer-01 p-1 text-v2-text-text-base"
-                disabled={!!props.provider}
-                onChange={(event) => {
-                  service.select(event.currentTarget.value)
-                  setSearch("")
-                }}
-              >
-                <For each={services()}>{(item) => <option value={item.id}>{item.name}</option>}</For>
-              </select>
-            </label>
-          </Show>
           <div class="flex flex-col p-0.5">
             <div class="flex h-7 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
               <Icon name="magnifying-glass" size="small" class="shrink-0" />
@@ -507,62 +428,52 @@ export function ModelSelectorPopoverV2(props: {
                   </div>
                 }
               >
-                <For each={groups()}>
-                  {(group) => (
-                    <div role="group">
-                      <div class="gap-2 px-3 py-2 text-xs text-v2-text-text-muted">
-                        <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
-                      </div>
-                      <div role="menu">
-                        <For each={group.items}>
-                          {(item) => (
-                            <TooltipV2
-                              class="w-full"
-                              placement="right-start"
-                              gutter={6}
-                              openDelay={0}
-                              value={<ModelTooltip model={item} latest={item.latest} v2 />}
-                            >
-                              <button
-                                type="button"
-                                role="menuitemradio"
-                                aria-checked={current() === modelKey(item)}
-                                value={modelKey(item)}
-                                data-option-key={modelKey(item)}
-                                data-selected-model={current() === modelKey(item) ? true : undefined}
-                                class="flex min-h-9 scroll-my-6 w-full items-center rounded-sm px-3 text-left text-[13px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2"
-                                classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
-                                onMouseEnter={() => {
-                                  setStore("active", modelKey(item))
-                                  setTimeout(() => searchRef?.focus())
-                                }}
-                                onClick={() => selectModel(item)}
-                              >
-                                <span class="min-w-0 flex-1 truncate leading-5">{item.name}</span>
-                                <span aria-hidden="true" class="ml-2 shrink-0 text-[11px] text-v2-text-text-muted">
-                                  {language.t(
-                                    item.provider.id === "openrouter" &&
-                                      (item.id.endsWith(":free") || item.id === "openrouter/free")
-                                      ? "model.price.free"
-                                      : item.cost.input > 0 || item.cost.output > 0
-                                        ? "model.price.paid"
-                                        : "model.price.unknown",
-                                  )}
-                                </span>
-                                <Show when={current() === modelKey(item)}>
-                                  <Icon name="check" size="small" class="shrink-0" />
-                                </Show>
-                                <Show when={item.latest}>
-                                  <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
-                                </Show>
-                              </button>
-                            </TooltipV2>
+                <For each={models()}>
+                  {(item) => (
+                    <TooltipV2
+                      class="w-full"
+                      placement="right-start"
+                      gutter={6}
+                      openDelay={0}
+                      value={<ModelTooltip model={item} latest={item.latest} v2 />}
+                    >
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={current() === modelKey(item)}
+                        value={modelKey(item)}
+                        data-option-key={modelKey(item)}
+                        data-selected-model={current() === modelKey(item) ? true : undefined}
+                        class="flex min-h-9 scroll-my-6 w-full items-center rounded-sm px-3 text-left text-[13px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2"
+                        classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
+                        onMouseEnter={() => {
+                          setStore("active", modelKey(item))
+                          setTimeout(() => searchRef?.focus())
+                        }}
+                        onClick={() => selectModel(item)}
+                      >
+                        <span class="min-w-0 flex-1 truncate leading-5">{item.name}</span>
+                        <TagV2 class="ml-2 max-w-28 shrink-0 truncate">{item.provider.name}</TagV2>
+                        <span aria-hidden="true" class="ml-2 shrink-0 text-[11px] text-v2-text-text-muted">
+                          {language.t(
+                            item.provider.id === "openrouter" &&
+                              (item.id.endsWith(":free") || item.id === "openrouter/free")
+                              ? "model.price.free"
+                              : item.cost.input > 0 || item.cost.output > 0
+                                ? "model.price.paid"
+                                : "model.price.unknown",
                           )}
-                        </For>
-                      </div>
-                    </div>
+                        </span>
+                        <Show when={current() === modelKey(item)}>
+                          <Icon name="check" size="small" class="shrink-0" />
+                        </Show>
+                        <Show when={item.latest}>
+                          <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
+                        </Show>
+                      </button>
+                    </TooltipV2>
                   )}
-                </For>
+                </For>{" "}
               </Show>
             </div>
           </ScrollView>

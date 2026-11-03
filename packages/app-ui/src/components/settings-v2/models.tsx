@@ -1,5 +1,5 @@
 import { useFilteredList } from "@zaovra-ai/ui/hooks"
-import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
+import { Tag } from "@zaovra-ai/ui/v2/badge-v2"
 import { Switch } from "@zaovra-ai/ui/v2/switch-v2"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
@@ -7,14 +7,11 @@ import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
-import { popularProviders } from "@/hooks/use-providers"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
-
-const PROVIDER_ICON_SIZE = 16
 
 export const SettingsModelsV2: Component = () => {
   const language = useLanguage()
@@ -25,21 +22,6 @@ export const SettingsModelsV2: Component = () => {
     key: (x) => `${x.provider.id}:${x.id}`,
     filterKeys: ["provider.name", "name", "id"],
     sortBy: (a, b) => a.name.localeCompare(b.name),
-    groupBy: (x) => x.provider.id,
-    sortGroupsBy: (a, b) => {
-      const aIndex = popularProviders.indexOf(a.category)
-      const bIndex = popularProviders.indexOf(b.category)
-      const aPopular = aIndex >= 0
-      const bPopular = bIndex >= 0
-
-      if (aPopular && !bPopular) return -1
-      if (!aPopular && bPopular) return 1
-      if (aPopular && bPopular) return aIndex - bIndex
-
-      const aName = a.items[0].provider.name
-      const bName = b.items[0].provider.name
-      return aName.localeCompare(bName)
-    },
   })
 
   return (
@@ -93,43 +75,31 @@ export const SettingsModelsV2: Component = () => {
               </div>
             }
           >
-            <For each={list.grouped.latest}>
-              {(group) => (
-                <div class="settings-v2-section" data-component="settings-models-provider">
-                  <div class="settings-v2-models-group-header">
-                    <ProviderIcon
-                      id={group.category}
-                      width={PROVIDER_ICON_SIZE}
-                      height={PROVIDER_ICON_SIZE}
-                      class="settings-v2-models-provider-icon shrink-0"
-                    />
-                    <h3 class="settings-v2-section-title">{group.items[0].provider.name}</h3>
-                  </div>
-                  <SettingsListV2>
-                    <For each={group.items}>
-                      {(item) => {
-                        const key = { providerID: item.provider.id, modelID: item.id }
-                        return (
-                          <SettingsRowV2 title={item.name} description="">
-                            <div>
-                              <Switch
-                                checked={models.visible(key)}
-                                onChange={(checked) => {
-                                  models.setVisibility(key, checked)
-                                }}
-                                hideLabel
-                              >
-                                {item.name}
-                              </Switch>
-                            </div>
-                          </SettingsRowV2>
-                        )
-                      }}
-                    </For>
-                  </SettingsListV2>
-                </div>
-              )}
-            </For>
+            <SettingsListV2>
+              <For each={list.flat()}>
+                {(item) => (
+                  <SettingsRowV2
+                    title={
+                      <span class="flex items-center gap-2">
+                        <span>{item.name}</span>
+                        <Tag>{item.provider.name}</Tag>
+                      </span>
+                    }
+                    description={item.id}
+                  >
+                    <Switch
+                      checked={models.visible({ providerID: item.provider.id, modelID: item.id })}
+                      onChange={(checked) =>
+                        models.setVisibility({ providerID: item.provider.id, modelID: item.id }, checked)
+                      }
+                      hideLabel
+                    >
+                      {item.name}
+                    </Switch>
+                  </SettingsRowV2>
+                )}
+              </For>
+            </SettingsListV2>
           </Show>
         </Show>
       </div>

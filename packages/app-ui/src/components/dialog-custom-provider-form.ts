@@ -1,5 +1,6 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 import { providerBaseURL, providerProtocols, type ProviderProtocol } from "../provider-discovery"
+import type { Config } from "@zaovra-ai/sdk/v2/client"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -103,7 +104,7 @@ export function validateCustomProvider(input: ValidateArgs) {
     return { id: idError, name: undefined }
   })
   const modelsValid = models.length > 0 && models.every((m) => !m.id && !m.name)
-  const modelConfig = Object.fromEntries(
+  const modelConfig: NonNullable<NonNullable<Config["provider"]>[string]["models"]> = Object.fromEntries(
     input.form.models.map((m) => [
       m.id.trim(),
       {

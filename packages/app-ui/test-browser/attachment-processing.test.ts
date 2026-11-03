@@ -3,13 +3,17 @@ import { createRoot } from "solid-js"
 import { createPromptInputV2Attachments } from "../../session-ui/src/v2/components/prompt-input/attachments"
 import type { PromptInputV2Prompt } from "../../session-ui/src/v2/components/prompt-input/types"
 
-function fixture(prepare: (file: File, signal?: AbortSignal) => Promise<File[]>) {
+function fixture(
+  prepare: (file: File, signal?: AbortSignal) => Promise<File[]>,
+  clipboard?: () => Promise<File[] | null>,
+) {
   return createRoot((dispose) => {
     let identity = "first"
     let prompt: PromptInputV2Prompt = []
     const editor = document.createElement("div")
     const attachments = createPromptInputV2Attachments({
       prepare,
+      readClipboardFiles: clipboard,
       identity: () => identity,
       capture: () => ({
         current: () => prompt,
@@ -41,6 +45,55 @@ function fixture(prepare: (file: File, signal?: AbortSignal) => Promise<File[]>)
 }
 const doc = () => new File(["source"], "sample.docx")
 const converted = () => new File(["invoice 420"], "sample.docx.md", { type: "text/plain" })
+
+test("Explorer clipboard files enter the same preparation and attachment pipeline", async () => {
+  const f = fixture(
+    async (file) =>
+      new Promise((resolve) => resolve([new File(["workspace metadata"], file.name + ".md", { type: "text/plain" })])),
+    async () => [new File(["audio"], "speech.wav"), doc()],
+  )
+  try {
+    const event = new Event("paste", { cancelable: true })
+    Object.defineProperty(event, "clipboardData", { value: { items: [], getData: () => "" } })
+    await f.attachments.handlePaste(event as ClipboardEvent)
+    expect(event.defaultPrevented).toBe(true)
+    expect(f.prompt().map((part) => (part.type === "image" ? part.filename : ""))).toEqual([
+      "speech.wav.md",
+      "sample.docx.md",
+    ])
+  } finally {
+    f.dispose()
+  }
+})
+
+test("native clipboard failures reach the visible error handler", async () => {
+  const f = fixture(
+    async (file) => [file],
+    async () => {
+      throw new Error("请重新复制或拖入文件")
+    },
+  )
+  try {
+    const event = new Event("paste", { cancelable: true })
+    Object.defineProperty(event, "clipboardData", { value: { items: [], getData: () => "" } })
+    await expect(f.attachments.handlePaste(event as ClipboardEvent)).rejects.toThrow("请重新复制")
+    expect(f.prompt()).toHaveLength(0)
+  } finally {
+    f.dispose()
+  }
+})
+
+test("a real dropped file takes precedence over its file URI text", async () => {
+  const f = fixture(async () => [converted()])
+  try {
+    const event = new Event("drop", { cancelable: true })
+    Object.defineProperty(event, "dataTransfer", { value: { files: [doc()], getData: () => "file:C:/sample.docx" } })
+    await f.attachments.handleDrop(event as DragEvent)
+    expect(f.prompt()[0]).toMatchObject({ type: "image", filename: "sample.docx.md", mime: "text/plain" })
+  } finally {
+    f.dispose()
+  }
+})
 
 test("pending attachment remains busy until converted content is attached", async () => {
   const ready = Promise.withResolvers<File[]>()

@@ -511,6 +511,8 @@ export const dict = {
   "usage.billingNote":
     "上方 Token 是实际记录的使用量，不等于金额或套餐扣费。已扣额度和剩余额度以账户账单为准，未获取时不显示为 0。",
   "usage.updated": "最近同步",
+  "provider.custom.protocol.auto": "自动检测（Responses → Chat）",
+  "provider.custom.protocol.autoHint": "保存时按模型检测接口；自定义服务会进行一次最小输出的连接测试。",
   "provider.custom.protocol.label": "兼容协议",
   "provider.custom.protocol.hint":
     "Chat 使用 /chat/completions；Responses 使用 /responses。请按服务商文档确认支持的接口，不能仅按模型名选择；很多中转服务只支持其中一种。常规鉴权请求头会自动处理。",
@@ -750,7 +752,7 @@ export const dict = {
   "provider.custom.discovery.unsupported": "该地址不支持获取模型列表，请检查地址，或手动填写模型 ID。",
   "provider.custom.discovery.saved": "{{provider}} 配置已保存",
   "provider.custom.discovery.savedDescription": "可以选择模型开始任务，尚未验证生成和工具调用能力。",
-  "provider.custom.discovery.intro": "选择兼容协议，填写服务地址和 Key，然后获取并选择模型。",
+  "provider.custom.discovery.intro": "填写服务地址和 Key，然后获取并选择模型。",
   "provider.custom.discovery.fetch": "获取模型",
   "provider.custom.discovery.loading": "正在获取模型…",
   "provider.custom.discovery.manual": "手动填写模型",

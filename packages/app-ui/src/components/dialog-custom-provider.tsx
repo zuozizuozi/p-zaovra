@@ -13,6 +13,9 @@ import { usePlatform } from "@/context/platform"
 import {
   discoverProviderModels,
   providerBaseURL,
+  providerServiceKey,
+  providerPresetProtocol,
+  detectProviderProtocol,
   providerProtocols,
   changeProviderProtocolURL,
 } from "@/provider-discovery"
@@ -56,7 +59,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
   const language = useLanguage()
 
   const [form, setForm] = createStore<FormState>({
-    protocol: "openai",
+    protocol: undefined,
     providerID: "",
     name: "",
     baseURL: "",
@@ -80,7 +83,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     alive.value = false
   })
   const automatic = () => {
-    const baseURL = providerBaseURL(form.baseURL, form.protocol)
+    const baseURL = providerBaseURL(form.baseURL, form.protocol ?? providerPresetProtocol(form.baseURL))
     const host = new URL(baseURL).hostname
     const stem =
       host
@@ -91,12 +94,20 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     const id = Array.from({ length: used.size + 2 }, (_, i) => (i === 0 ? stem : `${stem}-${i + 1}`)).find(
       (id) => !used.has(id),
     )!
-    return { baseURL, name: form.name.trim() || host, providerID: form.providerID.trim() || saved.providerID || id }
+    const existing = Object.entries(serverSync().data.config.provider ?? {}).find(
+      ([, provider]) => providerServiceKey(provider.options?.baseURL) === baseURL,
+    )
+    return {
+      baseURL,
+      name: form.name.trim() || existing?.[1].name || host,
+      providerID: form.providerID.trim() || saved.providerID || existing?.[0] || id,
+    }
   }
   const discover = async () => {
     const protocol = form.protocol
     if (discovery.pending || saveMutation.isPending) return
-    const url = validateProviderURL(form.baseURL, form.protocol, language.t)
+    const selected = form.protocol ?? providerPresetProtocol(form.baseURL)
+    const url = validateProviderURL(form.baseURL, selected, language.t)
     setForm("err", "baseURL", url.error)
     if (!url.baseURL) return
     setDiscovery({ pending: true, error: "" })
@@ -104,7 +115,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       const input = {
         baseURL: url.baseURL,
         apiKey: form.apiKey,
-        kind: form.protocol === "responses" ? ("openai" as const) : form.protocol,
+        kind: selected === "responses" ? ("openai" as const) : selected,
         headers: Object.fromEntries(
           form.headers.filter((h) => h.key.trim()).map((h) => [h.key.trim(), h.value.trim()]),
         ),
@@ -217,7 +228,16 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       form: { ...form, ...automatic() },
       t: language.t,
       disabledProviders: serverSync().data.config.disabled_providers ?? [],
-      existingProviderIDs: new Set([...serverSync().data.provider.all.keys()].filter((id) => id !== saved.providerID)),
+      existingProviderIDs: new Set(
+        [...serverSync().data.provider.all.keys()].filter(
+          (id) =>
+            id !== saved.providerID &&
+            !(
+              id === automatic().providerID &&
+              providerServiceKey(serverSync().data.config.provider?.[id]?.options?.baseURL) === automatic().baseURL
+            ),
+        ),
+      ),
     })
     batch(() => {
       setForm("err", output.err)
@@ -231,6 +251,37 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
 
   const saveMutation = useMutation(() => ({
     mutationFn: async (result: NonNullable<ReturnType<typeof validate>>) => {
+      if (form.protocol === undefined) {
+        for (const model of form.models) {
+          const protocol =
+            model.protocol ??
+            (await (platform.detectProviderProtocol ?? detectProviderProtocol)({
+              baseURL: result.config.options.baseURL,
+              apiKey: form.apiKey,
+              modelID: model.id.trim(),
+              headers: result.config.options.headers,
+            }))
+          result.config.models[model.id.trim()] = {
+            ...result.config.models[model.id.trim()]!,
+            ...(protocol === "responses" || protocol === "openai"
+              ? { provider: { npm: providerProtocols[protocol].npm } }
+              : {}),
+          }
+          result.config.npm = providerProtocols[protocol].npm
+        }
+      }
+      const before = serverSync().data.config.provider?.[result.providerID]
+      if (
+        form.protocol === undefined &&
+        (result.config.npm === "@ai-sdk/openai" || result.config.npm === "@ai-sdk/openai-compatible") &&
+        before?.npm &&
+        (before.npm === "@ai-sdk/openai" || before.npm === "@ai-sdk/openai-compatible")
+      )
+        result.config.npm = before.npm
+      result.config.models = { ...before?.models, ...result.config.models }
+      result.config.whitelist = [
+        ...new Set([...(before?.whitelist ?? Object.keys(before?.models ?? {})), ...result.config.whitelist]),
+      ]
       const disabledProviders = serverSync().data.config.disabled_providers ?? []
       const nextDisabled = disabledProviders.filter((id) => id !== result.providerID)
 
@@ -285,7 +336,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       setDiscovery({ manual: true, error: language.t("provider.custom.discovery.choose") })
       return
     }
-    const url = validateProviderURL(form.baseURL, form.protocol, language.t)
+    const url = validateProviderURL(form.baseURL, form.protocol ?? providerPresetProtocol(form.baseURL), language.t)
     setForm("err", "baseURL", url.error)
     if (!url.baseURL) return
     const result = (() => {
@@ -310,30 +361,6 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         <p class="text-14-regular text-text-base">{language.t("provider.custom.discovery.intro")}</p>
         <fieldset disabled={discovery.pending || saveMutation.isPending} class="flex min-w-0 flex-col gap-6">
           <div class="flex flex-col gap-4">
-            <label class="flex flex-col gap-2 text-14-regular">
-              <span>{language.t("provider.custom.protocol.label")}</span>
-              <select
-                aria-label={language.t("provider.custom.protocol.label")}
-                value={form.protocol}
-                class="h-10 w-full rounded-md border border-border-base bg-surface-base px-3 text-text-base focus-visible:outline focus-visible:outline-2"
-                onChange={(event) => {
-                  const protocol = event.currentTarget.value as NonNullable<FormState["protocol"]>
-                  if (protocol === form.protocol) return
-                  const baseURL = changeProviderProtocolURL(form.baseURL, form.protocol ?? "openai", protocol)
-                  batch(() => {
-                    setForm("protocol", protocol)
-                    setForm("baseURL", baseURL)
-                    setForm("models", [modelRow()])
-                    setDiscovery({ models: [], error: "", query: "", manual: false })
-                  })
-                }}
-              >
-                <For each={Object.entries(providerProtocols)}>
-                  {([value, protocol]) => <option value={value}>{protocol.label}</option>}
-                </For>
-              </select>
-              <span class="text-12-regular text-text-weak">{language.t("provider.custom.protocol.hint")}</span>
-            </label>
             <TextField
               autofocus={props.autofocus ?? true}
               label={language.t("provider.custom.field.baseURL.label")}
@@ -473,7 +500,8 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           </Show>
           <Show
             when={
-              (form.protocol === "openai" || form.protocol === "responses") &&
+              discovery.advanced &&
+              (form.protocol === undefined || form.protocol === "openai" || form.protocol === "responses") &&
               (discovery.manual || discovery.models.length > 0)
             }
           >
@@ -509,6 +537,39 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           <details open={discovery.advanced} onToggle={(event) => setDiscovery("advanced", event.currentTarget.open)}>
             <summary class="cursor-pointer text-14-medium">{language.t("provider.custom.discovery.advanced")}</summary>
             <div class="mt-4 flex flex-col gap-4">
+              <label class="flex flex-col gap-2 text-14-regular">
+                <span>{language.t("provider.custom.protocol.label")}</span>
+                <select
+                  aria-label={language.t("provider.custom.protocol.label")}
+                  value={form.protocol ?? "auto"}
+                  class="h-10 w-full rounded-md border border-border-base bg-surface-base px-3 text-text-base focus-visible:outline focus-visible:outline-2"
+                  onChange={(event) => {
+                    const protocol =
+                      event.currentTarget.value === "auto"
+                        ? undefined
+                        : (event.currentTarget.value as NonNullable<FormState["protocol"]>)
+                    if (protocol === form.protocol) return
+                    const baseURL = changeProviderProtocolURL(
+                      form.baseURL,
+                      form.protocol ?? "openai",
+                      protocol ?? "openai",
+                    )
+                    batch(() => {
+                      setForm("protocol", protocol)
+                      setForm("baseURL", baseURL)
+                      setForm("models", [modelRow()])
+                      setDiscovery({ models: [], error: "", query: "", manual: false })
+                    })
+                  }}
+                >
+                  <option value="auto">{language.t("provider.custom.protocol.auto")}</option>
+                  <For each={Object.entries(providerProtocols)}>
+                    {([value, protocol]) => <option value={value}>{protocol.label}</option>}
+                  </For>
+                </select>
+                <span class="text-12-regular text-text-weak">{language.t("provider.custom.protocol.hint")}</span>
+              </label>
+
               <TextField
                 label={language.t("provider.custom.field.providerID.label")}
                 placeholder={language.t("provider.custom.discovery.auto")}
@@ -579,6 +640,9 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           </details>
         </fieldset>
 
+        <Show when={form.protocol === undefined}>
+          <p class="text-12-regular text-text-weak">{language.t("provider.custom.protocol.autoHint")}</p>
+        </Show>
         <Button
           class="w-auto self-start"
           type="submit"

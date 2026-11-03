@@ -538,6 +538,9 @@ export const dict = {
   "usage.billingNote":
     "Tokens above reflect recorded usage, not money or quota deducted. Spending and remaining quota require account billing data; they are not assumed to be zero.",
   "usage.updated": "Last synchronized",
+  "provider.custom.protocol.auto": "Automatic (Responses → Chat)",
+  "provider.custom.protocol.autoHint":
+    "Saving checks each model with a minimal output request. Known services use their preset protocol.",
   "provider.custom.protocol.label": "API protocol",
   "provider.custom.protocol.hint":
     "Chat uses /chat/completions; Responses uses /responses. Check which endpoint your service documents; the model name alone is not enough. Many gateways support only one. Authentication headers are added automatically.",
@@ -775,8 +778,7 @@ export const dict = {
   "provider.custom.discovery.saved": "{{provider}} configuration saved",
   "provider.custom.discovery.savedDescription":
     "Select a model to start a task. Generation and tool calling have not been verified.",
-  "provider.custom.discovery.intro":
-    "Choose the API protocol, enter the service URL and Key, then fetch and select models.",
+  "provider.custom.discovery.intro": "Enter the service URL and Key, then fetch and select models.",
   "provider.custom.discovery.fetch": "Fetch models",
   "provider.custom.discovery.loading": "Fetching models…",
   "provider.custom.discovery.manual": "Enter models manually",

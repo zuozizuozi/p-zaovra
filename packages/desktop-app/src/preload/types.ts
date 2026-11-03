@@ -66,6 +66,7 @@ export type ElectronAPI = {
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void>
   parseMarkdownCommand: (markdown: string) => Promise<string>
   discoverProviderModels: typeof import("@zaovra-ai/app/provider-discovery").discoverProviderModels
+  detectProviderProtocol: typeof import("@zaovra-ai/app/provider-discovery").detectProviderProtocol
   checkAppExists: (appName: string) => Promise<boolean>
   resolveAppPath: (appName: string) => Promise<string | null>
   storeGet: (name: string, key: string) => Promise<string | null>
@@ -93,6 +94,12 @@ export type ElectronAPI = {
     extensions?: string[]
   }) => Promise<{ token: string; files: { path: string; name: string; size: number }[] } | null>
   readPickedFile: (token: string, path: string) => Promise<ArrayBuffer>
+  readClipboardFiles: () => Promise<{ token: string; files: { path: string; name: string; size: number }[] } | null>
+  storeAttachment: (input: {
+    directory: string
+    name: string
+    bytes: ArrayBuffer
+  }) => Promise<{ path: string; name: string; size: number }>
   cancelAttachment: (id: string) => Promise<void>
   artifactPreview: ArtifactPreviewAPI
   convertAttachment: (input: {

@@ -17,7 +17,7 @@ describe("assertAttachmentBudget", () => {
   })
 
   test("rejects the selection before files are read when its total exceeds the limit", () => {
-    expect(() => assertAttachmentBudget([{ size: MAX_ATTACHMENT_BYTES }, { size: 1 }])).toThrow("20 MB limit")
+    expect(() => assertAttachmentBudget([{ size: MAX_ATTACHMENT_BYTES }, { size: 1 }])).toThrow("100 MB limit")
   })
 
   test("reads an approved file through a bounded buffer", async () => {
@@ -37,7 +37,7 @@ describe("assertAttachmentBudget", () => {
     try {
       await writeFile(file, "")
       await truncate(file, MAX_ATTACHMENT_BYTES + 1)
-      await expect(readAttachment(file)).rejects.toThrow("20 MB limit")
+      await expect(readAttachment(file)).rejects.toThrow("100 MB limit")
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

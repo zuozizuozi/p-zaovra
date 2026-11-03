@@ -14,6 +14,7 @@ import { disconnectProviderCredentials } from "@/utils/provider-integration"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
+import { providerServiceKey } from "@/provider-discovery"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -46,7 +47,15 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   }
 
   const connected = createMemo(() => {
-    return providers.connected().filter((p) => p.id !== "zaovra" || Object.values(p.models).find((m) => m.cost?.input))
+    const seen = new Set<string>()
+    return providers.connected().filter((p) => {
+      if (p.id === "zaovra" && !Object.values(p.models).find((m) => m.cost?.input)) return false
+      const address = serverSync().data.config.provider?.[p.id]?.options?.baseURL
+      const key = providerServiceKey(address) || p.id
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
   })
 
   const popular = createMemo(() => {
@@ -117,6 +126,21 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   }
 
   const disconnect = async (providerID: string, name: string) => {
+    const address = providerServiceKey(serverSync().data.config.provider?.[providerID]?.options?.baseURL)
+    const duplicates = address
+      ? providers
+          .connected()
+          .filter(
+            (item) =>
+              item.id !== providerID &&
+              source(item) !== "env" &&
+              providerServiceKey(serverSync().data.config.provider?.[item.id]?.options?.baseURL) === address,
+          )
+      : []
+    for (const item of duplicates) {
+      await disconnectProviderCredentials(serverSdk().client, item.id)
+      await disableProvider(item.id, item.name)
+    }
     if (isConfigCustom(providerID) || connected().some((item) => item.id === providerID && source(item) === "config")) {
       await disconnectProviderCredentials(serverSdk().client, providerID).catch(() => undefined)
       await disableProvider(providerID, name)

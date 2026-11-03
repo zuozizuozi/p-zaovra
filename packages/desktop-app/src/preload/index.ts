@@ -76,6 +76,7 @@ const api: ElectronAPI = {
   setDisplayBackend: (backend) => ipcRenderer.invoke("set-display-backend", backend),
   parseMarkdownCommand: (markdown) => ipcRenderer.invoke("parse-markdown", markdown),
   discoverProviderModels: (input) => ipcRenderer.invoke("provider-discover-models", input),
+  detectProviderProtocol: (input) => ipcRenderer.invoke("provider-detect-protocol", input),
   checkAppExists: (appName) => ipcRenderer.invoke("check-app-exists", appName),
   resolveAppPath: (appName) => ipcRenderer.invoke("resolve-app-path", appName),
   storeGet: (name, key) => ipcRenderer.invoke("store-get", name, key),
@@ -106,6 +107,8 @@ const api: ElectronAPI = {
   openDirectoryPicker: (opts) => ipcRenderer.invoke("open-directory-picker", opts),
   openFilePicker: (opts) => ipcRenderer.invoke("open-file-picker", opts),
   readPickedFile: (token, path) => ipcRenderer.invoke("read-picked-file", token, path),
+  readClipboardFiles: () => ipcRenderer.invoke("read-clipboard-files"),
+  storeAttachment: (input) => ipcRenderer.invoke("store-attachment", input),
   cancelAttachment: (id) => ipcRenderer.invoke("cancel-attachment", id),
   artifactPreview: {
     readPDF: (input) => ipcRenderer.invoke("artifact-read-pdf", input),

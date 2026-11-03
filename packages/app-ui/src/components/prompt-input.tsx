@@ -1182,6 +1182,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     addPart,
     readClipboardImage: platform.readClipboardImage,
+    readClipboardFiles: platform.readClipboardFiles,
+    prepare: platform.prepareAttachment,
+    directory: () => sdk().directory,
+    onError: (error) =>
+      showToast({
+        title: language.t("common.requestFailed"),
+        description: error instanceof Error ? error.message : String(error),
+      }),
     getPathForFile: platform.getPathForFile,
   })
 

@@ -7,7 +7,7 @@ import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
 import type { UpdaterPlatform } from "../updater"
-import type { discoverProviderModels } from "../provider-discovery"
+import type { discoverProviderModels, detectProviderProtocol } from "../provider-discovery"
 
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
@@ -69,7 +69,8 @@ type PlatformBase = {
 
   /** Resolve the native source path for a desktop File. */
   getPathForFile?(file: File): string
-  prepareAttachment?(file: File, signal?: AbortSignal): Promise<File[]>
+  prepareAttachment?(file: File, signal?: AbortSignal, directory?: string): Promise<File[]>
+  readClipboardFiles?(): Promise<File[] | null>
 
   /** Open a native save file picker dialog (desktop only) */
   saveFilePickerDialog?(opts?: SaveFilePickerOptions): Promise<string | null>
@@ -87,6 +88,7 @@ type PlatformBase = {
   /** Fetch override */
   fetch?: typeof fetch
   discoverProviderModels?: typeof discoverProviderModels
+  detectProviderProtocol?: typeof detectProviderProtocol
 
   /** Get the configured default server URL (platform-specific) */
   getDefaultServer?(): Promise<ServerConnection.Key | null>
