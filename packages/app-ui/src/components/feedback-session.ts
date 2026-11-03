@@ -25,7 +25,7 @@ export function sessionFeedback(messages: readonly Message[], parts: (id: string
       {
         at: message.time.completed ?? message.time.created,
         status: status ?? (metadata?.statusCode ? Number(metadata.statusCode) : undefined),
-        message: Feedback.redact(text.slice(0, 2000)),
+        diagnosticMessage: Feedback.redact(text.slice(0, 2000)),
         requestID: requestID ? Feedback.redact(requestID.slice(0, 128)) : undefined,
         category: Feedback.suggestion(text),
       },
@@ -34,7 +34,7 @@ export function sessionFeedback(messages: readonly Message[], parts: (id: string
   const tools = recent.flatMap((message) => parts(message.id)).filter((part) => part.type === "tool")
   const latest = recent.findLast((message) => message.role === "assistant")
   return {
-    error: errors.findLast((item) => item.at >= now - 300_000 && item.at <= now)?.message,
+    error: errors.findLast((item) => item.at >= now - 300_000 && item.at <= now)?.diagnosticMessage,
     context: {
       provider: latest?.providerID,
       model: latest?.modelID,

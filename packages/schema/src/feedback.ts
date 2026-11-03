@@ -6,7 +6,15 @@ export namespace Feedback {
     provider?: string
     model?: string
     events?: Event[]
-    errors?: { at: number; status?: number; category?: string; message?: string; requestID?: string }[]
+    errors?: {
+      at: number
+      status?: number
+      category?: string
+      /** Legacy arbitrary text is deliberately excluded from automatic snapshots. */
+      message?: string
+      diagnosticMessage?: string
+      requestID?: string
+    }[]
   }
   export type Snapshot = Readonly<{
     text: string
@@ -14,8 +22,8 @@ export namespace Feedback {
     image?: string
   }>
 
-  // Free text is never part of the automatic projection. Explicitly included
-  // text still needs review: redaction cannot recognize every private phrase.
+  // Automatic errors accept explicitly projected diagnostic summaries, never
+  // arbitrary message/output/stack fields. Redaction cannot recognize every private phrase.
   const credentialNames =
     "access[-_]*token|refresh[-_]*token|id[-_]*token|client[-_]*secret|api[-_]*key|token|secret|password|passwd|authorization|proxy[-_]*authorization|cookie|set[-_]*cookie|private[-_]*key"
   const credentialKey = new RegExp("^(?:" + credentialNames + ")$", "i")
@@ -199,7 +207,7 @@ export namespace Feedback {
                 status:
                   Number.isInteger(item.status) && item.status! >= 400 && item.status! <= 599 ? item.status : undefined,
                 category: allowed(item.category, ["auth", "credit", "rate", "network", "model", "unknown"]),
-                ...(item.message ? { message: redact(item.message.slice(0, 2000)) } : {}),
+                ...(item.diagnosticMessage ? { message: redact(item.diagnosticMessage.slice(0, 2000)) } : {}),
                 ...(item.requestID ? { requestID: redact(item.requestID.slice(0, 128)) } : {}),
               })),
           }

@@ -57,6 +57,31 @@ test("deselected categories and opt-in text are absent; copies use the same froz
   expect(Feedback.validSnapshot({ ...snapshot, files: [{ name: "../secret", text: "bad" }] })).toBe(false)
 })
 
+test("562 diagnostic summaries preserve status and request id without accepting legacy arbitrary message text", () => {
+  const snapshot = Feedback.snapshot({
+    now: 1000,
+    description: "",
+    context: {
+      errors: [
+        {
+          at: 1000,
+          status: 400,
+          message: "SYNTHETIC_PRIVATE_RAW_MESSAGE",
+          diagnosticMessage: "HTTP 400 invalid tool schema api_key=sk-SYNTHETIC_DIAGNOSTIC_SECRET",
+          requestID: "req_fixture_562",
+        },
+      ],
+    },
+    include: { environment: false, errors: true, events: false },
+  })
+  const error = JSON.parse(snapshot.text).errors[0]
+  expect(error.status).toBe(400)
+  expect(error.requestID).toBe("req_fixture_562")
+  expect(error.message).toContain("HTTP 400 invalid tool schema")
+  expect(Feedback.copy(snapshot)).not.toContain("SYNTHETIC_PRIVATE_RAW_MESSAGE")
+  expect(Feedback.copy(snapshot)).not.toContain("SYNTHETIC_DIAGNOSTIC_SECRET")
+})
+
 test("self check classifies suggestions without creating a submission gate or configuration mutation", () => {
   expect(["401", "429", "proxy failed", "unclassified"].map(Feedback.suggestion)).toEqual([
     "auth",
