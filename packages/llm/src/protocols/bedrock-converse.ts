@@ -212,7 +212,7 @@ const lowerToolSpec = (tool: ToolDefinition, inputSchema: JsonSchema): BedrockTo
   toolSpec: {
     name: tool.name,
     description: tool.description,
-    inputSchema: { json: inputSchema },
+    inputSchema: { json: ToolSchemaProjection.objectRoot(inputSchema) },
   },
 })
 

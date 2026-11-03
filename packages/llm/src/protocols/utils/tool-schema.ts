@@ -45,7 +45,10 @@ const moonshot = (schema: JsonSchema): JsonSchema => {
   return isRecord(projected) ? projected : {}
 }
 
-const openAI = (schema: JsonSchema): JsonSchema => {
+// Every supported tool protocol requires a top-level object schema (Anthropic
+// `input_schema.type`, OpenAI/Bedrock `parameters`/`inputSchema`, Gemini OBJECT),
+// while Effect emits root unions such as `anyOf` for `Schema.Union` or `{}` inputs.
+const objectRoot = (schema: JsonSchema): JsonSchema => {
   const variants = Array.isArray(schema.anyOf) ? schema.anyOf.filter(isRecord) : []
   const flattened =
     variants.length === 0
@@ -135,5 +138,5 @@ export const ToolSchemaProjection = {
   gemini,
   modelCompatibility,
   moonshot,
-  openAI,
+  objectRoot,
 } as const

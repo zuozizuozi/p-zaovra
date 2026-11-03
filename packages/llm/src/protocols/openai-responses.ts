@@ -262,7 +262,7 @@ const lowerTool = (tool: ToolDefinition, inputSchema: JsonSchema): OpenAIRespons
   type: "function",
   name: tool.name,
   description: tool.description,
-  parameters: ToolSchemaProjection.openAI(inputSchema),
+  parameters: ToolSchemaProjection.objectRoot(inputSchema),
   // TODO: Read this from OpenAI-specific tool options so direct LLM callers can opt into strict schemas.
   strict: false,
 })

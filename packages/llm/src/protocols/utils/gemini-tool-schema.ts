@@ -61,10 +61,31 @@ const emptyObjectSchema = (schema: Record<string, unknown>) =>
   (!isRecord(schema.properties) || Object.keys(schema.properties).length === 0) &&
   !schema.additionalProperties
 
+// Gemini's Schema has no $ref/$defs, so inline local definitions to keep nested
+// argument shapes visible. A recursive reference collapses to an open schema.
+const inlineRefs = (schema: unknown, definitions: Record<string, unknown>, seen: ReadonlyArray<string>): unknown => {
+  if (Array.isArray(schema)) return schema.map((item) => inlineRefs(item, definitions, seen))
+  if (!isRecord(schema)) return schema
+  const siblings = Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => key !== "$ref" && key !== "$defs" && key !== "definitions")
+      .map(([key, value]) => [key, inlineRefs(value, definitions, seen)]),
+  )
+  if (typeof schema.$ref !== "string") return siblings
+  const name = schema.$ref.replace(/^#\/(\$defs|definitions)\//, "")
+  if (seen.includes(name) || !isRecord(definitions[name])) return siblings
+  return { ...(inlineRefs(definitions[name], definitions, [...seen, name]) as Record<string, unknown>), ...siblings }
+}
+
+const definitionsOf = (schema: unknown) =>
+  isRecord(schema)
+    ? { ...(isRecord(schema.definitions) ? schema.definitions : {}), ...(isRecord(schema.$defs) ? schema.$defs : {}) }
+    : {}
+
 const projectNode = (schema: unknown): Record<string, unknown> | undefined => {
   if (!isRecord(schema)) return undefined
   if (emptyObjectSchema(schema)) return undefined
-  return Object.fromEntries(
+  const node = Object.fromEntries(
     [
       ["description", schema.description],
       ["required", schema.required],
@@ -86,14 +107,25 @@ const projectNode = (schema: unknown): Record<string, unknown> | undefined => {
             ? undefined
             : projectNode(schema.items),
       ],
-      ["allOf", Array.isArray(schema.allOf) ? schema.allOf.map(projectNode) : undefined],
-      ["anyOf", Array.isArray(schema.anyOf) ? schema.anyOf.map(projectNode) : undefined],
-      ["oneOf", Array.isArray(schema.oneOf) ? schema.oneOf.map(projectNode) : undefined],
+      [
+        "anyOf",
+        Array.isArray(schema.anyOf)
+          ? schema.anyOf.map(projectNode)
+          : Array.isArray(schema.oneOf)
+            ? schema.oneOf.map(projectNode)
+            : undefined,
+      ],
       ["minLength", schema.minLength],
+      ["maxLength", schema.maxLength],
+      ["minimum", schema.minimum],
+      ["maximum", schema.maximum],
     ].filter((entry) => entry[1] !== undefined),
   )
+  // Schema has no allOf/oneOf fields and rejects unknown names; fold allOf
+  // constraints into the node and offer oneOf branches as anyOf.
+  return Array.isArray(schema.allOf) ? Object.assign({}, ...schema.allOf.map(projectNode), node) : node
 }
 
-export const convert = (schema: unknown) => projectNode(sanitizeNode(schema))
+export const convert = (schema: unknown) => projectNode(sanitizeNode(inlineRefs(schema, definitionsOf(schema), [])))
 
 export * as GeminiToolSchema from "./gemini-tool-schema"
