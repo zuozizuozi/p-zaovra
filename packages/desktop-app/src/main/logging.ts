@@ -25,9 +25,9 @@ export function feedbackDiagnostics(): Feedback.Context {
   return {
     version: app.getVersion(),
     platform: process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux",
-    events: feedbackEvents.filter((event) => event.at >= now - 300_000).map((event) => ({ ...event })),
+    events: feedbackEvents.filter((event) => event.at >= now - 1_800_000).map((event) => ({ ...event })),
     errors: feedbackEvents
-      .filter((event) => event.state === "error" && event.at >= now - 300_000)
+      .filter((event) => event.state === "error" && event.at >= now - 1_800_000)
       .slice(-20)
       .map((event) => ({ at: event.at, category: "unknown" })),
   }

@@ -66,7 +66,9 @@ export function DesktopRail() {
         <MenuV2.Portal>
           <MenuV2.Content>
             <MenuV2.Item onSelect={openSettings}>{language.t("sidebar.settings")}</MenuV2.Item>
-            <MenuV2.Item onSelect={() => openFeedback()}>{language.t("sidebar.help")}</MenuV2.Item>
+            <MenuV2.Item data-feedback-entry="menu" onSelect={() => openFeedback()}>
+              {language.t("sidebar.sendFeedback")}
+            </MenuV2.Item>
             <MenuV2.Item onSelect={openAbout}>{language.t("settings.about.title")}</MenuV2.Item>
           </MenuV2.Content>
         </MenuV2.Portal>

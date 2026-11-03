@@ -3,13 +3,15 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "sidebar.sendFeedback": "发送反馈",
   "artifact.externalFormat": "此格式暂不支持预览，可用本机应用打开，或在文件夹中查看。",
   "artifact.openDefault": "用系统默认程序打开",
   "permission.mode.ask": "请求批准",
   "permission.mode.automatic": "自动",
   "permission.mode.full": "完全权限",
   "permission.mode.ask.description": "命令或编辑需要授权时询问。",
-  "permission.mode.automatic.description": "自动批准工作区操作；发现外部字面路径时询问。PowerShell 动态脚本仍可能访问其他位置。",
+  "permission.mode.automatic.description":
+    "自动批准工作区操作；发现外部字面路径时询问。PowerShell 动态脚本仍可能访问其他位置。",
   "permission.mode.full.description": "此项目的权限请求自动批准；显式禁止规则仍生效。",
   "permission.mode.full.warning": "完全权限：可直接修改文件、执行命令并访问工作区外部，不再询问。显式禁止规则仍生效。",
   "session.end.checked": "已检查 {{count}} 项",

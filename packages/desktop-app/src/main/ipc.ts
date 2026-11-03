@@ -6,6 +6,7 @@ import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/
 import { readFile, stat, writeFile } from "node:fs/promises"
 import { feedbackArchive } from "./feedback"
 import { feedbackDiagnostics } from "./logging"
+import { captureFeedbackScreenshot } from "./feedback-capture"
 import { Feedback } from "@zaovra-ai/schema/feedback"
 import { basename, join } from "node:path"
 import { convertAttachment } from "./attachment-convert"
@@ -238,6 +239,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   handle("export-debug-logs", () => deps.exportDebugLogs())
   handle("feedback-diagnostics", () => feedbackDiagnostics())
+  handle("feedback-capture", (event) => captureFeedbackScreenshot(() => event.sender.capturePage()))
   handle("feedback-save", async (_event, input: unknown) => {
     if (!Feedback.validSnapshot(input)) throw new Error("Invalid feedback preview")
     const result = await dialog.showSaveDialog({

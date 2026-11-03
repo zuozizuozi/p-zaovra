@@ -1,4 +1,5 @@
 export const dict = {
+  "sidebar.sendFeedback": "Send feedback",
   "artifact.externalFormat":
     "Preview is unavailable for this file type. Open it with a local app or show its location.",
   "artifact.openDefault": "Open with default app",

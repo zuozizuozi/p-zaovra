@@ -2,6 +2,42 @@ import { expect, test } from "bun:test"
 import { Feedback } from "./feedback"
 import { credentialFields, redactionInputs, redactionSamples } from "../test/fixtures/feedback-redaction"
 
+test("565 binds only a valid session ID and keeps a bounded timestamped 30 minute window", () => {
+  const now = 2_000_000
+  const make = (sessionID: string) =>
+    Feedback.snapshot({
+      now,
+      description: "steps",
+      context: {
+        sessionID,
+        events: [-1, 199_999, 200_000, 800_000, 2_000_001].map((at) => ({ at, kind: "message", state: "error" })),
+        errors: [199_999, 200_000, 800_000, 2_000_001].map((at) => ({
+          at,
+          status: 400,
+          diagnosticMessage: 'HTTP 400 api_key="PRIVATE_565"',
+          requestID: "req_565",
+        })),
+      },
+      include: { environment: true, errors: true, events: true },
+    })
+  const snapshot = make("ses_565")
+  const report = JSON.parse(snapshot.text)
+  expect(report.sessionID).toBe("ses_565")
+  expect(report.events.map((item: { at: string }) => item.at)).toEqual([
+    new Date(200_000).toISOString(),
+    new Date(800_000).toISOString(),
+  ])
+  expect(report.errors).toHaveLength(2)
+  expect(report.errors[0]).toMatchObject({
+    status: 400,
+    requestID: "req_565",
+    secondsAgo: 1800,
+    at: new Date(200_000).toISOString(),
+  })
+  expect(snapshot.text).not.toContain("PRIVATE_565")
+  expect(JSON.parse(make('api_key="PRIVATE_565"').text).sessionID).toBeUndefined()
+})
+
 test("default automatic snapshot projects bounded fields and excludes free text and nested secrets", () => {
   const now = 1_000_000
   const secret = "SYNTHETIC_SECRET_BODY"

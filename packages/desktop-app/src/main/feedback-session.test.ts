@@ -46,6 +46,7 @@ test("549 first-message API failure reaches actual diagnostic ZIP with status, r
     const report = JSON.parse(text)
     expect(report.errors).toEqual([
       {
+        at: new Date(101).toISOString(),
         secondsAgo: 0,
         status: 400,
         category: "unknown",
@@ -53,7 +54,7 @@ test("549 first-message API failure reaches actual diagnostic ZIP with status, r
         requestID: "req_fixture_549",
       },
     ])
-    expect(report.events).toEqual([{ secondsAgo: 0, kind: "message", state: "error" }])
+    expect(report.events).toEqual([{ at: new Date(101).toISOString(), secondsAgo: 0, kind: "message", state: "error" }])
     expect(text).not.toContain("SECRET_HEADER")
     expect(text).not.toContain("PRIVATE_BODY")
   } finally {

@@ -160,7 +160,14 @@ const language = { locale: () => "zh", t: (key: string) => key }
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
 mock.module("@solidjs/router", () => ({ useParams: () => ({ id: session.id }) }))
 mock.module("@/context/server-sync", () => ({
-  useServerSync: () => () => ({ session: { data: { message: { [session.id]: scene.messages }, part: scene.parts } } }),
+  useServerSync: () => () => ({
+    session: {
+      data: { info: { [session.id]: session }, message: { [session.id]: scene.messages }, part: scene.parts },
+    },
+  }),
+}))
+mock.module("@/context/server-sdk", () => ({
+  useServerSDK: () => () => ({ client: { v2: { session: { list: async () => ({ data: { data: [] } }) } } } }),
 }))
 mock.module("@/components/settings-dialog", () => ({ useSettingsDialog: () => () => {} }))
 mock.module("@/context/platform", () => ({
@@ -217,7 +224,7 @@ test("menu feedback for the very first 400 saves status/request id and message e
       host,
     ),
   )
-  openFeedback()
+  openFeedback({ description: "First message failed" })
   await new Promise((resolve) => setTimeout(resolve, 25))
   button("继续反馈").click()
   await new Promise((resolve) => setTimeout(resolve, 25))

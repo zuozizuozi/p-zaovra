@@ -34,7 +34,7 @@ export function sessionFeedback(messages: readonly Message[], parts: (id: string
   const tools = recent.flatMap((message) => parts(message.id)).filter((part) => part.type === "tool")
   const latest = recent.findLast((message) => message.role === "assistant")
   return {
-    error: errors.findLast((item) => item.at >= now - 300_000 && item.at <= now)?.diagnosticMessage,
+    error: errors.findLast((item) => item.at >= now - 1_800_000 && item.at <= now)?.diagnosticMessage,
     context: {
       provider: latest?.providerID,
       model: latest?.modelID,

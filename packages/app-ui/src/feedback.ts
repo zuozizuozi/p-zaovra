@@ -7,6 +7,14 @@ export type FeedbackRequest = {
   context?: Feedback.Context
   readConversation?: () => string
   configure?: () => void
+  sessionID?: string
+  sessions?: { id: string; title: string }[]
+  loadSessions?: () => Promise<{ id: string; title: string }[]>
+  selectSession?: (sessionID?: string) => Promise<{
+    context: Feedback.Context
+    error?: string
+    readConversation?: () => string
+  }>
 }
 
 export function openFeedback(input: FeedbackRequest = {}) {
@@ -19,6 +27,13 @@ export function openFeedback(input: FeedbackRequest = {}) {
 
 export function feedbackSlash(text: string) {
   return /^\/bug(?:[ \t]+([^\r\n]*))?$/.exec(text.trim())?.[1] ?? (text.trim() === "/bug" ? "" : undefined)
+}
+
+export function openFeedbackSlash(text: string) {
+  const description = feedbackSlash(text)
+  if (description === undefined) return false
+  openFeedback({ description })
+  return true
 }
 
 export function useFeedbackModel(model: () => { provider: { id: string }; id: string } | undefined) {

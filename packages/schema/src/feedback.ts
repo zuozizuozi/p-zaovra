@@ -1,6 +1,7 @@
 export namespace Feedback {
   export type Event = { at: number; kind: string; state: string }
   export type Context = {
+    sessionID?: string
     version?: string
     platform?: string
     provider?: string
@@ -152,12 +153,13 @@ export namespace Feedback {
   }): Snapshot {
     const context = input.context
     const allowed = (value: string | undefined, values: string[]) => (values.includes(value ?? "") ? value : "unknown")
-    const time = (at: number) => Number.isFinite(at) && at >= input.now - 300_000 && at <= input.now
+    const time = (at: number) => Number.isFinite(at) && at >= input.now - 1_800_000 && at <= input.now
     const report = {
       format: 1,
       reportID: crypto.randomUUID(),
       created: new Date(input.now).toISOString(),
       description: redact(input.description),
+      ...(/^ses_[A-Za-z0-9_-]{1,160}$/.test(context.sessionID ?? "") ? { sessionID: context.sessionID } : {}),
       ...(input.include.environment
         ? {
             environment: {
@@ -179,6 +181,7 @@ export namespace Feedback {
               .filter((item) => time(item.at))
               .slice(-50)
               .map((item) => ({
+                at: new Date(item.at).toISOString(),
                 secondsAgo: Math.round((input.now - item.at) / 1000),
                 kind: allowed(item.kind, [
                   "read",
@@ -203,6 +206,7 @@ export namespace Feedback {
               .filter((item) => time(item.at))
               .slice(-20)
               .map((item) => ({
+                at: new Date(item.at).toISOString(),
                 secondsAgo: Math.round((input.now - item.at) / 1000),
                 status:
                   Number.isInteger(item.status) && item.status! >= 400 && item.status! <= 599 ? item.status : undefined,
