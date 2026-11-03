@@ -1,3 +1,5 @@
+import path from "node:path"
+
 /** Lexical literal operands only: never evaluates PowerShell, variables, types or cmdlets. */
 export function powerShellLiteralOperands(command: string) {
   if (command.length > 16_384) return { paths: [], complete: false }
@@ -12,7 +14,11 @@ export function powerShellLiteralOperands(command: string) {
     let value = quoted
       ? token.slice(1, -1).replace(/''/g, "'")
       : token.replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-\w+:/, "").replace(/^\$[\w:]+=/, "")
-    if (!quoted && (index === 0 || value.startsWith("-") || /[$`]/.test(value))) return []
+    if (
+      !quoted &&
+      ((index === 0 && !path.isAbsolute(value) && !/[\\/]/.test(value)) || value.startsWith("-") || /[$`]/.test(value))
+    )
+      return []
     if (token.startsWith('"') && /[$`]/.test(value)) {
       // A fixed directory prefix still requires its own authorization, even
       // when the rest of an interpolated path is unknown.

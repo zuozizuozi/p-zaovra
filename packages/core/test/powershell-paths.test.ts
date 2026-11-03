@@ -56,6 +56,7 @@ test("562 external literal prefixes and incomplete scans remain observable", () 
   }
   expect(powerShellLiteralOperands("$p='../outside/it''s.txt'; Get-Content $p").paths).toContain("../outside/it's.txt")
   expect(powerShellLiteralOperands('Get-Item --file="sub/file.txt"').paths).toEqual(["sub/file.txt"])
+  expect(powerShellLiteralOperands("../outside/tool.exe -q").paths).toContain("../outside/tool.exe")
   for (const command of [
     'Get-Content "unfinished',
     "x".repeat(16_385),

@@ -155,6 +155,8 @@ test("550 screenshot through real Bash/Permission: workspace automatic, full acc
           ])
           expect(yield* execute(command, "full")).toMatchObject({ visible: 0, dispatch: 0, type: "error" })
         }
+        yield* policy(askRules)
+        expect(yield* execute(external, "automatic")).toMatchObject({ visible: 1, dispatch: 0, type: "error" })
         for (const mode of ["automatic", "full"] as const) {
           for (const rules of [
             [{ action: "*", resource: "*", effect: "deny" }],
