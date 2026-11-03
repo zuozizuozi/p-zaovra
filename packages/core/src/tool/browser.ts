@@ -173,7 +173,7 @@ const BatchInput = Schema.Struct({
       encode: SchemaGetter.passthrough({ strict: false }),
     }),
   )
-const Input = Schema.Union([
+export const Input = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("open"),
     url: Schema.String,

@@ -201,7 +201,7 @@ const lowerTool = (tool: ToolDefinition, inputSchema: JsonSchema): OpenAIChatToo
   function: {
     name: tool.name,
     description: tool.description,
-    parameters: ToolSchemaProjection.openAI(inputSchema),
+    parameters: ToolSchemaProjection.objectRoot(inputSchema),
   },
 })
 

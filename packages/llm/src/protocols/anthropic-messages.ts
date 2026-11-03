@@ -267,7 +267,7 @@ const signatureFromMetadata = (metadata: ProviderMetadata | undefined): string |
 const lowerTool = (breakpoints: Cache.Breakpoints, tool: ToolDefinition, inputSchema: JsonSchema): AnthropicTool => ({
   name: tool.name,
   description: tool.description,
-  input_schema: inputSchema,
+  input_schema: ToolSchemaProjection.objectRoot(inputSchema),
   cache_control: cacheControl(breakpoints, tool.cache),
 })
 
