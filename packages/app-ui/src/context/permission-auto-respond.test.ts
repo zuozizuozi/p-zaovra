@@ -15,7 +15,9 @@ const session = (input: { id: string; parentID?: string }) =>
   }) as Session
 
 test("550 three modes distinguish workspace requests from external and unresolved commands", () => {
-  expect(modeAllowsPermission("invalid" as Parameters<typeof modeAllowsPermission>[0], { permission: "write" })).toBe(false)
+  expect(modeAllowsPermission("invalid" as Parameters<typeof modeAllowsPermission>[0], { permission: "write" })).toBe(
+    false,
+  )
   for (const request of [
     { permission: "read" },
     { permission: "write" },

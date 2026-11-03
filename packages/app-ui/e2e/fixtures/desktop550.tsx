@@ -23,7 +23,7 @@ render(
     <PlatformProvider value={platform}>
       <AppBaseProviders locale="zh">
         <AppInterface
-        disableHealthCheck
+          disableHealthCheck
           defaultServer={ServerConnection.Key.make(location.origin)}
           canonicalLocalServer={ServerConnection.Key.make(location.origin)}
           servers={[{ type: "http", http: { url: location.origin } }]}

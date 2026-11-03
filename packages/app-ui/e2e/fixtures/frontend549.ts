@@ -10,12 +10,19 @@ export async function setupFrontend549(page: Page, baseURL: string, desktop = fa
   process.env.PLAYWRIGHT_PORT = new URL(baseURL).port
   process.env.PLAYWRIGHT_SERVER_PORT = new URL(baseURL).port
   if (desktop) {
-    await page.route("**/*", async route => {
+    await page.route("**/*", async (route) => {
       if (!route.request().isNavigationRequest()) return route.fallback()
       const response = await route.fetch({ url: baseURL + "/e2e/fixtures/desktop550.html" })
       return route.fulfill({ response })
     })
-    await page.addInitScript(directory => localStorage.setItem("zaovra.global.dat:server", JSON.stringify({ projects: { local: [{ worktree: directory, expanded: true }] }, list: [], lastProject: {} })), directory)
+    await page.addInitScript(
+      (directory) =>
+        localStorage.setItem(
+          "zaovra.global.dat:server",
+          JSON.stringify({ projects: { local: [{ worktree: directory, expanded: true }] }, list: [], lastProject: {} }),
+        ),
+      directory,
+    )
   }
   const now = Date.now()
   const messages: SessionMessage[] = [
