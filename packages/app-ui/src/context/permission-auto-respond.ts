@@ -6,8 +6,8 @@ export function modeAllowsPermission(
   mode: PermissionMode,
   request: { permission: string; metadata?: Record<string, unknown> },
 ) {
-  if (mode === "ask") return false
   if (mode === "full") return true
+  if (mode !== "automatic") return false
   // The server evaluates deny before creating a request and rechecks after approval.
   if (request.permission === "external_directory") return false
   if (request.permission === "bash")
