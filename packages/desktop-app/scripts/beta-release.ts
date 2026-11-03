@@ -61,34 +61,50 @@ export function retiredVersions(versions: string[], current: string) {
   return [...new Set(versions)].sort((a, b) => semver.order(b, a)).slice(5)
 }
 
+export function unsignedBeta(args: string[], channel: string | undefined) {
+  if (!args.includes("--allow-unsigned-beta")) return false
+  if (channel !== "beta") throw new Error("--allow-unsigned-beta requires ZAOVRA_CHANNEL=beta")
+  return true
+}
+
 export async function publishBeta(directory: string, commit: string, notes: string) {
+  const unsigned = unsignedBeta(process.argv, process.env.ZAOVRA_CHANNEL)
   const plan = await planBeta(directory, commit, notes)
   if (!process.argv.includes("--publish")) {
-    console.log(JSON.stringify({ dryRun: true, ...plan }, null, 2))
+    console.log(
+      JSON.stringify(
+        { dryRun: true, signingPolicy: unsigned ? "unsigned beta" : "Valid signature required", ...plan },
+        null,
+        2,
+      ),
+    )
     return
   }
   if (process.env.BETA_APPROVED_SHA !== commit || !process.env.BETA_APPROVAL_REF?.trim())
     throw new Error("Evaluator approval for this exact SHA is required")
   if (!process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY)
     throw new Error("Minimal zaovra-updates bucket credentials are required")
-  if (process.platform !== "win32" || !process.env.WINDOWS_SIGNING_PUBLISHER_NAME)
-    throw new Error("Signed Windows publishing is required")
-  const signature = Bun.spawn(
-    [
-      "pwsh",
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-File",
-      join(import.meta.dir, "verify-beta-signature.ps1"),
-      "-Installer",
-      resolve(directory, plan.manifest.files[0].name),
-      "-Publisher",
-      process.env.WINDOWS_SIGNING_PUBLISHER_NAME,
-    ],
-    { stdout: "inherit", stderr: "inherit" },
-  )
-  if ((await signature.exited) !== 0) throw new Error("Installer signature validation failed")
+  if (process.platform !== "win32") throw new Error("Windows publishing is required")
+  if (unsigned) console.log("unsigned beta")
+  if (!unsigned) {
+    if (!process.env.WINDOWS_SIGNING_PUBLISHER_NAME) throw new Error("Signed Windows publishing is required")
+    const signature = Bun.spawn(
+      [
+        "pwsh",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        join(import.meta.dir, "verify-beta-signature.ps1"),
+        "-Installer",
+        resolve(directory, plan.manifest.files[0].name),
+        "-Publisher",
+        process.env.WINDOWS_SIGNING_PUBLISHER_NAME,
+      ],
+      { stdout: "inherit", stderr: "inherit" },
+    )
+    if ((await signature.exited) !== 0) throw new Error("Installer signature validation failed")
+  }
   const bucket = new S3Client({
     endpoint: "https://58d97556adff19b5c088918df00c7c8c.r2.cloudflarestorage.com",
     bucket: "zaovra-updates",
@@ -147,6 +163,7 @@ export async function publishBeta(directory: string, commit: string, notes: stri
   console.log(
     JSON.stringify({
       published: plan.manifest.version,
+      signing: unsigned ? "unsigned beta" : "Valid signature",
       commit,
       approval: process.env.BETA_APPROVAL_REF,
       retained: versions.filter((version) => !retired.includes(version)),
@@ -156,12 +173,14 @@ export async function publishBeta(directory: string, commit: string, notes: stri
 }
 
 if (import.meta.main) {
-  const [directory, commit, notesPath] = process.argv.slice(2).filter((value) => value !== "--publish")
+  const [directory, commit, notesPath] = process.argv
+    .slice(2)
+    .filter((value) => value !== "--publish" && value !== "--allow-unsigned-beta")
   if (!directory || !commit || !notesPath)
-    throw new Error("Usage: beta-release.ts <artifact-dir> <sha> <notes.md> [--publish]")
+    throw new Error("Usage: beta-release.ts <artifact-dir> <sha> <notes.md> [--publish] [--allow-unsigned-beta]")
   await publishBeta(directory, commit, await Bun.file(notesPath).text()).catch(() => {
     console.error(
-      "Beta delivery failed. Run the offline dry-run and verify the approved SHA, signing identity and bucket configuration. Credential details are not logged.",
+      "Beta delivery failed. Run the offline dry-run and verify the approved SHA, signing policy and bucket configuration. Credential details are not logged.",
     )
     process.exitCode = 1
   })
