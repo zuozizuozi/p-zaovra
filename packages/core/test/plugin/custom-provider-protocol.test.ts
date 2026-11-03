@@ -66,6 +66,7 @@ for (const protocol of ["openai", "anthropic", "google"] as const) {
         "@ai-sdk/anthropic": createAnthropic,
         "@ai-sdk/google": createGoogleGenerativeAI,
       }[result.config.npm]
+      if (!factory) throw new Error(`Unsupported fixture SDK: ${result.config.npm}`)
       const sdk = factory({ name: "custom", baseURL: migrated.api!.url!, apiKey: result.key })
       const response = await sdk
         .languageModel("example")
