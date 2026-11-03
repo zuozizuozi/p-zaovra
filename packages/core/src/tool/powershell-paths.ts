@@ -1,4 +1,5 @@
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 /** Lexical literal operands only: never evaluates PowerShell, variables, types or cmdlets. */
 export function powerShellLiteralOperands(command: string) {
@@ -24,6 +25,36 @@ export function powerShellLiteralOperands(command: string) {
       // when the rest of an interpolated path is unknown.
       value = value.slice(0, value.search(/[$`]/))
       if (!/[\\/]/.test(value)) return []
+    }
+    if (/^file:/i.test(value)) {
+      // Uri.LocalPath is a filesystem operand too. Invalid/ambiguous URI
+      // literals must not silently become a complete workspace-only scan.
+      if (!/^file:\/\//i.test(value) || !URL.canParse(value)) {
+        complete = false
+        return []
+      }
+      const url = new URL(value)
+      try {
+        if (url.search || url.hash) throw new Error("Ambiguous file URI")
+        value = fileURLToPath(url, {
+          windows: process.platform === "win32" || /^\/[A-Za-z]:/.test(url.pathname) || !!url.hostname,
+        })
+        if (/[\r\n\0<>|?*]/.test(value) || /:/.test(value.replace(/^[A-Za-z]:/, "")))
+          throw new Error("Invalid file path")
+      } catch {
+        complete = false
+        return []
+      }
+    }
+    // Normalize extended drive/UNC paths before '?' can be read as a glob.
+    if (/^[\\/]{2}\?[\\/]/.test(value)) {
+      const target = value.slice(4).replaceAll("/", "\\")
+      if (/^UNC\\/i.test(target)) value = "\\\\" + target.slice(4)
+      else if (/^[A-Za-z]:[\\/]/.test(target)) value = target
+      else {
+        complete = false
+        return []
+      }
     }
     // Non-filesystem labels (for example a status message or a type member)
     // must not be handed to the Windows path resolver as malformed paths.

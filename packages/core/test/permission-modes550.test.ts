@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { Cause, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "../src/agent"
 import { Config } from "../src/config"
@@ -107,6 +108,49 @@ test("550 screenshot through real Bash/Permission: workspace automatic, full acc
           )
           yield* Fiber.interrupt(observer)
           return { type, dispatch: runs.length - before, ...state }
+        })
+        const fileURIs = (file: string) => {
+          const uri = pathToFileURL(file).href
+          return [
+            `[IO.File]::ReadAllText(([Uri]"${uri}").LocalPath)`,
+            `$u=New-Object Uri '${uri}'; Get-Content $u.LocalPath`,
+            `$u=[System.Uri]::new('${uri}'); Get-Content $u.LocalPath`,
+            ...(process.platform === "win32" ? [`Get-Content '${path.toNamespacedPath(file)}'`] : []),
+          ]
+        }
+        for (const command of fileURIs(external)) {
+          yield* policy(askRules)
+          expect(yield* execute(command, "automatic"), command).toMatchObject({
+            visible: 1,
+            dispatch: 0,
+            type: "error",
+          })
+          for (const rules of [
+            [{ action: "*", resource: "*", effect: "deny" }],
+            [
+              { action: "*", resource: "*", effect: "allow" },
+              { action: "external_directory", resource: outside.path.replaceAll("\\", "/") + "/*", effect: "deny" },
+            ],
+          ] satisfies PermissionV2.Ruleset[]) {
+            yield* policy(rules)
+            expect(yield* execute(command, "full"), command).toMatchObject({ visible: 0, dispatch: 0, type: "error" })
+          }
+        }
+        for (const command of fileURIs(local)) {
+          yield* policy(askRules)
+          expect(yield* execute(command, "automatic"), command).toMatchObject({
+            visible: 0,
+            dispatch: 1,
+            type: "content",
+          })
+          yield* policy(askRules)
+          expect(yield* execute(command, "ask"), command).toMatchObject({ visible: 1, dispatch: 0, type: "error" })
+        }
+        yield* policy(askRules)
+        expect(yield* execute("Get-Content 'file:///%ZZ'", "automatic")).toMatchObject({
+          visible: 1,
+          dispatch: 0,
+          type: "error",
         })
         for (const mode of ["ask", "automatic", "full"] as const) {
           yield* policy(askRules)
