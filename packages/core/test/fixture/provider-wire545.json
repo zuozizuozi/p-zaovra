@@ -19,20 +19,20 @@
   },
   {
     "name": "openai-delivery-report",
-    "bytes": 452,
-    "sha256": "244dc39b375c91006767a24d1f74ec89314b712fdf0cc1c49e62e48ffc305e45",
-    "body": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: delivery-report.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
+    "bytes": 486,
+    "sha256": "7162d94217b1559ebb4f646d3aba323d8c39d6b3a500423c2f5d20cf19ec0920",
+    "body": "{\"model\":\"fixture-model\",\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: delivery-report.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
   },
   {
     "name": "openai-last-step",
-    "bytes": 446,
-    "sha256": "ecc1a150e681da8f0c620ceae423cebcad35a015296972ff915aaf3ae48837b7",
-    "body": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: last-step.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
+    "bytes": 480,
+    "sha256": "383d4037554e33e49b1225608e545102e1c3a43c265c4b8cde49d6574bc44e05",
+    "body": "{\"model\":\"fixture-model\",\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: last-step.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
   },
   {
     "name": "openai-text-recovery",
-    "bytes": 450,
-    "sha256": "e15a94fb8bed2ca152e3a973158a5c403cee2bfebab5948e67a24e62f25336c4",
-    "body": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: text-recovery.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
+    "bytes": 484,
+    "sha256": "6e939d5cc1efa28cf3ce481d821a07917cdb97ada7e020e6f958825020232532",
+    "body": "{\"model\":\"fixture-model\",\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Inspect the fixture.\"}]},{\"type\":\"function_call\",\"call_id\":\"call-fixture\",\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"fixture\\\"}\"},{\"type\":\"function_call_output\",\"call_id\":\"call-fixture\",\"output\":\"\\\"fixture-output\\\"\"},{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Finish in text only: text-recovery.\"}]}],\"tool_choice\":\"none\",\"store\":false,\"stream\":true}"
   }
 ]
