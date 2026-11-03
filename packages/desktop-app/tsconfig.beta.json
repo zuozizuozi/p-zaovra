@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "bun",
+      "node"
+    ],
+    "outDir": "node_modules/.ts-dist-beta"
+  },
+  "references": [],
+  "include": [
+    "scripts/beta-ci.ts",
+    "scripts/beta-release.ts"
+  ],
+  "exclude": []
+}

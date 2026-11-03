@@ -1,10 +1,12 @@
 import type { EventEmitter } from "node:events"
 
-export function installUpdate(input: {
+export async function installUpdate(input: {
   updater: Pick<EventEmitter, "once" | "removeListener"> & { quitAndInstall(): void }
   lifecycle: Pick<EventEmitter, "once" | "removeListener">
   quitting: (value: boolean) => void
+  beforeInstall?: () => Promise<unknown>
 }) {
+  await input.beforeInstall?.()
   return new Promise<void>((resolve, reject) => {
     const cleanup = () => {
       clearTimeout(timeout)

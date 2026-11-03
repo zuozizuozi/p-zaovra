@@ -1,0 +1,22 @@
+{
+  "name": "@zaovra-ai/feedback-worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsgo --noEmit",
+    "types": "wrangler types",
+    "test": "bun test src scripts"
+  },
+  "dependencies": {
+    "jose": "6.2.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261029.1",
+    "@typescript/native-preview": "7.0.0-dev.20251207.1",
+    "@types/bun": "1.3.13",
+    "wrangler": "4.156.0"
+  }
+}

@@ -123,7 +123,7 @@ function getConfig() {
         appId,
         productName: "Zaovra Beta",
         protocols: { name: "Zaovra Beta", schemes: ["zaovra"] },
-        publish: { provider: "github", owner: "zuozizuozi", repo: "p-zaovra", channel: "beta" },
+        publish: { provider: "generic", url: "https://updates.zaovra.com/beta/", channel: "beta" },
         rpm: { packageName: "zaovra-beta" },
       }
     }

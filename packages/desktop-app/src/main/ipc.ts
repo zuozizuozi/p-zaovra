@@ -3,12 +3,12 @@ import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import { discoverProviderModels, type ProviderDiscoveryInput } from "@zaovra-ai/app/provider-discovery"
 import { readFile, stat, writeFile } from "node:fs/promises"
-import { feedbackArchive } from "./feedback"
+import { feedbackArchive, submitFeedback } from "./feedback"
 import { feedbackDiagnostics } from "./logging"
 import { Feedback } from "@zaovra-ai/schema/feedback"
 import { basename, join } from "node:path"
 import { convertAttachment } from "./attachment-convert"
-import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
+import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, net, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@zaovra-ai/app/desktop-menu"
 
@@ -230,6 +230,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   handle("export-debug-logs", () => deps.exportDebugLogs())
   handle("feedback-diagnostics", () => feedbackDiagnostics())
+  handle("feedback-submit", (_event, input: unknown) => submitFeedback(input, net.fetch))
   handle("feedback-save", async (_event, input: unknown) => {
     if (!Feedback.validSnapshot(input)) throw new Error("Invalid feedback preview")
     const result = await dialog.showSaveDialog({

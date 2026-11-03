@@ -127,6 +127,7 @@ type PlatformBase = {
   /** Export collected diagnostic logs (desktop only) */
   exportDebugLogs?(): Promise<string>
   feedbackDiagnostics?(): Promise<Feedback.Context>
+  submitFeedback?(snapshot: Feedback.Snapshot): Promise<{ receipt: string; submitted: true }>
   saveFeedback?(snapshot: Feedback.Snapshot): Promise<boolean>
 
   /** Force focus styles on interactive elements through desktop devtools (desktop only) */
