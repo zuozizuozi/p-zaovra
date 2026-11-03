@@ -1,5 +1,5 @@
 import type { Message, Session, SessionInputAdmitted } from "@zaovra-ai/sdk/v2/client"
-import { feedbackSlash, openFeedback } from "@/feedback"
+import { openFeedbackSlash } from "@/feedback"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 import { Binary } from "@zaovra-ai/core/util/binary"
@@ -431,11 +431,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const text = currentPrompt.map((part) => ("content" in part ? part.content : "")).join("")
     const images = input.imageAttachments().slice()
     const mode = input.mode()
-    const feedback = mode === "normal" ? feedbackSlash(text) : undefined
-    if (feedback !== undefined) {
-      openFeedback({ description: feedback })
-      return
-    }
+    if (mode === "normal" && openFeedbackSlash(text)) return
 
     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
       if (input.working()) void abort()

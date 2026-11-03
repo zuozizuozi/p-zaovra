@@ -111,6 +111,7 @@ const api: ElectronAPI = {
   storeAttachment: (input) => ipcRenderer.invoke("store-attachment", input),
   cancelAttachment: (id) => ipcRenderer.invoke("cancel-attachment", id),
   artifactPreview: {
+    fileAction: (input) => ipcRenderer.invoke("artifact-file-action", input),
     readPDF: (input) => ipcRenderer.invoke("artifact-read-pdf", input),
     open: (input) => ipcRenderer.invoke("artifact-open", input),
     bounds: (input) => ipcRenderer.invoke("artifact-bounds", input),
@@ -150,6 +151,7 @@ const api: ElectronAPI = {
   exportDebugLogs: () => ipcRenderer.invoke("export-debug-logs"),
   feedbackDiagnostics: () => ipcRenderer.invoke("feedback-diagnostics"),
   submitFeedback: (snapshot) => ipcRenderer.invoke("feedback-submit", snapshot),
+  captureFeedbackScreenshot: () => ipcRenderer.invoke("feedback-capture"),
   saveFeedback: (snapshot) => ipcRenderer.invoke("feedback-save", snapshot),
   setForceFocus: (enabled) => ipcRenderer.invoke("set-force-focus", enabled),
   recordFatalRendererError: (error) => ipcRenderer.invoke("record-fatal-renderer-error", error),

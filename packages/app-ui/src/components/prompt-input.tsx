@@ -49,6 +49,7 @@ import { DialogSelectModelUnpaid } from "@/components/dialog-select-model-unpaid
 import { DialogSelectModelUnpaidV2 } from "@/components/dialog-select-model-unpaid-v2"
 import { useCommand } from "@/context/command"
 import { usePermission } from "@/context/permission"
+import { PermissionModeControl } from "./permission-mode-control"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
@@ -1664,6 +1665,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </Button>
               </div>
               <div class="flex items-center gap-1.5 min-w-0 flex-1 h-7">
+                <PermissionModeControl
+                  mode={permission.mode(sdk().directory, props.controls.session.id)}
+                  onChange={(mode) => permission.setMode(sdk().directory, mode)}
+                />
                 <Show when={!agentsLoading()}>
                   <div
                     data-component="prompt-agent-control"

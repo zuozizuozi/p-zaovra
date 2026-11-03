@@ -42,7 +42,8 @@ import { Icon } from "@zaovra-ai/ui/icon"
 import { type MascotState } from "@/components/task-mascot"
 import { TaskActivity } from "@/components/task-activity"
 import { runningTool } from "@/utils/running-tool"
-import { isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
+import { ProcessMessages } from "./process-messages-view"
+import { processMessages } from "./process-messages"
 import { useServerSync } from "@/context/server-sync"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
@@ -57,7 +58,6 @@ import { SessionRetry } from "@zaovra-ai/session-ui/session-retry"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@zaovra-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@zaovra-ai/ui/sticky-accordion-header"
 import { TextField } from "@zaovra-ai/ui/text-field"
-import { TextReveal } from "@zaovra-ai/ui/text-reveal"
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -155,7 +155,7 @@ function TimelineThinkingRow(props: {
         <span>{language.t("session.status.verifying")}</span>
       </Show>
       <Show when={!props.showReasoningSummaries}>
-        <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
+        <span class="session-turn-thinking-heading block min-w-0 truncate">{props.reasoningHeading}</span>
       </Show>
     </div>
   )
@@ -1367,15 +1367,6 @@ export function MessageTimeline(props: {
               {(message) => (
                 <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
                   <div data-slot="session-turn-message-content" aria-live="off">
-                    <Show when={isContinuation(getMsgParts(message().id))}>
-                      <div data-component="system-followup" class="text-xs text-text-weak">
-                        {language.t(
-                          displayTurn(message().id) === message().id
-                            ? "session.process.unknownOwner"
-                            : "session.process.followup",
-                        )}
-                      </div>
-                    </Show>
                     <Message
                       message={message()}
                       parts={getMsgParts(userMessageRow().userMessageID)}
@@ -1392,6 +1383,33 @@ export function MessageTimeline(props: {
                 </div>
               )}
             </Show>
+          </TimelineRowFrame>
+        )
+      }
+      case "ProcessMessages": {
+        const processRow = row as Accessor<TimelineRowByTag<"ProcessMessages">>
+        const entries = createMemo(() =>
+          processMessages(
+            processRow().messageIDs.flatMap(getMsgParts),
+            new Set(
+              (assistantMessagesByTurn().get(processRow().userMessageID) ?? emptyAssistantMessages).flatMap((message) =>
+                getMsgParts(message.id).flatMap((part) =>
+                  part.type === "tool" &&
+                  part.tool === "bash" &&
+                  part.state.status === "completed" &&
+                  typeof part.state.metadata.job_id === "string"
+                    ? [part.state.metadata.job_id]
+                    : [],
+                ),
+              ),
+            ),
+          ),
+        )
+        return (
+          <TimelineRowFrame row={processRow}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <ProcessMessages entries={entries()} />
+            </div>
           </TimelineRowFrame>
         )
       }
@@ -1475,7 +1493,8 @@ export function MessageTimeline(props: {
             const part = getMsgPart(ref.messageID, ref.partID)
             if (part?.type === "text")
               return ref.messageID !== answerMessages().get(displayTurn(assistantPartRow().userMessageID))
-            if (part?.type === "reasoning") return true
+            // Its own collapsed summary is the affordance for revealing reasoning.
+            if (part?.type === "reasoning") return false
             if (part?.type !== "tool") return false
             return (
               part.state.status !== "error" ||

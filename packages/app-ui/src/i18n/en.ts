@@ -1,4 +1,18 @@
 export const dict = {
+  "sidebar.sendFeedback": "Send feedback",
+  "artifact.externalFormat":
+    "Preview is unavailable for this file type. Open it with a local app or show its location.",
+  "artifact.openDefault": "Open with default app",
+  "permission.mode.ask": "Request approval",
+  "permission.mode.automatic": "Automatic",
+  "permission.mode.full": "Full access",
+  "permission.mode.ask.description": "Ask when a command or edit needs approval.",
+  "permission.mode.automatic.description":
+    "Automatically approve workspace operations; ask for detected external paths. Dynamic PowerShell scripts may still access other locations.",
+  "permission.mode.full.description":
+    "Automatically approve permission requests for this project. Explicit deny rules still apply.",
+  "permission.mode.full.warning":
+    "Full access can modify files and run commands outside this workspace without asking. Deny rules remain active.",
   "session.end.checked": "Checked {{count}} items",
   "session.end.details": "Turn details",
   "session.end.undo": "Undo",
@@ -1489,6 +1503,9 @@ export const dict = {
   "sidebar.gettingStarted.line1": "Zaovra includes free models so you can start immediately.",
   "sidebar.gettingStarted.line2": "Connect any provider to use models, inc. Claude, GPT, Gemini etc.",
   "sidebar.project.recentSessions": "Recent sessions",
+  "sidebar.otherSessions": "Other conversations",
+  "sidebar.newSessionProject": "New conversation in {{project}}",
+  "sidebar.sessionsRetry": "Could not load conversations. Retry",
   "sidebar.project.viewAllSessions": "View all sessions",
   "sidebar.project.clearNotifications": "Clear notifications",
   "sidebar.empty.title": "No projects open",

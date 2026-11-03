@@ -2,6 +2,42 @@ import { expect, test } from "bun:test"
 import { Feedback } from "./feedback"
 import { credentialFields, redactionInputs, redactionSamples } from "../test/fixtures/feedback-redaction"
 
+test("565 binds only a valid session ID and keeps a bounded timestamped 30 minute window", () => {
+  const now = 2_000_000
+  const make = (sessionID: string) =>
+    Feedback.snapshot({
+      now,
+      description: "steps",
+      context: {
+        sessionID,
+        events: [-1, 199_999, 200_000, 800_000, 2_000_001].map((at) => ({ at, kind: "message", state: "error" })),
+        errors: [199_999, 200_000, 800_000, 2_000_001].map((at) => ({
+          at,
+          status: 400,
+          diagnosticMessage: 'HTTP 400 api_key="PRIVATE_565"',
+          requestID: "req_565",
+        })),
+      },
+      include: { environment: true, errors: true, events: true },
+    })
+  const snapshot = make("ses_565")
+  const report = JSON.parse(snapshot.text)
+  expect(report.sessionID).toBe("ses_565")
+  expect(report.events.map((item: { at: string }) => item.at)).toEqual([
+    new Date(200_000).toISOString(),
+    new Date(800_000).toISOString(),
+  ])
+  expect(report.errors).toHaveLength(2)
+  expect(report.errors[0]).toMatchObject({
+    status: 400,
+    requestID: "req_565",
+    secondsAgo: 1800,
+    at: new Date(200_000).toISOString(),
+  })
+  expect(snapshot.text).not.toContain("PRIVATE_565")
+  expect(JSON.parse(make('api_key="PRIVATE_565"').text).sessionID).toBeUndefined()
+})
+
 test("default automatic snapshot projects bounded fields and excludes free text and nested secrets", () => {
   const now = 1_000_000
   const secret = "SYNTHETIC_SECRET_BODY"
@@ -55,6 +91,31 @@ test("deselected categories and opt-in text are absent; copies use the same froz
     expect(content).not.toContain(secret)
   expect(Feedback.validSnapshot(snapshot)).toBe(true)
   expect(Feedback.validSnapshot({ ...snapshot, files: [{ name: "../secret", text: "bad" }] })).toBe(false)
+})
+
+test("562 diagnostic summaries preserve status and request id without accepting legacy arbitrary message text", () => {
+  const snapshot = Feedback.snapshot({
+    now: 1000,
+    description: "",
+    context: {
+      errors: [
+        {
+          at: 1000,
+          status: 400,
+          message: "SYNTHETIC_PRIVATE_RAW_MESSAGE",
+          diagnosticMessage: "HTTP 400 invalid tool schema api_key=sk-SYNTHETIC_DIAGNOSTIC_SECRET",
+          requestID: "req_fixture_562",
+        },
+      ],
+    },
+    include: { environment: false, errors: true, events: false },
+  })
+  const error = JSON.parse(snapshot.text).errors[0]
+  expect(error.status).toBe(400)
+  expect(error.requestID).toBe("req_fixture_562")
+  expect(error.message).toContain("HTTP 400 invalid tool schema")
+  expect(Feedback.copy(snapshot)).not.toContain("SYNTHETIC_PRIVATE_RAW_MESSAGE")
+  expect(Feedback.copy(snapshot)).not.toContain("SYNTHETIC_DIAGNOSTIC_SECRET")
 })
 
 test("self check classifies suggestions without creating a submission gate or configuration mutation", () => {

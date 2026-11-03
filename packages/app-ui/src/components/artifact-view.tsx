@@ -1,4 +1,5 @@
 import { createArtifactAction } from "@/utils/artifact-action"
+import { ArtifactExternal } from "./artifact-external"
 import { showToast } from "@/utils/toast"
 import { createEffect, createResource, onCleanup, onMount, Show, lazy, Suspense } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -28,28 +29,36 @@ export function ArtifactView(props: Props) {
   const platform = usePlatform()
   const reveal = createArtifactAction(platform, () => showToast({ title: language.t("artifact.externalError") }))
   return (
-    <Show when={artifactViewer(props.target) === "pdf"} fallback={<ArtifactBrowserView {...props} />}>
-      <div class="flex h-full min-h-0 flex-col" aria-label={language.t("artifact.pdf")}>
-        <Show when={!props.compact}>
-          <div class="flex h-10 shrink-0 items-center justify-between border-b border-border-weak-base px-3 text-xs">
-            <span class="min-w-0 truncate">{props.target}</span>
-            <button
-              class="h-10 shrink-0 px-2"
-              onClick={() => void reveal(props.target, props.directory)}
-            >
-              {language.t(/^https?:\/\//i.test(props.target) ? "artifact.external" : "artifact.reveal")}
-            </button>
-          </div>
-        </Show>
-        <Suspense fallback={<p class="p-3 text-xs">{language.t("artifact.loadingPdf")}</p>}>
-          <PDF
-            load={() => {
-              if (!platform.artifactPreview?.readPDF) return Promise.reject(new Error("PDF viewer requires desktop"))
-              return platform.artifactPreview.readPDF({ target: props.target, directory: props.directory })
-            }}
-          />
-        </Suspense>
-      </div>
+    <Show
+      when={artifactViewer(props.target) !== "external"}
+      fallback={
+        <ArtifactExternal
+          target={props.target}
+          directory={props.directory}
+          fileAction={platform.artifactPreview?.fileAction}
+        />
+      }
+    >
+      <Show when={artifactViewer(props.target) === "pdf"} fallback={<ArtifactBrowserView {...props} />}>
+        <div class="flex h-full min-h-0 flex-col" aria-label={language.t("artifact.pdf")}>
+          <Show when={!props.compact}>
+            <div class="flex h-10 shrink-0 items-center justify-between border-b border-border-weak-base px-3 text-xs">
+              <span class="min-w-0 truncate">{props.target}</span>
+              <button class="h-10 shrink-0 px-2" onClick={() => void reveal(props.target, props.directory)}>
+                {language.t(/^https?:\/\//i.test(props.target) ? "artifact.external" : "artifact.reveal")}
+              </button>
+            </div>
+          </Show>
+          <Suspense fallback={<p class="p-3 text-xs">{language.t("artifact.loadingPdf")}</p>}>
+            <PDF
+              load={() => {
+                if (!platform.artifactPreview?.readPDF) return Promise.reject(new Error("PDF viewer requires desktop"))
+                return platform.artifactPreview.readPDF({ target: props.target, directory: props.directory })
+              }}
+            />
+          </Suspense>
+        </div>
+      </Show>
     </Show>
   )
 }
@@ -190,11 +199,7 @@ function ArtifactBrowserView(props: Props) {
           <button class={button} aria-label={language.t("artifact.zoomIn")} onClick={() => action("zoom-in")}>
             ＋
           </button>
-          <button
-            class={button}
-            disabled={!state.url}
-            onClick={() => void reveal(props.target, props.directory)}
-          >
+          <button class={button} disabled={!state.url} onClick={() => void reveal(props.target, props.directory)}>
             {language.t(/^https?:\/\//i.test(props.target) ? "artifact.external" : "artifact.reveal")}
           </button>
         </div>

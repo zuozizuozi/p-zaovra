@@ -10,25 +10,22 @@ import type { FeedbackRequest } from "@/feedback"
 
 const labels = {
   zh: {
-    title: "反馈问题",
-    description: "发生了什么？你期望看到什么？",
+    title: "发送反馈",
+    description: "发生了什么？你期望看到什么？（必填）",
     local: "先在本机预览，点击提交后才上传。",
-    submit: "提交反馈",
-    submitted: "已提交，编号：",
-    done: "已提交",
     continue: "继续反馈",
     back: "返回修改",
     preview: "实际导出内容预览",
     environment: "版本、系统及模型类别",
-    events: "最近5分钟事件摘要（最多50条）",
-    errors: "最近错误摘要（最多20条，不含原始日志）",
+    events: "最近30分钟带时间戳事件（最多50条）",
+    errors: "最近30分钟错误摘要（最多20条，不含原始日志）",
     details: "附带此错误的原始详情（打码后）",
     conversation: "附带最近对话正文（可能包含代码）",
     code: "主动选择代码或文本文件",
     screenshot: "主动选择 PNG 截图",
     remove: "移除",
     image: "截图像素预览：请先遮挡秘密，再选择图片。不会自动识别图片中的秘密。",
-    review: "请逐项检查。自动打码不能识别所有私人内容；原文、代码和截图默认不带。",
+    review: "请逐项检查。自动打码不能识别所有私人内容；请确认是否附带对话正文；代码和截图需主动选择。",
     copy: "复制报告",
     save: "保存诊断包 ZIP",
     mail: "打开邮件草稿",
@@ -48,21 +45,27 @@ const labels = {
     empty: "当前没有可选对话。",
     busy: "正在准备本地现场…",
     configure: "检查模型服务设置（反馈描述保留）",
+    session: "关联会话",
+    unrelated: "与会话无关",
+    current: "当前会话",
+    capture: "截取当前窗口",
+    attachment: "可粘贴或拖入 PNG（最大3 MB、800万像素）",
+    submit: "提交反馈",
+    submitted: "已提交",
+    receipt: "已提交，编号：",
+    submitUnavailable: "此版本暂未连接提交服务，可先保存诊断包。",
     modelNames: "附带模型与服务商完整名称（可能含自定义文字，打码后预览）",
   },
   en: {
-    title: "Report a problem",
-    description: "What happened, and what did you expect?",
-    local: "Review locally. Uploaded only when you select Submit.",
-    submit: "Submit feedback",
-    submitted: "Submitted. Receipt: ",
-    done: "Submitted",
+    title: "Send feedback",
+    description: "What happened, and what did you expect? (required)",
+    local: "Preview locally. Upload only when you click Submit.",
     continue: "Continue feedback",
     back: "Edit report",
     preview: "Exact export preview",
     environment: "Version, system and model family",
-    events: "Events from the last 5 minutes (up to 50)",
-    errors: "Recent error summaries (up to 20; no raw logs)",
+    events: "Timestamped events from the last 30 minutes (up to 50)",
+    errors: "Errors from the last 30 minutes (up to 20; no raw logs)",
     details: "Include raw details of this error after redaction",
     conversation: "Include recent conversation (may contain code)",
     code: "Choose a code or text file",
@@ -70,7 +73,7 @@ const labels = {
     remove: "Remove",
     image: "Screenshot pixel preview: mask secrets before selecting. Image secrets are not automatically detected.",
     review:
-      "Review each item. Redaction cannot recognize every private phrase. Conversation, code and screenshots are excluded by default.",
+      "Review each item. Redaction cannot recognize every private phrase. Check conversation inclusion. Code and screenshots require explicit selection.",
     copy: "Copy report",
     save: "Save diagnostic ZIP",
     mail: "Open email draft",
@@ -91,6 +94,15 @@ const labels = {
     empty: "No conversation is available here.",
     busy: "Preparing local diagnostics…",
     configure: "Check model service settings (description retained)",
+    session: "Related conversation",
+    unrelated: "Unrelated to a conversation",
+    current: "Current conversation",
+    capture: "Capture current window",
+    attachment: "Paste or drop a PNG (up to 3 MB and 8 million pixels)",
+    submit: "Submit feedback",
+    submitted: "Submitted",
+    receipt: "Submitted. Receipt: ",
+    submitUnavailable: "Submission is unavailable in this build. You can save the diagnostic ZIP.",
     modelNames: "Include full model and provider names (may contain custom text; review after redaction)",
   },
 }
@@ -101,9 +113,14 @@ export function FeedbackHost() {
   const text = () => (language.locale().startsWith("zh") ? labels.zh : labels.en)
   const [state, setState] = createStore({
     open: false,
+    capturing: false,
+    receipt: "",
+    sessionID: undefined as string | undefined,
+    sessions: [] as { id: string; title: string }[],
+    selectSession: undefined as FeedbackRequest["selectSession"],
+    conversationIncluded: false,
     busy: false,
     pending: false,
-    receipt: "",
     description: "",
     error: "",
     notice: "",
@@ -120,49 +137,69 @@ export function FeedbackHost() {
     configure: undefined as (() => void) | undefined,
   })
   const advice = createMemo(() => Feedback.suggestion(state.error))
+  let nativeContext: Feedback.Context = {}
+  let sessionContext: Feedback.Context = {}
+  let selection = 0
+  let closeTimer: ReturnType<typeof setTimeout> | undefined
+  const mergeContext = () => ({
+    ...nativeContext,
+    ...sessionContext,
+    sessionID: state.sessionID,
+    version: nativeContext.version ?? platform.version,
+    platform: platform.os ?? "web",
+    events: [...(nativeContext.events ?? []), ...(sessionContext.events ?? [])],
+    errors: [...(nativeContext.errors ?? []), ...(sessionContext.errors ?? [])],
+  })
   const receive = (event: Event) => {
+    clearTimeout(closeTimer)
+    selection++
     const request = (event as CustomEvent<FeedbackRequest>).detail ?? {}
     const generation = state.generation + 1
+    nativeContext = {}
+    sessionContext = request.context ?? {}
+    const included = /-beta(?:[.-]|$)/i.test(platform.version ?? "")
     setState({
       open: true,
       busy: true,
       pending: false,
+      capturing: false,
       receipt: "",
       preview: undefined,
       error: request.error ?? "",
       notice: "",
       description: request.description ?? state.description,
       generation,
-      context: {
-        version: platform.version,
-        platform: platform.os ?? "web",
-        provider: undefined,
-        model: undefined,
-        events: [],
-        errors: [],
-        ...request.context,
-      },
+      sessionID: request.sessionID ?? request.context?.sessionID,
+      sessions: request.sessions ?? [],
+      selectSession: request.selectSession,
       include: { environment: true, events: true, errors: true },
       details: false,
       modelNames: true,
-      conversation: undefined,
+      conversationIncluded: included,
+      conversation: included ? request.readConversation?.() : undefined,
       code: undefined,
       image: undefined,
       readConversation: request.readConversation,
       configure: request.configure,
     })
+    setState("context", mergeContext())
+    void request
+      .loadSessions?.()
+      .then((sessions) => {
+        if (state.generation === generation) setState("sessions", sessions.slice(0, 100))
+      })
+      .catch(() => {
+        if (state.generation === generation) setState("notice", text().unavailable)
+      })
     void (platform.feedbackDiagnostics?.() ?? Promise.resolve<Feedback.Context>({}))
       .then((context) => {
-        if (state.generation !== generation) return
-        setState("context", {
-          provider: undefined,
-          model: undefined,
-          ...context,
-          ...request.context,
-          version: platform.version ?? context.version,
-          platform: platform.os ?? "web",
-          events: [...(context.events ?? []), ...(request.context?.events ?? [])],
-          errors: [...(context.errors ?? []), ...(request.context?.errors ?? [])],
+        if (state.generation !== generation || state.preview) return
+        nativeContext = context
+        const included = /-beta(?:[.-]|$)/i.test(context.version ?? platform.version ?? "")
+        setState({
+          context: mergeContext(),
+          conversationIncluded: included,
+          conversation: included ? state.readConversation?.() : undefined,
         })
       })
       .catch(() => {
@@ -172,10 +209,41 @@ export function FeedbackHost() {
         if (state.generation === generation) setState("busy", false)
       })
   }
+  const selectSession = async (id?: string) => {
+    if (state.pending || !state.selectSession) return
+    const generation = state.generation
+    const selected = ++selection
+    setState({ pending: true, notice: "" })
+    await state
+      .selectSession(id)
+      .then((scene) => {
+        if (state.generation !== generation || selection !== selected) return
+        sessionContext = scene.context
+        setState({
+          sessionID: id,
+          error: scene.error ?? "",
+          readConversation: scene.readConversation,
+          conversation: state.conversationIncluded ? scene.readConversation?.() : undefined,
+          details: false,
+          preview: undefined,
+          receipt: "",
+        })
+        setState("context", mergeContext())
+      })
+      .catch(() => {
+        if (state.generation === generation) setState("notice", text().unavailable)
+      })
+      .finally(() => {
+        if (state.generation === generation) setState("pending", false)
+      })
+  }
   window.addEventListener("zaovra:feedback", receive)
-  onCleanup(() => window.removeEventListener("zaovra:feedback", receive))
+  onCleanup(() => {
+    clearTimeout(closeTimer)
+    window.removeEventListener("zaovra:feedback", receive)
+  })
   const freeze = () => {
-    setState({ receipt: "", notice: "" })
+    if (!state.description.trim() || state.pending) return
     setState(
       "preview",
       Feedback.snapshot({
@@ -206,6 +274,27 @@ export function FeedbackHost() {
         if (state.generation === generation) setState("pending", false)
       })
   }
+  const submit = async () => {
+    if (!platform.submitFeedback || state.pending || !state.preview || state.receipt) return
+    const snapshot = state.preview
+    const generation = state.generation
+    await perform(async () => {
+      const result = await platform.submitFeedback!(snapshot)
+      if (
+        !result.submitted ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result.receipt)
+      )
+        throw new Error("Invalid feedback receipt")
+      if (state.generation !== generation || state.preview !== snapshot) return ""
+      setState("receipt", result.receipt)
+      closeTimer = setTimeout(() => {
+        if (state.generation === generation && state.preview === snapshot) {
+          setState({ open: false, description: "", conversation: undefined, image: undefined, code: undefined })
+        }
+      }, 700)
+      return text().receipt + result.receipt
+    })
+  }
   const chooseImage = async (file: File) => {
     const generation = state.generation
     if (file.type !== "image/png" || file.size > 3_000_000) throw new Error("Invalid image")
@@ -214,6 +303,8 @@ export function FeedbackHost() {
       header.byteLength < 24 ||
       header.getUint32(0) !== 0x89504e47 ||
       header.getUint32(4) !== 0x0d0a1a0a ||
+      !header.getUint32(16) ||
+      !header.getUint32(20) ||
       header.getUint32(16) * header.getUint32(20) > 8_000_000
     )
       throw new Error("Image too large or invalid")
@@ -232,236 +323,307 @@ export function FeedbackHost() {
     if (state.open && state.generation === generation && !state.preview) setState("image", image)
     return ""
   }
+  const imageTransfer = (event: ClipboardEvent | DragEvent) => {
+    if (state.preview || state.pending) return
+    const transfer = "clipboardData" in event ? event.clipboardData : event.dataTransfer
+    const file = Array.from(transfer?.files ?? []).find((file) => file.type.startsWith("image/"))
+    if (!file) return
+    event.preventDefault()
+    void perform(() => chooseImage(file))
+  }
+  const capture = () =>
+    void perform(async () => {
+      const generation = state.generation
+      setState("capturing", true)
+      try {
+        // Wait for the dialog to disappear before capturing this WebContents.
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        if (!state.open || state.generation !== generation) return ""
+        const image = await platform.captureFeedbackScreenshot!()
+        if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 4_000_000)
+          throw new Error("Invalid screenshot")
+        const bytes = Uint8Array.from(atob(image.split(",")[1]), (char) => char.charCodeAt(0))
+        const header = new DataView(bytes.buffer)
+        if (
+          bytes.length > 3_000_000 ||
+          bytes.length < 24 ||
+          header.getUint32(0) !== 0x89504e47 ||
+          header.getUint32(4) !== 0x0d0a1a0a ||
+          !header.getUint32(16) ||
+          !header.getUint32(20) ||
+          header.getUint32(16) * header.getUint32(20) > 8_000_000
+        )
+          throw new Error("Invalid screenshot")
+        if (state.open && state.generation === generation && !state.preview) setState("image", image)
+        return ""
+      } finally {
+        if (state.generation === generation) setState("capturing", false)
+      }
+    })
   return (
     <Kobalte open={state.open} onOpenChange={(open) => setState("open", open)}>
-      <Kobalte.Portal>
-        <Kobalte.Overlay class="fixed inset-0 z-[10000] bg-black/40" />
-        <div class="fixed inset-0 z-[10001] flex items-center justify-center p-3 pointer-events-none">
-          <Dialog title={text().title} size="large" class="pointer-events-auto h-full max-h-[90dvh] overflow-hidden">
-            <div
-              data-component="feedback-dialog"
-              class="flex h-full min-h-0 flex-col gap-4 px-4 pb-4 text-13-regular min-w-0"
-            >
-              <p>{text().local}</p>
-              <div data-component="feedback-scroll" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-                <Show
-                  when={!state.preview}
-                  fallback={
-                    <>
-                      <h3>{text().preview}</h3>
-                      <For each={state.preview?.files}>
-                        {(file) => (
-                          <details open>
-                            <summary>{file.name}</summary>
-                            <pre class="whitespace-pre-wrap break-all select-text max-h-64 overflow-y-auto">
-                              {file.text}
-                            </pre>
-                          </details>
-                        )}
-                      </For>
-                      <Show when={state.preview?.image}>
-                        {(image) => (
-                          <>
-                            <p>{text().image}</p>
-                            <img src={image()} alt={text().screenshot} class="max-h-64 object-contain" />
-                          </>
-                        )}
-                      </Show>
-                      <p>{text().emailHint}</p>
-                    </>
-                  }
-                >
-                  <label class="flex flex-col gap-2">
-                    {text().description}
-                    <textarea
-                      autofocus
-                      rows={4}
-                      maxLength={2000}
-                      value={state.description}
-                      onInput={(event) => setState("description", event.currentTarget.value)}
-                      class="rounded-md border border-border-base bg-background-base p-2 resize-y"
-                    />
-                  </label>
-                  <p role="status">{text()[advice()]}</p>
-                  <Show when={state.configure}>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setState("open", false)
-                        state.configure?.()
-                      }}
-                    >
-                      {text().configure}
-                    </Button>
-                  </Show>
-                  <p class="text-text-weak">{text().review}</p>
-                  <For each={["environment", "events", "errors"] as const}>
-                    {(key) => (
-                      <label class="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={state.include[key]}
-                          onChange={(event) => setState("include", key, event.currentTarget.checked)}
-                        />
-                        {text()[key]}
-                      </label>
-                    )}
-                  </For>
-                  <Show when={state.context.model || state.context.provider}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={state.modelNames}
-                        onChange={(event) => setState("modelNames", event.currentTarget.checked)}
-                      />{" "}
-                      {text().modelNames}
-                    </label>
-                  </Show>
-                  <Show when={state.error}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={state.details}
-                        onChange={(event) => setState("details", event.currentTarget.checked)}
-                      />{" "}
-                      {text().details}
-                    </label>
-                  </Show>
-                  <label>
-                    <input
-                      type="checkbox"
-                      disabled={!state.readConversation}
-                      checked={state.conversation !== undefined}
-                      onChange={(event) =>
-                        setState("conversation", event.currentTarget.checked ? state.readConversation?.() : undefined)
-                      }
-                    />{" "}
-                    {text().conversation}
-                  </label>
-                  <label>
-                    {text().code}
-                    <input
-                      type="file"
-                      disabled={state.pending}
-                      accept="text/*,.ts,.tsx,.js,.json,.md,.py,.rs"
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.[0]
-                        if (!file) return
-                        const generation = state.generation
-                        void perform(async () => {
-                          if (file.size > 32_000) throw new Error("Text too large")
-                          const code = await file.text()
-                          if (state.open && state.generation === generation && !state.preview) setState("code", code)
-                          return ""
-                        })
-                        event.currentTarget.value = ""
-                      }}
-                    />
-                  </label>
-                  <Show when={state.code !== undefined}>
-                    <Button variant="ghost" onClick={() => setState("code", undefined)}>
-                      {text().remove} {text().code}
-                    </Button>
-                  </Show>
-                  <label>
-                    {text().screenshot}
-                    <input
-                      type="file"
-                      disabled={state.pending}
-                      accept="image/png"
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.[0]
-                        if (file) void perform(() => chooseImage(file))
-                        event.currentTarget.value = ""
-                      }}
-                    />
-                  </label>
-                  <Show when={state.image}>
-                    <p>{text().image}</p>
-                    <img src={state.image} alt={text().screenshot} class="max-h-64 object-contain" />
-                    <Button variant="ghost" onClick={() => setState("image", undefined)}>
-                      {text().remove} {text().screenshot}
-                    </Button>
-                  </Show>
-                  <Show when={state.busy}>
-                    <p role="status">{text().busy}</p>
-                  </Show>
-                </Show>
-              </div>
-              <div data-component="feedback-actions" class="shrink-0">
-                <Show
-                  when={state.preview}
-                  fallback={
-                    <Button disabled={state.pending} onClick={freeze}>
-                      {text().continue}
-                    </Button>
-                  }
-                >
-                  <div class="flex flex-wrap gap-2">
-                    <Show when={platform.submitFeedback}>
-                      <Button
-                        disabled={state.pending || !!state.receipt}
-                        onClick={() =>
-                          void perform(async () => {
-                            const generation = state.generation
-                            const preview = state.preview!
-                            const result = await platform.submitFeedback!(preview)
-                            if (state.generation === generation && state.preview === preview)
-                              setState("receipt", result.receipt)
-                            return text().submitted + result.receipt
-                          })
-                        }
+      <Show when={state.open}>
+        <Kobalte.Portal>
+          <Kobalte.Overlay
+            style={{ visibility: state.capturing ? "hidden" : undefined }}
+            class="fixed inset-0 z-[10000] bg-black/40"
+          />
+          <div
+            style={{ visibility: state.capturing ? "hidden" : undefined }}
+            class="fixed inset-0 z-[10001] flex items-center justify-center p-3 pointer-events-none"
+          >
+            <Dialog title={text().title} size="large" class="pointer-events-auto h-full max-h-[90dvh] overflow-hidden">
+              <div
+                data-component="feedback-dialog"
+                onPaste={imageTransfer}
+                onDragOver={(event) => {
+                  if (
+                    !state.preview &&
+                    Array.from(event.dataTransfer?.items ?? []).some((item) => item.type.startsWith("image/"))
+                  )
+                    event.preventDefault()
+                }}
+                onDrop={imageTransfer}
+                class="flex h-full min-h-0 flex-col gap-4 px-4 pb-4 text-13-regular min-w-0"
+              >
+                <p>{text().local}</p>
+                <div data-component="feedback-scroll" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+                  <Show
+                    when={!state.preview}
+                    fallback={
+                      <>
+                        <h3>{text().preview}</h3>
+                        <For each={state.preview?.files}>
+                          {(file) => (
+                            <details open>
+                              <summary>{file.name}</summary>
+                              <pre class="whitespace-pre-wrap break-all select-text max-h-64 overflow-y-auto">
+                                {file.text}
+                              </pre>
+                            </details>
+                          )}
+                        </For>
+                        <Show when={state.preview?.image}>
+                          {(image) => (
+                            <>
+                              <p>{text().image}</p>
+                              <img src={image()} alt={text().screenshot} class="max-h-64 object-contain" />
+                            </>
+                          )}
+                        </Show>
+                        <p>{text().emailHint}</p>
+                      </>
+                    }
+                  >
+                    <label class="flex flex-col gap-2">
+                      {text().session}
+                      <select
+                        aria-label={text().session}
+                        value={state.sessionID ?? ""}
+                        disabled={state.pending || state.busy || !state.selectSession}
+                        onChange={(event) => void selectSession(event.currentTarget.value || undefined)}
+                        class="rounded-md border border-border-base bg-background-base p-2"
                       >
-                        {state.receipt ? text().done : text().submit}
+                        <option value="">{text().unrelated}</option>
+                        <Show when={state.sessionID && !state.sessions.some((item) => item.id === state.sessionID)}>
+                          <option value={state.sessionID}>{text().current}</option>
+                        </Show>
+                        <For each={state.sessions}>{(item) => <option value={item.id}>{item.title}</option>}</For>
+                      </select>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                      {text().description}
+                      <textarea
+                        autofocus
+                        required
+                        rows={4}
+                        maxLength={2000}
+                        value={state.description}
+                        onInput={(event) => setState("description", event.currentTarget.value)}
+                        class="rounded-md border border-border-base bg-background-base p-2 resize-y"
+                      />
+                    </label>
+                    <p role="status">{text()[advice()]}</p>
+                    <Show when={state.configure}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setState("open", false)
+                          state.configure?.()
+                        }}
+                      >
+                        {text().configure}
                       </Button>
                     </Show>
-                    <Button disabled={state.pending} onClick={() => setState("preview", undefined)}>
-                      {text().back}
-                    </Button>
-                    <Button
-                      disabled={state.pending}
-                      onClick={() =>
-                        void perform(async () => {
-                          await navigator.clipboard.writeText(Feedback.copy(state.preview!))
-                          return text().copied
-                        })
-                      }
-                    >
-                      {text().copy}
-                    </Button>
-                    <Show when={platform.saveFeedback}>
+                    <p class="text-text-weak">{text().review}</p>
+                    <For each={["environment", "events", "errors"] as const}>
+                      {(key) => (
+                        <label class="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={state.include[key]}
+                            onChange={(event) => setState("include", key, event.currentTarget.checked)}
+                          />
+                          {text()[key]}
+                        </label>
+                      )}
+                    </For>
+                    <Show when={state.context.model || state.context.provider}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={state.modelNames}
+                          onChange={(event) => setState("modelNames", event.currentTarget.checked)}
+                        />{" "}
+                        {text().modelNames}
+                      </label>
+                    </Show>
+                    <Show when={state.error}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={state.details}
+                          onChange={(event) => setState("details", event.currentTarget.checked)}
+                        />{" "}
+                        {text().details}
+                      </label>
+                    </Show>
+                    <label>
+                      <input
+                        type="checkbox"
+                        disabled={state.busy || state.pending || !state.readConversation}
+                        checked={state.conversationIncluded}
+                        onChange={(event) =>
+                          setState({
+                            conversationIncluded: event.currentTarget.checked,
+                            conversation: event.currentTarget.checked ? state.readConversation?.() : undefined,
+                          })
+                        }
+                      />{" "}
+                      {text().conversation}
+                    </label>
+                    <label>
+                      {text().code}
+                      <input
+                        type="file"
+                        disabled={state.pending}
+                        accept="text/*,.ts,.tsx,.js,.json,.md,.py,.rs"
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0]
+                          if (!file) return
+                          const generation = state.generation
+                          void perform(async () => {
+                            if (file.size > 32_000) throw new Error("Text too large")
+                            const code = await file.text()
+                            if (state.open && state.generation === generation && !state.preview) setState("code", code)
+                            return ""
+                          })
+                          event.currentTarget.value = ""
+                        }}
+                      />
+                    </label>
+                    <Show when={state.code !== undefined}>
+                      <Button variant="ghost" onClick={() => setState("code", undefined)}>
+                        {text().remove} {text().code}
+                      </Button>
+                    </Show>
+                    <label>
+                      {text().screenshot}
+                      <input
+                        type="file"
+                        disabled={state.pending}
+                        accept="image/png"
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0]
+                          if (file) void perform(() => chooseImage(file))
+                          event.currentTarget.value = ""
+                        }}
+                      />
+                    </label>
+                    <p class="text-text-weak">{text().attachment}</p>
+                    <Show when={platform.captureFeedbackScreenshot}>
+                      <Button disabled={state.pending} variant="secondary" onClick={capture}>
+                        {text().capture}
+                      </Button>
+                    </Show>
+                    <Show when={state.image}>
+                      <p>{text().image}</p>
+                      <img src={state.image} alt={text().screenshot} class="max-h-64 object-contain" />
+                      <Button variant="ghost" onClick={() => setState("image", undefined)}>
+                        {text().remove} {text().screenshot}
+                      </Button>
+                    </Show>
+                    <Show when={state.busy}>
+                      <p role="status">{text().busy}</p>
+                    </Show>
+                  </Show>
+                </div>
+                <div data-component="feedback-actions" class="shrink-0">
+                  <Show
+                    when={state.preview}
+                    fallback={
+                      <Button disabled={state.pending || !state.description.trim()} onClick={freeze}>
+                        {text().continue}
+                      </Button>
+                    }
+                  >
+                    <div class="flex flex-wrap gap-2">
+                      <Show when={platform.submitFeedback} fallback={<p>{text().submitUnavailable}</p>}>
+                        <Button disabled={state.pending || !!state.receipt} onClick={() => void submit()}>
+                          {state.receipt ? text().submitted : text().submit}
+                        </Button>
+                      </Show>
+                      <Button
+                        disabled={state.pending || !!state.receipt}
+                        onClick={() => setState("preview", undefined)}
+                      >
+                        {text().back}
+                      </Button>
                       <Button
                         disabled={state.pending}
                         onClick={() =>
-                          void perform(async () =>
-                            (await platform.saveFeedback!(state.preview!)) ? text().saved : text().cancelled,
+                          void perform(async () => {
+                            await navigator.clipboard.writeText(Feedback.copy(state.preview!))
+                            return text().copied
+                          })
+                        }
+                      >
+                        {text().copy}
+                      </Button>
+                      <Show when={platform.saveFeedback}>
+                        <Button
+                          disabled={state.pending}
+                          onClick={() =>
+                            void perform(async () =>
+                              (await platform.saveFeedback!(state.preview!)) ? text().saved : text().cancelled,
+                            )
+                          }
+                        >
+                          {text().save}
+                        </Button>
+                      </Show>
+                      <Button
+                        disabled={state.pending || Feedback.copy(state.preview!).length > 8000}
+                        title={text().largeMail}
+                        onClick={() =>
+                          platform.openLink(
+                            `mailto:support@zaovra.com?subject=Zaovra%20feedback&body=${encodeURIComponent(Feedback.copy(state.preview!))}`,
                           )
                         }
                       >
-                        {text().save}
+                        {text().mail}
                       </Button>
-                    </Show>
-                    <Button
-                      disabled={state.pending || Feedback.copy(state.preview!).length > 8000}
-                      title={text().largeMail}
-                      onClick={() =>
-                        platform.openLink(
-                          `mailto:support@zaovra.com?subject=Zaovra%20feedback&body=${encodeURIComponent(Feedback.copy(state.preview!))}`,
-                        )
-                      }
-                    >
-                      {text().mail}
-                    </Button>
-                  </div>
+                    </div>
+                  </Show>
+                </div>
+                <Show when={state.notice}>
+                  <p role="status">{state.notice}</p>
                 </Show>
               </div>
-              <Show when={state.notice}>
-                <p role="status">{state.notice}</p>
-              </Show>
-            </div>
-          </Dialog>
-        </div>
-      </Kobalte.Portal>
+            </Dialog>
+          </div>
+        </Kobalte.Portal>
+      </Show>
     </Kobalte>
   )
 }

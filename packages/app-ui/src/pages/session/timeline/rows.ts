@@ -15,6 +15,7 @@ export type TimelineRowMap = {
     userMessageID: string
     anchor: boolean
   }
+  ProcessMessages: { userMessageID: string; messageIDs: string[] }
   AssistantHeading: { userMessageID: string }
   TurnDivider: {
     userMessageID: string

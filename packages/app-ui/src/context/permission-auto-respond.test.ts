@@ -1,13 +1,46 @@
 import { describe, expect, test } from "bun:test"
 import type { PermissionView, Session } from "@zaovra-ai/sdk/v2/client"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
-import { autoRespondsPermission, isDirectoryAutoAccepting, sessionAutoAccept } from "./permission-auto-respond"
+import {
+  autoRespondsPermission,
+  isDirectoryAutoAccepting,
+  sessionAutoAccept,
+  modeAllowsPermission,
+} from "./permission-auto-respond"
 
 const session = (input: { id: string; parentID?: string }) =>
   ({
     id: input.id,
     parentID: input.parentID,
   }) as Session
+
+test("550 three modes distinguish workspace requests from external and unresolved commands", () => {
+  expect(modeAllowsPermission("invalid" as Parameters<typeof modeAllowsPermission>[0], { permission: "write" })).toBe(
+    false,
+  )
+  for (const request of [
+    { permission: "read" },
+    { permission: "write" },
+    { permission: "bash", metadata: { preflight: "uncertain", externalRisk: false } },
+    {
+      permission: "bash",
+      metadata: { preflight: "uncertain", externalRisk: true, powerShellLiteralsWithinWorkspace: true },
+    },
+  ]) {
+    expect(modeAllowsPermission("ask", request)).toBe(false)
+    expect(modeAllowsPermission("automatic", request)).toBe(true)
+    expect(modeAllowsPermission("full", request)).toBe(true)
+  }
+  for (const request of [
+    { permission: "external_directory" },
+    { permission: "bash", metadata: { externalRisk: true } },
+    { permission: "bash", metadata: { preflight: "uncertain" } },
+    { permission: "unknown" },
+  ]) {
+    expect(modeAllowsPermission("automatic", request)).toBe(false)
+    expect(modeAllowsPermission("full", request)).toBe(true)
+  }
+})
 
 const permission = (sessionID: string) =>
   ({

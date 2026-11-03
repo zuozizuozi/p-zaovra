@@ -1,9 +1,44 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises"
+import { mkdtemp, writeFile, rm, mkdir, symlink } from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "node:os"
-import { previewURL, serveArtifact } from "./artifact-server"
+import { previewURL, serveArtifact, artifactFileAction } from "./artifact-server"
 const cleanup: (() => Promise<unknown> | void)[] = []
+test("549 unsupported native file actions use only fresh canonical files in the project, with no browser download", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "zaovra-native-result-"))
+  cleanup.push(() => rm(dir, { recursive: true, force: true }))
+  const project = path.join(dir, "project")
+  const outside = path.join(dir, "outside")
+  await mkdir(project)
+  await mkdir(outside)
+  await writeFile(path.join(project, "report.docx"), "synthetic document")
+  await writeFile(path.join(outside, "private.docx"), "synthetic outside fixture")
+  await symlink(outside, path.join(project, "linked"), process.platform === "win32" ? "junction" : "dir")
+  const calls: { file: string; action: string }[] = []
+  const run = async (file: string, action: string) => {
+    calls.push({ file, action })
+  }
+  for (const action of ["open", "reveal"] as const)
+    await artifactFileAction({ target: "report.docx", directory: project, action }, run)
+  expect(calls.map((item) => item.action)).toEqual(["open", "reveal"])
+  expect(calls.every((item) => item.file === path.join(project, "report.docx"))).toBe(true)
+  for (const target of [
+    "../outside/private.docx",
+    "linked/private.docx",
+    "https://example.com/report.docx",
+    "file:///secret",
+    "missing.docx",
+    ".",
+  ]) {
+    await expect(artifactFileAction({ target, directory: project, action: "open" }, run)).rejects.toThrow()
+  }
+  expect(calls).toHaveLength(2)
+  await writeFile(path.join(project, "launch.exe"), "synthetic, never execute")
+  await expect(artifactFileAction({ target: "launch.exe", directory: project, action: "open" }, run)).rejects.toThrow(
+    "不在预览中执行",
+  )
+  expect(calls).toHaveLength(2)
+})
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
 })

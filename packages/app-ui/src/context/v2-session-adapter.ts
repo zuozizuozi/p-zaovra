@@ -93,6 +93,12 @@ export function adaptSessionInput(session: Pick<SessionV2Info, "id" | "agent" | 
 export function adaptSessionMessages(session: SessionV2Info, messages: SessionMessage[], parentID?: string) {
   const result: { message: Message; parts: Part[] }[] = []
   const state = { parentID }
+  const shells = new Map(messages.flatMap((item) => (item.type === "shell" ? [[item.id, item] as const] : [])))
+  const completions = new Map(
+    messages.flatMap((item) =>
+      item.type === "synthetic" && item.completion ? [[item.completion.jobID, item] as const] : [],
+    ),
+  )
 
   for (const item of messages.toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))) {
     if (item.type === "user") {
@@ -162,7 +168,19 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
           sessionID: session.id,
           role: "assistant",
           time: item.time,
-          error: item.error ? { name: "UnknownError", data: { message: item.error.message } } : undefined,
+          error: item.error
+            ? item.error.metadata
+              ? {
+                  name: "APIError",
+                  data: {
+                    message: item.error.message,
+                    isRetryable: false,
+                    statusCode: Number(item.error.metadata.statusCode) || undefined,
+                    metadata: item.error.metadata,
+                  },
+                }
+              : { name: "UnknownError", data: { message: item.error.message } }
+            : undefined,
           parentID: state.parentID,
           modelID: item.model.id,
           providerID: item.model.providerID,
@@ -207,6 +225,19 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
               },
             ]
           const part = adaptTool(session.id, item.id, content)
+          if (part.type === "tool" && part.tool === "bash" && part.state.status === "completed") {
+            const job = shells.get(String(part.state.metadata.job_id ?? ""))
+            const completion = completions.get(String(part.state.metadata.job_id ?? ""))
+            const completed = completion?.completion?.sourceMessageID === item.id ? completion : undefined
+            if ((job && (job.origin === "tool" || job.callID === content.id)) || completed) {
+              part.state.metadata = {
+                ...part.state.metadata,
+                zaovraBackgroundState: completed || job?.time.completed !== undefined ? "completed" : "running",
+                zaovraBackgroundOutput: job?.output ?? completed?.text,
+                zaovraBackgroundCompleted: job?.time.completed ?? completed?.time.created,
+              }
+            }
+          }
           if (
             part.type === "tool" &&
             part.state.status === "completed" &&
@@ -248,12 +279,17 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
             synthetic: true,
             metadata: {
               ...(item.type === "synthetic" && item.completion
-                ? { zaovraSourceMessageID: item.completion.sourceMessageID }
+                ? {
+                    zaovraSourceMessageID: item.completion.sourceMessageID,
+                    zaovraCompletionJobID: item.completion.jobID,
+                  }
                 : {}),
               ...(item.type === "shell"
                 ? {
                     zaovraShellPending: item.time.completed === undefined,
                     zaovraShellJobID: item.id,
+                    zaovraShellCommand: item.command,
+                    zaovraShellOutput: item.output,
                     zaovraShellCompleted: item.time.completed,
                   }
                 : {}),

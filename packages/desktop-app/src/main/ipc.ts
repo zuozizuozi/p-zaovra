@@ -1,4 +1,5 @@
 import { createArtifactPreview } from "./artifact-preview"
+import { artifactFileAction } from "./artifact-server"
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import {
@@ -9,6 +10,7 @@ import {
 import { readFile, stat, writeFile } from "node:fs/promises"
 import { feedbackArchive, submitFeedback } from "./feedback"
 import { feedbackDiagnostics } from "./logging"
+import { captureFeedbackScreenshot } from "./feedback-capture"
 import { Feedback } from "@zaovra-ai/schema/feedback"
 import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -129,6 +131,13 @@ export function registerIpcHandlers(deps: Deps) {
   handle("artifact-bounds", (event, input: Parameters<ArtifactPreviewAPI["bounds"]>[0]) => preview(event).bounds(input))
   handle("artifact-action", (event, input: Parameters<ArtifactPreviewAPI["action"]>[0]) => preview(event).action(input))
   handle("artifact-state", (event, id: string) => preview(event).state(id))
+  handle("artifact-file-action", (_event, input: Parameters<typeof artifactFileAction>[0]) =>
+    artifactFileAction(input, async (file, action) => {
+      if (action === "reveal") return shell.showItemInFolder(file)
+      const error = await shell.openPath(file)
+      if (error) throw new Error("无法使用本机应用打开文件")
+    }),
+  )
   const rememberResolvedApp = (event: IpcMainInvokeEvent, value: string) => {
     const current = resolvedApps.get(event.sender.id)
     if (current) {
@@ -277,6 +286,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("export-debug-logs", () => deps.exportDebugLogs())
   handle("feedback-diagnostics", () => feedbackDiagnostics())
   handle("feedback-submit", (_event, input: unknown) => submitFeedback(input, net.fetch))
+  handle("feedback-capture", (event) => captureFeedbackScreenshot(() => event.sender.capturePage()))
   handle("feedback-save", async (_event, input: unknown) => {
     if (!Feedback.validSnapshot(input)) throw new Error("Invalid feedback preview")
     const result = await dialog.showSaveDialog({

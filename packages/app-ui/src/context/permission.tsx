@@ -19,6 +19,8 @@ import {
   isDirectoryAutoAccepting,
   autoRespondsPermission,
   sessionAutoAccept,
+  modeAllowsPermission,
+  type PermissionMode,
 } from "./permission-auto-respond"
 import { adaptPermissionRequest } from "./global-sync/utils"
 
@@ -164,6 +166,12 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       isAutoAcceptingDirectory(directory: string) {
         return selected().isAutoAcceptingDirectory(directory)
       },
+      mode(directory: string, sessionID?: string) {
+        return selected().mode(directory, sessionID)
+      },
+      setMode(directory: string, mode: PermissionMode) {
+        selected().setMode(directory, mode)
+      },
       toggleAutoAccept(sessionID: string, directory: string) {
         selected().toggleAutoAccept(sessionID, directory)
       },
@@ -195,10 +203,12 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
         if (!value || typeof value !== "object" || Array.isArray(value)) return value
 
         const data = value as Record<string, unknown>
-        if (data.autoAccept) return value
+        const modes = typeof data.modes === "object" && data.modes && !Array.isArray(data.modes) ? data.modes : {}
+        if (data.autoAccept) return { ...data, modes }
 
         return {
           ...data,
+          modes,
           autoAccept:
             typeof data.autoAcceptEdits === "object" && data.autoAcceptEdits && !Array.isArray(data.autoAcceptEdits)
               ? data.autoAcceptEdits
@@ -208,6 +218,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     },
     createStore({
       autoAccept: {} as Record<string, boolean>,
+      modes: {} as Record<string, PermissionMode>,
     }),
   )
 
@@ -277,14 +288,19 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   function isAutoAccepting(sessionID: string, directory?: string) {
+    if (directory && store.modes[directoryAcceptKey(directory)])
+      return store.modes[directoryAcceptKey(directory)] !== "ask"
     return autoRespondsPermission(store.autoAccept, sessions(directory), { sessionID }, directory)
   }
 
   function isAutoAcceptingDirectory(directory: string) {
+    if (store.modes[directoryAcceptKey(directory)]) return store.modes[directoryAcceptKey(directory)] !== "ask"
     return isDirectoryAutoAccepting(store.autoAccept, directory)
   }
 
   function shouldAutoRespond(permission: PermissionView, directory?: string) {
+    if (directory && store.modes[directoryAcceptKey(directory)])
+      return modeAllowsPermission(store.modes[directoryAcceptKey(directory)], permission)
     return autoRespondsPermission(store.autoAccept, sessions(directory), permission, directory)
   }
 
@@ -294,6 +310,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   async function shouldAutoRespondResolved(permission: PermissionView, directory?: string) {
+    if (directory && store.modes[directoryAcceptKey(directory)]) return shouldAutoRespond(permission, directory)
     const override = sessionAutoAccept(store.autoAccept, sessions(directory), permission, directory)
     if (override !== undefined) return override
     if (input.sync.session.lineage.peek(permission.sessionID)) return shouldAutoRespond(permission, directory)
@@ -302,14 +319,10 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     return shouldAutoRespond(permission, directory)
   }
 
-  async function respondPending(
-    permission: PermissionView,
-    directory?: string,
-    current: () => boolean = () => true,
-  ) {
+  async function respondPending(permission: PermissionView, directory?: string, current: () => boolean = () => true) {
     if (!current() || !isPending(permission)) return
     if (!(await shouldAutoRespondResolved(permission, directory))) return
-    if (meta.disposed || !current() || !isPending(permission)) return
+    if (meta.disposed || !current() || !isPending(permission) || !shouldAutoRespond(permission, directory)) return
     respondOnce(permission, directory)
   }
 
@@ -416,6 +429,24 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   const api = {
+    mode(directory: string, sessionID?: string): PermissionMode {
+      return (
+        store.modes[directoryAcceptKey(directory)] ??
+        ((sessionID ? isAutoAccepting(sessionID, directory) : isAutoAcceptingDirectory(directory)) ? "full" : "ask")
+      )
+    },
+    setMode(directory: string, mode: PermissionMode) {
+      if (meta.disposed || !["ask", "automatic", "full"].includes(mode)) return
+      setStore("modes", directoryAcceptKey(directory), mode)
+      if (mode === "ask") return
+      void input.sdk.client.v2.permission.request
+        .list({ location: { directory } }, { throwOnError: true })
+        .then((result) => {
+          if (meta.disposed) return
+          result.data.data.forEach((request) => void respondPending(adaptPermissionRequest(request), directory))
+        })
+        .catch(() => undefined)
+    },
     ready: () => !meta.disposed && ready(),
     respond,
     autoResponds(permission: PermissionView, directory?: string) {

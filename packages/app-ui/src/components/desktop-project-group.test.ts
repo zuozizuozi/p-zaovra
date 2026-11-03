@@ -43,7 +43,7 @@ test("persisted path keys retain their existing case and drive-root behavior", (
   expect(pathsEqual("C:\\", "c:/")).toBe(true)
 })
 
-test("unresolved tabs retain the existing same-server fallback", () => {
-  expect(desktopProjectGroup(groups, "local")).toBe(groups[0])
-  expect(desktopProjectGroup(groups, "local", "C:/Elsewhere")).toBe(groups[0])
+test("550 unknown and unrelated directories stay outside project groups", () => {
+  expect(desktopProjectGroup(groups, "local")).toBeUndefined()
+  expect(desktopProjectGroup(groups, "local", "C:/Elsewhere")).toBeUndefined()
 })

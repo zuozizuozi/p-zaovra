@@ -198,7 +198,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     label: "Help",
     items: [
       { type: "item", label: "Zaovra Documentation", href: "https://zaovra.com/docs" },
-      { type: "item", label: "Report a Problem", command: "feedback.open" },
+      { type: "item", label: "Send Feedback", command: "feedback.open" },
       { type: "item", label: "Export Logs...", command: "logs.export" },
     ],
   },

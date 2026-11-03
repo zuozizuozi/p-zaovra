@@ -1,4 +1,5 @@
 import { contextGroupTools, groupParts, sameGroups, type PartGroup } from "./message-part-groups"
+import { ReasoningBlock } from "./reasoning-block"
 export { groupParts, sameGroups, type PartGroup, type PartRef } from "./message-part-groups"
 import {
   Component,
@@ -1739,16 +1740,21 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   const data = useData()
   const part = () => props.part as ReasoningPart
   const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
+    () =>
+      props.message.role === "assistant" &&
+      typeof (props.message as AssistantMessage).time.completed !== "number" &&
+      part().time.end === undefined,
   )
   const text = () => readPartText(data.store.part_text_accum_delta, part())
 
   return (
     <Show when={text()}>
       <div data-component="reasoning-part" data-timeline-part-id={part().id}>
-        <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-          <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
-        </Show>
+        <ReasoningBlock text={text()} streaming={streaming()}>
+          <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
+            <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+          </Show>
+        </ReasoningBlock>
       </div>
     </Show>
   )
@@ -2092,7 +2098,9 @@ ToolRegistry.register({
     const sawPending = pending()
     const text = createMemo(() => {
       const cmd = props.input.command ?? props.metadata.command ?? ""
-      const out = stripAnsi(props.output || props.metadata.output || "").replace(/\r\n?/g, "\n")
+      const out = stripAnsi(
+        props.metadata.zaovraBackgroundOutput ?? props.output ?? props.metadata.output ?? "",
+      ).replace(/\r\n?/g, "\n")
       return `$ ${cmd}${out ? "\n\n" + out : ""}`
     })
     const [copied, setCopied] = createSignal(false)
@@ -2116,6 +2124,11 @@ ToolRegistry.register({
               <span data-slot="basic-tool-tool-title">
                 <TextShimmer text={i18n.t("ui.tool.shell")} active={pending()} />
               </span>
+              <Show when={props.metadata.zaovraBackgroundState}>
+                <span data-slot="background-command-state">
+                  {props.metadata.zaovraBackgroundState === "running" ? "后台运行中" : "后台已结束"}
+                </span>
+              </Show>
               <Show when={!pending() && !open() && props.input.command}>
                 <ShellSubmessage text={props.input.command} animate={sawPending} />
               </Show>

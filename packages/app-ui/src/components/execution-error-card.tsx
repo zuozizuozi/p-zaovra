@@ -32,6 +32,7 @@ export function ExecutionErrorCard(props: {
         {props.children}
         <ButtonV2
           variant="ghost-muted"
+          data-feedback-entry="error"
           onClick={() => openFeedback({ error: props.detail, configure: props.onConfigure })}
         >
           {language.locale().startsWith("zh") ? "反馈这个问题" : "Report this problem"}

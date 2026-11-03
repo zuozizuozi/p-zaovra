@@ -264,7 +264,7 @@ for (const sample of redactionSamples) {
   }
 }
 
-test("submit requires explicit preview action, retains failed report, deduplicates pending click and resets receipt after edit", async () => {
+test("submit requires explicit preview action, retains failed report, deduplicates pending click, closes after success and resets a new report", async () => {
   mount()
   let reads = 0
   openFeedback({
@@ -303,9 +303,15 @@ test("submit requires explicit preview action, retains failed report, deduplicat
     "已提交，编号：" + JSON.parse(frozen.files.find((file) => file.name === "report.json")!.text).reportID,
   )
   expect(button("已提交").disabled).toBe(true)
-  button("返回修改").click()
+  expect(button("返回修改").disabled).toBe(true)
+  await new Promise((resolve) => setTimeout(resolve, 750))
+  expect(document.querySelector("[data-component=feedback-dialog]")).toBeNull()
+  expect(submissions).toHaveLength(2)
+  openFeedback({ description: "new report" })
+  await settle()
   button("继续反馈").click()
   await settle()
   expect(button("提交反馈").disabled).toBe(false)
+  expect(submissions).toHaveLength(2)
   expect(reads).toBe(0)
 })

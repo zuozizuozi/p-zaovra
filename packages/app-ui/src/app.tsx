@@ -485,7 +485,7 @@ function DesktopCommands() {
     commands.push({
       id: "feedback.open",
       slash: "bug",
-      title: language.locale().startsWith("zh") ? "反馈问题" : "Report a problem",
+      title: language.locale().startsWith("zh") ? "发送反馈" : "Send feedback",
       onSelect: () => openFeedback(),
     })
     if (platform.platform === "desktop" && platform.exportDebugLogs) {
