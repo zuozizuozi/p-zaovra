@@ -49,10 +49,10 @@ for (const [index, row] of queries.entries())
           }
           expect(output.available.length).toBeGreaterThan(0)
           if (row.webIntent)
-            expect(output.activated.some((name) => name === "websearch" || name === "webfetch")).toBe(true)
+            expect(output.available.some((tool) => tool.name === "websearch" || tool.name === "webfetch")).toBe(true)
           if (output.activated.length) {
             expect(output.activated.length).toBeLessThanOrEqual(10)
-            expect(output.available.map((tool) => tool.name)).toEqual(output.activated)
+            expect(output.available.map((tool) => tool.name)).toEqual(expect.arrayContaining(output.activated))
           }
           const definitions = (yield* registry.materialize()).definitions
           expect(definitions.map((tool) => tool.name)).toEqual(expect.arrayContaining(["webfetch", "websearch"]))
@@ -114,7 +114,8 @@ test("539 unique matching terms rank before one-word matches and bound query act
         })
       const output = (yield* search(registry, sessionID, { query: "XENONZEBRA,xenonzebra gammakilo" })).output
         ?.structured as SearchOutput
-      expect(output.activated).toEqual([
+      expect(output.activated).toEqual(["rank_m"])
+      expect(output.available.map((tool) => tool.name)).toEqual([
         "rank_m",
         "rank_a",
         "rank_b",
@@ -126,7 +127,6 @@ test("539 unique matching terms rank before one-word matches and bound query act
         "rank_h",
         "rank_i",
       ])
-      expect(output.available.map((tool) => tool.name)).toEqual(output.activated)
       expect(executed).toEqual([])
       const exact = (yield* search(registry, sessionID, {
         names: suffixes.map((suffix) => "rank_" + suffix),
@@ -165,6 +165,81 @@ for (const input of [{ query: "web search HTTP fetch" }, { query: "qzxunknownlex
     ))
 
 type SearchOutput = { activated: string[]; available: { name: string; description: string }[] }
+
+for (const query of ["how to do this", "the for a to and of in with file files", "的，了 和 在 是 与 或 请 帮 我 使用"])
+  test(`541 stopword-only query cannot activate tools: ${query}`, () =>
+    withSearch([], (sessionID) =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const executed: string[] = []
+        yield* registry.register({
+          stopword_decoy: Tool.make({
+            description: "how to do this the for a and of in with file files 的 了 和 在 是 与 或 请 帮 我 使用",
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () => Effect.sync(() => executed.push("decoy")).pipe(Effect.as("not executed")),
+          }),
+        })
+        const output = (yield* search(registry, sessionID, { query })).output?.structured as SearchOutput
+        expect(output.activated).toEqual([])
+        expect(output.available.map((tool) => tool.name)).toContain("stopword_decoy")
+        expect(executed).toEqual([])
+      }),
+    ))
+
+test("541 search for the file activates search capabilities rather than generic file operators", () =>
+  withSearch([], (sessionID) =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const output = (yield* search(registry, sessionID, { query: "search for the file" })).output
+        ?.structured as SearchOutput
+      expect(output.activated).toContain("grep")
+      expect(output.activated.length).toBeLessThanOrEqual(5)
+      for (const name of output.activated)
+        expect(["evidence_read", "evidence_search", "glob", "grep", "websearch"]).toContain(name)
+      for (const name of ["bash", "read", "write", "edit", "task", "question", "skill"])
+        expect(output.activated).not.toContain(name)
+    }),
+  ))
+
+test("541 exact names bypass lexical stopwords without executing the selected tool", () =>
+  withSearch([], (sessionID) =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        the: Tool.make({
+          description: "A deliberately named application tool",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          execute: () => Effect.die("Discovery must not execute this tool"),
+        }),
+      })
+      const output = (yield* search(registry, sessionID, { names: ["the"], query: "how to do this" })).output
+        ?.structured as SearchOutput
+      expect(output.activated).toEqual(["the"])
+      expect(output.available.map((tool) => tool.name)).toEqual(["the"])
+    }),
+  ))
+
+test("541 activates all highest-score ties and leaves lower matches available without activation", () =>
+  withSearch([], (sessionID) =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      for (const name of ["priority_alpha", "priority_beta", "priority_lower"])
+        yield* registry.register({
+          [name]: Tool.make({
+            description: name === "priority_lower" ? "quasarprobe" : "quasarprobe orbitprobe",
+            input: Schema.Struct({}),
+            output: Schema.String,
+            execute: () => Effect.die("Discovery must not execute ranked tools"),
+          }),
+        })
+      const output = (yield* search(registry, sessionID, { query: "quasarprobe orbitprobe" })).output
+        ?.structured as SearchOutput
+      expect(output.activated).toEqual(["priority_alpha", "priority_beta"])
+      expect(output.available.map((tool) => tool.name)).toEqual(["priority_alpha", "priority_beta", "priority_lower"])
+    }),
+  ))
 
 function search(registry: ToolRegistry.Interface, sessionID: SessionV2.ID, input: Record<string, unknown>) {
   return settleTool(registry, {
