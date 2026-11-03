@@ -18,6 +18,7 @@ const legacyDesktopEntryFpm = `${legacyDesktopEntry.replaceAll("\\", "/")}=/usr/
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
+  if (unsignedBeta) return
   if (process.env.GITHUB_ACTIONS !== "true") return
   if (!publisherName) throw new Error("WINDOWS_SIGNING_PUBLISHER_NAME is required for signed Windows releases")
 
@@ -34,6 +35,9 @@ const channel = (() => {
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 })()
+
+const unsignedBeta = process.env.ZAOVRA_ALLOW_UNSIGNED_BETA === "true"
+if (unsignedBeta && channel !== "beta") throw new Error("ZAOVRA_ALLOW_UNSIGNED_BETA requires ZAOVRA_CHANNEL=beta")
 
 const APP_IDS = {
   dev: "ai.zaovra.desktop.dev",
@@ -78,10 +82,10 @@ const getBase = (appId: string): Configuration => ({
     icon: `resources/icons/icon.ico`,
     signtoolOptions: {
       sign: signWindows,
-      ...(publisherName ? { publisherName } : {}),
+      ...(publisherName && !unsignedBeta ? { publisherName } : {}),
     },
     target: ["nsis"],
-    verifyUpdateCodeSignature: true,
+    verifyUpdateCodeSignature: !unsignedBeta,
   },
   nsis: {
     oneClick: true,

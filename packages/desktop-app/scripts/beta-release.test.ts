@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { createHash } from "node:crypto"
-import { planBeta, retiredVersions } from "./beta-release"
+import { planBeta, retiredVersions, unsignedBeta } from "./beta-release"
 import { verifyBetaCI } from "./beta-ci"
 
 const root = process.env.ZAOVRA_BETA_TEST_DIR
@@ -24,6 +24,37 @@ async function fixture() {
   await Bun.write(join(directory, "beta.yml"), Bun.YAML.stringify(metadata))
   return { directory, metadata }
 }
+
+test("572 unsigned Beta requires the explicit flag and beta channel", () => {
+  expect(unsignedBeta([], "beta")).toBe(false)
+  expect(unsignedBeta(["--allow-unsigned-beta"], "beta")).toBe(true)
+  for (const channel of [undefined, "prod", "latest", "dev", "Beta"])
+    expect(() => unsignedBeta(["--allow-unsigned-beta"], channel)).toThrow("requires ZAOVRA_CHANNEL=beta")
+})
+
+test("572 unsigned Beta CLI dry-run accepts the flag in any argument position and logs its policy", async () => {
+  const value = await fixture()
+  const notes = join(value.directory, "notes.md")
+  await Bun.write(notes, "Unsigned internal Beta")
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, "beta-release.ts"), "--allow-unsigned-beta", value.directory, sha, notes],
+    { env: { ZAOVRA_CHANNEL: "beta" }, stdout: "pipe", stderr: "pipe" },
+  )
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(code, stderr).toBe(0)
+  expect(JSON.parse(stdout)).toMatchObject({ dryRun: true, signingPolicy: "unsigned beta", manifest: { commit: sha } })
+})
+
+test("572 unsigned Beta never accepts a prod version in its upload plan", async () => {
+  const value = await fixture()
+  value.metadata.version = "0.1.0"
+  await Bun.write(join(value.directory, "beta.yml"), Bun.YAML.stringify(value.metadata))
+  await expect(planBeta(value.directory, sha, "notes")).rejects.toThrow("Expected one Windows Beta installer")
+})
 
 test("dry plan re-hashes actual files and points metadata into its immutable version directory", async () => {
   const value = await fixture()
