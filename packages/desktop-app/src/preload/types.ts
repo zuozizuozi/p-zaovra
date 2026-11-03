@@ -130,6 +130,7 @@ export type ElectronAPI = {
   setBackgroundColor: (color: string) => Promise<void>
   exportDebugLogs: () => Promise<string>
   feedbackDiagnostics: () => Promise<Feedback.Context>
+  submitFeedback: (snapshot: Feedback.Snapshot) => Promise<{ receipt: string; submitted: true }>
   saveFeedback: (snapshot: Feedback.Snapshot) => Promise<boolean>
   setForceFocus: (enabled: boolean) => Promise<void>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>

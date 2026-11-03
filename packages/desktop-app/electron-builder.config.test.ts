@@ -66,6 +66,10 @@ for (const channel of channels) {
     if (previous === undefined) delete process.env.ZAOVRA_CHANNEL
     else process.env.ZAOVRA_CHANNEL = previous
 
+    if (channel.channel === "beta") {
+      expect(config.publish).toEqual({ provider: "generic", url: "https://updates.zaovra.com/beta/", channel: "beta" })
+      expect(config.win?.verifyUpdateCodeSignature).toBe(true)
+    }
     expect(config.appId).toBe(channel.appId)
     expect(config.extraMetadata?.desktopName).toBe(`${channel.appId}.desktop`)
     expect(config.linux?.executableName).toBe(channel.appId)

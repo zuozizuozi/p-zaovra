@@ -6,6 +6,10 @@ import { getLogger } from "./logging"
 import { getStore } from "./store"
 import { setAppQuitting } from "./windows"
 import { installUpdate } from "./updater-install"
+import { backupUpdateDatabase, updateDatabasePath } from "./update-backup"
+import { createSidecarEnv } from "./sidecar-env"
+import { homedir } from "node:os"
+import { join } from "node:path"
 
 const { autoUpdater } = pkg
 const key = "ready"
@@ -15,7 +19,7 @@ export function setupAutoUpdater() {
   autoUpdater.logger = logger
   autoUpdater.channel = CHANNEL === "beta" ? "beta" : "latest"
   autoUpdater.allowPrerelease = CHANNEL === "beta"
-  autoUpdater.allowDowngrade = true
+  autoUpdater.allowDowngrade = false
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
   logger.log("auto updater configured", {
@@ -40,7 +44,27 @@ export function setupAutoUpdater() {
       checkForUpdates: () => autoUpdater.checkForUpdates(),
       downloadUpdate: () => autoUpdater.downloadUpdate(),
       quitAndInstall: () =>
-        installUpdate({ updater: autoUpdater, lifecycle: electron.autoUpdater, quitting: setAppQuitting }),
+        installUpdate({
+          updater: autoUpdater,
+          lifecycle: electron.autoUpdater,
+          quitting: setAppQuitting,
+          beforeInstall: () =>
+            backupUpdateDatabase({
+              source: updateDatabasePath(
+                createSidecarEnv({
+                  env: process.env,
+                  platform: process.platform,
+                  packaged: app.isPackaged,
+                  channel: CHANNEL,
+                  userDataPath: app.getPath("userData"),
+                  resourcesPath: process.resourcesPath,
+                }),
+                homedir(),
+              ),
+              directory: join(app.getPath("userData"), "update-backups"),
+              version: app.getVersion(),
+            }),
+        }),
     },
     persistence: {
       get() {

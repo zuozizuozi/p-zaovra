@@ -11,7 +11,7 @@
     "email": "support@zaovra.com"
   },
   "scripts": {
-    "typecheck": "tsgo -b",
+    "typecheck": "tsgo -b && tsgo -p tsconfig.beta.json --noEmit",
     "predev": "bun ./scripts/predev.ts",
     "dev": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",

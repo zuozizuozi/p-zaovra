@@ -12,7 +12,10 @@ const labels = {
   zh: {
     title: "反馈问题",
     description: "发生了什么？你期望看到什么？",
-    local: "先在本机准备，不会自动上传。",
+    local: "先在本机预览，点击提交后才上传。",
+    submit: "提交反馈",
+    submitted: "已提交，编号：",
+    done: "已提交",
     continue: "继续反馈",
     back: "返回修改",
     preview: "实际导出内容预览",
@@ -50,7 +53,10 @@ const labels = {
   en: {
     title: "Report a problem",
     description: "What happened, and what did you expect?",
-    local: "Prepared locally. Nothing is uploaded automatically.",
+    local: "Review locally. Uploaded only when you select Submit.",
+    submit: "Submit feedback",
+    submitted: "Submitted. Receipt: ",
+    done: "Submitted",
     continue: "Continue feedback",
     back: "Edit report",
     preview: "Exact export preview",
@@ -97,6 +103,7 @@ export function FeedbackHost() {
     open: false,
     busy: false,
     pending: false,
+    receipt: "",
     description: "",
     error: "",
     notice: "",
@@ -104,7 +111,7 @@ export function FeedbackHost() {
     context: {} as Feedback.Context,
     include: { environment: true, events: true, errors: true },
     details: false,
-    modelNames: false,
+    modelNames: true,
     conversation: undefined as string | undefined,
     code: undefined as string | undefined,
     image: undefined as string | undefined,
@@ -120,6 +127,7 @@ export function FeedbackHost() {
       open: true,
       busy: true,
       pending: false,
+      receipt: "",
       preview: undefined,
       error: request.error ?? "",
       notice: "",
@@ -136,7 +144,7 @@ export function FeedbackHost() {
       },
       include: { environment: true, events: true, errors: true },
       details: false,
-      modelNames: false,
+      modelNames: true,
       conversation: undefined,
       code: undefined,
       image: undefined,
@@ -166,7 +174,8 @@ export function FeedbackHost() {
   }
   window.addEventListener("zaovra:feedback", receive)
   onCleanup(() => window.removeEventListener("zaovra:feedback", receive))
-  const freeze = () =>
+  const freeze = () => {
+    setState({ receipt: "", notice: "" })
     setState(
       "preview",
       Feedback.snapshot({
@@ -181,6 +190,7 @@ export function FeedbackHost() {
         ...(state.modelNames ? { modelNames: { model: state.context.model, provider: state.context.provider } } : {}),
       }),
     )
+  }
   const perform = async (action: () => Promise<string>) => {
     if (state.pending) return
     const generation = state.generation
@@ -388,6 +398,23 @@ export function FeedbackHost() {
                   }
                 >
                   <div class="flex flex-wrap gap-2">
+                    <Show when={platform.submitFeedback}>
+                      <Button
+                        disabled={state.pending || !!state.receipt}
+                        onClick={() =>
+                          void perform(async () => {
+                            const generation = state.generation
+                            const preview = state.preview!
+                            const result = await platform.submitFeedback!(preview)
+                            if (state.generation === generation && state.preview === preview)
+                              setState("receipt", result.receipt)
+                            return text().submitted + result.receipt
+                          })
+                        }
+                      >
+                        {state.receipt ? text().done : text().submit}
+                      </Button>
+                    </Show>
                     <Button disabled={state.pending} onClick={() => setState("preview", undefined)}>
                       {text().back}
                     </Button>

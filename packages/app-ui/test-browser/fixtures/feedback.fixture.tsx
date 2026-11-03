@@ -8,6 +8,8 @@ import { redactionInputs, redactionSamples } from "../../../schema/test/fixtures
 
 const saves: Feedback.Snapshot[] = []
 const links: string[] = []
+const submissions: Feedback.Snapshot[] = []
+const upload = { fail: false, wait: undefined as Promise<void> | undefined }
 const failure = { save: false, diagnostics: undefined as Promise<Feedback.Context> | undefined }
 const language = { locale: () => "zh", t: (key: string) => dict[key as keyof typeof dict] ?? key }
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
@@ -21,6 +23,15 @@ mock.module("@/context/platform", () => ({
       failure.diagnostics ?? {
         events: [{ at: Date.now(), kind: "main", state: "error", args: "SECRET_BODY" }],
       },
+    submitFeedback: async (snapshot: Feedback.Snapshot) => {
+      submissions.push(snapshot)
+      if (upload.wait) await upload.wait
+      if (upload.fail) throw new Error("offline")
+      return {
+        receipt: JSON.parse(snapshot.files.find((file) => file.name === "report.json")!.text).reportID as string,
+        submitted: true as const,
+      }
+    },
     saveFeedback: async (snapshot: Feedback.Snapshot) => {
       saves.push(snapshot)
       if (failure.save) throw new Error("offline")
@@ -34,6 +45,9 @@ afterEach(() => {
   disposals.splice(0).forEach((dispose) => dispose())
   document.body.replaceChildren()
   saves.length = 0
+  submissions.length = 0
+  upload.fail = false
+  upload.wait = undefined
   links.length = 0
   failure.save = false
   failure.diagnostics = undefined
@@ -110,7 +124,7 @@ test("conversation is not read before opt-in, deselection removes it, and later 
   context.events[0].kind = "LATER_SECRET"
   button("保存诊断包 ZIP").click()
   await settle()
-  expect(saves[0].files).toHaveLength(1)
+  expect(saves[0].files.map((file) => file.name)).toEqual(["report.json", "model.txt"])
   expect(saves[0].text).not.toContain("LATER_SECRET")
   expect(saves[0].text).not.toContain("OPTED_IN_BODY")
   const copied: string[] = []
@@ -220,7 +234,12 @@ for (const sample of redactionSamples) {
       expect([preview, copies[0], mail, ...snapshot.files.map((file) => file.text)].join("\n")).not.toContain(
         sample.marker,
       )
-      for (const content of [preview, copies[0], mail, ...snapshot.files.map((file) => file.text)]) {
+      for (const content of [
+        preview,
+        copies[0],
+        mail,
+        ...snapshot.files.filter((file) => file.name !== "model.txt").map((file) => file.text),
+      ]) {
         if (content === snapshot.text && input !== "description") continue
         for (const text of sample.preserve) expect(content).toContain(text)
       }
@@ -239,8 +258,54 @@ for (const sample of redactionSamples) {
       await settle()
       button("保存诊断包 ZIP").click()
       await settle()
-      expect(saves[1].files.map((file) => file.name)).toEqual(["report.json"])
+      expect(saves[1].files.map((file) => file.name)).toEqual(["report.json", "model.txt"])
       expect(saves[1].image).toBeUndefined()
     })
   }
 }
+
+test("submit requires explicit preview action, retains failed report, deduplicates pending click and resets receipt after edit", async () => {
+  mount()
+  let reads = 0
+  openFeedback({
+    description: "upload test",
+    context: { model: "gpt-fixture", provider: "fixture" },
+    readConversation: () => {
+      reads++
+      return "PRIVATE_CONVERSATION"
+    },
+  })
+  await settle()
+  expect(submissions).toHaveLength(0)
+  expect(reads).toBe(0)
+  button("继续反馈").click()
+  await settle()
+  expect(submissions).toHaveLength(0)
+  upload.fail = true
+  button("提交反馈").click()
+  await settle()
+  expect(document.body.textContent).toContain("操作没有完成")
+  expect(submissions).toHaveLength(1)
+  const frozen = submissions[0]
+  expect(frozen.text).not.toContain("PRIVATE_CONVERSATION")
+  upload.fail = false
+  let release!: () => void
+  upload.wait = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  button("提交反馈").click()
+  button("提交反馈").click()
+  expect(submissions).toHaveLength(2)
+  expect(submissions[1]).toBe(frozen)
+  release()
+  await settle()
+  expect(document.body.textContent).toContain(
+    "已提交，编号：" + JSON.parse(frozen.files.find((file) => file.name === "report.json")!.text).reportID,
+  )
+  expect(button("已提交").disabled).toBe(true)
+  button("返回修改").click()
+  button("继续反馈").click()
+  await settle()
+  expect(button("提交反馈").disabled).toBe(false)
+  expect(reads).toBe(0)
+})

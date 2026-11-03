@@ -251,6 +251,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
     feedbackDiagnostics: () => window.api.feedbackDiagnostics(),
+    submitFeedback: (snapshot) => window.api.submitFeedback(snapshot),
     // Solid store wrappers cannot cross Electron's context bridge.
     saveFeedback: (snapshot) =>
       window.api.saveFeedback({

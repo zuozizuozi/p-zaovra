@@ -55,3 +55,33 @@ for (const sample of redactionSamples) {
     })
   }
 }
+
+test("real HTTP submission returns only a validated receipt and rejects offline, oversized and false acknowledgments", async () => {
+  const { submitFeedback } = await import("./feedback")
+  const snapshot = Feedback.snapshot({ now: Date.now(), description: "synthetic feedback", context: {}, include: {} })
+  const receipt = JSON.parse(snapshot.files.find((file) => file.name === "report.json")!.text).reportID as string
+  let mode = "ok"
+  let posted: unknown
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      posted = await request.json()
+      if (mode === "offline") return new Response("unavailable", { status: 503 })
+      if (mode === "large") return new Response("x".repeat(2049))
+      return Response.json({ submitted: mode !== "false", receipt })
+    },
+  })
+  const fetcher = (url: string, init?: RequestInit) => {
+    expect(url).toBe("https://feedback.zaovra.com/v1/feedback")
+    expect(init?.redirect).toBe("error")
+    return fetch(server.url, init)
+  }
+  try {
+    expect(await submitFeedback(snapshot, fetcher)).toEqual({ submitted: true, receipt })
+    expect(posted).toEqual(snapshot)
+    for (mode of ["offline", "large", "false"]) await expect(submitFeedback(snapshot, fetcher)).rejects.toThrow()
+  } finally {
+    await server.stop(true)
+  }
+})
