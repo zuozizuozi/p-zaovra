@@ -1,6 +1,11 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
-import { providerBaseURL, providerProtocols, type ProviderProtocol } from "../provider-discovery"
-import type { Config } from "@zaovra-ai/sdk/v2/client"
+import {
+  providerBaseURL,
+  providerProtocols,
+  type ProviderProtocol,
+  type ProviderModelType,
+} from "../provider-discovery"
+import type { Config } from "@zaovra-ai/sdk/v2/types"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -18,7 +23,8 @@ export type ModelRow = {
   row: string
   id: string
   name: string
-  protocol?: "openai" | "responses"
+  protocol?: ProviderProtocol
+  type?: ProviderModelType
   images?: boolean
   err: ModelErr
 }
@@ -121,7 +127,12 @@ export function validateCustomProvider(input: ValidateArgs) {
           input.form.protocol === "openai" ||
           input.form.protocol === "responses") &&
         m.protocol
-          ? { provider: { npm: providerProtocols[m.protocol].npm } }
+          ? {
+              provider: {
+                npm: providerProtocols[m.protocol].npm,
+                ...(m.protocol === "google" && url.baseURL ? { api: url.baseURL.replace(/\/v1$/, "/v1beta") } : {}),
+              },
+            }
           : {}),
       },
     ]),
@@ -170,7 +181,7 @@ export function validateCustomProvider(input: ValidateArgs) {
       name,
       key,
       config: {
-        npm: providerProtocols[input.form.protocol ?? "openai"].npm,
+        npm: providerProtocols[input.form.protocol ?? "openai"].npm as string,
         name,
         ...(env ? { env: [env] } : {}),
         options: {

@@ -1,3 +1,7 @@
+import { providerModelType, type ProviderModelType } from "./provider-models"
+import { readProviderPricing, parseProviderPricing } from "./provider-pricing"
+export { providerModelType, providerModelTypes, nonChatModelRules, type ProviderModelType } from "./provider-models"
+
 export type ProviderDiscoveryInput = {
   baseURL: string
   apiKey: string
@@ -30,6 +34,18 @@ export const providerDiscoveryPresets: Record<string, { baseURL: string; kind?: 
   google: { baseURL: "https://generativelanguage.googleapis.com/v1beta", kind: "google" },
 }
 
+const providerEndpoint =
+  /\/(?:chat\/completions|responses|messages|models|embeddings|completions|audio(?:\/[^/]+)*|images(?:\/[^/]+)*)$/i
+
+export function providerBaseURLCorrection(value: string, kind?: ProviderProtocol) {
+  if (!providerEndpoint.test(value.trim().replace(/\/+$/, ""))) return
+  try {
+    return providerBaseURL(value, kind)
+  } catch {
+    return
+  }
+}
+
 export function providerServiceKey(value?: string) {
   if (!value) return ""
   try {
@@ -51,8 +67,10 @@ export function providerPresetProtocol(value: string): ProviderProtocol | undefi
 }
 
 export async function detectProviderProtocol(
-  input: ProviderDiscoveryInput & { modelID: string },
+  input: ProviderDiscoveryInput & { modelID: string; modelType?: ProviderModelType },
 ): Promise<ProviderProtocol> {
+  const type = input.modelType ?? providerModelType({ id: input.modelID })
+  if (type && type !== "chat") throw new Error(`nonChatModel:${type}`)
   const known = providerPresetProtocol(input.baseURL)
   const base = providerBaseURL(input.baseURL, known)
   if (known) return known
@@ -76,9 +94,54 @@ export async function detectProviderProtocol(
       ),
     })
     if (response.ok) {
-      const body: unknown = await response.json()
-      if (!body || typeof body !== "object" || !(protocol === "responses" ? "output" in body : "choices" in body))
-        throw new Error("服务返回了无效的协议检测结果，请在高级中指定协议")
+      const body: unknown = await response.json().catch(() => {
+        throw new Error("invalidModelReply")
+      })
+      if (!body || typeof body !== "object") throw new Error("invalidModelReply")
+      const parts =
+        protocol === "responses"
+          ? "output" in body
+            ? body.output
+            : undefined
+          : "choices" in body
+            ? body.choices
+            : undefined
+      if (!Array.isArray(parts)) throw new Error("invalidModelReply")
+      const text = parts
+        .flatMap((part: unknown): string[] => {
+          if (!part || typeof part !== "object") throw new Error("invalidModelReply")
+          if (protocol === "openai") {
+            const message = "message" in part ? part.message : undefined
+            if (!message || typeof message !== "object" || !("role" in message) || message.role !== "assistant")
+              throw new Error("invalidModelReply")
+            return "content" in message && typeof message.content === "string" ? [message.content] : []
+          }
+          if ("type" in part && part.type === "reasoning") return []
+          if (
+            !("type" in part) ||
+            part.type !== "message" ||
+            !("role" in part) ||
+            part.role !== "assistant" ||
+            !("content" in part) ||
+            !Array.isArray(part.content)
+          )
+            throw new Error("invalidModelReply")
+          return part.content.flatMap((content: unknown) => {
+            if (
+              !content ||
+              typeof content !== "object" ||
+              !("type" in content) ||
+              content.type !== "output_text" ||
+              !("text" in content) ||
+              typeof content.text !== "string"
+            )
+              return []
+            return [content.text]
+          })
+        })
+        .join("")
+        .trim()
+      if (text.toLowerCase().replace(/\s+/g, " ") === "reply ok") throw new Error("echoedModelReply")
       return protocol
     }
     const body = await response.text()
@@ -92,6 +155,8 @@ export async function detectProviderProtocol(
           )))
     )
       continue
+    if ([400, 404].includes(response.status) && providerBaseURLCorrection(input.baseURL))
+      throw new Error(`endpointURL:${base}`)
     throw new Error(`协议检测失败（HTTP ${response.status}），请检查服务和模型，或在高级中指定协议`)
   }
   throw new Error("此模型的 Responses 和 Chat 接口均不可用，请检查模型名称")
@@ -114,7 +179,8 @@ export function providerBaseURL(value: string, kind: ProviderProtocol = "openai"
   if (url.username || url.password) throw new Error("credentials")
   if (normalized.includes("?")) throw new Error("query")
   if (normalized.includes("#")) throw new Error("fragment")
-  url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/(?:chat\/completions|responses|messages|models)$/, "")
+  url.pathname = url.pathname.replace(/\/+$/, "")
+  while (providerEndpoint.test(url.pathname)) url.pathname = url.pathname.replace(providerEndpoint, "")
   if (!url.pathname || url.pathname === "/") url.pathname = kind === "google" ? "/v1beta" : "/v1"
   return url.href.replace(/\/$/, "")
 }
@@ -144,7 +210,10 @@ export async function discoverProviderModels(input: ProviderDiscoveryInput) {
       headers.set(header, header === "Authorization" ? `Bearer ${input.apiKey.trim()}` : input.apiKey.trim())
   }
   if (input.kind === "anthropic") headers.set("anthropic-version", "2023-06-01")
-  const models = new Map<string, { id: string; name: string }>()
+  const pricing = providerPresetProtocol(base)
+    ? Promise.resolve(parseProviderPricing(undefined))
+    : readProviderPricing(base)
+  const models = new Map<string, { id: string; name: string; type?: ProviderModelType; protocol?: ProviderProtocol }>()
   const signal = AbortSignal.timeout(15000)
   const endpoint = new URL(`${base}/models`)
   // OpenRouter's model catalog is public; listing it does not validate a key.
@@ -163,12 +232,6 @@ export async function discoverProviderModels(input: ProviderDiscoveryInput) {
     if (!Array.isArray(rows)) throw new Error("invalidResponse")
     for (const row of rows) {
       if (!row || typeof row !== "object") continue
-      if (
-        input.kind === "google" &&
-        Array.isArray(row.supportedGenerationMethods) &&
-        !row.supportedGenerationMethods.includes("generateContent")
-      )
-        continue
       const id =
         typeof row.id === "string"
           ? row.id.trim()
@@ -184,7 +247,8 @@ export async function discoverProviderModels(input: ProviderDiscoveryInput) {
             : typeof row.name === "string" && input.kind !== "google"
               ? row.name
               : id
-      models.set(id, { id, name })
+      const type = providerModelType({ id, name }, row)
+      models.set(id, { id, name, ...(type ? { type } : {}) })
     }
     if (
       input.kind === "google" &&
@@ -206,7 +270,11 @@ export async function discoverProviderModels(input: ProviderDiscoveryInput) {
       continue
     }
     if (!models.size) throw new Error("empty")
-    return [...models.values()]
+    const metadata = await pricing
+    return [...models.values()].map((model) => {
+      const details = metadata.get(model.id)
+      return details ? { ...model, ...details } : model
+    })
   }
   throw new Error("pagination")
 }

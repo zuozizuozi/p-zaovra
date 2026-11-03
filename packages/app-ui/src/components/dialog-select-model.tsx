@@ -1,4 +1,5 @@
 import { useModels } from "@/context/models"
+import { showToast } from "@/utils/toast"
 import { modelSource } from "@/utils/model-source"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show, ValidComponent } from "solid-js"
@@ -217,7 +218,8 @@ export function ModelSelectorPopoverV2(props: {
   onClose?: () => void
 }) {
   const model = props.model ?? useLocal().model
-  const catalog = useModels().catalog
+  const modelCatalog = useModels()
+  const catalog = modelCatalog.catalog
   const language = useLanguage()
   const dialog = useDialog()
   const local = useLocal()
@@ -285,6 +287,14 @@ export function ModelSelectorPopoverV2(props: {
     props.onClose?.()
   }
   const selectModel = (item: ModelItem) => {
+    const type = modelCatalog.type({ providerID: item.provider.id, modelID: item.id })
+    if (type !== "chat") {
+      showToast({
+        title: language.t(`provider.custom.modelType.${type}`),
+        description: language.t("provider.custom.modelType.notice"),
+      })
+      return
+    }
     restoreTrigger = false
     setOpen(false)
     afterClose(() => select(item))
@@ -452,7 +462,17 @@ export function ModelSelectorPopoverV2(props: {
                         }}
                         onClick={() => selectModel(item)}
                       >
-                        <span class="min-w-0 flex-1 truncate leading-5">{item.name}</span>
+                        <span class="min-w-0 flex-1 truncate leading-5">
+                          <span class="block truncate">{item.name}</span>
+                          <Show when={modelCatalog.type({ providerID: item.provider.id, modelID: item.id }) !== "chat"}>
+                            <span class="block truncate text-[11px] text-v2-text-text-muted">
+                              {language.t(
+                                `provider.custom.modelType.${modelCatalog.type({ providerID: item.provider.id, modelID: item.id })}`,
+                              )}{" "}
+                              · {language.t("provider.custom.modelType.unavailable")}
+                            </span>
+                          </Show>
+                        </span>
                         <TagV2 class="ml-2 max-w-28 shrink-0 truncate">{item.provider.name}</TagV2>
                         <span aria-hidden="true" class="ml-2 shrink-0 text-[11px] text-v2-text-text-muted">
                           {language.t(

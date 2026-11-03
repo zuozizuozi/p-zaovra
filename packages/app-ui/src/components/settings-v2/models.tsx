@@ -7,6 +7,7 @@ import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
+import { providerModelTypes, type ProviderModelType } from "@/provider-discovery"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
@@ -85,8 +86,26 @@ export const SettingsModelsV2: Component = () => {
                         <Tag>{item.provider.name}</Tag>
                       </span>
                     }
-                    description={item.id}
+                    description={`${item.id} · ${language.t(`provider.custom.modelType.${models.type({ providerID: item.provider.id, modelID: item.id })}`)}`}
                   >
+                    <select
+                      class="max-w-44 rounded border border-v2-border-border-base bg-transparent p-1 text-xs"
+                      aria-label={`${item.name} · ${language.t("provider.custom.modelType.label")}`}
+                      value={models.typeOverride({ providerID: item.provider.id, modelID: item.id }) ?? "auto"}
+                      onChange={(event) =>
+                        models.setType(
+                          { providerID: item.provider.id, modelID: item.id },
+                          event.currentTarget.value === "auto"
+                            ? undefined
+                            : (event.currentTarget.value as ProviderModelType),
+                        )
+                      }
+                    >
+                      <option value="auto">{language.t("provider.custom.modelType.auto")}</option>
+                      <For each={providerModelTypes}>
+                        {(type) => <option value={type}>{language.t(`provider.custom.modelType.${type}`)}</option>}
+                      </For>
+                    </select>
                     <Switch
                       checked={models.visible({ providerID: item.provider.id, modelID: item.id })}
                       onChange={(checked) =>

@@ -14,6 +14,7 @@ describe("provider discovery", () => {
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
+        if (new URL(request.url).pathname.includes("/api/pricing")) return new Response(null, { status: 404 })
         expect(new URL(request.url).pathname).toBe("/api/v1/models")
         expect(request.headers.get("authorization")).toBe("Bearer test-only")
         return Response.json({ data: [{ id: "vendor/model", name: "Vendor Model" }] })
@@ -46,6 +47,7 @@ describe("provider discovery", () => {
       port: 0,
       hostname: "127.0.0.1",
       fetch(request) {
+        if (new URL(request.url).pathname.includes("/api/pricing")) return new Response(null, { status: 404 })
         requests.push({
           path: new URL(request.url).pathname,
           key: request.headers.get("authorization"),
@@ -80,6 +82,7 @@ describe("provider discovery", () => {
       port: 0,
       hostname: "127.0.0.1",
       fetch(request) {
+        if (new URL(request.url).pathname.includes("/api/pricing")) return new Response(null, { status: 404 })
         const path = new URL(request.url).pathname
         paths.push(path)
         if (path === "/denied/models") return new Response("secret-provider-body", { status: 401 })
@@ -103,11 +106,12 @@ describe("provider discovery", () => {
     }
   })
 
-  test("uses Gemini authentication, pagination and generation capability filtering", async () => {
+  test("uses Gemini authentication and pagination while retaining typed embedding models", async () => {
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       fetch(request) {
+        if (new URL(request.url).pathname.includes("/api/pricing")) return new Response(null, { status: 404 })
         expect(request.headers.get("x-goog-api-key")).toBe("test-only")
         expect(request.headers.has("authorization")).toBe(false)
         if (new URL(request.url).searchParams.get("pageToken") === "next")
@@ -122,6 +126,7 @@ describe("provider discovery", () => {
     })
     try {
       expect(await discoverProviderModels({ baseURL: server.url.href, apiKey: "test-only", kind: "google" })).toEqual([
+        { id: "embed", name: "embed", type: "embedding" },
         { id: "generate-b", name: "B" },
       ])
     } finally {
@@ -134,6 +139,7 @@ describe("provider discovery", () => {
       port: 0,
       hostname: "127.0.0.1",
       fetch(request) {
+        if (new URL(request.url).pathname.includes("/api/pricing")) return new Response(null, { status: 404 })
         expect(request.headers.get("x-api-key")).toBe("test-only")
         expect(request.headers.get("anthropic-version")).toBe("2023-06-01")
         const next = new URL(request.url).searchParams.has("after_id")

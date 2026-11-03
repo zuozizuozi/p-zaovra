@@ -1,0 +1,1275 @@
+{
+  "source": "https://maas.gravitex.ai/prod-api/api/pricing/list-with-groups",
+  "captured": "2026-11-03",
+  "models": [
+    {
+      "id": "gpt-6.1-terra",
+      "nick": "GPTâ€‘6.1 Terra",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web_search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "kimi-k3.1-pro",
+      "nick": "Kimi K3.1 Pro",
+      "vendor": "Moonshot",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "deepseek-v4.1-flash-1017",
+      "nick": "DeepSeek V4.1 Flash 1017",
+      "vendor": "DeepSeek",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "mimo-v2.6-flash",
+      "nick": "MiMo-V2.6-Flash",
+      "vendor": "Xiaomi",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "mimo-v2.6-pro",
+      "nick": "MiMo-V2.6-Pro",
+      "vendor": "Xiaomi",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gemini-4-argon",
+      "nick": "Gemini 4 Argon",
+      "vendor": "Google",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gemini-3.8-flash-tts",
+      "nick": "Gemini 3.8 Flash TTS",
+      "vendor": "Google",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "gemini"
+      ],
+      "expectedType": "tts"
+    },
+    {
+      "id": "gemini-nano-banana-2.1",
+      "nick": "Nano Banana 2.1",
+      "vendor": "Google",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai",
+        "gemini",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "nick": "GPTâ€‘6.1 Sol",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web_search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "seedream-5-0-flash-nsfw",
+      "nick": "Seedream 5.0 Flash NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "hy4-preview",
+      "nick": "Hy4 preview",
+      "vendor": "Hunyuan",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "seedream-5-0-flash-260915",
+      "nick": "Seedream 5.0 Flash",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gpt-6-luna",
+      "nick": "GPT-6 Luna",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web_search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-6-sol",
+      "nick": "GPT-6 Sol",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web_search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "claude-opus-5-5",
+      "nick": "Claude Opus 5.5",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "grok-4.7",
+      "nick": "Grok 4.7",
+      "vendor": "xAI",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "deepseek-v4.1-flash",
+      "nick": "Deepseek V4.1 Flash",
+      "vendor": "DeepSeek",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gemini-3.5-flash-lite",
+      "nick": "Gemini 3.5 Flash Lite",
+      "vendor": null,
+      "tags": "",
+      "endpoints": [
+        "gemini",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gpt-image-2.5-flare",
+      "nick": "GPT Image 2.5 Flare",
+      "vendor": "OpenAI",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai-images",
+        "openai-images-edits"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gpt-image-2.5-sunburst",
+      "nick": "GPT Image 2.5 Sunburst",
+      "vendor": "OpenAI",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai-images",
+        "openai-images-edits"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "grok-imagine-image",
+      "nick": "Grok Imagine Image",
+      "vendor": "xAI",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai-images"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "grok-imagine-image-2.0",
+      "nick": "Grok Imagine Image 2.0",
+      "vendor": "xAI",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai-images"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gpt-6-astra",
+      "nick": "GPT-6 Astra",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web_search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "nick": "Gemini 3.8 Flash",
+      "vendor": "Google",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "claude-fable-5-1",
+      "nick": "Claude Fable 5.1",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "grok-4.6",
+      "nick": "Grok 4.6",
+      "vendor": "xAI",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "glm-5.3-flash",
+      "nick": "GLMâ€‘5.3â€‘Flash",
+      "vendor": "Zhipu",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "glm-5.3",
+      "nick": "GLM-5.3",
+      "vendor": "Zhipu",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "seedance-2-5-NSFW",
+      "nick": "Seedance 2.5 NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video,video-editing",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "gemini-3.7-flash",
+      "nick": "Gemini 3.7 Flash",
+      "vendor": "Google",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "seedance-2-0-mini-NSFW",
+      "nick": "Seedance 2.0 Mini NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "seedance-2-0-fast-NSFW",
+      "nick": "Seedance 2.0 Fast NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "seedream-5-0-pro-NSFW",
+      "nick": "Seedream 5.0 Pro NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "seedance-2-5",
+      "nick": "Seedance 2.5",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video,video-editing",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "qwen3.8-max",
+      "nick": "Qwen3.8-Max",
+      "vendor": "Ali",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "happyhorse-1.1-i2v",
+      "nick": "HappyHorse-1.1-I2V",
+      "vendor": "Ali",
+      "tags": "image-to-video",
+      "endpoints": [
+        "video"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "claude-opus-5",
+      "nick": "Claude Opus 5",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "dola-seedream-5-0-pro-260628",
+      "nick": "Seedream 5.0 Pro",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "nick": "Gemini 3.6 Flash",
+      "vendor": "Google",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "kimi-k3",
+      "nick": "Kimi K3",
+      "vendor": "Moonshot",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gpt-4o-mini-tts",
+      "nick": "GPT-4o Mini TTS",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai-speech"
+      ],
+      "expectedType": "tts"
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "nick": "GPT-5.6 Luna",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "nick": "GPT-5.6 Sol",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "nick": "GPT-5.6 Terra",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "claude-fable-5",
+      "nick": "Claude Fable 5 ",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "nick": "Gemini 3.5 Flash",
+      "vendor": "Google",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gpt-5.5",
+      "nick": "GPT 5.5",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-image-2",
+      "nick": "GPT Image 2",
+      "vendor": "OpenAI",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "images-edits",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "seedance-2-0",
+      "nick": "Seedance 2.0",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "text-embedding-3-large",
+      "nick": "Text Embedding 3 Large",
+      "vendor": "OpenAI",
+      "tags": "Embedding",
+      "endpoints": [
+        "embeddings"
+      ],
+      "expectedType": "embedding"
+    },
+    {
+      "id": "veo-3.1-generate-001",
+      "nick": "Veo 3.1 Generate",
+      "vendor": "Google",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "nick": "Claude-Sonnet-5-5",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "qwen3.7-flash",
+      "nick": "Qwen3.7-Flash",
+      "vendor": "Ali",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "qwen3.6-flash",
+      "nick": "Qwen3.6-Flash",
+      "vendor": "Ali",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "happyhorse-1.1-t2v",
+      "nick": "HappyHorse-1.1-T2V",
+      "vendor": "Ali",
+      "tags": "text-to-video",
+      "endpoints": [
+        "video"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "happyhorse-1.1-r2v",
+      "nick": "HappyHorse-1.1-R2V",
+      "vendor": "Ali",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "gemini-omni-flash-preview",
+      "nick": "Gemini Omni Flash Preview",
+      "vendor": "Google",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "openai-video",
+        "google-interactions"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "seed-2-1-turbo-260628",
+      "nick": "Seed 2.1 Turbo",
+      "vendor": "BytePlus",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "seedream-5-0-lite-nsfw",
+      "nick": "Seedream-5.0-lite-NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gemini-3.1-flash-lite-image",
+      "nick": "Nano Banana 2 Lite",
+      "vendor": "Google",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai",
+        "gemini",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "nick": "Claude-Sonnet-5",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "seed-2-0-lite-260428",
+      "nick": "Seed 2.0 Lite 260428",
+      "vendor": "BytePlus",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "seedance-2-0-mini",
+      "nick": "Seedance 2.0 Mini",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video",
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "kimi-k2.7-code",
+      "nick": "Kimi K2.7 Code",
+      "vendor": "Moonshot",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "minimax-m3",
+      "nick": "MiniMax-M3",
+      "vendor": "MiniMax",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "glm-5.2",
+      "nick": "GLM-5.2",
+      "vendor": "Zhipu",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "gemini-3-pro-image",
+      "nick": "Nano Banana Pro",
+      "vendor": "Google",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai",
+        "gemini",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "seed-2-0-code-preview-260328",
+      "nick": "Seed 2.0 Code Preview",
+      "vendor": "BytePlus",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "qwen3.7-plus",
+      "nick": "Qwen3.7-Plus",
+      "vendor": "Ali",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "claude-opus-4-8",
+      "nick": "Claude Opus 4.8",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "qwen3.7-max",
+      "nick": "Qwen3.7 Max",
+      "vendor": "Ali",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "wan2.7-r2v",
+      "nick": "Wan2.7 R2V",
+      "vendor": "Ali",
+      "tags": "reference-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "wan2.7-t2v",
+      "nick": "Wan2.7 T2V",
+      "vendor": "Ali",
+      "tags": "text-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "qwen3.6-plus",
+      "nick": "Qwen 3.6 Plus",
+      "vendor": "Ali",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "kimi-k2.6",
+      "nick": "Kimi K2.6",
+      "vendor": "Moonshot",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "seedance-2-0-NSFW",
+      "nick": "Seedance 2.0 NSFW",
+      "vendor": "BytePlus",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "seed-2-0-pro-260328",
+      "nick": "Seed 2.0 Pro",
+      "vendor": "BytePlus",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "claude-opus-4-7",
+      "nick": "Claude Opus 4.7",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "nick": "GPT 5.4 mini",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-5.4-nano",
+      "nick": "GPT 5.4 Nano",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-5.4",
+      "nick": "GPT 5.4",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-5.3-codex",
+      "nick": "GPT 5.3 Codex",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gemini-3.1-flash-image-preview",
+      "nick": "Nano Banana 2 Preview",
+      "vendor": "Google",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai",
+        "gemini",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gemini-3.1-flash-image",
+      "nick": "Nano Banana 2",
+      "vendor": "Google",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai",
+        "gemini",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "seedream-5-0-260128",
+      "nick": "Seedream 5.0",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "nick": "Gemini 3.1 Pro Preview",
+      "vendor": "Google",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "nick": "Claude Sonnet 4.6",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "claude-opus-4-6",
+      "nick": "Claude Opus 4.6",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "seedance-2-0-fast",
+      "nick": "Seedance 2.0 Fast",
+      "vendor": "BytePlus",
+      "tags": "text-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "gpt-5.1",
+      "nick": "GPT-5.1",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "deepseek-v4-pro-0813",
+      "nick": "DeepSeek V4 Pro 0813",
+      "vendor": "DeepSeek",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "nick": "Gemini 3.1 Flash Lite",
+      "vendor": "Google",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "wan2.7-i2v",
+      "nick": "Wan2.7 I2V",
+      "vendor": "Ali",
+      "tags": "image-to-Video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "nick": "DeepSeek V4 Pro",
+      "vendor": "DeepSeek",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "claude-sonnet-4-5-20250929",
+      "nick": "Claude Sonnet 4.5 20250929",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "nick": "Claude Haiku 5.5",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "glm-5.1",
+      "nick": "GLM 5.1",
+      "vendor": "Zhipu",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "veo-3.1-lite-generate-001",
+      "nick": "Veo 3.1 Lite Generate",
+      "vendor": "Google",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "nick": "Claude Haiku 4.5 20251001",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "deepseek-v4-flash-0731",
+      "nick": "DeepSeek V4 Flash 0731",
+      "vendor": "DeepSeek",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "wan2.7-videoedit",
+      "nick": "Wan2.7-VideoEdit",
+      "vendor": "Ali",
+      "tags": "reference-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "glm-5.3-nsfw",
+      "nick": "GLM 5.3 NSFW",
+      "vendor": "Zhipu",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "MiniMax-M2.7",
+      "nick": "MiniMax M2.7",
+      "vendor": "MiniMax",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "openai",
+        "openai-response",
+        "anthropic"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gpt-5-mini",
+      "nick": "GPT-5 Mini",
+      "vendor": "OpenAI",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "openai-response"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "responses"
+    },
+    {
+      "id": "gemini-3-flash-preview",
+      "nick": "Gemini 3 Flash Preview",
+      "vendor": "Google",
+      "tags": "chat,thinking,web search",
+      "endpoints": [
+        "openai",
+        "gemini"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "openai"
+    },
+    {
+      "id": "veo-3.1-fast-generate-001",
+      "nick": "Veo 3.1 Fast Generate",
+      "vendor": "Google",
+      "tags": "text-to-video,image-to-video",
+      "endpoints": [
+        "video-generation"
+      ],
+      "expectedType": "video"
+    },
+    {
+      "id": "claude-opus-4-5-20251101",
+      "nick": "Claude Opus 4.5 20251101",
+      "vendor": "Anthropic",
+      "tags": "chat,thinking",
+      "endpoints": [
+        "anthropic",
+        "openai"
+      ],
+      "expectedType": "chat",
+      "expectedProtocol": "anthropic"
+    },
+    {
+      "id": "seedream-4-5-251128",
+      "nick": "Seedream 4.5",
+      "vendor": "BytePlus",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gpt-image-1",
+      "nick": "GPT Image 1",
+      "vendor": "OpenAI",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "image-generation",
+        "openai"
+      ],
+      "expectedType": "image"
+    },
+    {
+      "id": "gemini-2.5-flash-image",
+      "nick": "Nano Banana",
+      "vendor": "Google",
+      "tags": "text-to-image,image-to-image",
+      "endpoints": [
+        "openai",
+        "gemini",
+        "image-generation"
+      ],
+      "expectedType": "image"
+    }
+  ]
+}

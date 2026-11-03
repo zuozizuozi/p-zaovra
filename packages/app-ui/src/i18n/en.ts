@@ -539,6 +539,31 @@ export const dict = {
     "Tokens above reflect recorded usage, not money or quota deducted. Spending and remaining quota require account billing data; they are not assumed to be zero.",
   "usage.updated": "Last synchronized",
   "provider.custom.protocol.auto": "Automatic (Responses → Chat)",
+  "provider.custom.discovery.willNormalize":
+    "This address includes an API endpoint. We will use {{url}} as the base URL.",
+  "provider.custom.discovery.normalized": "Removed the API endpoint. Base URL: {{url}}",
+  "provider.custom.discovery.endpointError":
+    "The address included an API endpoint and was corrected to {{url}}. The service still rejected the request; check that this is its base URL and that the selected model supports chat.",
+  "provider.custom.discovery.chatOnly":
+    "All model types are listed. Non-chat models can be saved for future tool support, but cannot be used for chat yet.",
+  "provider.custom.discovery.noChatModels":
+    "This service returned only speech, embedding, reranking or image generation models. Choose a chat model, such as a Ling model.",
+  "provider.custom.error.nonChatModel":
+    "This is a {{type}} model. It cannot be used for chat yet; it can be saved for future tool support.",
+  "provider.custom.modelType.asr": "speech recognition",
+  "provider.custom.modelType.tts": "speech generation",
+  "provider.custom.modelType.embedding": "embedding or reranking",
+  "provider.custom.modelType.image": "image generation",
+  "provider.custom.modelType.video": "video generation",
+  "provider.custom.modelType.audio": "speech processing",
+  "provider.custom.modelType.chat": "chat",
+  "provider.custom.modelType.label": "Model type",
+  "provider.custom.modelType.auto": "Automatic (chat if unknown)",
+  "provider.custom.modelType.notice":
+    "This model cannot be used for chat yet. It will be supported as a tool in a later update.",
+  "provider.custom.modelType.unavailable": "not available for chat",
+  "provider.custom.discovery.invalidReply":
+    "The model echoed the test input or returned an invalid chat response. It was not accepted for chat. Check the model type in Advanced settings.",
   "provider.custom.protocol.autoHint":
     "Saving checks each model with a minimal output request. Known services use their preset protocol.",
   "provider.custom.protocol.label": "API protocol",

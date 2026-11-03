@@ -512,6 +512,28 @@ export const dict = {
     "上方 Token 是实际记录的使用量，不等于金额或套餐扣费。已扣额度和剩余额度以账户账单为准，未获取时不显示为 0。",
   "usage.updated": "最近同步",
   "provider.custom.protocol.auto": "自动检测（Responses → Chat）",
+  "provider.custom.discovery.willNormalize": "地址包含了具体接口路径，将自动改用基础地址 {{url}}。",
+  "provider.custom.discovery.normalized": "已移除具体接口路径，基础地址已改为 {{url}}。",
+  "provider.custom.discovery.endpointError":
+    "地址包含了具体接口路径，已自动改为 {{url}}。服务仍拒绝请求，请确认这是基础地址，且所选模型支持对话。",
+  "provider.custom.discovery.chatOnly":
+    "所有类型的模型均会列出。非对话模型可以保存配置，目前暂不可用于对话，后续将作为工具接入。",
+  "provider.custom.discovery.noChatModels":
+    "此服务只返回了语音、向量、重排或图像生成模型，不能用于对话。请改选对话模型，例如 Ling 系列。",
+  "provider.custom.error.nonChatModel": "这是{{type}}模型，暂不可用于对话，可以保存配置，后续将作为工具接入。",
+  "provider.custom.modelType.asr": "语音识别",
+  "provider.custom.modelType.tts": "语音生成",
+  "provider.custom.modelType.embedding": "向量或重排",
+  "provider.custom.modelType.image": "图像生成",
+  "provider.custom.modelType.video": "视频生成",
+  "provider.custom.modelType.audio": "语音处理",
+  "provider.custom.modelType.chat": "对话",
+  "provider.custom.modelType.label": "模型类型",
+  "provider.custom.modelType.auto": "自动判断（未知按对话处理）",
+  "provider.custom.modelType.notice": "此模型暂不可用于对话，后续将作为工具接入。",
+  "provider.custom.modelType.unavailable": "暂不可用于对话",
+  "provider.custom.discovery.invalidReply":
+    "模型原样回显了检测输入，或返回了无效的对话格式，未将其作为正常对话模型接入。请在高级设置中确认模型类型。",
   "provider.custom.protocol.autoHint": "保存时按模型检测接口；自定义服务会进行一次最小输出的连接测试。",
   "provider.custom.protocol.label": "兼容协议",
   "provider.custom.protocol.hint":

@@ -5,6 +5,7 @@ import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } fro
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { providerModelType, type ProviderModelType } from "@/provider-discovery"
 
 export type ModelKey = { providerID: string; modelID: string }
 
@@ -14,6 +15,7 @@ type Store = {
   user: User[]
   recent: ModelKey[]
   variant?: Record<string, string | undefined>
+  types?: Record<string, ProviderModelType | undefined>
 }
 
 const RECENT_LIMIT = 5
@@ -102,6 +104,21 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
     )
 
     const find = (key: ModelKey) => list().find((m) => m.id === key.modelID && m.provider.id === key.providerID)
+    const type = (key: ModelKey): ProviderModelType => {
+      const item = find(key)
+      return (
+        store.types?.[modelKey(key)] ??
+        (item ? providerModelType(item, item) : providerModelType({ id: key.modelID })) ??
+        "chat"
+      )
+    }
+    const setType = (key: ModelKey, type: ProviderModelType | undefined) => {
+      if (!store.types) {
+        setStore("types", { [modelKey(key)]: type })
+        return
+      }
+      setStore("types", modelKey(key), type)
+    }
 
     function update(model: ModelKey, state: Visibility) {
       const index = store.user.findIndex((x) => x.modelID === model.modelID && x.providerID === model.providerID)
@@ -159,6 +176,9 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       catalog: { loading: providers.loading, error: providers.error, refresh: providers.refresh },
       list,
       find,
+      type,
+      setType,
+      typeOverride: (key: ModelKey) => store.types?.[modelKey(key)],
       visible,
       setVisibility,
       recent: {

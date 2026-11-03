@@ -28,6 +28,7 @@ let params: { id?: string } = {}
 let search: { draftId?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
+let modelType: "chat" | "asr" = "chat"
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
 let sendGate: Promise<void> | undefined
@@ -177,6 +178,7 @@ beforeAll(async () => {
       },
     }),
   }))
+  mock.module("@/context/models", () => ({ useModels: () => ({ type: () => modelType }) }))
 
   mock.module("@/context/permission", () => {
     const state = (server: string) => ({
@@ -308,6 +310,7 @@ beforeEach(() => {
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
+  modelType = "chat"
   permissionServer = "server-a"
   createSessionGate = undefined
   sendGate = undefined
@@ -318,6 +321,30 @@ beforeEach(() => {
 })
 
 describe("prompt submit worktree selection", () => {
+  test("a model marked as ASR cannot admit a chat prompt or create an optimistic session", async () => {
+    modelType = "asr"
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: () => 2,
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+    await submit.handleSubmit(new Event("submit"))
+    expect(sentPrompts).toHaveLength(0)
+    expect(createdSessions).toHaveLength(0)
+    expect(optimistic).toHaveLength(0)
+    expect(prompt.current()).toEqual(promptValue)
+  })
   test("/bug opens local feedback before model admission, without sending a prompt or creating a session", async () => {
     const descriptions: string[] = []
     const receive = (event: Event) =>
