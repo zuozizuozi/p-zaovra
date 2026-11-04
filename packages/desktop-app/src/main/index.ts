@@ -176,6 +176,7 @@ const main = Effect.gen(function* () {
     async (distro) => {
       logger.log("spawning wsl sidecar", { distro })
       return spawnWslSidecar(distro, {
+        allowSharedLegacy: !TEST_ONBOARDING && !userDataOverride,
         onLine: (line) => logger.log("wsl sidecar", { distro, stream: line.stream, text: line.text }),
       })
     },

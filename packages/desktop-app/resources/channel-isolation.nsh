@@ -24,3 +24,14 @@
     DeleteRegKey HKCU "Software\Classes\${ZAOVRA_SCHEME}"
   ${EndIf}
 !macroend
+
+!ifndef BUILD_UNINSTALLER
+; The assisted directory picker runs after customInit. Recheck its selection
+; before Next is enabled; silent /D installs remain guarded by customInit.
+Function .onVerifyInstDir
+  ${If} ${FileExists} "$INSTDIR\${ZAOVRA_OTHER_EXE_1}"
+  ${OrIf} ${FileExists} "$INSTDIR\${ZAOVRA_OTHER_EXE_2}"
+    Abort
+  ${EndIf}
+FunctionEnd
+!endif

@@ -25,7 +25,7 @@ The Zaovra Desktop app, built with Electron.
 - 导入时跳过源目录内的符号链接并记录日志，不跟随链接读取数据库；已存在且没有完成标记的 backend 仍拒绝合并。
 - 升级回归必须在 Node ≥24.15（包括 Electron 42.3.3 自带 Node 24.15.0）执行，覆盖数据/配置组合、显式 profile、外部 DB、重试/取消/重启与符号链接。
 - 使用父 a2394386 生成合成会话、凭据和 provider 配置，验证导入、空白、失败重试、重启，以及三渠道并装互不影响；另以仍打开的 SQLite WAL 写入器验证在线备份。测试只用独立合成目录。WSL 的真实旧安装迁移、真实安装器升级及 Linux 新包沙箱仍须单独验收。
-- WSL 后端升级后不会自动导入旧会话，原数据仍在原位置；旧共享数据目录不会被此隔离步骤删除或覆盖。WSL 旧数据导入记为下一批 P2。当前发布范围为 Windows Beta，Linux 包的沙箱验收延后，见[升级测试补充](TESTING.md)。
+- WSL 后端首次升级在独立 stage 安全复制：Dev 可选择导入或空白、Prod 导入、Beta 空白，显式 profile 不读取共享旧数据。在线 SQLite 备份含 WAL 并核 quick_check，完成后一次发布 backend 和标记；原数据保留，失败不启用半成品。需要发行版已有 Python 3/SQLite，不自动安装；真实 WSL 升级和安装器仍须独立验收，见[升级测试补充](TESTING.md)。
 
 ## Development
 

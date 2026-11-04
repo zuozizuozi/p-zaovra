@@ -1,4 +1,4 @@
-import { ServerConnection, useServer, useSettings, useTabs } from "@zaovra-ai/app"
+import { ServerConnection, useServer, useSettings, useTabs, useProviders, useSettingsDialog } from "@zaovra-ai/app"
 import { onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
@@ -8,6 +8,8 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
   const server = useServer()
   const settings = useSettings()
   const tabs = useTabs()
+  const providers = useProviders(() => undefined)
+  const connect = useSettingsDialog("providers")
   const [state, setState] = createStore({ needsDirectory: false, fallback: "", busy: false })
 
   async function open(directory: string) {
@@ -95,9 +97,10 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
     <Show when={state.needsDirectory || state.fallback}>
       <section
         role="status"
-        class="fixed bottom-4 left-16 right-4 z-50 flex flex-wrap items-center gap-3 bg-v2-background-bg-base p-4 text-v2-text-text-base"
+        class="fixed inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-v2-background-bg-base p-8 text-v2-text-text-base"
       >
-        <p class="min-w-0 flex-1 break-words">
+        <h1 class="text-24-semibold">{t("desktop.onboarding.welcome")}</h1>
+        <p class="max-w-lg break-words">
           {state.needsDirectory
             ? t("desktop.onboarding.choose")
             : t("desktop.onboarding.fallback", { path: state.fallback })}
@@ -110,7 +113,14 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
             </ButtonV2>
           }
         >
-          <ButtonV2 variant="neutral" disabled={state.busy} onClick={() => void choose()}>
+          <ButtonV2 variant="neutral" onClick={connect}>
+            {t("desktop.onboarding.connect")}
+          </ButtonV2>
+          <ButtonV2
+            variant="neutral"
+            disabled={state.busy || providers.loading() || providers.connected().length === 0}
+            onClick={() => void choose()}
+          >
             {t("desktop.dialog.chooseFolder")}
           </ButtonV2>
           <ButtonV2 variant="ghost-muted" disabled={state.busy} onClick={() => void skip()}>

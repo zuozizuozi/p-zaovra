@@ -4,6 +4,16 @@ import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
 import { showToast } from "@/utils/toast"
 
+export function updaterDetail(state: UpdaterState | undefined) {
+  if (state?.status === "error") return state.message
+  if (state?.status === "downloading" && state.percent !== undefined) return Math.round(state.percent) + "%"
+  return ""
+}
+
+export function showPackagedUpdater(input: { platform: string; channel?: string; updater?: unknown }) {
+  return input.platform === "desktop" && ["beta", "prod"].includes(input.channel ?? "") && Boolean(input.updater)
+}
+
 export function updaterAction(state: UpdaterState | undefined) {
   if (!state) return { label: "settings.updates.action.checkNow" as const }
   switch (state.status) {

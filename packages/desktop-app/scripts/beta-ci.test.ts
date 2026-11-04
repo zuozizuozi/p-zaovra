@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 import { mkdir } from "node:fs/promises"
-import { assessBetaCI, verifyBetaCI, verifyBetaPublish } from "./beta-ci"
+import { assessBetaCI, verifyBetaCI, verifyBetaPublish, retainedBetaBuild } from "./beta-ci"
 
 const sha = "a".repeat(40)
 const scrollback = "test/cli/run/scrollback.surface.test.ts"
@@ -217,7 +217,7 @@ async function archive(entries: [string, string][]) {
     new Response(reader.stderr).text(),
     reader.exited,
   ])
-  return { output, stderr, exit }
+  return { output, stderr, exit, zipPath: join(directory, "report.zip") }
 }
 test("604 real bounded ZIP reader consumes structured JSON without extraction and rejects ambiguity/traversal", async () => {
   const value = fixture()
@@ -406,3 +406,197 @@ test("605 fresh K63 comparison occurs inside the approved publish job after arti
   expect(publish.steps[fresh].run).toContain("beta-artifact/ci-gate.json")
   expect(publish.steps[fresh].run).toContain("$LASTEXITCODE")
 })
+
+test("193 only retained official artifacts with current provenance deduplicate builds", () => {
+  const r = { ...run("windows-beta"), id: 99, event: "workflow_run", path: ".github/workflows/windows-beta.yml" }
+  const a = {
+    id: 77,
+    name: "windows-beta-" + sha,
+    expired: false,
+    size_in_bytes: 100,
+    digest: "sha256:" + "b".repeat(64),
+    workflow_run: { id: 99, head_sha: sha },
+  }
+  const decision = { testRun: 10, testAttempt: 2, missingTests: 0, k63Applied: false }
+  const gate = {
+    commit: sha,
+    channel: "beta",
+    signingPolicy: "signed",
+    unsignedBeta: false,
+    installerSHA256: "c".repeat(64),
+    k63ExceptionApplied: false,
+    testRun: 10,
+    testAttempt: 2,
+    missingTests: 0,
+  }
+  expect(retainedBetaBuild(r, a, gate, sha, decision)).toBe(true)
+  for (const change of [
+    { expired: true },
+    { size_in_bytes: 0 },
+    { name: "other" },
+    { workflow_run: { id: 88, head_sha: sha } },
+    { workflow_run: { id: 99, head_sha: "d".repeat(40) } },
+  ])
+    expect(retainedBetaBuild(r, { ...a, ...change }, gate, sha, decision)).toBe(false)
+  for (const change of [
+    { testAttempt: 1 },
+    { testRun: 11 },
+    { commit: "d".repeat(40) },
+    { unsignedBeta: true },
+    { signingPolicy: "unsigned-beta" },
+    { k63ExceptionApplied: true },
+  ])
+    expect(retainedBetaBuild(r, a, { ...gate, ...change }, sha, decision)).toBe(false)
+  expect(retainedBetaBuild({ ...r, path: "other.yml" }, a, gate, sha, decision)).toBe(false)
+})
+test("193 workflow executes trusted verifier code when reviewing an old approved source", async () => {
+  const y = Bun.YAML.parse(
+    await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
+  ) as { jobs: Record<string, { steps: Array<{ uses?: string; with?: Record<string, unknown>; run?: string }> }> }
+  const gate = y.jobs.gate.steps.find((s) => s.uses?.startsWith("actions/checkout"))!
+  const publish = y.jobs.publish.steps.find((s) => s.uses?.startsWith("actions/checkout"))!
+  expect(gate.with?.ref).toBe("${{ github.workflow_sha }}")
+  expect(publish.with?.ref).toBe("${{ github.workflow_sha }}")
+  expect(publish.with?.["fetch-depth"]).toBe(0)
+  expect(
+    y.jobs.build.steps.some((s) => s.with?.path === "verifier" && s.with.ref === "${{ github.workflow_sha }}"),
+  ).toBe(true)
+})
+
+test("193 real trusted CLI checks old target checkout, fresh K63 and stale metadata", async () => {
+  const directory = join(root!, crypto.randomUUID()),
+    bin = join(directory, "bin"),
+    old = join(directory, "old-source")
+  await mkdir(bin, { recursive: true })
+  await mkdir(join(old, "packages/desktop-app/scripts"), { recursive: true })
+  const historical = Bun.spawn(
+    ["git", "show", "783ba85bf9eb49b495fee10674f1447084a85604:packages/desktop-app/scripts/beta-ci.ts"],
+    { cwd: join(import.meta.dir, "../../.."), stdout: "pipe", stderr: "pipe" },
+  )
+  const [legacyText, legacyError, legacyExit] = await Promise.all([
+    new Response(historical.stdout).text(),
+    new Response(historical.stderr).text(),
+    historical.exited,
+  ])
+  expect(legacyExit, legacyError).toBe(0)
+  await Bun.write(join(old, "packages/desktop-app/scripts/beta-ci.ts"), legacyText)
+  const targetSha = "783ba85bf9eb49b495fee10674f1447084a85604"
+  const value = JSON.parse(JSON.stringify(fixture()).replaceAll("a".repeat(40), targetSha)) as ReturnType<
+    typeof fixture
+  >
+  const prefix = "zaovra-tests-11111111-1111-1111-1111-111111111111/"
+  const entries: [string, string][] = [
+    [prefix + "plan.json", JSON.stringify(value.evidence.report.plan)],
+    [prefix + "results.json", JSON.stringify(value.evidence.report.results)],
+    [prefix + "scrollback-manifest.json", JSON.stringify(value.evidence.report.scrollbackManifest)],
+    ...value.evidence.report.files
+      .filter((f) => !["plan.json", "results.json", "scrollback-manifest.json"].includes(f))
+      .map((f): [string, string] => [prefix + f, "synthetic inventory"]),
+  ]
+  const zip = await archive(entries)
+  expect(zip.exit, zip.stderr).toBe(0)
+  const bytes = await Bun.file(zip.zipPath).bytes()
+  const artifact = {
+    ...value.evidence.artifact,
+    size_in_bytes: bytes.length,
+    digest: "sha256:" + new Bun.CryptoHasher("sha256").update(bytes).digest("hex"),
+  }
+  const responseMap = {
+    "runs/10/attempts/2": JSON.stringify(value.evidence.attempt),
+    "runs/10/attempts/2/jobs?per_page=100": JSON.stringify(value.evidence.jobs),
+    "runs/10/artifacts?per_page=100": JSON.stringify({ total_count: 1, artifacts: [artifact] }),
+  }
+  const gh = join(bin, "gh-fixture.ts"),
+    git = join(bin, "git-fixture.ts")
+  await Bun.write(
+    gh,
+    "const routes=" +
+      JSON.stringify(responseMap) +
+      ';const key=process.argv.at(-1).split("/actions/")[1];if(key==="artifacts/30/zip")await Bun.write(Bun.stdout,await Bun.file(' +
+      JSON.stringify(zip.zipPath) +
+      ").bytes());else if(key in routes)process.stdout.write(routes[key]);else process.exit(90)",
+  )
+  await Bun.write(
+    git,
+    "process.stdout.write(" +
+      JSON.stringify(value.evidence.expectedFiles.map((p) => "packages/zaovra/" + p).join("\0") + "\0") +
+      ")",
+  )
+  const { chmod } = await import("node:fs/promises")
+  for (const [name, source] of [
+    ["gh", gh],
+    ["git", git],
+  ]) {
+    const path = join(bin, process.platform === "win32" ? name + ".cmd" : name)
+    await Bun.write(
+      path,
+      process.platform === "win32"
+        ? '@echo off\r\n"' + process.execPath + '" "' + source + '" %*\r\n'
+        : "#!" + process.execPath + "\n" + (await Bun.file(source).text()),
+    )
+    await chmod(path, 0o700)
+  }
+  const inventory = join(directory, "ci.json"),
+    gatePath = join(directory, "ci-gate.json")
+  await Bun.write(inventory, JSON.stringify(value.inventory))
+  const decision = assessBetaCI(value.inventory, targetSha, 99, value.evidence, true)
+  const gate = {
+    commit: targetSha,
+    k63ExceptionApplied: true,
+    testRun: decision.testRun,
+    testAttempt: decision.testAttempt,
+    missingTests: decision.missingTests,
+  }
+  const invoke = async () => {
+    const child = Bun.spawn(
+      [process.execPath, join(import.meta.dir, "beta-ci.ts"), inventory, targetSha, "99", gatePath],
+      {
+        cwd: old,
+        env: {
+          ...process.env,
+          EVENT_NAME: "publish",
+          GH_TOKEN: "",
+          PYTHON: Bun.which(process.env.PYTHON ?? "python3")!,
+          PATH: bin + (process.platform === "win32" ? ";" + process.env.SystemRoot + "/System32" : ""),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { out, err, code }
+  }
+  await Bun.write(gatePath, JSON.stringify(gate))
+  const good = await invoke()
+  expect(good.code, good.err).toBe(0)
+  expect(JSON.parse(good.out).k63ExceptionApplied).toBe(true)
+  await Bun.write(gatePath, JSON.stringify({ ...gate, testAttempt: 1 }))
+  const stale = await invoke()
+  expect(stale.code).not.toBe(0)
+  expect(stale.err).toContain("differs from the fresh")
+  await Bun.write(
+    inventory,
+    JSON.stringify({ workflow_runs: [run("test"), run("typecheck")].map((r) => ({ ...r, head_sha: targetSha })) }),
+  )
+  await Bun.write(gatePath, JSON.stringify({ ...gate, commit: "b".repeat(40) }))
+  expect((await invoke()).code).not.toBe(0)
+  const { unlink } = await import("node:fs/promises")
+  await unlink(gatePath)
+  const missing = await invoke()
+  expect(missing.code).not.toBe(0)
+  expect(missing.err).not.toContain("OLD_VERIFIER_MUST_NOT_EXECUTE")
+  const baseline = Bun.spawn(
+    [process.execPath, join(old, "packages/desktop-app/scripts/beta-ci.ts"), inventory, targetSha, "99", gatePath],
+    { cwd: old, env: { ...process.env, EVENT_NAME: "publish" }, stdout: "pipe", stderr: "pipe" },
+  )
+  const [legacyOut, legacyErr, legacyCode] = await Promise.all([
+    new Response(baseline.stdout).text(),
+    new Response(baseline.stderr).text(),
+    baseline.exited,
+  ])
+  expect(legacyCode, legacyOut + legacyErr).toBe(0) // Historical verifier ignores the missing gate.
+}, 60000)

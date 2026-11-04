@@ -1,5 +1,7 @@
 export const dict = {
-  "desktop.onboarding.choose": "默认项目目录不可用。请选择文件夹，或稍后从主页添加项目。",
+  "desktop.onboarding.welcome": "欢迎使用 Zaovra",
+  "desktop.onboarding.connect": "1. 连接模型服务",
+  "desktop.onboarding.choose": "先连接模型服务，再选择项目文件夹。当前尚未选择项目或模型。",
   "desktop.onboarding.fallback": "文档目录不可用，默认项目已创建于 {{path}}。",
   "desktop.onboarding.later": "稍后",
   "desktop.onboarding.dismiss": "知道了",

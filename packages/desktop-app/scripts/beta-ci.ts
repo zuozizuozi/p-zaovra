@@ -31,16 +31,8 @@ export function assessBetaCI(input: unknown, sha: string, currentRun?: number, e
   if (k63 && (!allowK63 || !evidence)) throw new Error("Exact main test CI has not passed")
   const missingTests = k63 ? verifyK63(evidence!, sha, ci.test) : 0
   return {
-    alreadyBuilt: ci.runs.some(
-      (run) =>
-        run.name === "windows-beta" &&
-        ["workflow_run", "workflow_dispatch"].includes(run.event ?? "") &&
-        run.head_sha === sha &&
-        run.repository?.full_name === repository &&
-        run.id !== currentRun &&
-        run.status === "completed" &&
-        run.conclusion === "success",
-    ),
+    // A successful run alone does not prove a retained, fresh installer exists.
+    alreadyBuilt: false,
     k63Applied: k63,
     testRun: ci.test.id ?? 0,
     testAttempt: ci.test.run_attempt,
@@ -274,6 +266,102 @@ export function verifyK63(evidence: Evidence, sha: string, test: Run) {
   return count(manifest.tests)
 }
 
+export function retainedBetaBuild(
+  run: unknown,
+  artifact: unknown,
+  gate: unknown,
+  sha: string,
+  decision: { testRun: number; testAttempt: number; missingTests: number; k63Applied: boolean },
+) {
+  const r = record(run),
+    a = record(artifact),
+    g = record(gate)
+  const origin = record(a.workflow_run)
+  return (
+    r.name === "windows-beta" &&
+    r.path === ".github/workflows/windows-beta.yml" &&
+    r.head_sha === sha &&
+    ["workflow_run", "workflow_dispatch"].includes(String(r.event)) &&
+    r.status === "completed" &&
+    r.conclusion === "success" &&
+    record(r.repository).full_name === repository &&
+    a.name === "windows-beta-" + sha &&
+    a.expired === false &&
+    count(a.id) > 0 &&
+    count(a.size_in_bytes) > 0 &&
+    count(a.size_in_bytes) <= 256 * 1024 * 1024 &&
+    /^sha256:[a-f0-9]{64}$/.test(String(a.digest)) &&
+    origin.id === r.id &&
+    origin.head_sha === sha &&
+    g.commit === sha &&
+    g.channel === "beta" &&
+    g.signingPolicy === "signed" &&
+    g.unsignedBeta === false &&
+    /^[a-f0-9]{64}$/.test(String(g.installerSHA256)) &&
+    g.k63ExceptionApplied === decision.k63Applied &&
+    String(g.testRun) === String(decision.testRun) &&
+    String(g.testAttempt) === String(decision.testAttempt) &&
+    String(g.missingTests) === String(decision.missingTests)
+  )
+}
+
+async function existingBuild(
+  input: unknown,
+  sha: string,
+  currentRun: number,
+  decision: ReturnType<typeof assessBetaCI>,
+) {
+  const runs = selectCI(input, sha)
+    .runs.filter(
+      (r) =>
+        r.id !== currentRun &&
+        r.name === "windows-beta" &&
+        r.head_sha === sha &&
+        r.status === "completed" &&
+        r.conclusion === "success",
+    )
+    .sort((a, b) => b.run_number - a.run_number)
+    .slice(0, 3)
+  for (const run of runs) {
+    const inventory = record(
+      JSON.parse(new TextDecoder().decode(await github("runs/" + run.id + "/artifacts?per_page=100"))),
+    )
+    if (!Array.isArray(inventory.artifacts) || inventory.total_count !== inventory.artifacts.length)
+      throw new Error("Incomplete build artifact inventory")
+    const artifacts = inventory.artifacts.map(record).filter((a) => a.name === "windows-beta-" + sha)
+    if (artifacts.length !== 1) continue
+    const artifact = artifacts[0]
+    if (
+      artifact.expired !== false ||
+      !count(artifact.size_in_bytes) ||
+      count(artifact.size_in_bytes) > 256 * 1024 * 1024 ||
+      !/^sha256:[a-f0-9]{64}$/.test(String(artifact.digest))
+    )
+      continue
+    const bytes = await github("artifacts/" + artifact.id + "/zip")
+    if (
+      bytes.length !== artifact.size_in_bytes ||
+      "sha256:" + new Bun.CryptoHasher("sha256").update(bytes).digest("hex") !== artifact.digest
+    )
+      throw new Error("Build archive integrity mismatch")
+    const child = Bun.spawn([process.env.PYTHON ?? "python3", join(import.meta.dir, "beta-build-report.py")], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    child.stdin.write(bytes)
+    child.stdin.end()
+    const [body, , exit] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    if (exit !== 0) continue
+    if (retainedBetaBuild(run, artifact, JSON.parse(body), sha, decision)) return true
+  }
+  return false
+}
+
 async function github(path: string) {
   const child = Bun.spawn(["gh", "api", "repos/" + repository + "/actions/" + path], { stdout: "pipe", stderr: "pipe" })
   const [body, , exit] = await Promise.all([
@@ -366,6 +454,8 @@ if (import.meta.main) {
   const decision = publish
     ? verifyBetaPublish(input, sha, Number(process.argv[4]), await Bun.file(process.argv[5]).json(), evidence)
     : assessBetaCI(input, sha, Number(process.argv[4]), evidence, true)
+  if (process.env.EVENT_NAME === "workflow_run")
+    decision.alreadyBuilt = await existingBuild(input, sha, Number(process.argv[4]), decision)
   const metadata = {
     source: sha,
     k63ExceptionApplied: decision.k63Applied,

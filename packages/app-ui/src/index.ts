@@ -28,3 +28,5 @@ export {
 } from "./wsl/types"
 export { ServerConnection } from "./context/server"
 export { handleNotificationClick } from "./utils/notification-click"
+
+export { useSettingsDialog } from "./components/settings-dialog"
