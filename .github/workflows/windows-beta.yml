@@ -40,7 +40,8 @@ concurrency:
 
 jobs:
   gate:
-    if: github.repository == 'zuozizuozi/p-zaovra' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.conclusion == 'success' || (github.event.workflow_run.name == 'test' && github.event.workflow_run.conclusion == 'failure'))))
+    # Automatic builds stay skipped until Windows signing is explicitly enabled.
+    if: github.repository == 'zuozizuozi/p-zaovra' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && vars.WINDOWS_SIGNING_ENABLED == 'true' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.conclusion == 'success' || (github.event.workflow_run.name == 'test' && github.event.workflow_run.conclusion == 'failure'))))
     runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.gate.outputs.sha }}

@@ -600,3 +600,74 @@ test("193 real trusted CLI checks old target checkout, fresh K63 and stale metad
   ])
   expect(legacyCode, legacyOut + legacyErr).toBe(0) // Historical verifier ignores the missing gate.
 }, 60000)
+
+test("619 automatic Windows Beta jobs require signing opt-in before the CI gate", async () => {
+  const workflow = Bun.YAML.parse(
+    await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
+  ) as { jobs: Record<string, { if: string; needs?: string }> }
+  const admitted = new Function("github", "vars", "return (" + workflow.jobs.gate.if + ")")
+  const github = {
+    repository: "zuozizuozi/p-zaovra",
+    event_name: "workflow_run",
+    event: {
+      workflow_run: { head_repository: { full_name: "zuozizuozi/p-zaovra" }, name: "test", conclusion: "success" },
+    },
+  }
+  for (const enabled of ["", "false", "1", "true"]) {
+    for (const name of ["test", "typecheck"]) {
+      for (const conclusion of ["success", "failure", "cancelled", "skipped"]) {
+        const event = { ...github, event: { workflow_run: { ...github.event.workflow_run, name, conclusion } } }
+        expect(
+          Boolean(admitted(event, { WINDOWS_SIGNING_ENABLED: enabled })),
+          enabled + "/" + name + "/" + conclusion,
+        ).toBe(enabled === "true" && (conclusion === "success" || (name === "test" && conclusion === "failure")))
+      }
+    }
+  }
+  expect(Boolean(admitted(github, {}))).toBe(false)
+  expect(Boolean(admitted({ ...github, repository: "another/repository" }, { WINDOWS_SIGNING_ENABLED: "true" }))).toBe(
+    false,
+  )
+  expect(
+    Boolean(
+      admitted(
+        {
+          ...github,
+          event: { workflow_run: { ...github.event.workflow_run, head_repository: { full_name: "fork/repository" } } },
+        },
+        { WINDOWS_SIGNING_ENABLED: "true" },
+      ),
+    ),
+  ).toBe(false)
+  // GitHub skips dependent jobs when gate is skipped; no runner or Azure login starts.
+  expect(workflow.jobs.build.needs).toBe("gate")
+  expect(workflow.jobs.publish.needs).toBe("gate")
+  expect(workflow.jobs.build.if).not.toMatch(/always\(|!cancelled\(/)
+  expect(workflow.jobs.publish.if).not.toMatch(/always\(|!cancelled\(/)
+})
+
+test("619 signing opt-in does not restrict manual signed or unsigned Beta dispatch", async () => {
+  const workflow = Bun.YAML.parse(
+    await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
+  ) as { jobs: Record<string, { if: string; env?: Record<string, string> }> }
+  const evaluate = (condition: string, inputs: { build_only: boolean; unsigned_beta: boolean }, enabled: string) =>
+    new Function("github", "inputs", "vars", "needs", "return (" + condition + ")")(
+      { repository: "zuozizuozi/p-zaovra", event_name: "workflow_dispatch", event: {} },
+      inputs,
+      { WINDOWS_SIGNING_ENABLED: enabled },
+      { gate: { outputs: { build: "true" } } },
+    )
+  for (const enabled of ["", "false", "true"]) {
+    for (const unsigned_beta of [false, true]) {
+      for (const build_only of [false, true]) {
+        const inputs = { build_only, unsigned_beta }
+        expect(Boolean(evaluate(workflow.jobs.gate.if, inputs, enabled))).toBe(true)
+        expect(Boolean(evaluate(workflow.jobs.build.if, inputs, enabled))).toBe(build_only)
+        expect(Boolean(evaluate(workflow.jobs.publish.if, inputs, enabled))).toBe(!build_only)
+        expect(evaluate(workflow.jobs.build.env!.ZAOVRA_ALLOW_UNSIGNED_BETA.slice(3, -2), inputs, enabled)).toBe(
+          unsigned_beta ? "true" : "false",
+        )
+      }
+    }
+  }
+})
