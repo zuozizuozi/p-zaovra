@@ -70,7 +70,10 @@ describe("AppProcess", () => {
           'setTimeout(() => process.stderr.write("err 1\\n"), 10)',
           'setTimeout(() => process.stdout.write("out 2\\n"), 20)',
         ].join(";")
-        const result = yield* svc.run(cmd("-e", script), { combineOutput: true })
+        const result = yield* svc.run(cmd("-e", script), {
+          combineOutput: true,
+          onSpawn: () => Effect.promise(() => Bun.sleep(100)),
+        })
         expect(result.output?.toString("utf8")).toBe("out 1\nerr 1\nout 2\n")
         expect(result.stdout.toString("utf8")).toBe("")
         expect(result.stderr.toString("utf8")).toBe("")

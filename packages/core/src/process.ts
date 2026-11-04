@@ -275,10 +275,23 @@ const layer = Layer.effect(
             if (options?.onSpawn) yield* options.onSpawn(handle.pid)
             if (options?.persistent) yield* handle.unref
             if (options?.combineOutput) {
+              const ordered = CrossSpawnSpawner.output(handle)
+              const combined = ordered
+                ? Stream.suspend(() => {
+                    const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() }
+                    return ordered.pipe(
+                      Stream.map((value) =>
+                        Buffer.from(decoders[value.channel].decode(value.data, { stream: value.data !== undefined })),
+                      ),
+                      Stream.filter((value) => value.length > 0),
+                    )
+                  })
+                : Stream.merge(handle.stdout.pipe(Stream.decodeText), handle.stderr.pipe(Stream.decodeText)).pipe(
+                    Stream.map((text) => Buffer.from(text)),
+                  )
               const [output, exitCode] = yield* Effect.all(
                 [
-                  Stream.merge(handle.stdout.pipe(Stream.decodeText), handle.stderr.pipe(Stream.decodeText))
-                    .pipe(Stream.map((text) => Buffer.from(text)))
+                  combined
                     .pipe(
                       Stream.runForEach((chunk) =>
                         Effect.gen(function* () {

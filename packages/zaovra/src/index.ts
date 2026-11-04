@@ -27,6 +27,9 @@ import { WorkerCommand } from "./cli/cmd/worker"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
+import { ProcessTree } from "@zaovra-ai/core/process-tree"
+
+ProcessTree.installSignalHandlers()
 
 const args = hideBin(process.argv)
 
@@ -130,6 +133,10 @@ try {
   }
   process.exitCode = 1
 } finally {
+  await ProcessTree.shutdown().catch((error) => {
+    console.error("Tool process cleanup failed:", error)
+    process.exitCode = 1
+  })
   // Some subprocesses don't react properly to SIGTERM and similar signals.
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.

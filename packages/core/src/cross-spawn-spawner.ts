@@ -23,9 +23,10 @@ import {
 } from "effect/unstable/process/ChildProcessSpawner"
 import * as NodeChildProcess from "node:child_process"
 import { PassThrough } from "node:stream"
-import launch from "cross-spawn"
 import { makeGlobalNode } from "./effect/app-node"
 import { filesystem, path } from "./effect/app-node-platform"
+import { ProcessTree } from "./process-tree"
+import { Duration } from "effect"
 
 const toError = (err: unknown): Error => (err instanceof globalThis.Error ? err : new globalThis.Error(String(err)))
 
@@ -94,7 +95,15 @@ const toPlatformError = (
   })
 }
 
-type ExitSignal = Deferred.Deferred<readonly [code: number | null, signal: NodeJS.Signals | null]>
+type ExitSignal = Deferred.Deferred<
+  readonly [code: number | null, signal: NodeJS.Signals | null],
+  PlatformError.PlatformError
+>
+
+const orderedOutputs = new WeakMap<ChildProcessHandle, Stream.Stream<ProcessTree.Output, PlatformError.PlatformError>>()
+
+/** Ordered output events retain independent UTF8 decoder boundaries. */
+export const output = (handle: ChildProcessHandle) => orderedOutputs.get(handle)
 
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
@@ -167,7 +176,7 @@ export const make = Effect.gen(function* () {
 
   const setupFds = Effect.fnUntraced(function* (
     command: ChildProcess.StandardCommand,
-    proc: NodeChildProcess.ChildProcess,
+    proc: ProcessTree.Child,
     extra: ReadonlyArray<{ fd: number; config: ChildProcess.AdditionalFdConfig }>,
   ) {
     if (extra.length === 0) {
@@ -220,11 +229,7 @@ export const make = Effect.gen(function* () {
     }
   })
 
-  const setupStdin = (
-    command: ChildProcess.StandardCommand,
-    proc: NodeChildProcess.ChildProcess,
-    cfg: ChildProcess.StdinConfig,
-  ) =>
+  const setupStdin = (command: ChildProcess.StandardCommand, proc: ProcessTree.Child, cfg: ChildProcess.StdinConfig) =>
     Effect.suspend(() => {
       let sink: Sink.Sink<void, unknown, never, PlatformError.PlatformError> = Sink.drain
       if (Predicate.isNotNull(proc.stdin)) {
@@ -241,17 +246,18 @@ export const make = Effect.gen(function* () {
 
   const setupOutput = (
     command: ChildProcess.StandardCommand,
-    proc: NodeChildProcess.ChildProcess,
+    proc: ProcessTree.Child,
     out: ChildProcess.StdoutConfig,
     err: ChildProcess.StderrConfig,
+    owner?: ProcessTree.Tracker,
   ) => {
-    let stdout = proc.stdout
+    let stdout = proc.stdio[1]
       ? NodeStream.fromReadable({
           evaluate: () => proc.stdout!,
           onError: (cause) => toPlatformError("fromReadable(stdout)", toError(cause), command),
         })
       : Stream.empty
-    let stderr = proc.stderr
+    let stderr = proc.stdio[2]
       ? NodeStream.fromReadable({
           evaluate: () => proc.stderr!,
           onError: (cause) => toPlatformError("fromReadable(stderr)", toError(cause), command),
@@ -261,91 +267,46 @@ export const make = Effect.gen(function* () {
     if (Sink.isSink(out.stream)) stdout = Stream.transduce(stdout, out.stream)
     if (Sink.isSink(err.stream)) stderr = Stream.transduce(stderr, err.stream)
 
-    return { stdout, stderr, all: Stream.merge(stdout, stderr) }
+    const ordered =
+      owner?.all && !Sink.isSink(out.stream) && !Sink.isSink(err.stream)
+        ? NodeStream.fromReadable<ProcessTree.Output, PlatformError.PlatformError>({
+            evaluate: owner.all,
+            onError: (cause) => toPlatformError("fromReadable(all)", toError(cause), command),
+          })
+        : undefined
+    const all = ordered
+      ? ordered.pipe(
+          Stream.filter((value) => value.data !== undefined),
+          Stream.map((value) => value.data!),
+        )
+      : Stream.merge(stdout, stderr)
+    return { stdout, stderr, all, ordered }
   }
 
   const spawn = (command: ChildProcess.StandardCommand, opts: NodeChildProcess.SpawnOptions) =>
-    Effect.callback<readonly [NodeChildProcess.ChildProcess, ExitSignal], PlatformError.PlatformError>((resume) => {
-      const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
-      const proc = launch(command.command, command.args, opts)
-      let end = false
-      let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
-      proc.on("error", (err) => {
-        resume(Effect.fail(toPlatformError("spawn", err, command)))
-      })
-      proc.on("exit", (...args) => {
-        exit = args
-      })
-      proc.on("close", (...args) => {
-        if (end) return
-        end = true
-        Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
-      })
-      proc.on("spawn", () => {
-        resume(Effect.succeed([proc, signal]))
-      })
-      return Effect.sync(() => {
-        proc.kill("SIGTERM")
-      })
-    })
-
-  const killGroup = (
-    command: ChildProcess.StandardCommand,
-    proc: NodeChildProcess.ChildProcess,
-    signal: NodeJS.Signals,
-  ) => {
-    if (globalThis.process.platform === "win32") {
-      return Effect.callback<void, PlatformError.PlatformError>((resume) => {
-        NodeChildProcess.execFile(
-          "taskkill.exe",
-          ["/pid", String(proc.pid), "/T", "/F"],
-          { windowsHide: true },
-          (err) => {
-            if (err) return resume(Effect.fail(toPlatformError("kill", toError(err), command)))
-            resume(Effect.void)
+    Effect.callback<readonly [ProcessTree.Child, ExitSignal, ProcessTree.Tracker], PlatformError.PlatformError>(
+      (resume) => {
+        const signal = Deferred.makeUnsafe<
+          readonly [number | null, NodeJS.Signals | null],
+          PlatformError.PlatformError
+        >()
+        const starting = ProcessTree.start(command.command, command.args, opts)
+        void starting.then(
+          (owned) => {
+            void owned.closed.then(
+              (exit) => Deferred.doneUnsafe(signal, Exit.succeed(exit)),
+              (error) => Deferred.doneUnsafe(signal, Exit.fail(toPlatformError("exit", toError(error), command))),
+            )
+            resume(Effect.succeed([owned.proc, signal, owned.owner]))
           },
+          (error) => resume(Effect.fail(toPlatformError("spawn", toError(error), command))),
         )
-      })
-    }
-
-    return Effect.try({
-      try: () => {
-        globalThis.process.kill(-proc.pid!, signal)
+        return Effect.promise(async () => {
+          const owned = await starting
+          await owned.owner.stop()
+        })
       },
-      catch: (err) => toPlatformError("kill", toError(err), command),
-    })
-  }
-
-  const killOne = (
-    command: ChildProcess.StandardCommand,
-    proc: NodeChildProcess.ChildProcess,
-    signal: NodeJS.Signals,
-  ) =>
-    Effect.suspend(() => {
-      if (proc.kill(signal)) return Effect.void
-      return Effect.fail(toPlatformError("kill", new Error("Failed to kill child process"), command))
-    })
-
-  const timeout =
-    (
-      proc: NodeChildProcess.ChildProcess,
-      command: ChildProcess.StandardCommand,
-      opts: ChildProcess.KillOptions | undefined,
-    ) =>
-    <A, E, R>(
-      f: (
-        command: ChildProcess.StandardCommand,
-        proc: NodeChildProcess.ChildProcess,
-        signal: NodeJS.Signals,
-      ) => Effect.Effect<A, E, R>,
-    ) => {
-      const signal = opts?.killSignal ?? "SIGTERM"
-      if (Predicate.isUndefined(opts?.forceKillAfter)) return f(command, proc, signal)
-      return Effect.timeoutOrElse(f(command, proc, signal), {
-        duration: opts.forceKillAfter,
-        orElse: () => f(command, proc, "SIGKILL"),
-      })
-    }
+    )
 
   const source = (handle: ChildProcessHandle, from: ChildProcess.PipeFromOption | undefined) => {
     const opt = from ?? "stdout"
@@ -375,43 +336,31 @@ export const make = Effect.gen(function* () {
           const extra = fds(command.options)
           const dir = yield* cwd(command.options)
 
-          const [proc, signal] = yield* Effect.acquireRelease(
+          const [proc, signal, owner] = yield* Effect.acquireRelease(
             spawn(command, {
               cwd: dir,
               env: env(command.options),
               stdio: stdios(sin, sout, serr, extra),
-              detached: command.options.detached ?? process.platform !== "win32",
+              detached: process.platform !== "win32",
               shell: command.options.shell,
               windowsHide: process.platform === "win32",
             }),
-            Effect.fnUntraced(function* ([proc, signal]) {
-              const done = yield* Deferred.isDone(signal)
-              const kill = timeout(proc, command, command.options)
-              if (done) {
-                const [code] = yield* Deferred.await(signal)
-                if (process.platform === "win32") return yield* Effect.void
-                if (code !== 0 && Predicate.isNotNull(code)) return yield* Effect.ignore(kill(killGroup))
-                return yield* Effect.void
-              }
-              const send = (s: NodeJS.Signals) =>
-                Effect.catch(killGroup(command, proc, s), () => killOne(command, proc, s))
-              const sig = command.options.killSignal ?? "SIGTERM"
-              const attempt = send(sig).pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid)
-              const escalated = command.options.forceKillAfter
-                ? Effect.timeoutOrElse(attempt, {
-                    duration: command.options.forceKillAfter,
-                    orElse: () => send("SIGKILL").pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid),
-                  })
-                : attempt
-              return yield* Effect.ignore(escalated)
-            }),
+            ([, , owner]) =>
+              Effect.promise(() =>
+                owner.stop(
+                  command.options.killSignal,
+                  command.options.forceKillAfter === undefined
+                    ? undefined
+                    : Duration.toMillis(Duration.fromInputUnsafe(command.options.forceKillAfter)),
+                ),
+              ).pipe(Effect.orDie),
           )
 
           const fd = yield* setupFds(command, proc, extra)
-          const out = setupOutput(command, proc, sout, serr)
+          const out = setupOutput(command, proc, sout, serr, owner)
           let ref = true
-          return makeHandle({
-            pid: ProcessId(proc.pid!),
+          const handle = makeHandle({
+            pid: ProcessId(owner.pid),
             stdin: yield* setupStdin(command, proc, sin),
             stdout: out.stdout,
             stderr: out.stderr,
@@ -429,17 +378,17 @@ export const make = Effect.gen(function* () {
                 ),
               )
             }),
-            kill: (opts?: ChildProcess.KillOptions) => {
-              const sig = opts?.killSignal ?? "SIGTERM"
-              const send = (s: NodeJS.Signals) =>
-                Effect.catch(killGroup(command, proc, s), () => killOne(command, proc, s))
-              const attempt = send(sig).pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid)
-              if (!opts?.forceKillAfter) return attempt
-              return Effect.timeoutOrElse(attempt, {
-                duration: opts.forceKillAfter,
-                orElse: () => send("SIGKILL").pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid),
-              })
-            },
+            kill: (opts?: ChildProcess.KillOptions) =>
+              Effect.tryPromise({
+                try: () =>
+                  owner.stop(
+                    opts?.killSignal,
+                    opts?.forceKillAfter === undefined
+                      ? undefined
+                      : Duration.toMillis(Duration.fromInputUnsafe(opts.forceKillAfter)),
+                  ),
+                catch: (error) => toPlatformError("kill", toError(error), command),
+              }),
             unref: Effect.sync(() => {
               if (ref) {
                 proc.unref()
@@ -453,6 +402,8 @@ export const make = Effect.gen(function* () {
               })
             }),
           })
+          if (out.ordered) orderedOutputs.set(handle, out.ordered)
+          return handle
         }
         case "PipedCommand": {
           const flat = flatten(command)
