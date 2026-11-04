@@ -8,10 +8,19 @@ export async function identity(_pid: number): Promise<Identity | undefined> {
   throw new Error("Native tool process-tree ownership requires Bun on Windows or Linux")
 }
 
-export async function snapshot(): Promise<Identity[]> {
+export async function signal(_item: Identity, _signal: NodeJS.Signals): Promise<void> {
   throw new Error("Native tool process-tree ownership requires Bun on Windows or Linux")
 }
 
-export async function signal(_item: Identity, _signal: NodeJS.Signals): Promise<void> {
-  throw new Error("Native tool process-tree ownership requires Bun on Windows or Linux")
+export async function createJob(): Promise<{
+  name: string
+  members(): number[]
+  verify(pid: number): void
+  stop(): Promise<void>
+}> {
+  throw new Error("Native tool process ownership requires Bun on Windows or Linux")
+}
+
+export async function installSubreaper(): Promise<void> {
+  throw new Error("Native tool process ownership requires Bun on Linux")
 }

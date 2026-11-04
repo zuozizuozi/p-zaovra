@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { scheduler } from "node:timers/promises"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@zaovra-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -29,6 +29,47 @@ async function ready(file: string) {
 
 describe("spawner owned-tree scope disposal", () => {
   if (!ProcessTree.supported()) return
+  it.live(
+    "retains immediate shell stdout and stderr through delayed consumption and nonzero exit",
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      for (let index = 0; index < (process.platform === "win32" ? 3 : 30); index++) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* spawner.spawn(
+              process.platform === "win32"
+                ? ChildProcess.make(
+                    process.env.COMSPEC ?? "cmd.exe",
+                    ["/d", "/s", "/c", "echo hello& echo problem 1>&2& exit /b 42"],
+                    { stdin: "ignore" },
+                  )
+                : ChildProcess.make("/bin/sh", ["-c", "printf hello; printf problem >&2; exit 42"], {
+                    stdin: "ignore",
+                  }),
+            )
+            // The process may already be closed before its consumers attach.
+            yield* Effect.sleep("50 millis")
+            const result = yield* Effect.all(
+              [Stream.runCollect(handle.stdout), Stream.runCollect(handle.stderr), handle.exitCode],
+              { concurrency: "unbounded" },
+            )
+            expect(
+              Buffer.concat(result[0].map((chunk) => Buffer.from(chunk)))
+                .toString()
+                .trim(),
+            ).toBe("hello")
+            expect(
+              Buffer.concat(result[1].map((chunk) => Buffer.from(chunk)))
+                .toString()
+                .trim(),
+            ).toBe("problem")
+            expect(Number(result[2])).toBe(42)
+          }),
+        )
+      }
+    }),
+    60000,
+  )
   it.live(
     "waits for detached tool descendants while leaving an unrelated process alive",
     Effect.gen(function* () {

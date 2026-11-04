@@ -96,7 +96,15 @@ const toPlatformError = (
   })
 }
 
-type ExitSignal = Deferred.Deferred<readonly [code: number | null, signal: NodeJS.Signals | null]>
+type ExitSignal = Deferred.Deferred<
+  readonly [code: number | null, signal: NodeJS.Signals | null],
+  PlatformError.PlatformError
+>
+
+const orderedOutputs = new WeakMap<ChildProcessHandle, Stream.Stream<ProcessTree.Output, PlatformError.PlatformError>>()
+
+/** Ordered native output events retain independent UTF8 decoder boundaries. */
+export const output = (handle: ChildProcessHandle) => orderedOutputs.get(handle)
 
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
@@ -246,14 +254,15 @@ export const make = Effect.gen(function* () {
     proc: NodeChildProcess.ChildProcess,
     out: ChildProcess.StdoutConfig,
     err: ChildProcess.StderrConfig,
+    owner?: ProcessTree.Tracker,
   ) => {
-    let stdout = proc.stdout
+    let stdout = proc.stdio[1]
       ? NodeStream.fromReadable({
           evaluate: () => proc.stdout!,
           onError: (cause) => toPlatformError("fromReadable(stdout)", toError(cause), command),
         })
       : Stream.empty
-    let stderr = proc.stderr
+    let stderr = proc.stdio[2]
       ? NodeStream.fromReadable({
           evaluate: () => proc.stderr!,
           onError: (cause) => toPlatformError("fromReadable(stderr)", toError(cause), command),
@@ -263,7 +272,20 @@ export const make = Effect.gen(function* () {
     if (Sink.isSink(out.stream)) stdout = Stream.transduce(stdout, out.stream)
     if (Sink.isSink(err.stream)) stderr = Stream.transduce(stderr, err.stream)
 
-    return { stdout, stderr, all: Stream.merge(stdout, stderr) }
+    const ordered =
+      owner?.all && !Sink.isSink(out.stream) && !Sink.isSink(err.stream)
+        ? NodeStream.fromReadable<ProcessTree.Output, PlatformError.PlatformError>({
+            evaluate: owner.all,
+            onError: (cause) => toPlatformError("fromReadable(all)", toError(cause), command),
+          })
+        : undefined
+    const all = ordered
+      ? ordered.pipe(
+          Stream.filter((value) => value.data !== undefined),
+          Stream.map((value) => value.data!),
+        )
+      : Stream.merge(stdout, stderr)
+    return { stdout, stderr, all, ordered }
   }
 
   const spawn = (command: ChildProcess.StandardCommand, opts: NodeChildProcess.SpawnOptions) =>
@@ -272,14 +294,28 @@ export const make = Effect.gen(function* () {
       PlatformError.PlatformError
     >((resume) => {
       ProcessTree.assertOpen()
-      const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
+      const signal = Deferred.makeUnsafe<readonly [number | null, NodeJS.Signals | null], PlatformError.PlatformError>()
+      if (ProcessTree.supported()) {
+        const starting = ProcessTree.start(command.command, command.args, opts)
+        void starting.then(
+          (owned) => {
+            void owned.closed.then(
+              (exit) => Deferred.doneUnsafe(signal, Exit.succeed(exit)),
+              (error) => Deferred.doneUnsafe(signal, Exit.fail(toPlatformError("exit", toError(error), command))),
+            )
+            resume(Effect.succeed([owned.proc, signal, owned.owner]))
+          },
+          (error) => resume(Effect.fail(toPlatformError("spawn", toError(error), command))),
+        )
+        return Effect.promise(async () => {
+          const owned = await starting
+          await owned.owner.stop()
+        })
+      }
       const proc = launch(command.command, command.args, opts)
-      const ownership = ProcessTree.track(proc)
       let end = false
-      let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
-      proc.on("error", (err) => {
-        resume(Effect.fail(toPlatformError("spawn", err, command)))
-      })
+      let exit: readonly [number | null, NodeJS.Signals | null] | undefined
+      proc.on("error", (error) => resume(Effect.fail(toPlatformError("spawn", error, command))))
       proc.on("exit", (...args) => {
         exit = args
       })
@@ -288,16 +324,9 @@ export const make = Effect.gen(function* () {
         end = true
         Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
       })
-      proc.on("spawn", () => {
-        void ownership.then(
-          (owner) => resume(Effect.succeed([proc, signal, owner])),
-          (error) => resume(Effect.fail(toPlatformError("track", toError(error), command))),
-        )
-      })
-      return Effect.promise(async () => {
-        const owner = await ownership
-        if (owner) return owner.stop()
-        if (!ProcessTree.supported()) proc.kill("SIGTERM")
+      proc.on("spawn", () => resume(Effect.succeed([proc, signal, undefined])))
+      return Effect.sync(() => {
+        proc.kill("SIGTERM")
       })
     })
 
@@ -396,47 +425,48 @@ export const make = Effect.gen(function* () {
               shell: command.options.shell,
               windowsHide: process.platform === "win32",
             }),
-            Effect.fnUntraced(function* ([proc, signal, owner]) {
-              if (owner) {
-                return yield* Effect.promise(() =>
-                  owner.stop(
-                    command.options.killSignal,
-                    command.options.forceKillAfter === undefined
-                      ? undefined
-                      : Duration.toMillis(Duration.fromInputUnsafe(command.options.forceKillAfter)),
-                  ),
-                )
-              }
-              // A short-lived process may exit before identity admission. Never
-              // fall back to a recycled numeric PID/group on the native path.
-              if (ProcessTree.supported()) return
-              const done = yield* Deferred.isDone(signal)
-              const kill = timeout(proc, command, command.options)
-              if (done) {
-                const [code] = yield* Deferred.await(signal)
-                if (process.platform === "win32") return yield* Effect.void
-                if (code !== 0 && Predicate.isNotNull(code)) return yield* Effect.ignore(kill(killGroup))
-                return yield* Effect.void
-              }
-              const send = (s: NodeJS.Signals) =>
-                Effect.catch(killGroup(command, proc, s), () => killOne(command, proc, s))
-              const sig = command.options.killSignal ?? "SIGTERM"
-              const attempt = send(sig).pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid)
-              const escalated = command.options.forceKillAfter
-                ? Effect.timeoutOrElse(attempt, {
-                    duration: command.options.forceKillAfter,
-                    orElse: () => send("SIGKILL").pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid),
-                  })
-                : attempt
-              return yield* Effect.ignore(escalated)
-            }),
+            ([proc, signal, owner]) =>
+              Effect.gen(function* () {
+                if (owner) {
+                  return yield* Effect.promise(() =>
+                    owner.stop(
+                      command.options.killSignal,
+                      command.options.forceKillAfter === undefined
+                        ? undefined
+                        : Duration.toMillis(Duration.fromInputUnsafe(command.options.forceKillAfter)),
+                    ),
+                  )
+                }
+                // A short-lived process may exit before identity admission. Never
+                // fall back to a recycled numeric PID/group on the native path.
+                if (ProcessTree.supported()) return
+                const done = yield* Deferred.isDone(signal)
+                const kill = timeout(proc, command, command.options)
+                if (done) {
+                  const [code] = yield* Deferred.await(signal)
+                  if (process.platform === "win32") return yield* Effect.void
+                  if (code !== 0 && Predicate.isNotNull(code)) return yield* Effect.ignore(kill(killGroup))
+                  return yield* Effect.void
+                }
+                const send = (s: NodeJS.Signals) =>
+                  Effect.catch(killGroup(command, proc, s), () => killOne(command, proc, s))
+                const sig = command.options.killSignal ?? "SIGTERM"
+                const attempt = send(sig).pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid)
+                const escalated = command.options.forceKillAfter
+                  ? Effect.timeoutOrElse(attempt, {
+                      duration: command.options.forceKillAfter,
+                      orElse: () => send("SIGKILL").pipe(Effect.andThen(Deferred.await(signal)), Effect.asVoid),
+                    })
+                  : attempt
+                return yield* Effect.ignore(escalated)
+              }).pipe(Effect.orDie),
           )
 
           const fd = yield* setupFds(command, proc, extra)
-          const out = setupOutput(command, proc, sout, serr)
+          const out = setupOutput(command, proc, sout, serr, owner)
           let ref = true
-          return makeHandle({
-            pid: ProcessId(proc.pid!),
+          const handle = makeHandle({
+            pid: ProcessId(owner?.pid ?? proc.pid!),
             stdin: yield* setupStdin(command, proc, sin),
             stdout: out.stdout,
             stderr: out.stderr,
@@ -490,6 +520,8 @@ export const make = Effect.gen(function* () {
               })
             }),
           })
+          if (out.ordered) orderedOutputs.set(handle, out.ordered)
+          return handle
         }
         case "PipedCommand": {
           const flat = flatten(command)
