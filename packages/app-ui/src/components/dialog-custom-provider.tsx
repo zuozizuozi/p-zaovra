@@ -35,6 +35,8 @@ import {
   type ModelRow,
   headerRow,
   modelRow,
+  customProviderDefaults,
+  customProviderEnable,
   validateCustomProvider,
   validateProviderURL,
 } from "./dialog-custom-provider-form"
@@ -86,7 +88,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     manual: false,
     advanced: false,
     normalizedURL: "",
-    enable: undefined as boolean | undefined,
+    enable: undefined as { providerID: string; value: boolean } | undefined,
   })
   const alive = { value: true }
   const operation = providerOperation()
@@ -96,27 +98,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     alive.value = false
     operation.cancel()
   })
-  const automatic = () => {
-    const baseURL = providerBaseURL(form.baseURL, form.protocol ?? providerPresetProtocol(form.baseURL))
-    const host = new URL(baseURL).hostname
-    const stem =
-      host
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "-")
-        .replace(/^-+/, "") || "custom"
-    const used = new Set(serverSync().data.provider.all.keys())
-    const id = Array.from({ length: used.size + 2 }, (_, i) => (i === 0 ? stem : `${stem}-${i + 1}`)).find(
-      (id) => !used.has(id),
-    )!
-    const existing = Object.entries(serverSync().data.config.provider ?? {}).find(
-      ([, provider]) => providerServiceKey(provider.options?.baseURL) === baseURL,
-    )
-    return {
-      baseURL,
-      name: form.name.trim() || existing?.[1].name || host,
-      providerID: form.providerID.trim() || saved.providerID || existing?.[0] || id,
-    }
-  }
+  const automatic = () =>
+    customProviderDefaults({
+      form,
+      savedProviderID: saved.providerID,
+      providerIDs: serverSync().data.provider.all.keys(),
+      providers: serverSync().data.config.provider,
+    })
   const normalizeURL = () => {
     const selected = form.protocol ?? providerPresetProtocol(form.baseURL)
     const url = validateProviderURL(form.baseURL, selected, language.t)
@@ -261,8 +249,9 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
   }
 
   const validate = () => {
+    const defaults = automatic()
     const output = validateCustomProvider({
-      form: { ...form, ...automatic() },
+      form: { ...form, ...defaults },
       t: language.t,
       disabledProviders: serverSync().data.config.disabled_providers ?? [],
       existingProviderIDs: new Set(
@@ -270,8 +259,8 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           (id) =>
             id !== saved.providerID &&
             !(
-              id === automatic().providerID &&
-              providerServiceKey(serverSync().data.config.provider?.[id]?.options?.baseURL) === automatic().baseURL
+              id === defaults.providerID &&
+              providerServiceKey(serverSync().data.config.provider?.[id]?.options?.baseURL) === defaults.baseURL
             ),
         ),
       ),
@@ -286,15 +275,8 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     return output.result
   }
 
-  const reconnectID = () =>
-    saved.providerID ||
-    form.providerID.trim() ||
-    Object.entries(serverSync().data.config.provider ?? {}).find(
-      ([, provider]) =>
-        providerServiceKey(form.baseURL) &&
-        providerServiceKey(provider.options?.baseURL) === providerServiceKey(form.baseURL),
-    )?.[0]
-  const enable = () => discovery.enable ?? service.disconnected(reconnectID() ?? "")
+  const enable = (providerID = automatic().providerID) =>
+    customProviderEnable(providerID, service.disconnected(providerID), discovery.enable)
   const snapshot = (result: NonNullable<ReturnType<typeof validate>>) => {
     const valid = operation.start()
     const sdk = serverSDK()
@@ -305,7 +287,10 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       models: form.models.map((model) => ({ ...model })),
       sdk,
       sync: serverSync(),
-      enable: enable(),
+      enable: enable(result.providerID),
+      verified:
+        discovery.models.length > 0 ||
+        (form.protocol === undefined && form.models.some((model) => modelType(model) === "chat")),
       current: () => valid() && alive.value && serverSDK() === sdk,
     }
   }
@@ -388,12 +373,10 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       await result.sync.queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === result.sdk.scope && query.queryKey[2] === "providers",
       })
-      await serverSync().queryClient.fetchQuery({ ...serverSync().queryOptions.providers(null), staleTime: 0 })
-      if (
-        discovery.models.length ||
-        (form.protocol === undefined && form.models.some((model) => modelType(model) === "chat"))
-      )
-        serverSync().markProviderVerified(result.providerID)
+      if (!result.current()) return
+      await result.sync.queryClient.fetchQuery({ ...result.sync.queryOptions.providers(null), staleTime: 0 })
+      if (!result.current()) return
+      if (result.verified) result.sync.markProviderVerified(result.providerID)
       return result
     },
     onSuccess: (result) => {
@@ -460,11 +443,11 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       <form onSubmit={save} class="px-2.5 pb-6 flex flex-col gap-6">
         <p class="text-14-regular text-text-base">{language.t("provider.custom.discovery.intro")}</p>
         <fieldset disabled={discovery.pending || saveMutation.isPending} class="flex min-w-0 flex-col gap-6">
-          <Show when={serverSync().data.config.disabled_providers?.includes(reconnectID() ?? "")}>
+          <Show when={serverSync().data.config.disabled_providers?.includes(automatic().providerID)}>
             <ProviderEnableChoice
-              disconnected={service.disconnected(reconnectID() ?? "")}
+              disconnected={service.disconnected(automatic().providerID)}
               checked={enable()}
-              onChange={(value) => setDiscovery("enable", value)}
+              onChange={(value) => setDiscovery("enable", { providerID: automatic().providerID, value })}
             />
           </Show>
           <div class="flex flex-col gap-4">

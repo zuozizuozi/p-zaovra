@@ -1,8 +1,76 @@
 import { describe, expect, test } from "bun:test"
-import { validateCustomProvider, validateProviderURL } from "./dialog-custom-provider-form"
+import {
+  customProviderDefaults,
+  customProviderEnable,
+  validateCustomProvider,
+  validateProviderURL,
+} from "./dialog-custom-provider-form"
+import { reconnectDisabledProviders } from "../utils/provider-integration"
 import { providerBaseURL } from "../provider-discovery"
 
 const t = (key: string) => key
+
+describe("594 custom provider enable target", () => {
+  for (const [explicit, saved, expected] of [
+    [" replacement ", "saved-old", "replacement"],
+    ["", "saved-old", "saved-old"],
+    ["", undefined, "same-address"],
+  ] as const) {
+    test(`validates and enables the same saved ID: ${expected}`, () => {
+      const form = {
+        protocol: "openai" as const,
+        providerID: explicit,
+        name: "",
+        baseURL: "https://synthetic.example/v1/chat/completions",
+        apiKey: "synthetic",
+        models: [{ row: "m0", id: "model", name: "", err: {} }],
+        headers: [],
+        err: {},
+      }
+      const defaults = customProviderDefaults({
+        form,
+        savedProviderID: saved,
+        providerIDs: ["saved-old", "same-address", "replacement"],
+        providers: { "same-address": { name: "Synthetic", options: { baseURL: "https://synthetic.example/v1" } } },
+      })
+      const result = validateCustomProvider({
+        form: { ...form, ...defaults },
+        t,
+        disabledProviders: ["saved-old", "same-address", "replacement"],
+        existingProviderIDs: new Set(["saved-old", "same-address", "replacement"]),
+      }).result!
+      expect(defaults.providerID).toBe(expected)
+      expect(result.providerID).toBe(expected)
+      expect(result.config.options.baseURL).toBe("https://synthetic.example/v1")
+      const shouldEnable = customProviderEnable(result.providerID, true, undefined)
+      expect(reconnectDisabledProviders([expected, "unrelated"], result.providerID, shouldEnable)).toEqual([
+        "unrelated",
+      ])
+    })
+  }
+
+  test("a stale checkbox for old A cannot enable manually disabled B", () => {
+    expect(customProviderEnable("replacement", false, { providerID: "saved-old", value: true })).toBe(false)
+    expect(customProviderEnable("replacement", true, { providerID: "replacement", value: false })).toBe(false)
+    expect(customProviderEnable("replacement", false, { providerID: "replacement", value: true })).toBe(true)
+  })
+
+  test("blank URL is safe during initial rendering and a new ID cannot collide", () => {
+    const form = { providerID: "", name: "", baseURL: "", apiKey: "", models: [], headers: [], err: {} }
+    const empty = customProviderDefaults({ form, providerIDs: [], providers: {} })
+    expect(
+      validateCustomProvider({ form: { ...form, ...empty }, t, disabledProviders: [], existingProviderIDs: new Set() })
+        .result,
+    ).toBeUndefined()
+    const created = customProviderDefaults({
+      form: { ...form, baseURL: "https://synthetic.example" },
+      providerIDs: ["synthetic-example"],
+      providers: {},
+    })
+    expect(created.providerID).toBe("synthetic-example-2")
+    expect(customProviderEnable(created.providerID, false, undefined)).toBe(false)
+  })
+})
 
 test("discovery and saving share address normalization and rejection reasons", () => {
   for (const [input, output] of [

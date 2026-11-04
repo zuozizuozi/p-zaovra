@@ -286,6 +286,13 @@ const lowerMessages = Effect.fn("Gemini.lowerMessages")(function* (request: LLMR
     contents.push({ role: "user", parts })
   }
 
+  // A step-limit notice may follow a settled tool result as assistant text.
+  // Keep that history intact, but Gemini cannot continue from this model prefill.
+  if (
+    contents.at(-1)?.role === "model" &&
+    contents.some((content) => content.parts.some((part) => "functionResponse" in part))
+  )
+    contents.push({ role: "user", parts: [{ text: "Continue." }] })
   return contents
 })
 

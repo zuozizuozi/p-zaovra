@@ -1,6 +1,8 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 import {
   providerBaseURL,
+  providerPresetProtocol,
+  providerServiceKey,
   providerProtocols,
   type ProviderProtocol,
   type ProviderModelType,
@@ -56,6 +58,50 @@ type ValidateArgs = {
   t: Translator
   disabledProviders: string[]
   existingProviderIDs: Set<string>
+}
+
+export function customProviderDefaults(input: {
+  form: FormState
+  savedProviderID?: string
+  providerIDs: Iterable<string>
+  providers: Config["provider"]
+}) {
+  const baseURL = validateProviderURL(
+    input.form.baseURL,
+    input.form.protocol ?? providerPresetProtocol(input.form.baseURL),
+    (key) => key,
+  ).baseURL
+  const host = baseURL ? new URL(baseURL).hostname : "custom"
+  const stem =
+    host
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-")
+      .replace(/^-+/, "") || "custom"
+  const used = new Set(input.providerIDs)
+  const existing = baseURL
+    ? Object.entries(input.providers ?? {}).find(
+        ([, provider]) => providerServiceKey(provider.options?.baseURL) === baseURL,
+      )
+    : undefined
+  return {
+    baseURL: baseURL ?? input.form.baseURL,
+    name: input.form.name.trim() || existing?.[1].name || host,
+    providerID:
+      input.form.providerID.trim() ||
+      input.savedProviderID ||
+      existing?.[0] ||
+      Array.from({ length: used.size + 2 }, (_, i) => (i === 0 ? stem : `${stem}-${i + 1}`)).find(
+        (id) => !used.has(id),
+      )!,
+  }
+}
+
+export function customProviderEnable(
+  providerID: string,
+  disconnected: boolean,
+  choice: { providerID: string; value: boolean } | undefined,
+) {
+  return choice?.providerID === providerID ? choice.value : disconnected
 }
 
 export function validateProviderURL(value: string, protocol: FormState["protocol"], t: Translator) {
