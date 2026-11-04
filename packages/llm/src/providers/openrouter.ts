@@ -161,7 +161,10 @@ export const protocol = Protocol.make({
             ...event,
             choices: event.choices.map((choice) => ({
               ...choice,
-              delta: choice.delta ? { ...choice.delta, reasoning_content: undefined } : choice.delta,
+              // This adapter already emitted reasoning; neither alias belongs to the shared parser now.
+              delta: choice.delta
+                ? { ...choice.delta, reasoning_content: undefined, reasoning: undefined }
+                : choice.delta,
             })),
           },
         )
