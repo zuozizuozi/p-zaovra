@@ -829,7 +829,7 @@ function ProviderConnection(props: {
     dispatch({ type: "method.reset" })
   })
 
-  async function complete() {
+  async function complete(verified = false) {
     const name = provider().name
     attempt.complete = true
     await serverSDK().client.global.dispose({ throwOnError: true })
@@ -852,14 +852,20 @@ function ProviderConnection(props: {
         () => false,
       )
     service.select(props.provider)
+    if (verified) serverSync().markProviderVerified(props.provider)
     dialog.close()
     showToast({
       variant: "success",
       icon: "circle-check",
-      title: language.t("provider.connect.toast.connected.title", { provider: name }),
-      description: language.t(visible ? "provider.connect.toast.connected.description" : "model.catalog.saved", {
+      title: language.t(verified ? "provider.connect.toast.connected.title" : "provider.connect.toast.saved.title", {
         provider: name,
       }),
+      description: language.t(
+        visible && verified ? "provider.connect.toast.connected.description" : "model.catalog.saved",
+        {
+          provider: name,
+        },
+      ),
     })
   }
 
@@ -996,7 +1002,7 @@ function ProviderConnection(props: {
           },
           { throwOnError: true },
         )
-        if (alive.value) await complete()
+        if (alive.value) await complete(!!preset && !Object.keys(store.promptInputs ?? {}).length)
       } catch (error) {
         if (!alive.value) return
         const message = error instanceof Error ? error.message : ""

@@ -288,6 +288,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   function isAutoAccepting(sessionID: string, directory?: string) {
+    if (sessionAutoAccept(store.autoAccept, sessions(directory), { sessionID }, directory) === false) return false
     if (directory && store.modes[directoryAcceptKey(directory)])
       return store.modes[directoryAcceptKey(directory)] !== "ask"
     return autoRespondsPermission(store.autoAccept, sessions(directory), { sessionID }, directory)
@@ -299,6 +300,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
   }
 
   function shouldAutoRespond(permission: PermissionView, directory?: string) {
+    if (sessionAutoAccept(store.autoAccept, sessions(directory), permission, directory) === false) return false
     if (directory && store.modes[directoryAcceptKey(directory)])
       return modeAllowsPermission(store.modes[directoryAcceptKey(directory)], permission)
     return autoRespondsPermission(store.autoAccept, sessions(directory), permission, directory)
@@ -356,6 +358,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
 
   function enableDirectory(directory: string) {
     if (meta.disposed) return
+    setDirectoryMode(directory, "full")
     const key = directoryAcceptKey(directory)
     setStore(
       produce((draft) => {
@@ -382,6 +385,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     setStore(
       produce((draft) => {
         draft.autoAccept[key] = false
+        draft.modes[key] = "ask"
       }),
     )
   }
@@ -422,6 +426,8 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     setStore(
       produce((draft) => {
         draft.autoAccept[key] = false
+        const target = directory ?? input.sync.session.lineage.peek(sessionID)?.session.directory
+        if (target) draft.modes[directoryAcceptKey(target)] = "ask"
         if (!directory) return
         delete draft.autoAccept[sessionID]
       }),
@@ -430,6 +436,8 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
 
   const api = {
     mode(directory: string, sessionID?: string): PermissionMode {
+      if (sessionID && sessionAutoAccept(store.autoAccept, sessions(directory), { sessionID }, directory) === false)
+        return "ask"
       return (
         store.modes[directoryAcceptKey(directory)] ??
         ((sessionID ? isAutoAccepting(sessionID, directory) : isAutoAcceptingDirectory(directory)) ? "full" : "ask")
@@ -437,7 +445,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     },
     setMode(directory: string, mode: PermissionMode) {
       if (meta.disposed || !["ask", "automatic", "full"].includes(mode)) return
-      setStore("modes", directoryAcceptKey(directory), mode)
+      setDirectoryMode(directory, mode)
       if (mode === "ask") return
       void input.sdk.client.v2.permission.request
         .list({ location: { directory } }, { throwOnError: true })
@@ -492,6 +500,23 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
       const [childStore] = input.sync.child(directory)
       return childStore.config.permission === "allow"
     },
+  }
+
+  function setDirectoryMode(directory: string, mode: PermissionMode) {
+    const key = directoryAcceptKey(directory)
+    setStore(
+      produce((draft) => {
+        draft.modes[key] = mode
+        if (mode === "ask") return
+        // An explicit project selection replaces legacy session overrides for this project.
+        Object.keys(draft.autoAccept)
+          .filter((item) => item.startsWith(key.slice(0, -1)) && item !== key)
+          .forEach((item) => delete draft.autoAccept[item])
+        sessions(directory)
+          .filter((session) => session.directory === directory)
+          .forEach((session) => delete draft.autoAccept[session.id])
+      }),
+    )
   }
 
   return {

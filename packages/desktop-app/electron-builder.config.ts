@@ -45,6 +45,14 @@ const APP_IDS = {
   prod: "ai.zaovra.desktop",
 } as const
 
+// New identities must never invoke an old uninstaller whose InstallLocation
+// points at the shared pre-isolation directory (which can contain another channel).
+const INSTALLER_IDS = {
+  prod: "fbddedf8-1423-5de4-8bdd-ac14b5197666",
+  beta: "ba4cdc26-99a6-5b17-891a-309ad8f2da29",
+  dev: "2e9fc3e5-150a-5caa-95e1-b540a8ed93e1",
+} as const
+
 const getBase = (appId: string): Configuration => ({
   artifactName: "zaovra-desktop-${os}-${arch}.${ext}",
   directories: {
@@ -57,6 +65,7 @@ const getBase = (appId: string): Configuration => ({
   // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
   // https://www.electron.build/docs/linux/
   extraMetadata: {
+    name: channel === "prod" ? "zaovra-desktop" : `zaovra-desktop-${channel}`,
     desktopName: `${appId}.desktop`,
   },
   files: ["out/**/*", "!out/**/notices-inputs.json", "resources/**/*", "!resources/bin/**/*"],
@@ -88,6 +97,8 @@ const getBase = (appId: string): Configuration => ({
     verifyUpdateCodeSignature: !unsignedBeta,
   },
   nsis: {
+    guid: INSTALLER_IDS[channel],
+    include: `resources/channel-${channel}.nsh`,
     oneClick: true,
     perMachine: false,
     installerIcon: `resources/icons/icon.ico`,
@@ -109,16 +120,21 @@ const getBase = (appId: string): Configuration => ({
   },
 })
 
-function getConfig() {
+export function getConfig(platform: NodeJS.Platform = process.platform) {
   const appId = APP_IDS[channel]
   const base = getBase(appId)
+  const displayName = channel === "prod" ? "Zaovra" : channel === "beta" ? "Zaovra Beta" : "Zaovra Dev"
+  // FPM places the application under /opt/<productName>. Keep its sandboxed
+  // executable path free of spaces while retaining the human-facing launcher name.
+  const productName = platform === "linux" ? (channel === "prod" ? "zaovra" : `zaovra-${channel}`) : displayName
+  if (base.linux?.desktop?.entry) base.linux.desktop.entry.Name = displayName
 
   switch (channel) {
     case "dev": {
       return {
         ...base,
         appId,
-        productName: "Zaovra Dev",
+        productName,
         rpm: { packageName: "zaovra-dev" },
       }
     }
@@ -126,7 +142,7 @@ function getConfig() {
       return {
         ...base,
         appId,
-        productName: "Zaovra Beta",
+        productName,
         protocols: { name: "Zaovra Beta", schemes: [DEEP_LINK_PROTOCOLS[channel]] },
         publish: { provider: "generic", url: "https://updates.zaovra.com/beta/", channel: "beta" },
         rpm: { packageName: "zaovra-beta" },
@@ -136,7 +152,7 @@ function getConfig() {
       return {
         ...base,
         appId,
-        productName: "Zaovra",
+        productName,
         protocols: { name: "Zaovra", schemes: [DEEP_LINK_PROTOCOLS[channel]] },
         publish: { provider: "github", owner: "zuozizuozi", repo: "p-zaovra", channel: "latest" },
         deb: { fpm: [legacyDesktopEntryFpm] },

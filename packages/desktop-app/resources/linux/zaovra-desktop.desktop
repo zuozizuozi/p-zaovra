@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Zaovra
-Exec=/opt/Zaovra/ai.zaovra.desktop %U
+Exec=/opt/zaovra/ai.zaovra.desktop %U
 Terminal=false
 Type=Application
 Icon=ai.zaovra.desktop

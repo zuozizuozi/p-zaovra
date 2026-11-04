@@ -113,7 +113,8 @@ test("562 diagnostic summaries preserve status and request id without accepting 
   const error = JSON.parse(snapshot.text).errors[0]
   expect(error.status).toBe(400)
   expect(error.requestID).toBe("req_fixture_562")
-  expect(error.message).toContain("HTTP 400 invalid tool schema")
+  expect(error.message).toBeUndefined()
+  expect(Feedback.copy(snapshot)).not.toContain("invalid tool schema")
   expect(Feedback.copy(snapshot)).not.toContain("SYNTHETIC_PRIVATE_RAW_MESSAGE")
   expect(Feedback.copy(snapshot)).not.toContain("SYNTHETIC_DIAGNOSTIC_SECRET")
 })

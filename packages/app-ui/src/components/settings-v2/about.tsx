@@ -4,10 +4,12 @@ import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { BrandMark } from "../brand-mark"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
+import { useUpdaterAction } from "../updater-action"
 
 export function SettingsAbout() {
   const language = useLanguage()
   const platform = usePlatform()
+  const updater = useUpdaterAction()
   const [state, setState] = createStore<{ document?: "license" | "notices" }>({})
   const [text] = createResource(
     () => state.document,
@@ -18,9 +20,21 @@ export function SettingsAbout() {
       <BrandMark class="size-16" />
       <h2 class="text-24-semibold">Zaovra</h2>
       <p>
-        {language.t("settings.about.version")}{" "}
-        {platform.version ?? language.t("settings.about.dev")}
+        {language.t("settings.about.version")} {platform.version ?? language.t("settings.about.dev")}
       </p>
+      <Show when={platform.channel}>
+        <p>
+          {language.t("settings.about.channel")}: {platform.channel}
+        </p>
+      </Show>
+      <Show when={platform.updater}>
+        <div class="flex flex-wrap items-center gap-3" data-component="about-updater">
+          <p role="status">{language.t(`settings.about.updater.${platform.updater!.state().status}`)}</p>
+          <ButtonV2 variant="neutral" disabled={!updater.action().run} onClick={updater.run}>
+            {language.t(updater.action().label)}
+          </ButtonV2>
+        </div>
+      </Show>
       <p>Copyright © 2026 Zaovra contributors</p>
       <Show when={platform.legalDocument}>
         <div class="flex gap-3">

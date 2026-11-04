@@ -155,11 +155,15 @@ const main = Effect.gen(function* () {
     onboardingTestRoot ? join(onboardingTestRoot, "desktop") : userDataOverride || join(app.getPath("appData"), appId),
   )
   if (onboardingTestRoot) {
-    app.setPath("sessionData", join(onboardingTestRoot, "session"))
     // First-launch project creation must never fall back to the real user's directories in test mode.
     app.setPath("documents", join(onboardingTestRoot, "documents"))
     app.setPath("home", join(onboardingTestRoot, "home"))
   }
+  const sessionData = onboardingTestRoot
+    ? join(onboardingTestRoot, "session")
+    : join(app.getPath("userData"), "session")
+  mkdirSync(sessionData, { recursive: true })
+  app.setPath("sessionData", sessionData)
   const settings = getStore()
   const displayBackend = process.platform === "linux" ? settings.get(DISPLAY_BACKEND_KEY) : undefined
   initializeOldLayoutEligibility(app.getPath("userData"))

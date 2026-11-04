@@ -109,7 +109,10 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     },
   },
   renderer: {
-    define: channel === "prod" ? { "import.meta.env.VITE_SENTRY_DSN": '""' } : {},
+    define: {
+      "import.meta.env.ZAOVRA_CHANNEL": JSON.stringify(channel),
+      ...(channel === "prod" ? { "import.meta.env.VITE_SENTRY_DSN": '""' } : {}),
+    },
     plugins: [appPlugin, sentry, noticesInputs()],
     publicDir: "../../../app-ui/public",
     root: "src/renderer",

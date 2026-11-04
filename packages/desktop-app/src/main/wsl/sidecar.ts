@@ -6,6 +6,8 @@ import { checkHealth } from "../server"
 import { type WslCommandLine, resolveWslZaovra, shellEscape, wslArgs } from "./runtime"
 import { pollWslHealth } from "./startup"
 import { createWslStop, wslSidecarScript } from "./lifecycle"
+import { CHANNEL } from "../constants"
+import { wslBackendEnvironment } from "./environment"
 
 export type WslSidecar = {
   listener: {
@@ -37,7 +39,7 @@ export async function spawnWslSidecar(
     "export ZAOVRA_CLIENT=desktop",
     `export ZAOVRA_SERVER_USERNAME=${shellEscape(username)}`,
     `export ZAOVRA_SERVER_PASSWORD=${shellEscape(password)}`,
-    'export XDG_STATE_HOME="$HOME/.local/state"',
+    ...wslBackendEnvironment(CHANNEL, app.getPath("userData")),
     `exec ${shellEscape(zaovra)} --print-logs --log-level ${app.isPackaged ? "WARN" : "INFO"} serve --hostname 0.0.0.0 --port ${port}`,
   ].join("\n")
   const child = spawn("wsl", wslArgs(["bash", "-se"], distro), {

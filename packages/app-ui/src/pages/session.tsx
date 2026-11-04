@@ -198,8 +198,9 @@ export function SessionRouteErrorBoundary(
   const settings = useSettings()
   return (
     <ErrorBoundary
-      fallback={(error) =>
-        settings.general.newLayoutDesigns() ? (
+      fallback={(error, reset) => {
+        createEffect(on(() => [props.serverKey, props.sessionID], reset, { defer: true }))
+        return settings.general.newLayoutDesigns() ? (
           <SessionRouteFrame padded={props.padded}>
             <SessionPanelFrame newLayout raised={!!props.sessionID}>
               <SessionErrorFallback error={error} sessionID={props.sessionID} serverKey={props.serverKey} />
@@ -208,7 +209,7 @@ export function SessionRouteErrorBoundary(
         ) : (
           <ErrorPage error={error} />
         )
-      }
+      }}
     >
       {props.children}
     </ErrorBoundary>
@@ -219,6 +220,7 @@ function SessionErrorFallback(props: { error: unknown; sessionID?: string; serve
   const language = useLanguage()
   const server = useServer()
   const tabs = useTabs()
+  const navigate = useNavigate()
   const displayServer = createMemo(() => {
     const key = props.serverKey ?? server.key
     const conn = server.list.find((item) => ServerConnection.key(item) === key)
@@ -226,6 +228,15 @@ function SessionErrorFallback(props: { error: unknown; sessionID?: string; serve
   })
   const closeTab = () => {
     if (!props.sessionID) return
+    if (
+      !tabs.store.some(
+        (tab) =>
+          tab.type === "session" && tab.sessionId === props.sessionID && tab.server === (props.serverKey ?? server.key),
+      )
+    ) {
+      navigate("/")
+      return
+    }
     tabs.removeSessionTab({ server: props.serverKey ?? server.key, sessionId: props.sessionID })
   }
   if (isCurrentSessionNotFoundError(props.error, props.sessionID)) {

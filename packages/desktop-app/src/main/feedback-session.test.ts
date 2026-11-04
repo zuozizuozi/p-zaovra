@@ -5,7 +5,7 @@ import { Feedback } from "@zaovra-ai/schema/feedback"
 import { sessionFeedback } from "../../../app-ui/src/components/feedback-session"
 import { feedbackArchive } from "./feedback"
 
-test("549 first-message API failure reaches actual diagnostic ZIP with status, redacted message and request id", async () => {
+test("549 first-message API failure reaches actual diagnostic ZIP with structured status and request id", async () => {
   const message: AssistantMessage = {
     id: "msg_400",
     sessionID: "ses_549",
@@ -50,13 +50,15 @@ test("549 first-message API failure reaches actual diagnostic ZIP with status, r
         secondsAgo: 0,
         status: 400,
         category: "unknown",
-        message: "HTTP 400 invalid tool schema",
         requestID: "req_fixture_549",
       },
     ])
     expect(report.events).toEqual([{ at: new Date(101).toISOString(), secondsAgo: 0, kind: "message", state: "error" }])
     expect(text).not.toContain("SECRET_HEADER")
     expect(text).not.toContain("PRIVATE_BODY")
+    expect(text).not.toContain("invalid tool schema")
+    const details = sessionFeedback([message], () => [], 101).error
+    expect(details).toContain("HTTP 400 invalid tool schema")
   } finally {
     await zip.close()
   }

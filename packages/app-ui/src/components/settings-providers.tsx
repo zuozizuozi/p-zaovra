@@ -177,6 +177,13 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
                         </span>
                       </Show>
                       <Tag>{type(item)}</Tag>
+                      <Tag>
+                        {language.t(
+                          serverSync().providerVerified(item.id)
+                            ? "settings.providers.status.verified"
+                            : "settings.providers.status.unverified",
+                        )}
+                      </Tag>
                     </div>
                     <Show when={protocolEditable(serverSync().data.config.provider?.[item.id])}>
                       <Button

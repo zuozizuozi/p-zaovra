@@ -4,6 +4,21 @@ import { analyzeCommand } from "../src/tool/bash-preflight"
 import { powerShellLiteralOperands } from "../src/tool/powershell-paths"
 import { powerShellVariants } from "./fixture/powershell-variants"
 
+test("585 double-quoted apostrophes retain their exact filesystem identity", () => {
+  expect(powerShellLiteralOperands(`Get-Content "C:\\outside\\two''quotes\\file.txt"`).paths).toContain(
+    "C:\\outside\\two''quotes\\file.txt",
+  )
+  expect(powerShellLiteralOperands(`Get-Content 'C:\\outside\\two''''quotes\\file.txt'`).paths).toContain(
+    "C:\\outside\\two''quotes\\file.txt",
+  )
+  for (const parameter of ["-OutVariable p", "-ov p", "-oUtVaRiAbLe:p", "-OutV p"]) {
+    expect(
+      analyzeCommand(`$p='safe.txt'; Get-Content 'pointer.txt' ${parameter}; Get-Content $p`, "powershell")
+        .externalRisk,
+    ).toBe(true)
+  }
+})
+
 test("562 common forms expose literal paths without command-specific recognition", () => {
   const file = "D:\\示例项目\\资料\\示例清单.xlsx"
   for (const [index, command] of powerShellVariants(file).entries()) {

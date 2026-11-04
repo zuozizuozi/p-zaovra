@@ -1,3 +1,4 @@
+import { feedbackIpcSnapshot } from "./feedback-snapshot"
 import { prepareDesktopAttachment } from "./attachments"
 // @refresh reload
 
@@ -147,6 +148,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     remoteServers: import.meta.env.VITE_ZAOVRA_CHANNEL === "dev",
     os,
     version: pkg.version,
+    channel:
+      import.meta.env.ZAOVRA_CHANNEL === "beta" ? "beta" : import.meta.env.ZAOVRA_CHANNEL === "prod" ? "prod" : "dev",
     windowID: windowState.id,
 
     async openDirectoryPickerDialog(opts) {
@@ -251,15 +254,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
     feedbackDiagnostics: () => window.api.feedbackDiagnostics(),
-    submitFeedback: (snapshot) => window.api.submitFeedback(snapshot),
+    submitFeedback: (snapshot) => window.api.submitFeedback(feedbackIpcSnapshot(snapshot)),
     captureFeedbackScreenshot: () => window.api.captureFeedbackScreenshot(),
     // Solid store wrappers cannot cross Electron's context bridge.
-    saveFeedback: (snapshot) =>
-      window.api.saveFeedback({
-        text: snapshot.text,
-        files: snapshot.files.map((file) => ({ name: file.name, text: file.text })),
-        ...(snapshot.image ? { image: snapshot.image } : {}),
-      }),
+    saveFeedback: (snapshot) => window.api.saveFeedback(feedbackIpcSnapshot(snapshot)),
     legalDocument: (document) => window.api.legalDocument(document),
 
     setForceFocus: (enabled) => window.api.setForceFocus(enabled),

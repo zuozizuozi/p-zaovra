@@ -3,6 +3,19 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "settings.about.updater.error": "检查更新失败，请重试。",
+  "settings.about.updater.installing": "正在安装更新",
+  "settings.about.updater.up-to-date": "当前已是最新版本",
+  "settings.about.updater.ready": "更新已就绪，可以安装",
+  "settings.about.updater.downloading": "正在下载更新",
+  "settings.about.updater.available": "有新版本可用",
+  "settings.about.updater.checking": "正在检查更新",
+  "settings.about.updater.idle": "可以检查更新",
+  "settings.about.updater.disabled": "当前版本不支持自动更新",
+  "settings.about.channel": "发布通道",
+  "provider.connect.toast.saved.title": "{{provider}} 已保存，未验证",
+  "settings.providers.status.unverified": "已保存，未验证",
+  "settings.providers.status.verified": "已连接",
   "sidebar.sendFeedback": "发送反馈",
   "artifact.externalFormat": "此格式暂不支持预览，可用本机应用打开，或在文件夹中查看。",
   "artifact.openDefault": "用系统默认程序打开",
@@ -1548,8 +1561,8 @@ export const dict = {
 
   "settings.providers.title": "模型服务",
   "settings.providers.description": "提供商设置将在此处可配置。",
-  "settings.providers.section.connected": "已连接的提供商",
-  "settings.providers.connected.empty": "没有已连接的提供商",
+  "settings.providers.section.connected": "已配置的提供商",
+  "settings.providers.connected.empty": "暂无已保存的提供商",
   "settings.providers.section.popular": "热门提供商",
   "settings.providers.tag.environment": "环境",
   "settings.providers.tag.config": "配置",
@@ -1647,7 +1660,7 @@ export const dict = {
   "common.time.minutesAgo.short": "{{count}}分钟前",
   "common.time.hoursAgo.short": "{{count}}小时前",
   "common.time.daysAgo.short": "{{count}}天前",
-  "settings.providers.connected.environmentDescription": "已通过环境变量连接",
+  "settings.providers.connected.environmentDescription": "通过环境变量配置",
   "settings.providers.custom.description": "连接 OpenAI 兼容、Anthropic 或 Gemini 协议的服务。",
 
   "app.server.unreachable": "无法连接到 {{server}}",

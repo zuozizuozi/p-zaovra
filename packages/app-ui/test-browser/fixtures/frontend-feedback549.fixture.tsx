@@ -236,8 +236,22 @@ test("menu feedback for the very first 400 saves status/request id and message e
   const report = JSON.parse(text)
   expect(report.errors).toHaveLength(1)
   expect(report.errors[0]).toMatchObject({ status: 400, requestID: "req_fixture_549" })
-  expect(report.errors[0].message).toContain("HTTP 400")
+  expect(report.errors[0].message).toBeUndefined()
+  expect(text).not.toContain("invalid tool request")
   expect(report.events.filter((event: { kind: string }) => event.kind === "message")).toHaveLength(2)
   for (const secret of ["PRIVATE_USER_BODY", "PRIVATE_PROVIDER_BODY", "SYNTHETICSECRET549"])
     expect(text).not.toContain(secret)
+  button("返回修改").click()
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  const details = [...document.querySelectorAll("label")]
+    .find((label) => label.textContent?.includes("附带此错误的原始详情"))!
+    .querySelector<HTMLInputElement>("input")!
+  expect(details.checked).toBe(false)
+  details.click()
+  button("继续反馈").click()
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  button("保存诊断包 ZIP").click()
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  expect(archive!.files.find((file) => file.name === "details.txt")?.text).toContain("HTTP 400 invalid tool request")
+  expect(archive!.files.find((file) => file.name === "details.txt")?.text).not.toContain("SYNTHETICSECRET549")
 })

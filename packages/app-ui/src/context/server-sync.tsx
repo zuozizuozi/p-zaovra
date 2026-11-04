@@ -43,6 +43,7 @@ import { completeMcpOAuth, toggleMcp, type McpResource, type McpStatus } from ".
 import { createServerSession } from "./server-session"
 import { usePlatform } from "./platform"
 import { listV2Sessions } from "./v2-session-list"
+import { providerRequestSucceeded, providerVerificationToken } from "@/provider-verification"
 
 type GlobalStore = {
   ready: boolean
@@ -125,6 +126,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   }
 
   const queryOptionsApi = makeQueryOptionsApi(serverSDK.scope, () => serverSDK.client, sdkFor)
+  const verificationStarted = Date.now()
+  const [verified, setVerified] = createStore<Record<string, string>>({})
+  const verificationToken = (providerID: string) =>
+    providerVerificationToken(globalStore.provider.all.get(providerID), globalStore.config.provider?.[providerID])
+  const markProviderVerified = (providerID: string) => setVerified(providerID, verificationToken(providerID))
+  const verificationRequests = new Map<string, string>()
 
   const [configQuery, providerQuery, pathQuery] = useQueries(() => ({
     queries: [queryOptionsApi.globalConfig(), queryOptionsApi.providers(null), queryOptionsApi.path(null)],
@@ -384,6 +391,25 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     const event = e.details
     const recent = bootingRoot || Date.now() - bootedAt < 1500
 
+    if (event.type === "message.updated" && event.properties.info.role === "assistant") {
+      const message = event.properties.info
+      if (
+        !message.time.completed &&
+        message.time.created >= verificationStarted &&
+        !verificationRequests.has(message.id)
+      )
+        verificationRequests.set(message.id, verificationToken(message.providerID))
+      if (message.time.completed) {
+        if (message.error) setVerified(message.providerID, "")
+        if (
+          providerRequestSucceeded(message, verificationStarted) &&
+          verificationRequests.get(message.id) === verificationToken(message.providerID)
+        )
+          markProviderVerified(message.providerID)
+        verificationRequests.delete(message.id)
+      }
+    }
+
     session.apply(event)
     if (event.type === "session.created" || event.type === "session.updated" || event.type === "session.deleted") {
       homeSessions.apply(event)
@@ -510,6 +536,9 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     queryOptions: queryOptionsApi,
     // bootstrap,
     updateConfig: updateConfigMutation.mutateAsync,
+    providerVerified: (providerID: string) =>
+      !!verified[providerID] && verified[providerID] === verificationToken(providerID),
+    markProviderVerified,
     queryClient,
     project: projectApi,
     session,

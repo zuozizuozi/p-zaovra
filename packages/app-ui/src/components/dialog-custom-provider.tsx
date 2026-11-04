@@ -344,6 +344,12 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       await serverSync().queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === serverSDK().scope && query.queryKey[2] === "providers",
       })
+      await serverSync().queryClient.fetchQuery({ ...serverSync().queryOptions.providers(null), staleTime: 0 })
+      if (
+        discovery.models.length ||
+        (form.protocol === undefined && form.models.some((model) => modelType(model) === "chat"))
+      )
+        serverSync().markProviderVerified(result.providerID)
       return result
     },
     onSuccess: (result) => {

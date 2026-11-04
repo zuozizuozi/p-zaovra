@@ -21,6 +21,9 @@ export function adaptProviderCatalog(
             (method) => method.type === "oauth",
           ),
           credentialOnly: true,
+          connectionIDs: integration.connections.map((connection) =>
+            connection.type === "credential" ? connection.id : `env:${connection.name}`,
+          ),
           credentialLabels: integration.connections.flatMap((connection) =>
             connection.type === "credential" ? [connection.label] : [],
           ),
@@ -43,6 +46,10 @@ export function adaptProviderCatalog(
             : "config",
         env: integration?.methods.flatMap((method) => (method.type === "env" ? method.names : [])) ?? [],
         options: {
+          connectionIDs:
+            integration?.connections.map((connection) =>
+              connection.type === "credential" ? connection.id : `env:${connection.name}`,
+            ) ?? [],
           integrationID: provider.integrationID ?? provider.id,
           supportsOAuth: providerConnectionMethods(integration?.id ?? provider.id, integration?.methods).some(
             (method) => method.type === "oauth",

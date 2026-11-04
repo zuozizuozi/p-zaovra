@@ -65,7 +65,12 @@ export function sessionFeedback(messages: readonly Message[], parts: (id: string
         .toSorted((a, b) => a.at - b.at)
         .slice(-50),
       errors: [
-        ...errors,
+        ...errors.map((item) => ({
+          at: item.at,
+          status: item.status,
+          requestID: item.requestID,
+          category: item.category,
+        })),
         ...tools.flatMap((part) =>
           part.state.status === "error"
             ? [{ at: part.state.time.end, category: Feedback.suggestion(part.state.error) }]

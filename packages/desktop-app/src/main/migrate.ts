@@ -67,6 +67,9 @@ function migrateFile(datPath: string, filename: string) {
 }
 
 export function migrate() {
+  // An explicitly selected profile is an empty boundary, not an implicit import
+  // from the normal installation's Tauri settings/session lists.
+  if (app.commandLine.hasSwitch("user-data-dir")) return
   if (getStore().get(TAURI_MIGRATED_KEY)) {
     log.log("tauri migration: already done, skipping")
     return

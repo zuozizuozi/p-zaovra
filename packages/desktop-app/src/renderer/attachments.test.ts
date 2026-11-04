@@ -7,6 +7,33 @@ import { convertAttachment } from "../main/attachment-convert"
 import { storeAttachment } from "../main/attachment-store"
 
 const api = { convertAttachment, storeAttachment, cancelAttachment: async () => {} }
+
+test("mixed selected sources keep their own chip names, original bytes and conversion metadata", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "attachment-mapping-584-"))
+  try {
+    const sources = [
+      new File([await Bun.file("resources/attachments/fixtures/sample.docx").arrayBuffer()], "selected-word.docx"),
+      new File(["selected-csv-content"], "selected-table.csv", { type: "text/csv" }),
+      new File([new Uint8Array([0, 1, 2, 3])], "selected-audio.wav", { type: "audio/wav" }),
+    ]
+    const prepared: File[] = []
+    for (const source of sources) prepared.push(...(await prepareDesktopAttachment(source, api, undefined, directory)))
+    expect(prepared.map((file) => file.name)).toEqual([
+      "selected-word.docx.md",
+      "selected-table.csv",
+      "selected-audio.wav.md",
+    ])
+    expect(await prepared[1].text()).toBe("selected-csv-content")
+    for (const index of [0, 2]) {
+      const metadata = await prepared[index].text()
+      expect(metadata).toContain(JSON.stringify(sources[index].name))
+      const target = JSON.parse(metadata.split("\n")[1].slice("工作区路径：".length))
+      expect(await Bun.file(target).bytes()).toEqual(new Uint8Array(await sources[index].arrayBuffer()))
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 test("decodes Windows UTF-16 text files before attaching them", async () => {
   const result = await prepareDesktopAttachment(new File([Buffer.from("\ufeff报价,420", "utf16le")], "报价.csv"), api)
   expect(await result[0]!.text()).toBe("报价,420")

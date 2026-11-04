@@ -13,7 +13,9 @@ export function powerShellLiteralOperands(command: string) {
     }
     const quoted = /^["']/.test(token)
     let value = quoted
-      ? token.slice(1, -1).replace(/''/g, "'")
+      ? token.startsWith("'")
+        ? token.slice(1, -1).replace(/''/g, "'")
+        : token.slice(1, -1)
       : token.replace(/^(?:--[^=]+|[A-Za-z_][\w]*)=|^-\w+:/, "").replace(/^\$[\w:]+=/, "")
     if (
       !quoted &&

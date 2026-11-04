@@ -118,6 +118,20 @@ test("550 screenshot through real Bash/Permission: workspace automatic, full acc
             ...(process.platform === "win32" ? [`Get-Content '${path.toNamespacedPath(file)}'`] : []),
           ]
         }
+        const quotedExternal = path.join(outside.path, "two''quotes", "input.xlsx")
+        yield* Effect.promise(() => Bun.write(quotedExternal, "synthetic quote identity"))
+        for (const command of [
+          `Get-Content "${quotedExternal}"`,
+          `Get-Content '${quotedExternal.replaceAll("'", "''")}'`,
+          "$p='safe.txt'; Get-Content 'pointer.txt' -OutVariable p; Get-Content $p",
+          "$p='safe.txt'; Get-Content 'pointer.txt' -ov p; Get-Content $p",
+        ]) {
+          yield* policy([
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "external_directory", resource: outside.path.replaceAll("\\", "/") + "/*", effect: "deny" },
+          ])
+          expect(yield* execute(command, "full"), command).toMatchObject({ visible: 0, dispatch: 0, type: "error" })
+        }
         for (const command of fileURIs(external)) {
           yield* policy(askRules)
           expect(yield* execute(command, "automatic"), command).toMatchObject({

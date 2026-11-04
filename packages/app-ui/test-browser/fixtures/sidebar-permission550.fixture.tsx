@@ -49,14 +49,15 @@ const children = Object.fromEntries(
 const listeners = new Set<(event: { name: string; details: { type: string; properties: PermissionView } }) => void>()
 const replies: { requestID: string; reply: string }[] = []
 const drafts: unknown[] = []
-let pending: [] = []
+let listPending: (() => Promise<{ data: { data: unknown[] } }>) | undefined
+const pending: [] = []
 const sync = {
   data: { project: projects },
   child: (directory: string) => [children[directory] ?? { config: {}, session: [] }],
   session: {
     data: { info: sessions, permission: {} },
     lineage: {
-      peek: (id: string) => ({ session: sessions[id] }),
+      peek: (id: string) => (sessions[id] ? { session: sessions[id] } : undefined),
       resolve: async (id: string) => ({ session: sessions[id] }),
     },
     peek: (id: string) => sessions[id],
@@ -74,7 +75,7 @@ const sdk = {
   },
   client: {
     v2: {
-      permission: { request: { list: async () => ({ data: { data: pending } }) } },
+      permission: { request: { list: async () => (listPending ? listPending() : { data: { data: pending } }) } },
       session: {
         permission: {
           reply: async (input: { requestID: string; reply: string }) => {
@@ -244,6 +245,55 @@ test("three permission choices persist by project across new sessions/remount an
     expect(api!.mode("/fixture/a", "ses_new")).toBe("automatic")
     api!.setMode("/fixture/a", "ask")
     await settle()
+    expect(api!.autoResponds(request, "/fixture/a")).toBe(false)
+    for (const mode of ["full", "automatic"] as const) {
+      api!.setMode("/fixture/a", mode)
+      api!.toggleAutoAccept("ses_new", "/fixture/a")
+      expect(api!.mode("/fixture/a", "ses_new")).toBe("ask")
+      expect(api!.autoResponds(request, "/fixture/a")).toBe(false)
+      api!.setMode("/fixture/a", mode)
+      api!.toggleAutoAcceptDirectory("/fixture/a")
+      expect(api!.mode("/fixture/a")).toBe("ask")
+    }
+    const before = replies.length
+    const delayed: ((value: { data: { data: unknown[] } }) => void)[] = []
+    listPending = () => new Promise((resolve) => delayed.push(resolve))
+    api!.setMode("/fixture/a", "full")
+    api!.disableAutoAccept("ses_unresolved")
+    expect(api!.mode("/fixture/a", "ses_unresolved")).toBe("ask")
+    expect(api!.autoResponds({ ...request, sessionID: "ses_unresolved" }, "/fixture/a")).toBe(false)
+    api!.disableAutoAccept("ses_new", "/fixture/a")
+    delayed.splice(0).forEach((resolve) =>
+      resolve({
+        data: {
+          data: [
+            {
+              id: "per_delayed585",
+              sessionID: "ses_new",
+              action: "bash",
+              resources: ["fixture"],
+              metadata: { externalRisk: false },
+            },
+          ],
+        },
+      }),
+    )
+    await settle()
+    expect(replies).toHaveLength(before)
+    listeners.forEach((listener) =>
+      listener({
+        name: "/fixture/a",
+        details: { type: "permission.asked", properties: { ...request, id: "per_after_revoke585" } },
+      }),
+    )
+    await settle()
+    expect(replies).toHaveLength(before)
+    listPending = undefined
+    dispose()
+    await settle()
+    dispose = mount()
+    await settle()
+    expect(api!.mode("/fixture/a", "ses_new")).toBe("ask")
     expect(api!.autoResponds(request, "/fixture/a")).toBe(false)
   } finally {
     dispose()

@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path"
+import { mkdir } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { app, utilityProcess } from "electron"
 import type { Details } from "electron"
@@ -8,7 +9,7 @@ import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
 import { waitForServerHealth } from "./server-health"
 import { CHANNEL } from "./constants"
-import { createSidecarEnv } from "./sidecar-env"
+import { createSidecarEnv, sidecarDirectory } from "./sidecar-env"
 
 type SidecarMessage =
   | { type: "ready" }
@@ -60,8 +61,12 @@ export async function spawnLocalServer(
   options: SpawnLocalServerOptions,
 ) {
   const sidecar = join(dirname(fileURLToPath(import.meta.url)), "sidecar.js")
+  await mkdir(join(options.userDataPath, "temp"), { recursive: true })
+  await mkdir(sidecarDirectory(options.userDataPath), { recursive: true })
   const child = utilityProcess.fork(sidecar, [], {
-    cwd: process.cwd(),
+    // Unscoped provider requests resolve their Location from cwd. Starting in
+    // the real home would implicitly load its project config despite XDG isolation.
+    cwd: sidecarDirectory(options.userDataPath),
     env: createSidecarEnv({
       env: process.env,
       resourcesPath: process.resourcesPath,

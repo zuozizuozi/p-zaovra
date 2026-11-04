@@ -23,8 +23,8 @@ export namespace Feedback {
     image?: string
   }>
 
-  // Automatic errors accept explicitly projected diagnostic summaries, never
-  // arbitrary message/output/stack fields. Redaction cannot recognize every private phrase.
+  // Automatic errors contain structured status only. Arbitrary message/output/stack
+  // text belongs in the separately selected error-details attachment.
   const credentialNames =
     "access[-_]*token|refresh[-_]*token|id[-_]*token|client[-_]*secret|api[-_]*key|token|secret|password|passwd|authorization|proxy[-_]*authorization|cookie|set[-_]*cookie|private[-_]*key"
   const credentialKey = new RegExp("^(?:" + credentialNames + ")$", "i")
@@ -211,7 +211,6 @@ export namespace Feedback {
                 status:
                   Number.isInteger(item.status) && item.status! >= 400 && item.status! <= 599 ? item.status : undefined,
                 category: allowed(item.category, ["auth", "credit", "rate", "network", "model", "unknown"]),
-                ...(item.diagnosticMessage ? { message: redact(item.diagnosticMessage.slice(0, 2000)) } : {}),
                 ...(item.requestID ? { requestID: redact(item.requestID.slice(0, 128)) } : {}),
               })),
           }
