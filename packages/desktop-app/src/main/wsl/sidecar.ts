@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { createServer } from "node:net"
-import { app } from "electron"
+import { app, dialog } from "electron"
 import { checkHealth } from "../server"
-import { type WslCommandLine, resolveWslZaovra, shellEscape, wslArgs } from "./runtime"
+import { type WslCommandLine, resolveWslZaovra, shellEscape, wslArgs, runWslInDistro } from "./runtime"
 import { pollWslHealth } from "./startup"
 import { createWslStop, wslSidecarScript } from "./lifecycle"
 import { CHANNEL } from "../constants"
-import { wslBackendEnvironment } from "./environment"
+import { wslUpgradeProgram } from "./upgrade"
+import { wslBackendEnvironment, wslProfile } from "./environment"
 
 export type WslSidecar = {
   listener: {
@@ -21,10 +22,50 @@ export type WslSidecar = {
 
 export async function spawnWslSidecar(
   distro: string,
-  opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number } = {},
+  opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number; allowSharedLegacy?: boolean } = {},
 ): Promise<WslSidecar> {
   const zaovra = await resolveWslZaovra(distro)
   if (!zaovra) throw new Error(`Zaovra is not installed in ${distro}`)
+
+  const migrate = async (mode: "probe" | "migrate", action = "empty") => {
+    const result = await runWslInDistro(
+      [
+        "python3",
+        "-c",
+        wslUpgradeProgram,
+        CHANNEL,
+        wslProfile(app.getPath("userData")),
+        mode,
+        String(opts.allowSharedLegacy === true),
+        action,
+      ],
+      distro,
+      { timeoutMs: 60_000 },
+    )
+    if (result.code !== 0)
+      throw new Error(
+        "WSL data preparation failed. Python 3 with SQLite is required; original data is unchanged. " + result.stderr,
+      )
+    return JSON.parse(result.stdout) as { completed: boolean; available?: boolean }
+  }
+  const legacy = await migrate("probe")
+  if (!legacy.completed) {
+    const choice =
+      legacy.available && CHANNEL !== "prod"
+        ? await dialog.showMessageBox({
+            type: "question",
+            title: "WSL 数据升级",
+            message: "发现此发行版的原有会话和配置",
+            detail: "导入会安全复制到此渠道和 profile 的独立目录；原文件保留。",
+            buttons: ["导入原有数据（复制）", "从空白开始", "取消"],
+            defaultId: 0,
+            cancelId: 2,
+            noLink: true,
+          })
+        : undefined
+    if (choice?.response === 2) throw new Error("WSL data migration cancelled; original data retained")
+    await migrate("migrate", legacy.available && (CHANNEL === "prod" || choice?.response === 0) ? "import" : "empty")
+  }
 
   const port = await allocatePort()
   const password = randomUUID()

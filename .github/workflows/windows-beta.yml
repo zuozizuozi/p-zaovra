@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      unsigned_beta:
+        description: Explicit unsigned Beta exception (must match the reviewed artifact on publish)
+        required: false
+        default: false
+        type: boolean
       artifact_run:
         description: Successful windows-beta build run ID for publishing that SHA
         required: false
@@ -47,6 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
@@ -79,18 +85,18 @@ jobs:
       id-token: write
     env:
       ZAOVRA_CHANNEL: beta
+      ZAOVRA_ALLOW_UNSIGNED_BETA: ${{ github.event_name == 'workflow_dispatch' && inputs.unsigned_beta && 'true' || 'false' }}
+      BETA_SOURCE_SHA: ${{ needs.gate.outputs.sha }}
       WINDOWS_SIGNING_PUBLISHER_NAME: ${{ vars.WINDOWS_SIGNING_PUBLISHER_NAME }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ needs.gate.outputs.sha }}
           fetch-depth: 0
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: verifier
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
@@ -100,6 +106,7 @@ jobs:
       - name: Validate changed desktop, UI and Worker contracts
         shell: pwsh
         env:
+          PYTHON: python
           ZAOVRA_WORKER_TEST_DIR: ${{ runner.temp }}/feedback-worker
           ZAOVRA_BETA_TEST_DIR: ${{ runner.temp }}/beta-fixtures
           ZAOVRA_BACKUP_TEST_DIR: ${{ runner.temp }}/backup-fixtures
@@ -111,30 +118,31 @@ jobs:
             Pop-Location
           }
           Push-Location packages/desktop-app
-          bun test scripts/beta-release.test.ts src/main/feedback.test.ts src/main/updater-install.test.ts electron-builder.config.test.ts
+          bun test --timeout 30000 scripts/beta-release.test.ts scripts/beta-ci.test.ts scripts/beta-signing.test.ts scripts/beta-build-report.test.ts src/main/wsl/environment.test.ts src/main/wsl/upgrade.test.ts src/main/onboarding-directory.test.ts src/main/feedback.test.ts src/main/updater-install.test.ts electron-builder.config.test.ts ./test/install-channel.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --experimental-strip-types --test test-node/update-backup.node.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/app-ui
-          bun test ./test-browser/feedback-dom.test.ts
+          bun test src/components/updater-action.test.ts ./test-browser/desktop-entry-dom.test.ts ./test-browser/feedback-dom.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/feedback-worker
           bun test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
-      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+      - if: env.ZAOVRA_ALLOW_UNSIGNED_BETA != 'true'
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - name: Monotonic Beta version
         shell: pwsh
         run: |
           $baseVersion = (Get-Content packages/desktop-app/package.json | ConvertFrom-Json).version.Split('-')[0]
           "ZAOVRA_VERSION=$baseVersion-beta.${{ github.run_number }}" >> $env:GITHUB_ENV
-      - name: Build signed Windows Beta with packaged updater
+      - name: Prepare Windows Beta with packaged updater
         working-directory: packages/desktop-app
         shell: pwsh
         run: |
@@ -144,9 +152,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run postbuild
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package signed Windows Beta
+        if: env.ZAOVRA_ALLOW_UNSIGNED_BETA != 'true'
+        working-directory: packages/desktop-app
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+        run: |
           bun run package:win --x64 --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/verify-beta-signature.ps1 -Installer dist/zaovra-desktop-win-x64.exe -Publisher $env:WINDOWS_SIGNING_PUBLISHER_NAME
+      - name: Package explicitly unsigned Windows Beta
+        if: github.event_name == 'workflow_dispatch' && inputs.unsigned_beta
+        working-directory: packages/desktop-app
+        shell: pwsh
+        run: |
+          bun run package:win --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record and verify packaged signing policy
+        working-directory: packages/desktop-app
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          UNSIGNED_BETA: ${{ inputs.unsigned_beta || false }}
+        run: |
           $sha = "${{ needs.gate.outputs.sha }}"
           $k63 = "${{ needs.gate.outputs.k63_applied }}" -eq "true"
           $policy = if ($k63) { "K63 例外已应用" } else { "Exact main test and typecheck passed" }
@@ -159,7 +193,14 @@ jobs:
             missingTests = "${{ needs.gate.outputs.k63_missing_tests }}"
           } | ConvertTo-Json | Set-Content dist/ci-gate.json
           "Windows Beta $env:ZAOVRA_VERSION; source $sha. $policy; test run ${{ needs.gate.outputs.test_run_id }} attempt ${{ needs.gate.outputs.test_run_attempt }}. Includes feedback upload and automatic database backup before update. Review this exact artifact before publishing." | Set-Content dist/notes.md
-          bun scripts/beta-release.ts dist $sha dist/notes.md
+          bun ../../verifier/packages/desktop-app/scripts/beta-signing.ts build dist $sha
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
+          $signing = if ($env:UNSIGNED_BETA -eq "true") { "未签名Beta" } else { "Signed Windows Beta" }
+          Add-Content dist/notes.md $signing
+          $signing >> $env:GITHUB_STEP_SUMMARY
+          bun scripts/beta-release.ts dist $sha dist/notes.md @flags
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve reviewable installers only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -184,7 +225,8 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ needs.gate.outputs.sha }}
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.3.14
@@ -210,6 +252,17 @@ jobs:
           run-id: ${{ inputs.artifact_run }}
           github-token: ${{ github.token }}
           path: beta-artifact
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
+      - name: Compare requested policy with actual packaged Beta
+        env:
+          EVENT_NAME: workflow_dispatch
+          UNSIGNED_BETA: ${{ inputs.unsigned_beta || false }}
+        shell: pwsh
+        run: |
+          bun packages/desktop-app/scripts/beta-signing.ts publish beta-artifact "${{ needs.gate.outputs.sha }}"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged signing identity verification failed" }
       - name: Reverify latest exact CI and compare reviewed artifact gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -225,9 +278,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Fresh publish verification or artifact gate comparison failed" }
       - name: Publish approved exact SHA and retain five versions
         env:
+          ZAOVRA_CHANNEL: beta
+          UNSIGNED_BETA: ${{ inputs.unsigned_beta || false }}
           BETA_APPROVED_SHA: ${{ needs.gate.outputs.sha }}
           BETA_APPROVAL_REF: ${{ inputs.approval_ref }}
           WINDOWS_SIGNING_PUBLISHER_NAME: ${{ vars.WINDOWS_SIGNING_PUBLISHER_NAME }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_UPDATES_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATES_SECRET_ACCESS_KEY }}
-        run: bun packages/desktop-app/scripts/beta-release.ts beta-artifact "${{ needs.gate.outputs.sha }}" beta-artifact/notes.md --publish
+        shell: pwsh
+        run: |
+          $flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
+          bun packages/desktop-app/scripts/beta-release.ts beta-artifact "${{ needs.gate.outputs.sha }}" beta-artifact/notes.md --publish @flags
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

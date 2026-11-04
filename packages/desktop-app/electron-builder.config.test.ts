@@ -183,3 +183,34 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   expect(desktop).toContain("StartupWMClass=ai.zaovra.desktop")
   expect(desktop).toContain("NoDisplay=true")
 })
+
+test("612 assisted NSIS uses distinct channel product directories and preserves signing", async () => {
+  const { getWindowsInstallationDirName } = await import("app-builder-lib/out/targets/targetUtil.js")
+  const dirs = []
+  for (const channel of ["dev", "beta", "prod"]) {
+    const child = Bun.spawn(
+      [process.execPath, "-e", 'console.log(JSON.stringify((await import("./electron-builder.config.ts")).default))'],
+      { cwd: import.meta.dir, env: { ZAOVRA_CHANNEL: channel }, stdout: "pipe", stderr: "pipe" },
+    )
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    expect(code, err).toBe(0)
+    const config = JSON.parse(out)
+    expect(config.nsis.oneClick).toBe(false)
+    expect(config.nsis.allowToChangeInstallationDirectory).toBe(true)
+    expect(config.nsis.runAfterFinish).toBe(true)
+    dirs.push(
+      getWindowsInstallationDirName(
+        { productFilename: config.productName, sanitizedName: "@zaovra-aidesktop" } as never,
+        true,
+      ),
+    )
+    if (channel === "beta")
+      expect(config.extraMetadata).toMatchObject({ zaovraChannel: "beta", zaovraUnsignedBeta: false })
+  }
+  expect(dirs).toEqual(["Zaovra Dev", "Zaovra Beta", "Zaovra"])
+  expect(new Set(dirs).size).toBe(3)
+})

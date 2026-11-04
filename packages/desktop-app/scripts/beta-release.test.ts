@@ -102,6 +102,6 @@ test("exact main CI gate rejects stale successful, failed latest and other SHA c
   ).toThrow()
   const already = { ...run("windows-beta", 1), event: "workflow_run", id: 99 }
   const metadata = { workflow_runs: [run("test", 1), run("typecheck", 1), already] }
-  expect(verifyBetaCI(metadata, sha, 100)).toBe(true)
+  expect(verifyBetaCI(metadata, sha, 100)).toBe(false) // A run without a retained artifact is rebuildable.
   expect(verifyBetaCI(metadata, sha, 99)).toBe(false)
 })

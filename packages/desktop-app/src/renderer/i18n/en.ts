@@ -1,6 +1,8 @@
 export const dict = {
+  "desktop.onboarding.welcome": "Welcome to Zaovra",
+  "desktop.onboarding.connect": "1. Connect a model service",
   "desktop.onboarding.choose":
-    "The default project folder is unavailable. Choose a folder, or add a project from the home page later.",
+    "Connect your model service first, then choose a project folder. Nothing is selected yet.",
   "desktop.onboarding.fallback": "Documents was unavailable. Your default project was created in {{path}}.",
   "desktop.onboarding.later": "Later",
   "desktop.onboarding.dismiss": "Dismiss",

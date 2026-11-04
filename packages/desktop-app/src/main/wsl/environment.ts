@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto"
 
+export function wslProfile(userDataPath: string) {
+  return createHash("sha256").update(userDataPath).digest("hex").slice(0, 16)
+}
+
 export function wslBackendEnvironment(channel: "dev" | "beta" | "prod", userDataPath: string) {
-  const profile = createHash("sha256").update(userDataPath).digest("hex").slice(0, 16)
+  const profile = wslProfile(userDataPath)
   const root = `$HOME/.local/share/zaovra-desktop/${channel}/${profile}`
   return [
-    `export XDG_DATA_HOME="${root}/data"`,
-    `export XDG_CONFIG_HOME="${root}/config"`,
+    `export XDG_DATA_HOME="${root}/backend/data"`,
+    `export XDG_CONFIG_HOME="${root}/backend/config"`,
     `export XDG_CACHE_HOME="${root}/cache"`,
     `export XDG_STATE_HOME="${root}/state"`,
     'export TMPDIR="$XDG_CACHE_HOME/temp"',

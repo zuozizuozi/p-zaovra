@@ -67,6 +67,9 @@ const getBase = (appId: string): Configuration => ({
   extraMetadata: {
     name: channel === "prod" ? "zaovra-desktop" : `zaovra-desktop-${channel}`,
     desktopName: `${appId}.desktop`,
+    ...(channel === "beta"
+      ? { zaovraChannel: "beta", zaovraUnsignedBeta: unsignedBeta, zaovraSourceSHA: process.env.BETA_SOURCE_SHA }
+      : {}),
   },
   files: ["out/**/*", "!out/**/notices-inputs.json", "resources/**/*", "!resources/bin/**/*"],
   extraResources: process.platform === "win32" ? [{ from: "resources/bin", to: "bin" }] : [],
@@ -99,7 +102,10 @@ const getBase = (appId: string): Configuration => ({
   nsis: {
     guid: INSTALLER_IDS[channel],
     include: `resources/channel-${channel}.nsh`,
-    oneClick: true,
+    // Assisted installers use the channel product name for their default directory.
+    oneClick: false,
+    allowToChangeInstallationDirectory: true,
+    runAfterFinish: true,
     perMachine: false,
     installerIcon: `resources/icons/icon.ico`,
     installerHeaderIcon: `resources/icons/icon.ico`,

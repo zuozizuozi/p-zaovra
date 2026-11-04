@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { updaterAction } from "./updater-action"
+import { showPackagedUpdater, updaterDetail, updaterAction } from "./updater-action"
 
 describe("updaterAction", () => {
   test("disables update actions when the platform has no updater", () => {
@@ -27,4 +27,21 @@ describe("updaterAction", () => {
       label: "settings.updates.action.installing",
     })
   })
+})
+
+test("612 updater entry is confined to packaged Beta and production", () => {
+  for (const channel of ["dev", undefined])
+    expect(showPackagedUpdater({ platform: "desktop", channel, updater: {} })).toBe(false)
+  for (const channel of ["beta", "prod"]) {
+    expect(showPackagedUpdater({ platform: "desktop", channel, updater: {} })).toBe(true)
+    expect(showPackagedUpdater({ platform: "desktop", channel })).toBe(false)
+    expect(showPackagedUpdater({ platform: "web", channel, updater: {} })).toBe(false)
+  }
+})
+test("612 update progress and failures are actionable", () => {
+  expect(updaterDetail({ status: "downloading", version: "1.0", percent: 32.6 })).toBe("33%")
+  expect(updaterDetail({ status: "downloading", version: "1.0" })).toBe("")
+  expect(updaterDetail({ status: "error", message: "Network unavailable" })).toBe("Network unavailable")
+  expect(updaterAction({ status: "error", message: "offline" }).run).toBe("check")
+  expect(updaterAction({ status: "up-to-date" }).run).toBe("check")
 })

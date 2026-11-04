@@ -4,13 +4,14 @@ import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { BrandMark } from "../brand-mark"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
-import { useUpdaterAction } from "../updater-action"
+import { showPackagedUpdater, updaterDetail, useUpdaterAction } from "../updater-action"
 
 export function SettingsAbout() {
   const language = useLanguage()
   const platform = usePlatform()
   const updater = useUpdaterAction()
   const [state, setState] = createStore<{ document?: "license" | "notices" }>({})
+  const update = () => platform.updater?.state()
   const [text] = createResource(
     () => state.document,
     (document) => platform.legalDocument?.(document),
@@ -27,9 +28,12 @@ export function SettingsAbout() {
           {language.t("settings.about.channel")}: {platform.channel}
         </p>
       </Show>
-      <Show when={platform.updater}>
+      <Show when={showPackagedUpdater(platform)}>
         <div class="flex flex-wrap items-center gap-3" data-component="about-updater">
-          <p role="status">{language.t(`settings.about.updater.${platform.updater!.state().status}`)}</p>
+          <div role="status" aria-live="polite">
+            <p>{language.t(`settings.about.updater.${platform.updater!.state().status}`)}</p>
+            <Show when={updaterDetail(update())}>{(detail) => <p>{detail()}</p>}</Show>
+          </div>
           <ButtonV2 variant="neutral" disabled={!updater.action().run} onClick={updater.run}>
             {language.t(updater.action().label)}
           </ButtonV2>

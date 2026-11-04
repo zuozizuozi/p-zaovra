@@ -13,6 +13,77 @@ import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 describe("Snapshot", () => {
+  for (const child of [false, true])
+    testEffect(Layer.empty).live(
+      "192 captures linked " + (child ? "subdirectory" : "root") + " with selective diff and restore",
+      () =>
+        Effect.acquireUseRelease(
+          Effect.promise(() => tmpdir()),
+          (tmp) =>
+            Effect.gen(function* () {
+              const project = path.join(tmp.path, "project"),
+                alias = path.join(tmp.path, "alias")
+              yield* Effect.promise(async () => {
+                await fs.mkdir(path.join(project, "scope"), { recursive: true })
+                await fs.writeFile(path.join(project, "scope/tracked.txt"), "before\n")
+                await fs.writeFile(path.join(project, "outside.txt"), "untouched\n")
+                for (const args of [
+                  ["init"],
+                  ["config", "core.autocrlf", "false"],
+                  ["config", "commit.gpgsign", "false"],
+                  ["config", "user.email", "test@zaovra.test"],
+                  ["config", "user.name", "Test"],
+                  ["add", "."],
+                  ["commit", "-m", "initial"],
+                ]) {
+                  const p = Bun.spawn(["git", ...args], { cwd: project, stdout: "pipe", stderr: "pipe" })
+                  const [code, , err] = await Promise.all([
+                    p.exited,
+                    new Response(p.stdout).text(),
+                    new Response(p.stderr).text(),
+                  ])
+                  expect(code, err).toBe(0)
+                }
+                await fs.symlink(project, alias, process.platform === "win32" ? "junction" : "dir")
+              })
+              const capture = (directory: string) =>
+                Effect.gen(function* () {
+                  const snapshot = yield* Snapshot.Service
+                  return yield* snapshot.capture()
+                }).pipe(Effect.provide(snapshotLayer(path.join(tmp.path, "data"), directory)))
+              const direct = yield* capture(child ? path.join(project, "scope") : project)
+              yield* Effect.gen(function* () {
+                const snapshot = yield* Snapshot.Service
+                const before = yield* snapshot.capture()
+                expect(before).toBeDefined()
+                expect(before).toBe(direct)
+                if (!before) throw new Error("Linked snapshot unavailable")
+                yield* Effect.promise(() => fs.writeFile(path.join(project, "scope/tracked.txt"), "after\n"))
+                const after = yield* snapshot.capture()
+                if (!after) throw new Error("Changed snapshot unavailable")
+                expect(yield* snapshot.files({ from: before, to: after })).toEqual([
+                  RelativePath.make("scope/tracked.txt"),
+                ])
+                expect((yield* snapshot.diff({ from: before, to: after })).length).toBe(1)
+                yield* snapshot.restore({ files: new Map([[RelativePath.make("scope/tracked.txt"), before]]) })
+                expect(yield* read(path.join(project, "scope/tracked.txt"))).toBe("before\n")
+                expect(yield* read(path.join(project, "outside.txt"))).toBe("untouched\n")
+                yield* Effect.promise(async () => {
+                  await fs.unlink(alias)
+                  await fs.symlink(tmp.path, alias, process.platform === "win32" ? "junction" : "dir")
+                })
+                expect(yield* snapshot.capture()).toBeUndefined()
+                yield* Effect.promise(() => fs.unlink(alias))
+                expect(yield* snapshot.capture()).toBeUndefined()
+              }).pipe(
+                Effect.provide(snapshotLayer(path.join(tmp.path, "data"), child ? path.join(alias, "scope") : alias)),
+              )
+            }),
+          (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+        ),
+      30000,
+    )
+
   for (const split of [false, true])
     for (const repair of [false, true])
       testEffect(Layer.empty).live(

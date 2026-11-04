@@ -243,14 +243,16 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
           })
       : undefined,
 
-    updater: {
-      autoCheck: () => window.api.updater.autoCheck(),
-      setAutoCheck: (enabled) => window.api.updater.setAutoCheck(enabled),
-      state: updaterState,
-      check: () => window.api.updater.check(),
-      download: () => window.api.updater.download(),
-      install: () => window.api.updater.install(),
-    },
+    updater: import.meta.env.DEV
+      ? undefined
+      : {
+          autoCheck: () => window.api.updater.autoCheck(),
+          setAutoCheck: (enabled) => window.api.updater.setAutoCheck(enabled),
+          state: updaterState,
+          check: () => window.api.updater.check(),
+          download: () => window.api.updater.download(),
+          install: () => window.api.updater.install(),
+        },
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
     feedbackDiagnostics: () => window.api.feedbackDiagnostics(),
