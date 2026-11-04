@@ -12,3 +12,19 @@ WSL 保留旧数据的说明基于启动脚本及持久化路径的源码核对�
 ## Native 升级回归运行时
 
 必须使用 Node ≥24.15；只在 Node 24.13 通过不算升级验收。Electron 42.3.3 的 Node 模式（`ELECTRON_RUN_AS_NODE=1`）可运行 `--experimental-strip-types --test test-node/backend-upgrade.node.ts test-node/backend-upgrade-regression.node.ts`。仍须显式设置隔离 `ZAOVRA_UPGRADE_TEST_DIR` 和精确 a239 父版 `ZAOVRA_UPGRADE_PARENT_ROOT`，所有输入仅合成数据。回归覆盖 Dev/Prod 的数据+配置、仅配置、仅数据、外部 DB、失败重试/取消/重启、已有和新建的显式 profile、源链接跳过及已有目标拒绝合并；不替代真实安装器升级或 Electron 选择窗口验收。
+
+### Electron Node 的 PowerShell 命令
+
+在专用 PowerShell 进程中，将工作目录切到 `packages/desktop-app`。预先设置三个绝对路径变量：`$ElectronPath` 指向 Electron 42.3.3 的 `electron.exe`；`$CaseRoot` 指向本轮 F 盘会话内尚未使用的合成夹具目录；`$ParentRoot` 指向精确提交 `a23943862386040f1f8a2c2a3cdacf4f0dfa3451` 的独立源码树。当前工作树及父版源码树都需已准备好各自的离线依赖，且 `bun`、`git` 在 PATH 中。该 PowerShell 进程的 HOME、USERPROFILE、XDG\_\*、TEMP/TMP/TMPDIR 也须指向本轮隔离目录，不使用正常用户数据。
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE = "1"
+$env:ZAOVRA_UPGRADE_TEST_DIR = $CaseRoot
+$env:ZAOVRA_UPGRADE_PARENT_ROOT = $ParentRoot
+& $ElectronPath --experimental-strip-types --test test-node/backend-upgrade.node.ts test-node/backend-upgrade-regression.node.ts
+if ($LASTEXITCODE -ne 0) { throw "Native upgrade regression failed" }
+```
+
+运行后退出该专用 PowerShell 进程。Electron 在这里仅作为 Node 运行时，不打开应用窗口；测试用例会验证父版 SHA，新增回归还会检查 Node ≥24.15。
+
+当前 CI 的 `bun test`/包测试不会执行 `test-node/*.node.ts`。这 19 项的通过证据来自本地 Electron Node 24.15.0，不能计入远端 Bun CI 的用例数；是否接入 CI 留到下一批。
