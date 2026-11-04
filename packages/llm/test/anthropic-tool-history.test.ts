@@ -157,7 +157,10 @@ describe("545 Anthropic tool history", () => {
             ),
           ),
         )
-        const assistant = Schema.decodeUnknownSync(Message)(JSON.parse(JSON.stringify(response.message)))
+        const assistant = Schema.decodeUnknownSync(Schema.toCodecIso(Message))(
+          JSON.parse(JSON.stringify(response.message)),
+        )
+        expect(assistant).toBeInstanceOf(Message)
         expect(assistant.content.map((part) => part.type)).toEqual([
           "reasoning",
           "reasoning",

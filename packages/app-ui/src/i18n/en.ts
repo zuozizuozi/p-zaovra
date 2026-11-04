@@ -796,6 +796,12 @@ export const dict = {
   "provider.connect.apiKey.label": "{{provider}} API key",
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
+  "provider.connect.disabled.disconnect": "This service was disabled when it was disconnected.",
+  "provider.connect.disabled.config":
+    "This service is disabled in configuration. Saving credentials keeps that choice.",
+  "provider.connect.disabled.enable": "Enable this service after saving credentials successfully",
+  "provider.connect.disabled.failed":
+    "Credentials were saved, but the service could not be enabled. Retry enabling it.",
   "provider.connect.zaovraZen.line1":
     "Zaovra managed models are connected through the Zaovra account used to sign in to the desktop app.",
   "provider.connect.zaovraZen.line2":

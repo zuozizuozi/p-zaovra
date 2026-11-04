@@ -1,5 +1,43 @@
 import type { IntegrationInfo, IntegrationMethod, ZaovraClient } from "@zaovra-ai/sdk/v2"
 
+// A disposed form or a newer submission must not admit the old preparation's writes.
+export function providerOperation() {
+  const state = { generation: 0 }
+  return {
+    start: () => {
+      const generation = ++state.generation
+      return () => generation === state.generation
+    },
+    cancel: () => ++state.generation,
+  }
+}
+
+export async function connectProviderKey(input: {
+  client: ZaovraClient
+  request: Parameters<ZaovraClient["v2"]["integration"]["connect"]["key"]>[0]
+  current: () => boolean
+  discover?: () => Promise<{ id: string; name: string }[]>
+  saveModels?: (models: { id: string; name: string }[]) => Promise<unknown>
+  enable?: () => Promise<unknown>
+}) {
+  if (!input.current()) return false
+  const models = await input.discover?.()
+  if (!input.current()) return false
+  if (models) await input.saveModels?.(models)
+  if (!input.current()) return false
+  // A dispatched credential write cannot be cancelled by closing its form.
+  await input.client.v2.integration.connect.key(input.request, { throwOnError: true })
+  if (!input.current()) return false
+  await input.enable?.().catch(() => {
+    throw new Error("providerReenableFailed")
+  })
+  return input.current()
+}
+
+export function reconnectDisabledProviders(disabled: readonly string[], providerID: string, enable: boolean) {
+  return enable ? disabled.filter((id) => id !== providerID) : [...disabled]
+}
+
 export function providerConnectionMethods(integrationID: string, methods: readonly IntegrationMethod[] = []) {
   // Also protect a desktop connected to an older server that still advertises ChatGPT subscription login.
   return methods.filter(

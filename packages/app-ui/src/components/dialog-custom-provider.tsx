@@ -28,7 +28,8 @@ import {
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
-import { resolveProviderIntegration } from "@/utils/provider-integration"
+import { providerOperation, reconnectDisabledProviders, resolveProviderIntegration } from "@/utils/provider-integration"
+import { ProviderEnableChoice } from "./provider-enable-choice"
 import {
   type FormState,
   type ModelRow,
@@ -85,12 +86,15 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     manual: false,
     advanced: false,
     normalizedURL: "",
+    enable: undefined as boolean | undefined,
   })
   const alive = { value: true }
+  const operation = providerOperation()
   const modelType = (model: ModelRow) => model.type ?? providerModelType(model) ?? "chat"
   const saved = { providerID: undefined as string | undefined }
   onCleanup(() => {
     alive.value = false
+    operation.cancel()
   })
   const automatic = () => {
     const baseURL = providerBaseURL(form.baseURL, form.protocol ?? providerPresetProtocol(form.baseURL))
@@ -130,6 +134,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     const url = normalizeURL()
     if (!url.baseURL) return
     setDiscovery({ pending: true, error: "" })
+    const current = operation.start()
     try {
       const input = {
         baseURL: url.baseURL,
@@ -140,7 +145,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         ),
       }
       const models = await (platform.discoverProviderModels ?? discoverProviderModels)(input)
-      if (!alive.value || protocol !== form.protocol || input.apiKey !== form.apiKey) return
+      if (!current() || !alive.value || protocol !== form.protocol || input.apiKey !== form.apiKey) return
       batch(() => {
         setDiscovery({ models, manual: false, query: "" })
         setForm("baseURL", input.baseURL)
@@ -150,7 +155,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         ])
       })
     } catch (error) {
-      if (!alive.value) return
+      if (!current() || !alive.value) return
       const message = error instanceof Error ? error.message : ""
       const key = /restart/.test(message)
         ? "restart"
@@ -179,7 +184,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         manual: true,
       })
     } finally {
-      if (alive.value) setDiscovery("pending", false)
+      if (current() && alive.value) setDiscovery("pending", false)
     }
   }
 
@@ -281,20 +286,45 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     return output.result
   }
 
+  const reconnectID = () =>
+    saved.providerID ||
+    form.providerID.trim() ||
+    Object.entries(serverSync().data.config.provider ?? {}).find(
+      ([, provider]) =>
+        providerServiceKey(form.baseURL) &&
+        providerServiceKey(provider.options?.baseURL) === providerServiceKey(form.baseURL),
+    )?.[0]
+  const enable = () => discovery.enable ?? service.disconnected(reconnectID() ?? "")
+  const snapshot = (result: NonNullable<ReturnType<typeof validate>>) => {
+    const valid = operation.start()
+    const sdk = serverSDK()
+    return {
+      ...result,
+      protocol: form.protocol,
+      apiKey: form.apiKey,
+      models: form.models.map((model) => ({ ...model })),
+      sdk,
+      sync: serverSync(),
+      enable: enable(),
+      current: () => valid() && alive.value && serverSDK() === sdk,
+    }
+  }
   const saveMutation = useMutation(() => ({
-    mutationFn: async (result: NonNullable<ReturnType<typeof validate>>) => {
-      if (form.protocol === undefined) {
-        for (const model of form.models) {
+    mutationFn: async (result: ReturnType<typeof snapshot>) => {
+      if (!result.current()) return
+      if (result.protocol === undefined) {
+        for (const model of result.models) {
           if (modelType(model) !== "chat") continue
           const protocol =
             model.protocol ??
             (await (platform.detectProviderProtocol ?? detectProviderProtocol)({
               baseURL: result.config.options.baseURL,
-              apiKey: form.apiKey,
+              apiKey: result.apiKey,
               modelID: model.id.trim(),
               modelType: modelType(model),
               headers: result.config.options.headers,
             }))
+          if (!result.current()) return
           result.config.models[model.id.trim()] = {
             ...result.config.models[model.id.trim()]!,
             provider: {
@@ -305,20 +335,18 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           result.config.npm = providerProtocols[protocol].npm
         }
       }
-      const before = serverSync().data.config.provider?.[result.providerID]
-      if (form.protocol === undefined && before?.npm) result.config.npm = before.npm
+      const before = result.sync.data.config.provider?.[result.providerID]
+      if (result.protocol === undefined && before?.npm) result.config.npm = before.npm
       result.config.models = { ...before?.models, ...result.config.models }
       result.config.whitelist = [
         ...new Set([...(before?.whitelist ?? Object.keys(before?.models ?? {})), ...result.config.whitelist]),
       ]
-      const disabledProviders = serverSync().data.config.disabled_providers ?? []
-      const nextDisabled = disabledProviders.filter((id) => id !== result.providerID)
-
-      await serverSync().updateConfig({
+      if (!result.current()) return
+      await result.sync.updateConfig({
         provider: { [result.providerID]: result.config },
-        disabled_providers: nextDisabled,
       })
-      for (const model of form.models)
+      if (!result.current()) return
+      for (const model of result.models)
         catalog.setType(
           { providerID: result.providerID, modelID: model.id.trim() },
           model.type ?? providerModelType(model),
@@ -326,11 +354,12 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       // A credential failure must retry the same config, not create another provider.
       saved.providerID = result.providerID
       if (result.key) {
-        const resolved = await resolveProviderIntegration(serverSDK().client, result.providerID)
+        const resolved = await resolveProviderIntegration(result.sdk.client, result.providerID)
+        if (!result.current()) return
         if (!resolved.integration?.methods.some((method) => method.type === "key")) {
           throw new Error(`Provider ${result.providerID} does not expose a key integration`)
         }
-        await serverSDK().client.v2.integration.connect.key(
+        await result.sdk.client.v2.integration.connect.key(
           {
             integrationID: resolved.integrationID,
             location: resolved.location,
@@ -339,10 +368,25 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           },
           { throwOnError: true },
         )
-        await serverSDK().client.global.dispose({ throwOnError: true })
+        if (!result.current()) return
+        await result.sdk.client.global.dispose({ throwOnError: true })
       }
-      await serverSync().queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey[0] === serverSDK().scope && query.queryKey[2] === "providers",
+      if (!result.current()) return
+      if (result.enable) {
+        const disabled = result.sync.data.config.disabled_providers ?? []
+        if (disabled.includes(result.providerID))
+          await result.sync
+            .updateConfig({
+              disabled_providers: reconnectDisabledProviders(disabled, result.providerID, true),
+            })
+            .catch(() => {
+              throw new Error("providerReenableFailed")
+            })
+        if (!result.current()) return
+      }
+      service.disconnect(result.providerID, false)
+      await result.sync.queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === result.sdk.scope && query.queryKey[2] === "providers",
       })
       await serverSync().queryClient.fetchQuery({ ...serverSync().queryOptions.providers(null), staleTime: 0 })
       if (
@@ -353,6 +397,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       return result
     },
     onSuccess: (result) => {
+      if (!result?.current()) return
       service.select(result.providerID)
       dialog.close()
       showToast({
@@ -362,7 +407,8 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         description: language.t("provider.custom.discovery.savedDescription"),
       })
     },
-    onError: (err) => {
+    onError: (err, result) => {
+      if (!result.current()) return
       const message = err instanceof Error ? err.message : String(err)
       const type = message.startsWith("nonChatModel:")
         ? providerModelType(form.models.find((model) => providerModelType(model)) ?? { id: "" })
@@ -372,11 +418,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         : discovery.normalizedURL
       const description = type
         ? language.t("provider.custom.error.nonChatModel", { type: language.t(`provider.custom.modelType.${type}`) })
-        : /^(invalidModelReply|echoedModelReply)$/.test(message)
-          ? language.t("provider.custom.discovery.invalidReply")
-          : endpoint && (/HTTP 40[04]/.test(message) || message.startsWith("endpointURL:"))
-            ? language.t("provider.custom.discovery.endpointError", { url: endpoint })
-            : message
+        : message === "providerReenableFailed"
+          ? language.t("provider.connect.disabled.failed")
+          : /^(invalidModelReply|echoedModelReply)$/.test(message)
+            ? language.t("provider.custom.discovery.invalidReply")
+            : endpoint && (/HTTP 40[04]/.test(message) || message.startsWith("endpointURL:"))
+              ? language.t("provider.custom.discovery.endpointError", { url: endpoint })
+              : message
       showToast({ title: language.t("common.requestFailed"), description })
     },
   }))
@@ -399,7 +447,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       }
     })()
     if (!result) return
-    saveMutation.mutate(result)
+    saveMutation.mutate(snapshot(result))
   }
 
   return (
@@ -412,6 +460,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       <form onSubmit={save} class="px-2.5 pb-6 flex flex-col gap-6">
         <p class="text-14-regular text-text-base">{language.t("provider.custom.discovery.intro")}</p>
         <fieldset disabled={discovery.pending || saveMutation.isPending} class="flex min-w-0 flex-col gap-6">
+          <Show when={serverSync().data.config.disabled_providers?.includes(reconnectID() ?? "")}>
+            <ProviderEnableChoice
+              disconnected={service.disconnected(reconnectID() ?? "")}
+              checked={enable()}
+              onChange={(value) => setDiscovery("enable", value)}
+            />
+          </Show>
           <div class="flex flex-col gap-4">
             <TextField
               autofocus={props.autofocus ?? true}

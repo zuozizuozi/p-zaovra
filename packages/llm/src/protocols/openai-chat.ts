@@ -78,6 +78,7 @@ export const OpenAIChatMessage = Schema.Union([
     content: Schema.NullOr(Schema.String),
     tool_calls: optionalArray(OpenAIChatAssistantToolCall),
     reasoning_content: Schema.optional(Schema.String),
+    encrypted_content: Schema.optional(Schema.String),
   }),
   Schema.Struct({ role: Schema.Literal("tool"), tool_call_id: Schema.String, content: Schema.String }),
 ]).pipe(Schema.toTaggedUnion("role"))
@@ -152,6 +153,8 @@ type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta
 export const OpenAIChatDelta = Schema.Struct({
   content: optionalNull(Schema.String),
   reasoning_content: optionalNull(Schema.String),
+  reasoning: optionalNull(Schema.String),
+  encrypted_content: optionalNull(Schema.String),
   tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
 })
 
@@ -186,6 +189,7 @@ interface ParserState {
   readonly finishReason?: FinishReason
   readonly rawFinishReason?: string
   readonly lifecycle: Lifecycle.State
+  readonly encryptedContent?: string
 }
 
 const invalid = ProviderShared.invalidRequest
@@ -227,8 +231,8 @@ const lowerMedia = Effect.fn("OpenAIChat.lowerMedia")(function* (part: MediaPart
   return { type: "image_url" as const, image_url: { url: media.dataUrl } }
 })
 
-const openAICompatibleReasoningContent = (native: unknown) =>
-  isRecord(native) && typeof native.reasoning_content === "string" ? native.reasoning_content : undefined
+const openAICompatibleField = (native: unknown, field: "reasoning_content" | "encrypted_content") =>
+  isRecord(native) && typeof native[field] === "string" ? native[field] : undefined
 
 const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (message: OpenAIChatRequestMessage) {
   const content: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
@@ -277,7 +281,12 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
     reasoning_content:
       reasoning.length > 0
         ? reasoning.map((part) => part.text).join("")
-        : openAICompatibleReasoningContent(message.native?.openaiCompatible),
+        : openAICompatibleField(message.native?.openaiCompatible, "reasoning_content"),
+    encrypted_content:
+      reasoning
+        .map((part) => openAICompatibleField(part.providerMetadata?.openaiCompatible, "encrypted_content"))
+        .find((value) => value !== undefined) ??
+      openAICompatibleField(message.native?.openaiCompatible, "encrypted_content"),
   }
 })
 
@@ -465,20 +474,29 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     const choice = event.choices[0]
     const finishReason = choice?.finish_reason ? mapFinishReason(choice.finish_reason) : state.finishReason
     const delta = choice?.delta
+    const encryptedContent =
+      delta?.encrypted_content == null
+        ? state.encryptedContent
+        : (state.encryptedContent ?? "") + delta.encrypted_content
+    const metadata =
+      encryptedContent === undefined ? undefined : { openaiCompatible: { encrypted_content: encryptedContent } }
     const toolDeltas = delta?.tool_calls ?? []
     let tools = state.tools
 
     let lifecycle = state.lifecycle
 
-    if (delta?.reasoning_content)
-      lifecycle = Lifecycle.reasoningDelta(lifecycle, events, "reasoning-0", delta.reasoning_content)
+    // Ciphertext can arrive without a visible summary, or after the tool delta.
+    if (delta?.encrypted_content != null)
+      lifecycle = Lifecycle.reasoningStart(lifecycle, events, "reasoning-0", metadata)
+    const reasoning = delta?.reasoning_content || delta?.reasoning
+    if (reasoning) lifecycle = Lifecycle.reasoningDelta(lifecycle, events, "reasoning-0", reasoning, metadata)
 
     if (delta?.content) {
-      lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0")
+      lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0", metadata)
       lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.content)
     }
 
-    if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0")
+    if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0", metadata)
 
     for (const tool of toolDeltas) {
       const result = ToolStream.appendOrStart(
@@ -528,6 +546,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         model: event.model ?? state.model,
         systemFingerprint: event.system_fingerprint ?? state.systemFingerprint,
         lifecycle,
+        encryptedContent,
       },
       events,
     ] as const
@@ -538,7 +557,13 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   const events: LLMEvent[] = []
   const hasToolCalls = state.toolCallEvents.length > 0
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
-  const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
+  const closed =
+    state.encryptedContent === undefined
+      ? state.lifecycle
+      : Lifecycle.reasoningEnd(state.lifecycle, events, "reasoning-0", {
+          openaiCompatible: { encrypted_content: state.encryptedContent },
+        })
+  const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(closed, events) : closed
   events.push(...state.toolCallEvents)
   if (reason)
     Lifecycle.finish(lifecycle, events, {

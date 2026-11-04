@@ -15,6 +15,7 @@ import { DialogConnectProvider, useProviderConnectController } from "./dialog-co
 import { DialogCustomProvider } from "./dialog-custom-provider"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
+import { useModelService } from "@/hooks/use-model-service"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -44,6 +45,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
   const providers = useProviders()
+  const service = useModelService()
   const providerConnect = useProviderConnectController({ onBack: props.onBack })
 
   const connect = (provider?: string) => {
@@ -108,6 +110,7 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
     await serverSync()
       .updateConfig({ disabled_providers: next })
       .then(() => {
+        if (!before.includes(providerID)) service.disconnect(providerID)
         showToast({
           variant: "success",
           icon: "circle-check",

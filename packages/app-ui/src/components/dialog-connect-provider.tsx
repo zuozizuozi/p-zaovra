@@ -38,7 +38,14 @@ import { useSettings } from "@/context/settings"
 import { popularProviders } from "@/hooks/use-providers"
 import { useQuery } from "@tanstack/solid-query"
 import { directoryKey } from "@/context/global-sync/utils"
-import { providerConnectionMethods, resolveProviderIntegration } from "@/utils/provider-integration"
+import {
+  connectProviderKey,
+  providerOperation,
+  reconnectDisabledProviders,
+  providerConnectionMethods,
+  resolveProviderIntegration,
+} from "@/utils/provider-integration"
+import { ProviderEnableChoice } from "./provider-enable-choice"
 import { CustomProviderForm } from "./dialog-custom-provider"
 import { usePlatform } from "@/context/platform"
 import { discoverProviderModels, providerDiscoveryPresets, providerProtocols } from "@/provider-discovery"
@@ -125,10 +132,13 @@ export const DialogConnectProvider: Component<{
         <Match when={controller.selected() === CUSTOM_ID}>
           <CustomProviderForm autofocus={!newLayout()} />
         </Match>
-        <Match when={controller.selected() && controller.selected() !== CUSTOM_ID ? controller.selected() : undefined}>
+        <Match
+          keyed
+          when={controller.selected() && controller.selected() !== CUSTOM_ID ? controller.selected() : undefined}
+        >
           {(provider) => (
             <ProviderConnection
-              provider={provider()}
+              provider={provider}
               directory={props.directory}
               onBack={reset}
               setBack={(handler) => (back.current = handler)}
@@ -829,30 +839,37 @@ function ProviderConnection(props: {
     dispatch({ type: "method.reset" })
   })
 
-  async function complete(verified = false) {
+  async function complete(current = () => alive.value, verified = false) {
+    if (!current()) return
+    const sdk = serverSDK()
+    const sync = serverSync()
+    const providerID = props.provider
+    const directory = props.directory?.()
     const name = provider().name
     attempt.complete = true
-    await serverSDK().client.global.dispose({ throwOnError: true })
+    await sdk.client.global.dispose({ throwOnError: true })
+    if (!current()) return
     // Discovery precedes credential admission. Refresh again after admission so
     // selectors do not retain the earlier, disconnected catalog.
-    await serverSync().queryClient.invalidateQueries({
-      predicate: (query) => query.queryKey[0] === serverSDK().scope && query.queryKey[2] === "providers",
+    await sync.queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === sdk.scope && query.queryKey[2] === "providers",
     })
+    if (!current()) return
     const { directoryKey } = await import("@/context/global-sync/utils")
-    const directory = props.directory?.()
-    const visible = await serverSync()
-      .queryClient.fetchQuery({
-        ...serverSync().queryOptions.providers(directory ? directoryKey(directory) : null),
+    if (!current()) return
+    const visible = await sync.queryClient
+      .fetchQuery({
+        ...sync.queryOptions.providers(directory ? directoryKey(directory) : null),
         staleTime: 0,
       })
       .then(
         (catalog) =>
-          catalog.connected.includes(props.provider) &&
-          Object.keys(catalog.all.get(props.provider)?.models ?? {}).length > 0,
+          catalog.connected.includes(providerID) && Object.keys(catalog.all.get(providerID)?.models ?? {}).length > 0,
         () => false,
       )
-    service.select(props.provider)
-    if (verified) serverSync().markProviderVerified(props.provider)
+    if (!current()) return
+    service.select(providerID)
+    if (verified) sync.markProviderVerified(providerID)
     dialog.close()
     showToast({
       variant: "success",
@@ -951,7 +968,22 @@ function ProviderConnection(props: {
       value: "",
       pending: false,
       error: undefined as string | undefined,
+      enable: undefined as boolean | undefined,
     })
+    const operation = providerOperation()
+    onCleanup(operation.cancel)
+    const disabled = () => serverSync().data.config.disabled_providers?.includes(props.provider) === true
+    const enable = () => formStore.enable ?? service.disconnected(props.provider)
+    const enableChoice = () => (
+      <Show when={disabled()}>
+        <ProviderEnableChoice
+          disconnected={service.disconnected(props.provider)}
+          checked={enable()}
+          disabled={formStore.pending}
+          onChange={(value) => setFormStore("enable", value)}
+        />
+      </Show>
+    )
 
     onMount(() => {
       if (!newLayout()) return
@@ -967,57 +999,79 @@ function ProviderConnection(props: {
         return
       }
       setFormStore({ pending: true, error: undefined })
+      const valid = operation.start()
+      const sdk = serverSDK()
+      const sync = serverSync()
+      const providerID = props.provider
+      const integration = auth.latest!
+      const inputs = { ...store.promptInputs }
+      const shouldEnable = enable()
+      const current = () =>
+        valid() && alive.value && serverSDK() === sdk && props.provider === providerID && formStore.value.trim() === key
       try {
-        const preset = providerDiscoveryPresets[props.provider]
-        const configured = serverSync().data.config.provider?.[props.provider]?.options
-        if (preset && !Object.keys(store.promptInputs ?? {}).length) {
-          const discovered = await (platform.discoverProviderModels ?? discoverProviderModels)({
-            ...preset,
-            baseURL: typeof configured?.baseURL === "string" ? configured.baseURL : preset.baseURL,
-            headers:
-              configured?.headers && typeof configured.headers === "object"
-                ? Object.fromEntries(
-                    Object.entries(configured.headers).filter(
-                      (entry): entry is [string, string] => typeof entry[1] === "string",
-                    ),
-                  )
-                : undefined,
-            apiKey: key,
-          })
-          await serverSync().updateConfig({
-            provider: {
-              [props.provider]: {
-                whitelist: discovered.map((model) => model.id),
-                models: Object.fromEntries(discovered.map((model) => [model.id, { name: model.name }])),
+        const preset = providerDiscoveryPresets[providerID]
+        const configured = sync.data.config.provider?.[providerID]?.options
+        const discovery =
+          preset && !Object.keys(inputs).length
+            ? {
+                ...preset,
+                baseURL: typeof configured?.baseURL === "string" ? configured.baseURL : preset.baseURL,
+                headers:
+                  configured?.headers && typeof configured.headers === "object"
+                    ? Object.fromEntries(
+                        Object.entries(configured.headers).filter(
+                          (entry): entry is [string, string] => typeof entry[1] === "string",
+                        ),
+                      )
+                    : undefined,
+                apiKey: key,
+              }
+            : undefined
+        const connected = await connectProviderKey({
+          client: sdk.client,
+          current,
+          request: { integrationID: integration.integrationID, location: integration.location, key, inputs },
+          discover: discovery
+            ? () => (platform.discoverProviderModels ?? discoverProviderModels)(discovery)
+            : undefined,
+          saveModels: (discovered) =>
+            sync.updateConfig({
+              provider: {
+                [providerID]: {
+                  whitelist: discovered.map((model) => model.id),
+                  models: Object.fromEntries(discovered.map((model) => [model.id, { name: model.name }])),
+                },
               },
-            },
-          })
-        }
-        await serverSDK().client.v2.integration.connect.key(
-          {
-            integrationID: auth.latest!.integrationID,
-            location: auth.latest!.location,
-            key,
-            inputs: store.promptInputs ?? {},
+            }),
+          enable: async () => {
+            if (!shouldEnable) {
+              service.disconnect(providerID, false)
+              return
+            }
+            const disabled = sync.data.config.disabled_providers ?? []
+            if (disabled.includes(providerID))
+              await sync.updateConfig({ disabled_providers: reconnectDisabledProviders(disabled, providerID, true) })
+            if (current()) service.disconnect(providerID, false)
           },
-          { throwOnError: true },
-        )
-        if (alive.value) await complete(!!preset && !Object.keys(store.promptInputs ?? {}).length)
+        })
+        if (connected) await complete(current, !!discovery)
       } catch (error) {
-        if (!alive.value) return
+        if (!current()) return
         const message = error instanceof Error ? error.message : ""
         setFormStore(
           "error",
           language.t(
-            /restart/.test(message)
-              ? "provider.custom.discovery.restart"
-              : /http40[13]/.test(message)
-                ? "provider.custom.discovery.auth"
-                : "common.requestFailed",
+            message === "providerReenableFailed"
+              ? "provider.connect.disabled.failed"
+              : /restart/.test(message)
+                ? "provider.custom.discovery.restart"
+                : /http40[13]/.test(message)
+                  ? "provider.custom.discovery.auth"
+                  : "common.requestFailed",
           ),
         )
       } finally {
-        if (alive.value) setFormStore("pending", false)
+        if (current()) setFormStore("pending", false)
       }
     }
 
@@ -1044,6 +1098,7 @@ function ProviderConnection(props: {
             </div>
           </Show>
           <form onSubmit={handleSubmit} class="flex flex-col items-start gap-5 self-stretch">
+            {enableChoice()}
             <Show when={providerDiscoveryPresets[props.provider]}>
               {(preset) => (
                 <p>
@@ -1106,6 +1161,7 @@ function ProviderConnection(props: {
           </Match>
         </Switch>
         <form onSubmit={handleSubmit} class="flex flex-col items-start gap-4">
+          {enableChoice()}
           <TextField
             autofocus={!newLayout()}
             ref={apiKey}

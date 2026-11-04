@@ -10,6 +10,7 @@ import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
+import { useModelService } from "@/hooks/use-model-service"
 import { disconnectProviderCredentials } from "@/utils/provider-integration"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
@@ -39,6 +40,7 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
   const serverSdk = useServerSDK()
   const serverSync = useServerSync()
   const providers = useProviders()
+  const service = useModelService()
   const providerConnect = useProviderConnectController({ onBack: props.onBack })
 
   const connect = (provider?: string) => {
@@ -111,6 +113,7 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
     await serverSync()
       .updateConfig({ disabled_providers: next })
       .then(() => {
+        if (!before.includes(providerID)) service.disconnect(providerID)
         showToast({
           variant: "success",
           icon: "circle-check",
