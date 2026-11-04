@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 import { mkdir } from "node:fs/promises"
-import { assessBetaCI, verifyBetaCI } from "./beta-ci"
+import { assessBetaCI, verifyBetaCI, verifyBetaPublish } from "./beta-ci"
 
 const sha = "a".repeat(40)
 const scrollback = "test/cli/run/scrollback.surface.test.ts"
@@ -171,7 +171,7 @@ test("604 mismatched attempt, stale artifact, other job or failed preparation re
     expect(() => allowed(value), mutation).toThrow()
   }
 })
-test("604 publish never receives the build-only exception and ordinary green CI stays valid", () => {
+test("604 default strict gate still requires explicit verified evidence and ordinary green CI stays valid", () => {
   const value = fixture()
   expect(() => assessBetaCI(value.inventory, sha, 99, value.evidence, false)).toThrow()
   expect(() => verifyBetaCI(value.inventory, sha)).toThrow()
@@ -292,4 +292,117 @@ test("604 CLI writes separate provenance output lines without network calls for 
   expect(await Bun.file(output).text()).toBe(
     "build=true\nk63_applied=false\ntest_run_id=10\ntest_run_attempt=2\nk63_missing_tests=0\n",
   )
+})
+
+function artifactGate() {
+  return { commit: sha, k63ExceptionApplied: true, testRun: "10", testAttempt: "2", missingTests: "17" }
+}
+test("605 publish accepts K63 only after executing the same fresh verification", () => {
+  const value = fixture()
+  expect(verifyBetaPublish(value.inventory, sha, 99, artifactGate(), value.evidence)).toMatchObject({
+    k63Applied: true,
+    testRun: 10,
+    testAttempt: 2,
+    missingTests: 17,
+  })
+  expect(() => verifyBetaPublish(value.inventory, sha, 99, artifactGate())).toThrow()
+})
+test("605 valid-looking ci-gate cannot conceal a non-K63 failure or assertion failure", () => {
+  for (const field of ["exit", "assertion", "type"]) {
+    const value = fixture()
+    if (field === "exit") value.evidence.report.results[1].exit = 1
+    if (field === "assertion") value.evidence.report.results[0].stats!.failures = 1
+    if (field === "type") value.inventory.workflow_runs[1].conclusion = "failure"
+    expect(() => verifyBetaPublish(value.inventory, sha, 99, artifactGate(), value.evidence), field).toThrow()
+  }
+})
+test("605 any difference between reviewed ci-gate and fresh decision refuses publish", () => {
+  for (const [field, mismatch] of [
+    ["commit", "c".repeat(40)],
+    ["k63ExceptionApplied", false],
+    ["k63ExceptionApplied", "true"],
+    ["testRun", "11"],
+    ["testAttempt", "1"],
+    ["missingTests", "0"],
+  ]) {
+    const value = fixture()
+    const gate: Record<string, unknown> = artifactGate()
+    gate[String(field)] = mismatch
+    expect(() => verifyBetaPublish(value.inventory, sha, 99, gate, value.evidence), String(field)).toThrow()
+  }
+})
+test("605 changed latest attempt or a newly pending attempt cannot borrow the reviewed build decision", () => {
+  const value = fixture()
+  value.inventory.workflow_runs[0].run_attempt = 3
+  value.evidence.attempt.run_attempt = 3
+  expect(() => verifyBetaPublish(value.inventory, sha, 99, artifactGate(), value.evidence)).toThrow("differs")
+  value.inventory.workflow_runs[0].status = "in_progress"
+  expect(() => verifyBetaPublish(value.inventory, sha, 99, artifactGate(), value.evidence)).toThrow()
+})
+test("605 green publish also requires matching artifact provenance, never a stale K63 flag", () => {
+  const value = fixture()
+  value.inventory.workflow_runs[0].conclusion = "success"
+  expect(() => verifyBetaPublish(value.inventory, sha, 99, artifactGate())).toThrow()
+  const gate = { ...artifactGate(), k63ExceptionApplied: false, missingTests: "0" }
+  expect(verifyBetaPublish(value.inventory, sha, 99, gate)).toMatchObject({ k63Applied: false })
+  expect(() => verifyBetaPublish(value.inventory, sha, 99, {})).toThrow()
+})
+test("605 real publish CLI compares downloaded ci-gate before returning success", async () => {
+  const directory = join(root!, crypto.randomUUID())
+  await mkdir(directory, { recursive: true })
+  const inventory = join(directory, "ci.json")
+  const metadata = join(directory, "ci-gate.json")
+  await Bun.write(inventory, JSON.stringify({ workflow_runs: [run("test"), run("typecheck")] }))
+  const execute = async () => {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "beta-ci.ts"), inventory, sha, "99", metadata], {
+      env: { ...process.env, EVENT_NAME: "publish", BUILD_ONLY: "false", GH_TOKEN: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [output, error, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { output, error, code }
+  }
+  await Bun.write(metadata, JSON.stringify({ ...artifactGate(), k63ExceptionApplied: false, missingTests: "0" }))
+  const matching = await execute()
+  expect(matching.code, matching.error).toBe(0)
+  expect(JSON.parse(matching.output)).toMatchObject({ testRun: 10, testAttempt: 2, k63ExceptionApplied: false })
+  await Bun.write(
+    metadata,
+    JSON.stringify({ ...artifactGate(), k63ExceptionApplied: false, missingTests: "0", testAttempt: "1" }),
+  )
+  const mismatch = await execute()
+  expect(mismatch.code).not.toBe(0)
+  expect(mismatch.error).toContain("differs from the fresh publish verification")
+})
+test("605 fresh K63 comparison occurs inside the approved publish job after artifact download", async () => {
+  const source = await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text()
+  const workflow = Bun.YAML.parse(source) as {
+    jobs: Record<
+      string,
+      {
+        if: string
+        environment?: string
+        steps: { name?: string; env?: Record<string, string>; run?: string; uses?: string }[]
+      }
+    >
+  }
+  const publish = workflow.jobs.publish
+  const fresh = publish.steps.findIndex(
+    (step) => step.name === "Reverify latest exact CI and compare reviewed artifact gate",
+  )
+  const download = publish.steps.findIndex((step) => step.uses?.startsWith("actions/download-artifact@"))
+  const upload = publish.steps.findIndex((step) => step.name === "Publish approved exact SHA and retain five versions")
+  expect(publish.environment).toBe("beta-publish")
+  expect(publish.if).toBe("github.event_name == 'workflow_dispatch' && !inputs.build_only")
+  expect(fresh).toBeGreaterThan(download)
+  expect(fresh).toBeLessThan(upload)
+  expect(publish.steps[fresh].env).toMatchObject({ EVENT_NAME: "publish", PYTHON: "python" })
+  expect(publish.steps[fresh].env).not.toHaveProperty("R2_ACCESS_KEY_ID")
+  expect(publish.steps[fresh].run).toContain("actions/runs?head_sha=$sha&per_page=100")
+  expect(publish.steps[fresh].run).toContain("beta-artifact/ci-gate.json")
+  expect(publish.steps[fresh].run).toContain("$LASTEXITCODE")
 })

@@ -48,6 +48,27 @@ export function assessBetaCI(input: unknown, sha: string, currentRun?: number, e
   }
 }
 
+export function verifyBetaPublish(
+  input: unknown,
+  sha: string,
+  currentRun: number | undefined,
+  artifactGate: unknown,
+  evidence?: Evidence,
+) {
+  // Re-evaluate the latest exact CI evidence; the build's metadata is never proof of K63.
+  const decision = assessBetaCI(input, sha, currentRun, evidence, true)
+  const gate = record(artifactGate)
+  if (
+    gate.commit !== sha ||
+    gate.k63ExceptionApplied !== decision.k63Applied ||
+    String(gate.testRun) !== String(decision.testRun) ||
+    String(gate.testAttempt) !== String(decision.testAttempt) ||
+    String(gate.missingTests) !== String(decision.missingTests)
+  )
+    throw new Error("Build CI gate metadata differs from the fresh publish verification")
+  return decision
+}
+
 function selectCI(input: unknown, sha: string) {
   const inventory = record(input)
   if (!/^[a-f0-9]{40}$/.test(sha) || !Array.isArray(inventory.workflow_runs)) throw new Error("Invalid CI inventory")
@@ -306,12 +327,24 @@ async function loadEvidence(test: Run, sha: string): Promise<Evidence> {
     reader.exited,
   ])
   if (exit !== 0) throw new Error("Invalid CI report archive")
-  const cwd = join(import.meta.dir, "../../zaovra")
-  const expectedFiles = Array.from(
-    new Bun.Glob("**/*{.test,_test,.spec,_spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}").scanSync({ cwd, onlyFiles: true }),
-  )
-    .filter((file) => !file.split(/[\\/]/).some((part) => part === "node_modules" || part === ".git"))
-    .map((file) => file.replaceAll("\\", "/"))
+  // Publish can review an earlier main commit: use that Git tree, not the workflow checkout's current files.
+  const source = Bun.spawn(["git", "ls-tree", "-r", "--name-only", "-z", sha, "--", "packages/zaovra"], {
+    cwd: join(import.meta.dir, "../../.."),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [paths, , code] = await Promise.all([
+    new Response(source.stdout).text(),
+    new Response(source.stderr).text(),
+    source.exited,
+  ])
+  if (code !== 0) throw new Error("Cannot read the exact approved source inventory")
+  const expectedFiles = paths
+    .split("\0")
+    .filter(Boolean)
+    .map((file) => file.replace(/^packages\/zaovra\//, ""))
+    .filter((file) => /(?:\.test|_test|\.spec|_spec)\.(?:js|jsx|ts|tsx|mjs|cjs|mts|cts)$/.test(file))
+    .filter((file) => !file.split("/").some((part) => part === "node_modules" || part === ".git"))
   return { attempt, jobs, artifact, report: JSON.parse(body) as unknown, expectedFiles }
 }
 
@@ -325,10 +358,14 @@ if (import.meta.main) {
   if (selected.typecheck.status !== "completed" || selected.typecheck.conclusion !== "success")
     throw new Error("Exact main typecheck CI has not passed")
   const evidence =
-    buildOnly && selected.test.status === "completed" && selected.test.conclusion === "failure"
+    selected.test.status === "completed" && selected.test.conclusion === "failure"
       ? await loadEvidence(selected.test, sha)
       : undefined
-  const decision = assessBetaCI(input, sha, Number(process.argv[4]), evidence, buildOnly)
+  const publish = process.env.EVENT_NAME === "publish"
+  if (publish && !process.argv[5]) throw new Error("Publish requires the reviewed artifact CI gate metadata")
+  const decision = publish
+    ? verifyBetaPublish(input, sha, Number(process.argv[4]), await Bun.file(process.argv[5]).json(), evidence)
+    : assessBetaCI(input, sha, Number(process.argv[4]), evidence, true)
   const metadata = {
     source: sha,
     k63ExceptionApplied: decision.k63Applied,
