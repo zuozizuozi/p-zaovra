@@ -39,6 +39,11 @@
       "node": "./src/filesystem/fff.node.ts",
       "default": "./src/filesystem/fff.bun.ts"
     },
+    "#process-tree-native": {
+      "bun": "./src/process-tree.native.bun.ts",
+      "node": "./src/process-tree.native.node.ts",
+      "default": "./src/process-tree.native.node.ts"
+    },
     "#preview-native": {
       "bun": "./src/preview-native.bun.ts",
       "node": "./src/preview-native.node.ts",

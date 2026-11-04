@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import type { AppServices } from "@/effect/app-runtime"
 import type { InstanceStore } from "@/project/instance-store"
 import { cmd, type WithDoubleDash } from "./cmd/cmd"
+import { ProcessTree } from "@zaovra-ai/core/process-tree"
 
 /**
  * User-visible command failure. Throw via `fail("...")` from an effectCmd handler
@@ -78,7 +79,7 @@ export const effectCmd = <Args, A>(opts: EffectCmdOpts<Args, A>) =>
       const args = rawArgs as unknown as WithDoubleDash<Args>
       const useInstance = typeof opts.instance === "function" ? opts.instance(args) : opts.instance !== false
       if (!useInstance) {
-        await AppRuntime.runPromise(opts.handler(args))
+        await AppRuntime.runPromise(opts.handler(args), { signal: ProcessTree.shutdownSignal })
         return
       }
       const { InstanceStore } = await import("@/project/instance-store")
@@ -88,7 +89,9 @@ export const effectCmd = <Args, A>(opts: EffectCmdOpts<Args, A>) =>
         InstanceStore.Service.use((store) => store.load({ directory }).pipe(Effect.map((ctx) => ({ store, ctx })))),
       )
       try {
-        await AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)))
+        await AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)), {
+          signal: ProcessTree.shutdownSignal,
+        })
       } finally {
         await AppRuntime.runPromise(store.dispose(ctx))
       }

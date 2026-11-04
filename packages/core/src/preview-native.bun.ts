@@ -2,7 +2,7 @@ export * as PreviewNative from "./preview-native.bun"
 
 import { writeFile } from "node:fs/promises"
 
-export async function windowsProcess(pid: number, stop?: string, cancelled?: string) {
+export async function windowsProcess(pid: number, stop?: string, cancelled?: string, strict = false) {
   const { dlopen, FFIType, ptr } = await import("bun:ffi")
   const lib = dlopen("kernel32.dll", {
     OpenProcess: { args: [FFIType.u32, FFIType.bool, FFIType.u32], returns: FFIType.ptr },
@@ -10,10 +10,21 @@ export async function windowsProcess(pid: number, stop?: string, cancelled?: str
     WaitForSingleObject: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
     TerminateProcess: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.bool },
     CloseHandle: { args: [FFIType.ptr], returns: FFIType.bool },
+    GetLastError: { args: [], returns: FFIType.u32 },
   })
   const handle = lib.symbols.OpenProcess(0x101000 | (stop ? 1 : 0), false, pid)
   try {
-    if (!handle || lib.symbols.WaitForSingleObject(handle, 0) !== 258) return
+    if (!handle) {
+      const error = lib.symbols.GetLastError()
+      if (strict && error !== 87) throw new Error(`Cannot inspect owned process ${pid}: Windows ${error}`)
+      return
+    }
+    const state = lib.symbols.WaitForSingleObject(handle, 0)
+    if (state === 0) return
+    if (state !== 258) {
+      if (strict) throw new Error(`Cannot query owned process liveness ${pid}: Windows ${lib.symbols.GetLastError()}`)
+      return
+    }
     const created = Buffer.alloc(8)
     const exited = Buffer.alloc(8)
     const kernel = Buffer.alloc(8)

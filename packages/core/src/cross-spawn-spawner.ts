@@ -26,6 +26,8 @@ import { PassThrough } from "node:stream"
 import launch from "cross-spawn"
 import { makeGlobalNode } from "./effect/app-node"
 import { filesystem, path } from "./effect/app-node-platform"
+import { ProcessTree } from "./process-tree"
+import { Duration } from "effect"
 
 const toError = (err: unknown): Error => (err instanceof globalThis.Error ? err : new globalThis.Error(String(err)))
 
@@ -265,9 +267,14 @@ export const make = Effect.gen(function* () {
   }
 
   const spawn = (command: ChildProcess.StandardCommand, opts: NodeChildProcess.SpawnOptions) =>
-    Effect.callback<readonly [NodeChildProcess.ChildProcess, ExitSignal], PlatformError.PlatformError>((resume) => {
+    Effect.callback<
+      readonly [NodeChildProcess.ChildProcess, ExitSignal, ProcessTree.Tracker | undefined],
+      PlatformError.PlatformError
+    >((resume) => {
+      ProcessTree.assertOpen()
       const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
       const proc = launch(command.command, command.args, opts)
+      const ownership = ProcessTree.track(proc)
       let end = false
       let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
       proc.on("error", (err) => {
@@ -282,10 +289,15 @@ export const make = Effect.gen(function* () {
         Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
       })
       proc.on("spawn", () => {
-        resume(Effect.succeed([proc, signal]))
+        void ownership.then(
+          (owner) => resume(Effect.succeed([proc, signal, owner])),
+          (error) => resume(Effect.fail(toPlatformError("track", toError(error), command))),
+        )
       })
-      return Effect.sync(() => {
-        proc.kill("SIGTERM")
+      return Effect.promise(async () => {
+        const owner = await ownership
+        if (owner) return owner.stop()
+        if (!ProcessTree.supported()) proc.kill("SIGTERM")
       })
     })
 
@@ -375,7 +387,7 @@ export const make = Effect.gen(function* () {
           const extra = fds(command.options)
           const dir = yield* cwd(command.options)
 
-          const [proc, signal] = yield* Effect.acquireRelease(
+          const [proc, signal, owner] = yield* Effect.acquireRelease(
             spawn(command, {
               cwd: dir,
               env: env(command.options),
@@ -384,7 +396,20 @@ export const make = Effect.gen(function* () {
               shell: command.options.shell,
               windowsHide: process.platform === "win32",
             }),
-            Effect.fnUntraced(function* ([proc, signal]) {
+            Effect.fnUntraced(function* ([proc, signal, owner]) {
+              if (owner) {
+                return yield* Effect.promise(() =>
+                  owner.stop(
+                    command.options.killSignal,
+                    command.options.forceKillAfter === undefined
+                      ? undefined
+                      : Duration.toMillis(Duration.fromInputUnsafe(command.options.forceKillAfter)),
+                  ),
+                )
+              }
+              // A short-lived process may exit before identity admission. Never
+              // fall back to a recycled numeric PID/group on the native path.
+              if (ProcessTree.supported()) return
               const done = yield* Deferred.isDone(signal)
               const kill = timeout(proc, command, command.options)
               if (done) {
@@ -430,6 +455,18 @@ export const make = Effect.gen(function* () {
               )
             }),
             kill: (opts?: ChildProcess.KillOptions) => {
+              if (owner)
+                return Effect.tryPromise({
+                  try: () =>
+                    owner.stop(
+                      opts?.killSignal,
+                      opts?.forceKillAfter === undefined
+                        ? undefined
+                        : Duration.toMillis(Duration.fromInputUnsafe(opts.forceKillAfter)),
+                    ),
+                  catch: (error) => toPlatformError("kill", toError(error), command),
+                })
+              if (ProcessTree.supported()) return Effect.void
               const sig = opts?.killSignal ?? "SIGTERM"
               const send = (s: NodeJS.Signals) =>
                 Effect.catch(killGroup(command, proc, s), () => killOne(command, proc, s))
