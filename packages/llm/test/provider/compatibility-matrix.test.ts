@@ -274,7 +274,18 @@ for (const supplier of suppliers) {
             const output = `${process.env.ZAOVRA_MATRIX_DIR}/${supplier.id}.json`
             await Bun.write(
               output,
-              JSON.stringify({ supplier, realModelCalls: 0, listenerStopped: true, wires }, null, 2),
+              JSON.stringify(
+                {
+                  supplier,
+                  realModelCalls: 0,
+                  listenerStopped: true,
+                  // Archive afresh from authoritative HTTP bytes, independently
+                  // of assertions that inspect the mutable parsed body.
+                  wires: wires.map((wire) => ({ ...wire, body: JSON.parse(wire.raw) })),
+                },
+                null,
+                2,
+              ),
             )
           }),
         ),
