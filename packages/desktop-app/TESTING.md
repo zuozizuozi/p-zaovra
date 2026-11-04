@@ -32,3 +32,11 @@ if ($LASTEXITCODE -ne 0) { throw "Native upgrade regression failed" }
 ## 已知限制
 
 Google 原生工具多轮未经真实验证。597唯一真实复测第二轮在本地代理侧出现 URLError Errno 2，未到达工具续轮；599不追加调用，Beta发出后如需复测须另行授权。
+
+### Windows Beta gate 的 K63 构建例外
+
+仅允许精确 main 的 test 最新 attempt 唯一 scrollback 段 exit=132 / signal=SIGILL 且缺实际 XML；该 attempt 的 job、官方附件 SHA256、完整源文件 plan 与 results、其余段零断言失败都须通过，typecheck 必须真实成功。不匹配日志文本，不改变 test 工作流、Bun 或 scrollback 测试。构建输出及 ci-gate.json/notes 记录“K63 例外已应用”、test run id、attempt 和缺口例数，原 CI failure 不改绿。
+
+合入后可由失败 test 的 workflow_run 触发，或由评估执行 windows-beta workflow_dispatch：approved_sha=<当前已审 main 完整 SHA>、build_only=true；该入口只构建，不需要 artifact_run/approval_ref。不得再次重跑同一 test 凑绿。普通 dispatch 的 build_only 默认为 false，仍走发布入口：本例外不会放行 publish 的失败 test，且原精确产物审核、手动 dispatch 与 beta-publish 环境审批继续生效。
+
+本地回归从 desktop-app 包运行 bun test scripts/beta-ci.test.ts scripts/beta-release.test.ts，设置本会话隔离 ZAOVRA_BETA_TEST_DIR、HOME/XDG/TEMP，ZIP 读取回归使用 Python 3（Windows 可设 PYTHON=python）。

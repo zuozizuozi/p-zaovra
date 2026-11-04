@@ -11,13 +11,18 @@ on:
         description: Exact reviewed main commit
         required: true
         type: string
+      build_only:
+        description: Build the exact reviewed main SHA without publishing
+        required: false
+        default: false
+        type: boolean
       artifact_run:
-        description: Successful windows-beta build run ID for that SHA
-        required: true
+        description: Successful windows-beta build run ID for publishing that SHA
+        required: false
         type: string
       approval_ref:
         description: Evaluator revision or review URL authorizing this Beta upload
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -30,11 +35,15 @@ concurrency:
 
 jobs:
   gate:
-    if: github.repository == 'zuozizuozi/p-zaovra' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.conclusion == 'success'))
+    if: github.repository == 'zuozizuozi/p-zaovra' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.conclusion == 'success' || (github.event.workflow_run.name == 'test' && github.event.workflow_run.conclusion == 'failure'))))
     runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.gate.outputs.sha }}
       build: ${{ steps.gate.outputs.build }}
+      k63_applied: ${{ steps.gate.outputs.k63_applied }}
+      test_run_id: ${{ steps.gate.outputs.test_run_id }}
+      test_run_attempt: ${{ steps.gate.outputs.test_run_attempt }}
+      k63_missing_tests: ${{ steps.gate.outputs.k63_missing_tests }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -46,6 +55,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.approved_sha || github.event.workflow_run.head_sha }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          BUILD_ONLY: ${{ inputs.build_only || false }}
           WORKFLOW_SHA: ${{ github.sha }}
           CURRENT_RUN: ${{ github.run_id }}
         shell: bash
@@ -59,7 +69,7 @@ jobs:
           echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
   build:
-    if: github.event_name == 'workflow_run' && needs.gate.outputs.build == 'true'
+    if: (github.event_name == 'workflow_run' || inputs.build_only) && needs.gate.outputs.build == 'true'
     needs: gate
     runs-on: windows-2025
     permissions:
@@ -136,7 +146,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/verify-beta-signature.ps1 -Installer dist/zaovra-desktop-win-x64.exe -Publisher $env:WINDOWS_SIGNING_PUBLISHER_NAME
           $sha = "${{ needs.gate.outputs.sha }}"
-          "Windows Beta $env:ZAOVRA_VERSION; source $sha. Includes feedback upload and automatic database backup before update. Review this exact artifact before publishing." | Set-Content dist/notes.md
+          $k63 = "${{ needs.gate.outputs.k63_applied }}" -eq "true"
+          $policy = if ($k63) { "K63 例外已应用" } else { "Exact main test and typecheck passed" }
+          @{
+            commit = $sha
+            k63ExceptionApplied = $k63
+            message = $policy
+            testRun = "${{ needs.gate.outputs.test_run_id }}"
+            testAttempt = "${{ needs.gate.outputs.test_run_attempt }}"
+            missingTests = "${{ needs.gate.outputs.k63_missing_tests }}"
+          } | ConvertTo-Json | Set-Content dist/ci-gate.json
+          "Windows Beta $env:ZAOVRA_VERSION; source $sha. $policy; test run ${{ needs.gate.outputs.test_run_id }} attempt ${{ needs.gate.outputs.test_run_attempt }}. Includes feedback upload and automatic database backup before update. Review this exact artifact before publishing." | Set-Content dist/notes.md
           bun scripts/beta-release.ts dist $sha dist/notes.md
       - name: Preserve reviewable installers only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -147,11 +167,12 @@ jobs:
             packages/desktop-app/dist/zaovra-desktop-win-x64.exe.blockmap
             packages/desktop-app/dist/beta.yml
             packages/desktop-app/dist/notes.md
+            packages/desktop-app/dist/ci-gate.json
           if-no-files-found: error
           retention-days: 7
 
   publish:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.build_only
     needs: gate
     runs-on: windows-2025
     environment: beta-publish
@@ -180,7 +201,7 @@ jobs:
           $review = @($environment.protection_rules | Where-Object type -eq required_reviewers)
           if (-not ($review | Where-Object { $_.prevent_self_review -eq $true -and @($_.reviewers.reviewer.login) -contains $env:BETA_APPROVER_LOGIN })) { throw "A protected evaluator reviewer with no self approval is required" }
           $build = gh api "repos/$env:GH_REPO/actions/runs/$env:ARTIFACT_RUN" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $build.head_sha -ne $env:APPROVED_SHA -or $build.event -ne "workflow_run" -or $build.name -ne "windows-beta" -or $build.conclusion -ne "success") { throw "Build artifact identity or result does not match approval" }
+          if ($LASTEXITCODE -ne 0 -or $build.head_sha -ne $env:APPROVED_SHA -or @("workflow_run", "workflow_dispatch") -notcontains $build.event -or $build.name -ne "windows-beta" -or $build.conclusion -ne "success") { throw "Build artifact identity or result does not match approval" }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: windows-beta-${{ needs.gate.outputs.sha }}
