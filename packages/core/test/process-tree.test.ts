@@ -85,19 +85,23 @@ describe("owned tool process trees", () => {
           "SIGKILL",
         )
         expect((await ProcessTreeNative.identity(unrelatedPID))?.birth).toBe(unrelatedIdentity?.birth)
-        console.info(
-          JSON.stringify({
-            phase: "owned-tree-after-stop",
-            owned_alive: false,
-            unrelated: await ProcessTreeNative.identity(unrelatedPID),
-          }),
-        )
         const stopping = owner!.stop("SIGTERM", 100)
         expect(owner!.stop()).toBe(stopping)
         await stopping
         for (const pid of [rootInfo.pid, childInfo.pid, leafInfo.pid])
           expect(await ProcessTreeNative.identity(pid)).toBeUndefined()
         expect((await ProcessTreeNative.identity(unrelatedPID))?.birth).toBe(unrelatedIdentity?.birth)
+        const remaining = await Promise.all(
+          [rootInfo.pid, childInfo.pid, leafInfo.pid].map((pid) => ProcessTreeNative.identity(pid)),
+        )
+        console.info(
+          JSON.stringify({
+            phase: "owned-tree-after-stop",
+            owned_alive: remaining.some((item) => item !== undefined),
+            remaining,
+            unrelated: await ProcessTreeNative.identity(unrelatedPID),
+          }),
+        )
       } finally {
         await owner?.stop()
         if (unrelatedIdentity) await ProcessTreeNative.signal(unrelatedIdentity, "SIGKILL")
