@@ -23,6 +23,7 @@ The Zaovra Desktop app, built with Electron.
 - 首个 Beta 尚未发布，没有旧 Beta 数据需要自动导入，始终从空白数据开始。显式 `--user-data-dir` 同样从隔离目录开始，不隐式读取原 home 数据。
 - Native 后端不再继承 `ZAOVRA_DB`、`ZAOVRA_CONFIG`、`ZAOVRA_CONFIG_DIR`、`ZAOVRA_CONFIG_CONTENT` 作为运行时覆盖；原 `ZAOVRA_DB`/配置目录仅可作为上述升级复制的来源。需要另一套数据时使用独立 `--user-data-dir`。本条是渠道隔离的兼容性变更，不影响独立 CLI 的覆盖参数。
 - 使用父 a2394386 生成合成会话、凭据和 provider 配置，验证导入、空白、失败重试、重启，以及三渠道并装互不影响；另以仍打开的 SQLite WAL 写入器验证在线备份。测试只用独立合成目录。WSL 的真实旧安装迁移、真实安装器升级及 Linux 新包沙箱仍须单独验收。
+- WSL 后端升级后不会自动导入旧会话，原数据仍在原位置；旧共享数据目录不会被此隔离步骤删除或覆盖。WSL 旧数据导入记为下一批 P2。当前发布范围为 Windows Beta，Linux 包的沙箱验收延后，见[升级测试补充](TESTING.md)。
 
 ## Development
 
