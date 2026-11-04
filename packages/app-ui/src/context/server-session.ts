@@ -84,9 +84,7 @@ function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) {
     const result = Binary.search(session, item.message.id, (message) => message.id)
     if (!result.found) session.splice(result.index, 0, item.message)
     const current = part.get(item.message.id)
-    const confirmed = result.found
-      ? item.parts.filter((part) => Binary.search(current ?? [], part.id, (value) => value.id).found)
-      : []
+    const confirmed = result.found ? item.parts.filter((part) => current?.some((value) => value.id === part.id)) : []
     if (result.found) observed.push({ messageID: item.message.id, parts: confirmed })
     part.set(
       item.message.id,
@@ -117,7 +115,7 @@ function runInflight(map: Map<string, Promise<void>>, key: string, task: () => P
 function merge<T extends { id: string }>(a: readonly T[], b: readonly T[]) {
   const items = new Map(a.map((item) => [item.id, item] as const))
   for (const item of b) items.set(item.id, item)
-  return [...items.values()].sort((x, y) => cmp(x.id, y.id))
+  return [...items.values()]
 }
 
 function reconcileFetched<T extends { id: string }>(
@@ -127,6 +125,7 @@ function reconcileFetched<T extends { id: string }>(
     touched?: ReadonlySet<string>
     retained?: ReadonlySet<string>
     preserveUnfetched?: boolean | ((item: T) => boolean)
+    sourceOrder?: boolean
   } = {},
 ) {
   const result = new Map(fetched.map((item) => [item.id, item]))
@@ -148,7 +147,8 @@ function reconcileFetched<T extends { id: string }>(
     if (item) result.set(id, item)
     if (!item) result.delete(id)
   }
-  return [...result.values()].sort((a, b) => cmp(a.id, b.id))
+  const items = [...result.values()]
+  return options.sourceOrder ? items : items.sort((a, b) => cmp(a.id, b.id))
 }
 
 export function createServerSession(client: ZaovraClient, options?: { retry?: typeof retry }) {
@@ -596,7 +596,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       session: adapted.map((item) => cleanMessage(item.message)).sort((a, b) => cmp(a.id, b.id)),
       part: adapted.map((item) => ({
         id: item.message.id,
-        part: item.parts.filter((part) => !!part.id).sort((a, b) => cmp(a.id, b.id)),
+        part: item.parts.filter((part) => !!part.id),
       })),
       cursor,
       complete: !cursor,
@@ -658,7 +658,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       for (const partID of load?.carriedDeltaParts.get(item.id) ?? []) {
         if (!fetchedIDs.has(partID)) touched.delete(partID)
       }
-      const parts = reconcileFetched(fetched, data.part[item.id] ?? [], { touched })
+      const parts = reconcileFetched(fetched, data.part[item.id] ?? [], { touched, sourceOrder: true })
       if (!parts.length) {
         orphanParts.get(sessionID)?.delete(item.id)
         setData(produce((draft) => deleteMessageParts(draft, item.id)))
@@ -1335,14 +1335,11 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           setData("part", part.messageID, [part])
           return
         }
-        const result = Binary.search(parts, part.id, (item) => item.id)
-        if (result.found) setData("part", part.messageID, result.index, reconcile(part))
-        if (!result.found)
-          setData("part", part.messageID, (value = []) => {
-            const next = value.slice()
-            next.splice(result.index, 0, part)
-            return next
-          })
+        // Provider IDs are identities, not ordinals. Keep observed/content order
+        // while locating updates by ID independently of their display position.
+        const index = parts.findIndex((item) => item.id === part.id)
+        if (index >= 0) setData("part", part.messageID, index, reconcile(part))
+        if (index < 0) setData("part", part.messageID, (value = []) => [...value, part])
         return
       }
       case "message.part.removed": {
@@ -1377,8 +1374,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
             offsetChunks.delete(props.partID)
             const parts = draft.part[props.messageID]
             if (!parts) return
-            const result = Binary.search(parts, props.partID, (part) => part.id)
-            if (result.found) parts.splice(result.index, 1)
+            const index = parts.findIndex((part) => part.id === props.partID)
+            if (index >= 0) parts.splice(index, 1)
             if (parts.length === 0) delete draft.part[props.messageID]
           }),
         )
@@ -1394,8 +1391,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         }
         const parts = data.part[props.messageID]
         if (!parts) return
-        const result = Binary.search(parts, props.partID, (part) => part.id)
-        if (!result.found) return
+        const index = parts.findIndex((part) => part.id === props.partID)
+        if (index < 0) return
         trackPartChange(props.sessionID, props.messageID, props.partID)
         const load = messageLoads.get(props.sessionID)
         if (load) {
@@ -1407,7 +1404,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           if (carried?.size === 0) load.carriedDeltaParts.delete(props.messageID)
         }
         const field = props.field as keyof (typeof parts)[number]
-        const current = parts[result.index]?.[field]
+        const current = parts[index]?.[field]
         if (!deltaBases.has(props.partID) && typeof current === "string")
           deltaBases.set(props.partID, { base: current, sessionID: props.sessionID })
         setData(
@@ -1420,7 +1417,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           props.messageID,
           produce((draft) => {
             if (!draft) return
-            const part = draft[result.index]
+            const part = draft[index]
             const field = props.field as keyof typeof part
             ;(part[field] as string) = ((part[field] as string | undefined) ?? "") + props.delta
           }),
@@ -1550,9 +1547,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     },
     optimistic: {
       add(input: { sessionID: string; message: Message; parts: Part[] }) {
-        const parts = input.parts
-          .filter((part) => !!part?.id && !SKIP_PARTS.has(part.type))
-          .sort((a, b) => cmp(a.id, b.id))
+        const parts = input.parts.filter((part) => !!part?.id && !SKIP_PARTS.has(part.type))
         const load = messageLoads.get(input.sessionID)
         if (load?.clearedMessageParts.has(input.message.id)) {
           const touched = load.touchedParts.get(input.message.id) ?? new Set<string>()
@@ -1570,7 +1565,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         if (items) items.set(input.message.id, { ...input, parts, confirmedParts: [] })
         if (!items)
           optimistic.set(input.sessionID, new Map([[input.message.id, { ...input, parts, confirmedParts: [] }]]))
-        setData("message", input.sessionID, (messages = []) => merge(messages, [input.message]))
+        setData("message", input.sessionID, (messages = []) =>
+          merge(messages, [input.message]).sort((a, b) => cmp(a.id, b.id)),
+        )
         setData(
           "part_text_accum_delta",
           produce((draft) => {

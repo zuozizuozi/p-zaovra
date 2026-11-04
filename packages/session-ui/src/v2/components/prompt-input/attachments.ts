@@ -297,7 +297,7 @@ export function createPromptInputV2Attachments(
       }
       const target = capture()
       void input
-        .picker({ defaultPath: input.directory(), multiple: true, accept: accepted }, (file) =>
+        .picker({ multiple: true, accept: accepted }, (file) =>
           input.identity?.() === target?.identity ? add(file, true, target) : Promise.resolve(false),
         )
         .catch(input.onError)

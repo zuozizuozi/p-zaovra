@@ -15,6 +15,16 @@ const model = OpenAICompatible.configure({ baseURL: "https://synthetic.invalid/v
 for (const fixture of [
   { name: "ciphertext without summary", deltas: [{ encrypted_content: "opaque" }], encrypted: "opaque", text: "" },
   {
+    name: "ciphertext split across visible text",
+    deltas: [
+      { reasoning_content: "summary", encrypted_content: "opaque-" },
+      { content: "answer" },
+      { encrypted_content: "tail+/=" },
+    ],
+    encrypted: "opaque-tail+/=",
+    text: "summary",
+  },
+  {
     name: "ciphertext chunks after visible text",
     deltas: [
       { reasoning_content: "summary" },
@@ -52,6 +62,9 @@ for (const fixture of [
         ),
       )
       expect(response.reasoning).toBe(fixture.text)
+      expect(response.events.filter((event) => event.type === "reasoning-start")).toHaveLength(
+        fixture.text || fixture.encrypted !== undefined ? 1 : 0,
+      )
       const prepared = yield* LLMClient.prepare<OpenAIChatBody>(
         LLM.request({
           model,

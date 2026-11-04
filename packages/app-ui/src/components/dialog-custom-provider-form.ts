@@ -8,6 +8,7 @@ import {
   type ProviderModelType,
 } from "../provider-discovery"
 import type { Config } from "@zaovra-ai/sdk/v2/types"
+import { providerDisplayName } from "../provider-label"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -85,7 +86,7 @@ export function customProviderDefaults(input: {
     : undefined
   return {
     baseURL: baseURL ?? input.form.baseURL,
-    name: input.form.name.trim() || existing?.[1].name || host,
+    name: providerDisplayName(input.form.name.trim() || existing?.[1].name, baseURL),
     providerID:
       input.form.providerID.trim() ||
       input.savedProviderID ||

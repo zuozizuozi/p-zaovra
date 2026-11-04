@@ -404,7 +404,10 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
               match.superseded = true
               delete match.providerMetadata
             }
-            match.time = { created: match.time?.created ?? event.data.timestamp, completed: event.data.timestamp }
+            match.time = {
+              created: match.time?.created ?? event.data.timestamp,
+              completed: match.time?.completed ?? event.data.timestamp,
+            }
             if (!event.data.superseded && event.data.providerMetadata !== undefined)
               match.providerMetadata = event.data.providerMetadata
           }

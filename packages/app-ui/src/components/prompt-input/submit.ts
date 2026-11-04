@@ -23,6 +23,7 @@ import { ScopedKey } from "@/utils/server-scope"
 import { pathKey } from "@/utils/path-key"
 import { createPromptSubmissionState } from "./submission-state"
 import { toLegacySessionSummary } from "@/context/global-sync/home-session-index"
+import { adaptSessionInput } from "@/context/v2-session-adapter"
 
 type PendingPrompt = {
   abort: AbortController
@@ -184,37 +185,23 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
-  const { optimisticParts } = buildRequestParts({
-    prompt: input.draft.prompt,
-    context: input.draft.context,
-    images: draftImages(input.draft.prompt),
-    text: draftText(input.draft.prompt),
-    sessionID: input.draft.sessionID,
-    messageID,
-    sessionDirectory: input.draft.sessionDirectory,
-  })
-
-  const message: Message = {
-    id: messageID,
-    sessionID: input.draft.sessionID,
-    role: "user",
-    time: { created: Date.now() },
-    agent: admission.selection?.agent ?? input.draft.agent,
-    model: admission.selection
-      ? {
-          modelID: admission.selection.model.id,
-          providerID: admission.selection.model.providerID,
-          variant: admission.selection.model.variant,
-        }
-      : input.draft.model,
-  }
+  // The V2 admission owns part identities and context lowering. Use its adapter
+  // for optimism too, so confirmation and reload reconcile the same parts.
+  const optimistic = adaptSessionInput(
+    {
+      id: input.draft.sessionID,
+      agent: input.draft.agent,
+      model: { id: input.draft.model.modelID, providerID: input.draft.model.providerID, variant: input.draft.variant },
+    },
+    { id: messageID, timeCreated: Date.now(), prompt: admission },
+  )
 
   const add = () =>
     input.sync.session.optimistic.add({
       directory: input.draft.sessionDirectory,
       sessionID: input.draft.sessionID,
-      message,
-      parts: optimisticParts,
+      message: optimistic.message,
+      parts: optimistic.parts,
     })
 
   const remove = () =>

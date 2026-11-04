@@ -19,9 +19,9 @@ test("mixed selected sources keep their own chip names, original bytes and conve
     const prepared: File[] = []
     for (const source of sources) prepared.push(...(await prepareDesktopAttachment(source, api, undefined, directory)))
     expect(prepared.map((file) => file.name)).toEqual([
-      "selected-word.docx.md",
+      "selected-word.docx",
       "selected-table.csv",
-      "selected-audio.wav.md",
+      "selected-audio.wav",
     ])
     expect(await prepared[1].text()).toBe("selected-csv-content")
     for (const index of [0, 2]) {

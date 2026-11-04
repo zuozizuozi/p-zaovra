@@ -1,6 +1,7 @@
 import type { IntegrationInfo, Model, ModelV2Info, Provider, ProviderV2Info } from "@zaovra-ai/sdk/v2/client"
 import type { NormalizedProviderListResponse } from "@zaovra-ai/session-ui/context"
 import { providerConnectionMethods } from "@/utils/provider-integration"
+import { providerDisplayName } from "@/provider-label"
 
 export function adaptProviderCatalog(
   providers: ProviderV2Info[],
@@ -12,7 +13,7 @@ export function adaptProviderCatalog(
       integration.id,
       {
         id: integration.id,
-        name: integration.name,
+        name: providerDisplayName(integration.name),
         source: integration.connections.some((connection) => connection.type === "env") ? "env" : "api",
         env: integration.methods.flatMap((method) => (method.type === "env" ? method.names : [])),
         options: {
@@ -38,7 +39,7 @@ export function adaptProviderCatalog(
       const integration = integrations.find((item) => item.id === (provider.integrationID ?? provider.id))
       all.set(provider.id, {
         id: provider.id,
-        name: provider.name,
+        name: providerDisplayName(provider.name, provider.api.url),
         source: integration?.connections.some((connection) => connection.type === "env")
           ? "env"
           : integration?.connections.length

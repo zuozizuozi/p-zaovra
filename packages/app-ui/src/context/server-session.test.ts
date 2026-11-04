@@ -81,6 +81,52 @@ const assistant = (id: string, text: string, created: number): Extract<SessionMe
   time: { created, completed: created + 1 },
 })
 
+test("177 source order survives ID lookup, deltas, removal and history reload", async () => {
+  const message = assistant("msg_answer", "", 2)
+  message.content = [
+    { type: "reasoning", id: "reasoning-0", text: "Think" },
+    { type: "text", id: "text-0", text: "Before tool" },
+    {
+      type: "tool",
+      id: "call-z",
+      name: "read",
+      time: { created: 2, completed: 3 },
+      state: { status: "completed", input: {}, content: [{ type: "text", text: "Result" }], structured: {} },
+    },
+    ...Array.from({ length: 12 }, (_, index) => ({
+      type: "text" as const,
+      id: `text-${index + 1}`,
+      text: `After ${index + 1}`,
+    })),
+  ]
+  const ctx = setup({
+    pages: [{ data: [user("msg_user", "Read", 1), message] }, { data: [user("msg_user", "Read", 1), message] }],
+  })
+  await ctx.store.sync("ses_child")
+  const ids = message.content.map((part) => `msg_answer:${part.id}`)
+  expect(ctx.store.data.part.msg_answer.map((part) => part.id)).toEqual(ids)
+  ctx.store.apply({
+    type: "message.part.delta",
+    properties: {
+      sessionID: "ses_child",
+      messageID: "msg_answer",
+      partID: "msg_answer:text-10",
+      field: "text",
+      delta: " appended",
+    },
+  })
+  expect(ctx.store.data.part.msg_answer.find((part) => part.id === "msg_answer:text-10")).toMatchObject({
+    text: "After 10 appended",
+  })
+  ctx.store.apply({
+    type: "message.part.removed",
+    properties: { sessionID: "ses_child", messageID: "msg_answer", partID: "msg_answer:call-z" },
+  })
+  expect(ctx.store.data.part.msg_answer.map((part) => part.id)).toEqual(ids.filter((id) => id !== "msg_answer:call-z"))
+  await ctx.store.sync("ses_child", { force: true })
+  expect(ctx.store.data.part.msg_answer.map((part) => part.id)).toEqual(ids.filter((id) => id !== "msg_answer:call-z"))
+})
+
 for (const continuation of ["继续", "continue", "补充要求", "修改要求"])
   test("request evidence stays conservative through real store pagination and reopen: " + continuation, async () => {
     const original = user("msg_001", "必须先读 customer-spec.md，缺失不得自编。", 1)

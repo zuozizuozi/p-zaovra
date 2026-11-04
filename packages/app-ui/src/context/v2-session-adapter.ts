@@ -33,7 +33,10 @@ export function adaptSession(session: SessionV2Info): SessionView {
   return { ...toLegacySessionSummary(session), agent: session.agent, model: session.model }
 }
 
-export function adaptSessionInput(session: Pick<SessionV2Info, "id" | "agent" | "model">, input: SessionInputAdmitted) {
+export function adaptSessionInput(
+  session: Pick<SessionV2Info, "id" | "agent" | "model">,
+  input: Pick<SessionInputAdmitted, "id" | "timeCreated" | "prompt">,
+) {
   return {
     message: {
       id: input.id,

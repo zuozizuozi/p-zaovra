@@ -811,7 +811,8 @@ export const dict = {
   "provider.custom.discovery.save": "保存配置",
   "provider.custom.discovery.search": "搜索模型",
   "provider.custom.discovery.success": "已获取模型列表，默认选中第一项，可自行更换。尚未验证生成和工具调用能力。",
-  "provider.custom.discovery.auth": "认证失败，请检查 API Key 和服务地址。",
+  "provider.custom.discovery.auth":
+    "认证失败。请在该服务商控制台的“API Key / 密钥管理”复制有效 Key；在其 API 文档核对基础服务地址（不要填 chat/completions 等具体接口路径），然后重新获取模型。不同服务商的 Key 不能通用。",
   "provider.custom.discovery.rate": "请求过于频繁，请稍后重试，也可以手动填写模型 ID。",
   "provider.custom.discovery.url": "请填写有效的 HTTP(S) 服务地址，不要包含账号密码、查询参数或锚点。",
   "provider.custom.discovery.empty": "服务未返回模型，可手动填写服务商提供的模型 ID。",

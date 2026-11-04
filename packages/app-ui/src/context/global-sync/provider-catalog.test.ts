@@ -1,6 +1,23 @@
 import { expect, test } from "bun:test"
 import { adaptProviderCatalog } from "./provider-catalog"
 
+test("612 domain-only saved services have brand names and empty catalogs inject no test presets", () => {
+  const catalog = adaptProviderCatalog(
+    [],
+    [],
+    [
+      { id: "gravitex", name: "api.gravitex.ai", methods: [{ type: "key", label: "Key" }], connections: [] },
+      { id: "edge", name: "api.edgecloudapp.com", methods: [{ type: "key", label: "Key" }], connections: [] },
+      { id: "custom", name: "My custom account", methods: [{ type: "key", label: "Key" }], connections: [] },
+    ],
+  )
+  expect(catalog.all.get("gravitex")?.name).toBe("万引")
+  expect(catalog.all.get("edge")?.name).toBe("EdgeCloud")
+  expect(catalog.all.get("custom")?.name).toBe("My custom account")
+  expect(adaptProviderCatalog([], [], []).all.size).toBe(0)
+  expect(adaptProviderCatalog([], [], []).connected).toEqual([])
+})
+
 test("saved provider credentials remain removable without inventing available models", () => {
   const catalog = adaptProviderCatalog(
     [],

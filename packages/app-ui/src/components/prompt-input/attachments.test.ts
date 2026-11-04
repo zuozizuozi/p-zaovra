@@ -25,7 +25,7 @@ describe("attachmentMime", () => {
 })
 
 describe("pickAttachmentFiles", () => {
-  test("reads the current project directory for every native picker invocation", async () => {
+  test("does not open the project directory by default in the native attachment picker", async () => {
     const paths: string[] = []
     const files: File[] = []
     const file = new File(["hello"], "hello.txt", { type: "text/plain" })
@@ -53,7 +53,7 @@ describe("pickAttachmentFiles", () => {
     })
     await Promise.resolve()
     expect(files).toEqual([file, file])
-    expect(paths).toEqual(["C:\\Projects\\LoremIpsum", "C:\\Projects\\DolorSit"])
+    expect(paths).toEqual(["", ""])
   })
 
   test("uses the browser file input when no native picker exists", async () => {

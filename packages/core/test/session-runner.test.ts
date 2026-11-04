@@ -449,6 +449,104 @@ const it = testEffect(
   ),
 )
 const sessionID = SessionV2.ID.make("ses_runner_test")
+
+for (const scenario of ["same", "changed", "missing"] as const) {
+  it.effect(`192 DeepSeek durable runner preflight: ${scenario}`, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const database = yield* Database.Service
+      currentModel = OpenAIChat.route
+        .with({
+          provider: "fake",
+          auth: Auth.bearer("synthetic"),
+          providerOptions: { deepseek: { thinking: { type: "enabled" } } },
+        })
+        .model({ id: "deepseek-fixture" })
+      const history: SessionMessage.Message[] = [
+        {
+          id: SessionMessage.ID.make("msg_seed_user"),
+          type: "user",
+          text: "Already ran this tool",
+          time: { created: DateTime.makeUnsafe(0) },
+        },
+        SessionMessage.Assistant.make({
+          id: SessionMessage.ID.make("msg_seed_assistant"),
+          type: "assistant",
+          agent: "build",
+          model: {
+            id: ModelV2.ID.make(scenario === "changed" ? "deepseek-previous" : "deepseek-fixture"),
+            providerID: ProviderV2.ID.make("fake"),
+          },
+          time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+          finish: "tool-calls",
+          content: [
+            ...(scenario === "missing"
+              ? []
+              : [
+                  SessionMessage.AssistantReasoning.make({
+                    type: "reasoning",
+                    id: "reasoning-0",
+                    text: "original private reasoning",
+                    time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+                  }),
+                ]),
+            SessionMessage.AssistantTool.make({
+              type: "tool",
+              id: "already-echoed",
+              name: "echo",
+              time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+              state: {
+                status: "completed",
+                input: { text: "retained result" },
+                structured: { text: "retained result" },
+                content: [{ type: "text", text: "retained result" }],
+              },
+            }),
+          ],
+        }),
+      ]
+      yield* Effect.forEach(history, (message, index) =>
+        database.db
+          .insert(SessionMessageTable)
+          .values({
+            id: message.id,
+            session_id: sessionID,
+            type: message.type,
+            seq: index - 2,
+            data: Schema.encodeSync(SessionMessage.Message)(message),
+          })
+          .run()
+          .pipe(Effect.orDie),
+      )
+      replayProvider = true
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Continue without repeating the completed tool" }),
+        resume: false,
+      })
+      const result = yield* session.resume(sessionID).pipe(Effect.exit)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]!.tools.length).toBeGreaterThan(0)
+      expect(executions).toHaveLength(0)
+      if (scenario === "same") {
+        expect(Exit.isSuccess(result)).toBe(true)
+        expect(replayBodies).toHaveLength(1)
+        expect(
+          JSON.parse(replayBodies[0]!).messages.find((message: { role: string }) => message.role === "assistant"),
+        ).toMatchObject({ reasoning_content: "original private reasoning", tool_calls: [{ id: "already-echoed" }] })
+      }
+      if (scenario !== "same") {
+        expect(Exit.isFailure(result)).toBe(true)
+        expect(String(result)).toContain("reasoning_content")
+        expect(replayBodies).toHaveLength(0)
+      }
+      const retained = (yield* session.context(sessionID)).find((message) => message.id === history[1]!.id)
+      expect(retained).toEqual(history[1])
+    }),
+  )
+}
 const otherSessionID = SessionV2.ID.make("ses_runner_other")
 
 const insertSession = (id: SessionV2.ID) =>
@@ -8733,14 +8831,26 @@ describe("SessionRunnerLLM", () => {
       const sessions = yield* SessionV2.Service
       const database = yield* Database.Service
       const deadline = (yield* Clock.currentTimeMillis) + 500
-      yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "autonomous", budgetPolicy: 2, inheritedDeadline: deadline, creationBudget: { durationMs: null } } }).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+      yield* database.db
+        .update(SessionTable)
+        .set({
+          metadata: {
+            budgetMode: "autonomous",
+            budgetPolicy: 2,
+            inheritedDeadline: deadline,
+            creationBudget: { durationMs: null },
+          },
+        })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
       yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Use the remaining interval" }), resume: false })
       responseStream = Stream.fromIterable([
         LLMEvent.stepStart({ index: 0 }),
         LLMEvent.toolCall({ id: "after-deadline", name: "echo", input: { text: "must not execute" } }),
         LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
         LLMEvent.finish({ reason: "tool-calls" }),
-      ]).pipe(Stream.tap((event) => event.type === "tool-call" ? setTime(deadline) : Effect.void))
+      ]).pipe(Stream.tap((event) => (event.type === "tool-call" ? setTime(deadline) : Effect.void)))
       yield* sessions.resume(sessionID)
       expect(executions).toEqual([])
       expect(requests).toHaveLength(1)
@@ -8756,7 +8866,19 @@ describe("SessionRunnerLLM", () => {
         const sessions = yield* SessionV2.Service
         const database = yield* Database.Service
         const deadline = (yield* Clock.currentTimeMillis) + remaining
-        yield* database.db.update(SessionTable).set({ metadata: { budgetMode: "autonomous", budgetPolicy: 2, inheritedDeadline: deadline, creationBudget: { durationMs: null } } }).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+        yield* database.db
+          .update(SessionTable)
+          .set({
+            metadata: {
+              budgetMode: "autonomous",
+              budgetPolicy: 2,
+              inheritedDeadline: deadline,
+              creationBudget: { durationMs: null },
+            },
+          })
+          .where(eq(SessionTable.id, sessionID))
+          .run()
+          .pipe(Effect.orDie)
         yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Expired parent task" }), resume: false })
         yield* sessions.resume(sessionID)
         expect(requests).toHaveLength(0)

@@ -10,6 +10,22 @@ import { providerBaseURL } from "../provider-discovery"
 
 const t = (key: string) => key
 
+test("612 automatic provider names use the service brand and retain explicit user names", () => {
+  const form = {
+    providerID: "",
+    name: "",
+    baseURL: "https://api.gravitex.ai/v1",
+    apiKey: "synthetic",
+    models: [],
+    headers: [],
+    err: {},
+  }
+  expect(customProviderDefaults({ form, providerIDs: [], providers: {} }).name).toBe("万引")
+  expect(customProviderDefaults({ form: { ...form, name: "My account" }, providerIDs: [], providers: {} }).name).toBe(
+    "My account",
+  )
+})
+
 describe("594 custom provider enable target", () => {
   for (const [explicit, saved, expected] of [
     [" replacement ", "saved-old", "replacement"],

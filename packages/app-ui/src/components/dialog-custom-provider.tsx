@@ -288,9 +288,6 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       sdk,
       sync: serverSync(),
       enable: enable(result.providerID),
-      verified:
-        discovery.models.length > 0 ||
-        (form.protocol === undefined && form.models.some((model) => modelType(model) === "chat")),
       current: () => valid() && alive.value && serverSDK() === sdk,
     }
   }
@@ -376,7 +373,6 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       if (!result.current()) return
       await result.sync.queryClient.fetchQuery({ ...result.sync.queryOptions.providers(null), staleTime: 0 })
       if (!result.current()) return
-      if (result.verified) result.sync.markProviderVerified(result.providerID)
       return result
     },
     onSuccess: (result) => {

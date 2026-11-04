@@ -846,7 +846,8 @@ export const dict = {
   "provider.custom.discovery.search": "Search models",
   "provider.custom.discovery.success":
     "Model list received. The first model is selected; change the selection as needed. This does not verify generation or tool support.",
-  "provider.custom.discovery.auth": "Authentication failed. Check the API key and service address.",
+  "provider.custom.discovery.auth":
+    "Authentication failed. Copy a valid key from this provider's console under API Keys. Check the base URL in its API documentation (without endpoint paths such as chat/completions), then fetch models again. Keys from another provider will not work.",
   "provider.custom.discovery.rate": "Rate limited. Try again later or enter a model ID manually.",
   "provider.custom.discovery.url":
     "Enter a valid HTTP(S) service URL without credentials, query parameters or fragments.",

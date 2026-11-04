@@ -25,7 +25,6 @@ export function pickAttachmentFiles(input: {
   void input
     .picker(
       {
-        defaultPath: input.directory(),
         multiple: true,
         accept: ACCEPTED_FILE_TYPES,
       },

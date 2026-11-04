@@ -47,7 +47,7 @@ export async function prepareDesktopAttachment(
     return [
       new File(
         [metadata, result ? `\n${result.warnings.map((warning) => `> ${warning}`).join("\n")}\n\n${result.text}` : ""],
-        `${file.name}.md`,
+        file.name,
         { type: "text/plain" },
       ),
     ]

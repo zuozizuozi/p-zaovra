@@ -93,6 +93,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     ) => Effect.Effect<void>,
   ) => {
     const chunks = new Map<string, { values: string[]; length: number }>()
+    const completed = new Map<string, string>()
     const start = (id: string) =>
       Effect.suspend(() => {
         if (chunks.has(id)) return Effect.die(`Duplicate ${name} start: ${id}`)
@@ -110,8 +111,14 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
       })
     const end = Effect.fnUntraced(function* (id: string, providerMetadata?: ProviderMetadata, superseded?: boolean) {
       const current = chunks.get(id)
-      if (!current) return yield* Effect.die(`${name} end before start: ${id}`)
-      yield* ended(id, current.values.join(""), providerMetadata, superseded)
+      // Chat may finalize opaque metadata after visible reasoning already ended.
+      // Preserve its text and identity without starting or displaying it again.
+      const value =
+        current?.values.join("") ??
+        (name === "reasoning" && providerMetadata !== undefined ? completed.get(id) : undefined)
+      if (value === undefined) return yield* Effect.die(`${name} end before start: ${id}`)
+      yield* ended(id, value, providerMetadata, superseded)
+      if (name === "reasoning") completed.set(id, value)
       chunks.delete(id)
     })
     const flush = Effect.fnUntraced(function* () {

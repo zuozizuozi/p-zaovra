@@ -58,7 +58,7 @@ const ModelList: Component<{
       current={model.current()}
       filterKeys={["provider.name", "name", "id"]}
       sortBy={(a, b) => a.name.localeCompare(b.name)}
-      groupBy={(x) => x.provider.name}
+      groupBy={(x) => `${x.provider.name} · ${x.provider.id}`}
       sortGroupsBy={(a, b) => {
         const aProvider = a.items[0].provider.id
         const bProvider = b.items[0].provider.id
@@ -464,6 +464,12 @@ export function ModelSelectorPopoverV2(props: {
                       >
                         <span class="min-w-0 flex-1 truncate leading-5">
                           <span class="block truncate">{item.name}</span>
+                          <span
+                            class="block truncate text-[11px] text-v2-text-text-muted"
+                            title={`${item.provider.id} / ${item.id}`}
+                          >
+                            {item.provider.id} / {item.id}
+                          </span>
                           <Show when={modelCatalog.type({ providerID: item.provider.id, modelID: item.id }) !== "chat"}>
                             <span class="block truncate text-[11px] text-v2-text-text-muted">
                               {language.t(

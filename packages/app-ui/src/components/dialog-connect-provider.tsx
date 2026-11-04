@@ -839,7 +839,7 @@ function ProviderConnection(props: {
     dispatch({ type: "method.reset" })
   })
 
-  async function complete(current = () => alive.value, verified = false) {
+  async function complete(current = () => alive.value) {
     if (!current()) return
     const sdk = serverSDK()
     const sync = serverSync()
@@ -857,32 +857,24 @@ function ProviderConnection(props: {
     if (!current()) return
     const { directoryKey } = await import("@/context/global-sync/utils")
     if (!current()) return
-    const visible = await sync.queryClient
+    await sync.queryClient
       .fetchQuery({
         ...sync.queryOptions.providers(directory ? directoryKey(directory) : null),
         staleTime: 0,
       })
-      .then(
-        (catalog) =>
-          catalog.connected.includes(providerID) && Object.keys(catalog.all.get(providerID)?.models ?? {}).length > 0,
-        () => false,
-      )
+      .catch(() => undefined)
     if (!current()) return
     service.select(providerID)
-    if (verified) sync.markProviderVerified(providerID)
     dialog.close()
     showToast({
       variant: "success",
       icon: "circle-check",
-      title: language.t(verified ? "provider.connect.toast.connected.title" : "provider.connect.toast.saved.title", {
+      title: language.t("provider.connect.toast.saved.title", {
         provider: name,
       }),
-      description: language.t(
-        visible && verified ? "provider.connect.toast.connected.description" : "model.catalog.saved",
-        {
-          provider: name,
-        },
-      ),
+      description: language.t("model.catalog.saved", {
+        provider: name,
+      }),
     })
   }
 
@@ -1054,7 +1046,7 @@ function ProviderConnection(props: {
             if (current()) service.disconnect(providerID, false)
           },
         })
-        if (connected) await complete(current, !!discovery)
+        if (connected) await complete(current)
       } catch (error) {
         if (!current()) return
         const message = error instanceof Error ? error.message : ""

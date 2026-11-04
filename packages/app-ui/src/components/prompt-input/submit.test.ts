@@ -2,8 +2,11 @@ import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { createStore } from "solid-js/store"
 import type { Prompt, PromptStore } from "@/context/prompt"
 import type { ModelSelection } from "@/context/local"
+import type { SessionV2Info, SessionMessage, SessionInputAdmitted, ZaovraClient } from "@zaovra-ai/sdk/v2/client"
+import { createServerSession } from "@/context/server-session"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
+let sendFollowupDraft: typeof import("./submit").sendFollowupDraft
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -294,7 +297,112 @@ beforeAll(async () => {
 
   const mod = await import("./submit")
   createPromptSubmit = mod.createPromptSubmit
+  sendFollowupDraft = mod.sendFollowupDraft
 })
+
+for (const mode of ["steer", "queue", "admit-only"] as const) {
+  test(`177 actual submission/admission/history shares attachment identities: ${mode}`, async () => {
+    const session: SessionV2Info = {
+      id: "ses_fixture",
+      projectID: "project",
+      title: "Synthetic",
+      agent: "build",
+      model: { id: "fixture", providerID: "fixture" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+      location: { directory: "/synthetic" },
+    }
+    let admitted: SessionInputAdmitted["prompt"] | undefined
+    let adds = 0
+    let calls = 0
+    const client = {
+      v2: {
+        session: {
+          get: async () => ({ data: { data: session } }),
+          pendingInputs: async () => ({ data: { data: [] } }),
+          messages: async () => ({
+            data: {
+              data: [{ id: "msg_fixture", type: "user", time: { created: 2 }, ...admitted } as SessionMessage],
+              cursor: {},
+            },
+          }),
+          prompt: async (input: { id: string; prompt: SessionInputAdmitted["prompt"] }) => {
+            calls++
+            admitted = input.prompt
+            if (mode === "steer")
+              store.apply({
+                type: "session.next.prompted",
+                properties: { sessionID: session.id, messageID: input.id, timestamp: 2, prompt: input.prompt },
+              })
+            return { data: { data: {} } }
+          },
+        },
+      },
+      session: { diff: async () => ({ data: [] }), todo: async () => ({ data: [] }) },
+    } as unknown as ZaovraClient
+    const store = createServerSession(client)
+    store.remember({ id: session.id, directory: "/synthetic", title: "Synthetic", time: session.time } as Parameters<
+      typeof store.remember
+    >[0])
+    const input = {
+      client,
+      serverSync: { session: { set: store.set, watchExecution: async () => undefined } },
+      sync: {
+        data: { command: [] },
+        session: {
+          optimistic: {
+            add: (input: Parameters<typeof store.optimistic.add>[0]) => {
+              adds++
+              store.optimistic.add(input)
+            },
+            remove: store.optimistic.remove,
+          },
+        },
+      },
+      messageID: "msg_fixture",
+      delivery: mode === "queue" ? "queue" : "steer",
+      resume: mode === "admit-only" ? false : undefined,
+      draft: {
+        sessionID: session.id,
+        sessionDirectory: "/synthetic",
+        agent: "build",
+        model: { modelID: "fixture", providerID: "fixture" },
+        context: [],
+        prompt: [
+          { type: "text", content: "Read images", start: 0, end: 11 },
+          ...["one.png", "two.png"].map((filename) => ({
+            type: "image",
+            id: filename,
+            filename,
+            mime: "image/png",
+            dataUrl: `data:image/png;base64,${btoa(filename)}`,
+          })),
+        ],
+      },
+    } as unknown as Parameters<typeof sendFollowupDraft>[0]
+    expect(await sendFollowupDraft(input)).toBe(true)
+    expect(calls).toBe(1)
+    expect(adds).toBe(mode === "steer" ? 1 : 0)
+    if (mode !== "steer") return
+    expect(store.data.part.msg_fixture.filter((part) => part.type === "file").map((part) => part.filename)).toEqual([
+      "one.png",
+      "two.png",
+    ])
+    expect(store.data.part.msg_fixture.map((part) => part.id)).toEqual([
+      "msg_fixture:text",
+      "msg_fixture:file:0",
+      "msg_fixture:file:1",
+    ])
+    await store.sync(session.id, { force: true })
+    expect(store.data.part.msg_fixture.map((part) => part.id)).toEqual([
+      "msg_fixture:text",
+      "msg_fixture:file:0",
+      "msg_fixture:file:1",
+    ])
+    expect(admitted?.files?.map((file) => file.name)).toEqual(["one.png", "two.png"])
+  })
+}
 
 beforeEach(() => {
   createdClients.length = 0

@@ -190,6 +190,8 @@ interface ParserState {
   readonly rawFinishReason?: string
   readonly lifecycle: Lifecycle.State
   readonly encryptedContent?: string
+  readonly reasoningStarted?: boolean
+  readonly closedCipher?: string
 }
 
 const invalid = ProviderShared.invalidRequest
@@ -382,10 +384,23 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
   const outputParameter = request.providerOptions?.openai?.maxTokensParameter ?? "max_tokens"
   if (outputParameter !== "max_tokens" && outputParameter !== "max_completion_tokens")
     return yield* invalid("OpenAI Chat maxTokensParameter must be max_tokens or max_completion_tokens")
+  const options = yield* lowerOptions(request)
+  const messages = yield* lowerMessages(request)
+  // DeepSeek requires original reasoning on every assistant turn when thinking
+  // and tools are enabled, including turns that did not call a tool.
+  if (
+    "thinking" in options &&
+    options.thinking?.type === "enabled" &&
+    request.tools.length > 0 &&
+    messages.some((message) => message.role === "assistant" && !message.reasoning_content?.trim())
+  )
+    return yield* invalid(
+      "DeepSeek thinking with tools requires original reasoning_content for every assistant turn. Start a new session or disable thinking to continue. Existing tool results remain saved; do not repeat completed tools.",
+    )
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
   return {
     model: request.model.id,
-    messages: yield* lowerMessages(request),
+    messages,
     tools:
       request.tools.length === 0
         ? undefined
@@ -403,7 +418,7 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
     presence_penalty: generation?.presencePenalty,
     seed: generation?.seed,
     stop: generation?.stop,
-    ...(yield* lowerOptions(request)),
+    ...options,
   }
 })
 
@@ -486,7 +501,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     let lifecycle = state.lifecycle
 
     // Ciphertext can arrive without a visible summary, or after the tool delta.
-    if (delta?.encrypted_content != null)
+    if (delta?.encrypted_content != null && !state.reasoningStarted)
       lifecycle = Lifecycle.reasoningStart(lifecycle, events, "reasoning-0", metadata)
     const reasoning = delta?.reasoning_content || delta?.reasoning
     if (reasoning) lifecycle = Lifecycle.reasoningDelta(lifecycle, events, "reasoning-0", reasoning, metadata)
@@ -547,6 +562,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         systemFingerprint: event.system_fingerprint ?? state.systemFingerprint,
         lifecycle,
         encryptedContent,
+        reasoningStarted: state.reasoningStarted || !!reasoning || delta?.encrypted_content != null,
+        closedCipher: events.some((event) => event.type === "reasoning-end") ? encryptedContent : state.closedCipher,
       },
       events,
     ] as const
@@ -557,6 +574,21 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   const events: LLMEvent[] = []
   const hasToolCalls = state.toolCallEvents.length > 0
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
+  // A late ciphertext chunk finalizes metadata on the existing reasoning part;
+  // it must not reopen that ID and create a second durable part.
+  if (
+    state.encryptedContent !== undefined &&
+    state.encryptedContent !== state.closedCipher &&
+    !state.lifecycle.reasoning.has("reasoning-0")
+  )
+    events.push(
+      LLMEvent.reasoningEnd({
+        id: "reasoning-0",
+        providerMetadata: {
+          openaiCompatible: { encrypted_content: state.encryptedContent },
+        },
+      }),
+    )
   const closed =
     state.encryptedContent === undefined
       ? state.lifecycle

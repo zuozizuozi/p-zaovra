@@ -25,3 +25,26 @@ export function providerRequestSucceeded(
     !["error", "unknown"].includes(message.finish)
   )
 }
+
+export function createProviderVerification(token: (providerID: string) => string, since = Date.now()) {
+  const requests = new Map<string, { providerID: string; token: string }>()
+  return (message: Parameters<typeof providerRequestSucceeded>[0] & { id: string; providerID: string }) => {
+    if (message.role !== "assistant" || message.time.created < since) return
+    if (message.time.completed === undefined) {
+      if (!requests.has(message.id))
+        requests.set(message.id, { providerID: message.providerID, token: token(message.providerID) })
+      return
+    }
+    const request = requests.get(message.id)
+    requests.delete(message.id)
+    if (
+      !request ||
+      request.providerID !== message.providerID ||
+      !request.token ||
+      request.token !== token(message.providerID)
+    )
+      return
+    if (message.error) return { providerID: message.providerID, token: "" }
+    if (providerRequestSucceeded(message, since)) return { providerID: message.providerID, token: request.token }
+  }
+}
