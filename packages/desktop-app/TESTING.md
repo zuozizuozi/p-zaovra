@@ -28,3 +28,7 @@ if ($LASTEXITCODE -ne 0) { throw "Native upgrade regression failed" }
 运行后退出该专用 PowerShell 进程。Electron 在这里仅作为 Node 运行时，不打开应用窗口；测试用例会验证父版 SHA，新增回归还会检查 Node ≥24.15。
 
 当前 CI 的 `bun test`/包测试不会执行 `test-node/*.node.ts`。这 19 项的通过证据来自本地 Electron Node 24.15.0，不能计入远端 Bun CI 的用例数；是否接入 CI 留到下一批。
+
+## 已知限制
+
+Google 原生工具多轮未经真实验证。597唯一真实复测第二轮在本地代理侧出现 URLError Errno 2，未到达工具续轮；599不追加调用，Beta发出后如需复测须另行授权。

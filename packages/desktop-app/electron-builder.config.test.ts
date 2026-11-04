@@ -134,9 +134,9 @@ test.skipIf(process.platform !== "win32")("rejects CI signing without an explici
 })
 
 const channels = [
-  { channel: "dev", appId: "ai.zaovra.desktop.dev" },
-  { channel: "beta", appId: "ai.zaovra.desktop.beta" },
-  { channel: "prod", appId: "ai.zaovra.desktop" },
+  { channel: "dev", appId: "ai.zaovra.desktop.dev", productName: "zaovra-dev" },
+  { channel: "beta", appId: "ai.zaovra.desktop.beta", productName: "zaovra-beta" },
+  { channel: "prod", appId: "ai.zaovra.desktop", productName: "zaovra" },
 ] as const
 
 for (const channel of channels) {
@@ -145,7 +145,7 @@ for (const channel of channels) {
     process.env.ZAOVRA_CHANNEL = channel.channel
 
     const module = await import(`./electron-builder.config.ts?channel=${channel.channel}`)
-    const config = module.default as Configuration
+    const config = module.getConfig("linux") as Configuration
 
     if (previous === undefined) delete process.env.ZAOVRA_CHANNEL
     else process.env.ZAOVRA_CHANNEL = previous
@@ -154,6 +154,7 @@ for (const channel of channels) {
       expect(config.publish).toEqual({ provider: "generic", url: "https://updates.zaovra.com/beta/", channel: "beta" })
       expect(config.win?.verifyUpdateCodeSignature).toBe(true)
     }
+    expect(config.productName).toBe(channel.productName)
     expect(config.appId).toBe(channel.appId)
     expect(config.extraMetadata?.desktopName).toBe(`${channel.appId}.desktop`)
     expect(config.linux?.executableName).toBe(channel.appId)
@@ -166,16 +167,18 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   process.env.ZAOVRA_CHANNEL = "prod"
 
   const module = await import("./electron-builder.config.ts?compat=prod")
-  const config = module.default as Configuration
+  const config = module.getConfig("linux") as Configuration
 
   if (previous === undefined) delete process.env.ZAOVRA_CHANNEL
   else process.env.ZAOVRA_CHANNEL = previous
 
+  expect(config.productName).toBe("zaovra")
+  expect(config.linux?.executableName).toBe("ai.zaovra.desktop")
   expect(config.deb?.fpm?.[0]).toEndWith(`${legacyDesktopEntry}=/usr/share/applications/zaovra-desktop.desktop`)
   expect(config.rpm?.fpm?.[0]).toEndWith(`${legacyDesktopEntry}=/usr/share/applications/zaovra-desktop.desktop`)
 
   const desktop = await Bun.file(legacyDesktopEntry).text()
-  expect(desktop).toContain("Exec=/opt/Zaovra/ai.zaovra.desktop %U")
+  expect(desktop).toContain(`Exec=/opt/${config.productName}/${config.linux?.executableName} %U`)
   expect(desktop).toContain("Icon=ai.zaovra.desktop")
   expect(desktop).toContain("StartupWMClass=ai.zaovra.desktop")
   expect(desktop).toContain("NoDisplay=true")
