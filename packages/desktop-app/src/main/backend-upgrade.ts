@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:fs/promises"
+import { cp, lstat, mkdir, mkdtemp, readFile, rename, writeFile } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
 
 export function legacyBackend(input: {
@@ -7,22 +7,26 @@ export function legacyBackend(input: {
   channel: string
   packaged: boolean
   userDataPath: string
+  explicitProfile?: boolean
 }) {
   const data = join(
-    input.packaged && input.channel === "prod"
+    input.explicitProfile || (input.packaged && input.channel === "prod")
       ? join(input.userDataPath, "data")
       : input.env.XDG_DATA_HOME || join(input.home, ".local", "share"),
     "zaovra",
   )
-  const filename =
-    input.env.ZAOVRA_DB ||
-    (input.packaged && input.channel === "dev" && !["1", "true"].includes(input.env.ZAOVRA_DISABLE_CHANNEL_DB ?? "")
-      ? "zaovra-dev.db"
-      : "zaovra.db")
+  const filename = input.explicitProfile
+    ? "zaovra.db"
+    : input.env.ZAOVRA_DB ||
+      (input.packaged && input.channel === "dev" && !["1", "true"].includes(input.env.ZAOVRA_DISABLE_CHANNEL_DB ?? "")
+        ? "zaovra-dev.db"
+        : "zaovra.db")
   return {
     data,
     database: filename === ":memory:" ? undefined : isAbsolute(filename) ? filename : join(data, filename),
-    config: input.env.ZAOVRA_CONFIG_DIR || join(input.env.XDG_CONFIG_HOME || join(input.home, ".config"), "zaovra"),
+    config: input.explicitProfile
+      ? join(input.userDataPath, "config", "zaovra")
+      : input.env.ZAOVRA_CONFIG_DIR || join(input.env.XDG_CONFIG_HOME || join(input.home, ".config"), "zaovra"),
   }
 }
 
@@ -53,14 +57,24 @@ export async function prepareBackendUpgrade(input: {
   if (action === "cancel") return action
   await mkdir(input.userDataPath, { recursive: true })
   const stage = await mkdtemp(join(input.userDataPath, ".backend-upgrade-"))
-  await mkdir(join(stage, "data", "zaovra"), { recursive: true, mode: 0o700 })
-  await mkdir(join(stage, "config", "zaovra"), { recursive: true, mode: 0o700 })
-  if (action === "import" && legacy) {
-    await copyTree(legacy.data, join(stage, "data", "zaovra"), true, legacy.database)
-    await copyTree(legacy.config, join(stage, "config", "zaovra"), false)
-    if (await exists(legacy.database)) {
+  // Node >=24.15 rejects an existing destination directory with errorOnExist.
+  // Leave each leaf to cp; missing sources get an empty leaf instead.
+  await mkdir(join(stage, "data"), { recursive: true, mode: 0o700 })
+  await mkdir(join(stage, "config"), { recursive: true, mode: 0o700 })
+  const importing = action === "import" ? legacy : undefined
+  const skipped = await copyTree(importing?.data, join(stage, "data", "zaovra"), true, importing?.database)
+  await copyTree(importing?.config, join(stage, "config", "zaovra"), false)
+  if (importing?.database && (await exists(importing.database))) {
+    const blocked =
+      (await lstat(importing.database)).isSymbolicLink() ||
+      skipped.some((path) => {
+        const nested = relative(resolve(path), resolve(importing.database!))
+        return !nested || (!nested.startsWith("..") && !isAbsolute(nested))
+      })
+    if (blocked) console.warn("[backend-upgrade] Skipped symbolic link database")
+    if (!blocked) {
       const { DatabaseSync, backup } = await import("node:sqlite")
-      const source = new DatabaseSync(legacy.database!, { readOnly: true, timeout: 5000 })
+      const source = new DatabaseSync(importing.database, { readOnly: true, timeout: 5000 })
       try {
         // Online backup includes committed WAL pages even while the old app is open.
         await backup(source, join(stage, "data", "zaovra", "zaovra.db"))
@@ -88,7 +102,7 @@ export async function prepareBackendUpgrade(input: {
 
 async function exists(path?: string) {
   if (!path) return false
-  return stat(path).then(
+  return lstat(path).then(
     () => true,
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return false
@@ -97,8 +111,12 @@ async function exists(path?: string) {
   )
 }
 
-async function copyTree(source: string, target: string, data: boolean, database?: string) {
-  if (!(await exists(source))) return
+async function copyTree(source: string | undefined, target: string, data: boolean, database?: string) {
+  const skipped: string[] = []
+  if (!source || !(await exists(source))) {
+    await mkdir(target, { recursive: true, mode: 0o700 })
+    return skipped
+  }
   const nested = relative(resolve(source), resolve(target))
   if (!nested || (!nested.startsWith("..") && !isAbsolute(nested)))
     throw new Error("Upgrade source contains destination")
@@ -107,11 +125,18 @@ async function copyTree(source: string, target: string, data: boolean, database?
     errorOnExist: true,
     force: false,
     filter: async (path) => {
-      if ((await lstat(path)).isSymbolicLink()) throw new Error("Upgrade cannot import a symbolic link")
+      if ((await lstat(path)).isSymbolicLink()) {
+        skipped.push(path)
+        console.warn("[backend-upgrade] Skipped symbolic link")
+        return false
+      }
       // Only the selected database is imported, through SQLite's backup API.
       if (data && database && [database, database + "-wal", database + "-shm", database + "-journal"].includes(path))
         return false
       return !data || !/\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm|journal))?$/i.test(path)
     },
   })
+  // A skipped source root still needs an empty private destination leaf.
+  await mkdir(target, { recursive: true, mode: 0o700 })
+  return skipped
 }

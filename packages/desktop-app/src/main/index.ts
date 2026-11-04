@@ -306,7 +306,7 @@ const main = Effect.gen(function* () {
   session.defaultSession.setSpellCheckerDictionaryDownloadURL("http://127.0.0.1:9/dictionaries/")
 
   if (!TEST_ONBOARDING) migrate()
-  const upgrade = yield* Effect.promise(() => prepareBackendProfile(!userDataOverride && !TEST_ONBOARDING))
+  const upgrade = yield* Effect.promise(() => prepareBackendProfile(!TEST_ONBOARDING, Boolean(userDataOverride)))
   if (upgrade === "cancel") {
     app.quit()
     return
@@ -453,7 +453,7 @@ const main = Effect.gen(function* () {
 
 Effect.runFork(main)
 
-async function prepareBackendProfile(importLegacy: boolean) {
+async function prepareBackendProfile(importLegacy: boolean, explicitProfile: boolean) {
   for (;;) {
     try {
       return await prepareBackendUpgrade({
@@ -466,6 +466,7 @@ async function prepareBackendProfile(importLegacy: boolean) {
               channel: CHANNEL,
               packaged: app.isPackaged,
               userDataPath: app.getPath("userData"),
+              explicitProfile,
             })
           : undefined,
         choose: async () => {

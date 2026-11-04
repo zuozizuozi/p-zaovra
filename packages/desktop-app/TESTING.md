@@ -8,3 +8,7 @@
 - 新 Beta 必须等渠道隔离与 provider 后续修复实际合入 main 后，由发布负责人按精确 main 构建、核 SHA 并安排上传及冒烟；旧 Beta 不复用。
 
 WSL 保留旧数据的说明基于启动脚本及持久化路径的源码核对。本补充不代表已运行真实 WSL 升级、Electron 弹窗或完整安装器升级测试。
+
+## Native 升级回归运行时
+
+必须使用 Node ≥24.15；只在 Node 24.13 通过不算升级验收。Electron 42.3.3 的 Node 模式（`ELECTRON_RUN_AS_NODE=1`）可运行 `--experimental-strip-types --test test-node/backend-upgrade.node.ts test-node/backend-upgrade-regression.node.ts`。仍须显式设置隔离 `ZAOVRA_UPGRADE_TEST_DIR` 和精确 a239 父版 `ZAOVRA_UPGRADE_PARENT_ROOT`，所有输入仅合成数据。回归覆盖 Dev/Prod 的数据+配置、仅配置、仅数据、外部 DB、失败重试/取消/重启、已有和新建的显式 profile、源链接跳过及已有目标拒绝合并；不替代真实安装器升级或 Electron 选择窗口验收。
