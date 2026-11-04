@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { isAbsolute, join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, session } from "electron"
+import { app, dialog, session } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -53,6 +53,7 @@ import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { getStore } from "./store"
 import { DISPLAY_BACKEND_KEY } from "./store-keys"
+import { legacyBackend, prepareBackendUpgrade } from "./backend-upgrade"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Zaovra Dev",
@@ -305,6 +306,11 @@ const main = Effect.gen(function* () {
   session.defaultSession.setSpellCheckerDictionaryDownloadURL("http://127.0.0.1:9/dictionaries/")
 
   if (!TEST_ONBOARDING) migrate()
+  const upgrade = yield* Effect.promise(() => prepareBackendProfile(!userDataOverride && !TEST_ONBOARDING))
+  if (upgrade === "cancel") {
+    app.quit()
+    return
+  }
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
     Effect.tap((result) =>
       Effect.sync(() => {
@@ -446,3 +452,49 @@ const main = Effect.gen(function* () {
 })
 
 Effect.runFork(main)
+
+async function prepareBackendProfile(importLegacy: boolean) {
+  for (;;) {
+    try {
+      return await prepareBackendUpgrade({
+        channel: CHANNEL,
+        userDataPath: app.getPath("userData"),
+        legacy: importLegacy
+          ? legacyBackend({
+              env: process.env,
+              home: homedir(),
+              channel: CHANNEL,
+              packaged: app.isPackaged,
+              userDataPath: app.getPath("userData"),
+            })
+          : undefined,
+        choose: async () => {
+          const result = await dialog.showMessageBox({
+            type: "question",
+            title: "升级 Zaovra Dev",
+            message: "发现原有会话和配置",
+            detail: "导入会复制原有数据，保留原文件。选择空白开始后，此 Dev 配置将使用独立的数据目录。",
+            buttons: ["导入原有数据（复制，原文件保留）", "从空白开始", "退出"],
+            defaultId: 0,
+            cancelId: 2,
+            noLink: true,
+          })
+          return (["import", "empty", "cancel"] as const)[result.response] ?? "cancel"
+        },
+      })
+    } catch (error) {
+      logger.error("backend upgrade failed before server startup", error)
+      const result = await dialog.showMessageBox({
+        type: "error",
+        title: "数据导入未完成",
+        message: "原文件保持不变，尚未启用新数据目录。",
+        detail: "可以重试导入，或退出后再试。应用不会在导入失败后自动切换为空白数据。",
+        buttons: ["重试", "退出"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (result.response !== 0) return "cancel"
+    }
+  }
+}

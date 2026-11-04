@@ -1,7 +1,7 @@
 import { join } from "node:path"
 
 export function sidecarDirectory(userDataPath: string) {
-  return join(userDataPath, "config", "zaovra")
+  return join(userDataPath, "backend", "config", "zaovra")
 }
 
 export function createSidecarEnv(input: {
@@ -28,8 +28,8 @@ export function createSidecarEnv(input: {
     ["XDG_CACHE_HOME", "cache"],
     ["XDG_STATE_HOME", "state"],
   ])
-    env[key] = join(input.userDataPath, directory)
+    env[key] = join(input.userDataPath, "backend", directory)
   for (const key of ["ZAOVRA_DB", "ZAOVRA_CONFIG", "ZAOVRA_CONFIG_DIR", "ZAOVRA_CONFIG_CONTENT"]) delete env[key]
-  for (const key of ["TMP", "TEMP", "TMPDIR"]) env[key] = join(input.userDataPath, "temp")
+  for (const key of ["TMP", "TEMP", "TMPDIR"]) env[key] = join(input.userDataPath, "backend", "temp")
   return env
 }

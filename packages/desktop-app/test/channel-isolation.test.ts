@@ -29,11 +29,11 @@ test.each(["prod", "beta", "dev"])(
       ["XDG_STATE_HOME", "state"],
       ["XDG_CACHE_HOME", "cache"],
     ])
-      expect(env[key]).toBe(join("profiles", channel, dir))
+      expect(env[key]).toBe(join("profiles", channel, "backend", dir))
     for (const key of ["ZAOVRA_DB", "ZAOVRA_CONFIG_DIR", "ZAOVRA_CONFIG", "ZAOVRA_CONFIG_CONTENT"])
       expect(env[key]).toBeUndefined()
     expect(inherited.ZAOVRA_DB).toBe("shared.db")
-    expect(sidecarDirectory(join("profiles", channel))).toBe(join("profiles", channel, "config", "zaovra"))
+    expect(sidecarDirectory(join("profiles", channel))).toBe(join("profiles", channel, "backend", "config", "zaovra"))
   },
 )
 

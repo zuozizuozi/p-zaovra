@@ -62,7 +62,7 @@ test("actual Core roots and SQLite state are empty in a fresh Beta and remain se
     expect(beta.config).toBeNull()
     expect(beta.credentials).toBe(0)
     expect(beta.cwd).toBe(beta.paths.config)
-    expect(beta.db).toStartWith(join(root, "beta", "data"))
+    expect(beta.db).toStartWith(join(root, "beta", "backend", "data"))
     const dev = await run("dev")
     expect(dev.before.map((row: { value: string }) => row.value)).toEqual(["synthetic-dev", "synthetic-dev"])
     expect(dev.config).toBe("synthetic-dev")

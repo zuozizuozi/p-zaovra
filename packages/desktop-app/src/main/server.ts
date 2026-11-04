@@ -61,7 +61,7 @@ export async function spawnLocalServer(
   options: SpawnLocalServerOptions,
 ) {
   const sidecar = join(dirname(fileURLToPath(import.meta.url)), "sidecar.js")
-  await mkdir(join(options.userDataPath, "temp"), { recursive: true })
+  await mkdir(join(options.userDataPath, "backend", "temp"), { recursive: true })
   await mkdir(sidecarDirectory(options.userDataPath), { recursive: true })
   const child = utilityProcess.fork(sidecar, [], {
     // Unscoped provider requests resolve their Location from cwd. Starting in

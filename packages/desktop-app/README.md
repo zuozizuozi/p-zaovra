@@ -16,6 +16,14 @@ Windows 本地测试：双击本目录唯一的 `启动器.bat`，自动检查�
 
 The Zaovra Desktop app, built with Electron.
 
+## 渠道隔离升级验收
+
+- Native 正式版首次升级会将原数据库和全局配置复制到本 profile 的独立 backend 目录，原件保留。Dev 发现旧数据时先选择“导入原有数据（复制，原文件保留）”或“从空白开始”；退出不记为完成。
+- 数据库使用 SQLite 在线备份，包含已提交的 WAL；数据、配置和完成标记一起启用。失败不会启动空白后端，可以重试。已完成的选择在重启后保持，不重新覆盖新数据。
+- 首个 Beta 尚未发布，没有旧 Beta 数据需要自动导入，始终从空白数据开始。显式 `--user-data-dir` 同样从隔离目录开始，不隐式读取原 home 数据。
+- Native 后端不再继承 `ZAOVRA_DB`、`ZAOVRA_CONFIG`、`ZAOVRA_CONFIG_DIR`、`ZAOVRA_CONFIG_CONTENT` 作为运行时覆盖；原 `ZAOVRA_DB`/配置目录仅可作为上述升级复制的来源。需要另一套数据时使用独立 `--user-data-dir`。本条是渠道隔离的兼容性变更，不影响独立 CLI 的覆盖参数。
+- 使用父 a2394386 生成合成会话、凭据和 provider 配置，验证导入、空白、失败重试、重启，以及三渠道并装互不影响；另以仍打开的 SQLite WAL 写入器验证在线备份。测试只用独立合成目录。WSL 的真实旧安装迁移、真实安装器升级及 Linux 新包沙箱仍须单独验收。
+
 ## Development
 
 ```bash
