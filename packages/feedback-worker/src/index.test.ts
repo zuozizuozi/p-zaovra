@@ -54,8 +54,11 @@ const child = spawn("node", ["scripts/worker-fixture.mjs", issuer], {
 child.stdout.on("data", (data) => logWrites.push(appendFile(root + "/runtime.log", data)))
 child.stderr.on("data", (data) => logWrites.push(appendFile(root + "/runtime.log", data)))
 const stopped = new Promise<number | null>((done) => child.once("close", done))
+const startupTimeout = 90_000
 beforeAll(async () => {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  const started = performance.now()
+  // Cold Windows runners may still be starting Miniflare after the former 20-second window.
+  while (performance.now() - started < startupTimeout) {
     if (await Bun.file(root + "/runtime-ready.json").exists()) {
       const ready = JSON.parse(await readFile(root + "/runtime-ready.json", "utf8")) as {
         base: string
@@ -64,13 +67,20 @@ beforeAll(async () => {
       }
       if (ready.pid !== child.pid || !ready.birth) throw new Error("Fixture identity mismatch")
       base = ready.base
+      console.info("Local Worker fixture ready after " + Math.round(performance.now() - started) + "ms")
       return
     }
     if (child.exitCode !== null) throw new Error("Local Worker fixture failed; inspect runtime.log")
     await Bun.sleep(200)
   }
-  throw new Error("Local Worker fixture readiness timed out")
-}, 30_000)
+  const phase = Bun.file(root + "/runtime-phase.json")
+  throw new Error(
+    "Local Worker fixture readiness timed out after " +
+      startupTimeout +
+      "ms; phase=" +
+      ((await phase.exists()) ? await phase.text() : "unavailable"),
+  )
+}, startupTimeout + 30_000)
 afterAll(async () => {
   child.stdin.end()
   const exit = await stopped
@@ -85,6 +95,7 @@ afterAll(async () => {
       manual_PID_signals: 0,
     }),
   )
+  console.info("Local Worker fixture stopped with exit " + exit)
   expect(exit).toBe(0)
 }, 30_000)
 

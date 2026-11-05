@@ -87,6 +87,19 @@ jobs:
           ZAOVRA_WORKER_TEST_DIR: ${{ runner.temp }}/zaovra-feedback-inbox
         working-directory: packages/feedback-worker
         run: bun test src scripts
+      - name: Preserve local feedback fixture lifecycle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: feedback-fixture-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/zaovra-feedback-inbox/runtime-phase.json
+            ${{ runner.temp }}/zaovra-feedback-inbox/runtime-process.json
+            ${{ runner.temp }}/zaovra-feedback-inbox/runtime-ready.json
+            ${{ runner.temp }}/zaovra-feedback-inbox/runtime-stopped.json
+            ${{ runner.temp }}/zaovra-feedback-inbox/runtime-cleanup.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Check Windows credential-reader source without reading credentials
         if: runner.os == 'Windows'
         working-directory: packages/feedback-worker
