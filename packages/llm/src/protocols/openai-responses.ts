@@ -194,7 +194,7 @@ const OpenAIResponsesStreamItem = Schema.Struct({
   // own subset of these — we capture them generically so we can surface the
   // call's typed input portion and round-trip the full result payload without
   // hand-rolling a per-tool schema.
-  status: Schema.optional(Schema.String),
+  status: optionalNull(Schema.String),
   action: Schema.optional(Schema.Unknown),
   queries: Schema.optional(Schema.Unknown),
   results: Schema.optional(Schema.Unknown),
@@ -629,6 +629,32 @@ const NO_EVENTS: StepResult["1"] = []
 // the protocol's `terminal` predicate stay in sync.
 const TERMINAL_TYPES = new Set(["response.completed", "response.incomplete", "response.failed"])
 
+// Keep the fallback separate from handled events: future event payloads may
+// reuse field names, but malformed events consumed by `step` must still fail.
+const HANDLED_EVENT_TYPES = new Set([
+  ...TERMINAL_TYPES,
+  "response.output_text.delta",
+  "response.reasoning_text.delta",
+  "response.reasoning_summary.delta",
+  "response.reasoning_summary_text.delta",
+  "response.reasoning_text.done",
+  "response.reasoning_summary.done",
+  "response.reasoning_summary_text.done",
+  "response.reasoning_summary_part.added",
+  "response.reasoning_summary_part.done",
+  "response.output_item.added",
+  "response.function_call_arguments.delta",
+  "response.output_item.done",
+  "error",
+])
+
+const OpenAIResponsesStreamEvent: Schema.Codec<OpenAIResponsesEvent> = Schema.Union([
+  OpenAIResponsesEvent,
+  Schema.Struct({
+    type: Schema.String.check(Schema.makeFilter((type) => !HANDLED_EVENT_TYPES.has(type))),
+  }),
+])
+
 const onOutputTextDelta = (state: ParserState, event: OpenAIResponsesEvent): StepResult => {
   if (!event.delta) return [state, NO_EVENTS]
   const events: LLMEvent[] = []
@@ -996,7 +1022,7 @@ export const protocol = Protocol.make({
     from: fromRequest,
   },
   stream: {
-    event: Protocol.jsonEvent(OpenAIResponsesEvent),
+    event: Protocol.jsonEvent(OpenAIResponsesStreamEvent),
     initial: (request) => ({
       hasFunctionCall: false,
       tools: ToolStream.empty<string>(),
