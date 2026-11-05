@@ -5,6 +5,6 @@
     "outDir": "node_modules/.ts-dist-beta"
   },
   "references": [],
-  "include": ["scripts/beta-ci.ts", "scripts/beta-signing.ts", "scripts/beta-release.ts"],
+  "include": ["scripts/beta-ci.ts", "scripts/beta-signing.ts", "scripts/beta-release.ts", "scripts/beta-storage.ts"],
   "exclude": []
 }

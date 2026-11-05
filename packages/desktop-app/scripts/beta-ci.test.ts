@@ -601,7 +601,7 @@ test("193 real trusted CLI checks old target checkout, fresh K63 and stale metad
   expect(legacyCode, legacyOut + legacyErr).toBe(0) // Historical verifier ignores the missing gate.
 }, 60000)
 
-test("619 automatic Windows Beta jobs require signing opt-in before the CI gate", async () => {
+test("646 automatic Windows Beta admits unsigned or signed after exact CI", async () => {
   const workflow = Bun.YAML.parse(
     await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
   ) as { jobs: Record<string, { if: string; needs?: string }> }
@@ -620,11 +620,11 @@ test("619 automatic Windows Beta jobs require signing opt-in before the CI gate"
         expect(
           Boolean(admitted(event, { WINDOWS_SIGNING_ENABLED: enabled })),
           enabled + "/" + name + "/" + conclusion,
-        ).toBe(enabled === "true" && (conclusion === "success" || (name === "test" && conclusion === "failure")))
+        ).toBe(conclusion === "success" || (name === "test" && conclusion === "failure"))
       }
     }
   }
-  expect(Boolean(admitted(github, {}))).toBe(false)
+  expect(Boolean(admitted(github, {}))).toBe(true)
   expect(Boolean(admitted({ ...github, repository: "another/repository" }, { WINDOWS_SIGNING_ENABLED: "true" }))).toBe(
     false,
   )
@@ -646,7 +646,7 @@ test("619 automatic Windows Beta jobs require signing opt-in before the CI gate"
   expect(workflow.jobs.publish.if).not.toMatch(/always\(|!cancelled\(/)
 })
 
-test("619 signing opt-in does not restrict manual signed or unsigned Beta dispatch", async () => {
+test("646 signing choice preserves manual signed or unsigned Beta dispatch", async () => {
   const workflow = Bun.YAML.parse(
     await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
   ) as { jobs: Record<string, { if: string; env?: Record<string, string> }> }
@@ -670,4 +670,54 @@ test("619 signing opt-in does not restrict manual signed or unsigned Beta dispat
       }
     }
   }
+})
+
+test("646 K63 allows only successful known additional CI jobs", () => {
+  const value = fixture()
+  for (const name of ["nsis-compile", "feedback-inbox (ubuntu-24.04)", "feedback-inbox (windows-2022)"])
+    value.evidence.jobs.jobs.push({ ...value.evidence.jobs.jobs[0], name, conclusion: "success" })
+  value.evidence.jobs.total_count = value.evidence.jobs.jobs.length
+  expect(allowed(value).k63Applied).toBe(true)
+  for (const conclusion of ["failure", "skipped", "cancelled", "timed_out"]) {
+    const wrong = structuredClone(value)
+    wrong.evidence.jobs.jobs[1].conclusion = conclusion
+    expect(() => allowed(wrong)).toThrow("Other test job")
+  }
+  value.evidence.jobs.jobs[1].name = "unrecognized"
+  expect(() => allowed(value)).toThrow("Other test job")
+})
+
+test("646 unsigned deduplication requires a successful continuous official build", () => {
+  const build = { ...run("windows-beta"), id: 99, event: "workflow_run", path: ".github/workflows/windows-beta.yml" }
+  const artifact = {
+    id: 77,
+    name: "windows-beta-" + sha,
+    expired: false,
+    size_in_bytes: 100,
+    digest: "sha256:" + "b".repeat(64),
+    workflow_run: { id: 99, head_sha: sha },
+  }
+  const decision = { testRun: 10, testAttempt: 2, missingTests: 0, k63Applied: false }
+  const gate = {
+    commit: sha,
+    channel: "beta",
+    signingPolicy: "unsigned-beta",
+    unsignedBeta: true,
+    deliveryMode: "continuous",
+    installerSHA256: "c".repeat(64),
+    k63ExceptionApplied: false,
+    testRun: 10,
+    testAttempt: 2,
+    missingTests: 0,
+  }
+  expect(retainedBetaBuild(build, artifact, gate, sha, decision)).toBe(true)
+  for (const change of [
+    { deliveryMode: "manual" },
+    { unsignedBeta: "true" },
+    { testAttempt: 1 },
+    { commit: "d".repeat(40) },
+  ])
+    expect(retainedBetaBuild(build, artifact, { ...gate, ...change }, sha, decision)).toBe(false)
+  expect(retainedBetaBuild({ ...build, event: "workflow_dispatch" }, artifact, gate, sha, decision)).toBe(false)
+  expect(retainedBetaBuild({ ...build, conclusion: "failure" }, artifact, gate, sha, decision)).toBe(false)
 })

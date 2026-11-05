@@ -40,8 +40,8 @@ concurrency:
 
 jobs:
   gate:
-    # Automatic builds stay skipped until Windows signing is explicitly enabled.
-    if: github.repository == 'zuozizuozi/p-zaovra' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && vars.WINDOWS_SIGNING_ENABLED == 'true' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.conclusion == 'success' || (github.event.workflow_run.name == 'test' && github.event.workflow_run.conclusion == 'failure'))))
+    # Main CI admits continuous Beta; signing opt-in selects signed packaging.
+    if: github.repository == 'zuozizuozi/p-zaovra' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.conclusion == 'success' || (github.event.workflow_run.name == 'test' && github.event.workflow_run.conclusion == 'failure'))))
     runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.gate.outputs.sha }}
@@ -67,6 +67,7 @@ jobs:
           BUILD_ONLY: ${{ inputs.build_only || false }}
           WORKFLOW_SHA: ${{ github.sha }}
           CURRENT_RUN: ${{ github.run_id }}
+          CONTINUOUS_BETA: ${{ github.event_name == 'workflow_run' && 'true' || 'false' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -86,7 +87,7 @@ jobs:
       id-token: write
     env:
       ZAOVRA_CHANNEL: beta
-      ZAOVRA_ALLOW_UNSIGNED_BETA: ${{ github.event_name == 'workflow_dispatch' && inputs.unsigned_beta && 'true' || 'false' }}
+      ZAOVRA_ALLOW_UNSIGNED_BETA: ${{ ((github.event_name == 'workflow_run' && vars.WINDOWS_SIGNING_ENABLED != 'true') || (github.event_name == 'workflow_dispatch' && inputs.unsigned_beta)) && 'true' || 'false' }}
       BETA_SOURCE_SHA: ${{ needs.gate.outputs.sha }}
       WINDOWS_SIGNING_PUBLISHER_NAME: ${{ vars.WINDOWS_SIGNING_PUBLISHER_NAME }}
     steps:
@@ -119,7 +120,7 @@ jobs:
             Pop-Location
           }
           Push-Location packages/desktop-app
-          bun test --timeout 30000 scripts/beta-release.test.ts scripts/beta-ci.test.ts scripts/beta-signing.test.ts scripts/beta-build-report.test.ts src/main/wsl/environment.test.ts src/main/wsl/upgrade.test.ts src/main/onboarding-directory.test.ts src/main/feedback.test.ts src/main/updater-install.test.ts electron-builder.config.test.ts ./test/install-channel.test.ts
+          bun test --timeout 30000 scripts/beta-release.test.ts scripts/beta-storage.test.ts scripts/beta-ci.test.ts scripts/beta-signing.test.ts scripts/beta-build-report.test.ts src/main/wsl/environment.test.ts src/main/wsl/upgrade.test.ts src/main/onboarding-directory.test.ts src/main/feedback.test.ts src/main/updater-install.test.ts electron-builder.config.test.ts ./test/install-channel.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --experimental-strip-types --test test-node/update-backup.node.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -138,7 +139,18 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Reserve automatic monotonic Beta version
+        if: github.event_name == 'workflow_run'
+        shell: pwsh
+        env:
+          EVENT_NAME: workflow_run
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_UPDATES_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATES_SECRET_ACCESS_KEY }}
+        run: |
+          bun verifier/packages/desktop-app/scripts/beta-storage.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Monotonic Beta version
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           $baseVersion = (Get-Content packages/desktop-app/package.json | ConvertFrom-Json).version.Split('-')[0]
@@ -169,7 +181,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/verify-beta-signature.ps1 -Installer dist/zaovra-desktop-win-x64.exe -Publisher $env:WINDOWS_SIGNING_PUBLISHER_NAME
       - name: Package explicitly unsigned Windows Beta
-        if: github.event_name == 'workflow_dispatch' && inputs.unsigned_beta
+        if: env.ZAOVRA_ALLOW_UNSIGNED_BETA == 'true'
         working-directory: packages/desktop-app
         shell: pwsh
         run: |
@@ -180,13 +192,14 @@ jobs:
         shell: pwsh
         env:
           EVENT_NAME: ${{ github.event_name }}
-          UNSIGNED_BETA: ${{ inputs.unsigned_beta || false }}
+          UNSIGNED_BETA: ${{ env.ZAOVRA_ALLOW_UNSIGNED_BETA }}
         run: |
           $sha = "${{ needs.gate.outputs.sha }}"
           $k63 = "${{ needs.gate.outputs.k63_applied }}" -eq "true"
           $policy = if ($k63) { "K63 例外已应用" } else { "Exact main test and typecheck passed" }
           @{
             commit = $sha
+            deliveryMode = if ("${{ github.event_name }}" -eq "workflow_run") { "continuous" } else { "manual" }
             k63ExceptionApplied = $k63
             message = $policy
             testRun = "${{ needs.gate.outputs.test_run_id }}"
@@ -201,6 +214,30 @@ jobs:
           Add-Content dist/notes.md $signing
           $signing >> $env:GITHUB_STEP_SUMMARY
           bun scripts/beta-release.ts dist $sha dist/notes.md @flags
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Automatically publish verified Beta
+        if: github.event_name == 'workflow_run'
+        working-directory: packages/desktop-app
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          UNSIGNED_BETA: ${{ env.ZAOVRA_ALLOW_UNSIGNED_BETA }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_UPDATES_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATES_SECRET_ACCESS_KEY }}
+          PYTHON: python
+        run: |
+          $sha = "${{ needs.gate.outputs.sha }}"
+          gh api "repos/$env:GH_REPO/actions/runs?head_sha=$sha&per_page=100" > "$env:RUNNER_TEMP/continuous-ci.json"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot refresh exact CI" }
+          $env:EVENT_NAME = "publish"
+          bun ../../verifier/packages/desktop-app/scripts/beta-ci.ts "$env:RUNNER_TEMP/continuous-ci.json" $sha "${{ github.run_id }}" dist/ci-gate.json
+          if ($LASTEXITCODE -ne 0) { throw "Fresh CI gate differs from this build" }
+          $env:EVENT_NAME = "workflow_run"
+          bun ../../verifier/packages/desktop-app/scripts/beta-signing.ts publish dist $sha
+          if ($LASTEXITCODE -ne 0) { throw "Actual packaged identity differs" }
+          $flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
+          bun ../../verifier/packages/desktop-app/scripts/beta-release.ts dist $sha dist/notes.md --publish --continuous @flags
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve reviewable installers only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

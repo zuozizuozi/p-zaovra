@@ -1,8 +1,9 @@
-import { S3Client, semver, YAML } from "bun"
+import { semver, YAML } from "bun"
 import { createHash } from "node:crypto"
 import { basename, join, resolve } from "node:path"
 
-export const versionPattern = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
+import { betaBucket, continuousIdentity, deliverBeta, versionPattern } from "./beta-storage"
+export { versionPattern } from "./beta-storage"
 
 export async function digest(file: Blob) {
   const hash = createHash("sha512")
@@ -80,7 +81,11 @@ export async function publishBeta(directory: string, commit: string, notes: stri
     )
     return
   }
-  if (process.env.BETA_APPROVED_SHA !== commit || !process.env.BETA_APPROVAL_REF?.trim())
+  const continuous = process.argv.includes("--continuous")
+  const identity = continuous ? continuousIdentity() : undefined
+  if (identity && (identity.commit !== commit || process.env.ZAOVRA_VERSION !== plan.manifest.version))
+    throw new Error("Continuous Beta version or source identity mismatch")
+  if (!continuous && (process.env.BETA_APPROVED_SHA !== commit || !process.env.BETA_APPROVAL_REF?.trim()))
     throw new Error("Evaluator approval for this exact SHA is required")
   if (!process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY)
     throw new Error("Minimal zaovra-updates bucket credentials are required")
@@ -105,69 +110,15 @@ export async function publishBeta(directory: string, commit: string, notes: stri
     )
     if ((await signature.exited) !== 0) throw new Error("Installer signature validation failed")
   }
-  const bucket = new S3Client({
-    endpoint: "https://58d97556adff19b5c088918df00c7c8c.r2.cloudflarestorage.com",
-    bucket: "zaovra-updates",
-    region: "auto",
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  })
-  const previous = bucket.file("beta/beta.yml")
-  if (await previous.exists()) {
-    const old = YAML.parse(await previous.text()) as { version: string }
-    if (!versionPattern.test(old.version) || semver.order(plan.manifest.version, old.version) <= 0)
-      throw new Error("Beta versions must increase; do not overwrite a published version")
-  }
-  const indexFile = bucket.file("beta/versions.json")
-  const index = (await indexFile.exists()) ? ((await indexFile.json()) as string[]) : []
-  if (!Array.isArray(index) || index.some((version) => !versionPattern.test(version)))
-    throw new Error("Invalid owned release index")
-  for (const entry of plan.manifest.files) {
-    const target = bucket.file(plan.prefix + entry.name)
-    if (await target.exists()) {
-      if ((await digest(target)) !== entry.sha512) throw new Error("Existing immutable artifact differs")
-    } else await target.write(Bun.file(join(directory, entry.name)))
-    if ((await digest(target)) !== entry.sha512) throw new Error("Uploaded artifact failed hash validation")
-  }
-  await bucket.file(plan.prefix + "release.json").write(JSON.stringify(plan.manifest), { type: "application/json" })
-  await bucket.file(plan.prefix + "notes.md").write(notes, { type: "text/markdown" })
-  // Commit the update pointer only after immutable artifacts have been uploaded and re-read.
-  const pointer = await fetch(previous.presign({ method: "PUT", expiresIn: 300, type: "text/yaml" }), {
-    method: "PUT",
-    body: plan.metadata,
-    headers: { "content-type": "text/yaml", "cache-control": "no-store, max-age=0" },
-  })
-  if (!pointer.ok || (await previous.text()) !== plan.metadata) throw new Error("Update pointer did not commit")
-  const versions = [...new Set([...index, plan.manifest.version])]
-  const retired = retiredVersions(versions, plan.manifest.version)
-  for (const version of retired) {
-    const prefix = "beta/" + version + "/"
-    const release = (await bucket.file(prefix + "release.json").json()) as typeof plan.manifest
-    if (
-      release.version !== version ||
-      release.files.some(
-        (file) => file.name !== basename(file.name) || !/^zaovra-desktop-win-x64\.exe(?:\.blockmap)?$/.test(file.name),
-      )
-    )
-      throw new Error("Refusing retention cleanup outside the owned release")
-    for (const key of [
-      ...release.files.map((file) => prefix + file.name),
-      prefix + "notes.md",
-      prefix + "release.json",
-    ])
-      await bucket.file(key).delete()
-  }
-  await indexFile.write(JSON.stringify(versions.filter((version) => !retired.includes(version))), {
-    type: "application/json",
-  })
+  await deliverBeta(betaBucket(), directory, plan, undefined, identity)
+
   console.log(
     JSON.stringify({
       published: plan.manifest.version,
       signing: unsigned ? "unsigned beta" : "Valid signature",
       commit,
       approval: process.env.BETA_APPROVAL_REF,
-      retained: versions.filter((version) => !retired.includes(version)),
-      retired,
+      retention: "Old immutable versions retained; no deletion during pointer transaction",
     }),
   )
 }
@@ -175,7 +126,7 @@ export async function publishBeta(directory: string, commit: string, notes: stri
 if (import.meta.main) {
   const [directory, commit, notesPath] = process.argv
     .slice(2)
-    .filter((value) => value !== "--publish" && value !== "--allow-unsigned-beta")
+    .filter((value) => value !== "--publish" && value !== "--allow-unsigned-beta" && value !== "--continuous")
   if (!directory || !commit || !notesPath)
     throw new Error("Usage: beta-release.ts <artifact-dir> <sha> <notes.md> [--publish] [--allow-unsigned-beta]")
   await publishBeta(directory, commit, await Bun.file(notesPath).text()).catch(() => {

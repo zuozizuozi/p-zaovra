@@ -123,9 +123,27 @@ function unitAttempt(input: unknown, jobsInput: unknown, sha: string, test: Run)
   )
     throw new Error("Test attempt identity mismatch")
   const jobs = record(jobsInput)
-  if (!Array.isArray(jobs.jobs) || jobs.total_count !== 1 || jobs.jobs.length !== 1)
+  if (!Array.isArray(jobs.jobs) || jobs.total_count !== jobs.jobs.length || !jobs.jobs.length)
     throw new Error("Incomplete test jobs")
-  const job = record(jobs.jobs[0])
+  const all = jobs.jobs.map(record)
+  const units = all.filter((job) => job.name === "unit")
+  if (
+    units.length !== 1 ||
+    all
+      .filter((job) => job.name !== "unit")
+      .some(
+        (job) =>
+          job.run_id !== test.id ||
+          job.head_sha !== sha ||
+          job.status !== "completed" ||
+          job.conclusion !== "success" ||
+          !["nsis-compile", "feedback-inbox (ubuntu-24.04)", "feedback-inbox (windows-2022)"].includes(
+            String(job.name),
+          ),
+      )
+  )
+    throw new Error("Other test job failure or unrecognized job")
+  const job = units[0]
   if (
     job.run_id !== test.id ||
     job.head_sha !== sha ||
@@ -295,8 +313,11 @@ export function retainedBetaBuild(
     origin.head_sha === sha &&
     g.commit === sha &&
     g.channel === "beta" &&
-    g.signingPolicy === "signed" &&
-    g.unsignedBeta === false &&
+    ((g.signingPolicy === "signed" && g.unsignedBeta === false) ||
+      (r.event === "workflow_run" &&
+        g.deliveryMode === "continuous" &&
+        g.signingPolicy === "unsigned-beta" &&
+        g.unsignedBeta === true)) &&
     /^[a-f0-9]{64}$/.test(String(g.installerSHA256)) &&
     g.k63ExceptionApplied === decision.k63Applied &&
     String(g.testRun) === String(decision.testRun) &&
@@ -357,7 +378,9 @@ async function existingBuild(
       child.exited,
     ])
     if (exit !== 0) continue
-    if (retainedBetaBuild(run, artifact, JSON.parse(body), sha, decision)) return true
+    const gate: unknown = JSON.parse(body)
+    if (process.env.CONTINUOUS_BETA === "true" && record(gate).deliveryMode !== "continuous") continue
+    if (retainedBetaBuild(run, artifact, gate, sha, decision)) return true
   }
   return false
 }

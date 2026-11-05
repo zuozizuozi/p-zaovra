@@ -107,3 +107,39 @@ jobs:
       - name: Bundle feedback Worker without uploading
         working-directory: packages/feedback-worker
         run: bun run build
+
+  nsis-compile:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+      - name: Check continuous Beta types and contracts
+        working-directory: packages/desktop-app
+        shell: pwsh
+        env:
+          ZAOVRA_BETA_TEST_DIR: ${{ runner.temp }}/beta-delivery-contracts
+        run: |
+          bun typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun test scripts/beta-storage.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun test --test-name-pattern "646" scripts/beta-ci.test.ts scripts/beta-signing.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install NSIS compiler
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11.0 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile actual channel includes before LogicLib
+        shell: pwsh
+        env:
+          NSIS_COMPILE_DIRECTORY: ${{ runner.temp }}/zaovra-nsis-compile
+        run: ./packages/desktop-app/scripts/check-nsis.ps1 -OutputDirectory $env:NSIS_COMPILE_DIRECTORY
