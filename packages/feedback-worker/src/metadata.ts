@@ -25,7 +25,8 @@ export function feedbackMetadata(receipt: string, value: unknown) {
       : file && typeof file === "object" && "text" in file && typeof file.text === "string"
         ? file.text
         : undefined
-  if (typeof text !== "string" || text.length > 32_000) throw new Error("Invalid report text")
+  // Stored text can grow during redaction/pretty-printing; only the projected summary is truncated here.
+  if (typeof text !== "string") throw new Error("Invalid report text")
   const report: unknown = JSON.parse(text)
   if (!report || typeof report !== "object" || !("reportID" in report) || report.reportID !== receipt)
     throw new Error("Report does not match its receipt")

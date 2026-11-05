@@ -1,3 +1,4 @@
+import { archiveFeedback } from "../scripts/archive-feedback"
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { createServer } from "node:http"
@@ -201,4 +202,36 @@ test("stored feedback queues the native local email binding, and protected retry
     202,
   )
   expect((await fetch(base + "/admin/report/" + receipt, { headers })).status).toBe(200)
+})
+
+test("205 accepted expanded feedback persists and notifies through the actual local Worker and R2", async () => {
+  const receipt = crypto.randomUUID()
+  const text = JSON.stringify({ reportID: receipt, description: "集成扩展反馈", extra: Array(5000).fill(0) })
+  expect(text.length).toBeLessThan(32_000)
+  expect((await submit({ text, files: [{ name: "report.json", text }] })).status).toBe(201)
+  const headers = { "cf-access-jwt-assertion": await token() }
+  const stored = await fetch(base + "/admin/report/" + receipt, { headers })
+  expect(stored.status).toBe(200)
+  expect(((await stored.json()) as { snapshot: { text: string } }).snapshot.text.length).toBeGreaterThan(32_000)
+  let status = ""
+  for (let i = 0; i < 50; i++) {
+    const response = await fetch(base + "/admin/notifications/" + receipt, { headers })
+    if (response.ok) status = ((await response.json()) as { status: string }).status
+    if (["sent", "failed", "invalid"].includes(status)) break
+    await Bun.sleep(50)
+  }
+  expect(status).toBe("sent")
+  const jwt = await token()
+  const archived = await archiveFeedback({
+    token: jwt,
+    directory: root + "/expanded-archive",
+    archiveRoot: root,
+    fetcher: (url, init) =>
+      fetch(base + new URL(url).pathname + new URL(url).search, {
+        ...init,
+        headers: { "cf-access-jwt-assertion": jwt },
+      }),
+  })
+  expect(archived.map((entry) => entry.receipt)).toContain(receipt)
+  expect(archived.find((entry) => entry.receipt === receipt)?.bytes).toBeGreaterThan(32_000)
 })

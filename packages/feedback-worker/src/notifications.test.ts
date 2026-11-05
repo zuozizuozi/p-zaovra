@@ -103,3 +103,51 @@ test("an expired delivery lease is recovered; missing email configuration cannot
   })
   expect(await platform.env.FEEDBACK.head("reports/" + missing + ".json")).not.toBeNull()
 })
+
+test("205 expanded accepted records send through real local R2 once without metadata failures", async () => {
+  const receipt = crypto.randomUUID()
+  const text = JSON.stringify({ reportID: receipt, description: "扩展反馈", extra: Array(5000).fill(0) }, null, 2)
+  expect(text.length).toBeGreaterThan(32_000)
+  await platform.env.FEEDBACK.put(
+    "reports/" + receipt + ".json",
+    JSON.stringify({ received: new Date().toISOString(), snapshot: { text } }),
+  )
+  let sends = 0
+  await notifyFeedback(platform.env, receipt, async (notice) => {
+    sends++
+    expect(notice.summary).toBe("扩展反馈")
+  })
+  expect(sends).toBe(1)
+  expect(await (await platform.env.FEEDBACK.get("notifications/" + receipt + ".json"))?.json()).toMatchObject({
+    status: "sent",
+    attempts: 1,
+  })
+})
+test("205 invalid records are terminally isolated without repeated send attempts and allow explicit recovery", async () => {
+  const receipt = crypto.randomUUID()
+  await platform.env.FEEDBACK.put("reports/" + receipt + ".json", JSON.stringify({ received: "bad" }))
+  let sends = 0
+  const send = async () => {
+    sends++
+  }
+  await notifyFeedback(platform.env, receipt, send)
+  await notifyFeedback(platform.env, receipt, send)
+  expect(sends).toBe(0)
+  expect(await (await platform.env.FEEDBACK.get("notifications/" + receipt + ".json"))?.json()).toMatchObject({
+    status: "invalid",
+    attempts: 1,
+  })
+  await platform.env.FEEDBACK.put(
+    "reports/" + receipt + ".json",
+    JSON.stringify({
+      received: new Date().toISOString(),
+      snapshot: { text: JSON.stringify({ reportID: receipt, description: "修复原件" }) },
+    }),
+  )
+  await notifyFeedback(platform.env, receipt, send, true)
+  expect(sends).toBe(1)
+  expect(await (await platform.env.FEEDBACK.get("notifications/" + receipt + ".json"))?.json()).toMatchObject({
+    status: "sent",
+    attempts: 2,
+  })
+})

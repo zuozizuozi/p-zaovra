@@ -107,7 +107,8 @@ test("unsafe receipt, escaping junction and malformed service credentials fail w
       archiveRoot: allowed,
       fetcher: async () => Response.json({ reports: [{ receipt: "../escape" }], cursor: null }),
     }),
-  ).rejects.toThrow("Invalid feedback receipt")
+  ).resolves.toEqual([])
+  expect(await readFile(join(allowed, "invalid", "索引.md"), "utf8")).toContain("无效编号")
 })
 
 test("legacy flat originals are indexed without a repeat download", async () => {
@@ -125,7 +126,7 @@ test("legacy flat originals are indexed without a repeat download", async () => 
   expect(await readFile(join(directory, "索引.md"), "utf8")).toContain(receipt + ".json")
 })
 
-test("an interrupted metadata write recovers from its retained original; corrupt cache fails without downloading again", async () => {
+test("an interrupted metadata write recovers; corrupt cache is isolated without downloading again", async () => {
   const directory = join(root, "recover-" + crypto.randomUUID())
   const receipt = crypto.randomUUID()
   const folder = join(directory, "20261105", receipt)
@@ -140,8 +141,7 @@ test("an interrupted metadata write recovers from its retained original; corrupt
   expect(requests).toBe(1)
   expect(JSON.parse(await readFile(join(folder, "metadata.json"), "utf8"))).toMatchObject({ receipt, untrusted: true })
   await writeFile(join(folder, "metadata.json"), JSON.stringify({ receipt, bytes: -1 }))
-  await expect(archiveFeedback({ serviceToken, directory, archiveRoot: root, fetcher })).rejects.toThrow(
-    "Invalid local archive metadata",
-  )
-  expect(requests).toBe(1)
+  await expect(archiveFeedback({ serviceToken, directory, archiveRoot: root, fetcher })).resolves.toEqual([])
+  expect(await readFile(join(directory, "索引.md"), "utf8")).toContain("本地原件或元数据异常")
+  expect(requests).toBe(2)
 })

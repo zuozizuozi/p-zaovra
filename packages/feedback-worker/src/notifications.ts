@@ -57,7 +57,12 @@ export async function notifyFeedback(
   const existing = await env.FEEDBACK.get(key)
   const state = existing ? await existing.json<{ status: string; attempts: number; retryAfter: number }>() : undefined
   const now = Date.now()
-  if (state?.status === "sent" || (state?.status === "sending" && state.retryAfter > now)) return
+  if (
+    (!force && state?.status === "invalid") ||
+    state?.status === "sent" ||
+    (state?.status === "sending" && state.retryAfter > now)
+  )
+    return
   if (!force && state && (state.attempts >= 5 || state.retryAfter > now)) return
   const attempts = (state?.attempts ?? 0) + 1
   const claim = await env.FEEDBACK.put(
@@ -70,8 +75,13 @@ export async function notifyFeedback(
   if (!claim) return // Another request or cron owns this receipt's current delivery lease.
   const outcome = await (async () => {
     const report = await env.FEEDBACK.get("reports/" + receipt + ".json")
-    if (!report) throw new Error("Missing stored feedback")
-    await send(feedbackMetadata(receipt, await report.json()))
+    if (!report) return { status: "invalid", attempts, retryAfter: 0 }
+    const text = await report.text()
+    const notice = await Promise.resolve()
+      .then(() => feedbackMetadata(receipt, JSON.parse(text)))
+      .catch(() => undefined)
+    if (!notice) return { status: "invalid", attempts, retryAfter: 0 }
+    await send(notice)
     return { status: "sent", attempts, retryAfter: 0, sentAt: new Date().toISOString() }
   })().catch(() => {
     // Never log SMTP errors: providers can include recipient addresses or submitted text.
