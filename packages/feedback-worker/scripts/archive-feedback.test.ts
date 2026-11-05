@@ -32,7 +32,11 @@ test("Access archive preserves immutable originals, uses a header and rejects un
     ).rejects.toThrow("Archive must stay inside")
     const first = await archiveFeedback({ token: "fixture-token", directory, archiveRoot: root, fetcher })
     expect(first).toHaveLength(1)
-    expect(JSON.parse(await Bun.file(join(directory, id + ".json")).text())).toEqual(original)
+    expect(
+      JSON.parse(
+        await Bun.file(join(directory, original.received.slice(0, 10).replaceAll("-", ""), id, "feedback.json")).text(),
+      ),
+    ).toEqual(original)
     expect(await archiveFeedback({ token: "fixture-token", directory, archiveRoot: root, fetcher })).toHaveLength(0)
     expect(downloads).toBe(1)
     unsafe = true

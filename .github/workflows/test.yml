@@ -59,3 +59,37 @@ jobs:
           path: ${{ runner.temp }}/zaovra-test-reports
           if-no-files-found: warn
           retention-days: 7
+
+  feedback-inbox:
+    name: feedback-inbox (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      ZAOVRA_WORKER_TEST_DIR: ${{ runner.temp }}/zaovra-feedback-inbox
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+      - name: Check feedback types
+        working-directory: packages/feedback-worker
+        run: bun typecheck
+      - name: Run local feedback tests
+        working-directory: packages/feedback-worker
+        run: bun test src scripts
+      - name: Check Windows credential-reader source without reading credentials
+        if: runner.os == 'Windows'
+        working-directory: packages/feedback-worker
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/check-poll-feedback.ps1
+      - name: Bundle feedback Worker without uploading
+        working-directory: packages/feedback-worker
+        run: bun run build

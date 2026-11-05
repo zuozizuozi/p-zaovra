@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
-import { execFile, spawn } from "node:child_process"
+import { spawn } from "node:child_process"
 import { createServer } from "node:http"
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { exportJWK, generateKeyPair, SignJWT } from "jose"
 import { Feedback } from "../../schema/src/feedback"
 import { safeSnapshot } from "./index"
@@ -19,114 +18,75 @@ await new Promise<void>((done) => jwks.listen(0, "127.0.0.1", done))
 const address = jwks.address()
 if (!address || typeof address === "string") throw new Error("Missing local JWKS port")
 const issuer = "http://127.0.0.1:" + address.port
-const portProbe = createServer()
-await new Promise<void>((done) => portProbe.listen(0, "127.0.0.1", done))
-const portAddress = portProbe.address()
-if (!portAddress || typeof portAddress === "string") throw new Error("Missing local Worker port")
-const port = portAddress.port
-await new Promise<void>((done, reject) => portProbe.close((error) => (error ? reject(error) : done())))
-const base = "http://127.0.0.1:" + port
-await mkdir(root, { recursive: true })
-await mkdir(root + "/profile", { recursive: true })
-await mkdir(root + "/temp", { recursive: true })
-const child = spawn(
-  "node",
-  [
-    resolve("node_modules/wrangler/bin/wrangler.js"),
-    "dev",
-    "--local",
-    "--ip",
-    "127.0.0.1",
-    "--port",
-    String(port),
-    "--persist-to",
-    root + "/state",
-    "--var",
-    "ACCESS_TEAM_DOMAIN:" + issuer,
-    "--var",
-    "ACCESS_AUD:local-fixture",
-  ],
-  {
-    env: {
-      ACCESS_TEAM_DOMAIN: "https://company-console-58d97556.cloudflareaccess.com",
-      ACCESS_AUD: "cc9a377b9898db5561a1365d623f78074b7928e9ca74e8d6a6dca0e30cc30a25",
-      PATH: process.env.PATH,
-      SystemRoot: process.env.SystemRoot,
-      WINDIR: process.env.WINDIR,
-      COMSPEC: process.env.COMSPEC,
-      HOME: root + "/profile",
-      USERPROFILE: root + "/profile",
-      APPDATA: root + "/profile",
-      LOCALAPPDATA: root + "/profile",
-      XDG_CONFIG_HOME: root + "/profile",
-      TEMP: root + "/temp",
-      TMP: root + "/temp",
-      WRANGLER_LOG_PATH: root + "/wrangler.log",
-      WRANGLER_SEND_METRICS: "false",
-    },
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  },
-)
+let base = ""
 const logWrites: Promise<void>[] = []
+await mkdir(root, { recursive: true })
+const child = spawn("node", ["scripts/worker-fixture.mjs", issuer], {
+  env: {
+    ACCESS_TEAM_DOMAIN: "https://company-console-58d97556.cloudflareaccess.com",
+    ACCESS_AUD: "cc9a377b9898db5561a1365d623f78074b7928e9ca74e8d6a6dca0e30cc30a25",
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([key]) =>
+        [
+          "PATH",
+          "SystemRoot",
+          "WINDIR",
+          "COMSPEC",
+          "HOME",
+          "USERPROFILE",
+          "APPDATA",
+          "LOCALAPPDATA",
+          "XDG_CONFIG_HOME",
+          "XDG_DATA_HOME",
+          "XDG_CACHE_HOME",
+          "TEMP",
+          "TMP",
+          "WRANGLER_LOG_PATH",
+          "WRANGLER_SEND_METRICS",
+          "ZAOVRA_WORKER_TEST_DIR",
+        ].includes(key),
+      ),
+    ),
+  },
+  windowsHide: true,
+  stdio: ["pipe", "pipe", "pipe"],
+})
 child.stdout.on("data", (data) => logWrites.push(appendFile(root + "/runtime.log", data)))
 child.stderr.on("data", (data) => logWrites.push(appendFile(root + "/runtime.log", data)))
 const stopped = new Promise<number | null>((done) => child.once("close", done))
-async function ownedBirth() {
-  if (!child.pid) throw new Error("Missing owned Worker pid")
-  if (process.platform !== "win32")
-    return (await readFile("/proc/" + child.pid + "/stat", "utf8"))
-      .split(") ")
-      .slice(1)
-      .join(") ")
-      .trim()
-      .split(/\s+/)[19]
-  return new Promise<string>((done, reject) =>
-    execFile(
-      "powershell.exe",
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "$p = Get-CimInstance Win32_Process -Filter 'ProcessId = " +
-          child.pid +
-          "'; if ($p) { $p.CreationDate.ToUniversalTime().ToString('o') }",
-      ],
-      { windowsHide: true },
-      (error, value) => (error ? reject(error) : done(value.trim())),
-    ),
-  )
-}
-let birth: string | undefined
 beforeAll(async () => {
-  birth = await ownedBirth()
-  if (!birth) throw new Error("Missing owned process birth")
-  await writeFile(root + "/runtime-process.json", JSON.stringify({ pid: child.pid, birth }))
-  for (let i = 0; i < 100; i++) {
-    if (
-      await fetch(base + "/health").then(
-        (response) => response.ok,
-        () => false,
-      )
-    )
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (await Bun.file(root + "/runtime-ready.json").exists()) {
+      const ready = JSON.parse(await readFile(root + "/runtime-ready.json", "utf8")) as {
+        base: string
+        pid: number
+        birth: string
+      }
+      if (ready.pid !== child.pid || !ready.birth) throw new Error("Fixture identity mismatch")
+      base = ready.base
       return
-    if (child.exitCode !== null) throw new Error("Worker failed to start; inspect runtime.log")
+    }
+    if (child.exitCode !== null) throw new Error("Local Worker fixture failed; inspect runtime.log")
     await Bun.sleep(200)
   }
-  throw new Error("Local Worker readiness timeout")
+  throw new Error("Local Worker fixture readiness timed out")
 }, 30_000)
 afterAll(async () => {
-  if (child.exitCode === null && child.pid)
-    await new Promise<void>((done, reject) =>
-      execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, (error) =>
-        error ? reject(error) : done(),
-      ),
-    )
-  await stopped
+  child.stdin.end()
+  const exit = await stopped
   await Promise.all(logWrites)
   await new Promise<void>((done, reject) => jwks.close((error) => (error ? reject(error) : done())))
-})
+  await writeFile(
+    root + "/runtime-cleanup.json",
+    JSON.stringify({
+      fixture_exit: exit,
+      managed_worker_stop: await Bun.file(root + "/runtime-stopped.json").exists(),
+      JWKS_closed: true,
+      manual_PID_signals: 0,
+    }),
+  )
+  expect(exit).toBe(0)
+}, 30_000)
 
 function snapshot() {
   return Feedback.snapshot({
@@ -192,4 +152,42 @@ test("admin rejects missing, forged, wrong-audience and expired JWTs; authentica
 test("invalid payloads and public report reads fail closed", async () => {
   expect((await submit({})).status).toBe(400)
   expect((await fetch(base + "/reports/example.json")).status).toBe(404)
+})
+
+test("Access service assertions authorize admin while raw Service Token headers cannot bypass JWT verification", async () => {
+  expect(
+    (
+      await fetch(base + "/admin/reports", {
+        headers: { "CF-Access-Client-Id": "fixture.access", "CF-Access-Client-Secret": "fixture-service-secret" },
+      })
+    ).status,
+  ).toBe(403)
+  const jwt = await new SignJWT({ common_name: "fixture.access", sub: "" })
+    .setProtectedHeader({ alg: "RS256", kid: "local-fixture" })
+    .setIssuer(issuer)
+    .setAudience("local-fixture")
+    .setIssuedAt()
+    .setExpirationTime("2m")
+    .sign(keys.privateKey)
+  expect((await fetch(base + "/admin/reports", { headers: { "cf-access-jwt-assertion": jwt } })).status).toBe(200)
+})
+
+test("stored feedback queues the native local email binding, and protected retry preserves the receipt", async () => {
+  const value = snapshot()
+  const receipt = safeSnapshot(value).receipt
+  expect((await submit(value)).status).toBe(201)
+  const headers = { "cf-access-jwt-assertion": await token() }
+  let state: { status?: string } = {}
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const response = await fetch(base + "/admin/notifications/" + receipt, { headers })
+    if (response.ok) state = (await response.json()) as { status?: string }
+    if (state.status === "sent" || state.status === "failed") break
+    await Bun.sleep(50)
+  }
+  expect(state.status).toBe("sent")
+  expect((await fetch(base + "/admin/notifications/" + receipt + "/retry", { method: "POST" })).status).toBe(403)
+  expect((await fetch(base + "/admin/notifications/" + receipt + "/retry", { method: "POST", headers })).status).toBe(
+    202,
+  )
+  expect((await fetch(base + "/admin/report/" + receipt, { headers })).status).toBe(200)
 })
