@@ -34,6 +34,11 @@ async function lifecycle(mode: string, code: number, signal?: "SIGTERM" | "SIGIN
     expect(await closed, stderr).toBe(code)
     const result = await events()
     console.info(JSON.stringify({ phase: "effect-cmd-lifecycle634", mode, code, events: result }))
+    if (mode === "event-repeat") {
+      expect(result).not.toContain("dispose-completed")
+      expect(result).not.toContain("top-finally-completed")
+      return
+    }
     expect(result.filter((item) => item === "dispose-started")).toHaveLength(1)
     expect(result.filter((item) => item === "dispose-completed")).toHaveLength(1)
     expect(result.at(-1)).toBe("top-finally-completed")
@@ -54,7 +59,6 @@ test.each([
   ["error", 1],
   ["event-term", 143],
   ["event-int", 130],
-  ["event-repeat", 143],
 ] as const)(
   "real effectCmd outer disposer completes before %s exits",
   async (mode, code) => {
@@ -133,4 +137,9 @@ async function actualEntry(signal?: "SIGTERM" | "SIGINT") {
 
 test("actual src/index.ts waits for disposal after a signal event during finally", async () => {
   await actualEntry()
+}, 30000)
+
+// Revision636 explicitly makes the second signal force exit, even during asynchronous disposal.
+test("second signal forces the real effectCmd instead of waiting for its disposer", async () => {
+  await lifecycle("event-repeat", 143)
 }, 30000)

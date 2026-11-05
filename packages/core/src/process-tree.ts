@@ -15,18 +15,21 @@ type Identity = { pid: number; ppid: number; pgid: number; birth: string; state?
 type Result = readonly [number | null, NodeJS.Signals | null]
 /** A bounded observation cannot certify descendants whose parent chain was already lost. */
 export type Cleanup = { pid: number | undefined; status: "unverified"; reason: string; observedExited: number }
-export const events = new EventEmitter<{ cleanup: [Cleanup] }>()
+export const events = new EventEmitter<{ cleanup: [Cleanup]; force: [{ exitCode: number | undefined }] }>()
 const owners = new Set<Tracker>()
 const executions = new Set<Promise<unknown>>()
 const shutdownController = new AbortController()
 export const shutdownSignal = shutdownController.signal
 let closing: Promise<void> | undefined
 let requestedSignal: "SIGINT" | "SIGTERM" | undefined
+let signalTimer: ReturnType<typeof setTimeout> | undefined
+let forcing = false
 export const supported = () => ["win32", "linux", "darwin"].includes(process.platform)
 
 export class Tracker {
   stopping: Promise<void> | undefined
   cleanup: Cleanup | undefined
+  private readonly force = new AbortController()
   constructor(
     readonly proc: Child,
     readonly closed: Promise<Result>,
@@ -36,8 +39,11 @@ export class Tracker {
     return this.proc.pid!
   }
   stop(signal: NodeJS.Signals = "SIGTERM", grace = 1000): Promise<void> {
-    if (this.stopping) return this.stopping
-    this.stopping = stopTree(this.proc, this.closed, signal, Math.max(0, grace)).then(
+    if (this.stopping) {
+      if (signal === "SIGKILL") this.force.abort()
+      return this.stopping
+    }
+    this.stopping = stopTree(this.proc, this.closed, signal, Math.max(0, grace), this.force.signal).then(
       (result) => {
         this.report(result)
         owners.delete(this)
@@ -85,7 +91,13 @@ export function start(command: string, args: readonly string[], options: SpawnOp
   })
 }
 
-async function stopTree(proc: Child, closed: Promise<Result>, signal: NodeJS.Signals, grace: number) {
+async function stopTree(
+  proc: Child,
+  closed: Promise<Result>,
+  signal: NodeJS.Signals,
+  grace: number,
+  force: AbortSignal,
+) {
   // The ChildProcess object is the authority. Never rediscover an exited root by numeric PID.
   const unobserved = { reason: "root exited before teardown snapshot", observedExited: 0 }
   if (proc.exitCode !== null || proc.signalCode !== null || !proc.pid) return unobserved
@@ -115,7 +127,9 @@ async function stopTree(proc: Child, closed: Promise<Result>, signal: NodeJS.Sig
   }
   await send(signal)
   if (signal !== "SIGKILL") {
-    await scheduler.wait(grace)
+    await scheduler.wait(grace, { signal: force }).catch((error: Error) => {
+      if (error.name !== "AbortError") throw error
+    })
     // Exactly one termination-phase snapshot. Only surviving, identity-checked owners can seed new ancestry.
     const members = (await Promise.all(items.map((item) => same(item)))).filter((item) => item !== undefined)
     const current = await processes()
@@ -241,6 +255,7 @@ export function run<A>(execute: (signal: AbortSignal) => Promise<A>) {
 }
 
 export function shutdown() {
+  clearTimeout(signalTimer)
   if (closing) return closing
   closing = Promise.resolve().then(async () => {
     shutdownController.abort(new Error("CLI is shutting down"))
@@ -259,11 +274,25 @@ export function signalExitCode() {
 }
 
 export function installSignalHandlers() {
+  const force = () => {
+    if (forcing) return
+    forcing = true
+    clearTimeout(signalTimer)
+    events.emit("force", { exitCode: signalExitCode() })
+    // Legacy commands have no registered execution to await. A second signal explicitly abandons that wait.
+    void Promise.allSettled([...owners].map((owner) => owner.stop("SIGKILL", 0))).then((results) => {
+      for (const result of results)
+        if (result.status === "rejected") console.error("Forced tool cleanup failed:", result.reason)
+      process.exit(signalExitCode())
+    })
+  }
   const stop = (signal: "SIGINT" | "SIGTERM") => {
-    if (requestedSignal) return
+    if (requestedSignal) return force()
     requestedSignal = signal
-    // Only interrupt here. The top-level finally, outside run(), owns waiting and exit.
+    const cooperative = executions.size > 0
     shutdownController.abort(new Error("CLI received " + signal))
+    // Keep complete cooperative finalizers; bound unregistered legacy work before its 700ms probe completes.
+    if (!cooperative) signalTimer = setTimeout(force, 250)
   }
   const interrupt = () => {
     if (process.listenerCount("SIGINT") === 1) stop("SIGINT")
@@ -272,6 +301,7 @@ export function installSignalHandlers() {
   process.on("SIGINT", interrupt)
   process.on("SIGTERM", terminate)
   return () => {
+    clearTimeout(signalTimer)
     process.off("SIGINT", interrupt)
     process.off("SIGTERM", terminate)
   }

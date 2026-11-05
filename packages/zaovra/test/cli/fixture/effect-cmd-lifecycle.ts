@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises"
+import { writeFileSync } from "node:fs"
 import path from "node:path"
 import { scheduler } from "node:timers/promises"
 import { Effect } from "effect"
@@ -12,7 +12,7 @@ const mode = process.argv[3]
 const events: string[] = []
 const event = async (name: string) => {
   events.push(name)
-  await writeFile(path.join(directory, "events.json"), JSON.stringify(events))
+  writeFileSync(path.join(directory, "events.json"), JSON.stringify(events))
 }
 const keepalive = setInterval(() => {}, 1000)
 setTimeout(() => process.exit(97), 20000).unref()
