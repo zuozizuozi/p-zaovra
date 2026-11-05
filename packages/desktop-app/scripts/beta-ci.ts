@@ -466,6 +466,25 @@ if (import.meta.main) {
   const input: unknown = await Bun.file(process.argv[2]).json()
   const selected = selectCI(input, sha)
   if (!count(selected.test.id)) throw new Error("Missing exact test run identity")
+  // Either workflow can finish first; the later completion will trigger this gate again.
+  if (
+    process.env.EVENT_NAME === "workflow_run" &&
+    [selected.test, selected.typecheck].some((run) => run.status !== "completed")
+  ) {
+    if (
+      [selected.test, selected.typecheck].some(
+        (run) => !["completed", "queued", "in_progress", "waiting", "pending", "requested"].includes(run.status ?? ""),
+      )
+    )
+      throw new Error("Invalid pending CI status")
+    if (selected.typecheck.status === "completed" && selected.typecheck.conclusion !== "success")
+      throw new Error("Exact main typecheck CI has not passed")
+    if (selected.test.status === "completed" && !["success", "failure"].includes(selected.test.conclusion ?? ""))
+      throw new Error("Exact main test CI has not completed")
+    if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, "build=false\n")
+    console.log(JSON.stringify({ source: sha, waitingForCI: true }))
+    process.exit(0)
+  }
   if (selected.typecheck.status !== "completed" || selected.typecheck.conclusion !== "success")
     throw new Error("Exact main typecheck CI has not passed")
   const evidence =

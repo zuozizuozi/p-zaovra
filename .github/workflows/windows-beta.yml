@@ -108,6 +108,7 @@ jobs:
       - name: Validate changed desktop, UI and Worker contracts
         shell: pwsh
         env:
+          ZAOVRA_ALLOW_UNSIGNED_BETA: "false"
           PYTHON: python
           ZAOVRA_WORKER_TEST_DIR: ${{ runner.temp }}/feedback-worker
           ZAOVRA_BETA_TEST_DIR: ${{ runner.temp }}/beta-fixtures

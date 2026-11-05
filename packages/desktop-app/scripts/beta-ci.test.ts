@@ -721,3 +721,89 @@ test("646 unsigned deduplication requires a successful continuous official build
   expect(retainedBetaBuild({ ...build, event: "workflow_dispatch" }, artifact, gate, sha, decision)).toBe(false)
   expect(retainedBetaBuild({ ...build, conclusion: "failure" }, artifact, gate, sha, decision)).toBe(false)
 })
+
+async function continuousGate666(inventory: unknown, event = "workflow_run") {
+  const directory = join(root!, crypto.randomUUID())
+  await mkdir(directory, { recursive: true })
+  const input = join(directory, "ci.json")
+  const output = join(directory, "outputs")
+  await Bun.write(input, JSON.stringify(inventory))
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, "beta-ci.ts"), input, sha, "99"], {
+    env: {
+      ...process.env,
+      EVENT_NAME: event,
+      BUILD_ONLY: "true",
+      WORKFLOW_SHA: sha,
+      CONTINUOUS_BETA: event === "workflow_run" ? "true" : "false",
+      GITHUB_OUTPUT: output,
+      GH_TOKEN: "",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  return { stdout, stderr, code, outputs: (await Bun.file(output).exists()) ? await Bun.file(output).text() : "" }
+}
+
+test("666 automatic gate waits successfully for either exact main CI without building", async () => {
+  for (const name of ["test", "typecheck"])
+    for (const status of ["queued", "in_progress", "waiting", "pending", "requested"]) {
+      const runs = [run("test"), run("typecheck")].map((value) =>
+        value.name === name ? { ...value, status, conclusion: null } : value,
+      )
+      const result = await continuousGate666({ total_count: 2, workflow_runs: runs })
+      expect(result.code, result.stderr).toBe(0)
+      expect(result.outputs).toBe("build=false\n")
+      expect(JSON.parse(result.stdout)).toMatchObject({ source: sha, waitingForCI: true })
+    }
+}, 60000)
+
+test("666 automatic gate admits the later completed peer with exact run attempt provenance", async () => {
+  const result = await continuousGate666({ total_count: 2, workflow_runs: [run("test"), run("typecheck")] })
+  expect(result.code, result.stderr).toBe(0)
+  expect(result.outputs).toBe(
+    "build=true\nk63_applied=false\ntest_run_id=10\ntest_run_attempt=2\nk63_missing_tests=0\n",
+  )
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    source: sha,
+    k63ExceptionApplied: false,
+    testRun: 10,
+    testAttempt: 2,
+  })
+})
+
+test("666 waiting never relaxes manual publish identity or terminal failure gates", async () => {
+  const pending = { ...run("test"), status: "in_progress", conclusion: null }
+  for (const event of ["workflow_dispatch", "publish"]) {
+    const result = await continuousGate666({ workflow_runs: [pending, run("typecheck")] }, event)
+    expect(result.code).not.toBe(0)
+    expect(result.outputs).toBe("")
+  }
+  for (const runs of [
+    [pending, run("typecheck", "failure")],
+    [run("test", "cancelled"), { ...run("typecheck"), status: "in_progress", conclusion: null }],
+    [{ ...pending, status: "unknown" }, run("typecheck")],
+    [{ ...pending, head_sha: "b".repeat(40) }, run("typecheck")],
+    [pending],
+  ]) {
+    const result = await continuousGate666({ total_count: runs.length, workflow_runs: runs })
+    expect(result.code).not.toBe(0)
+    expect(result.outputs).toBe("")
+  }
+})
+
+test("666 validation isolates unsigned packaging env without changing the actual packaging policy", async () => {
+  const workflow = Bun.YAML.parse(
+    await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
+  ) as { jobs: { build: { env: Record<string, string>; steps: { name?: string; env?: Record<string, string> }[] } } }
+  const validation = workflow.jobs.build.steps.find(
+    (step) => step.name === "Validate changed desktop, UI and Worker contracts",
+  )
+  expect(validation?.env?.ZAOVRA_ALLOW_UNSIGNED_BETA).toBe("false")
+  expect(workflow.jobs.build.env.ZAOVRA_ALLOW_UNSIGNED_BETA).toContain("vars.WINDOWS_SIGNING_ENABLED != 'true'")
+  expect(workflow.jobs.build.env.ZAOVRA_ALLOW_UNSIGNED_BETA).toContain("inputs.unsigned_beta")
+})
