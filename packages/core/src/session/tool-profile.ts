@@ -38,13 +38,7 @@ export function select(
     repair?: boolean
   },
 ) {
-  if (
-    input.repair ||
-    input.explicit ||
-    !/^gpt-/i.test(input.model) ||
-    !definitions.some((tool) => tool.name === "tool_search")
-  )
-    return definitions
+  if (input.repair || input.explicit || !definitions.some((tool) => tool.name === "tool_search")) return definitions
   const active = new Set([...(input.custom ?? []), ...(input.recalled ?? [])])
   for (const message of input.history) {
     if (message.type !== "assistant") continue

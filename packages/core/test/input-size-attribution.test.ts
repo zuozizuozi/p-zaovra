@@ -71,7 +71,7 @@ const it = testEffect(
   ]),
 )
 
-it.live("660 attribute a real runner initial request and compare existing compact advertisements offline", () =>
+it.live("664 a non-GPT runner advertises compact schemas without changing canonical registration", () =>
   Effect.gen(function* () {
     requests.length = 0
     const sessions = yield* SessionV2.Service
@@ -88,22 +88,25 @@ it.live("660 attribute a real runner initial request and compare existing compac
     const request = requests[0]!
     expect(request.tools.length).toBeGreaterThan(10)
     const sizes = SessionCache.inputSizes(request)
-    const compact = ToolProfile.select(request.tools, { model: "gpt-fixture", history: [] })
-    const fullBytes = sizes.find((entry) => entry.category === "tools")!.bytes
-    expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(fullBytes)
+    const registry = yield* ToolRegistry.Service
+    const full = (yield* registry.materialize()).definitions
+    const compact = ToolProfile.select(full, { model: model.id, history: [] })
+    const fullBytes = Buffer.byteLength(JSON.stringify(full))
+    expect(request.tools).toEqual(compact)
+    expect(sizes.find((entry) => entry.category === "tools")!.bytes).toBeLessThan(fullBytes)
     expect(compact.some((tool) => tool.name === "tool_search")).toBe(true)
     expect(compact.some((tool) => tool.name === "bash_job")).toBe(true)
     console.log(
       JSON.stringify({
-        measurement: "660-local-canonical-request",
+        measurement: "664-local-canonical-request",
         scope: "one synthetic-provider current-main runner request, not R4 wire body or tokenizer",
         model_API: 0,
         sizes,
-        full_tools: request.tools.length,
+        full_tools: full.length,
         compact_tools: compact.length,
         full_tool_bytes: fullBytes,
         existing_compact_tool_bytes: Buffer.byteLength(JSON.stringify(compact)),
-        advertisement_changed_in_product: false,
+        advertisement_changed_in_product: true,
       }),
     )
   }),
