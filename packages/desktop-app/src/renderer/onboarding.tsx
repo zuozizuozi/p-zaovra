@@ -1,4 +1,4 @@
-import { ServerConnection, useServer, useSettings, useTabs, useProviders, useSettingsDialog } from "@zaovra-ai/app"
+import { ServerConnection, useLayout, useServer, useSettings, useTabs } from "@zaovra-ai/app"
 import { onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
@@ -6,11 +6,10 @@ import { t } from "./i18n"
 
 export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoaded: () => void }) {
   const server = useServer()
+  const layout = useLayout()
   const settings = useSettings()
   const tabs = useTabs()
-  const providers = useProviders(() => undefined)
-  const connect = useSettingsDialog("providers")
-  const [state, setState] = createStore({ needsDirectory: false, fallback: "", busy: false })
+  const [state, setState] = createStore({ needsDirectory: false, busy: false })
 
   async function open(directory: string) {
     server.projects.open(directory)
@@ -18,6 +17,7 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
     const tab = await tabs.newDraft({ server: server.key, directory })
     if (!tab) throw new Error("Onboarding directory did not resolve to a draft")
     tabs.select(tab)
+    layout.sidebar.open()
   }
 
   async function choose() {
@@ -36,18 +36,6 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
     }
   }
 
-  async function skip() {
-    setState("busy", true)
-    try {
-      await window.api.finishFirstLaunchOnboarding(false)
-      setState("needsDirectory", false)
-    } catch {
-      setState("needsDirectory", true)
-    } finally {
-      setState("busy", false)
-    }
-  }
-
   onMount(() => {
     void runFirstLaunchOnboarding().finally(props.onLoaded)
   })
@@ -55,7 +43,9 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
   async function runFirstLaunchOnboarding() {
     try {
       await Promise.all(
-        [server.ready.promise, tabs.ready.promise, tabs.recentReady.promise].map((p) => p ?? Promise.resolve()),
+        [server.ready.promise, layout.ready.promise, tabs.ready.promise, tabs.recentReady.promise].map(
+          (p) => p ?? Promise.resolve(),
+        ),
       )
       const existingInstall = await window.api.isOldLayoutEligible()
       settings.general.setOldLayoutEligible(existingInstall)
@@ -85,7 +75,6 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
         setState("needsDirectory", true)
         return
       }
-      if (result.fallback) setState("fallback", result.directory)
       await open(result.directory)
     } catch (error) {
       console.error("[desktop-onboarding] first launch onboarding failed", error)
@@ -94,39 +83,15 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
   }
 
   return (
-    <Show when={state.needsDirectory || state.fallback}>
+    <Show when={state.needsDirectory}>
       <section
         role="status"
-        class="fixed inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-v2-background-bg-base p-8 text-v2-text-text-base"
+        class="fixed bottom-4 right-4 z-40 flex max-w-sm items-center gap-3 rounded-lg border border-v2-border-border-base bg-v2-background-bg-base p-3 text-v2-text-text-base shadow-lg"
       >
-        <h1 class="text-24-semibold">{t("desktop.onboarding.welcome")}</h1>
-        <p class="max-w-lg break-words">
-          {state.needsDirectory
-            ? t("desktop.onboarding.choose")
-            : t("desktop.onboarding.fallback", { path: state.fallback })}
-        </p>
-        <Show
-          when={state.needsDirectory}
-          fallback={
-            <ButtonV2 variant="ghost-muted" onClick={() => setState("fallback", "")}>
-              {t("desktop.onboarding.dismiss")}
-            </ButtonV2>
-          }
-        >
-          <ButtonV2 variant="neutral" onClick={connect}>
-            {t("desktop.onboarding.connect")}
-          </ButtonV2>
-          <ButtonV2
-            variant="neutral"
-            disabled={state.busy || providers.loading() || providers.connected().length === 0}
-            onClick={() => void choose()}
-          >
-            {t("desktop.dialog.chooseFolder")}
-          </ButtonV2>
-          <ButtonV2 variant="ghost-muted" disabled={state.busy} onClick={() => void skip()}>
-            {t("desktop.onboarding.later")}
-          </ButtonV2>
-        </Show>
+        <p>{t("desktop.onboarding.choose")}</p>
+        <ButtonV2 variant="neutral" disabled={state.busy} onClick={() => void choose()}>
+          {t("desktop.dialog.chooseFolder")}
+        </ButtonV2>
       </section>
     </Show>
   )

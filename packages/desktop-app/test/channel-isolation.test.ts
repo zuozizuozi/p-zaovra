@@ -37,15 +37,19 @@ test.each(["prod", "beta", "dev"])(
   },
 )
 
-test("first launch requests an explicit location before any directory is resolved or created", async () => {
-  const operations: string[] = []
+test("existing profile does not create a default directory", async () => {
   const result = await completeFirstLaunch({
-    pending: true,
+    pending: false,
     create: true,
+    path: () => {
+      throw new Error("unexpected path lookup")
+    },
+    mkdir: async () => {
+      throw new Error("unexpected directory creation")
+    },
     complete: () => {
-      operations.push("complete")
+      throw new Error("unexpected completion")
     },
   })
-  expect(result).toEqual({ needsDirectory: true })
-  expect(operations).toEqual([])
+  expect(result).toBe(null)
 })

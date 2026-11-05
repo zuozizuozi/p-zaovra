@@ -1,4 +1,6 @@
 import { existsSync, readdirSync } from "node:fs"
+import { mkdir } from "node:fs/promises"
+import { app } from "electron"
 import { getStore } from "./store"
 import { FIRST_LAUNCH_ONBOARDING_COMPLETE_KEY, OLD_LAYOUT_ELIGIBLE_KEY } from "./store-keys"
 import { write as writeLog } from "./logging"
@@ -35,6 +37,8 @@ export async function finishFirstLaunchOnboarding(createDefaultProject: boolean)
   const result = await completeFirstLaunch({
     pending: true,
     create: createDefaultProject,
+    path: (name) => app.getPath(name),
+    mkdir: (directory) => mkdir(directory, { recursive: true }),
     complete: () => getStore().set(FIRST_LAUNCH_ONBOARDING_COMPLETE_KEY, true),
   })
   writeLog("onboarding", "first launch onboarding resolved", { createDefaultProject, result })

@@ -1,10 +1,5 @@
 export const dict = {
-  "desktop.onboarding.welcome": "欢迎使用 Zaovra",
-  "desktop.onboarding.connect": "1. 连接模型服务",
-  "desktop.onboarding.choose": "先连接模型服务，再选择项目文件夹。当前尚未选择项目或模型。",
-  "desktop.onboarding.fallback": "文档目录不可用，默认项目已创建于 {{path}}。",
-  "desktop.onboarding.later": "稍后",
-  "desktop.onboarding.dismiss": "知道了",
+  "desktop.onboarding.choose": "无法创建默认项目，请选择文件夹。",
   "desktop.server.exited":
     "本地服务已停止（退出码 {{code}}），当前任务状态无法确认。请关闭并重新打开 Zaovra 恢复连接，核对任务后再继续；命令不会自动重跑。",
   "desktop.menu.checkForUpdates": "检查更新...",
