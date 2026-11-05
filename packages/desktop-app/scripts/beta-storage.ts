@@ -1,7 +1,7 @@
 import { S3Client, semver, YAML } from "bun"
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
-import { digest } from "./beta-release"
+import { digest, retiredVersions } from "./beta-release"
 import type { planBeta } from "./beta-release"
 
 export const versionPattern = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
@@ -188,6 +188,43 @@ export async function deliverBeta(
     }
     throw new Error("Beta pointer readback failed; inspect initial delivery")
   }
+}
+
+export async function retainBetaVersions(bucket: S3Client, version: string) {
+  const indexFile = bucket.file("beta/versions.json")
+  const index: unknown = (await indexFile.exists()) ? await indexFile.json() : []
+  if (
+    !Array.isArray(index) ||
+    index.some((value) => typeof value !== "string" || !versionPattern.test(value) || semver.order(value, version) > 0)
+  )
+    throw new Error("Invalid owned release index")
+  const versions = [...new Set([...(index as string[]), version])]
+  const retired = retiredVersions(versions, version)
+  if ((await pointer(bucket)).version !== version)
+    throw new Error("A newer publisher owns the pointer; defer retention")
+  const owned = await Promise.all(
+    retired.map(async (old) => {
+      const prefix = "beta/" + old + "/"
+      const release = (await bucket.file(prefix + "release.json").json()) as {
+        version?: unknown
+        files?: { name?: unknown }[]
+      }
+      const names = release.files?.map((file) => file.name)
+      if (
+        release.version !== old ||
+        !names ||
+        names.length !== 2 ||
+        !names.includes("zaovra-desktop-win-x64.exe") ||
+        !names.includes("zaovra-desktop-win-x64.exe.blockmap")
+      )
+        throw new Error("Refusing retention outside the owned release")
+      return [...names.map((name) => prefix + name), prefix + "notes.md", prefix + "release.json"]
+    }),
+  )
+  for (const key of owned.flat()) await bucket.file(key).delete()
+  const retained = versions.filter((value) => !retired.includes(value))
+  await indexFile.write(JSON.stringify(retained), { type: "application/json" })
+  return { retained, retired }
 }
 
 if (import.meta.main) {

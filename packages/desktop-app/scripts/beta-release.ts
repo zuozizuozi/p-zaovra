@@ -2,7 +2,7 @@ import { semver, YAML } from "bun"
 import { createHash } from "node:crypto"
 import { basename, join, resolve } from "node:path"
 
-import { betaBucket, continuousIdentity, deliverBeta, versionPattern } from "./beta-storage"
+import { betaBucket, continuousIdentity, deliverBeta, retainBetaVersions, versionPattern } from "./beta-storage"
 export { versionPattern } from "./beta-storage"
 
 export async function digest(file: Blob) {
@@ -110,7 +110,12 @@ export async function publishBeta(directory: string, commit: string, notes: stri
     )
     if ((await signature.exited) !== 0) throw new Error("Installer signature validation failed")
   }
-  await deliverBeta(betaBucket(), directory, plan, undefined, identity)
+  const bucket = betaBucket()
+  await deliverBeta(bucket, directory, plan, undefined, identity)
+  const retention = await retainBetaVersions(bucket, plan.manifest.version).catch(() => {
+    console.warn("Beta is published and verified; old-version retention is deferred. Credentials are not logged.")
+    return { deferred: true }
+  })
 
   console.log(
     JSON.stringify({
@@ -118,7 +123,7 @@ export async function publishBeta(directory: string, commit: string, notes: stri
       signing: unsigned ? "unsigned beta" : "Valid signature",
       commit,
       approval: process.env.BETA_APPROVAL_REF,
-      retention: "Old immutable versions retained; no deletion during pointer transaction",
+      retention,
     }),
   )
 }

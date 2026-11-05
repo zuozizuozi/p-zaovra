@@ -4,7 +4,13 @@ import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { createHash } from "node:crypto"
 import { planBeta } from "./beta-release"
-import { continuousIdentity, deliverBeta, nextBetaVersion, reserveBetaVersion } from "./beta-storage"
+import {
+  continuousIdentity,
+  deliverBeta,
+  nextBetaVersion,
+  reserveBetaVersion,
+  retainBetaVersions,
+} from "./beta-storage"
 
 const root = process.env.ZAOVRA_BETA_TEST_DIR
 if (!root) throw new Error("Use an isolated ZAOVRA_BETA_TEST_DIR")
@@ -50,14 +56,21 @@ async function fixture() {
         )
       const isPublic = url.pathname.startsWith("/public/")
       const key = url.pathname.replace(/^\/(?:public\/|zaovra-updates\/)?/, "")
-      if (request.method === "GET") {
+      if (request.method === "GET" || request.method === "HEAD") {
         if (!objects.has(key)) return new Response("missing", { status: 404 })
         if (
           isPublic &&
           ((key.endsWith(".exe") && control.publicArtifactBad) || (key === "beta/beta.yml" && control.publicPointerBad))
         )
           return new Response("tampered cache")
-        return new Response(objects.get(key), { headers: { etag: etag(objects.get(key)!) } })
+        return new Response(objects.get(key), {
+          headers: { etag: etag(objects.get(key)!), "content-length": String(Buffer.byteLength(objects.get(key)!)) },
+        })
+      }
+      if (request.method === "DELETE") {
+        objects.delete(key)
+        writes.push("DELETE:" + key)
+        return new Response(null, { status: 204 })
       }
       if (request.method !== "PUT") return new Response("method", { status: 405 })
       if (key === "beta/beta.yml" && control.compete) {
@@ -183,6 +196,35 @@ test("646 competing publish and reservation-owner mismatch fail closed", async (
       deliverBeta(f.bucket, f.directory, f.plan, f.server.url.origin + "/public/", identity),
     ).rejects.toThrow("pointer changed")
     expect(YAML.parse(f.objects.get("beta/beta.yml")!).version).toBe("0.1.1-beta.99")
+  } finally {
+    await f.server.stop(true)
+  }
+})
+
+test("646 retention keeps five only after verified pointer ownership and rejects foreign paths", async () => {
+  const f = await fixture()
+  try {
+    const current = "0.1.1-beta.7"
+    const versions = [1, 2, 3, 4, 5, 6].map((number) => "0.1.1-beta." + number)
+    f.objects.set("beta/versions.json", JSON.stringify(versions))
+    f.objects.set("beta/beta.yml", YAML.stringify({ version: current }))
+    const files = ["zaovra-desktop-win-x64.exe", "zaovra-desktop-win-x64.exe.blockmap"].map((name) => ({ name }))
+    for (const version of versions)
+      f.objects.set("beta/" + version + "/release.json", JSON.stringify({ version, files }))
+    f.objects.set(
+      "beta/0.1.1-beta.1/release.json",
+      JSON.stringify({ version: "0.1.1-beta.1", files: [{ name: "../private" }] }),
+    )
+    await expect(retainBetaVersions(f.bucket, current)).rejects.toThrow("outside the owned")
+    expect(f.writes).toHaveLength(0)
+    f.objects.set("beta/0.1.1-beta.1/release.json", JSON.stringify({ version: "0.1.1-beta.1", files }))
+    const result = await retainBetaVersions(f.bucket, current)
+    expect(result.retired).toEqual(["0.1.1-beta.2", "0.1.1-beta.1"])
+    expect(result.retained).toHaveLength(5)
+    expect(f.objects.has("beta/0.1.1-beta.3/release.json")).toBe(true)
+    expect(f.objects.has("beta/reservations/0.1.1-beta.4.json")).toBe(true)
+    f.objects.set("beta/beta.yml", YAML.stringify({ version: "0.1.1-beta.8" }))
+    await expect(retainBetaVersions(f.bucket, current)).rejects.toThrow("newer publisher")
   } finally {
     await f.server.stop(true)
   }
