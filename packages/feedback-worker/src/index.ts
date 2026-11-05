@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose"
 import { Feedback } from "../../schema/src/feedback"
+import { queueFeedbackNotification, retryFeedbackNotifications } from "./notifications"
 
 const limit = 5_500_000
 const receiptPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -68,7 +69,7 @@ function json(value: unknown, status = 200) {
 }
 
 const handler = {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url)
     if (url.pathname === "/health" && request.method === "GET") return json({ ok: true })
     if (url.pathname === "/v1/feedback" && request.method === "POST") {
@@ -96,10 +97,30 @@ const handler = {
       })
       if (!stored && (await env.FEEDBACK.head(key))?.customMetadata?.digest !== digest)
         return json({ error: "receipt_conflict" }, 409)
+      queueFeedbackNotification(env, prepared.receipt, ctx)
       return json({ receipt: prepared.receipt, submitted: true }, stored ? 201 : 200)
     }
     if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
       if (!(await authenticated(request, env))) return json({ error: "access_required" }, 403)
+      if (request.method === "GET" && url.pathname.startsWith("/admin/notifications/")) {
+        const receipt = url.pathname.slice("/admin/notifications/".length)
+        if (!receiptPattern.test(receipt)) return json({ error: "invalid_receipt" }, 400)
+        const state = await env.FEEDBACK.get("notifications/" + receipt + ".json")
+        return state
+          ? json({ receipt, ...(await state.json<{ status: string; attempts: number; retryAfter: number }>()) })
+          : json({ error: "not_found" }, 404)
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/admin/notifications/") &&
+        url.pathname.endsWith("/retry")
+      ) {
+        const receipt = url.pathname.slice("/admin/notifications/".length, -"/retry".length)
+        if (!receiptPattern.test(receipt)) return json({ error: "invalid_receipt" }, 400)
+        if (!(await env.FEEDBACK.head("reports/" + receipt + ".json"))) return json({ error: "not_found" }, 404)
+        queueFeedbackNotification(env, receipt, ctx, true)
+        return json({ receipt, notification: "queued" }, 202)
+      }
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405)
       if (url.pathname === "/admin/reports") {
         const cursor = url.searchParams.get("cursor") ?? undefined
@@ -155,8 +176,15 @@ const handler = {
 } satisfies ExportedHandler<Env>
 
 export default {
-  fetch(request, env) {
-    return handler.fetch(request, env).catch(() => json({ error: "temporarily_unavailable" }, 503))
+  fetch(request, env, ctx) {
+    return handler.fetch(request, env, ctx).catch(() => json({ error: "temporarily_unavailable" }, 503))
+  },
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(
+      retryFeedbackNotifications(env).catch(() => {
+        console.error(JSON.stringify({ event: "feedback_notification_retry_failed" }))
+      }),
+    )
   },
 } satisfies ExportedHandler<Env>
 

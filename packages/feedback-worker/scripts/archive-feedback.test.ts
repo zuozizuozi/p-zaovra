@@ -1,10 +1,12 @@
+import { mkdir } from "node:fs/promises"
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 import { archiveFeedback } from "./archive-feedback"
 
-test("Access archive preserves immutable originals, uses a header and rejects unsafe receipts", async () => {
+test("Access archive preserves immutable originals, uses a header and isolates unsafe receipts", async () => {
   const root = process.env.ZAOVRA_WORKER_TEST_DIR
   if (!root) throw new Error("Use the current isolated record directory")
+  await mkdir(root, { recursive: true })
   const directory = join(root, "archive-" + crypto.randomUUID())
   const id = crypto.randomUUID()
   let unsafe = false
@@ -32,13 +34,19 @@ test("Access archive preserves immutable originals, uses a header and rejects un
     ).rejects.toThrow("Archive must stay inside")
     const first = await archiveFeedback({ token: "fixture-token", directory, archiveRoot: root, fetcher })
     expect(first).toHaveLength(1)
-    expect(JSON.parse(await Bun.file(join(directory, id + ".json")).text())).toEqual(original)
+    expect(
+      JSON.parse(
+        await Bun.file(join(directory, original.received.slice(0, 10).replaceAll("-", ""), id, "feedback.json")).text(),
+      ),
+    ).toEqual(original)
     expect(await archiveFeedback({ token: "fixture-token", directory, archiveRoot: root, fetcher })).toHaveLength(0)
     expect(downloads).toBe(1)
     unsafe = true
-    await expect(archiveFeedback({ token: "fixture-token", directory, archiveRoot: root, fetcher })).rejects.toThrow(
-      "Invalid feedback receipt",
+    await expect(archiveFeedback({ token: "fixture-token", directory, archiveRoot: root, fetcher })).resolves.toEqual(
+      [],
     )
+    expect(await Bun.file(join(directory, "索引.md")).text()).toContain("无效编号")
+    expect(downloads).toBe(1)
   } finally {
     await server.stop(true)
   }

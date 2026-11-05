@@ -6,12 +6,42 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "feedback.zaovra.com", "custom_domain": true }],
-  "r2_buckets": [{ "binding": "FEEDBACK", "bucket_name": "zaovra-feedback" }],
-  "ratelimits": [{ "name": "SUBMISSIONS", "namespace_id": "550", "simple": { "limit": 10, "period": 60 } }],
+  "routes": [
+    {
+      "pattern": "feedback.zaovra.com",
+      "custom_domain": true,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FEEDBACK",
+      "bucket_name": "zaovra-feedback",
+    },
+  ],
+  "ratelimits": [
+    {
+      "name": "SUBMISSIONS",
+      "namespace_id": "550",
+      "simple": {
+        "limit": 10,
+        "period": 60,
+      },
+    },
+  ],
   "vars": {
     "ACCESS_TEAM_DOMAIN": "https://company-console-58d97556.cloudflareaccess.com",
-    "ACCESS_AUD": "cc9a377b9898db5561a1365d623f78074b7928e9ca74e8d6a6dca0e30cc30a25"
+    "ACCESS_AUD": "cc9a377b9898db5561a1365d623f78074b7928e9ca74e8d6a6dca0e30cc30a25",
   },
-  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1,
+  },
+  "send_email": [
+    {
+      "name": "NOTIFY_EMAIL",
+    },
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
 }
