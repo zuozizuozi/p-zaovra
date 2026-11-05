@@ -2,6 +2,7 @@ export * as ProcessTree from "./process-tree"
 
 import type { ChildProcess, SpawnOptions } from "node:child_process"
 import { execFile } from "node:child_process"
+import { EventEmitter } from "node:events"
 import { readdir, readFile } from "node:fs/promises"
 import { Duplex, PassThrough } from "node:stream"
 import type { Readable, Writable } from "node:stream"
@@ -12,6 +13,9 @@ export type Child = ChildProcess
 export type Output = { channel: "stdout" | "stderr"; data?: Buffer }
 type Identity = { pid: number; ppid: number; pgid: number; birth: string; state?: string }
 type Result = readonly [number | null, NodeJS.Signals | null]
+/** A bounded observation cannot certify descendants whose parent chain was already lost. */
+export type Cleanup = { pid: number | undefined; status: "unverified"; reason: string; observedExited: number }
+export const events = new EventEmitter<{ cleanup: [Cleanup] }>()
 const owners = new Set<Tracker>()
 const executions = new Set<Promise<unknown>>()
 const shutdownController = new AbortController()
@@ -22,6 +26,7 @@ export const supported = () => ["win32", "linux", "darwin"].includes(process.pla
 
 export class Tracker {
   stopping: Promise<void> | undefined
+  cleanup: Cleanup | undefined
   constructor(
     readonly proc: Child,
     readonly closed: Promise<Result>,
@@ -32,10 +37,23 @@ export class Tracker {
   }
   stop(signal: NodeJS.Signals = "SIGTERM", grace = 1000): Promise<void> {
     if (this.stopping) return this.stopping
-    this.stopping = stopTree(this.proc, this.closed, signal, Math.max(0, grace)).then(() => {
-      owners.delete(this)
-    })
+    this.stopping = stopTree(this.proc, this.closed, signal, Math.max(0, grace)).then(
+      (result) => {
+        this.report(result)
+        owners.delete(this)
+      },
+      (error) => {
+        this.report({ reason: "teardown failed; observed targets not confirmed", observedExited: 0 })
+        throw error
+      },
+    )
     return this.stopping
+  }
+  report(result: Omit<Cleanup, "pid" | "status">) {
+    if (this.cleanup) return
+    this.cleanup = { pid: this.proc.pid, status: "unverified", ...result }
+    console.warn("cleanup unverified", this.cleanup)
+    events.emit("cleanup", this.cleanup)
   }
 }
 
@@ -56,7 +74,10 @@ export function start(command: string, args: readonly string[], options: SpawnOp
   const owner = new Tracker(proc, closed, output.all)
   owners.add(owner)
   proc.once("close", () => {
-    if (!owner.stopping) owners.delete(owner)
+    if (!owner.stopping) {
+      if (proc.pid) owner.report({ reason: "root exited before teardown snapshot", observedExited: 0 })
+      owners.delete(owner)
+    }
   })
   return new Promise<{ proc: Child; owner: Tracker; pid: number; closed: Promise<Result> }>((resolve, reject) => {
     proc.once("error", reject)
@@ -66,20 +87,19 @@ export function start(command: string, args: readonly string[], options: SpawnOp
 
 async function stopTree(proc: Child, closed: Promise<Result>, signal: NodeJS.Signals, grace: number) {
   // The ChildProcess object is the authority. Never rediscover an exited root by numeric PID.
-  if (proc.exitCode !== null || proc.signalCode !== null || !proc.pid) return
+  const unobserved = { reason: "root exited before teardown snapshot", observedExited: 0 }
+  if (proc.exitCode !== null || proc.signalCode !== null || !proc.pid) return unobserved
   if (process.platform === "win32") {
     await command("taskkill.exe", ["/PID", String(proc.pid), "/T", "/F"]).catch((error) => {
       if (proc.exitCode === null && proc.signalCode === null) throw error
     })
     await deadline(closed, 5000)
-    return
+    return { reason: "taskkill completed; escaped descendants cannot be certified", observedExited: 1 }
   }
   const snapshot = await processes()
+  if (proc.exitCode !== null || proc.signalCode !== null) return unobserved
   const root = snapshot.find((item) => item.pid === proc.pid)
-  if (!root) {
-    if (proc.exitCode !== null || proc.signalCode !== null) return
-    throw new Error("Cannot observe running tool root; cleanup is unverified")
-  }
+  if (!root) throw new Error("Cannot observe running tool root; cleanup is unverified")
   const descendants = new Set([root.pid])
   for (let previous = -1; previous !== descendants.size; ) {
     previous = descendants.size
@@ -96,9 +116,33 @@ async function stopTree(proc: Child, closed: Promise<Result>, signal: NodeJS.Sig
   await send(signal)
   if (signal !== "SIGKILL") {
     await scheduler.wait(grace)
+    // Exactly one termination-phase snapshot. Only surviving, identity-checked owners can seed new ancestry.
+    const members = (await Promise.all(items.map((item) => same(item)))).filter((item) => item !== undefined)
+    const current = await processes()
+    const owned = new Set(
+      current
+        .filter((item) => members.some((member) => member.pid === item.pid && member.birth === item.birth))
+        .map((item) => item.pid),
+    )
+    for (let previous = -1; previous !== owned.size; ) {
+      previous = owned.size
+      for (const item of current) if (owned.has(item.ppid)) owned.add(item.pid)
+    }
+    for (const item of current)
+      if (owned.has(item.pid) && !items.some((previous) => previous.pid === item.pid && previous.birth === item.birth))
+        items.push(item)
     await send("SIGKILL")
   }
   await deadline(closed, 5000)
+  const until = Date.now() + 5000
+  for (;;) {
+    const remaining = (await Promise.all(items.map((item) => same(item)))).filter((item) => item !== undefined)
+    if (!remaining.length) break
+    if (Date.now() >= until) throw new Error("Observed tool descendants remain; cleanup unverified, do not replay")
+    await scheduler.wait(10)
+  }
+  // Even observed targets exiting cannot prove that no unobserved child escaped before either snapshot.
+  return { reason: "observed targets exited; lost ancestry cannot be certified", observedExited: items.length }
 }
 
 function command(file: string, args: string[]): Promise<string> {
