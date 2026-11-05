@@ -58,7 +58,6 @@ export class Tracker {
   report(result: Omit<Cleanup, "pid" | "status">) {
     if (this.cleanup) return
     this.cleanup = { pid: this.proc.pid, status: "unverified", ...result }
-    console.warn("cleanup unverified", this.cleanup)
     events.emit("cleanup", this.cleanup)
   }
 }

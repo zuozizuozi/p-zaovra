@@ -17,7 +17,7 @@ export const layer = Layer.unwrap(
       Layer.orDie,
       Layer.merge(Layer.succeed(References.MinimumLogLevel, Logging.minimumLogLevel())),
     )
-    return Layer.merge(logs, yield* Effect.promise(Otlp.tracingLayer))
+    return Layer.merge(Layer.provideMerge(Logging.processTreeEvents, logs), yield* Effect.promise(Otlp.tracingLayer))
   }),
 )
 

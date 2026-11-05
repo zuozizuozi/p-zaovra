@@ -1,6 +1,7 @@
-import { Formatter, Logger, type LogLevel } from "effect"
+import { Effect, Formatter, Layer, Logger, type LogLevel } from "effect"
 import path from "path"
 import { Global } from "../global"
+import { ProcessTree } from "../process-tree"
 import { runID } from "./shared"
 
 function formatter(id: string = runID) {
@@ -50,6 +51,19 @@ export function fileLogger(file = path.join(Global.Path.log, "zaovra.log"), id: 
   // Do not set batchWindow to 0; it causes high idle CPU usage.
   return Logger.toFile(formatter(id), file, { flag: "a" })
 }
+
+export const processTreeEvents = Layer.effectDiscard(
+  Effect.gen(function* () {
+    // Capture the configured logger instead of using a default console logger in the callback.
+    const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+    const report = (cleanup: ProcessTree.Cleanup) =>
+      runSync(Effect.logInfo({ message: "cleanup unverified", ...cleanup }))
+    yield* Effect.acquireRelease(
+      Effect.sync(() => ProcessTree.events.on("cleanup", report)),
+      () => Effect.sync(() => ProcessTree.events.off("cleanup", report)),
+    )
+  }),
+)
 
 const stderrLogger = Logger.make((options) => process.stderr.write(formatter().log(options) + "\n"))
 
