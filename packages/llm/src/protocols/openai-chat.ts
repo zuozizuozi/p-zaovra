@@ -385,18 +385,17 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
   if (outputParameter !== "max_tokens" && outputParameter !== "max_completion_tokens")
     return yield* invalid("OpenAI Chat maxTokensParameter must be max_tokens or max_completion_tokens")
   const options = yield* lowerOptions(request)
-  const messages = yield* lowerMessages(request)
-  // DeepSeek requires original reasoning on every assistant turn when thinking
-  // and tools are enabled, including turns that did not call a tool.
-  if (
+  // DeepSeek can emit tool calls without reasoning. Keep original reasoning
+  // verbatim and explicitly represent an absent trace with an empty field.
+  const messages = (yield* lowerMessages(request)).map((message) =>
     "thinking" in options &&
     options.thinking?.type === "enabled" &&
     request.tools.length > 0 &&
-    messages.some((message) => message.role === "assistant" && !message.reasoning_content?.trim())
+    message.role === "assistant" &&
+    message.reasoning_content === undefined
+      ? { ...message, reasoning_content: "" }
+      : message,
   )
-    return yield* invalid(
-      "DeepSeek thinking with tools requires original reasoning_content for every assistant turn. Start a new session or disable thinking to continue. Existing tool results remain saved; do not repeat completed tools.",
-    )
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
   return {
     model: request.model.id,
