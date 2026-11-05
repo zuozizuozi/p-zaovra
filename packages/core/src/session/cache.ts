@@ -21,6 +21,17 @@ export const Snapshot = Schema.Struct({
   systemSegments: Schema.optional(
     Schema.Array(Schema.Struct({ index: Schema.Number, hash: Schema.String, bytes: Schema.Number })),
   ),
+  inputSizes: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        category: Schema.String,
+        parts: Schema.Number,
+        characters: Schema.Number,
+        bytes: Schema.Number,
+        hash: Schema.String,
+      }),
+    ),
+  ),
   model: Schema.String,
   epoch: Schema.Number,
   segments: Schema.Array(Schema.Struct({ name: Schema.String, hash: Schema.String, bytes: Schema.Number })),
@@ -40,17 +51,56 @@ export function tools(definitions: readonly ToolDefinition[]) {
     )
 }
 
+/** Canonical JSON components, not wire bytes or tokenizer estimates. Never retain their text. */
+export function inputSizes(request: LLMRequest) {
+  const segments = [
+    { category: "system", value: request.system },
+    { category: "tools", value: request.tools },
+    ...request.messages.flatMap((message) => [
+      { category: "messageMetadata", value: { role: message.role, native: message.native } },
+      ...message.content.map((part) => ({
+        category:
+          message.role === "system"
+            ? "system"
+            : part.type === "reasoning"
+              ? "reasoning"
+              : part.type === "tool-call"
+                ? "toolCalls"
+                : part.type === "tool-result"
+                  ? "toolResults"
+                  : part.type === "text"
+                    ? "text"
+                    : "attachments",
+        value: part,
+      })),
+    ]),
+  ]
+  return [...new Set(segments.map((segment) => segment.category))].map((category) => {
+    const values = segments
+      .filter((segment) => segment.category === category)
+      .map((segment) => JSON.stringify(segment.value))
+    return {
+      category,
+      parts: values.length,
+      characters: values.reduce((total, value) => total + value.length, 0),
+      bytes: values.reduce((total, value) => total + Buffer.byteLength(value), 0),
+      hash: createHash("sha256").update(JSON.stringify(values)).digest("hex"),
+    }
+  })
+}
+
 // Hash only prompt structure; never retain prompts, credentials or reasoning text.
 // These are client-side segments, not an estimate of a provider's tokenizer/cache.
 export function snapshot(
   request: LLMRequest,
   epoch: number,
-  boundary: { purpose?: "execution" | "summary"; durableMessages?: number } = {},
+  boundary: { purpose?: "execution" | "summary"; durableMessages?: number; measure?: boolean } = {},
 ): typeof Snapshot.Type {
   return {
     model: `${request.model.provider}/${request.model.id}/${request.model.route.id}`,
     epoch,
     purpose: boundary.purpose ?? "execution",
+    ...(boundary.measure ? { inputSizes: inputSizes(request) } : {}),
     ...(boundary.durableMessages === undefined
       ? {}
       : {
@@ -228,7 +278,7 @@ export function track<E, R>(
         details && typeof details === "object" && "snapshot" in details
           ? Option.getOrUndefined(Schema.decodeUnknownOption(Snapshot)(details.snapshot))
           : undefined
-      const current = snapshot(input.request, input.epoch, input)
+      const current = snapshot(input.request, input.epoch, { ...input, measure: true })
       const requestID = SessionMessage.ID.create()
       yield* SessionProgress.record(input.events, input.sessionID, "cache", {
         phase: "request",

@@ -961,6 +961,12 @@ const layer = Layer.effect(
             budget: progressBudget?.limit,
             advisoryDeadline: quality?.deadline,
             deadline: SessionBudget.deadline(session, progressBudget?.duration, progressBudget?.policy?.deadline),
+            executionDeadline: progressBudget?.policy?.closingReserveMs
+              ? SessionBudget.closingDeadline(
+                  SessionBudget.deadline(session, progressBudget.duration, progressBudget.policy.deadline),
+                  progressBudget.policy.closingReserveMs,
+                )
+              : undefined,
             epoch: system.baselineSeq,
           }
         : undefined

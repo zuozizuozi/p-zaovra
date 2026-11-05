@@ -68,6 +68,7 @@ type FactsInput = {
   unreported: number
   budget?: number
   deadline?: number
+  executionDeadline?: number
   advisoryDeadline?: number
   epoch?: number
 }
@@ -85,8 +86,10 @@ const FactsSnapshot = Schema.Struct({
   activeTimeUnknown: Schema.optional(Schema.Boolean),
   budgetLimit: Schema.optional(Schema.Number),
   hardDeadline: Schema.optional(Schema.Number),
+  executionDeadline: Schema.optional(Schema.Number),
   advisoryDeadline: Schema.optional(Schema.Number),
   remainingMs: Schema.optional(Schema.Number),
+  executableRemainingMs: Schema.optional(Schema.Number),
   advisoryRemainingMs: Schema.optional(Schema.Number),
 })
 
@@ -104,6 +107,7 @@ export function factsDue(input: FactsInput, previous?: string) {
     prior.allowanceLimit !== input.limit ||
     prior.budgetLimit !== input.budget ||
     prior.hardDeadline !== input.deadline ||
+    prior.executionDeadline !== input.executionDeadline ||
     prior.advisoryDeadline !== input.advisoryDeadline ||
     Boolean(prior.activeTimeUnknown) !== Boolean(input.state.activeTimeUnknown) ||
     prior.unreported > 0 !== input.unreported > 0
@@ -124,6 +128,8 @@ export function factsDue(input: FactsInput, previous?: string) {
   if (
     budgetBand(prior.knownTokens) !== budgetBand(input.tokens) ||
     timeBand(prior.remainingMs) !== timeBand(input.deadline === undefined ? undefined : input.deadline - input.now) ||
+    timeBand(prior.executableRemainingMs) !==
+      timeBand(input.executionDeadline === undefined ? undefined : input.executionDeadline - input.now) ||
     timeBand(prior.advisoryRemainingMs) !==
       timeBand(input.advisoryDeadline === undefined ? undefined : input.advisoryDeadline - input.now) ||
     (input.limit !== undefined && input.limit - input.step <= 3 && prior.allowanceTurn !== input.step)
@@ -142,6 +148,7 @@ export function facts(input: FactsInput) {
   const reminder =
     (input.budget !== undefined && input.tokens >= input.budget * 0.75) ||
     (input.deadline !== undefined && input.deadline - input.now <= 60_000) ||
+    (input.executionDeadline !== undefined && input.executionDeadline - input.now <= 60_000) ||
     (input.advisoryDeadline !== undefined && input.advisoryDeadline - input.now <= 60_000)
   return (
     factsPrefix +
@@ -158,6 +165,7 @@ export function facts(input: FactsInput) {
       unreported: input.unreported,
       ...(input.budget === undefined ? {} : { budgetLimit: input.budget }),
       ...(input.deadline === undefined ? {} : { hardDeadline: input.deadline }),
+      ...(input.executionDeadline === undefined ? {} : { executionDeadline: input.executionDeadline }),
       ...(input.advisoryDeadline === undefined ? {} : { advisoryDeadline: input.advisoryDeadline }),
       ...(input.budget === undefined
         ? {}
@@ -165,10 +173,13 @@ export function facts(input: FactsInput) {
           ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
           : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
       ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
+      ...(input.executionDeadline === undefined
+        ? {}
+        : { executableRemainingMs: Math.max(0, input.executionDeadline - input.now) }),
       ...(input.advisoryDeadline === undefined
         ? {}
         : { advisoryRemainingMs: Math.max(0, input.advisoryDeadline - input.now), advisoryOnly: true }),
-    })}${input.advisoryDeadline === undefined ? "" : "\nThe advisory deadline is a planning reminder, not a stop condition. remainingMs, when present, is the enforced wall-clock budget."}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
+    })}${input.executionDeadline === undefined ? "" : "\nexecutableRemainingMs ends provider/tool admission before the host cleanup reserve. remainingMs includes that reserve; finish necessary checks and report actual job states before executionDeadline. Never restart running or unknown jobs."}${input.advisoryDeadline === undefined ? "" : "\nThe advisory deadline is a planning reminder, not a stop condition. remainingMs, when present, is the enforced wall-clock budget."}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
   )
 }
 
