@@ -5,7 +5,11 @@ import { dict } from "../../../desktop-app/src/renderer/i18n/zh"
 import { dict as appDict } from "../../src/i18n/zh"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
 const calls = {
-  connect: 0,
+  sidebar: 0,
+  loaded: 0,
+  touched: [] as string[],
+  drafts: [] as Array<{ server: string; directory: string }>,
+  selected: [] as string[],
   picker: 0,
   opened: [] as string[],
   finished: [] as boolean[],
@@ -14,7 +18,8 @@ const calls = {
   install: 0,
 }
 const [state, setState] = createStore({
-  connected: false,
+  directoryAvailable: true,
+  existingInstall: false,
   channel: "beta",
   update: { status: "idle" } as import("../../src/updater").UpdaterState,
 })
@@ -47,43 +52,52 @@ mock.module("../../../desktop-app/src/renderer/i18n", () => ({
 }))
 mock.module("@zaovra-ai/app", () => ({
   ServerConnection: { builtin: () => true, key: () => "local" },
+  useLayout: () => ({
+    ready: { promise: Promise.resolve() },
+    sidebar: { open: () => calls.sidebar++ },
+  }),
   useSettings: () => ({ general: { setOldLayoutEligible: () => {} } }),
   useServer: () => ({
     ready: { promise: Promise.resolve() },
     isLocal: () => true,
     list: [],
     key: "local",
-    projects: { open: (path: string) => calls.opened.push(path), touch: () => {} },
+    projects: {
+      open: (path: string) => calls.opened.push(path),
+      touch: (path: string) => calls.touched.push(path),
+    },
   }),
   useTabs: () => ({
     ready: { promise: Promise.resolve() },
     recentReady: { promise: Promise.resolve() },
     store: [],
-    newDraft: async () => "draft",
-    select: () => {},
+    newDraft: async (input: { server: string; directory: string }) => {
+      calls.drafts.push(input)
+      return "draft"
+    },
+    select: (tab: string) => calls.selected.push(tab),
   }),
-  useProviders: () => ({ loading: () => false, connected: () => (state.connected ? [{ id: "fixture" }] : []) }),
-  useSettingsDialog: () => () => {
-    calls.connect++
-  },
 }))
 const disposals: Array<() => void> = []
 afterEach(() => {
   disposals.splice(0).forEach((d) => d())
   document.body.replaceChildren()
-  setState({ connected: false, channel: "beta", update: { status: "idle" } })
+  setState({ directoryAvailable: true, existingInstall: false, channel: "beta", update: { status: "idle" } })
+  calls.sidebar = calls.loaded = calls.picker = calls.check = calls.download = calls.install = 0
+  calls.opened.length = calls.touched.length = calls.drafts.length = calls.selected.length = calls.finished.length = 0
 })
 const button = (text: string) =>
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === text)!
 const settle = () => new Promise((r) => setTimeout(r, 30))
-test("612 fresh desktop starts with model service then project choice, no error or fabricated model", async () => {
+async function mountOnboarding() {
   Object.assign(window, {
     api: {
-      isOldLayoutEligible: async () => false,
+      isOldLayoutEligible: async () => state.existingInstall,
       isFirstLaunchOnboardingPending: async () => true,
       finishFirstLaunchOnboarding: async (create: boolean) => {
         calls.finished.push(create)
-        return create ? { needsDirectory: true } : null
+        if (!create) return null
+        return state.directoryAvailable ? { directory: "F:/synthetic/Default Project" } : { needsDirectory: true }
       },
       openDirectoryPicker: async () => {
         calls.picker++
@@ -94,24 +108,58 @@ test("612 fresh desktop starts with model service then project choice, no error 
   const { DesktopFirstLaunchOnboarding } = await import("../../../desktop-app/src/renderer/onboarding")
   const host = document.createElement("main")
   document.body.append(host)
-  disposals.push(render(() => <DesktopFirstLaunchOnboarding initialUrl="/" onLoaded={() => {}} />, host))
+  disposals.push(render(() => <DesktopFirstLaunchOnboarding initialUrl="/" onLoaded={() => calls.loaded++} />, host))
   await settle()
-  expect(document.body.textContent).toContain("先连接模型服务")
+}
+
+test("659 fresh desktop opens the default project and draft without a model prerequisite", async () => {
+  await mountOnboarding()
+  expect(calls.opened).toEqual(["F:/synthetic/Default Project"])
+  expect(calls.touched).toEqual(calls.opened)
+  expect(calls.drafts).toEqual([{ server: "local", directory: "F:/synthetic/Default Project" }])
+  expect(calls.selected).toEqual(["draft"])
+  expect(calls.sidebar).toBe(1)
+  expect(calls.finished).toEqual([true])
+  expect(calls.loaded).toBe(1)
+  expect(calls.picker).toBe(0)
+  expect(document.querySelector('[role="status"]')).toBeNull()
+  expect(document.body.textContent).not.toContain("先连接模型服务")
   expect(document.body.textContent).not.toContain("不可用")
-  expect(document.body.textContent).not.toContain("Default Project")
+  expect(document.body.textContent).not.toContain("gpt-6-luna")
+})
+
+test("659 failed default directories offer an enabled folder picker without a model prerequisite", async () => {
+  setState("directoryAvailable", false)
+  await mountOnboarding()
+  expect(document.querySelector('[role="status"]')?.textContent).toContain("无法创建默认项目，请选择文件夹。")
+  expect(document.body.textContent).not.toContain("先连接模型服务")
   expect(document.body.textContent).not.toContain("gpt-6-luna")
   expect(calls.opened).toEqual([])
   expect(calls.picker).toBe(0)
-  button("1. 连接模型服务").click()
-  expect(calls.connect).toBe(1)
-  expect(button("选择文件夹").disabled).toBe(true)
-  setState("connected", true)
-  await settle()
   expect(button("选择文件夹").disabled).toBe(false)
   button("选择文件夹").click()
   await settle()
   expect(calls.opened).toEqual(["F:/synthetic-project"])
+  expect(calls.touched).toEqual(calls.opened)
+  expect(calls.drafts).toEqual([{ server: "local", directory: "F:/synthetic-project" }])
+  expect(calls.selected).toEqual(["draft"])
+  expect(calls.sidebar).toBe(1)
   expect(calls.finished).toEqual([true, false])
+  expect(calls.loaded).toBe(1)
+  expect(document.querySelector('[role="status"]')).toBeNull()
+})
+
+test("659 an existing installation does not create a project or change the sidebar", async () => {
+  setState("existingInstall", true)
+  await mountOnboarding()
+  expect(calls.finished).toEqual([false])
+  expect(calls.opened).toEqual([])
+  expect(calls.drafts).toEqual([])
+  expect(calls.selected).toEqual([])
+  expect(calls.sidebar).toBe(0)
+  expect(calls.picker).toBe(0)
+  expect(calls.loaded).toBe(1)
+  expect(document.querySelector('[role="status"]')).toBeNull()
 })
 test("612 actual About updater shows failures, progress and restart action; hides dev", async () => {
   const { SettingsAbout } = await import("../../src/components/settings-v2/about")

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-test("609/612 real Desktop onboarding and About DOM", async () => {
+test("659 default Desktop project recovery and 612 About DOM", async () => {
   const child = Bun.spawn(
     [
       process.execPath,
