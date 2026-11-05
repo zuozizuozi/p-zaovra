@@ -1,3 +1,4 @@
+!include "LogicLib.nsh"
 !macro channelDirectoryGuard
   ; Also protect an explicitly selected /D path. Never overwrite another channel.
   ${If} ${FileExists} "$INSTDIR\${ZAOVRA_OTHER_EXE_1}"
