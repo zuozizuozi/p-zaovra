@@ -69,7 +69,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
-      ZAOVRA_WORKER_TEST_DIR: ${{ runner.temp }}/zaovra-feedback-inbox
       WRANGLER_SEND_METRICS: "false"
     steps:
       - name: Checkout repository
@@ -84,6 +83,8 @@ jobs:
         working-directory: packages/feedback-worker
         run: bun typecheck
       - name: Run local feedback tests
+        env:
+          ZAOVRA_WORKER_TEST_DIR: ${{ runner.temp }}/zaovra-feedback-inbox
         working-directory: packages/feedback-worker
         run: bun test src scripts
       - name: Check Windows credential-reader source without reading credentials
