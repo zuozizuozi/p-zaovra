@@ -54,6 +54,7 @@ import { cleanupStoreFiles } from "./store-cleanup"
 import { getStore } from "./store"
 import { DISPLAY_BACKEND_KEY } from "./store-keys"
 import { legacyBackend, prepareBackendUpgrade } from "./backend-upgrade"
+import { registerSystemProtocol } from "./system-protocol"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Zaovra Dev",
@@ -325,7 +326,12 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
-  app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL)
+  registerSystemProtocol({
+    protocol: DEEP_LINK_PROTOCOL,
+    explicitProfile: app.commandLine.hasSwitch("user-data-dir"),
+    onboardingTest: TEST_ONBOARDING,
+    register: (protocol) => app.setAsDefaultProtocolClient(protocol),
+  })
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater()

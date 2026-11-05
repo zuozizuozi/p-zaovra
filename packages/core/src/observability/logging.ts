@@ -1,4 +1,4 @@
-import { Effect, Formatter, Layer, Logger, type LogLevel } from "effect"
+import { Effect, Exit, Formatter, Layer, Logger, Scope, type LogLevel } from "effect"
 import path from "path"
 import { Global } from "../global"
 import { ProcessTree } from "../process-tree"
@@ -49,7 +49,16 @@ function format(input: unknown) {
 
 export function fileLogger(file = path.join(Global.Path.log, "zaovra.log"), id: string = runID) {
   // Do not set batchWindow to 0; it causes high idle CPU usage.
-  return Logger.toFile(formatter(id), file, { flag: "a" })
+  return Effect.gen(function* () {
+    const scope = yield* Scope.make()
+    let closing: Promise<void> | undefined
+    const close = () => (closing ??= Effect.runPromise(Scope.close(scope, Exit.void)))
+    const remove = ProcessTree.onForceExit(close)
+    // Keep the drain registered while normal scope disposal is in flight, so a
+    // concurrent second signal joins that same drain instead of skipping it.
+    yield* Effect.addFinalizer(() => Effect.promise(close).pipe(Effect.ensuring(Effect.sync(remove))))
+    return yield* Logger.toFile(formatter(id), file, { flag: "a" }).pipe(Scope.provide(scope))
+  })
 }
 
 export const processTreeEvents = Layer.effectDiscard(

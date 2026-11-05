@@ -18,6 +18,7 @@ export type Cleanup = { pid: number | undefined; status: "unverified"; reason: s
 export const events = new EventEmitter<{ cleanup: [Cleanup]; force: [{ exitCode: number | undefined }] }>()
 const owners = new Set<Tracker>()
 const executions = new Set<Promise<unknown>>()
+const forceFinalizers = new Set<() => Promise<void>>()
 const shutdownController = new AbortController()
 export const shutdownSignal = shutdownController.signal
 let closing: Promise<void> | undefined
@@ -25,6 +26,14 @@ let requestedSignal: "SIGINT" | "SIGTERM" | undefined
 let signalTimer: ReturnType<typeof setTimeout> | undefined
 let forcing = false
 export const supported = () => ["win32", "linux", "darwin"].includes(process.platform)
+
+/** Final diagnostics only: forced exit still abandons application-level disposal. */
+export function onForceExit(finalize: () => Promise<void>) {
+  forceFinalizers.add(finalize)
+  return () => {
+    forceFinalizers.delete(finalize)
+  }
+}
 
 export class Tracker {
   stopping: Promise<void> | undefined
@@ -38,6 +47,7 @@ export class Tracker {
   get pid() {
     return this.proc.pid!
   }
+  /** Resolving only confirms observed targets exited. Read cleanup separately; lost ancestry remains unverified. */
   stop(signal: NodeJS.Signals = "SIGTERM", grace = 1000): Promise<void> {
     if (this.stopping) {
       if (signal === "SIGKILL") this.force.abort()
@@ -224,16 +234,17 @@ function signalPID(pid: number, signal: NodeJS.Signals) {
   }
 }
 
-async function deadline<A>(promise: Promise<A>, milliseconds: number) {
+async function deadline<A>(
+  promise: Promise<A>,
+  milliseconds: number,
+  message = "Tool cleanup did not finish; status unknown, do not replay",
+) {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Tool cleanup did not finish; status unknown, do not replay")),
-          milliseconds,
-        )
+        timer = setTimeout(() => reject(new Error(message)), milliseconds)
       }),
     ])
   } finally {
@@ -279,9 +290,22 @@ export function installSignalHandlers() {
     clearTimeout(signalTimer)
     events.emit("force", { exitCode: signalExitCode() })
     // Legacy commands have no registered execution to await. A second signal explicitly abandons that wait.
-    void Promise.allSettled([...owners].map((owner) => owner.stop("SIGKILL", 0))).then((results) => {
+    void Promise.allSettled([...owners].map((owner) => owner.stop("SIGKILL", 0))).then(async (results) => {
       for (const result of results)
         if (result.status === "rejected") console.error("Forced tool cleanup failed:", result.reason)
+      // Cleanup emits its final diagnostic before the existing batched loggers drain.
+      // A broken logger must not turn a second signal into an unbounded wait.
+      if (forceFinalizers.size)
+        await deadline(
+          Promise.allSettled([...forceFinalizers].map((finalize) => Promise.resolve().then(finalize))).then(
+            (results) => {
+              for (const result of results)
+                if (result.status === "rejected") console.error("Forced diagnostic flush failed:", result.reason)
+            },
+          ),
+          250,
+          "Forced diagnostic flush timed out",
+        ).catch((error) => console.error("Forced diagnostic flush incomplete:", error))
       process.exit(signalExitCode())
     })
   }

@@ -75,12 +75,17 @@ try {
       event("dispose-completed")
     })
   } else if (mode.startsWith("app")) {
+    // Windows taskkill starts a separate process. Keep the work pending beyond that
+    // native startup cost; the timer-only probe still checks the original 700ms bound.
+    const delay = process.platform === "win32" && !normal ? 5000 : 700
     const script =
       'const fs=require("node:fs");fs.writeFileSync(' +
       JSON.stringify(ready) +
       ",JSON.stringify({pid:process.pid}));setTimeout(()=>{fs.writeFileSync(" +
       JSON.stringify(path.join(directory, "work-completed.txt")) +
-      ',"completed");process.stdout.write("work-completed-after-signal");process.exit(0)},700)'
+      ',"completed");process.stdout.write("work-completed-after-signal");process.exit(0)},' +
+      delay +
+      ")"
     const work = Effect.runPromise(
       Effect.gen(function* () {
         const app = yield* AppProcess.Service
