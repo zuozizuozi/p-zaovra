@@ -26,11 +26,12 @@ for (const unsigned of [false, true]) {
     expect(() => verifyBetaSigning(gate, pkg, sha, !unsigned, digest)).toThrow()
   })
 }
-test("609 no automatic or malformed unsigned fallback", () => {
-  for (const event of [undefined, "workflow_run", "push"]) expect(() => betaSigningPolicy(event, true)).toThrow()
+test("646 automatic Beta policy stays strict for other events and malformed unsigned", () => {
+  for (const event of [undefined, "push", "pull_request"]) expect(() => betaSigningPolicy(event, true)).toThrow()
   for (const value of [undefined, null, 0, 1, "false", "true"])
     expect(() => betaSigningPolicy("workflow_dispatch", value)).toThrow()
   expect(betaSigningPolicy("workflow_run", false).signingPolicy).toBe("signed")
+  expect(betaSigningPolicy("workflow_run", true).signingPolicy).toBe("unsigned-beta")
 })
 test("609 reads identity from a real ASAR without running packaged code", async () => {
   if (!process.env.ZAOVRA_BETA_TEST_DIR) throw new Error("Isolated fixtures required")
@@ -95,4 +96,18 @@ test("609 statically inspects nested installer archives without executing them",
     expect(code, out + err).toBe(0)
   }
   expect(await installerPackage(join(root, "synthetic-installer.exe"), root, path7za)).toEqual(pkg)
+})
+
+test("646 package version must match the update pointer and signing gate", () => {
+  const version = "0.1.1-beta.4"
+  const policy = betaSigningPolicy("workflow_run", true)
+  const gate = { commit: sha, installerSHA256: digest, version, ...policy }
+  const pkg = { zaovraChannel: "beta", zaovraUnsignedBeta: true, zaovraSourceSHA: sha, version }
+  expect(verifyBetaSigning(gate, pkg, sha, true, digest, version).unsignedBeta).toBe(true)
+  expect(() => verifyBetaSigning(gate, { ...pkg, version: "0.1.1-beta.3" }, sha, true, digest, version)).toThrow(
+    "version",
+  )
+  expect(() => verifyBetaSigning({ ...gate, version: "0.1.1-beta.3" }, pkg, sha, true, digest, version)).toThrow(
+    "version",
+  )
 })

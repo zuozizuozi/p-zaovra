@@ -3,16 +3,26 @@ import { join } from "node:path"
 
 export function betaSigningPolicy(event: string | undefined, unsigned: unknown) {
   if (typeof unsigned !== "boolean") throw new Error("unsigned_beta must be a boolean")
-  if (unsigned && event !== "workflow_dispatch") throw new Error("Unsigned Beta requires explicit manual dispatch")
+  if (unsigned && event !== "workflow_dispatch" && event !== "workflow_run")
+    throw new Error("Unsigned Beta requires the Beta workflow or explicit manual dispatch")
   return { channel: "beta", signingPolicy: unsigned ? "unsigned-beta" : "signed", unsignedBeta: unsigned } as const
 }
 
-export function verifyBetaSigning(gate: unknown, pkg: unknown, sha: string, unsigned: boolean, digest: string) {
+export function verifyBetaSigning(
+  gate: unknown,
+  pkg: unknown,
+  sha: string,
+  unsigned: boolean,
+  digest: string,
+  version?: string,
+) {
   if (!gate || typeof gate !== "object" || !pkg || typeof pkg !== "object")
     throw new Error("Missing Beta signing metadata")
   const policy = betaSigningPolicy("workflow_dispatch", unsigned)
   const record = gate as Record<string, unknown>
   const metadata = pkg as Record<string, unknown>
+  if (version !== undefined && (metadata.version !== version || record.version !== version))
+    throw new Error("Installer package version differs from beta.yml and its gate")
   if (
     !/^[a-f0-9]{40}$/.test(sha) ||
     !/^[a-f0-9]{64}$/.test(digest) ||
@@ -68,8 +78,11 @@ if (import.meta.main) {
     mode === "build"
       ? await readBetaPackage(join(directory, "win-unpacked/resources/app.asar"))
       : await installerPackage(join(directory, "zaovra-desktop-win-x64.exe"))
-  const metadata = mode === "build" ? { ...gate, ...policy, installerSHA256: digest } : gate
-  verifyBetaSigning(metadata, pkg, sha, policy.unsignedBeta, digest)
+  const version = (Bun.YAML.parse(await Bun.file(join(directory, "beta.yml")).text()) as { version?: unknown }).version
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+-beta\.[1-9]\d*$/.test(version))
+    throw new Error("Invalid Beta update version")
+  const metadata = mode === "build" ? { ...gate, ...policy, installerSHA256: digest, version } : gate
+  verifyBetaSigning(metadata, pkg, sha, policy.unsignedBeta, digest, version)
   if (mode === "build") await Bun.write(path, JSON.stringify(metadata, null, 2))
-  console.log(policy.unsignedBeta ? "未签名Beta: explicit reviewed exception" : "Signed Windows Beta")
+  console.log(policy.unsignedBeta ? "未签名Beta: explicit Beta channel policy" : "Signed Windows Beta")
 }
