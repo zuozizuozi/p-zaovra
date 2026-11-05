@@ -886,7 +886,7 @@ const layer = Layer.effect(
           permissions: agent.info?.permissions,
           custom: toolMaterialization?.custom,
           recalled:
-            !deliveryReview && toolMaterialization
+            !deliveryReview && toolMaterialization?.definitions.some((tool) => tool.name === "tool_search")
               ? yield* ToolProfile.recalled(db, session.id)
               : [],
           explicit: !!agent.info && ("tools" in agent.info.request.body || "tool_choice" in agent.info.request.body),
