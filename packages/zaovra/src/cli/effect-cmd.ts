@@ -73,27 +73,30 @@ export const effectCmd = <Args, A>(opts: EffectCmdOpts<Args, A>) =>
     aliases: opts.aliases,
     describe: opts.describe,
     builder: opts.builder as never,
-    async handler(rawArgs) {
-      const { AppRuntime } = await import("@/effect/app-runtime")
-      // yargs typing wraps Args in ArgumentsCamelCase<WithDoubleDash<...>>; cast at the boundary.
-      const args = rawArgs as unknown as WithDoubleDash<Args>
-      const useInstance = typeof opts.instance === "function" ? opts.instance(args) : opts.instance !== false
-      if (!useInstance) {
-        await ProcessTree.run((signal) => AppRuntime.runPromise(opts.handler(args), { signal }))
-        return
-      }
-      const { InstanceStore } = await import("@/project/instance-store")
-      const { InstanceRef } = await import("@/effect/instance-ref")
-      const directory = opts.directory?.(args) ?? process.cwd()
-      const { store, ctx } = await AppRuntime.runPromise(
-        InstanceStore.Service.use((store) => store.load({ directory }).pipe(Effect.map((ctx) => ({ store, ctx })))),
-      )
-      try {
-        await ProcessTree.run((signal) =>
-          AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)), { signal }),
+    handler(rawArgs) {
+      // Register the whole command, including instance loading and outer disposal.
+      return ProcessTree.run(async (signal) => {
+        const { AppRuntime } = await import("@/effect/app-runtime")
+        // yargs wraps Args in ArgumentsCamelCase<WithDoubleDash<...>>.
+        const args = rawArgs as unknown as WithDoubleDash<Args>
+        const useInstance = typeof opts.instance === "function" ? opts.instance(args) : opts.instance !== false
+        if (!useInstance) {
+          await AppRuntime.runPromise(opts.handler(args), { signal })
+          return
+        }
+        const { InstanceStore } = await import("@/project/instance-store")
+        const { InstanceRef } = await import("@/effect/instance-ref")
+        const directory = opts.directory?.(args) ?? process.cwd()
+        const { store, ctx } = await AppRuntime.runPromise(
+          InstanceStore.Service.use((store) => store.load({ directory }).pipe(Effect.map((ctx) => ({ store, ctx })))),
         )
-      } finally {
-        await AppRuntime.runPromise(store.dispose(ctx))
-      }
+        try {
+          await AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)), {
+            signal,
+          })
+        } finally {
+          await AppRuntime.runPromise(store.dispose(ctx))
+        }
+      })
     },
   })

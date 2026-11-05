@@ -17,6 +17,7 @@ const executions = new Set<Promise<unknown>>()
 const shutdownController = new AbortController()
 export const shutdownSignal = shutdownController.signal
 let closing: Promise<void> | undefined
+let requestedSignal: "SIGINT" | "SIGTERM" | undefined
 export const supported = () => ["win32", "linux", "darwin"].includes(process.platform)
 
 export class Tracker {
@@ -39,7 +40,7 @@ export class Tracker {
 }
 
 export function assertOpen() {
-  if (closing) throw new Error("Tool process admission is closed during CLI shutdown")
+  if (closing || shutdownSignal.aborted) throw new Error("Tool process admission is closed during CLI shutdown")
 }
 
 /** One direct spawn, with readers and shutdown ownership registered before yielding. Never replay on error. */
@@ -207,15 +208,18 @@ export function shutdown() {
   return closing
 }
 
+/** The top-level CLI exits only after its complete command and outer finalizers settle. */
+export function signalExitCode() {
+  if (!requestedSignal) return undefined
+  return requestedSignal === "SIGINT" ? 130 : 143
+}
+
 export function installSignalHandlers() {
-  const stop = (signal: NodeJS.Signals) => {
-    void shutdown().then(
-      () => process.exit(signal === "SIGINT" ? 130 : 143),
-      (error) => {
-        console.error("Tool process cleanup failed:", error)
-        process.exit(1)
-      },
-    )
+  const stop = (signal: "SIGINT" | "SIGTERM") => {
+    if (requestedSignal) return
+    requestedSignal = signal
+    // Only interrupt here. The top-level finally, outside run(), owns waiting and exit.
+    shutdownController.abort(new Error("CLI received " + signal))
   }
   const interrupt = () => {
     if (process.listenerCount("SIGINT") === 1) stop("SIGINT")

@@ -125,13 +125,15 @@ try {
     await cli.parse()
   }
 } catch (e) {
-  const formatted = FormatError(e)
-  if (formatted) UI.error(formatted)
-  if (formatted === undefined) {
-    UI.error("Unexpected error" + EOL)
-    process.stderr.write(errorMessage(e) + EOL)
+  if (ProcessTree.signalExitCode() === undefined) {
+    const formatted = FormatError(e)
+    if (formatted) UI.error(formatted)
+    if (formatted === undefined) {
+      UI.error("Unexpected error" + EOL)
+      process.stderr.write(errorMessage(e) + EOL)
+    }
+    process.exitCode = 1
   }
-  process.exitCode = 1
 } finally {
   await ProcessTree.shutdown().catch((error) => {
     console.error("Tool process cleanup failed:", error)
@@ -141,5 +143,7 @@ try {
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.
   // Explicitly exit to avoid any hanging subprocesses.
+  const signalCode = ProcessTree.signalExitCode()
+  if (signalCode !== undefined && process.exitCode !== 1) process.exitCode = signalCode
   process.exit()
 }

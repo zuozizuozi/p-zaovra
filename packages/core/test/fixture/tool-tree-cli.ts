@@ -52,3 +52,5 @@ try {
     await writeFile(path.join(directory, "admission-closed"), "closed")
   }
 }
+
+process.exitCode = ProcessTree.signalExitCode() ?? process.exitCode
