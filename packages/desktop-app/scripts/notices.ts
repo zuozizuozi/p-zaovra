@@ -7,7 +7,7 @@ const packages = new Map<
   string,
   {
     name: string
-    version: string
+    version?: string
     license?: string
     dependencies?: Record<string, string>
     optionalDependencies?: Record<string, string>
@@ -21,7 +21,8 @@ async function owner(file: string): Promise<string | undefined> {
   const manifest = Bun.file(path.join(dir, "package.json"))
   if (await manifest.exists()) {
     const data = await manifest.json()
-    if (data.name && data.version) {
+    // Private workspaces omit versions; vendor subpath manifests still belong to their versioned parent.
+    if (data.name && (data.version || data.private === true)) {
       packages.set(dir, data)
       owners.set(dir, dir)
       return dir
@@ -83,7 +84,9 @@ for (const [dir, data] of [...packages].sort((a, b) => a[1].name.localeCompare(b
   const license = texts.length
     ? texts.join("\n\n")
     : `The installed package omits its license file. Supplement: ${fallback}\n${await Bun.file(path.join(root, "resources/licenses", fallback)).text()}`
-  sections.push(`${data.name} ${data.version}\nLicense: ${data.license ?? "See upstream license"}\n${license}`)
+  sections.push(
+    `${data.name} ${data.version ?? "workspace"}\nLicense: ${data.license ?? "See upstream license"}\n${license}`,
+  )
 }
 for (const file of (await readdir(path.join(root, "resources/licenses"), { withFileTypes: true }))
   .filter((entry) => entry.isFile())
