@@ -17,6 +17,7 @@ import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { usePlatform } from "@/context/platform"
 import { fileManagerApp } from "@/utils/file-manager"
 import { showToast } from "@/utils/toast"
+import { createImeKeyOwnership } from "@/utils/ime-key-ownership"
 import { SidebarSessionActions } from "./sidebar-session-actions"
 import { desktopProjectGroup } from "./desktop-project-group"
 import type { PromptSession } from "@/context/prompt-state"
@@ -87,6 +88,7 @@ function DesktopSessionTab(props: {
 }
 
 export function DesktopSidebar() {
+  const ime = createImeKeyOwnership()
   const navigate = useNavigate()
   const command = useCommand()
   const global = useGlobal()
@@ -335,7 +337,10 @@ export function DesktopSidebar() {
                           })
                         }
                         onInput={(event) => setView("projectTitle", event.currentTarget.value)}
+                        onCompositionStart={ime.start}
+                        onCompositionEnd={ime.end}
                         onKeyDown={(event) => {
+                          if (ime.owns(event)) return
                           event.stopPropagation()
                           if (event.key === "Escape") {
                             event.preventDefault()

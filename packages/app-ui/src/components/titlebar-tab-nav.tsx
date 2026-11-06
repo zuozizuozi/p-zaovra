@@ -10,6 +10,7 @@ import { ServerConnection, serverName } from "@/context/server"
 import { displayName, projectForSession } from "@/pages/layout/helpers"
 import { SessionTabAvatar } from "@/pages/layout/session-tab-avatar"
 import { showToast } from "@/utils/toast"
+import { createImeKeyOwnership } from "@/utils/ime-key-ownership"
 import { sessionTitle } from "@/utils/session-title"
 import type { Session } from "@zaovra-ai/sdk/v2"
 import { canOpenTabRename, forwardTabRef } from "./titlebar-tab-gesture"
@@ -39,6 +40,7 @@ export function TabNavItem(props: {
   hidden?: boolean
 }) {
   const language = useLanguage()
+  const ime = createImeKeyOwnership()
   const [editing, setEditing] = createSignal(false)
   const [menuOpen, setMenuOpen] = createSignal(false)
   const [titleOverflowing, setTitleOverflowing] = createSignal(false)
@@ -296,7 +298,10 @@ export function TabNavItem(props: {
             }}
             contenteditable={editing() ? true : undefined}
             onDblClick={openRename}
+            onCompositionStart={ime.start}
+            onCompositionEnd={ime.end}
             onKeyDown={(event) => {
+              if (ime.owns(event)) return
               event.stopPropagation()
               if (event.key === "Enter") {
                 event.preventDefault()
