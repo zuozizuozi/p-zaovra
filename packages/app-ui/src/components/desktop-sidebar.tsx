@@ -383,6 +383,7 @@ export function DesktopSidebar() {
                     </MenuV2.Trigger>
                     <MenuV2.Portal>
                       <MenuV2.Content
+                        class="w-56"
                         onCloseAutoFocus={(event) => {
                           if (view.editingProject === groupKey(group)) event.preventDefault()
                         }}
@@ -411,13 +412,9 @@ export function DesktopSidebar() {
                             {language.t(fileManagerApp(platform.os ?? "unknown").actionLabel)}
                           </MenuV2.Item>
                         </Show>
+                        <MenuV2.Separator />
                         <MenuV2.Item onSelect={() => group.ctx.projects.close(group.project.worktree)}>
-                          <span class="flex flex-col gap-1">
-                            <span>{language.t("sidebar.project.remove")}</span>
-                            <span class="text-xs text-v2-text-text-faint">
-                              {language.t("sidebar.project.removeHint")}
-                            </span>
-                          </span>
+                          {language.t("sidebar.project.remove")}
                         </MenuV2.Item>
                       </MenuV2.Content>
                     </MenuV2.Portal>

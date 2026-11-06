@@ -123,6 +123,8 @@ function ensureLoopbackNoProxy() {
 }
 
 const main = Effect.gen(function* () {
+  // Windows LCD antialiasing gives narrow CJK strokes colored fringes.
+  if (process.platform === "win32") app.commandLine.appendSwitch("disable-lcd-text")
   installTextContextMenus()
 
   // on macOS apps run in `/` which can cause issues with ripgrep
