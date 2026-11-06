@@ -184,6 +184,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const removedMessages = new Map<string, Set<string>>()
   const v2Refreshes = new Map<string, ReturnType<typeof setTimeout>>()
   const resyncs = new Map<string, Promise<void>>()
+  const questionLoads = new Map<string, Promise<void>>()
+  const questionVersions = new Map<string, number>()
+  const admitted = new Map<string, Map<string, boolean>>()
   const eventAt = new Map<string, number>()
   const eventVersion = new Map<string, object>()
   const executionWaits = new Map<string, Promise<void>>()
@@ -464,6 +467,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       eventAt.delete(sessionID)
       eventVersion.delete(sessionID)
       resyncs.delete(sessionID)
+      admitted.delete(sessionID)
+      questionVersions.delete(sessionID)
       clearOptimistic(sessionID)
       requests.delete(sessionID)
       v2Info.delete(sessionID)
@@ -536,9 +541,18 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     if (!session) throw sessionNotFoundError(sessionID)
     v2Info.set(sessionID, session)
     const active = generation(sessionID)
+    const version = eventVersion.get(sessionID)
     const pending = (options?.retry ?? retry)(() => client.v2.session.pendingInputs({ sessionID })).then((response) => {
       if (!response.data) throw new Error(`Unable to load pending inputs: ${sessionID}`)
-      if (generations.get(sessionID) === active) setData("pending_input", sessionID, response.data.data)
+      if (generations.get(sessionID) === active) {
+        const current = admitted.get(sessionID) ?? new Map<string, boolean>()
+        // A later promotion wins over an older pending-input snapshot.
+        response.data.data.forEach((input) => {
+          if (current.get(input.id) !== false) current.set(input.id, true)
+        })
+        admitted.set(sessionID, current)
+        if (eventVersion.get(sessionID) === version) setData("pending_input", sessionID, response.data.data)
+      }
       return response.data.data
     })
 
@@ -558,6 +572,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       return response.data
     }
     const first = await loadPage(before)
+    const pendingInputs = await pending
     const oldest = first.data.reduce<SessionMessage | undefined>(
       (result, item) =>
         !result ||
@@ -574,6 +589,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         .filter(
           (message) =>
             message.role === "user" &&
+            admitted.get(sessionID)?.get(message.id) !== true &&
             (message.time.created < oldest.time.created ||
               (message.time.created === oldest.time.created && message.id <= oldest.id)),
         )
@@ -595,9 +611,12 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       ...pages.flatMap((page) => page.data),
       ...(before && carried?.cursor === before ? carried.messages : []),
     ]
+    items.forEach((item) => {
+      if (item.type === "user") admitted.get(sessionID)?.set(item.id, false)
+    })
     const adapted = [
       ...adaptSessionMessages(session, items, cachedParent),
-      ...(await pending).map((input) => adaptSessionInput(session, input)),
+      ...pendingInputs.map((input) => adaptSessionInput(session, input)),
     ].sort((a, b) => cmpMessage(a.message, b.message))
     const adaptedIDs = new Set(adapted.map((item) => item.message.id))
     return {
@@ -836,6 +855,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       pinned.forEach((_, id) => void resync(id).catch(() => {}))
     }
     const eventID = eventSessionID(event)
+    if (eventID && ["question.asked", "question.replied", "question.rejected"].includes(event.type))
+      questionVersions.set(eventID, (questionVersions.get(eventID) ?? 0) + 1)
     if (eventID && (event.type === "session.next.shell.started" || event.type === "session.next.shell.ended")) {
       const props = event.properties as { messageID?: string; callID?: string }
       const id = event.type === "session.next.shell.started" ? props.messageID : props.callID
@@ -876,6 +897,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     }
     if (event.type === "session.next.prompt.cancelled") {
       const props = event.properties as { sessionID: string; messageID: string }
+      admitted.get(props.sessionID)?.delete(props.messageID)
       apply({ type: "message.removed", properties: props })
       setData("pending_input", props.sessionID, (items = []) => items.filter((item) => item.id !== props.messageID))
       refreshV2(props.sessionID)
@@ -896,8 +918,16 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           agents?: { name: string; source?: { text: string; start: number; end: number } }[]
         }
       }
-      if (event.type === "session.next.prompt.admitted") refreshV2(props.sessionID)
+      if (event.type === "session.next.prompt.admitted") {
+        const pending = admitted.get(props.sessionID) ?? new Map<string, boolean>()
+        pending.set(props.messageID, true)
+        admitted.set(props.sessionID, pending)
+        refreshV2(props.sessionID)
+      }
       if (event.type === "session.next.prompted") {
+        const current = admitted.get(props.sessionID) ?? new Map<string, boolean>()
+        current.set(props.messageID, false)
+        admitted.set(props.sessionID, current)
         setData("pending_input", props.sessionID, (items = []) => items.filter((item) => item.id !== props.messageID))
         if (props.prompt.selection) {
           v2Info.delete(props.sessionID)
@@ -1008,7 +1038,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       setData("session_status", props.sessionID, reconcile({ type: "busy" }))
       void watchExecution(props.sessionID).catch(() => {})
       const session = data.info[props.sessionID]
-      const parentID = data.message[props.sessionID]?.findLast((message) => message.role === "user")?.id
+      const parentID = data.message[props.sessionID]?.findLast(
+        (message) => message.role === "user" && admitted.get(props.sessionID)?.get(message.id) !== true,
+      )?.id
       if (!session || !parentID) return refreshV2(props.sessionID)
       apply({
         type: "message.updated",
@@ -1518,12 +1550,38 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     }
   }
 
+  // Both directory bootstrap and current-view recovery use this single writer.
+  const syncQuestions = (directory: string) =>
+    runInflight(questionLoads, directory, async () => {
+      const versions = new Map(questionVersions)
+      const questions = await client.v2.question.request.list(
+        { location: { directory } },
+        { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+      )
+      await Promise.all([...new Set(questions.data.data.map((item) => item.sessionID))].map((id) => resolve(id)))
+      batch(() => {
+        const ids = new Set([...Object.keys(data.question), ...questions.data.data.map((item) => item.sessionID)])
+        for (const id of ids) {
+          if (data.info[id]?.directory !== directory || questionVersions.get(id) !== versions.get(id)) continue
+          setData(
+            "question",
+            id,
+            reconcile(
+              questions.data.data.filter((item) => item.sessionID === id).sort((a, b) => cmp(a.id, b.id)),
+              { key: "id" },
+            ),
+          )
+        }
+      })
+    })
+
   const resync = (sessionID: string) =>
     runInflight(resyncs, sessionID, async () => {
       const active = generation(sessionID)
       const version = eventVersion.get(sessionID)
       const session = await resolve(sessionID, { force: true })
-      const [ownership, permissions] = await Promise.all([
+      const [, ownership, permissions] = await Promise.all([
+        syncQuestions(session.directory).catch(() => undefined),
         client.v2.session.active({ throwOnError: true, signal: AbortSignal.timeout(10_000) }).catch(() => undefined),
         client.v2.permission.request
           .list(
@@ -1554,6 +1612,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   return {
     data,
     resync,
+    questions: { sync: syncQuestions },
     resyncSilent(now = Date.now()) {
       return Promise.all([...pinned.keys()].filter((id) => now - (eventAt.get(id) ?? 0) >= 15_000).map(resync))
     },
@@ -1615,6 +1674,11 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     },
     optimistic: {
       add(input: { sessionID: string; message: Message; parts: Part[] }) {
+        if (input.parts.some((part) => part.type === "text" && part.metadata?.zaovraDelivery)) {
+          const pending = admitted.get(input.sessionID) ?? new Map<string, boolean>()
+          pending.set(input.message.id, true)
+          admitted.set(input.sessionID, pending)
+        }
         const parts = input.parts.filter((part) => !!part?.id && !SKIP_PARTS.has(part.type))
         const load = messageLoads.get(input.sessionID)
         if (load?.clearedMessageParts.has(input.message.id)) {
@@ -1652,6 +1716,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         if (!item) return
         messageLoads.get(input.sessionID)?.optimisticParts.delete(input.messageID)
         clearOptimistic(input.sessionID, input.messageID)
+        admitted.get(input.sessionID)?.delete(input.messageID)
         if (item.confirmedMessage) {
           const partIDs = new Set(item.parts.map((part) => part.id))
           setData(

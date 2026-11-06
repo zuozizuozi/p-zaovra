@@ -52,6 +52,19 @@ export function createSessionComposerController(options?: { closeMs?: number | (
     })
   })
 
+  createEffect(
+    on(
+      () => {
+        const request = permissionRequest()
+        return request ? permission.autoReplyError(request) : undefined
+      },
+      (error) => {
+        if (error)
+          showToast({ title: language.t("common.requestFailed"), description: formatServerError(error, language.t) })
+      },
+    ),
+  )
+
   const blocked = createMemo(() => {
     const id = params.id
     if (!id) return false

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionInputAdmitted, ZaovraClient, SessionMessage, SessionV2Info } from "@zaovra-ai/sdk/v2/client"
+import type {
+  QuestionView,
+  SessionInputAdmitted,
+  ZaovraClient,
+  SessionMessage,
+  SessionV2Info,
+} from "@zaovra-ai/sdk/v2/client"
 import { createServerSession } from "./server-session"
 import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 
@@ -20,11 +26,13 @@ function setup(input: {
   sessions?: Record<string, SessionV2Info>
   pages?: { data: SessionMessage[]; cursor?: string }[]
   pending?: SessionInputAdmitted[]
+  pendingWait?: () => Promise<void>
   wait?: () => Promise<void>
   active?: () => Partial<Record<string, { type: "running" }>>
   interrupt?: () => Promise<void>
   pageWait?: () => Promise<void>
   getWait?: () => Promise<void>
+  questions?: () => Promise<QuestionView[]>
 }) {
   const sessions = input.sessions ?? { ses_child: info("ses_child") }
   const pages = input.pages ?? [{ data: [] }]
@@ -36,6 +44,7 @@ function setup(input: {
   }
   const client = {
     v2: {
+      question: { request: { list: async () => ({ data: { data: (await input.questions?.()) ?? [] } }) } },
       permission: { request: { list: async () => ({ data: { data: [] } }) } },
       session: {
         interrupt: input.interrupt ?? (() => Promise.resolve()),
@@ -57,6 +66,7 @@ function setup(input: {
         },
         pendingInputs: async ({ sessionID }: { sessionID: string }) => {
           requests.pending.push(sessionID)
+          await input.pendingWait?.()
           return { data: { data: input.pending ?? [] } }
         },
       },
@@ -1124,4 +1134,171 @@ test("701 legacy text deltas count as session activity before silent resync", as
   await ctx.store.resyncSilent(Date.now() + 14000)
   expect(ctx.requests.get.length).toBe(before)
   ctx.store.unpin("ses_child")
+})
+
+for (const delivery of ["queue", "steer"] as const) {
+  test(`707 pending ${delivery} HTTP, admission and optimistic messages never parent the active reply`, async () => {
+    const pending: SessionInputAdmitted[] = [2, 3].map((n) => ({
+      id: `msg_u${n}`,
+      sessionID: "ses_child",
+      delivery,
+      prompt: { text: `next ${n}` },
+      admittedSeq: n,
+      timeCreated: n,
+    }))
+    const ctx = setup({ pending, pages: [{ data: [user("msg_u1", "first", 1)] }], wait: () => new Promise(() => {}) })
+    await ctx.store.sync("ses_child")
+    const step = (id: string) =>
+      ctx.store.apply({
+        type: "session.next.step.started",
+        properties: {
+          sessionID: "ses_child",
+          assistantMessageID: id,
+          timestamp: 10,
+          agent: "build",
+          model: { id: "model", providerID: "provider" },
+        },
+      })
+    step("msg_a1")
+    expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a1")).toMatchObject({ parentID: "msg_u1" })
+    ctx.store.apply({
+      type: "session.next.prompt.admitted",
+      properties: { sessionID: "ses_child", messageID: "msg_u4", delivery, timestamp: 4, prompt: { text: "later" } },
+    })
+    ctx.store.optimistic.add({
+      sessionID: "ses_child",
+      message: {
+        id: "msg_u5",
+        role: "user",
+        sessionID: "ses_child",
+        agent: "build",
+        model: { providerID: "p", modelID: "m" },
+        time: { created: 5 },
+      },
+      parts: [
+        {
+          id: "msg_u5:text",
+          messageID: "msg_u5",
+          sessionID: "ses_child",
+          type: "text",
+          text: "optimistic",
+          metadata: { zaovraDelivery: delivery },
+        },
+      ],
+    })
+    step("msg_a2")
+    expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a2")).toMatchObject({ parentID: "msg_u1" })
+    ctx.store.apply({
+      type: "session.next.prompted",
+      properties: { sessionID: "ses_child", messageID: "msg_u2", delivery, timestamp: 11, prompt: { text: "next 2" } },
+    })
+    step("msg_a3")
+    expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a3")).toMatchObject({ parentID: "msg_u2" })
+    const refreshed = setup({
+      pending: pending.slice(1),
+      pages: [
+        {
+          data: [
+            user("msg_u1", "first", 1),
+            assistant("msg_a1", "step1", 10),
+            user("msg_u2", "next 2", 11),
+            assistant("msg_a3", "step2", 12),
+          ],
+        },
+      ],
+    })
+    await refreshed.store.sync("ses_child")
+    expect(refreshed.store.data.message.ses_child.find((item) => item.id === "msg_a3")).toMatchObject({
+      parentID: "msg_u2",
+    })
+  })
+}
+
+test("707 silent and reconnect question resync recovers lost asked and removes replies from another window", async () => {
+  let pending: QuestionView[] = [{ id: "q_lost", sessionID: "ses_child", questions: [] }]
+  const ctx = setup({ questions: async () => pending })
+  await ctx.store.resolve("ses_child")
+  ctx.store.pin("ses_child")
+  await ctx.store.resyncSilent()
+  expect(ctx.store.data.question.ses_child).toEqual(pending)
+  pending = []
+  await ctx.store.resync("ses_child")
+  expect(ctx.store.data.question.ses_child).toEqual([])
+  pending = [{ id: "q_reconnect", sessionID: "ses_child", questions: [] }]
+  ctx.store.apply({ type: "server.connected", properties: {} })
+  await ctx.store.resync("ses_child")
+  expect(ctx.store.data.question.ses_child).toEqual(pending)
+  ctx.store.unpin("ses_child")
+})
+
+for (const event of ["question.asked", "question.replied", "question.rejected"]) {
+  test(`707 directory and current-view shared question load preserves in-flight ${event}`, async () => {
+    const gate = Promise.withResolvers<QuestionView[]>()
+    const entered = Promise.withResolvers<void>()
+    let calls = 0
+    const ctx = setup({
+      questions: () => {
+        calls++
+        entered.resolve()
+        return gate.promise
+      },
+    })
+    await ctx.store.resolve("ses_child")
+    ctx.store.set("question", "ses_child", [{ id: "q_old", sessionID: "ses_child", questions: [] }])
+    const bootstrap = ctx.store.questions.sync("/repo")
+    await entered.promise
+    const current = ctx.store.resync("ses_child")
+    ctx.store.apply({
+      type: event,
+      properties:
+        event === "question.asked"
+          ? { id: "q_new", sessionID: "ses_child", questions: [] }
+          : { requestID: "q_old", sessionID: "ses_child" },
+    })
+    gate.resolve([{ id: "q_old", sessionID: "ses_child", questions: [] }])
+    await Promise.all([bootstrap, current])
+    expect(calls).toBe(1)
+    expect(ctx.store.data.question.ses_child.map((item) => item.id)).toEqual(
+      event === "question.asked" ? ["q_new", "q_old"] : [],
+    )
+  })
+}
+
+test("707 pending HTTP admission remains excluded when unrelated SSE arrives during its snapshot", async () => {
+  const entered = Promise.withResolvers<void>()
+  const gate = Promise.withResolvers<void>()
+  const ctx = setup({
+    pending: [
+      {
+        id: "msg_u2",
+        sessionID: "ses_child",
+        admittedSeq: 2,
+        timeCreated: 2,
+        delivery: "queue",
+        prompt: { text: "later" },
+      },
+    ],
+    pages: [{ data: [user("msg_u1", "current", 1)] }],
+    pendingWait: () => {
+      entered.resolve()
+      return gate.promise
+    },
+    wait: () => new Promise(() => {}),
+  })
+  const loading = ctx.store.sync("ses_child")
+  await entered.promise
+  ctx.store.apply({ type: "question.asked", properties: { id: "q_progress", sessionID: "ses_child", questions: [] } })
+  gate.resolve()
+  await loading
+  ctx.store.apply({
+    type: "session.next.step.started",
+    properties: {
+      sessionID: "ses_child",
+      assistantMessageID: "msg_a",
+      timestamp: 3,
+      agent: "build",
+      model: { id: "m", providerID: "p" },
+    },
+  })
+  expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a")).toMatchObject({ parentID: "msg_u1" })
 })

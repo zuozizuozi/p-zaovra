@@ -22,6 +22,7 @@ import {
   modeAllowsPermission,
   type PermissionMode,
 } from "./permission-auto-respond"
+import { createPermissionDelivery } from "./permission-delivery"
 import { adaptPermissionRequest } from "./global-sync/utils"
 
 type PermissionRespondFn = (input: {
@@ -160,6 +161,9 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       autoResponds(permission: PermissionView, directory?: string) {
         return selected().autoResponds(permission, directory)
       },
+      autoReplyError(permission: PermissionView) {
+        return selected().autoReplyError(permission)
+      },
       isAutoAccepting(sessionID: string, directory?: string) {
         return selected().isAutoAccepting(sessionID, directory)
       },
@@ -235,51 +239,32 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     )
   }
 
-  const MAX_RESPONDED = 1000
-  const RESPONDED_TTL_MS = 60 * 60 * 1000
-  const responded = new Map<string, number>()
   const enableVersion = new Map<string, number>()
   const meta = { disposed: false }
-
-  function pruneResponded(now: number) {
-    for (const [id, ts] of responded) {
-      if (now - ts < RESPONDED_TTL_MS) break
-      responded.delete(id)
-    }
-
-    for (const id of responded.keys()) {
-      if (responded.size <= MAX_RESPONDED) break
-      responded.delete(id)
-    }
-  }
 
   const respond: PermissionRespondFn = (request) => {
     if (meta.disposed) return
     input.sdk.client.v2.session.permission
-      .reply({
-        sessionID: request.sessionID,
-        requestID: request.permissionID,
-        reply: request.response,
-      })
-      .catch(() => {
-        responded.delete(request.permissionID)
-      })
+      .reply(
+        {
+          sessionID: request.sessionID,
+          requestID: request.permissionID,
+          reply: request.response,
+        },
+        { throwOnError: true },
+      )
+      .catch(() => undefined)
   }
 
-  function respondOnce(permission: PermissionView, directory?: string) {
-    const now = Date.now()
-    const hit = responded.has(permission.id)
-    responded.delete(permission.id)
-    responded.set(permission.id, now)
-    pruneResponded(now)
-    if (hit) return
-    respond({
-      sessionID: permission.sessionID,
-      permissionID: permission.id,
-      response: "once",
-      directory,
-    })
-  }
+  const delivery = createPermissionDelivery({
+    reply: (permission) =>
+      input.sdk.client.v2.session.permission.reply(
+        { sessionID: permission.sessionID, requestID: permission.id, reply: "once" },
+        { throwOnError: true },
+      ),
+    pending: isPending,
+    disposed: () => meta.disposed,
+  })
 
   function sessions(directory?: string) {
     const info = Object.values(input.sync.session.data.info).filter((session) => !!session)
@@ -325,7 +310,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     if (!current() || !isPending(permission)) return
     if (!(await shouldAutoRespondResolved(permission, directory))) return
     if (meta.disposed || !current() || !isPending(permission) || !shouldAutoRespond(permission, directory)) return
-    respondOnce(permission, directory)
+    await delivery.once(permission)
   }
 
   function bumpEnableVersion(sessionID: string, directory?: string) {
@@ -459,7 +444,10 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     respond,
     autoResponds(permission: PermissionView, directory?: string) {
       if (meta.disposed) return false
-      return shouldAutoRespond(permission, directory)
+      return !delivery.error(permission) && shouldAutoRespond(permission, directory)
+    },
+    autoReplyError(permission: PermissionView) {
+      return delivery.error(permission)
     },
     isAutoAccepting(sessionID: string, directory?: string) {
       if (meta.disposed) return false
