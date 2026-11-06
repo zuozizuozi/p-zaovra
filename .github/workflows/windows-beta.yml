@@ -125,6 +125,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --experimental-strip-types --test test-node/update-backup.node.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test test-node/beta-flags.node.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/app-ui
           bun test src/components/updater-action.test.ts ./test-browser/desktop-entry-dom.test.ts ./test-browser/feedback-dom.test.ts
@@ -210,7 +212,7 @@ jobs:
           "Windows Beta $env:ZAOVRA_VERSION; source $sha. $policy; test run ${{ needs.gate.outputs.test_run_id }} attempt ${{ needs.gate.outputs.test_run_attempt }}. Includes feedback upload and automatic database backup before update. Review this exact artifact before publishing." | Set-Content dist/notes.md
           bun ../../verifier/packages/desktop-app/scripts/beta-signing.ts build dist $sha
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
+          [string[]]$flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
           $signing = if ($env:UNSIGNED_BETA -eq "true") { "未签名Beta" } else { "Signed Windows Beta" }
           Add-Content dist/notes.md $signing
           $signing >> $env:GITHUB_STEP_SUMMARY
@@ -237,7 +239,7 @@ jobs:
           $env:EVENT_NAME = "workflow_run"
           bun ../../verifier/packages/desktop-app/scripts/beta-signing.ts publish dist $sha
           if ($LASTEXITCODE -ne 0) { throw "Actual packaged identity differs" }
-          $flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
+          [string[]]$flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
           bun ../../verifier/packages/desktop-app/scripts/beta-release.ts dist $sha dist/notes.md --publish --continuous @flags
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve reviewable installers only
@@ -326,6 +328,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATES_SECRET_ACCESS_KEY }}
         shell: pwsh
         run: |
-          $flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
+          [string[]]$flags = if ($env:UNSIGNED_BETA -eq "true") { @("--allow-unsigned-beta") } else { @() }
           bun packages/desktop-app/scripts/beta-release.ts beta-artifact "${{ needs.gate.outputs.sha }}" beta-artifact/notes.md --publish @flags
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
