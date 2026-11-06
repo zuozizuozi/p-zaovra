@@ -86,3 +86,73 @@ it.effect("701 a silent provider is cancelled and produces a readable timeout fo
     ).toMatchObject({ action: "stop", category: "timeout" })
   }),
 )
+
+for (const turn of [2, 3]) {
+  for (const mode of ["silent", "disconnect", "complete", "stop", "tool-stop"] as const) {
+    it.effect(`707 turn ${turn} ${mode} releases its source and never repeats tool effects`, () =>
+      Effect.gen(function* () {
+        const opened: number[] = []
+        const released: number[] = []
+        const tools: number[] = []
+        const started = yield* Deferred.make<void>()
+        const toolStarted = yield* Deferred.make<void>()
+        const failure = new LLMError({
+          module: "test",
+          method: "stream",
+          reason: new TransportReason({ kind: "StreamReadError", message: "disconnected" }),
+        })
+        const run = yield* Effect.forEach(
+          Array.from({ length: turn }, (_, index) => index + 1),
+          (index) =>
+            Stream.unwrap(
+              Effect.gen(function* () {
+                opened.push(index)
+                yield* Effect.addFinalizer(() =>
+                  Effect.sync(() => {
+                    released.push(index)
+                  }),
+                )
+                if (index !== turn) return Stream.make(index)
+                yield* Deferred.succeed(started, undefined)
+                if (mode === "silent" || mode === "stop") return Stream.fromEffect(Effect.never)
+                if (mode === "disconnect") return Stream.concat(Stream.make(index), Stream.fail(failure))
+                return Stream.make(index)
+              }),
+            ).pipe(
+              providerProgress,
+              Stream.runForEach((value) => {
+                tools.push(value)
+                if (index !== turn || mode !== "tool-stop") return Effect.void
+                return Deferred.succeed(toolStarted, undefined).pipe(Effect.andThen(Effect.never))
+              }),
+            ),
+          { concurrency: 1 },
+        ).pipe(Effect.exit, Effect.forkChild)
+        yield* Deferred.await(started)
+        if (mode === "silent") yield* adjust("180 seconds")
+        if (mode === "stop") yield* Fiber.interrupt(run)
+        if (mode === "tool-stop") {
+          yield* Deferred.await(toolStarted)
+          yield* adjust("181 seconds")
+          expect(released).toEqual(Array.from({ length: turn - 1 }, (_, index) => index + 1))
+          yield* Fiber.interrupt(run)
+        }
+        const result = yield* Fiber.join(run).pipe(Effect.exit)
+        expect(opened).toEqual(Array.from({ length: turn }, (_, index) => index + 1))
+        expect(released).toEqual(opened)
+        expect(tools).toEqual(
+          Array.from({ length: mode === "silent" || mode === "stop" ? turn - 1 : turn }, (_, index) => index + 1),
+        )
+        if (mode === "complete") expect(result).toMatchObject({ _tag: "Success", value: { _tag: "Success" } })
+        if (mode === "disconnect" && Exit.isSuccess(result) && Exit.isFailure(result.value))
+          expect(Cause.squash(result.value.cause)).toBe(failure)
+        if (mode === "silent") {
+          expect(result).toMatchObject({ _tag: "Success", value: { _tag: "Failure" } })
+          if (Exit.isSuccess(result) && Exit.isFailure(result.value))
+            expect(Cause.pretty(result.value.cause)).toContain("180 秒没有有效事件")
+        }
+        if (mode === "stop" || mode === "tool-stop") expect(Exit.isFailure(result)).toBe(true)
+      }),
+    )
+  }
+}

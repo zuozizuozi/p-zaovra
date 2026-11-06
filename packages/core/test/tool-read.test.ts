@@ -328,6 +328,60 @@ describe("ReadTool", () => {
     }),
   )
 
+  it.effect("707 forwards native PDF capability and settles document or extracted text accordingly", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const pdf = Buffer.from(
+        yield* Effect.promise(() => Bun.file(new URL("./fixtures/pdf-text.pdf", import.meta.url)).bytes()),
+      ).toString("base64")
+      for (const inputModalities of [["text", "pdf"], ["text"], []]) {
+        const supported = inputModalities.includes("pdf")
+        readResult = supported
+          ? {
+              uri: "file:///document.pdf",
+              name: "document.pdf",
+              content: pdf,
+              encoding: "base64",
+              mime: "application/pdf",
+            }
+          : {
+              uri: "file:///document.pdf",
+              name: "document.pdf",
+              content: "Extracted PDF content",
+              encoding: "utf8",
+              mime: "text/plain",
+            }
+        const settled = yield* settleTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          inputModalities,
+          call: {
+            type: "tool-call",
+            id: `pdf-${inputModalities.length}`,
+            name: "read",
+            input: { path: "document.pdf" },
+          },
+        })
+        expect(readCalls.at(-1)?.page.pdfs).toBe(supported)
+        expect(settled.output?.content.some((part) => part.type === "file")).toBe(supported)
+        if (supported)
+          expect(settled.output?.content).toContainEqual(
+            expect.objectContaining({
+              type: "file",
+              mime: "application/pdf",
+              uri: `data:application/pdf;base64,${pdf}`,
+            }),
+          )
+        if (!supported)
+          expect(settled.output?.structured).toMatchObject({
+            content: "Extracted PDF content",
+            encoding: "utf8",
+            mime: "text/plain",
+          })
+      }
+    }),
+  )
+
   it.effect("preserves a PNG above the generic text limit as native media", () =>
     Effect.gen(function* () {
       const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))

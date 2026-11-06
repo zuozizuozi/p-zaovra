@@ -7793,6 +7793,148 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.live("707 real-clock S1 output exhaustion preserves recovery then stops with a summary", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = Model.make({
+        id: "fake-model",
+        provider: "fake",
+        route: OpenAIChat.route.with({
+          limits: { context: 200000, output: 64000 },
+        }),
+      })
+      sessionOutput = { fake: { "fake-model": { initial: 16000, maximum: 64000 } } }
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Complete the change" }), resume: false })
+      requests.length = 0
+      response = reasoningLimitResponse()
+      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(false)
+      expect(requests.map((request) => request.generation?.maxTokens)).toEqual([16000, 32000, 64000])
+      expect(requests.every((request) => request.tools.length > 0)).toBe(true)
+      expect(yield* session.outcome(sessionID)).toMatchObject({
+        state: "stopped",
+        termination: { category: "output-exhausted" },
+      })
+    }),
+  )
+
+  for (const turn of [2, 3]) {
+    for (const mode of ["silent", "disconnect", "complete", "stop", "tool-stop"] as const) {
+      it.effect(
+        `707 Runner turn ${turn} ${mode} cancels and releases without duplicate side effects or busy ownership`,
+        () =>
+          Effect.gen(function* () {
+            yield* setup
+            currentModel = Model.make({
+              id: "fake-model",
+              provider: "fake",
+              route: OpenAIChat.route.with({ limits: { context: 200000, output: 64000 } }),
+            })
+            sessionOutput = { fake: { "fake-model": { initial: 16000, maximum: 64000 } } }
+            const session = yield* SessionV2.Service
+            const events = yield* EventV2.Service
+            const started = yield* Deferred.make<void>()
+            const recovering = yield* Deferred.make<void>()
+            const released: number[] = []
+            let retries = 0
+            yield* session.prompt({
+              sessionID,
+              prompt: Prompt.make({ text: "707 later provider lifecycle" }),
+              resume: false,
+            })
+            requests.length = 0
+            executions.length = 0
+            response = reasoningLimitResponse()
+            toolExecutionGate = yield* Deferred.make<void>()
+            toolExecutionsStarted = yield* Deferred.make<void>()
+            toolExecutionsReady = 1
+            yield* events.listen((event) =>
+              event.type === SessionEvent.Retried.type
+                ? Effect.sync(() => {
+                    retries++
+                    if (retries !== turn - 1) return
+                    responseStream = Stream.unwrap(
+                      Effect.gen(function* () {
+                        yield* Effect.addFinalizer(() =>
+                          Effect.sync(() => {
+                            released.push(turn)
+                          }),
+                        )
+                        yield* Deferred.succeed(started, undefined)
+                        if (mode === "silent" || mode === "stop") return Stream.fromEffect(Effect.never)
+                        if (mode === "disconnect")
+                          return Stream.concat(
+                            Stream.fromIterable([
+                              LLMEvent.stepStart({ index: 0 }),
+                              LLMEvent.textStart({ id: "707-partial" }),
+                              LLMEvent.textDelta({ id: "707-partial", text: "partial" }),
+                            ]),
+                            Stream.fail(
+                              new LLMError({
+                                module: "test",
+                                method: "stream",
+                                reason: new TransportReason({
+                                  kind: "StreamReadError",
+                                  message: "707 disconnected after output",
+                                }),
+                              }),
+                            ),
+                          )
+                        if (mode === "tool-stop")
+                          return Stream.fromIterable([
+                            LLMEvent.stepStart({ index: 0 }),
+                            LLMEvent.toolCall({ id: "707-once", name: "echo", input: { text: "once" } }),
+                            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+                            LLMEvent.finish({ reason: "tool-calls" }),
+                          ])
+                        return Stream.fromIterable(fragmentFixture("text", "707-complete", ["Done."]).completeEvents)
+                      }),
+                    )
+                  })
+                : Effect.void,
+            )
+            yield* events.listen((event) =>
+              event.type === SessionEvent.Retried.type &&
+              (event.data as { error?: { metadata?: Record<string, string> } }).error?.metadata?.phase === "recovery"
+                ? Deferred.succeed(recovering, undefined)
+                : Effect.void,
+            )
+            const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+            yield* Deferred.await(started)
+            if (mode === "silent") yield* adjust("180 seconds")
+            if (mode === "disconnect") {
+              response = fragmentFixture("text", "707-network-recovered", ["Recovered."]).completeEvents
+              yield* Deferred.await(recovering)
+              yield* adjust("5 seconds")
+            }
+            if (mode === "stop") yield* session.interrupt(sessionID)
+            if (mode === "tool-stop") {
+              yield* Deferred.await(toolExecutionsStarted)
+              yield* adjust("181 seconds")
+              expect(activeToolExecutions).toBe(1)
+              yield* session.interrupt(sessionID)
+            }
+            const result = yield* Fiber.join(run)
+            expect(requests).toHaveLength(mode === "disconnect" ? turn + 1 : turn)
+            expect(released).toEqual([turn])
+            expect(executions).toEqual(mode === "tool-stop" ? ["once"] : [])
+            expect(activeToolExecutions).toBe(0)
+            expect(Exit.isSuccess(result)).toBe(mode === "complete" || mode === "disconnect")
+            expect((yield* session.outcome(sessionID)).state).not.toBe("running")
+            const execution = yield* SessionExecution.Service
+            expect((yield* execution.active).has(sessionID)).toBe(false)
+            if (mode === "disconnect")
+              expect(
+                (yield* session.context(sessionID)).some(
+                  (message) =>
+                    message.type === "assistant" && message.error?.message.includes("707 disconnected after output"),
+                ),
+              ).toBe(true)
+          }),
+      )
+    }
+  }
+
   for (const scenario of [
     "accepted",
     "rejected",
