@@ -102,9 +102,11 @@ const getBase = (appId: string): Configuration => ({
   nsis: {
     guid: INSTALLER_IDS[channel],
     include: `resources/channel-${channel}.nsh`,
-    // Assisted installers use the channel product name for their default directory.
+    // Assisted (not one-click) so an existing per-machine install is upgraded in place
+    // and the channel product name stays the default folder. channel-isolation.nsh
+    // removes the install-mode and finish pages: only a progress page, then launch.
     oneClick: false,
-    allowToChangeInstallationDirectory: true,
+    allowToChangeInstallationDirectory: false,
     runAfterFinish: true,
     perMachine: false,
     installerIcon: `resources/icons/icon.ico`,

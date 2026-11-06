@@ -111,9 +111,9 @@ export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoU
 
   const response = await dialog.showMessageBox({
     type: "info",
-    message: `Update ${state.version} downloaded. Restart now?`,
-    title: "Update Ready",
-    buttons: ["Restart", "Later"],
+    message: `新版本 ${state.version} 已准备好，重启以完成更新。`,
+    title: "更新已就绪",
+    buttons: ["重启以完成更新", "稍后"],
     defaultId: 0,
     cancelId: 1,
   })

@@ -1,7 +1,7 @@
 import type { EventEmitter } from "node:events"
 
 export async function installUpdate(input: {
-  updater: Pick<EventEmitter, "once" | "removeListener"> & { quitAndInstall(): void }
+  updater: Pick<EventEmitter, "once" | "removeListener"> & { quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void }
   lifecycle: Pick<EventEmitter, "once" | "removeListener">
   quitting: (value: boolean) => void
   beforeInstall?: () => Promise<unknown>
@@ -27,7 +27,8 @@ export async function installUpdate(input: {
     input.lifecycle.once("before-quit-for-update", accepted)
     input.quitting(true)
     try {
-      input.updater.quitAndInstall()
+      // Silent NSIS (/S --updated --force-run): no wizard or folder page, relaunch afterwards.
+      input.updater.quitAndInstall(true, true)
     } catch (error) {
       failed(error)
     }

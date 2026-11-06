@@ -4,9 +4,9 @@ type Keys = keyof typeof en
 
 export const dict = {
   "settings.about.updater.error": "检查更新失败，请重试。",
-  "settings.about.updater.installing": "正在安装更新",
+  "settings.about.updater.installing": "正在更新…",
   "settings.about.updater.up-to-date": "当前已是最新版本",
-  "settings.about.updater.ready": "更新已就绪，可以安装",
+  "settings.about.updater.ready": "更新已就绪，重启以完成更新",
   "settings.about.updater.downloading": "正在下载更新",
   "settings.about.updater.available": "有新版本可用",
   "settings.about.updater.checking": "正在检查更新",
@@ -1184,8 +1184,8 @@ export const dict = {
   "toast.session.unshare.failed.description": "取消分享会话时发生错误",
   "toast.session.listFailed.title": "无法加载 {{project}} 的会话",
   "toast.update.title": "有可用更新",
-  "toast.update.description": "Zaovra 有新版本 ({{version}}) 可安装。",
-  "toast.update.action.installRestart": "安装并重启",
+  "toast.update.description": "Zaovra 新版本 ({{version}}) 已下载，重启以完成更新。",
+  "toast.update.action.installRestart": "重启以完成更新",
   "toast.update.action.notYet": "稍后",
 
   "error.page.title": "出了点问题",
@@ -1474,13 +1474,13 @@ export const dict = {
   "settings.updates.row.startup.title": "启动时检查更新",
   "settings.updates.row.startup.description": "在 Zaovra 启动时自动检查更新",
   "settings.updates.row.check.title": "检查更新",
-  "settings.updates.row.check.description": "手动检查更新并在有更新时安装",
+  "settings.updates.row.check.description": "手动检查并下载新版本",
   "settings.updates.action.checkNow": "立即检查",
   "settings.updates.action.checking": "正在检查...",
   "settings.updates.action.download": "下载更新",
   "settings.updates.toast.available": "发现新版本 {{version}}",
   "settings.updates.action.downloading": "正在下载...",
-  "settings.updates.action.installing": "正在安装...",
+  "settings.updates.action.installing": "正在更新…",
   "settings.updates.toast.latest.title": "已是最新版本",
   "settings.updates.toast.latest.description": "你正在使用最新版本的 Zaovra。",
 

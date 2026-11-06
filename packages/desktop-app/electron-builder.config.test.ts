@@ -184,7 +184,7 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   expect(desktop).toContain("NoDisplay=true")
 })
 
-test("612 assisted NSIS uses distinct channel product directories and preserves signing", async () => {
+test("690 NSIS has no folder, install-mode or finish page and keeps distinct channel directories", async () => {
   const { getWindowsInstallationDirName } = await import("app-builder-lib/out/targets/targetUtil.js")
   const dirs = []
   for (const channel of ["dev", "beta", "prod"]) {
@@ -199,13 +199,16 @@ test("612 assisted NSIS uses distinct channel product directories and preserves 
     ])
     expect(code, err).toBe(0)
     const config = JSON.parse(out)
+    // Assisted keeps existing per-machine installs in place; the folder page is gone.
     expect(config.nsis.oneClick).toBe(false)
-    expect(config.nsis.allowToChangeInstallationDirectory).toBe(true)
+    expect(config.nsis.allowToChangeInstallationDirectory).toBe(false)
     expect(config.nsis.runAfterFinish).toBe(true)
+    expect(config.nsis.perMachine).toBe(false)
+    expect(config.nsis.include).toBe(`resources/channel-${channel}.nsh`)
     dirs.push(
       getWindowsInstallationDirName(
         { productFilename: config.productName, sanitizedName: "@zaovra-aidesktop" } as never,
-        true,
+        !config.nsis.oneClick || config.nsis.perMachine,
       ),
     )
     if (channel === "beta")
@@ -213,4 +216,9 @@ test("612 assisted NSIS uses distinct channel product directories and preserves 
   }
   expect(dirs).toEqual(["Zaovra Dev", "Zaovra Beta", "Zaovra"])
   expect(new Set(dirs).size).toBe(3)
+  const isolation = await Bun.file("resources/channel-isolation.nsh").text()
+  expect(isolation).toMatch(/!macro customInstallMode[\s\S]*?isForceMachineInstall[\s\S]*?isForceCurrentInstall[\s\S]*?!macroend/)
+  expect(isolation).toMatch(/!macro customFinishPage\s+!macroend/)
+  expect(isolation).toMatch(/!macro customInstall\s[\s\S]*?SetAutoClose true[\s\S]*?ExecShellAsUser[\s\S]*?!macroend/)
+  expect(isolation).toMatch(/!macro customInit\s+!insertmacro channelDirectoryGuard/)
 })

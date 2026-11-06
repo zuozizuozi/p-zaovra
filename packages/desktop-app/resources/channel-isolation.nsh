@@ -12,6 +12,34 @@
   !insertmacro channelDirectoryGuard
 !macroend
 
+!macro customInstallMode
+  ; No "who should this be installed for" page. Keep whatever initMultiUser chose:
+  ; an existing per-machine installation is upgraded in place (UAC), anything else
+  ; installs for the current user into the channel's default folder.
+  ${If} $installMode == "all"
+    StrCpy $isForceMachineInstall "1"
+  ${Else}
+    StrCpy $isForceCurrentInstall "1"
+  ${EndIf}
+!macroend
+
+; No finish page: the progress page closes by itself and the app starts.
+!macro customFinishPage
+!macroend
+
+!macro customInstall
+  ; Silent updates (/S --force-run) are relaunched by the builder's own install section.
+  ${IfNot} ${Silent}
+    SetAutoClose true
+    HideWindow
+    ${If} ${isUpdated}
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"
+    ${Else}
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" ""
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro customUnInit
   !insertmacro channelDirectoryGuard
 !macroend
@@ -27,8 +55,8 @@
 !macroend
 
 !ifndef BUILD_UNINSTALLER
-; The assisted directory picker runs after customInit. Recheck its selection
-; before Next is enabled; silent /D installs remain guarded by customInit.
+; Installers have no directory page; this only matters if one is ever re-enabled.
+; Silent and /D installs remain guarded by customInit.
 Function .onVerifyInstDir
   ${If} ${FileExists} "$INSTDIR\${ZAOVRA_OTHER_EXE_1}"
   ${OrIf} ${FileExists} "$INSTDIR\${ZAOVRA_OTHER_EXE_2}"
