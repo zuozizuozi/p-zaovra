@@ -7,7 +7,7 @@ export async function completeFirstLaunch(input: {
   mkdir: (path: string) => Promise<unknown>
   complete: () => void
 }): Promise<null | { directory: string; fallback: boolean } | { needsDirectory: true }> {
-  if (!input.pending) return null
+  if (!input.pending && !input.create) return null
   if (!input.create) {
     input.complete()
     return null

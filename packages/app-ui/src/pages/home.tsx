@@ -1,7 +1,9 @@
+import { StartupContext } from "@/context/startup"
 import { openFeedback } from "@/feedback"
 import type { Session } from "@zaovra-ai/sdk/v2/client"
 import {
   type ComponentProps,
+  useContext,
   createEffect,
   createMemo,
   createResource,
@@ -294,6 +296,11 @@ export function NewHome() {
   const sync = useServerSync()
   const layout = useLayout()
   const platform = usePlatform()
+  const startup = useContext(StartupContext)
+  const [startupReady] = createResource(async () => {
+    await startup?.catch(() => undefined)
+    return true
+  })
   const pickDirectory = useDirectoryPicker()
   const dialog = useDialog()
   const navigate = useNavigate()
@@ -365,7 +372,7 @@ export function NewHome() {
   createEffect(() => {
     const conn = focusedServer()
     const project = newSessionProject()
-    if (searchParams.view === "projects" || !conn || !project || state.starting) return
+    if (!startupReady() || searchParams.view === "projects" || !conn || !project || state.starting) return
     setState("starting", true)
     void tabs.newDraft({ server: ServerConnection.key(conn), directory: project.worktree }, undefined, undefined, {
       replace: true,

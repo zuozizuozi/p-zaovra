@@ -32,7 +32,6 @@ import { DesktopFirstLaunchOnboarding } from "./onboarding"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { createStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
-import { Splash } from "@zaovra-ai/ui/logo"
 import { useTheme } from "@zaovra-ai/ui/theme/context"
 
 const root = document.getElementById("root")
@@ -356,7 +355,7 @@ listenForDeepLinks()
 function LoadingSplash() {
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-      <Splash class="w-16 h-20 motion-safe:animate-pulse" />
+      <p role="status">{t("desktop.starting")}</p>
     </div>
   )
 }

@@ -75,6 +75,12 @@ const sections: string[] = [
 for (const [dir, data] of [...packages].sort((a, b) => a[1].name.localeCompare(b[1].name))) {
   const files = (await readdir(dir)).filter((file) => /^(licen[cs]e|copying|notice)([.-]|$)/i.test(file))
   const texts = await Promise.all(files.map(async (file) => `${file}\n${await Bun.file(path.join(dir, file)).text()}`))
+  if (data.license === "UNLICENSED") {
+    sections.push(
+      `${data.name} ${data.version ?? "workspace"}\nProprietary Zaovra code. Upstream notices are preserved below.`,
+    )
+    continue
+  }
   const fallback =
     data.name === "poe-oauth"
       ? "poe-code-LICENSE.txt"

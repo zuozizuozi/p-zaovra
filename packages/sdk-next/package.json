@@ -3,7 +3,7 @@
   "name": "@zaovra-ai/sdk-next",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "exports": {
     ".": "./src/index.ts"
   },

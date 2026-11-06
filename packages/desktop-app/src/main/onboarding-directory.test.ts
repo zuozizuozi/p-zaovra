@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { completeFirstLaunch } from "./onboarding-directory"
 
-test("fresh profile creates Documents/Default Project and completes only once", async () => {
+test("fresh profile creates Documents/Default Project and can restore the same default on restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "first-launch-"))
   let pending = true
   const input = {
@@ -21,7 +21,7 @@ test("fresh profile creates Documents/Default Project and completes only once", 
     expect(result).toEqual({ directory: join(root, "documents", "Default Project"), fallback: false })
     expect((await stat(join(root, "documents", "Default Project"))).isDirectory()).toBe(true)
     expect(pending).toBe(false)
-    expect(await completeFirstLaunch({ ...input, pending })).toBe(null)
+    expect(await completeFirstLaunch({ ...input, pending })).toEqual(result)
     expect(await Bun.file(join(root, "home")).exists()).toBe(false)
   } finally {
     await cleanup(root)
@@ -89,7 +89,7 @@ test("explicit selection completes without creating another directory; restart i
   }
   expect(await completeFirstLaunch({ ...input, pending })).toBe(null)
   expect(pending).toBe(false)
-  expect(await completeFirstLaunch({ ...input, pending, create: true })).toBe(null)
+  expect(await completeFirstLaunch({ ...input, pending, create: false })).toBe(null)
 })
 
 test("completion storage errors stay visible instead of creating a second project", async () => {
@@ -117,3 +117,20 @@ async function cleanup(root: string) {
   if (dirname(root) !== tmpdir()) throw new Error("Fixture path escaped its temporary directory")
   await rm(root, { recursive: true, force: true })
 }
+
+test("687 completed empty profile can ensure the default directory again", async () => {
+  const root = await mkdtemp(join(tmpdir(), "main-ui-687-"))
+  try {
+    const result = await completeFirstLaunch({
+      pending: false,
+      create: true,
+      path: (name) => join(root, name),
+      mkdir: (directory) => mkdir(directory, { recursive: true }),
+      complete: () => {},
+    })
+    expect(result).toEqual({ directory: join(root, "documents", "Default Project"), fallback: false })
+    expect((await stat(join(root, "documents", "Default Project"))).isDirectory()).toBe(true)
+  } finally {
+    await cleanup(root)
+  }
+})

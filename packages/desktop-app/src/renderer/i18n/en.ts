@@ -1,4 +1,5 @@
 export const dict = {
+  "desktop.starting": "Starting…",
   "desktop.onboarding.choose": "Your default project could not be created. Choose a folder.",
   "desktop.server.exited":
     "The local service stopped (code {{code}}). Task status cannot be confirmed. Close and reopen Zaovra to reconnect, then inspect the task before continuing. Commands will not be replayed automatically.",

@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs"
 import * as http from "node:http"
 import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
-import { isAbsolute, join } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
 import { app, dialog, session } from "electron"
@@ -136,8 +136,13 @@ const main = Effect.gen(function* () {
   const onboardingTestRoot = ((): string | undefined => {
     if (!TEST_ONBOARDING) return
 
-    const root = join(tmpdir(), `zaovra-onboarding-${randomUUID()}`)
-    rmSync(root, { recursive: true, force: true })
+    const requested = app.commandLine.getSwitchValue("user-data-dir")
+    const child = requested && isAbsolute(requested) ? relative(tmpdir(), requested) : undefined
+    // Reuse only an explicitly isolated test profile below TEMP, never a normal profile.
+    const root =
+      child && !child.startsWith("..") && !isAbsolute(child)
+        ? requested
+        : join(tmpdir(), `zaovra-onboarding-${randomUUID()}`)
     ;["data", "config", "cache", "state", "desktop", "session", "documents", "home"].forEach((dir) =>
       mkdirSync(join(root, dir), { recursive: true }),
     )

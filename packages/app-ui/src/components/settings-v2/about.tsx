@@ -10,7 +10,7 @@ export function SettingsAbout() {
   const language = useLanguage()
   const platform = usePlatform()
   const updater = useUpdaterAction()
-  const [state, setState] = createStore<{ document?: "license" | "notices" }>({})
+  const [state, setState] = createStore<{ document?: "notices" }>({})
   const update = () => platform.updater?.state()
   const [text] = createResource(
     () => state.document,
@@ -39,12 +39,9 @@ export function SettingsAbout() {
           </ButtonV2>
         </div>
       </Show>
-      <p>Copyright © 2026 Zaovra contributors</p>
+      <p>© 2026 Zaovra</p>
       <Show when={platform.legalDocument}>
         <div class="flex gap-3">
-          <ButtonV2 variant="neutral" onClick={() => setState("document", "license")}>
-            {language.t("settings.about.license")}
-          </ButtonV2>
           <ButtonV2 variant="neutral" onClick={() => setState("document", "notices")}>
             {language.t("settings.about.notices")}
           </ButtonV2>
