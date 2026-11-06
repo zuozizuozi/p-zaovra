@@ -61,20 +61,6 @@ const cases = [
     header: "native",
   },
   {
-    name: "recover already persisted selected-only shadow",
-    raw: { provider: { openai: legacy }, providers: { openai: { models: { "gpt-4o": {} } } } },
-    key: "providers",
-    url: legacy.options.baseURL,
-    header: "preserved",
-  },
-  {
-    name: "recover persisted shadow after the saved selection changes",
-    raw: { provider: { openai: legacy }, providers: { openai: { models: { "gpt-agent": {} } } } },
-    key: "providers",
-    url: legacy.options.baseURL,
-    header: "preserved",
-  },
-  {
     name: "cross-layer blacklist",
     raw: { provider: { openai: legacy }, providers: { unrelated: {} } },
     project: { providers: { openai: { models: { "gpt-4o-mini": {} } } } },
@@ -100,31 +86,12 @@ const cases = [
     header: "preserved",
   },
   {
-    name: "recovered shadow keeps empty allowlist",
-    raw: { provider: { openai: { ...legacy, whitelist: [] } }, providers: { openai: { models: { "gpt-4o": {} } } } },
-    blocked: true,
-    key: "providers",
-    url: legacy.options.baseURL,
-    header: "preserved",
-  },
-  {
     name: "selected native model stays disabled",
     raw: { providers: { openai: { ...native, models: { "gpt-4o": { disabled: true } } } } },
     blocked: true,
     key: "providers",
     url: native.api.url,
     header: "native",
-  },
-  {
-    name: "recovered shadow retains legacy deprecated model",
-    raw: {
-      provider: { openai: { ...legacy, models: { "gpt-4o": { status: "deprecated" } } } },
-      providers: { openai: { models: { "gpt-4o": {} } } },
-    },
-    blocked: true,
-    key: "providers",
-    url: legacy.options.baseURL,
-    header: "preserved",
   },
   {
     name: "cross-layer provider allow none",

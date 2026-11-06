@@ -312,7 +312,7 @@ const layer = Layer.effect(
       const text = yield* fs.readFileStringSafe(document.path).pipe(Effect.orDie)
       if (!text) return
       const current = yield* loadText(text, document.path)
-      // A concurrently edited configuration must be reopened, never overwritten.
+      // Adopt edits that completed before this read instead of migrating stale info.
       if (JSON.stringify(current.info) !== JSON.stringify(document.info)) {
         configs[index] = current
         return
@@ -336,11 +336,6 @@ const layer = Layer.effect(
       }),
       activateModels: Effect.fn("Config.activateModels")(function* (connected) {
         if (!connected.length) return configs
-        // Recover the empty-model-only entries emitted by the old writer, even
-        // when the user has selected another model since that migration.
-        // Explicit native settings keep the normal whole-entry decode precedence.
-        for (const [index] of configs.entries())
-          yield* rewriteActivation(index, (text) => recoverActivation(text, connected))
         for (const item of ConfigProviderActivation.plan(configs, connected)) {
           const index = item.index
           const document = configs[index]
@@ -395,41 +390,6 @@ const layer = Layer.effect(
 
 type ActivationDocument = Pick<typeof ConfigV1.Info.Type, "provider"> & {
   providers?: Record<string, ConfigProvider.Info>
-}
-
-function recoverActivation(text: string, connected: readonly string[]) {
-  const input = parse(text) as ActivationDocument
-  const edits = Object.entries(input.providers ?? {}).flatMap(([id, native]) => {
-    if (!connected.includes(id) || !input.provider?.[id]) return []
-    if (Object.keys(native).some((key) => key !== "models")) return []
-    const models = Object.entries(native.models ?? {})
-    if (
-      !models.length ||
-      models.some(([model, value]) => Object.keys(value).length !== 0 || /(^|\/)auto(?::|$)/i.test(model))
-    )
-      return []
-    const legacy = Option.getOrUndefined(decode({ provider: { [id]: input.provider[id] } }))?.providers?.[id]
-    return Object.entries(legacy ?? {}).flatMap(([field, value]): { path: string[]; value: unknown }[] => {
-      if (value === undefined) return []
-      if (field !== "models") return [{ path: ["providers", id, field], value }]
-      return Object.entries(legacy?.models ?? {}).flatMap(([model, info]) => {
-        if (native.models?.[model] === undefined) return [{ path: ["providers", id, "models", model], value: info }]
-        return Object.entries(info).flatMap(([key, value]) =>
-          value === undefined ? [] : [{ path: ["providers", id, "models", model, key], value }],
-        )
-      })
-    })
-  })
-  return edits.reduce(
-    (result, edit) =>
-      applyEdits(
-        result,
-        modify(result, edit.path, edit.value, {
-          formattingOptions: { insertSpaces: true, tabSize: 2 },
-        }),
-      ),
-    text,
-  )
 }
 
 export const locationLayer = layer.pipe(Layer.provideMerge(Policy.locationLayer))
