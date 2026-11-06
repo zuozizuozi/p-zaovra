@@ -984,3 +984,37 @@ for (const test of [
       }),
   )
 }
+
+for (const status of [400, 422, 502])
+  it.effect("683 classifies complete nested parameter evidence before truncation / " + status, () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const error = yield* RequestExecutor.Service.use((executor) => executor.execute(secretRequest)).pipe(
+        Effect.flip,
+        Effect.provide(
+          countedResponsesLayer(attempts, [
+            new Response(
+              JSON.stringify({
+                padding: "x".repeat(20_000),
+                error: {
+                  message: "padding ".repeat(60) + "thinking_budget must not be greater than 131072; header-secret-456",
+                  type: "server_error",
+                },
+              }),
+              { status, headers: { "x-request-id": "req_constraint_683" } },
+            ),
+          ]),
+        ),
+      )
+      expectLLMError(error)
+      expect(error.reason).toMatchObject({ _tag: "InvalidRequest", parameter: "thinking_budget", retryable: false })
+      expect(error.reason.message).toContain("请降一档")
+      expect(error.reason.message).not.toContain("header-secret-456")
+      expect(errorHttp(error)).toMatchObject({
+        requestId: "req_constraint_683",
+        response: { status },
+        bodyTruncated: true,
+      })
+      expect(yield* Ref.get(attempts)).toBe(1)
+    }),
+  )

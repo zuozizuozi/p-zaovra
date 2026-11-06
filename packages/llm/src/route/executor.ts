@@ -17,7 +17,7 @@ import {
   type LLMEvent,
   TransportReason,
 } from "../schema"
-import { isQuotaExceeded, providerFailure } from "../provider-error"
+import { isQuotaExceeded, reasoningParameterConstraint, providerFailure } from "../provider-error"
 
 export interface Interface {
   readonly execute: (
@@ -293,7 +293,11 @@ const providerEvidence = (body: string | void) => {
     .join(" ")
   const type = [error.type, root.type].find((value): value is string => typeof value === "string")
   const quota = [error.message, root.message].some((value) => typeof value === "string" && isQuotaExceeded(value))
-  return { code, type, quota }
+  const parameter = [error.message, root.message, body]
+    .filter((value): value is string => typeof value === "string")
+    .map(reasoningParameterConstraint)
+    .find((value) => value !== undefined)
+  return { code, type, quota, parameter }
 }
 
 const statusError =

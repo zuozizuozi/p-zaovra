@@ -279,18 +279,60 @@ const layer = Layer.effect(
       notify = false,
       settle = true,
       stopMessage?: string,
+      providerDeadline?: number,
     ) {
       const limits = yield* readBudget(session.id)
       const limit = limits.limit
       const deadline = SessionBudget.deadline(session, limits.duration, limits.policy?.deadline)
       const duration = deadline === undefined ? undefined : deadline - DateTime.toEpochMillis(session.time.created)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
-      const expired = !!stopMessage || (duration !== undefined && elapsed >= duration)
+      const previousProviderStop =
+        limits.policy?.closingReserveMs === undefined
+          ? undefined
+          : yield* db
+              .select({ text: sql<string>`json_extract(${EventTable.data}, '$.text')` })
+              .from(EventTable)
+              .where(
+                and(
+                  eq(EventTable.aggregate_id, session.id),
+                  eq(
+                    EventTable.type,
+                    EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
+                  ),
+                  sql`substr(json_extract(${EventTable.data}, '$.text'), 1, 19) = '[host.run.closing] '`,
+                  sql`instr(json_extract(${EventTable.data}, '$.text'), ${":" + limits.requestID + " "}) > 0`,
+                ),
+              )
+              .orderBy(desc(EventTable.seq))
+              .limit(1)
+              .get()
+              .pipe(Effect.orDie)
+      const receipt = previousProviderStop
+        ? Option.getOrUndefined(
+            Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
+              previousProviderStop.text.slice(previousProviderStop.text.indexOf(" ", 19) + 1),
+            ),
+          )
+        : undefined
+      const stopped =
+        receipt !== null &&
+        typeof receipt === "object" &&
+        "providerDeadline" in receipt &&
+        typeof receipt.providerDeadline === "number" &&
+        "deadline" in receipt &&
+        receipt.deadline === deadline &&
+        "closingReserveMs" in receipt &&
+        receipt.closingReserveMs === limits.policy?.closingReserveMs
+          ? receipt.providerDeadline
+          : undefined
+      const providerAt = providerDeadline ?? stopped
+      const expired = (providerAt === undefined && !!stopMessage) || (duration !== undefined && elapsed >= duration)
       const reserveReached =
         !expired &&
-        deadline !== undefined &&
-        limits.policy?.closingReserveMs !== undefined &&
-        (yield* Clock.currentTimeMillis) >= deadline - limits.policy.closingReserveMs
+        ((providerAt !== undefined && (yield* Clock.currentTimeMillis) >= providerAt) ||
+          (deadline !== undefined &&
+            limits.policy?.closingReserveMs !== undefined &&
+            (yield* Clock.currentTimeMillis) >= deadline - limits.policy.closingReserveMs))
       const checkpoint = notify ? AccuracyGuidance.checkpoint({ elapsed, limit: duration }) : undefined
       if (checkpoint) {
         // Durable events survive compaction and explicit resumes: one notice per Session.
@@ -360,7 +402,7 @@ const layer = Layer.effect(
       yield* Effect.forEach(cancelled, (job) => backgroundJobs.cancel(job.id), {
         discard: true,
       })
-      const receipt = `[host.run.closing] ${source ?? limits.requestID}:${limits.requestID} `
+      const prefix = `[host.run.closing] ${source ?? limits.requestID}:${limits.requestID} `
       if (closing) {
         const previous = yield* db
           .select({ seq: EventTable.seq })
@@ -372,7 +414,7 @@ const layer = Layer.effect(
                 EventTable.type,
                 EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
               ),
-              sql`substr(json_extract(${EventTable.data}, '$.text'), 1, ${receipt.length}) = ${receipt}`,
+              sql`substr(json_extract(${EventTable.data}, '$.text'), 1, ${prefix.length}) = ${prefix}`,
             ),
           )
           .limit(1)
@@ -384,12 +426,13 @@ const layer = Layer.effect(
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
           text:
-            receipt +
+            prefix +
             JSON.stringify({
               requestID: limits.requestID,
               sourceMessageID: source,
               deadline,
               closingReserveMs: limits.policy?.closingReserveMs,
+              ...(providerAt === undefined ? {} : { providerDeadline: providerAt }),
               state: "stopped_unverified",
               cancelled: cancelled.map((job) => job.id),
               preserved: jobs
@@ -401,15 +444,18 @@ const layer = Layer.effect(
             }),
         })
       }
-      const message = closing
-        ? SessionOutcome.chineseTask(taskHistory)
-          ? `宿主显式收尾余量已到，硬截止为 ${deadline}。已停止新请求与新操作，只取消当前来源的临时任务；保留的服务和其他请求不代表交付完成。本任务未验证，请核查已有结果及未完事项，这不是成功。`
-          : `Host closing reserve reached before absolute deadline ${deadline}. New provider requests and operations have stopped; only temporary jobs owned by this request were cancelled. Preserved services and other requests are not proof of completion. The work remains unverified; inspect retained results and unfinished requirements. This is not task success.`
-        : scoped
-          ? SessionOutcome.chineseTask(taskHistory)
-            ? `宿主请求绝对截止 ${limits.policy?.deadline} 已到，已停止新模型工作，仅取消当前验收来源的临时任务。其他来源及服务仍保留归属。本请求已停止、未验证，不是任务完成。`
-            : `The absolute host request deadline ${limits.policy?.deadline} was reached. New provider work has stopped; only temporary jobs for this acceptance source were cancelled. Other sources and services remain owned. This request is stopped and unverified, not completed.`
-          : `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}需要明确续授：可在会话界面提高或移除预算后直接继续，无需重启；已保留成果和未完成事项，这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
+      const message =
+        closing && providerAt !== undefined
+          ? `模型请求的截止前收口窗口已到（P=${providerAt}，C=${SessionBudget.closingDeadline(deadline, limits.policy?.closingReserveMs)}）；已取消当前请求并等待释放。任务尚未验证，缺失的用量仍为未知。`
+          : closing
+            ? SessionOutcome.chineseTask(taskHistory)
+              ? `宿主显式收尾余量已到，硬截止为 ${deadline}。已停止新请求与新操作，只取消当前来源的临时任务；保留的服务和其他请求不代表交付完成。本任务未验证，请核查已有结果及未完事项，这不是成功。`
+              : `Host closing reserve reached before absolute deadline ${deadline}. New provider requests and operations have stopped; only temporary jobs owned by this request were cancelled. Preserved services and other requests are not proof of completion. The work remains unverified; inspect retained results and unfinished requirements. This is not task success.`
+            : scoped
+              ? SessionOutcome.chineseTask(taskHistory)
+                ? `宿主请求绝对截止 ${limits.policy?.deadline} 已到，已停止新模型工作，仅取消当前验收来源的临时任务。其他来源及服务仍保留归属。本请求已停止、未验证，不是任务完成。`
+                : `The absolute host request deadline ${limits.policy?.deadline} was reached. New provider work has stopped; only temporary jobs for this acceptance source were cancelled. Other sources and services remain owned. This request is stopped and unverified, not completed.`
+              : `${expired ? `本会话已经过 ${elapsed} 毫秒，达到墙钟时长预算 ${duration} 毫秒` : `本会话已记录 ${usage.total} Tokens，达到配置预算 ${limit}`}；已停止发起新的模型请求，已完成的操作已保留。${usage.unreported ? `另有 ${usage.unreported} 次请求未完整上报用量，实际消耗可能更高。` : ""}需要明确续授：可在会话界面提高或移除预算后直接继续，无需重启；已保留成果和未完成事项，这不是任务完成。\n现场摘要：${JSON.stringify(SessionOutcome.deliveryFacts(yield* SessionOutcome.history(db, session.id)))}`
       const context = yield* getContext(session.id)
       const last = context.at(-1)
       if (last?.type !== "assistant" || last.finish !== "stopped" || last.termination?.category !== "budget") {
@@ -590,6 +636,10 @@ const layer = Layer.effect(
       expired: boolean
       closing?: boolean
       repairExpired?: boolean
+      providerReady: Deferred.Deferred<void>
+      providerStartedAt?: number
+      providerActive?: boolean
+      providerDeadline?: number
       model?: { id: string; provider: string }
       repairScope: Deferred.Deferred<typeof DeliveryContract.Receipt.Type | undefined>
     }
@@ -720,7 +770,12 @@ const layer = Layer.effect(
           Effect.provideService(ShellIdentity.Current, initialized.shell),
         ))
       const model = yield* models.resolve(session)
-      if (budgetStop) budgetStop.model = model
+      if (budgetStop) {
+        budgetStop.model = model
+        budgetStop.providerStartedAt ??= yield* Clock.currentTimeMillis
+        budgetStop.providerActive = true
+        yield* Deferred.succeed(budgetStop.providerReady, undefined)
+      }
       if (yield* checkBudget(session, model, true)) return { needsContinuation: false, step: currentStep }
       const repeated = SessionEfficiency.repeatedInspection(yield* getContext(session.id))
       if (repeated.length)
@@ -750,6 +805,10 @@ const layer = Layer.effect(
               item.content.some((part) => part.type === "tool" && part.id === `command_${message.id}`),
           ),
       )
+      if (budgetStop && subtask?.type === "user" && subtask.subtask) {
+        budgetStop.providerActive = false
+        budgetStop.providerStartedAt = undefined
+      }
       const durableHistory = yield* SessionOutcome.history(db, session.id)
       const operationSource = SessionOutcome.requested(durableHistory).sourceMessageID
       const operationRows =
@@ -1210,6 +1269,24 @@ const layer = Layer.effect(
       let receivedTool = false
       let receivedHostedTool = false
       let rejectedInput = false
+      // Preparation and retries share the original absolute observation window.
+      if (budgetStop?.providerStartedAt !== undefined) {
+        const budget = yield* readBudget(session.id)
+        const bound = SessionBudget.deadline(session, budget.duration, budget.policy?.deadline)
+        const providerAt =
+          budget.policy?.closingReserveMs === undefined
+            ? undefined
+            : SessionBudget.observationDeadline(
+                SessionBudget.closingDeadline(bound, budget.policy.closingReserveMs),
+                budgetStop.providerStartedAt,
+              )
+        if (providerAt !== undefined && (yield* Clock.currentTimeMillis) >= providerAt) {
+          budgetStop.closing = true
+          budgetStop.providerDeadline = providerAt
+          yield* checkBudget(session, model, false, true, undefined, providerAt)
+          return { needsContinuation: false, step: currentStep }
+        }
+      }
       // Explicit command delegation uses the same durable tool settlement path,
       // without asking a provider to decide whether to create the child.
       const providerStream = (
@@ -1529,6 +1606,11 @@ const layer = Layer.effect(
           }),
         ),
         Effect.ensuring(withPublication(publisher.flush())),
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            if (budgetStop) budgetStop.providerActive = exit._tag === "Failure"
+          }),
+        ),
         Effect.annotateLogs({
           sessionID: session.id,
           provider: model.provider,
@@ -2419,6 +2501,7 @@ const layer = Layer.effect(
     ) {
       const budgetStop: TurnBudget = {
         admissionRequired,
+        providerReady: yield* Deferred.make<void>(),
         expired: false,
         repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
       }
@@ -2426,7 +2509,7 @@ const layer = Layer.effect(
           while (true) {
             const session = yield* getSession(sessionID)
             if (!budgetStop.model) {
-              yield* Effect.sleep("1 second")
+              yield* Deferred.await(budgetStop.providerReady)
               continue
             }
             const budget = yield* readBudget(sessionID)
@@ -2435,15 +2518,23 @@ const layer = Layer.effect(
               bound === undefined || budget.policy?.closingReserveMs === undefined
                 ? bound
                 : bound - budget.policy.closingReserveMs
-            const remaining = closingAt === undefined ? undefined : closingAt - (yield* Clock.currentTimeMillis)
+            const providerAt =
+              budget.policy?.closingReserveMs === undefined || budgetStop.providerStartedAt === undefined
+                ? undefined
+                : SessionBudget.observationDeadline(closingAt, budgetStop.providerStartedAt)
+            const stopAt =
+              (budgetStop.providerActive || recovery.waiting) && providerAt !== undefined ? providerAt : closingAt
+            const remaining = stopAt === undefined ? undefined : stopAt - (yield* Clock.currentTimeMillis)
             if (remaining === undefined || remaining > 0) {
               yield* Effect.sleep(remaining === undefined ? 1000 : Math.min(1000, remaining))
               continue
             }
-            const phase = yield* checkBudget(session, budgetStop.model, false, false)
+            const early = stopAt === providerAt ? providerAt : undefined
+            const phase = yield* checkBudget(session, budgetStop.model, false, false, undefined, early)
             if (!phase) continue
             budgetStop.expired = phase === "expired"
             budgetStop.closing = phase === "closing"
+            budgetStop.providerDeadline = early
             return { needsContinuation: false, step }
           }
         })
@@ -2677,7 +2768,14 @@ const layer = Layer.effect(
                 Effect.gen(function* () {
                   if (!budgetStop.expired && !budgetStop.closing) return
                   yield* Fiber.interrupt(fiber)
-                  yield* checkBudget(yield* getSession(sessionID), budgetStop.model!)
+                  yield* checkBudget(
+                    yield* getSession(sessionID),
+                    budgetStop.model!,
+                    false,
+                    true,
+                    undefined,
+                    budgetStop.providerDeadline,
+                  )
                 }),
               ),
             ),

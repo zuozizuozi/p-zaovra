@@ -16,6 +16,7 @@ import {
 export function providerFailure(input: {
   message: string
   quota?: boolean
+  parameter?: string
   code?: string
   type?: string
   status?: number
@@ -32,6 +33,18 @@ export function providerFailure(input: {
       : new ContentPolicyReason(common)
   if (/invalid_api_key|authentication_error|unauthorized|access_denied|forbidden/.test(code))
     return new AuthenticationReason({ ...common, kind: input.status === 403 ? "insufficient-permissions" : "invalid" })
+  const parameter = input.parameter ?? reasoningParameterConstraint(input.message)
+  if (
+    ![401, 402, 403, 429, 529].includes(input.status ?? 0) &&
+    !/context_length_exceeded/.test(code) &&
+    !isContextOverflow(input.message) &&
+    parameter
+  )
+    return new InvalidRequestReason({
+      ...common,
+      message: `${input.message}\n当前推理档位超出该模型或服务的上限，请降一档。`,
+      parameter,
+    })
   if (
     /invalid_request|invalid_argument|invalid_prompt|bad_request|context_length_exceeded|model_not_found|unsupported/.test(
       code,
@@ -58,6 +71,19 @@ export function providerFailure(input: {
   if (input.status === 402) return new QuotaExceededReason(common)
   if ([400, 404, 409, 413, 422].includes(input.status ?? 0)) return new InvalidRequestReason(common)
   return new UnknownProviderReason({ ...common, status: input.status })
+}
+
+/** Only a named reasoning parameter and its own constraint justify stopping recovery. */
+export function reasoningParameterConstraint(message: string) {
+  if (/\btools?\s+with\s+reasoning(?:_effort)?\b/i.test(message)) return
+  return (
+    /\b(thinking_budget|reasoning_budget|reasoning_effort|thinking[._]budget_tokens)\b[\s\x22\x27`:=0-9()\[\]-]{0,40}(?:must (?:not |be )*(?:greater|less|at most|at least|between|one of|[<>]=?)|should (?:not |be )*(?:greater|less|between|[<>]=?)|(?:is |are )?(?:not supported|unsupported|out of range)|(?:exceeds?|above|below) (?:the )?(?:maximum|minimum|upper|lower|supported)|不(?:得|能|应)(?:大于|小于)|超出.{0,16}(?:上限|范围))/i.exec(
+      message,
+    )?.[1] ??
+    /(?:unsupported|invalid) (?:value for |reasoning )?(?:parameter[ :]+)?[\x22\x27` ]*\b(thinking_budget|reasoning_budget|reasoning_effort|thinking[._]budget_tokens)\b/i.exec(
+      message,
+    )?.[1]
+  )?.toLowerCase()
 }
 
 export const isQuotaExceeded = (value: string) =>

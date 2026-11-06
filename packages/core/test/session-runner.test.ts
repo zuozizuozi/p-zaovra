@@ -11143,3 +11143,274 @@ it.effect("490 an omitted reserve keeps a provider alive until the explicit hard
     ).toBe(false)
   }),
 )
+
+for (const mode of ["sse", "headers", "backoff", "preparation", "short"] as const)
+  it.live(
+    "683 closes actual HTTP " + mode + " at P and never dispatches again for that request",
+    () =>
+      Effect.gen(function* () {
+        yield* setup
+        verificationEnabled = false
+        const started = Promise.withResolvers<void>()
+        const closed = Promise.withResolvers<void>()
+        let calls = 0
+        let frames = 0
+        let closedAt = 0
+        const server = Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          fetch(request) {
+            calls++
+            started.resolve()
+            if (mode === "backoff")
+              return new Response('{"error":{"code":"server_error","message":"temporarily unavailable"}}', {
+                status: 503,
+                headers: { "retry-after": "5" },
+              })
+            if (mode === "headers")
+              return new Promise<Response>((resolve) => {
+                request.signal.addEventListener(
+                  "abort",
+                  () => {
+                    closedAt = Date.now()
+                    closed.resolve()
+                    resolve(new Response("cancelled"))
+                  },
+                  { once: true },
+                )
+              })
+            let timer: ReturnType<typeof setInterval>
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  timer = setInterval(() => {
+                    frames++
+                    controller.enqueue(new TextEncoder().encode(sseEvents(deltaChunk({ content: "partial " }))))
+                  }, 25)
+                },
+                cancel() {
+                  clearInterval(timer)
+                  closedAt = Date.now()
+                  closed.resolve()
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            )
+          },
+        })
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() => server.stop(true)).pipe(
+            Effect.tap(() => Effect.sync(() => console.info("683 server closed", mode, server.pendingRequests))),
+          ),
+        )
+        const session = yield* SessionV2.Service
+        const now = yield* Clock.currentTimeMillis
+        const short = mode === "short"
+        const closingAt = now + (short ? 800 : 4000)
+        yield* session.prompt({
+          sessionID,
+          resume: false,
+          prompt: Prompt.make({
+            text: "保留部分输出，等待有界模型请求",
+            runPolicy: {
+              mode: "unattended",
+              deadline: now + (short ? 1000 : 6000),
+              closingReserveMs: short ? 200 : 2000,
+            },
+          }),
+        })
+        responseStream = LLMClient.stream(
+          LLM.request({
+            model: OpenAIChat.route
+              .with({
+                endpoint: { baseURL: "http://127.0.0.1:" + server.port + "/v1" },
+                auth:
+                  mode === "preparation"
+                    ? Auth.custom(() =>
+                        Effect.sync(() => started.resolve()).pipe(
+                          Effect.andThen(Effect.never),
+                          Effect.ensuring(
+                            Effect.sync(() => {
+                              closedAt = Date.now()
+                              closed.resolve()
+                            }),
+                          ),
+                        ),
+                      )
+                    : Auth.bearer("fixture-only"),
+              })
+              .model({ id: "local" }),
+            prompt: "fixture",
+          }),
+        ).pipe(Stream.provide(LLMClient.layer.pipe(Layer.provide(RequestExecutor.fetchLayer))))
+        const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+        yield* Effect.raceFirst(
+          Effect.promise(() => started.promise),
+          Fiber.join(run),
+        )
+        yield* Fiber.join(run)
+        const ended = yield* Clock.currentTimeMillis
+        if (mode !== "backoff") {
+          yield* Effect.promise(() => closed.promise).pipe(Effect.timeout("1 second"))
+          expect(closedAt).toBeLessThan(closingAt)
+          expect(closedAt).toBeGreaterThanOrEqual(now + (short ? 380 : 1900))
+        }
+        expect(ended).toBeLessThan(closingAt)
+        expect(ended).toBeGreaterThanOrEqual(now + (short ? 380 : 1900))
+        expect(calls).toBe(mode === "preparation" ? 0 : 1)
+        expect(requests).toHaveLength(1)
+        const context = yield* session.context(sessionID)
+        const receipts = context.filter((m) => m.type === "synthetic" && m.text.startsWith("[host.run.closing]"))
+        expect(receipts).toHaveLength(1)
+        expect(JSON.stringify(receipts)).toContain("providerDeadline")
+        const providerAt = Number(
+          receipts[0]?.type === "synthetic" ? /"providerDeadline":(\d+)/.exec(receipts[0].text)?.[1] : NaN,
+        )
+        expect(Number.isFinite(providerAt)).toBe(true)
+        expect(ended).toBeGreaterThanOrEqual(providerAt)
+        console.info(
+          "683 provider window",
+          JSON.stringify({ mode, now, providerAt, closedAt, ended, closingAt, calls, frames }),
+        )
+        expect(yield* session.outcome(sessionID)).toMatchObject({
+          state: "stopped",
+          termination: { category: "budget" },
+        })
+        if (mode === "sse" || mode === "short") {
+          expect(frames).toBeGreaterThan(3)
+          expect(JSON.stringify(context)).toContain("partial ")
+        }
+        if (mode !== "backoff")
+          expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ calls: 1, unreported: 1 })
+        yield* session.resume(sessionID)
+        expect(calls).toBe(mode === "preparation" ? 0 : 1)
+        expect(requests).toHaveLength(1)
+      }),
+    { timeout: 15000 },
+  )
+
+it.effect("683 persists the explicit effort constraint hint without Session recovery", () =>
+  Effect.gen(function* () {
+    yield* setup
+    const session = yield* SessionV2.Service
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Keep selected max effort" }), resume: false })
+    responseStream = LLMClient.stream(
+      LLM.request({
+        model: OpenAIChat.route.with({ auth: Auth.bearer("fixture-private-key") }).model({ id: "offline" }),
+        prompt: "fixture",
+      }),
+    ).pipe(
+      Stream.provide(
+        fixedResponse(
+          JSON.stringify({
+            error: {
+              message: "thinking_budget must not be greater than 131072; fixture-private-key",
+              code: "server_error",
+            },
+          }),
+          { status: 502 },
+        ),
+      ),
+    )
+    yield* session.resume(sessionID).pipe(Effect.exit)
+    expect(requests).toHaveLength(1)
+    const history = JSON.stringify(yield* session.context(sessionID))
+    expect(history).toContain("当前推理档位超出该模型或服务的上限，请降一档。")
+    expect(history).toContain("HTTP 502")
+    expect(history).not.toContain("fixture-private-key")
+  }),
+)
+
+for (const duration of [20000, null])
+  it.effect("683 reschedules P after duration update " + duration, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const done = yield* Deferred.make<void>()
+      const now = yield* Clock.currentTimeMillis
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ time_created: now })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* session.update({ sessionID, budget: { durationMs: 10000 } })
+      yield* session.prompt({
+        sessionID,
+        resume: false,
+        prompt: Prompt.make({
+          text: "Wait for updated budget",
+          runPolicy: { mode: "unattended", deadline: now + 60000, closingReserveMs: 2000 },
+        }),
+      })
+      streamGate = yield* Deferred.make<void>()
+      streamStarted = yield* Deferred.make<void>()
+      const run = yield* session
+        .resume(sessionID)
+        .pipe(Effect.ensuring(Deferred.succeed(done, undefined)), Effect.forkChild)
+      yield* Deferred.await(streamStarted)
+      yield* adjust(1000)
+      yield* session.update({ sessionID, budget: { durationMs: duration } })
+      yield* adjust(4001)
+      expect(yield* Deferred.isDone(done)).toBe(false)
+      expect(requests).toHaveLength(1)
+      if (duration === null) {
+        yield* Fiber.interrupt(run)
+        expect(JSON.stringify(yield* session.context(sessionID))).not.toContain("providerDeadline")
+        return
+      }
+      yield* session.update({ sessionID, budget: { durationMs: 10000 } })
+      yield* adjust(1000)
+      yield* Fiber.join(run)
+      expect(yield* Deferred.isDone(done)).toBe(true)
+      expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+      expect(JSON.stringify(yield* session.context(sessionID))).toContain("providerDeadline")
+    }),
+  )
+
+it.effect("683 Session retries share the original absolute P", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const now = yield* Clock.currentTimeMillis
+    yield* session.prompt({
+      sessionID,
+      resume: false,
+      prompt: Prompt.make({
+        text: "Wait through one recovery",
+        runPolicy: { mode: "unattended", deadline: now + 20000, closingReserveMs: 2000 },
+      }),
+    })
+    const gate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    responseStream = Stream.fail(
+      new LLMError({
+        module: "fixture",
+        method: "stream",
+        reason: new ProviderInternalReason({ message: "temporary", status: 503 }),
+      }),
+    ).pipe(
+      Stream.ensuring(
+        Effect.sync(() => {
+          streamGate = gate
+        }),
+      ),
+    )
+    const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* adjust(5001)
+    yield* Deferred.await(streamStarted)
+    expect(requests).toHaveLength(2)
+    yield* adjust(4000)
+    yield* Fiber.join(run)
+    expect(requests).toHaveLength(2)
+    expect((yield* session.outcome(sessionID)).termination?.category).toBe("budget")
+    expect(
+      (yield* session.context(sessionID)).some(
+        (message) => message.type === "synthetic" && message.text.includes('"providerDeadline":9000'),
+      ),
+    ).toBe(true)
+  }),
+)
