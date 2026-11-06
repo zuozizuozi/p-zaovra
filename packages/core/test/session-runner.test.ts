@@ -11556,3 +11556,98 @@ it.effect("683 Session retries share the original absolute P", () =>
     ).toBe(true)
   }),
 )
+
+it.effect("221 persists each renewed provider deadline before another explicit resume", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const database = yield* Database.Service
+    const now = yield* Clock.currentTimeMillis
+    yield* database.db
+      .update(SessionTable)
+      .set({ time_created: now })
+      .where(eq(SessionTable.id, sessionID))
+      .run()
+      .pipe(Effect.orDie)
+    yield* session.update({ sessionID, budget: { durationMs: 10000 } })
+    yield* session.prompt({
+      sessionID,
+      resume: false,
+      prompt: Prompt.make({
+        text: "Wait for an explicitly renewed budget",
+        runPolicy: { mode: "unattended", deadline: now + 60000, closingReserveMs: 2000 },
+      }),
+    })
+    const receipts = session
+      .context(sessionID)
+      .pipe(
+        Effect.map((messages) =>
+          messages.flatMap((message) =>
+            message.type === "synthetic" && message.text.startsWith("[host.run.closing]") ? [message.text] : [],
+          ),
+        ),
+      )
+    response = repairStop("receipt221")
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const firstRun = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(4001)
+    yield* Fiber.join(firstRun)
+    const first = yield* receipts
+    expect(first).toHaveLength(1)
+    expect(first[0]).toContain('"deadline":' + (now + 10000))
+    expect(first[0]).toContain('"providerDeadline":' + (now + 4000))
+    streamGate = undefined
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(1)
+
+    yield* session.update({ sessionID, budget: { durationMs: 20000 } })
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const secondRun = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(8000)
+    yield* Fiber.join(secondRun)
+    expect(requests).toHaveLength(2)
+    const second = yield* receipts
+    expect(second).toHaveLength(2)
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toContain('"deadline":' + (now + 20000))
+    expect(second[1]).toContain('"providerDeadline":' + (now + 11000.5))
+    streamGate = undefined
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    expect(yield* receipts).toEqual(second)
+
+    yield* session.update({ sessionID, budget: { durationMs: 30000 } })
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const thirdRun = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(8001)
+    yield* Fiber.join(thirdRun)
+    const third = yield* receipts
+    expect(requests).toHaveLength(3)
+    expect(third).toHaveLength(3)
+    expect(third.slice(0, 2)).toEqual(second)
+    expect(third[2]).toContain('"deadline":' + (now + 30000))
+    streamGate = undefined
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(3)
+    expect(yield* receipts).toEqual(third)
+
+    yield* session.prompt({
+      sessionID,
+      resume: false,
+      prompt: Prompt.make({
+        text: "A new request may use the remaining budget",
+        runPolicy: { mode: "unattended", deadline: now + 60000, closingReserveMs: 2000 },
+      }),
+    })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(4)
+    expect(yield* receipts).toEqual(third)
+  }),
+)

@@ -405,7 +405,7 @@ const layer = Layer.effect(
       const prefix = `[host.run.closing] ${source ?? limits.requestID}:${limits.requestID} `
       if (closing) {
         const previous = yield* db
-          .select({ seq: EventTable.seq })
+          .select({ text: sql<string>`json_extract(${EventTable.data}, '$.text')` })
           .from(EventTable)
           .where(
             and(
@@ -417,10 +417,25 @@ const layer = Layer.effect(
               sql`substr(json_extract(${EventTable.data}, '$.text'), 1, ${prefix.length}) = ${prefix}`,
             ),
           )
+          .orderBy(desc(EventTable.seq))
           .limit(1)
           .get()
           .pipe(Effect.orDie)
-        if (previous) return phase
+        const recorded = previous
+          ? Option.getOrUndefined(
+              Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(previous.text.slice(prefix.length)),
+            )
+          : undefined
+        // Renewed budgets need their own receipt; a previous window cannot seal this one.
+        if (
+          recorded !== null &&
+          typeof recorded === "object" &&
+          "deadline" in recorded &&
+          recorded.deadline === deadline &&
+          "closingReserveMs" in recorded &&
+          recorded.closingReserveMs === limits.policy?.closingReserveMs
+        )
+          return phase
         yield* events.publish(SessionEvent.Synthetic, {
           sessionID: session.id,
           timestamp: yield* DateTime.now,
