@@ -28,7 +28,7 @@ export function SessionTabAvatar(props: {
       when={props.conversationIcon}
       fallback={
         <ProjectAvatar
-          fallback={displayName(props.project ?? { worktree: props.directory })}
+          fallback={displayName(props.project ?? { worktree: props.directory }, language)}
           src={getProjectAvatarSource(props.project?.id, props.project?.icon)}
           variant={getProjectAvatarVariant(props.project?.icon?.color)}
           unread={state.unread()}

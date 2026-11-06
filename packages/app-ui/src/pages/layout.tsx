@@ -1278,7 +1278,7 @@ export default function LegacyLayout(props: ParentProps) {
   })
 
   async function renameProject(project: LocalProject, next: string) {
-    const current = displayName(project)
+    const current = displayName(project, language)
     if (next === current) return
     const name = next === getFilename(project.worktree) ? "" : next
 

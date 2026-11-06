@@ -74,7 +74,7 @@ export function SessionFileBrowserTab(props: {
           pathKey(item.worktree) === directory || item.sandboxes?.some((sandbox) => pathKey(sandbox) === directory),
       )
   })
-  const title = createMemo(() => displayName(project() ?? { worktree: sdk().directory }))
+  const title = createMemo(() => displayName(project() ?? { worktree: sdk().directory }, language))
   const optionID = (path: string) => `${resultsID}-option-${files().indexOf(path)}`
 
   const onFilterKeyDown = (event: KeyboardEvent & { currentTarget: HTMLInputElement }) => {

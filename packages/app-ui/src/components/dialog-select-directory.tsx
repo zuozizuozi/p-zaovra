@@ -6,6 +6,7 @@ import type { ListRef } from "@zaovra-ai/ui/list"
 import { getDirectory, getFilename } from "@zaovra-ai/core/util/path"
 import { createMemo, createResource, createSignal } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { displayName } from "@/pages/layout/helpers"
 import { ServerConnection } from "@/context/server"
 import { useGlobal } from "@/context/global"
 import { cleanPickerInput, createDirectorySearch, displayPickerPath } from "./directory-picker-domain"
@@ -103,7 +104,7 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
       .slice(0, 5)
       .map(({ project }) => {
         const row = toRow(project.worktree, home(), "recent")
-        const name = project.name || getFilename(project.worktree)
+        const name = displayName(project, language)
         return {
           ...row,
           search: `${row.search}\n${name}`,

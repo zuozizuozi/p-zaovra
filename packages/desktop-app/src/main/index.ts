@@ -9,7 +9,7 @@ import type { Event } from "electron"
 import { app, dialog, session } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
-import contextMenu from "electron-context-menu"
+import { installTextContextMenus } from "./text-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
 import { checkAppExists, resolveAppPath } from "./apps"
@@ -123,7 +123,7 @@ function ensureLoopbackNoProxy() {
 }
 
 const main = Effect.gen(function* () {
-  contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
+  installTextContextMenus()
 
   // on macOS apps run in `/` which can cause issues with ripgrep
   try {

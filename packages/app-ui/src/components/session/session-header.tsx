@@ -7,7 +7,7 @@ import { Keybind } from "@zaovra-ai/ui/keybind"
 import { Spinner } from "@zaovra-ai/ui/spinner"
 import { showToast } from "@/utils/toast"
 import { Tooltip, TooltipKeybind } from "@zaovra-ai/ui/tooltip"
-import { getFilename } from "@zaovra-ai/core/util/path"
+import { displayName } from "@/pages/layout/helpers"
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -156,8 +156,7 @@ export function SessionHeader() {
   })
   const name = createMemo(() => {
     const current = project()
-    if (current) return current.name || getFilename(current.worktree)
-    return getFilename(projectDirectory())
+    return displayName(current ?? { worktree: projectDirectory() }, language)
   })
   const hotkey = createMemo(() => command.keybind("file.open"))
   const os = createMemo(() => detectOS(platform))

@@ -2,7 +2,6 @@ import { createEffect, createMemo, createResource, For, Show, on } from "solid-j
 import { createStore } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
-import { Icon } from "@zaovra-ai/ui/icon"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { useCommand } from "@/context/command"
 import { useGlobal, type ServerCtx } from "@/context/global"
@@ -15,7 +14,10 @@ import { displayName } from "@/pages/layout/helpers"
 import { ProjectGlyph } from "@/components/project-glyph"
 import { Wordmark } from "@zaovra-ai/ui/logo"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
-import { useDialog } from "@zaovra-ai/ui/context/dialog"
+import { usePlatform } from "@/context/platform"
+import { fileManagerApp } from "@/utils/file-manager"
+import { showToast } from "@/utils/toast"
+import { SidebarSessionActions } from "./sidebar-session-actions"
 import { desktopProjectGroup } from "./desktop-project-group"
 import type { PromptSession } from "@/context/prompt-state"
 
@@ -69,6 +71,16 @@ function DesktopSessionTab(props: {
         active={props.active()}
         forceTruncate
         conversationIcon
+        actions={(rename) =>
+          session() && props.serverCtx() ? (
+            <SidebarSessionActions
+              session={session()!}
+              server={props.tab.server}
+              ctx={props.serverCtx()!}
+              rename={rename}
+            />
+          ) : undefined
+        }
       />
     </Show>
   )
@@ -81,11 +93,41 @@ export function DesktopSidebar() {
   const language = useLanguage()
   const layout = useLayout()
   const tabs = useTabs()
-  const dialog = useDialog()
+  const platform = usePlatform()
   const [view, setView] = createStore({
+    menuProject: "",
+    editingProject: "",
+    projectTitle: "",
+    savingProject: false,
     collapsed: {} as Record<string, boolean>,
     loadErrors: {} as Record<string, boolean>,
   })
+  const connection = (group: ProjectGroup) =>
+    global.servers.list().find((item) => ServerConnection.key(item) === group.server)
+  const renameProject = async (group: ProjectGroup) => {
+    if (view.editingProject !== groupKey(group) || view.savingProject) return
+    const name = view.projectTitle.trim()
+    if (!name || name === displayName(group.project, language)) {
+      setView("editingProject", "")
+      return
+    }
+    setView("savingProject", true)
+    await (
+      group.project.id && group.project.id !== "global"
+        ? group.ctx.sdk
+            .createClient({ directory: group.project.worktree, throwOnError: true })
+            .project.update({ projectID: group.project.id, directory: group.project.worktree, name })
+        : Promise.resolve(group.ctx.sync.project.meta(group.project.worktree, { name }))
+    )
+      .then(() => setView("editingProject", ""))
+      .catch((error: unknown) =>
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : undefined,
+        }),
+      )
+      .finally(() => setView("savingProject", false))
+  }
   const groupKey = (group: ProjectGroup) => `${group.server}:${group.project.worktree}`
   const expanded = (group: ProjectGroup) => !view.collapsed[groupKey(group)]
   const loaded = new Set<string>()
@@ -226,7 +268,7 @@ export function DesktopSidebar() {
         <Show when={activeGroup()}>
           {(group) => (
             <p data-slot="new-session-project" class="px-2 pt-1 text-xs text-v2-text-text-faint truncate">
-              {language.t("sidebar.newSessionProject", { project: displayName(group().project) })}
+              {language.t("sidebar.newSessionProject", { project: displayName(group().project, language) })}
             </p>
           )}
         </Show>
@@ -244,72 +286,143 @@ export function DesktopSidebar() {
                 data-current={activeGroup() && groupKey(activeGroup()!) === groupKey(group)}
                 class="flex min-w-0 flex-col gap-1"
               >
-                <div class="group/project flex h-8 min-w-0 items-center gap-1 rounded-md hover:bg-v2-background-bg-layer-02">
-                  <button
-                    type="button"
-                    class="flex min-w-0 flex-1 items-center gap-2 px-2 text-left"
-                    onClick={() => selectProject(group)}
-                    title={group.project.worktree}
-                    data-slot="project-heading"
-                  >
-                    <span class="size-5 shrink-0">
-                      <ProjectGlyph project={group.project} />
-                    </span>
-                    <span class="min-w-0 flex-1 truncate text-[13px] font-normal text-v2-text-text-base">
-                      {displayName(group.project)}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    data-slot="project-action"
-                    aria-label={language.t("command.session.new")}
-                    class="flex size-6 items-center justify-center"
-                    onClick={() => {
-                      layout.home.setSelection({ server: group.server, directory: group.project.worktree })
-                      void tabs.newDraft({ server: group.server, directory: group.project.worktree })
+                <MenuV2
+                  open={view.menuProject === groupKey(group)}
+                  onOpenChange={(open) => setView("menuProject", open ? groupKey(group) : "")}
+                  modal={false}
+                  placement="bottom-end"
+                >
+                  <div
+                    class="group/project flex h-8 min-w-0 items-center gap-1 rounded-md hover:bg-v2-background-bg-layer-02"
+                    onContextMenu={(event) => {
+                      if (view.editingProject === groupKey(group)) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setView("menuProject", groupKey(group))
                     }}
                   >
-                    <IconV2 name="plus" size="small" />
-                  </button>
-                  <button
-                    type="button"
-                    data-slot="project-action"
-                    class="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-v2-icon-icon-muted hover:bg-v2-background-bg-layer-03"
-                    aria-expanded={expanded(group)}
-                    aria-label={expanded(group) ? language.t("home.server.collapse") : language.t("home.server.expand")}
-                    onClick={() => setView("collapsed", groupKey(group), expanded(group))}
-                  >
-                    <IconV2 name={expanded(group) ? "chevron-down" : "chevron-right"} size="small" />
-                  </button>
-                  <MenuV2 modal={false} placement="bottom-end">
+                    <Show
+                      when={view.editingProject === groupKey(group)}
+                      fallback={
+                        <>
+                          <button
+                            type="button"
+                            class="flex min-w-0 flex-1 items-center gap-2 px-2 text-left"
+                            onClick={() => selectProject(group)}
+                            title={group.project.worktree}
+                            data-slot="project-heading"
+                          >
+                            <span class="size-5 shrink-0">
+                              <ProjectGlyph project={group.project} />
+                            </span>
+                            <span class="min-w-0 flex-1 truncate text-[13px] font-normal text-v2-text-text-base">
+                              {displayName(group.project, language)}
+                            </span>
+                          </button>
+                        </>
+                      }
+                    >
+                      <input
+                        data-action="project-rename"
+                        aria-label={language.t("common.rename")}
+                        class="mx-2 min-w-0 flex-1 rounded border border-v2-border-border-focus bg-transparent px-1 text-[13px] text-v2-text-text-base outline-none"
+                        value={view.projectTitle}
+                        disabled={view.savingProject}
+                        ref={(input) =>
+                          queueMicrotask(() => {
+                            input.focus()
+                            input.select()
+                          })
+                        }
+                        onInput={(event) => setView("projectTitle", event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          event.stopPropagation()
+                          if (event.key === "Escape") {
+                            event.preventDefault()
+                            setView("editingProject", "")
+                            return
+                          }
+                          if (event.key === "Enter") {
+                            event.preventDefault()
+                            void renameProject(group)
+                          }
+                        }}
+                        onBlur={() => void renameProject(group)}
+                      />
+                    </Show>
+                    <button
+                      type="button"
+                      data-slot="project-action"
+                      aria-label={language.t("command.session.new")}
+                      class="flex size-6 items-center justify-center"
+                      onClick={() => {
+                        layout.home.setSelection({ server: group.server, directory: group.project.worktree })
+                        void tabs.newDraft({ server: group.server, directory: group.project.worktree })
+                      }}
+                    >
+                      <IconV2 name="plus" size="small" />
+                    </button>
+                    <button
+                      type="button"
+                      data-slot="project-action"
+                      class="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-v2-icon-icon-muted hover:bg-v2-background-bg-layer-03"
+                      aria-expanded={expanded(group)}
+                      aria-label={
+                        expanded(group) ? language.t("home.server.collapse") : language.t("home.server.expand")
+                      }
+                      onClick={() => setView("collapsed", groupKey(group), expanded(group))}
+                    >
+                      <IconV2 name={expanded(group) ? "chevron-down" : "chevron-right"} size="small" />
+                    </button>
                     <MenuV2.Trigger
                       data-slot="project-action"
-                      class="flex size-6 shrink-0 items-center justify-center"
+                      class="hover-reveal mr-1 flex size-6 shrink-0 items-center justify-center group-hover/project:opacity-100 group-focus-within/project:opacity-100 data-[expanded]:opacity-100"
                       aria-label={language.t("common.moreOptions")}
                     >
                       <IconV2 name="outline-dots" size="small" />
                     </MenuV2.Trigger>
                     <MenuV2.Portal>
-                      <MenuV2.Content>
+                      <MenuV2.Content
+                        onCloseAutoFocus={(event) => {
+                          if (view.editingProject === groupKey(group)) event.preventDefault()
+                        }}
+                      >
                         <MenuV2.Item
-                          onSelect={async () => {
-                            const connection = global.servers
-                              .list()
-                              .find((item) => ServerConnection.key(item) === group.server)
-                            if (!connection) return
-                            const { DialogEditProjectV2 } = await import("@/components/dialog-edit-project-v2")
-                            void dialog.show(() => <DialogEditProjectV2 project={group.project} server={connection} />)
-                          }}
+                          onSelect={() =>
+                            setView({
+                              editingProject: groupKey(group),
+                              projectTitle: displayName(group.project, language),
+                            })
+                          }
                         >
-                          {language.t("dialog.project.edit.title")}
+                          {language.t("common.rename")}
                         </MenuV2.Item>
+                        <Show when={platform.openPath && ServerConnection.local(connection(group))}>
+                          <MenuV2.Item
+                            onSelect={() =>
+                              void platform.openPath?.(group.project.worktree).catch((error: unknown) =>
+                                showToast({
+                                  title: language.t("common.requestFailed"),
+                                  description: error instanceof Error ? error.message : undefined,
+                                }),
+                              )
+                            }
+                          >
+                            {language.t(fileManagerApp(platform.os ?? "unknown").actionLabel)}
+                          </MenuV2.Item>
+                        </Show>
                         <MenuV2.Item onSelect={() => group.ctx.projects.close(group.project.worktree)}>
-                          {language.t("common.close")}
+                          <span class="flex flex-col gap-1">
+                            <span>{language.t("sidebar.project.remove")}</span>
+                            <span class="text-xs text-v2-text-text-faint">
+                              {language.t("sidebar.project.removeHint")}
+                            </span>
+                          </span>
                         </MenuV2.Item>
                       </MenuV2.Content>
                     </MenuV2.Portal>
-                  </MenuV2>
-                </div>
+                  </div>
+                </MenuV2>
 
                 <Show when={expanded(group)}>
                   <div
@@ -343,22 +456,32 @@ export function DesktopSidebar() {
                       }}
                     </For>
                     <For each={groupSessions(group)}>
-                      {(session) => (
-                        <button
-                          type="button"
-                          data-slot="project-session"
-                          class="flex min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] text-v2-text-text-faint hover:bg-v2-background-bg-layer-02"
-                          title={session.title}
-                          onClick={() => {
-                            const tab: SessionTab = { type: "session", server: group.server, sessionId: session.id }
-                            tabs.rememberSessionInfo(tab, session)
-                            tabs.select(tab)
-                          }}
-                        >
-                          <Icon name="speech-bubble" size="small" />
-                          <span class="truncate">{session.title}</span>
-                        </button>
-                      )}
+                      {(session) => {
+                        const tab: SessionTab = { type: "session", server: group.server, sessionId: session.id }
+                        return (
+                          <TabNavItem
+                            href={tabHref(tab)}
+                            server={group.server}
+                            session={() => session}
+                            active={false}
+                            forceTruncate
+                            conversationIcon
+                            onClose={() => {}}
+                            onNavigate={() => {
+                              tabs.rememberSessionInfo(tab, session)
+                              tabs.select(tab)
+                            }}
+                            actions={(rename) => (
+                              <SidebarSessionActions
+                                session={session}
+                                server={group.server}
+                                ctx={group.ctx}
+                                rename={rename}
+                              />
+                            )}
+                          />
+                        )
+                      }}
                     </For>
                     <Show when={view.loadErrors[groupKey(group)]}>
                       <button type="button" class="p-2 text-xs text-text-weak" onClick={() => loadGroup(group)}>

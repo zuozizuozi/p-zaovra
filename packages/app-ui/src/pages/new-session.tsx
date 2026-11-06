@@ -1,4 +1,3 @@
-import { displayName } from "@/pages/layout/helpers"
 import { Show, createEffect, createMemo, createResource, createSignal, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
@@ -173,24 +172,18 @@ export default function NewSessionPage() {
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
         <div class="@container relative flex flex-col min-h-0 h-full flex-1">
           <div class="flex-1 min-h-0 overflow-hidden rounded-[10px]">
-            <NewSessionDesignView
-              heading={
-                projectController.selected()
-                  ? language.t("session.new.projectTitle", { project: displayName(projectController.selected()!) })
-                  : undefined
-              }
-            >
+            <NewSessionDesignView>
               <div data-slot="new-session-task" class={NEW_SESSION_CONTENT_WIDTH}>
-                <div class="flex flex-col" classList={{ "gap-8": showWorkspaceBar(), "gap-3": !showWorkspaceBar() }}>
+                <div class="flex flex-col" classList={{ "gap-3": true }}>
                   <Show when={projectController.empty()}>
                     <PromptProjectAddButton controller={projectController} />
                   </Show>
                   <Show when={projectController.selected()}>
                     <div
-                      class="flex min-h-7 min-w-0 items-center gap-0 text-v2-text-text-faint"
+                      data-slot="new-session-folder"
+                      class="order-last flex min-h-7 min-w-0 items-center text-v2-text-text-faint"
                       classList={{
-                        "flex-col justify-center sm:flex-row": showWorkspaceBar(),
-                        "justify-center": !showWorkspaceBar(),
+                        "flex-wrap justify-start gap-1": true,
                       }}
                     >
                       <PromptProjectSelector controller={projectController} placement="bottom" />

@@ -137,6 +137,7 @@ function buildHomeSessionRecords(input: {
   projectDirectories: () => string[]
   projects: () => LocalProject[]
   projectByID: () => Map<string, LocalProject>
+  language: ReturnType<typeof useLanguage>
 }) {
   const directories = new Set(input.projectDirectories().map(pathKey))
   const sessions = input.sessions().filter((session) => directories.has(pathKey(session.directory)))
@@ -155,7 +156,7 @@ function buildHomeSessionRecords(input: {
       return {
         session,
         project,
-        projectName: displayName(project),
+        projectName: displayName(project, input.language),
       }
     })
 }
@@ -388,7 +389,7 @@ export function NewHome() {
   const searchPlaceholder = createMemo(() => {
     const project = selectedProject()
     if (project) {
-      return language.t("home.sessions.search.placeholder.scoped", { scope: displayName(project) })
+      return language.t("home.sessions.search.placeholder.scoped", { scope: displayName(project, language) })
     }
     if (global.servers.list().length > 1) {
       const conn = focusedServer()
@@ -442,6 +443,7 @@ export function NewHome() {
       projectDirectories,
       projects,
       projectByID,
+      language,
     }),
   )
   const records = createMemo(() => allRecords().slice(0, HOME_SESSION_LIMIT))
@@ -1178,7 +1180,7 @@ function HomeRecentlyClosedRow(props: {
         onClick={() => props.openRecentProject(props.server, props.project.worktree)}
       >
         <HomeProjectAvatar project={props.project} outline />
-        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
+        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project, props.language)}</span>
       </button>
     </TooltipV2>
   )
@@ -1227,7 +1229,7 @@ function HomeProjectRow(props: {
         onClick={() => props.selectProject(props.server, props.project.worktree)}
       >
         <HomeProjectAvatar project={props.project} />
-        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
+        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project, props.language)}</span>
       </button>
       <div
         class="hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 group-hover/project:opacity-100 focus-within:opacity-100 data-[menu=true]:opacity-100"
@@ -1286,7 +1288,8 @@ function HomeProjectRow(props: {
 }
 
 function HomeProjectAvatar(props: { project: LocalProject; outline?: boolean }) {
-  const name = createMemo(() => displayName(props.project))
+  const language = useLanguage()
+  const name = createMemo(() => displayName(props.project, language))
   return (
     <ProjectAvatar
       fallback={name()}

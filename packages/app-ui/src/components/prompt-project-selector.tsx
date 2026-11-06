@@ -68,7 +68,7 @@ export function createPromptProjectController(input: {
   const projects = () => {
     const search = store.search.trim().toLowerCase()
     if (!search) return input.controls().available
-    return input.controls().available.filter((project) => displayName(project).toLowerCase().includes(search))
+    return input.controls().available.filter((project) => displayName(project, language).toLowerCase().includes(search))
   }
   const servers = () =>
     input
@@ -459,6 +459,7 @@ export function PromptProjectAddButton(props: { controller: PromptProjectControl
 }
 
 function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptProjectController }) {
+  const language = useLanguage()
   const [local, rest] = splitProps(props, ["controller", "class", "classList", "onClick", "onKeyDown"])
   const project = () => local.controller.selected()
   return (
@@ -490,7 +491,7 @@ function ProjectTrigger(props: ComponentProps<"button"> & { controller: PromptPr
         {(item) => <ProjectGlyph project={item()} />}
       </Show>
       <span class="min-w-0 truncate leading-5">
-        {project() ? displayName(project()!) : local.controller.labels.new()}
+        {project() ? displayName(project()!, language) : local.controller.labels.new()}
       </span>
       <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
     </button>
@@ -502,6 +503,7 @@ function ProjectItem(props: {
   controller: PromptProjectController
   onSelect: (project: PromptProject) => void
 }) {
+  const language = useLanguage()
   const key = () => props.controller.projectKey(props.project)
   return (
     <DropdownMenu.RadioItem
@@ -527,7 +529,9 @@ function ProjectItem(props: {
       onSelect={() => props.onSelect(props.project)}
     >
       <ProjectGlyph project={props.project} />
-      <DropdownMenu.ItemLabel class="min-w-0 truncate leading-5">{displayName(props.project)}</DropdownMenu.ItemLabel>
+      <DropdownMenu.ItemLabel class="min-w-0 truncate leading-5">
+        {displayName(props.project, language)}
+      </DropdownMenu.ItemLabel>
       <DropdownMenu.ItemIndicator style={{ width: "14px", height: "14px", right: "12px" }}>
         <IconV2 name="check" size="small" class="shrink-0 text-v2-icon-icon-base" />
       </DropdownMenu.ItemIndicator>

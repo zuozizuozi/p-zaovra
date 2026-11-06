@@ -97,7 +97,7 @@ const ProjectTile = (props: {
       <ContextMenu.Trigger
         as="button"
         type="button"
-        aria-label={displayName(props.project)}
+        aria-label={displayName(props.project, props.language)}
         data-action="project-switch"
         data-project={base64Encode(props.project.worktree)}
         classList={{
@@ -199,7 +199,7 @@ const ProjectPreviewPanel = (props: {
 }): JSX.Element => (
   <div class="-m-3 p-2 flex flex-col w-72">
     <div class="px-4 pt-2 pb-1 flex items-center gap-2">
-      <div class="text-14-medium text-text-strong truncate grow">{displayName(props.project)}</div>
+      <div class="text-14-medium text-text-strong truncate grow">{displayName(props.project, props.language)}</div>
     </div>
     <div class="px-4 pb-2 text-12-medium text-text-weak">{props.language.t("sidebar.project.recentSessions")}</div>
     <div class="px-2 pb-2 flex flex-col gap-2">

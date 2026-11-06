@@ -5,7 +5,6 @@ import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { Spinner } from "@zaovra-ai/ui/spinner"
 import { Tooltip } from "@zaovra-ai/ui/tooltip"
-import { getFilename } from "@zaovra-ai/core/util/path"
 import { A, useParams } from "@solidjs/router"
 import { type Accessor, createMemo, For, type JSX, Match, Show, Switch } from "solid-js"
 import { useServerSync } from "@/context/server-sync"
@@ -16,7 +15,7 @@ import { usePermission } from "@/context/permission"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
 import { sessionPermissionRequest, sessionQuestionRequest } from "../session/composer/session-request-tree"
-import { childSessionOnPath, getProjectAvatarSource, hasProjectPermissions } from "./helpers"
+import { childSessionOnPath, displayName, getProjectAvatarSource, hasProjectPermissions } from "./helpers"
 
 export const ProjectIcon = (props: {
   project: LocalProject
@@ -24,6 +23,7 @@ export const ProjectIcon = (props: {
   notify?: boolean
   working?: boolean
 }): JSX.Element => {
+  const language = useLanguage()
   const serverSync = useServerSync()
   const notification = useNotification()
   const permission = usePermission()
@@ -41,7 +41,7 @@ export const ProjectIcon = (props: {
     }),
   )
   const notify = createMemo(() => props.notify && (hasPermissions() || unseenCount() > 0))
-  const name = createMemo(() => props.project.name || getFilename(props.project.worktree))
+  const name = createMemo(() => displayName(props.project, language))
 
   return (
     <div class={`relative size-8 shrink-0 rounded ${props.class ?? ""}`}>

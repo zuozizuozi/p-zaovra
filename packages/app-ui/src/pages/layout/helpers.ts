@@ -55,8 +55,17 @@ export const childSessionOnPath = (sessions: Session[] | undefined, rootID: stri
   }
 }
 
-export const displayName = (project: { name?: string; worktree: string }) =>
-  project.name || getFilename(project.worktree) || project.worktree
+export function displayName(
+  project: { name?: string; worktree: string },
+  language?: { t: (key: "project.defaultName") => string },
+) {
+  const folder = getFilename(project.worktree)
+  if (project.name && project.name !== "Default Project") return project.name
+  if (folder && folder !== "Default Project") return folder
+  if (folder === "Default Project" || project.name === "Default Project")
+    return language?.t("project.defaultName") ?? "Default project"
+  return language?.t("project.defaultName") ?? "Default project"
+}
 
 export function toggleHomeProjectSelection(
   current: HomeProjectSelection | undefined,

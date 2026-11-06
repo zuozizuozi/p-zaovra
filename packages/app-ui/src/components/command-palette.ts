@@ -147,6 +147,7 @@ export function createCommandPaletteModel(props: { filesOnly?: () => boolean; on
     stored: () => serverCtx.sync.data.project,
     load: (search, signal) =>
       listV2Sessions(serverSDK.client, { roots: true, search, limit: 50, order: "desc" }, { signal }),
+    language,
     untitled: () => language.t("command.session.new"),
     category: () => language.t("command.category.session"),
   })
@@ -223,6 +224,7 @@ export function createServerSessionEntries(props: {
   load: (search: string, signal: AbortSignal) => Promise<{ data?: Session[] }>
   untitled: () => string
   category: () => string
+  language?: ReturnType<typeof useLanguage>
 }) {
   let abort: AbortController | undefined
 
@@ -265,7 +267,7 @@ export function createServerSessionEntries(props: {
               id: `session:${props.server}:${session.id}`,
               type: "session" as const,
               title: session.title || props.untitled(),
-              description: project ? displayName(project) : getFilename(session.directory),
+              description: project ? displayName(project, props.language) : getFilename(session.directory),
               category: props.category(),
               directory: session.directory,
               sessionID: session.id,

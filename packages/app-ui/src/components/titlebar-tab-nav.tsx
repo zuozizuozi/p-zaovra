@@ -1,6 +1,7 @@
-import { createEffect, createMemo, createSignal, onCleanup, Show, type Ref } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, Show, type Ref, type JSX } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
+import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { useGlobal } from "@/context/global"
@@ -31,6 +32,7 @@ export function TabNavItem(props: {
   active?: boolean
   forceTruncate?: boolean
   conversationIcon?: boolean
+  actions?: (rename: () => void) => JSX.Element
   suppressNavigation?: () => boolean
   dragging?: boolean
   pressed?: boolean
@@ -38,6 +40,7 @@ export function TabNavItem(props: {
 }) {
   const language = useLanguage()
   const [editing, setEditing] = createSignal(false)
+  const [menuOpen, setMenuOpen] = createSignal(false)
   const [titleOverflowing, setTitleOverflowing] = createSignal(false)
   let tabRoot!: HTMLDivElement
   let titleEl!: HTMLSpanElement
@@ -64,7 +67,7 @@ export function TabNavItem(props: {
   const projectName = createMemo(() => {
     const session = props.session()
     if (!session) return
-    return displayName(project() ?? { worktree: session.directory })
+    return displayName(project() ?? { worktree: session.directory }, language)
   })
   const previewPath = createMemo(() => {
     const session = props.session()
@@ -80,7 +83,7 @@ export function TabNavItem(props: {
   })
 
   const [popoverOpen, setPopoverOpen] = createSignal(false)
-  const previewBlocked = () => !!props.dragging || editing() || !!props.pressed || !props.session()
+  const previewBlocked = () => menuOpen() || !!props.dragging || editing() || !!props.pressed || !props.session()
 
   const measureTitleOverflow = () => {
     if (!titleEl || editing()) {
@@ -163,9 +166,9 @@ export function TabNavItem(props: {
     titleEl.textContent = value
   })
 
-  const openRename = (event: MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
+  const openRename = (event?: MouseEvent) => {
+    event?.preventDefault()
+    event?.stopPropagation()
     if (!canOpenTabRename(props.dragging, editing(), committing)) return
     const session = props.session()
     if (!session) return
@@ -196,7 +199,7 @@ export function TabNavItem(props: {
     onCleanup(cleanup)
   })
 
-  const tab = (
+  const TabContent = () => (
     <div
       ref={(el) => {
         tabRoot = el
@@ -211,6 +214,18 @@ export function TabNavItem(props: {
       data-active={props.active}
       data-dragging={props.dragging}
       data-pressed={props.pressed}
+      onContextMenu={(event) => {
+        if (!props.actions || editing()) return
+        event.preventDefault()
+        event.stopPropagation()
+        setMenuOpen(true)
+      }}
+      onKeyDown={(event) => {
+        if (!props.actions || editing() || !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")))
+          return
+        event.preventDefault()
+        setMenuOpen(true)
+      }}
       onMouseDown={(event) => {
         if (event.button !== MIDDLE_MOUSE_BUTTON) return
         event.preventDefault()
@@ -306,38 +321,65 @@ export function TabNavItem(props: {
         </a>
       </Show>
 
-      <div data-slot="tab-close" class="group-hover:bg-[var(--tab-bg)] group-data-[active=true]:bg-[var(--tab-bg)]">
-        <IconButtonV2
-          size="small"
-          variant="ghost-muted"
-          class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-          }}
-          onClick={closeTab}
-          icon={<IconV2 name="xmark-small" />}
-          aria-label={language.t("common.close")}
-        />
-      </div>
+      <Show
+        when={props.actions}
+        fallback={
+          <div data-slot="tab-close" class="group-hover:bg-[var(--tab-bg)] group-data-[active=true]:bg-[var(--tab-bg)]">
+            <IconButtonV2
+              size="small"
+              variant="ghost-muted"
+              class="hover-reveal relative z-10 group-hover:opacity-100 group-data-[active=true]:opacity-100 group-data-[editing=true]:opacity-100"
+              onPointerDown={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={closeTab}
+              icon={<IconV2 name="xmark-small" />}
+              aria-label={language.t("common.close")}
+            />
+          </div>
+        }
+      >
+        <MenuV2.Trigger
+          data-action="session-menu"
+          aria-label={language.t("common.moreOptions")}
+          class="hover-reveal flex size-6 shrink-0 items-center justify-center rounded group-hover:opacity-100 group-focus-within:opacity-100 data-[expanded]:opacity-100"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <IconV2 name="outline-dots" size="small" />
+        </MenuV2.Trigger>
+      </Show>
     </div>
   )
 
   return (
-    <TabPreviewPopover
-      trigger={tab}
-      open={popoverOpen() && !previewBlocked()}
-      onOpenChange={(value) => {
-        if (value && previewBlocked()) return
-        setPopoverOpen(value)
-      }}
-      data={{
-        projectName: projectName(),
-        title: sessionTitle(props.session()?.title, language),
-        path: previewPath(),
-        serverName: serverLabel(),
-      }}
-    />
+    <MenuV2 open={menuOpen()} onOpenChange={setMenuOpen} modal={false} placement="bottom-end">
+      <TabPreviewPopover
+        trigger={<TabContent />}
+        open={popoverOpen() && !previewBlocked()}
+        onOpenChange={(value) => {
+          if (value && previewBlocked()) return
+          setPopoverOpen(value)
+        }}
+        data={{
+          projectName: projectName(),
+          title: sessionTitle(props.session()?.title, language),
+          path: previewPath(),
+          serverName: serverLabel(),
+        }}
+      />
+      <Show when={props.actions}>
+        <MenuV2.Portal>
+          <MenuV2.Content
+            onCloseAutoFocus={(event) => {
+              if (editing()) event.preventDefault()
+            }}
+          >
+            {props.actions?.(() => openRename())}
+          </MenuV2.Content>
+        </MenuV2.Portal>
+      </Show>
+    </MenuV2>
   )
 }
 

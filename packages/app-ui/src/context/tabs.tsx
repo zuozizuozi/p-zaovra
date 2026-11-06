@@ -4,7 +4,7 @@ import { createStore, produce } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
 import { batch, createEffect, getOwner, onCleanup, onMount, startTransition } from "solid-js"
-import { useLocation, useNavigate, useParams } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
 import { SessionTabsRemovedDetail } from "@/components/titlebar-session-events"
@@ -78,7 +78,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
     const [info, setInfo] = persisted(Persist.window("tabs.info"), createStore<Record<string, TabInfo>>({}))
     const [closed, setClosed, , closedReady] = persisted(Persist.window("tabs.closed"), createStore<ClosedTab[]>([]))
 
-    const params = useParams()
     const navigate = useNavigate()
     const location = useLocation()
     const memory = createTabMemory(getOwner())
@@ -395,14 +394,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           setStore(
             produce((tabs) => {
               const sessionIDs = new Set(input.sessionIDs)
-              const currentHref =
-                targetServer === server.key && params.dir && params.id
-                  ? tabHref({
-                      type: "session",
-                      server: targetServer,
-                      sessionId: params.id,
-                    })
-                  : undefined
+              const currentHref = location.pathname
               const currentIndex = currentHref
                 ? tabs.findIndex(
                     (tab) => tab.type === "session" && tab.server === targetServer && tabHref(tab) === currentHref,

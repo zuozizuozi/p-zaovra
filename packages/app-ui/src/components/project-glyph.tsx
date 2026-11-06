@@ -1,3 +1,4 @@
+import { useLanguage } from "@/context/language"
 import { Show } from "solid-js"
 import { Icon } from "@zaovra-ai/ui/v2/icon"
 import { ProjectAvatar } from "@zaovra-ai/ui/v2/project-avatar-v2"
@@ -12,6 +13,7 @@ type ProjectGlyphProject = {
 }
 
 export function ProjectGlyph(props: { project: ProjectGlyphProject }) {
+  const language = useLanguage()
   const source = () => getProjectAvatarSource(props.project.id, props.project.icon)
   return (
     <Show
@@ -28,7 +30,7 @@ export function ProjectGlyph(props: { project: ProjectGlyphProject }) {
       }
     >
       <ProjectAvatar
-        fallback={displayName(props.project)}
+        fallback={displayName(props.project, language)}
         src={source()}
         variant={getProjectAvatarVariant(props.project.icon?.color)}
       />
