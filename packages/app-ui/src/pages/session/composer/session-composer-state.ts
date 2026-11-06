@@ -2,6 +2,7 @@ import { createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { PermissionView, QuestionView, Todo } from "@zaovra-ai/sdk/v2"
 import { useLocation, useParams } from "@solidjs/router"
+import { formatServerError } from "@/utils/server-errors"
 import { showToast } from "@/utils/toast"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
@@ -50,6 +51,19 @@ export function createSessionComposerController(options?: { closeMs?: number | (
       return !permission.autoResponds(item, sdk().directory)
     })
   })
+
+  createEffect(
+    on(
+      () => {
+        const request = permissionRequest()
+        return request ? permission.autoReplyError(request) : undefined
+      },
+      (error) => {
+        if (error)
+          showToast({ title: language.t("common.requestFailed"), description: formatServerError(error, language.t) })
+      },
+    ),
+  )
 
   const blocked = createMemo(() => {
     const id = params.id
@@ -100,7 +114,14 @@ export function createSessionComposerController(options?: { closeMs?: number | (
       )
       .then(() => params.id === sessionID)
       .catch((err: unknown) => {
-        const description = err instanceof Error ? err.message : String(err)
+        const description = formatServerError(err, language.t)
+        if (/Permission request not found/i.test(description)) {
+          serverSync().session.set("permission", perm.sessionID, (items = []) =>
+            items.filter((item) => item.id !== perm.id),
+          )
+          showToast({ title: language.t("session.permission.expired") })
+          return false
+        }
         showToast({ title: language.t("common.requestFailed"), description })
         return false
       })

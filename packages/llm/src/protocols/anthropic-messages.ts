@@ -56,6 +56,17 @@ const AnthropicImageBlock = Schema.Struct({
 })
 type AnthropicImageBlock = Schema.Schema.Type<typeof AnthropicImageBlock>
 
+const AnthropicDocumentBlock = Schema.Struct({
+  type: Schema.tag("document"),
+  source: Schema.Struct({
+    type: Schema.tag("base64"),
+    media_type: Schema.Literal("application/pdf"),
+    data: Schema.String,
+  }),
+  cache_control: Schema.optional(AnthropicCacheControl),
+})
+type AnthropicDocumentBlock = Schema.Schema.Type<typeof AnthropicDocumentBlock>
+
 const AnthropicThinkingBlock = Schema.Struct({
   type: Schema.tag("thinking"),
   thinking: Schema.String,
@@ -112,7 +123,7 @@ type AnthropicServerToolResultBlock = Schema.Schema.Type<typeof AnthropicServerT
 // to the model as proper image inputs instead of being JSON-stringified into
 // the prompt — which silently inflates context by megabytes and can push the
 // conversation over the model's token limit.
-const AnthropicToolResultContent = Schema.Union([AnthropicTextBlock, AnthropicImageBlock])
+const AnthropicToolResultContent = Schema.Union([AnthropicTextBlock, AnthropicImageBlock, AnthropicDocumentBlock])
 
 const AnthropicToolResultBlock = Schema.Struct({
   type: Schema.tag("tool_result"),
@@ -122,7 +133,12 @@ const AnthropicToolResultBlock = Schema.Struct({
   cache_control: Schema.optional(AnthropicCacheControl),
 })
 
-const AnthropicUserBlock = Schema.Union([AnthropicTextBlock, AnthropicImageBlock, AnthropicToolResultBlock])
+const AnthropicUserBlock = Schema.Union([
+  AnthropicTextBlock,
+  AnthropicImageBlock,
+  AnthropicDocumentBlock,
+  AnthropicToolResultBlock,
+])
 type AnthropicUserBlock = Schema.Schema.Type<typeof AnthropicUserBlock>
 const AnthropicAssistantBlock = Schema.Union([
   AnthropicTextBlock,
@@ -317,12 +333,17 @@ const lowerServerToolResult = Effect.fn("AnthropicMessages.lowerServerToolResult
   return { type: wireType, tool_use_id: part.id, content: part.result.value } satisfies AnthropicServerToolResultBlock
 })
 
-const lowerImage = Effect.fn("AnthropicMessages.lowerImage")(function* (part: MediaPart) {
+const lowerMedia = Effect.fn("AnthropicMessages.lowerMedia")(function* (part: MediaPart) {
   const media = yield* ProviderShared.validateMedia(
     "Anthropic Messages",
     part,
-    new Set<string>(ProviderShared.IMAGE_MIMES),
+    new Set<string>([...ProviderShared.IMAGE_MIMES, "application/pdf"]),
   )
+  if (media.mime === "application/pdf")
+    return {
+      type: "document" as const,
+      source: { type: "base64" as const, media_type: "application/pdf" as const, data: media.base64 },
+    } satisfies AnthropicDocumentBlock
   return {
     type: "image" as const,
     source: {
@@ -342,8 +363,13 @@ const lowerToolResultContentItem = Effect.fn("AnthropicMessages.lowerToolResultC
   const media = yield* ProviderShared.validateToolFile(
     "Anthropic Messages",
     item,
-    new Set<string>(ProviderShared.IMAGE_MIMES),
+    new Set<string>([...ProviderShared.IMAGE_MIMES, "application/pdf"]),
   )
+  if (media.mime === "application/pdf")
+    return {
+      type: "document" as const,
+      source: { type: "base64" as const, media_type: "application/pdf" as const, data: media.base64 },
+    } satisfies AnthropicDocumentBlock
   return {
     type: "image" as const,
     source: {
@@ -450,7 +476,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
           continue
         }
         if (part.type === "media") {
-          content.push(yield* lowerImage(part))
+          content.push(yield* lowerMedia(part))
           continue
         }
         return yield* ProviderShared.unsupportedContent("Anthropic Messages", "user", ["text", "media"])

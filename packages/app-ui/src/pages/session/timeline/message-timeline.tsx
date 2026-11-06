@@ -465,7 +465,8 @@ export function MessageTimeline(props: {
           part.type === "tool" &&
           part.state.status === "error" &&
           !(part.tool === "question" && part.state.error.includes("dismissed this question")) &&
-          !projection.quietParts().has(part.id),
+          !projection.quietParts().has(part.id) &&
+          !projection.processParts().has(part.id),
       )
   }
   const messageLastRowIndex = projection.messageLastRowIndex
@@ -1098,10 +1099,15 @@ export function MessageTimeline(props: {
     sessionStatus().type !== "idle" &&
     activeMessageID() !== undefined &&
     displayTurn(activeMessageID()!) === displayTurn(userMessageID)
+  const pendingDelivery = (userMessageID: string) =>
+    serverSync().session.data.pending_input[sessionID() ?? ""]?.find((input) => input.id === userMessageID)?.delivery ??
+    getMsgParts(userMessageID).find((part) => part.type === "text")?.metadata?.zaovraDelivery
   const waitingToJoin = (userMessageID: string) =>
-    sessionStatus().type !== "idle" &&
-    (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0 &&
-    activeMessageID() !== userMessageID
+    !!pendingDelivery(userMessageID) ||
+    !!serverSync().session.data.pending_input[sessionID() ?? ""]?.some((input) => input.id === userMessageID) ||
+    (sessionStatus().type !== "idle" &&
+      (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0 &&
+      activeMessageID() !== userMessageID)
 
   const turnDurationMs = (userMessageID: string) => {
     const message = messageByID().get(userMessageID)
@@ -1138,21 +1144,8 @@ export function MessageTimeline(props: {
   }
 
   const quietParts = projection.quietParts
-  const answerMessages = createMemo(() => {
-    const result = new Map<string, string>()
-    assistantMessagesByTurn().forEach((messages, user) => {
-      const latest = messages.at(-1)
-      const answer = workingDisplayTurn(user)
-        ? latest
-        : messages.findLast(
-            (message) =>
-              message.finish !== "tool-calls" &&
-              getMsgParts(message.id).some((part) => part.type === "text" && part.text.trim()),
-          )
-      if (answer) result.set(user, answer.id)
-    })
-    return result
-  })
+  const answerMessages = projection.answerMessages
+  const processParts = projection.processParts
   const snapshotWarning = createMemo(() => {
     const messages = sessionMessages().toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
     for (const message of messages) {
@@ -1261,8 +1254,12 @@ export function MessageTimeline(props: {
                   onToolOpenChange={(open) => setToolOpen(part().id, open)}
                   deferToolContent
                   virtualizeDiff={false}
-                  quietFailure={quietParts().has(part().id)}
-                  explainFailure={!workingDisplayTurn(row().userMessageID) && !quietParts().has(part().id)}
+                  quietFailure={quietParts().has(part().id) || processParts().has(part().id)}
+                  explainFailure={
+                    !workingDisplayTurn(row().userMessageID) &&
+                    !quietParts().has(part().id) &&
+                    !processParts().has(part().id)
+                  }
                   onContentRendered={onSizeChange}
                 />
               </>
@@ -1370,13 +1367,17 @@ export function MessageTimeline(props: {
                     <Message
                       message={message()}
                       parts={getMsgParts(userMessageRow().userMessageID)}
-                      actions={props.actions}
+                      actions={pendingDelivery(userMessageRow().userMessageID) ? undefined : props.actions}
                       useV2Actions={settings.general.newLayoutDesigns()}
                       comments={messageComments()}
                     />
                     <Show when={waitingToJoin(userMessageRow().userMessageID)}>
                       <div class="flex justify-end pt-1 pr-1 text-11-regular text-text-weak" role="status">
-                        {language.t("session.message.waitingToJoin")}
+                        {language.t(
+                          pendingDelivery(userMessageRow().userMessageID) === "queue"
+                            ? "session.message.queued"
+                            : "session.message.waitingToJoin",
+                        )}
                       </div>
                     </Show>
                   </div>
@@ -1499,6 +1500,7 @@ export function MessageTimeline(props: {
             return (
               part.state.status !== "error" ||
               quietParts().has(part.id) ||
+              processParts().has(part.id) ||
               (!!props.compactTurnID &&
                 part.state.metadata?.phase !== "permission" &&
                 displayTurn(assistantPartRow().userMessageID) === displayTurn(props.compactTurnID))

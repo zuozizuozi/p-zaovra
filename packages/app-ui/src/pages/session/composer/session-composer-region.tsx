@@ -140,15 +140,6 @@ export function SessionComposerRegion(props: {
                 "margin-top": `${-controller.lift()}px`,
               }}
             >
-              <Show when={controller.followup()?.items.length}>
-                <SessionFollowupDock
-                  items={controller.followup()!.items}
-                  sending={controller.followup()!.sending}
-                  onSend={controller.followup()!.onSend}
-                  onEdit={controller.followup()!.onEdit}
-                  onRemove={controller.followup()!.onRemove}
-                />
-              </Show>
               <Show
                 when={controller.child()}
                 fallback={
@@ -158,6 +149,16 @@ export function SessionComposerRegion(props: {
                       aria-disabled={controller.state.blocked()}
                       data-slot="question-composer"
                     >
+                      <label class="flex items-center justify-end gap-1 px-2 text-xs text-text-weak">
+                        <input
+                          type="checkbox"
+                          checked={settings.general.followup() === "queue"}
+                          onChange={(event) =>
+                            settings.general.setFollowup(event.currentTarget.checked ? "queue" : "steer")
+                          }
+                        />
+                        {language.t("session.message.queueAfterTask")}
+                      </label>
                       {props.promptInput}
                     </div>
                   </Show>

@@ -103,7 +103,7 @@ export const clear = Effect.fn("SessionRevert.clear")(function* (session: Sessio
   if (!session.revert) return
   const snapshot = yield* Snapshot.Service
   const original = session.revert.snapshot ? Snapshot.ID.make(session.revert.snapshot) : undefined
-  if (original)
+  if (original && session.revert.files?.length)
     yield* snapshot.restore({
       files: new Map((session.revert.files ?? []).map((file) => [file.path, original])),
     })

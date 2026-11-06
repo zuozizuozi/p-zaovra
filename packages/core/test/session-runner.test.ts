@@ -7793,6 +7793,148 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.live("707 real-clock S1 output exhaustion preserves recovery then stops with a summary", () =>
+    Effect.gen(function* () {
+      yield* setup
+      currentModel = Model.make({
+        id: "fake-model",
+        provider: "fake",
+        route: OpenAIChat.route.with({
+          limits: { context: 200000, output: 64000 },
+        }),
+      })
+      sessionOutput = { fake: { "fake-model": { initial: 16000, maximum: 64000 } } }
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Complete the change" }), resume: false })
+      requests.length = 0
+      response = reasoningLimitResponse()
+      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(false)
+      expect(requests.map((request) => request.generation?.maxTokens)).toEqual([16000, 32000, 64000])
+      expect(requests.every((request) => request.tools.length > 0)).toBe(true)
+      expect(yield* session.outcome(sessionID)).toMatchObject({
+        state: "stopped",
+        termination: { category: "output-exhausted" },
+      })
+    }),
+  )
+
+  for (const turn of [2, 3]) {
+    for (const mode of ["silent", "disconnect", "complete", "stop", "tool-stop"] as const) {
+      it.effect(
+        `707 Runner turn ${turn} ${mode} cancels and releases without duplicate side effects or busy ownership`,
+        () =>
+          Effect.gen(function* () {
+            yield* setup
+            currentModel = Model.make({
+              id: "fake-model",
+              provider: "fake",
+              route: OpenAIChat.route.with({ limits: { context: 200000, output: 64000 } }),
+            })
+            sessionOutput = { fake: { "fake-model": { initial: 16000, maximum: 64000 } } }
+            const session = yield* SessionV2.Service
+            const events = yield* EventV2.Service
+            const started = yield* Deferred.make<void>()
+            const recovering = yield* Deferred.make<void>()
+            const released: number[] = []
+            let retries = 0
+            yield* session.prompt({
+              sessionID,
+              prompt: Prompt.make({ text: "707 later provider lifecycle" }),
+              resume: false,
+            })
+            requests.length = 0
+            executions.length = 0
+            response = reasoningLimitResponse()
+            toolExecutionGate = yield* Deferred.make<void>()
+            toolExecutionsStarted = yield* Deferred.make<void>()
+            toolExecutionsReady = 1
+            yield* events.listen((event) =>
+              event.type === SessionEvent.Retried.type
+                ? Effect.sync(() => {
+                    retries++
+                    if (retries !== turn - 1) return
+                    responseStream = Stream.unwrap(
+                      Effect.gen(function* () {
+                        yield* Effect.addFinalizer(() =>
+                          Effect.sync(() => {
+                            released.push(turn)
+                          }),
+                        )
+                        yield* Deferred.succeed(started, undefined)
+                        if (mode === "silent" || mode === "stop") return Stream.fromEffect(Effect.never)
+                        if (mode === "disconnect")
+                          return Stream.concat(
+                            Stream.fromIterable([
+                              LLMEvent.stepStart({ index: 0 }),
+                              LLMEvent.textStart({ id: "707-partial" }),
+                              LLMEvent.textDelta({ id: "707-partial", text: "partial" }),
+                            ]),
+                            Stream.fail(
+                              new LLMError({
+                                module: "test",
+                                method: "stream",
+                                reason: new TransportReason({
+                                  kind: "StreamReadError",
+                                  message: "707 disconnected after output",
+                                }),
+                              }),
+                            ),
+                          )
+                        if (mode === "tool-stop")
+                          return Stream.fromIterable([
+                            LLMEvent.stepStart({ index: 0 }),
+                            LLMEvent.toolCall({ id: "707-once", name: "echo", input: { text: "once" } }),
+                            LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+                            LLMEvent.finish({ reason: "tool-calls" }),
+                          ])
+                        return Stream.fromIterable(fragmentFixture("text", "707-complete", ["Done."]).completeEvents)
+                      }),
+                    )
+                  })
+                : Effect.void,
+            )
+            yield* events.listen((event) =>
+              event.type === SessionEvent.Retried.type &&
+              (event.data as { error?: { metadata?: Record<string, string> } }).error?.metadata?.phase === "recovery"
+                ? Deferred.succeed(recovering, undefined)
+                : Effect.void,
+            )
+            const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+            yield* Deferred.await(started)
+            if (mode === "silent") yield* adjust("180 seconds")
+            if (mode === "disconnect") {
+              response = fragmentFixture("text", "707-network-recovered", ["Recovered."]).completeEvents
+              yield* Deferred.await(recovering)
+              yield* adjust("5 seconds")
+            }
+            if (mode === "stop") yield* session.interrupt(sessionID)
+            if (mode === "tool-stop") {
+              yield* Deferred.await(toolExecutionsStarted)
+              yield* adjust("181 seconds")
+              expect(activeToolExecutions).toBe(1)
+              yield* session.interrupt(sessionID)
+            }
+            const result = yield* Fiber.join(run)
+            expect(requests).toHaveLength(mode === "disconnect" ? turn + 1 : turn)
+            expect(released).toEqual([turn])
+            expect(executions).toEqual(mode === "tool-stop" ? ["once"] : [])
+            expect(activeToolExecutions).toBe(0)
+            expect(Exit.isSuccess(result)).toBe(mode === "complete" || mode === "disconnect")
+            expect((yield* session.outcome(sessionID)).state).not.toBe("running")
+            const execution = yield* SessionExecution.Service
+            expect((yield* execution.active).has(sessionID)).toBe(false)
+            if (mode === "disconnect")
+              expect(
+                (yield* session.context(sessionID)).some(
+                  (message) =>
+                    message.type === "assistant" && message.error?.message.includes("707 disconnected after output"),
+                ),
+              ).toBe(true)
+          }),
+      )
+    }
+  }
+
   for (const scenario of [
     "accepted",
     "rejected",
@@ -11412,5 +11554,100 @@ it.effect("683 Session retries share the original absolute P", () =>
         (message) => message.type === "synthetic" && message.text.includes('"providerDeadline":9000'),
       ),
     ).toBe(true)
+  }),
+)
+
+it.effect("221 persists each renewed provider deadline before another explicit resume", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    const session = yield* SessionV2.Service
+    const database = yield* Database.Service
+    const now = yield* Clock.currentTimeMillis
+    yield* database.db
+      .update(SessionTable)
+      .set({ time_created: now })
+      .where(eq(SessionTable.id, sessionID))
+      .run()
+      .pipe(Effect.orDie)
+    yield* session.update({ sessionID, budget: { durationMs: 10000 } })
+    yield* session.prompt({
+      sessionID,
+      resume: false,
+      prompt: Prompt.make({
+        text: "Wait for an explicitly renewed budget",
+        runPolicy: { mode: "unattended", deadline: now + 60000, closingReserveMs: 2000 },
+      }),
+    })
+    const receipts = session
+      .context(sessionID)
+      .pipe(
+        Effect.map((messages) =>
+          messages.flatMap((message) =>
+            message.type === "synthetic" && message.text.startsWith("[host.run.closing]") ? [message.text] : [],
+          ),
+        ),
+      )
+    response = repairStop("receipt221")
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const firstRun = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(4001)
+    yield* Fiber.join(firstRun)
+    const first = yield* receipts
+    expect(first).toHaveLength(1)
+    expect(first[0]).toContain('"deadline":' + (now + 10000))
+    expect(first[0]).toContain('"providerDeadline":' + (now + 4000))
+    streamGate = undefined
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(1)
+
+    yield* session.update({ sessionID, budget: { durationMs: 20000 } })
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const secondRun = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(8000)
+    yield* Fiber.join(secondRun)
+    expect(requests).toHaveLength(2)
+    const second = yield* receipts
+    expect(second).toHaveLength(2)
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toContain('"deadline":' + (now + 20000))
+    expect(second[1]).toContain('"providerDeadline":' + (now + 11000.5))
+    streamGate = undefined
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    expect(yield* receipts).toEqual(second)
+
+    yield* session.update({ sessionID, budget: { durationMs: 30000 } })
+    streamGate = yield* Deferred.make<void>()
+    streamStarted = yield* Deferred.make<void>()
+    const thirdRun = yield* session.resume(sessionID).pipe(Effect.forkChild)
+    yield* Deferred.await(streamStarted)
+    yield* adjust(8001)
+    yield* Fiber.join(thirdRun)
+    const third = yield* receipts
+    expect(requests).toHaveLength(3)
+    expect(third).toHaveLength(3)
+    expect(third.slice(0, 2)).toEqual(second)
+    expect(third[2]).toContain('"deadline":' + (now + 30000))
+    streamGate = undefined
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(3)
+    expect(yield* receipts).toEqual(third)
+
+    yield* session.prompt({
+      sessionID,
+      resume: false,
+      prompt: Prompt.make({
+        text: "A new request may use the remaining budget",
+        runPolicy: { mode: "unattended", deadline: now + 60000, closingReserveMs: 2000 },
+      }),
+    })
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(4)
+    expect(yield* receipts).toEqual(third)
   }),
 )

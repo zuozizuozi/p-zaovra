@@ -5,6 +5,7 @@ import { pathToFileURL } from "url"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { FileSystem } from "../filesystem"
 import { FSUtil } from "../fs-util"
+import { Pdf } from "../pdf"
 import { makeLocationNode } from "../effect/app-node"
 import { AbsolutePath, PositiveInt, RelativePath } from "../schema"
 
@@ -68,6 +69,7 @@ export type ReadError =
   | MalformedUtf8Error
   | OffsetOutOfRangeError
   | PathKindError
+  | Pdf.DecodeError
 
 export const PageInput = Schema.Struct({
   offset: PositiveInt.pipe(Schema.optional),
@@ -95,7 +97,7 @@ export interface Interface {
   readonly read: (
     path: AbsolutePath,
     resource: string,
-    page?: PageInput & { images?: boolean },
+    page?: PageInput & { images?: boolean; pdfs?: boolean },
   ) => Effect.Effect<FileSystem.Content | TextPage, ReadError>
   readonly list: (path: AbsolutePath, page?: PageInput) => Effect.Effect<ListPage, FSUtil.Error>
 }
@@ -172,7 +174,7 @@ export const read = Effect.fn("ReadTool.read")(function* (
   fs: FSUtil.Interface,
   input: string,
   resource: string,
-  page: PageInput & { images?: boolean } = {},
+  page: PageInput & { images?: boolean; pdfs?: boolean } = {},
 ) {
   const real = yield* fs.realPath(input)
   return yield* Effect.scoped(
@@ -184,9 +186,10 @@ export const read = Effect.fn("ReadTool.read")(function* (
         yield* file.readAlloc(Math.min(64 * 1024, Number(info.size) || 4 * 1024)),
         () => new Uint8Array(),
       )
-      const mime = imageMime(first)
+      const pdf = startsWith(first, [0x25, 0x50, 0x44, 0x46])
+      const mime = imageMime(first) ?? (pdf ? "application/pdf" : undefined)
       if (mime) {
-        if (page.images === false || info.size > MAX_MEDIA_INGEST_BYTES) {
+        if (!pdf && (page.images === false || info.size > MAX_MEDIA_INGEST_BYTES)) {
           const header = Buffer.from(first)
           const dimensions =
             mime === "image/png" && first.length >= 24
@@ -212,6 +215,15 @@ export const read = Effect.fn("ReadTool.read")(function* (
         }
         if (total > MAX_MEDIA_INGEST_BYTES)
           return yield* Effect.fail(new MediaIngestLimitError({ resource, maximumBytes: MAX_MEDIA_INGEST_BYTES }))
+        if (pdf && page.pdfs !== true)
+          return yield* pdfPage(
+            Buffer.concat(
+              chunks.map((chunk) => Buffer.from(chunk)),
+              total,
+            ),
+            resource,
+            page,
+          )
         return {
           uri: pathToFileURL(real).href,
           name: path.basename(real),
@@ -223,7 +235,7 @@ export const read = Effect.fn("ReadTool.read")(function* (
           mime,
         }
       }
-      if (startsWith(first, [0x25, 0x50, 0x44, 0x46]) || extensions.has(path.extname(resource).toLowerCase()))
+      if (extensions.has(path.extname(resource).toLowerCase()))
         return yield* Effect.fail(new BinaryFileError({ resource }))
       const paged = info.size > MAX_READ_BYTES || page.offset !== undefined || page.limit !== undefined
       if (!paged) {
@@ -378,3 +390,29 @@ const layer = Layer.effect(
 )
 
 export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node] })
+
+const pdfPage = Effect.fn("ReadTool.pdfPage")(function* (data: Uint8Array, resource: string, page: PageInput) {
+  const extracted = yield* Pdf.text(data)
+  const lines = extracted.text.split("\n")
+  const offset = page.offset ?? 1
+  if (offset > lines.length) return yield* new OffsetOutOfRangeError({ offset })
+  const selected: string[] = []
+  let bytes = 0
+  for (const line of lines.slice(offset - 1, offset - 1 + (page.limit ?? MAX_READ_LINES))) {
+    const value = line.length > MAX_LINE_LENGTH ? line.slice(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX : line
+    const size = Buffer.byteLength(value) + (selected.length ? 1 : 0)
+    if (bytes + size > MAX_READ_BYTES) break
+    selected.push(value)
+    bytes += size
+  }
+  const next = offset + selected.length
+  const truncated = next <= lines.length || extracted.truncated
+  return new TextPage({
+    type: "text-page",
+    content: selected.join("\n"),
+    mime: "text/plain",
+    offset,
+    truncated,
+    ...(next <= lines.length ? { next } : {}),
+  })
+})

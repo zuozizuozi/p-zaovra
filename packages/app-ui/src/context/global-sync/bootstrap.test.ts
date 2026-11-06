@@ -290,7 +290,9 @@ describe("query keys", () => {
             if (unavailable) throw new Error("temporarily unavailable")
             return {
               data: {
-                data: [{ id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } }],
+                data: [
+                  { id: "build", mode: "primary", hidden: false, permissions: [], request: { headers: {}, body: {} } },
+                ],
               },
             }
           },
@@ -359,4 +361,81 @@ describe("query keys", () => {
       "providers",
     ])
   })
+})
+
+test("707 directory bootstrap and session resync share question ownership and preserve newer events", async () => {
+  const [store, setStore] = directoryState()
+  const gate = Promise.withResolvers<{ data: { data: { id: string; sessionID: string; questions: [] }[] } }>()
+  const entered = Promise.withResolvers<void>()
+  let calls = 0
+  const client = {
+    config: { get: async () => ({ data: {} }) },
+    vcs: { get: async () => ({ data: undefined }) },
+    v2: {
+      ...emptyCatalog,
+      agent: { list: async () => ({ data: { data: [] } }) },
+      command: { list: async () => ({ data: { data: [] } }) },
+      permission: { request: { list: async () => ({ data: { data: [] } }) } },
+      question: {
+        request: {
+          list: () => {
+            calls++
+            entered.resolve()
+            return gate.promise
+          },
+        },
+      },
+      session: {
+        active: async () => ({ data: { data: {} } }),
+        get: async () => ({
+          data: {
+            data: {
+              id: "ses_707",
+              projectID: "project",
+              agent: "build",
+              location: { directory: "/project" },
+              title: "test",
+              time: { created: 1, updated: 1 },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+          },
+        }),
+        messages: async () => ({ data: { data: [], cursor: {} } }),
+        pendingInputs: async () => ({ data: { data: [] } }),
+      },
+    },
+    mcp: { status: async () => ({ data: {} }) },
+  } as unknown as ZaovraClient
+  const session = createServerSession(client)
+  await session.resolve("ses_707")
+  const queries = new QueryClient()
+  const bootstrap = bootstrapDirectory({
+    directory: "/project",
+    scope: ServerScope.local,
+    mcp: false,
+    global: {
+      config: {},
+      path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
+      project: [{ id: "project", worktree: "/project" } as Project],
+      provider,
+    },
+    sdk: client,
+    store,
+    setStore,
+    vcsCache: { setStore() {} } as unknown as VcsCache,
+    loadSessions() {},
+    translate: (key) => key,
+    queryClient: queries,
+    session,
+  })
+  await entered.promise
+  const resync = session.resync("ses_707")
+  session.apply({ type: "question.asked", properties: { id: "q_new", sessionID: "ses_707", questions: [] } })
+  gate.resolve({ data: { data: [] } })
+  await Promise.all([bootstrap, resync])
+  expect(calls).toBe(1)
+  expect(session.data.question.ses_707.map((item) => item.id)).toEqual(["q_new"])
+  expect(store.question).toEqual({})
+  queries.clear()
 })

@@ -120,6 +120,7 @@ export async function setupTimeline(
     provider: provider(),
     sessions,
     sessionStatus: { [sessionID]: initialStatus },
+    activeSessions: initialStatus.type === "idle" ? {} : { [sessionID]: { type: "running" } },
     pageMessages: () => ({
       items: messages,
     }),

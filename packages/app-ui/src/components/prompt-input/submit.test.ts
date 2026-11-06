@@ -383,8 +383,8 @@ for (const mode of ["steer", "queue", "admit-only"] as const) {
     } as unknown as Parameters<typeof sendFollowupDraft>[0]
     expect(await sendFollowupDraft(input)).toBe(true)
     expect(calls).toBe(1)
-    expect(adds).toBe(mode === "steer" ? 1 : 0)
-    if (mode !== "steer") return
+    expect(adds).toBe(mode === "admit-only" ? 0 : 1)
+    if (mode === "admit-only") return
     expect(store.data.part.msg_fixture.filter((part) => part.type === "file").map((part) => part.filename)).toEqual([
       "one.png",
       "two.png",

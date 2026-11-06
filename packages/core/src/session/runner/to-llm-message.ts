@@ -240,6 +240,7 @@ export const toLLMMessages = (
   messages: readonly SessionMessage.Message[],
   model: ResolvedModel,
   originalRequests?: string,
+  preservePDF = false,
 ) =>
   messages
     .filter((message) => !SessionMessage.isToolOwnedShell(message))
@@ -248,14 +249,19 @@ export const toLLMMessages = (
       Message.make({
         ...message,
         content: message.content.map((part): ContentPart => {
-          if (part.type === "media") return omittedMedia(part.mediaType, part.filename, model.inputModalities) ?? part
+          if (part.type === "media")
+            return preservePDF && part.mediaType === "application/pdf"
+              ? part
+              : (omittedMedia(part.mediaType, part.filename, model.inputModalities) ?? part)
           if (part.type !== "tool-result" || part.result.type !== "content") return part
           return {
             ...part,
             result: {
               type: "content",
               value: part.result.value.map((item: ToolOutput["content"][number]) =>
-                item.type === "file" ? (omittedMedia(item.mime, item.name, model.inputModalities) ?? item) : item,
+                item.type === "file" && !(preservePDF && item.mime === "application/pdf")
+                  ? (omittedMedia(item.mime, item.name, model.inputModalities) ?? item)
+                  : item,
               ),
             },
           }

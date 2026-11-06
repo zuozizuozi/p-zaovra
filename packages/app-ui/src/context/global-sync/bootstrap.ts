@@ -350,37 +350,39 @@ export async function bootstrapDirectory(input: {
             }),
         ),
       () =>
-        retry(() =>
-          input.sdk.v2.question.request
-            .list({ location: { directory: input.directory } }, { throwOnError: true })
-            .then((x) => x.data.data)
-            .then((questions) => {
-              const ids = questions.map((question) => question.sessionID)
-              const grouped = groupBySession(questions.filter((q): q is QuestionView => !!q.id && !!q.sessionID))
-              const warm = input.session
-                ? Promise.all(ids.map((sessionID) => input.session!.resolve(sessionID))).then(() => undefined)
-                : warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk })
-              return warm.then(() =>
-                batch(() => {
-                  const current = input.session?.data.question ?? input.store.question
-                  for (const sessionID of Object.keys(current)) {
-                    if (grouped[sessionID]) continue
-                    if (input.session?.get(sessionID)?.directory !== input.directory) continue
-                    if (input.session) input.session.set("question", sessionID, [])
-                    if (!input.session) input.setStore("question", sessionID, [])
-                  }
-                  for (const [sessionID, questions] of Object.entries(grouped)) {
-                    const value = reconcile(
-                      questions.filter((q) => !!q?.id).sort((a, b) => cmp(a.id, b.id)),
-                      { key: "id" },
-                    )
-                    if (input.session) input.session.set("question", sessionID, value)
-                    if (!input.session) input.setStore("question", sessionID, value)
-                  }
+        input.session
+          ? retry(() => input.session!.questions.sync(input.directory))
+          : retry(() =>
+              input.sdk.v2.question.request
+                .list({ location: { directory: input.directory } }, { throwOnError: true })
+                .then((x) => x.data.data)
+                .then((questions) => {
+                  const ids = questions.map((question) => question.sessionID)
+                  const grouped = groupBySession(questions.filter((q): q is QuestionView => !!q.id && !!q.sessionID))
+                  const warm = input.session
+                    ? Promise.all(ids.map((sessionID) => input.session!.resolve(sessionID))).then(() => undefined)
+                    : warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk })
+                  return warm.then(() =>
+                    batch(() => {
+                      const current = input.session?.data.question ?? input.store.question
+                      for (const sessionID of Object.keys(current)) {
+                        if (grouped[sessionID]) continue
+                        if (input.session?.get(sessionID)?.directory !== input.directory) continue
+                        if (input.session) input.session.set("question", sessionID, [])
+                        if (!input.session) input.setStore("question", sessionID, [])
+                      }
+                      for (const [sessionID, questions] of Object.entries(grouped)) {
+                        const value = reconcile(
+                          questions.filter((q) => !!q?.id).sort((a, b) => cmp(a.id, b.id)),
+                          { key: "id" },
+                        )
+                        if (input.session) input.session.set("question", sessionID, value)
+                        if (!input.session) input.setStore("question", sessionID, value)
+                      }
+                    }),
+                  )
                 }),
-              )
-            }),
-        ),
+            ),
       () => Promise.resolve(input.loadSessions(input.directory)),
       input.mcp && (() => input.queryClient.fetchQuery(loadMcpQuery(input.scope, input.directory, input.sdk))),
       input.mcp && (() => input.queryClient.fetchQuery(loadMcpResourcesQuery(input.scope, input.directory, input.sdk))),
