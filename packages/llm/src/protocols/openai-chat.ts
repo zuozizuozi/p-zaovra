@@ -192,6 +192,7 @@ interface ParserState {
   readonly encryptedContent?: string
   readonly reasoningStarted?: boolean
   readonly closedCipher?: string
+  readonly reasoningOrigin?: { readonly provider: string; readonly model: string; readonly thinking: true }
 }
 
 const invalid = ProviderShared.invalidRequest
@@ -321,7 +322,19 @@ const lowerMessage = Effect.fn("OpenAIChat.lowerMessage")(function* (message: Op
   return (yield* lowerToolMessages(message)).messages
 })
 
-const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: LLMRequest) {
+const hasEmptyReasoningOrigin = (message: OpenAIChatRequestMessage, request: LLMRequest) =>
+  message.content.some((part) => {
+    if (part.type !== "reasoning" || part.text !== "") return false
+    const metadata = part.providerMetadata?.openaiCompatible
+    if (!isRecord(metadata) || !isRecord(metadata.emptyReasoning)) return false
+    return (
+      metadata.emptyReasoning.provider === request.model.provider &&
+      metadata.emptyReasoning.model === request.model.id &&
+      metadata.emptyReasoning.thinking === true
+    )
+  })
+
+const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: LLMRequest, requireReasoning: boolean) {
   const system: OpenAIChatMessage[] =
     request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
   const messages = [...system]
@@ -355,7 +368,16 @@ const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: 
       continue
     }
     flushImages()
-    messages.push(...(yield* lowerMessage(message)))
+    const lowered = yield* lowerMessage(message)
+    if (
+      requireReasoning &&
+      lowered.some((item) => item.role === "assistant" && !item.reasoning_content?.trim()) &&
+      !hasEmptyReasoningOrigin(message, request)
+    )
+      return yield* invalid(
+        "DeepSeek thinking with tools requires original reasoning_content for every assistant turn. Start a new session or disable thinking to continue. Existing tool results remain saved; do not repeat completed tools.",
+      )
+    messages.push(...lowered)
   }
   flushImages()
   return messages
@@ -385,18 +407,10 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
   if (outputParameter !== "max_tokens" && outputParameter !== "max_completion_tokens")
     return yield* invalid("OpenAI Chat maxTokensParameter must be max_tokens or max_completion_tokens")
   const options = yield* lowerOptions(request)
-  const messages = yield* lowerMessages(request)
-  // DeepSeek requires original reasoning on every assistant turn when thinking
-  // and tools are enabled, including turns that did not call a tool.
-  if (
-    "thinking" in options &&
-    options.thinking?.type === "enabled" &&
-    request.tools.length > 0 &&
-    messages.some((message) => message.role === "assistant" && !message.reasoning_content?.trim())
+  const messages = yield* lowerMessages(
+    request,
+    "thinking" in options && options.thinking?.type === "enabled" && request.tools.length > 0,
   )
-    return yield* invalid(
-      "DeepSeek thinking with tools requires original reasoning_content for every assistant turn. Start a new session or disable thinking to continue. Existing tool results remain saved; do not repeat completed tools.",
-    )
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
   return {
     model: request.model.id,
@@ -564,6 +578,7 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
         encryptedContent,
         reasoningStarted: state.reasoningStarted || !!reasoning || delta?.encrypted_content != null,
         closedCipher: events.some((event) => event.type === "reasoning-end") ? encryptedContent : state.closedCipher,
+        reasoningOrigin: state.reasoningOrigin,
       },
       events,
     ] as const
@@ -574,6 +589,20 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
   const events: LLMEvent[] = []
   const hasToolCalls = state.toolCallEvents.length > 0
   const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
+  // Only a completed thinking response can attest that the upstream trace was
+  // empty. Persist the observation so replay cannot bless unrelated history.
+  const emptyReasoning =
+    reason && state.reasoningOrigin && !state.reasoningStarted
+      ? { openaiCompatible: { emptyReasoning: state.reasoningOrigin } }
+      : undefined
+  const observed = emptyReasoning
+    ? Lifecycle.reasoningEnd(
+        Lifecycle.reasoningStart(state.lifecycle, events, "reasoning-0", emptyReasoning),
+        events,
+        "reasoning-0",
+        emptyReasoning,
+      )
+    : state.lifecycle
   // A late ciphertext chunk finalizes metadata on the existing reasoning part;
   // it must not reopen that ID and create a second durable part.
   if (
@@ -591,7 +620,7 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
     )
   const closed =
     state.encryptedContent === undefined
-      ? state.lifecycle
+      ? observed
       : Lifecycle.reasoningEnd(state.lifecycle, events, "reasoning-0", {
           openaiCompatible: { encrypted_content: state.encryptedContent },
         })
@@ -630,7 +659,20 @@ export const protocol = Protocol.make({
   stream: {
     event: Protocol.jsonEvent(OpenAIChatEvent),
     terminal: (event) => event.error != null,
-    initial: () => ({ tools: ToolStream.empty<number>(), toolCallEvents: [], lifecycle: Lifecycle.initial() }),
+    initial: (request) => {
+      const thinking = request.providerOptions?.deepseek?.thinking
+      return {
+        tools: ToolStream.empty<number>(),
+        toolCallEvents: [],
+        lifecycle: Lifecycle.initial(),
+        reasoningOrigin:
+          request.providerOptions?.deepseek !== undefined &&
+          DeepSeekOptions.matches(request.model.provider, request.model.id) &&
+          (thinking === undefined || (Schema.is(DeepSeekOptions.Thinking)(thinking) && thinking.type === "enabled"))
+            ? { provider: request.model.provider, model: request.model.id, thinking: true as const }
+            : undefined,
+      }
+    },
     step,
     onHalt: finishEvents,
   },

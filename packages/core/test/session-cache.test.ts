@@ -241,3 +241,36 @@ test("K3 physical attempts stay under one logical request without duplicating us
   ])
   expect(report.versions?.[0].total).toBe(12)
 })
+
+test("660 local input sizes split canonical components without retaining or changing reasoning", () => {
+  const input = LLM.updateRequest(request, {
+    tools: [ToolDefinition.make({ name: "read", description: "Read one file", inputSchema: { type: "object" } })],
+    messages: [
+      Message.user("original task"),
+      Message.assistant([
+        { type: "reasoning", text: "private reasoning 完整" },
+        { type: "text", text: "visible answer" },
+        { type: "tool-call", id: "one", name: "read", input: { path: "a.ts" } },
+      ]),
+      Message.tool({ id: "one", name: "read", result: { content: "private result 内容" } }),
+    ],
+  })
+  const original = JSON.stringify(input)
+  const plain = SessionCache.snapshot(input, 1)
+  const measured = SessionCache.snapshot(input, 1, { measure: true })
+  const sizes = measured.inputSizes!
+  expect(sizes.map((part) => part.category)).toEqual(
+    expect.arrayContaining(["system", "tools", "reasoning", "toolCalls", "toolResults", "text", "messageMetadata"]),
+  )
+  const reasoning = sizes.find((part) => part.category === "reasoning")!
+  expect(reasoning.parts).toBe(1)
+  expect(reasoning.bytes).toBeGreaterThan(reasoning.characters)
+  expect(reasoning.hash).toMatch(/^[0-9a-f]{64}$/)
+  expect(JSON.stringify(measured)).not.toContain("private reasoning")
+  expect(JSON.stringify(measured)).not.toContain("private result")
+  expect(plain.inputSizes).toBeUndefined()
+  expect(measured.segments).toEqual(plain.segments)
+  expect(SessionCache.compare(plain, measured).reason).toBe("append")
+  expect(SessionCache.snapshot(input, 1, { measure: true }).inputSizes).toEqual(sizes)
+  expect(JSON.stringify(input)).toBe(original)
+})

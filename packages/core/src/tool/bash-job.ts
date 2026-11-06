@@ -335,15 +335,19 @@ const layer = Layer.effect(
                   input.action === "wait"
                     ? yield* SessionBudget.bounds(database.db, config, context.sessionID)
                     : undefined
-                const remaining =
-                  bound?.deadline === undefined ? undefined : bound.deadline - (yield* Clock.currentTimeMillis)
+                const closingAt = SessionBudget.closingDeadline(bound?.deadline, bound?.policy?.closingReserveMs)
+                const now = yield* Clock.currentTimeMillis
+                const remaining = closingAt === undefined ? undefined : closingAt - now
                 if (remaining !== undefined && remaining <= 0)
                   return yield* new Tool.Failure({
                     message:
-                      "The host deadline expired; no observation wait was admitted. get and cancel remain available.",
+                      "The host deadline or closing reserve prevents an observation wait. get and cancel remain available.",
                   })
+                const waitUntil = SessionBudget.observationDeadline(closingAt, now)
                 const timeout =
-                  remaining === undefined ? (input.timeout ?? 600_000) : Math.min(input.timeout ?? 600_000, remaining)
+                  waitUntil === undefined
+                    ? (input.timeout ?? 600_000)
+                    : Math.min(input.timeout ?? 600_000, Math.max(0, waitUntil - now))
                 if (!job) {
                   const owner = {
                     root: global.data,

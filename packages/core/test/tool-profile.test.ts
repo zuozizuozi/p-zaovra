@@ -19,6 +19,10 @@ const definitions = [
   "read",
   "skill",
   "task",
+  "task_status",
+  "task_list",
+  "task_cancel",
+  "task_resume",
   "tool_search",
   "verification_review",
   "webfetch",
@@ -80,9 +84,7 @@ describe("model tool advertisements", () => {
     expect(selected.every((tool) => definitions.includes(tool))).toBe(true)
     expect(JSON.stringify(selected).length).toBeLessThan(JSON.stringify(definitions).length)
   })
-  test("non-GPT, aliases and explicit provider tool choices retain the original catalog", () => {
-    for (const model of ["claude-opus", "qwen-coder", "custom-alias"])
-      expect(ToolProfile.select(definitions, { model, history: [] })).toBe(definitions)
+  test("explicit provider tool choices and missing search retain the original catalog", () => {
     expect(ToolProfile.select(definitions, { model: "gpt-6-luna", history: [], explicit: true })).toBe(definitions)
     const noSearch = definitions.filter((tool) => tool.name !== "tool_search")
     expect(ToolProfile.select(noSearch, { model: "gpt-6-luna", history: [] })).toBe(noSearch)
@@ -163,3 +165,38 @@ test("preserves an exact legacy write allow declaration as well as edit permissi
     ),
   ).toContain("write")
 })
+
+test.each(["deepseek-v4.1-flash-1017", "qwen3.7-flash", "glm-5.3-flash", "claude-opus", "custom-alias"])(
+  "664 %s shares compact discovery, permission and recovery behavior",
+  (model) => {
+    const initial = ToolProfile.select(definitions, { model, history: [] })
+    expect(initial).toEqual(ToolProfile.select(definitions, { model: "gpt-6-luna", history: [] }))
+    expect(names(initial)).not.toContain("browser")
+    expect(names(initial)).toContain("tool_search")
+    expect(initial.every((tool) => definitions.includes(tool))).toBe(true)
+    const discovered = ToolProfile.select(definitions, { model, history: [observed("tool_search", ["browser"])] })
+    expect(discovered.find((tool) => tool.name === "browser")).toBe(definitions.find((tool) => tool.name === "browser"))
+    expect(names(ToolProfile.select(definitions, { model, history: [], recalled: ["task"] }))).toEqual(
+      expect.arrayContaining(["task", "task_status"]),
+    )
+    expect(names(ToolProfile.select(definitions, { model, history: [], custom: ["write"] }))).toContain("write")
+    expect(
+      names(
+        ToolProfile.select(definitions, {
+          model,
+          history: [],
+          permissions: [{ action: "edit", resource: "*", effect: "allow" }],
+        }),
+      ),
+    ).toEqual(expect.arrayContaining(["write", "edit"]))
+    const denied = definitions.filter((tool) => tool.name !== "browser" && tool.name !== "apply_patch")
+    expect(names(ToolProfile.select(denied, { model, history: [observed("tool_search", ["browser"])] }))).not.toContain(
+      "browser",
+    )
+    expect(names(ToolProfile.select(denied, { model, history: [] }))).toEqual(expect.arrayContaining(["write", "edit"]))
+    expect(ToolProfile.select(definitions, { model, history: [], explicit: true })).toBe(definitions)
+    expect(ToolProfile.select(definitions, { model, history: [], repair: true })).toBe(definitions)
+    const noSearch = definitions.filter((tool) => tool.name !== "tool_search")
+    expect(ToolProfile.select(noSearch, { model, history: [] })).toBe(noSearch)
+  },
+)

@@ -422,3 +422,27 @@ test("quality configuration preserves omissions for runtime defaults", () => {
   expect(config?.stagnation_log).not.toBe(true)
   expect(config?.independent_review).not.toBe(true)
 })
+
+test("660 facts distinguish provider cutoff C from hard D and preserve unlimited interaction", () => {
+  const input = {
+    now: 1_000,
+    state: { activeMs: 0, request: "bounded", requestStarted: 0 },
+    turns: 1,
+    step: 2,
+    tokens: 0,
+    unreported: 0,
+    deadline: 120_000,
+    executionDeadline: 70_000,
+  }
+  const facts = SessionProgress.facts(input)
+  expect(facts).toContain('"hardDeadline":120000')
+  expect(facts).toContain('"executionDeadline":70000')
+  expect(facts).toContain('"remainingMs":119000')
+  expect(facts).toContain('"executableRemainingMs":69000')
+  expect(facts).toContain("Never restart running or unknown jobs")
+  expect(SessionProgress.factsDue({ ...input, now: 11_000 }, facts)).toBe(true)
+  expect(SessionProgress.factsDue({ ...input, executionDeadline: 60_000 }, facts)).toBe(true)
+  const unlimited = SessionProgress.facts({ ...input, deadline: undefined, executionDeadline: undefined })
+  expect(unlimited).not.toContain("remainingMs")
+  expect(unlimited).not.toContain("executionDeadline")
+})

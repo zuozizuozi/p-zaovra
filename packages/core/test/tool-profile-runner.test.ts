@@ -306,3 +306,59 @@ for (const partial of [false, true])
         expect(scripted).toHaveLength(1)
       }),
   )
+
+for (const id of ["deepseek-v4.1-flash-1017", "qwen3.7-flash", "glm-5.3-flash"]) {
+  const nonGPT = testEffect(
+    AppNodeBuilder.build(
+      LayerNode.group([SessionV2.node, node, ToolSearch.node, ToolRegistry.node, leaves, Location.node]),
+      replacements
+        .filter(([key]) => key !== SessionRunnerModel.node)
+        .concat([
+          [
+            SessionRunnerModel.node,
+            SessionRunnerModel.layerWith(() => Effect.succeed(Model.make({ id, provider: "offline", route }))),
+          ],
+          [SessionExecution.node, SessionExecution.noopLayer],
+        ]),
+    ),
+  )
+  nonGPT.live("664 " + id + " discovers and executes a deferred tool, then retains it on continuation", () =>
+    Effect.gen(function* () {
+      scripted = undefined
+      requests.length = 0
+      executed.length = 0
+      const sessions = yield* SessionV2.Service
+      const runner = yield* SessionRunner.Service
+      const location = yield* Location.Service
+      const session = yield* sessions.create({ location: { directory: location.directory } })
+      yield* sessions.prompt({
+        sessionID: session.id,
+        prompt: { text: "Inspect the fixture workspace." },
+        resume: false,
+      })
+      yield* runner.run({ sessionID: session.id, force: false })
+      expect(requests).toHaveLength(3)
+      expect(requests[0]!.tools.map((tool) => tool.name)).toContain("tool_search")
+      expect(requests[0]!.tools.map((tool) => tool.name)).not.toContain("browser")
+      expect(requests[1]!.tools.map((tool) => tool.name)).toContain("browser")
+      expect(executed).toEqual(["browser"])
+      const transcript = yield* sessions.context(session.id)
+      expect(
+        transcript.flatMap((message) =>
+          message.type === "assistant"
+            ? message.content.filter((part) => part.type === "tool" && part.name === "tool_search")
+            : [],
+        ),
+      ).toMatchObject([{ state: { status: "completed", structured: { activated: ["browser"] } } }])
+      yield* sessions.prompt({
+        sessionID: session.id,
+        prompt: { text: "Continue with the retained result." },
+        resume: false,
+      })
+      yield* runner.run({ sessionID: session.id, force: false })
+      expect(requests).toHaveLength(4)
+      expect(requests[3]!.tools.map((tool) => tool.name)).toContain("browser")
+      expect(executed).toEqual(["browser"])
+    }),
+  )
+}

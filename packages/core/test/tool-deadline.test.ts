@@ -297,3 +297,68 @@ it.effect("490 bash_job wait uses shared D while get/cancel remain available and
     }),
   ),
 )
+
+it.effect("660 foreground and job waits yield before C, preserve one live job and deny waits at reserve", () =>
+  runtime((directory, started, dispatched) =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const registry = yield* ToolRegistry.Service
+      const jobs = yield* BackgroundJob.Service
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const now = yield* Clock.currentTimeMillis
+      yield* sessions.prompt({
+        sessionID: session.id,
+        prompt: {
+          text: "Finish within the host budget",
+          runPolicy: { mode: "unattended", deadline: now + 10_000, closingReserveMs: 2_000 },
+        },
+        resume: false,
+      })
+      yield* SessionInput.promoteSteers(database.db, events, session.id, Number.MAX_SAFE_INTEGER)
+      const foreground = yield* settleTool(registry, {
+        sessionID: session.id,
+        ...toolIdentity,
+        call: {
+          type: "tool-call",
+          id: "closing-window",
+          name: "bash",
+          input: { command: "echo retained", timeout: 600_000 },
+        },
+      }).pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      yield* adjust(3_999)
+      expect(foreground.pollUnsafe()).toBeUndefined()
+      yield* adjust(1)
+      const first = yield* Fiber.join(foreground)
+      const id = "msg_bash_msg_tool_test_closing-window"
+      expect(first.output?.structured).toMatchObject({ job_id: id, status: "running", kind: "task" })
+      expect((yield* jobs.get(id))?.status).toBe("running")
+      expect(dispatched).toHaveLength(1)
+      const call = (action: "wait" | "get" | "cancel") =>
+        settleTool(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call" as const,
+            id: action,
+            name: "bash_job",
+            input: { job_id: id, action, timeout: 600_000 },
+          },
+        })
+      const waiting = yield* call("wait").pipe(Effect.forkChild)
+      for (let i = 0; i < 40; i++) yield* Effect.yieldNow
+      yield* adjust(1_999)
+      expect(waiting.pollUnsafe()).toBeUndefined()
+      yield* adjust(1)
+      expect((yield* Fiber.join(waiting)).output?.structured).toMatchObject({ status: "running", kind: "task" })
+      expect(dispatched).toHaveLength(1)
+      yield* setTime(now + 8_000)
+      expect((yield* call("wait")).result.type).toBe("error")
+      expect((yield* call("get")).output?.structured).toMatchObject({ status: "running" })
+      expect((yield* call("cancel")).output?.structured).toMatchObject({ status: "cancelled" })
+      expect(dispatched).toHaveLength(1)
+    }),
+  ),
+)

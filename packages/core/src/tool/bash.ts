@@ -17,6 +17,7 @@ import { Location } from "../location"
 import { Global } from "../global"
 import { PreviewProcess } from "../preview-process"
 import { AppProcess } from "../process"
+import { BackgroundJob } from "../background-job"
 import { ShellIdentity } from "../shell-identity"
 import { analyzeCommand } from "./bash-preflight"
 import { PermissionV2 } from "../permission"
@@ -99,7 +100,7 @@ export const Input = Schema.Struct({
   timeout: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TIMEOUT_MS }))
     .pipe(Schema.optional)
     .annotate({
-      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Wait for the result, or use background execution and one blocking bash_job wait. Timeout hands the same live process to a background job; running or unknown does not authorize retrying it. hard_timeout_ms is a separate process deadline.`,
+      description: `Timeout in milliseconds, maximum ${MAX_TIMEOUT_MS}. Foreground defaults to ${DEFAULT_TIMEOUT_MS}. Host observation waits may yield earlier to leave time before the closing reserve. Wait for the result, or use background execution and one blocking bash_job wait. Timeout hands the same live process to a background job; running or unknown does not authorize retrying it. hard_timeout_ms is a separate process deadline.`,
     }),
 })
 
@@ -112,6 +113,7 @@ const StructuredOutput = Schema.Struct({
   verification: Schema.optional(SessionOutcome.Check),
   verifications: Schema.optional(Schema.Array(SessionOutcome.Check)),
   job_id: Schema.String.pipe(Schema.optional),
+  status: Schema.String.pipe(Schema.optional),
   kind: Schema.Literals(["task", "preview"]).pipe(Schema.optional),
   exit: Schema.Number.pipe(Schema.optional),
   truncated: Schema.Boolean,
@@ -188,6 +190,7 @@ const layer = Layer.effectDiscard(
     const permission = yield* PermissionV2.Service
     const events = yield* EventV2.Service
     const jobs = yield* BashJob.Service
+    const backgroundJobs = yield* BackgroundJob.Service
     const global = yield* Global.Service
     const database = yield* Database.Service
 
@@ -218,6 +221,7 @@ const layer = Layer.effectDiscard(
             ...(output.verifications ? { verifications: output.verifications } : {}),
             truncated: output.truncated,
             ...(output.job_id ? { job_id: output.job_id } : {}),
+            ...(output.status ? { status: output.status } : {}),
             ...(output.kind ? { kind: output.kind } : {}),
             ...(output.exit === undefined ? {} : { exit: output.exit }),
             ...(output.timeout === undefined ? {} : { timeout: output.timeout }),
@@ -372,18 +376,20 @@ const layer = Layer.effectDiscard(
                 ? undefined
                 : Config.latest(yield* config.entries(), "experimental")?.quality_progress?.silent_command_ms
               const bound = yield* SessionBudget.bounds(database.db, config, context.sessionID)
-              const remaining =
-                bound?.deadline === undefined ? undefined : bound.deadline - (yield* Clock.currentTimeMillis)
-              if (remaining !== undefined && remaining <= (bound?.policy?.closingReserveMs ?? 0))
+              const closingAt = SessionBudget.closingDeadline(bound?.deadline, bound?.policy?.closingReserveMs)
+              const now = yield* Clock.currentTimeMillis
+              const remaining = closingAt === undefined ? undefined : closingAt - now
+              if (remaining !== undefined && remaining <= 0)
                 return yield* new ToolFailure({
                   message: "The host deadline or closing reserve prevents a new command; no process was started.",
                   metadata: { phase: "input", reason: "deadline-expired" },
                 })
               const requestedTimeout = input.timeout ?? (input.run_in_background || silence ? 0 : DEFAULT_TIMEOUT_MS)
+              const waitUntil = SessionBudget.observationDeadline(closingAt, now)
               const timeout =
-                input.run_in_background || remaining === undefined
+                input.run_in_background || waitUntil === undefined
                   ? requestedTimeout
-                  : Math.min(requestedTimeout || remaining, remaining)
+                  : Math.min(requestedTimeout || Infinity, Math.max(0, waitUntil - now))
               if (input.timeout === 0 && !input.run_in_background)
                 return yield* new ToolFailure({ message: "A zero timeout requires run_in_background=true" })
               let lastProgress = Number.NEGATIVE_INFINITY
@@ -787,7 +793,7 @@ const layer = Layer.effectDiscard(
                   ...(warnings.length ? { warnings } : {}),
                 }
               })
-              if (!input.run_in_background && (silence || timeout)) {
+              if (!input.run_in_background && (silence || timeout || waitUntil !== undefined)) {
                 const done = yield* Deferred.make<Output, Effect.Error<typeof run>>()
                 const job_id = yield* jobs.start(
                   input.command,
@@ -817,21 +823,30 @@ const layer = Layer.effectDiscard(
                   }),
                 )
                 const waiting = Effect.gen(function* () {
-                  yield* Deferred.await(started)
+                  // Preparation consumes the same absolute observation window as execution.
+                  yield* waitUntil === undefined
+                    ? Deferred.await(started)
+                    : Effect.raceFirst(
+                        Deferred.await(started),
+                        Effect.sleep(Math.max(0, waitUntil - (yield* Clock.currentTimeMillis))),
+                      )
                   const began = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
                   while (true) {
                     const now = Number((yield* Clock.currentTimeNanos) / 1_000_000n)
                     const remaining = Math.min(
                       silence ? silence - (now - lastOutput) : Infinity,
                       timeout ? timeout - (now - began) : Infinity,
+                      waitUntil === undefined ? Infinity : waitUntil - (yield* Clock.currentTimeMillis),
                     )
                     if (remaining <= 0) {
                       if (input.background_kind !== "preview") yield* jobs.watch(job_id)
+                      const job = yield* backgroundJobs.get(job_id)
                       return {
                         job_id,
+                        status: job?.status ?? "unavailable",
                         kind: input.background_kind ?? "task",
                         shell: identity,
-                        output: `${partial || "(no output yet)"}\nCommand moved to the background with its declared lifetime. Tasks notify this Session on completion; services do not block delivery. Use bash_job get/wait/cancel when needed. No check has passed yet.`,
+                        output: `${job?.output ?? job?.error ?? (partial || "(no output yet)")}\nObservation wait ended; job status is ${job?.status ?? "unavailable"}. The same command retains its declared lifetime. Tasks notify this Session on completion; services do not block delivery. Use bash_job get/wait/cancel when needed; do not restart it. This does not certify a passing check.`,
                         truncated: false,
                       }
                     }
@@ -929,6 +944,7 @@ export const node = makeLocationNode({
     ToolRegistry.node,
     Snapshot.node,
     BashJob.node,
+    BackgroundJob.node,
     LocationMutation.node,
     FSUtil.node,
     AppProcess.node,

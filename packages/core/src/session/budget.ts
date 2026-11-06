@@ -139,3 +139,13 @@ export function deadline(
   const bound = parent === undefined ? own : own === undefined ? parent : Math.min(parent, own)
   return request === undefined ? bound : bound === undefined ? request : Math.min(request, bound)
 }
+
+/** Provider/tool admission ends before the host's cleanup reserve, never after it. */
+export function closingDeadline(deadline: number | undefined, reserve = 0) {
+  return deadline === undefined ? undefined : deadline - reserve
+}
+
+/** Yield the same job with up to 30s (at most half the remaining time) for closing work. */
+export function observationDeadline(closingAt: number | undefined, now: number) {
+  return closingAt === undefined ? undefined : closingAt - Math.min(30_000, Math.max(0, closingAt - now) / 2)
+}
