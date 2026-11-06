@@ -13,6 +13,7 @@ import { useTheme, type ColorScheme } from "@zaovra-ai/ui/theme/context"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { useParams } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
+import { useHighlights } from "@/context/highlights"
 import { usePermission } from "@/context/permission"
 import { usePlatform, type DisplayBackend } from "@/context/platform"
 import { useServerSync } from "@/context/server-sync"
@@ -93,6 +94,7 @@ const playDemoSound = (id: string | undefined) => {
 export const SettingsGeneral: Component = () => {
   const theme = useTheme()
   const language = useLanguage()
+  const highlights = useHighlights()
   const permission = usePermission()
   const platform = usePlatform()
   const dialog = useDialog()
@@ -737,6 +739,17 @@ export const SettingsGeneral: Component = () => {
             />
           </div>
         </SettingsRow>
+
+        <Show when={highlights.available()}>
+          <SettingsRow
+            title={language.t("settings.general.row.releaseNotes.view")}
+            description={platform.version ?? ""}
+          >
+            <Button data-action="view-release-notes" size="small" variant="secondary" onClick={highlights.show}>
+              {language.t("settings.general.row.releaseNotes.open")}
+            </Button>
+          </SettingsRow>
+        </Show>
 
         <SettingsRow
           title={language.t("settings.updates.row.check.title")}
