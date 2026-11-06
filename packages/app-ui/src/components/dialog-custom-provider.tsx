@@ -22,7 +22,6 @@ import {
   type ProviderProtocol,
   providerServiceKey,
   providerPresetProtocol,
-  detectProviderProtocol,
   providerProtocols,
   changeProviderProtocolURL,
 } from "@/provider-discovery"
@@ -270,21 +269,11 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     mutationFn: async (result: ReturnType<typeof snapshot>) => {
       if (!result.current()) return
       if (result.protocol === undefined) {
-        const detected: { protocol?: ProviderProtocol } = {}
         for (const model of result.models) {
           if (modelType(model) !== "chat") continue
-          const protocol =
-            model.protocol ??
-            detected.protocol ??
-            (await (platform.detectProviderProtocol ?? detectProviderProtocol)({
-              baseURL: result.config.options.baseURL,
-              apiKey: result.apiKey,
-              modelID: model.id.trim(),
-              modelType: modelType(model),
-              headers: result.config.options.headers,
-            }))
+          const protocol = model.protocol
+          if (!protocol) throw new Error(language.t("provider.models.protocolRequired"))
           if (!result.current()) return
-          detected.protocol = protocol
           result.config.models[model.id.trim()] = {
             ...result.config.models[model.id.trim()]!,
             provider: {
@@ -395,6 +384,14 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       setDiscovery({ error: language.t("provider.custom.discovery.choose") })
       return
     }
+    if (form.protocol === undefined) {
+      const protocol = providerPresetProtocol(form.baseURL)
+      if (!protocol && form.models.some((model) => modelType(model) === "chat" && !model.protocol)) {
+        setDiscovery({ advanced: true, error: language.t("provider.models.protocolRequired") })
+        return
+      }
+      if (protocol) setForm("protocol", protocol)
+    }
     const url = normalizeURL()
     if (!url.baseURL) return
     const result = (() => {
@@ -454,6 +451,9 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
                 ? language.t("provider.custom.discovery.loading")
                 : language.t("provider.custom.discovery.fetch")}
             </Button>
+            <Button type="button" variant="ghost" onClick={() => setDiscovery("advanced", true)}>
+              {language.t("provider.models.manual")}
+            </Button>
           </div>
           <Show when={discovery.error}>
             <p role="alert" class="text-14-regular text-text-danger">
@@ -499,7 +499,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
             when={
               discovery.advanced &&
               (form.protocol === undefined || form.protocol === "openai" || form.protocol === "responses") &&
-              discovery.models.length > 0
+              form.models.some((model) => model.id.trim())
             }
           >
             <For each={form.models}>
@@ -533,36 +533,65 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           <details open={discovery.advanced} onToggle={(event) => setDiscovery("advanced", event.currentTarget.open)}>
             <summary class="cursor-pointer text-14-medium">{language.t("provider.custom.discovery.advanced")}</summary>
             <div class="mt-4 flex flex-col gap-4">
+              <p class="text-12-regular text-text-weak">{language.t("provider.models.description")}</p>
               <For each={form.models}>
                 {(model, index) => (
-                  <label class="flex flex-col gap-2 text-14-regular">
-                    <span>
-                      {model.id || language.t("provider.custom.models.id.label")} ·{" "}
-                      {language.t("provider.custom.modelType.label")}
-                    </span>
-                    <select
-                      aria-label={`${model.id || language.t("provider.custom.models.id.label")} · ${language.t("provider.custom.modelType.label")}`}
-                      value={model.type ?? "auto"}
-                      class="h-10 w-full rounded-md border border-border-base bg-surface-base px-3"
-                      onChange={(event) =>
-                        setForm(
-                          "models",
-                          index(),
-                          "type",
-                          event.currentTarget.value === "auto"
-                            ? undefined
-                            : (event.currentTarget.value as ProviderModelType),
-                        )
-                      }
+                  <div class="flex flex-col gap-2 text-14-regular">
+                    <TextField
+                      label={language.t("provider.custom.models.id.label")}
+                      value={model.id}
+                      validationState={model.err.id ? "invalid" : undefined}
+                      error={model.err.id}
+                      onChange={(value) => setForm("models", index(), "id", value)}
+                    />
+                    <TextField
+                      label={language.t("provider.custom.models.name.label")}
+                      value={model.name}
+                      onChange={(value) => setForm("models", index(), "name", value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setForm("models", (rows) => rows.filter((_, i) => i !== index()))}
                     >
-                      <option value="auto">{language.t("provider.custom.modelType.auto")}</option>
-                      <For each={providerModelTypes}>
-                        {(type) => <option value={type}>{language.t(`provider.custom.modelType.${type}`)}</option>}
-                      </For>
-                    </select>
-                  </label>
+                      {language.t("provider.models.remove")}
+                    </Button>
+                    <label class="flex flex-col gap-2">
+                      <span>
+                        {model.id || language.t("provider.custom.models.id.label")} ·{" "}
+                        {language.t("provider.custom.modelType.label")}
+                      </span>
+                      <select
+                        aria-label={`${model.id || language.t("provider.custom.models.id.label")} · ${language.t("provider.custom.modelType.label")}`}
+                        value={model.type ?? "auto"}
+                        class="h-10 w-full rounded-md border border-border-base bg-surface-base px-3"
+                        onChange={(event) =>
+                          setForm(
+                            "models",
+                            index(),
+                            "type",
+                            event.currentTarget.value === "auto"
+                              ? undefined
+                              : (event.currentTarget.value as ProviderModelType),
+                          )
+                        }
+                      >
+                        <option value="auto">{language.t("provider.custom.modelType.auto")}</option>
+                        <For each={providerModelTypes}>
+                          {(type) => <option value={type}>{language.t(`provider.custom.modelType.${type}`)}</option>}
+                        </For>
+                      </select>
+                    </label>
+                  </div>
                 )}
               </For>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setForm("models", (rows) => [...rows, modelRow()])}
+              >
+                {language.t("provider.custom.models.add")}
+              </Button>
               <label class="flex flex-col gap-2 text-14-regular">
                 <span>{language.t("provider.custom.protocol.label")}</span>
                 <select
@@ -674,7 +703,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           type="submit"
           size="large"
           variant="primary"
-          disabled={saveMutation.isPending || discovery.pending || discovery.models.length === 0}
+          disabled={saveMutation.isPending || discovery.pending || !form.models.some((model) => model.id.trim())}
         >
           {saveMutation.isPending ? language.t("common.saving") : language.t("provider.custom.discovery.save")}
         </Button>

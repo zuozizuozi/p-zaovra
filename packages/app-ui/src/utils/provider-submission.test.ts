@@ -8,6 +8,8 @@ function transport(handler: (request: Request) => Promise<Response>) {
   })
 }
 
+const explicit = { models: [{ id: "concrete", name: "Concrete" }], saveModels: async () => {} }
+
 function fixture() {
   const writes: string[] = []
   const client = createZaovraClient({
@@ -27,6 +29,7 @@ test("587 disposed A discovery cannot overwrite the reopened B credential or con
   const pending = Promise.withResolvers<{ id: string; name: string }[]>()
   const configurations: string[] = []
   const old = connectProviderKey({
+    ...explicit,
     client: target.client,
     request: { integrationID: "same-provider", key: "synthetic-A", inputs: {} },
     current: a.start(),
@@ -37,6 +40,7 @@ test("587 disposed A discovery cannot overwrite the reopened B credential or con
   })
   a.cancel() // Same lifetime boundary used by the form's onCleanup.
   const current = await connectProviderKey({
+    ...explicit,
     client: target.client,
     request: { integrationID: "same-provider", key: "synthetic-B", inputs: {} },
     current: b.start(),
@@ -58,10 +62,11 @@ test("587 generation change after config preparation prevents the credential wri
   const operation = providerOperation()
   const pending = Promise.withResolvers<void>()
   const old = connectProviderKey({
+    ...explicit,
     client: target.client,
     request: { integrationID: "A", key: "synthetic-A", inputs: {} },
     current: operation.start(),
-    discover: async () => [],
+    discover: async () => [{ id: "concrete", name: "Concrete" }],
     saveModels: () => pending.promise,
   })
   await Promise.resolve()
@@ -76,6 +81,7 @@ test("587 reconnect removes only its own ID from the latest list after a success
   const operation = providerOperation()
   const state = { disabled: ["provider", "other"], enabled: 0 }
   const connected = await connectProviderKey({
+    ...explicit,
     client: target.client,
     request: { integrationID: "provider", key: "synthetic", inputs: {} },
     current: operation.start(),
@@ -107,6 +113,7 @@ test("587 failed key save never re-enables and the current form can retry", asyn
   })
   const submit = () =>
     connectProviderKey({
+      ...explicit,
       client,
       request: { integrationID: "provider", key: "synthetic", inputs: {} },
       current: operation.start(),
@@ -133,6 +140,7 @@ test("587 disposing after dispatch does not claim cancellation or admit follow-u
     }),
   })
   const submitted = connectProviderKey({
+    ...explicit,
     client,
     request: { integrationID: "provider", key: "synthetic", inputs: {} },
     current: operation.start(),
@@ -153,6 +161,7 @@ test("587 failed enable reports the already saved credential without changing th
   const disabled = ["provider", "other"]
   await expect(
     connectProviderKey({
+      ...explicit,
       client: target.client,
       request: { integrationID: "provider", key: "synthetic", inputs: {} },
       current: providerOperation().start(),

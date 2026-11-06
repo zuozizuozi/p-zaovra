@@ -1,4 +1,3 @@
-import { primaryProviderModel } from "@/context/model-choice"
 import { useModelService } from "@/hooks/use-model-service"
 import { modelSource } from "@/utils/model-source"
 import type { IntegrationAttempt, IntegrationMethod } from "@zaovra-ai/sdk/v2/types"
@@ -47,6 +46,8 @@ import {
   resolveProviderIntegration,
 } from "@/utils/provider-integration"
 import { CustomProviderForm } from "./dialog-custom-provider"
+import { ProviderModelFields, ProviderModelsForm } from "./dialog-provider-models"
+import { manualProviderModels, providerModelsPatch, providerModelsReady } from "./provider-model-config"
 import { usePlatform } from "@/context/platform"
 import { discoverProviderModels, providerDiscoveryPresets, providerProtocols } from "@/provider-discovery"
 
@@ -514,6 +515,7 @@ function ProviderConnection(props: {
   )
   const [store, setStore] = createStore({
     methodIndex: undefined as undefined | number,
+    modelsNeeded: false,
     authorization: undefined as undefined | IntegrationAttempt,
     promptInputs: undefined as undefined | Record<string, string>,
     state: "pending" as undefined | "pending" | "complete" | "error" | "prompt",
@@ -857,13 +859,15 @@ function ProviderConnection(props: {
     if (!current()) return
     const { directoryKey } = await import("@/context/global-sync/utils")
     if (!current()) return
-    await sync.queryClient
-      .fetchQuery({
-        ...sync.queryOptions.providers(directory ? directoryKey(directory) : null),
-        staleTime: 0,
-      })
-      .catch(() => undefined)
+    const catalog = await sync.queryClient.fetchQuery({
+      ...sync.queryOptions.providers(directory ? directoryKey(directory) : null),
+      staleTime: 0,
+    })
     if (!current()) return
+    if (!providerModelsReady(providerID, sync.data.config, catalog.all.get(providerID)?.models ?? {})) {
+      setStore("modelsNeeded", true)
+      return false
+    }
     service.select(providerID)
     dialog.close()
     showToast({
@@ -876,6 +880,7 @@ function ProviderConnection(props: {
         provider: name,
       }),
     })
+    return true
   }
 
   function goBack() {
@@ -960,6 +965,9 @@ function ProviderConnection(props: {
       value: "",
       pending: false,
       error: undefined as string | undefined,
+      manual: !providerDiscoveryPresets[props.provider] || !!Object.keys(store.promptInputs ?? {}).length,
+      modelIDs: "",
+      protocol: undefined as keyof typeof providerProtocols | undefined,
     })
     const operation = providerOperation()
     onCleanup(operation.cancel)
@@ -983,13 +991,23 @@ function ProviderConnection(props: {
       const providerID = props.provider
       const integration = auth.latest!
       const inputs = { ...store.promptInputs }
+      const manual = formStore.manual
+      const modelIDs = formStore.modelIDs
+      const protocol = formStore.protocol
       const current = () =>
-        valid() && alive.value && serverSDK() === sdk && props.provider === providerID && formStore.value.trim() === key
+        valid() &&
+        alive.value &&
+        serverSDK() === sdk &&
+        props.provider === providerID &&
+        formStore.value.trim() === key &&
+        formStore.manual === manual &&
+        formStore.modelIDs === modelIDs &&
+        formStore.protocol === protocol
       try {
         const preset = providerDiscoveryPresets[providerID]
         const configured = sync.data.config.provider?.[providerID]?.options
         const discovery =
-          preset && !Object.keys(inputs).length
+          preset && !formStore.manual && !Object.keys(inputs).length
             ? {
                 ...preset,
                 baseURL: typeof configured?.baseURL === "string" ? configured.baseURL : preset.baseURL,
@@ -1011,18 +1029,16 @@ function ProviderConnection(props: {
           discover: discovery
             ? () => (platform.discoverProviderModels ?? discoverProviderModels)(discovery)
             : undefined,
+          models: discovery ? undefined : manualProviderModels(formStore.modelIDs),
           saveModels: (discovered) =>
-            sync.updateConfig({
-              ...(primaryProviderModel(discovered)
-                ? { model: providerID + "/" + primaryProviderModel(discovered)!.id }
-                : {}),
-              provider: {
-                [providerID]: {
-                  whitelist: discovered.map((model) => model.id),
-                  models: Object.fromEntries(discovered.map((model) => [model.id, { name: model.name }])),
-                },
-              },
-            }),
+            sync.updateConfig(
+              providerModelsPatch(
+                providerID,
+                discovered,
+                sync.data.config.provider?.[providerID],
+                formStore.manual ? formStore.protocol : undefined,
+              ),
+            ),
           enable: async () => {
             const disabled = sync.data.config.disabled_providers ?? []
             if (disabled.includes(providerID))
@@ -1037,13 +1053,17 @@ function ProviderConnection(props: {
         setFormStore(
           "error",
           language.t(
-            message === "providerReenableFailed"
-              ? "provider.connect.disabled.failed"
-              : /restart/.test(message)
-                ? "provider.custom.discovery.restart"
-                : /http40[13]/.test(message)
-                  ? "provider.custom.discovery.auth"
-                  : "common.requestFailed",
+            message === "providerModelsRequired"
+              ? "provider.models.required"
+              : message === "providerModelsDuplicate"
+                ? "provider.models.duplicate"
+                : message === "providerReenableFailed"
+                  ? "provider.connect.disabled.failed"
+                  : /restart/.test(message)
+                    ? "provider.custom.discovery.restart"
+                    : /http40[13]/.test(message)
+                      ? "provider.custom.discovery.auth"
+                      : "common.requestFailed",
           ),
         )
       } finally {
@@ -1106,6 +1126,27 @@ function ProviderConnection(props: {
                 </div>
               )}
             </Show>
+            <Show
+              when={formStore.manual}
+              fallback={
+                <ButtonV2
+                  type="button"
+                  variant="ghost-muted"
+                  disabled={formStore.pending}
+                  onClick={() => setFormStore("manual", true)}
+                >
+                  {language.t("provider.models.manual")}
+                </ButtonV2>
+              }
+            >
+              <ProviderModelFields
+                value={formStore.modelIDs}
+                protocol={formStore.protocol}
+                disabled={formStore.pending}
+                onChange={(value) => setFormStore("modelIDs", value)}
+                onProtocol={(value) => setFormStore("protocol", value)}
+              />
+            </Show>
             <ButtonV2 type="submit" variant="contrast" disabled={formStore.pending}>
               {formStore.pending ? language.t("provider.custom.discovery.loading") : language.t("common.continue")}
             </ButtonV2>
@@ -1152,6 +1193,27 @@ function ProviderConnection(props: {
           <Button class="w-auto" type="submit" size="large" variant="primary" disabled={formStore.pending}>
             {formStore.pending ? language.t("provider.custom.discovery.loading") : language.t("common.continue")}
           </Button>
+          <Show
+            when={formStore.manual}
+            fallback={
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={formStore.pending}
+                onClick={() => setFormStore("manual", true)}
+              >
+                {language.t("provider.models.manual")}
+              </Button>
+            }
+          >
+            <ProviderModelFields
+              value={formStore.modelIDs}
+              protocol={formStore.protocol}
+              disabled={formStore.pending}
+              onChange={(value) => setFormStore("modelIDs", value)}
+              onProtocol={(value) => setFormStore("protocol", value)}
+            />
+          </Show>
         </form>
       </div>
     )
@@ -1357,6 +1419,9 @@ function ProviderConnection(props: {
           autofocus={!newLayout() && store.methodIndex === undefined ? true : undefined}
         >
           <Switch>
+            <Match when={store.modelsNeeded}>
+              <ProviderModelsForm providerID={props.provider} onSaved={() => complete()} />
+            </Match>
             <Match when={loading()}>
               <div class="text-14-regular text-text-base">
                 <div class="flex items-center gap-x-2">

@@ -1,4 +1,18 @@
 export const dict = {
+  "provider.models.title": "Configure models",
+  "provider.models.remove": "Remove model",
+  "provider.models.unavailable":
+    "Models were saved but remain unavailable. Check this provider’s allowlist, denylist and disabled model settings.",
+  "provider.models.complete": "Add models to finish configuration",
+  "provider.models.ids": "Model IDs",
+  "provider.models.placeholder": "One model ID per line",
+  "provider.models.description":
+    "Enter exact model IDs from your provider, one per line. This saves configuration without sending a generation request.",
+  "provider.models.manual": "Enter model IDs manually",
+  "provider.models.required": "Enter at least one concrete chat model ID. Automatic routing IDs cannot be selected.",
+  "provider.models.duplicate": "Each model ID must be unique.",
+  "provider.models.protocolRequired": "Choose the protocol in Advanced before saving manual model IDs.",
+  "provider.models.save": "Save models",
   "settings.about.updater.error": "Update check failed. Try again.",
   "settings.about.updater.installing": "Updating…",
   "settings.about.updater.up-to-date": "You are up to date",

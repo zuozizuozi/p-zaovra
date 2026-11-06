@@ -1,4 +1,5 @@
 import type { IntegrationInfo, IntegrationMethod, ZaovraClient } from "@zaovra-ai/sdk/v2"
+import { primaryProviderModel } from "../context/model-choice"
 
 // A disposed form or a newer submission must not admit the old preparation's writes.
 export function providerOperation() {
@@ -17,13 +18,15 @@ export async function connectProviderKey(input: {
   request: Parameters<ZaovraClient["v2"]["integration"]["connect"]["key"]>[0]
   current: () => boolean
   discover?: () => Promise<{ id: string; name: string }[]>
+  models?: { id: string; name: string }[]
   saveModels?: (models: { id: string; name: string }[]) => Promise<unknown>
   enable?: () => Promise<unknown>
 }) {
   if (!input.current()) return false
-  const models = await input.discover?.()
+  const models = input.discover ? await input.discover() : input.models
   if (!input.current()) return false
-  if (models) await input.saveModels?.(models)
+  if (!models || !primaryProviderModel(models) || !input.saveModels) throw new Error("providerModelsRequired")
+  await input.saveModels(models)
   if (!input.current()) return false
   // A dispatched credential write cannot be cancelled by closing its form.
   await input.client.v2.integration.connect.key(input.request, { throwOnError: true })

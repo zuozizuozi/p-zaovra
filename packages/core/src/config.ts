@@ -2,7 +2,7 @@ export * as Config from "./config"
 
 import { makeLocationNode } from "./effect/app-node"
 import path from "path"
-import { type ParseError, parse } from "jsonc-parser"
+import { type ParseError, parse, modify, applyEdits } from "jsonc-parser"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Permission } from "@zaovra-ai/schema/permission"
 import { FSUtil } from "./fs-util"
@@ -20,6 +20,7 @@ import { ConfigLSP } from "./config/lsp"
 import { ConfigMCP } from "./config/mcp"
 import { ConfigPlugin } from "./config/plugin"
 import { ConfigProvider } from "./config/provider"
+import { ConfigProviderActivation } from "./config/provider-activation"
 import { ConfigReference } from "./config/reference"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
@@ -207,6 +208,8 @@ export function decode(input: unknown): Option.Option<Info> {
 export interface Interface {
   /** Returns location config documents and supplemental directories from lowest to highest priority. */
   readonly entries: () => Effect.Effect<Entry[]>
+  /** Persists only previously selected models belonging to saved credentials. */
+  readonly activateModels?: (connected: readonly string[]) => Effect.Effect<Entry[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/Config") {}
@@ -305,6 +308,64 @@ const layer = Layer.effect(
 
     return Service.of({
       entries: Effect.fn("Config.entries")(function* () {
+        return configs
+      }),
+      activateModels: Effect.fn("Config.activateModels")(function* (connected) {
+        for (const item of ConfigProviderActivation.plan(configs, connected)) {
+          const index = item.index
+          const document = configs[index]
+          if (document?.type !== "document") continue
+          if (document.path) {
+            const text = yield* fs.readFileStringSafe(document.path).pipe(Effect.orDie)
+            if (!text) continue
+            const current = yield* loadText(text, document.path)
+            // A concurrently edited configuration must be reopened, never overwritten.
+            if (JSON.stringify(current.info) !== JSON.stringify(document.info)) {
+              configs[index] = current
+              continue
+            }
+            const input = parse(text) as Record<string, unknown>
+            const key = input.providers !== undefined || input.provider === undefined ? "providers" : "provider"
+            const next = applyEdits(
+              text,
+              modify(
+                text,
+                [key, item.providerID, "models", item.modelID],
+                {},
+                {
+                  formattingOptions: { insertSpaces: true, tabSize: 2 },
+                },
+              ),
+            )
+            const written = yield* fs.writeFileString(document.path, next).pipe(
+              Effect.as(true),
+              Effect.catch(() =>
+                Effect.logWarning("Selected model migration could not be saved; configure models in Settings").pipe(
+                  Effect.as(false),
+                ),
+              ),
+            )
+            if (!written) continue
+            configs[index] = yield* loadText(next, document.path)
+            continue
+          }
+          configs[index] = new Document({
+            ...document,
+            info: new Info({
+              ...document.info,
+              providers: {
+                ...document.info.providers,
+                [item.providerID]: {
+                  ...document.info.providers?.[item.providerID],
+                  models: {
+                    ...document.info.providers?.[item.providerID]?.models,
+                    [item.modelID]: {},
+                  },
+                },
+              },
+            }),
+          })
+        }
         return configs
       }),
     })

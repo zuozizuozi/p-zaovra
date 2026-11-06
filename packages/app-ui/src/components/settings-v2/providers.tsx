@@ -1,4 +1,5 @@
 import { DialogProviderProtocol } from "../dialog-provider-protocol"
+import { DialogProviderModels } from "../dialog-provider-models"
 import { protocolEditable, protocolChoice } from "../provider-protocol"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { Tag } from "@zaovra-ai/ui/v2/badge-v2"
@@ -208,6 +209,14 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
                         </Tag>
                       </div>
                     </div>
+                    <ButtonV2
+                      variant="ghost-muted"
+                      onClick={() => dialog.show(() => <DialogProviderModels providerID={item.id} />)}
+                    >
+                      {language.t(
+                        Object.keys(item.models).length ? "provider.models.title" : "provider.models.complete",
+                      )}
+                    </ButtonV2>
                     <Show when={protocolEditable(serverSync().data.config.provider?.[item.id])}>
                       <ButtonV2
                         variant="ghost-muted"

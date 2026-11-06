@@ -1,4 +1,4 @@
-import { isProviderAutoModel } from "@/context/model-choice"
+import { resolveModelSelection } from "@/context/model-choice"
 import { aliasModelVariant, modelVariantChoice } from "./model-choice"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
@@ -104,14 +104,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const provider = providers.all().get(model.providerID)
       return !!provider?.models[model.modelID] && connected().has(model.providerID) && !!models.find(model)
     }
-
-    const firstModel = (...items: Array<() => ModelKey | undefined>) => {
-      for (const item of items) {
-        const model = item()
-        if (!model) continue
-        if (validModel(model)) return model
-      }
-    }
+    const chatModels = createMemo(() =>
+      models.list().filter((model) => models.type({ providerID: model.provider.id, modelID: model.id }) === "chat"),
+    )
 
     const pickAgent = (name: string | undefined) => {
       return resolveAgent(list(), name)
@@ -150,37 +145,6 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       handoff.delete(key)
       setStore("promoting", undefined)
     })
-
-    const configuredModel = () => {
-      const configured = sync().data.config.model
-      if (!configured) return
-      const model = parseModelKey(configured)
-      if (model && validModel(model)) return model
-    }
-
-    const recentModel = () => {
-      for (const item of models.recent.list()) {
-        if (validModel(item)) return item
-      }
-    }
-
-    const defaultModel = () => {
-      const defaults = providers.default()
-      for (const provider of providers.connected()) {
-        const configured = defaults[provider.id]
-        if (configured) {
-          const model = { providerID: provider.id, modelID: configured }
-          if (validModel(model)) return model
-        }
-
-        const first = Object.values(provider.models)[0]
-        if (!first) continue
-        const model = { providerID: provider.id, modelID: first.id }
-        if (validModel(model)) return model
-      }
-    }
-
-    const fallback = createMemo<ModelKey | undefined>(() => configuredModel() ?? recentModel() ?? defaultModel())
 
     const agent = {
       list,
@@ -233,19 +197,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
-    const current = () => {
-      const selected = scope()?.model
-      if (selected && isProviderAutoModel(selected.modelID))
-        return models.list().find((model) => model.provider.id === selected.providerID)
-      if (selected) return validModel(selected) ? models.find(selected) : undefined
-      const item = firstModel(
-        () => scope()?.model,
-        () => agent.current()?.model,
-        fallback,
-      )
-      if (!item) return
-      return models.find(item)
-    }
+    const current = () =>
+      resolveModelSelection({
+        selected: scope()?.model,
+        agent: agent.current()?.model,
+        configured: parseModelKey(sync().data.config.model ?? ""),
+        recent: models.recent.list(),
+        providers: providers.connected(),
+        defaults: providers.default(),
+        models: chatModels(),
+        valid: validModel,
+        find: models.find,
+      })
 
     const configured = () => {
       const item = agent.current()

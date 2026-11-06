@@ -5,11 +5,13 @@ import { Effect } from "effect"
 import { Config } from "../../config"
 import { ModelV2 } from "../../model"
 import { ProviderV2 } from "../../provider"
+import { Integration } from "../../integration"
 
 export const Plugin = define({
   id: "config-provider",
   effect: Effect.fn(function* (ctx) {
     const config = yield* Config.Service
+    const integrations = yield* Integration.Service
     yield* ctx.integration.transform(
       Effect.fn(function* (integrations) {
         const files = (yield* config.entries()).filter((entry): entry is Config.Document => entry.type === "document")
@@ -37,7 +39,17 @@ export const Plugin = define({
 
     yield* ctx.catalog.transform(
       Effect.fn(function* (catalog) {
-        const entries = yield* config.entries()
+        const saved = (yield* integrations.list())
+          .filter((item) => item.connections.some((connection) => connection.type === "credential"))
+          .map((item) => String(item.id))
+        const connected = [
+          ...saved,
+          ...catalog.provider
+            .list()
+            .filter((record) => saved.includes(record.provider.integrationID ?? record.provider.id))
+            .map((record) => String(record.provider.id)),
+        ]
+        const entries = yield* config.activateModels?.(connected) ?? config.entries()
         const files = entries.filter((entry): entry is Config.Document => entry.type === "document")
         const configuredModels = new Set<string>()
         const configuredDefault = Config.latest(entries, "model")
