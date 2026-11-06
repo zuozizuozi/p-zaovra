@@ -127,7 +127,7 @@
     "type": "git",
     "url": "https://github.com/zuozizuozi/p-zaovra"
   },
-  "license": "MIT",
+  "license": "UNLICENSED",
   "prettier": {
     "semi": false,
     "printWidth": 120

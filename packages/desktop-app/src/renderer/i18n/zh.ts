@@ -1,4 +1,5 @@
 export const dict = {
+  "desktop.starting": "正在启动…",
   "desktop.onboarding.choose": "无法创建默认项目，请选择文件夹。",
   "desktop.server.exited":
     "本地服务已停止（退出码 {{code}}），当前任务状态无法确认。请关闭并重新打开 Zaovra 恢复连接，核对任务后再继续；命令不会自动重跑。",

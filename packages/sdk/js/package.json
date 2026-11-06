@@ -3,7 +3,7 @@
   "name": "@zaovra-ai/sdk",
   "version": "1.18.3",
   "type": "module",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "scripts": {
     "test": "bun test",
     "typecheck": "tsgo --noEmit",

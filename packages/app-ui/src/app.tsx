@@ -1,3 +1,4 @@
+import { StartupContext } from "@/context/startup"
 import "@/index.css"
 import { FeedbackHost } from "./components/feedback-host"
 import { openFeedback } from "./feedback"
@@ -27,7 +28,6 @@ import { Effect } from "effect"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 import {
   type Component,
-  createContext,
   createEffect,
   createMemo,
   createRenderEffect,
@@ -327,8 +327,6 @@ function SharedProviders(props: ParentProps) {
   )
 }
 
-const StartupContext = createContext<Promise<void>>()
-
 function AccountGate(props: ParentProps) {
   const serverSDK = useServerSDK()
   const platform = usePlatform()
@@ -457,7 +455,9 @@ function AccountGate(props: ParentProps) {
       {/* Onboarding mounts behind this account gate, so its splash must not cover sign-in. */}
       <Show when={startup && !startupReady()}>
         <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 motion-safe:animate-pulse" />
+          <Show when={platform.platform !== "desktop"} fallback={<p role="status">正在启动…</p>}>
+            <Splash class="w-16 h-20 motion-safe:animate-pulse" />
+          </Show>
         </div>
       </Show>
     </Show>
@@ -586,6 +586,7 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
 }
 
 function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; startup?: Promise<void> }>) {
+  const platform = usePlatform()
   const server = useServer()
   const checkServerHealth = useCheckServerHealth()
 
@@ -638,7 +639,9 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean; start
       </Show>
       <Show when={checking()}>
         <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 motion-safe:animate-pulse" />
+          <Show when={platform.platform !== "desktop"} fallback={<p role="status">正在启动…</p>}>
+            <Splash class="w-16 h-20 motion-safe:animate-pulse" />
+          </Show>
         </div>
       </Show>
     </>

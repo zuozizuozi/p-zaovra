@@ -29,7 +29,7 @@ export function isFirstLaunchOnboardingPending() {
 }
 
 export async function finishFirstLaunchOnboarding(createDefaultProject: boolean) {
-  if (!isFirstLaunchOnboardingPending()) {
+  if (!isFirstLaunchOnboardingPending() && !createDefaultProject) {
     writeLog("onboarding", "first launch onboarding already completed")
     return null
   }

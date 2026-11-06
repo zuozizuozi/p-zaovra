@@ -2,7 +2,7 @@
   "name": "@zaovra-ai/console-support",
   "version": "1.18.3",
   "type": "module",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "dev": "sst shell --stage production -- vite dev"

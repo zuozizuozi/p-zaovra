@@ -1,4 +1,4 @@
-import { ServerConnection, useLayout, useServer, useSettings, useTabs } from "@zaovra-ai/app"
+import { useLayout, useServer, useSettings, useTabs } from "@zaovra-ai/app"
 import { onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
@@ -51,14 +51,13 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
       settings.general.setOldLayoutEligible(existingInstall)
       if (!server.isLocal()) return
 
+      if (tabs.store.length > 0) {
+        if (props.initialUrl === "/") tabs.toggleHome({ home: true })
+        return
+      }
       const pending = await window.api.isFirstLaunchOnboardingPending()
-      if (!pending) return
 
-      const shouldTrigger =
-        !existingInstall &&
-        props.initialUrl === "/" &&
-        tabs.store.length === 0 &&
-        server.list.every(ServerConnection.builtin)
+      const shouldTrigger = tabs.store.length === 0 && server.projects.list().length === 0
 
       console.info("[desktop-onboarding] first launch onboarding evaluated", {
         pending,
@@ -66,7 +65,7 @@ export function DesktopFirstLaunchOnboarding(props: { initialUrl: string; onLoad
         existingInstall,
         initialUrl: props.initialUrl,
         tabs: tabs.store.length,
-        servers: server.list.map(ServerConnection.key),
+        projects: server.projects.list().length,
       })
 
       const result = await window.api.finishFirstLaunchOnboarding(shouldTrigger)
