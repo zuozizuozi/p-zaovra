@@ -27,7 +27,7 @@ const missingPath = "__missing_read_target__.txt"
 const missingAbsolutePath = path.join(process.cwd(), missingPath)
 const readCalls: {
   input: AbsolutePath
-  page: ReadToolFileSystem.PageInput & { images?: boolean }
+  page: ReadToolFileSystem.PageInput & { images?: boolean; pdfs?: boolean }
 }[] = []
 const listCalls: ReadToolFileSystem.PageInput[] = []
 let resolvedType: "file" | "directory" = "file"
@@ -219,7 +219,7 @@ describe("ReadTool", () => {
       expect(readCalls).toEqual([
         {
           input: AbsolutePath.make(path.join(process.cwd(), "README.md")),
-          page: { offset: undefined, limit: undefined, images: false },
+          page: { offset: undefined, limit: undefined, images: false, pdfs: false },
         },
       ])
     }),
@@ -246,7 +246,10 @@ describe("ReadTool", () => {
         { sessionID, action: "read", resources: [external.replaceAll("\\", "/")], save: ["*"] },
       ])
       expect(readCalls).toEqual([
-        { input: AbsolutePath.make(external), page: { offset: undefined, limit: undefined, images: false } },
+        {
+          input: AbsolutePath.make(external),
+          page: { offset: undefined, limit: undefined, images: false, pdfs: false },
+        },
       ])
     }),
   )
@@ -279,7 +282,7 @@ describe("ReadTool", () => {
       expect(readCalls).toEqual([
         {
           input: AbsolutePath.make(path.join(process.cwd(), "pixel.png")),
-          page: { offset: undefined, limit: undefined, images: false },
+          page: { offset: undefined, limit: undefined, images: false, pdfs: false },
         },
       ])
 
@@ -563,7 +566,7 @@ describe("ReadTool", () => {
       expect(readCalls).toEqual([
         {
           input: AbsolutePath.make(path.join(process.cwd(), "archive.dat")),
-          page: { offset: 2, limit: 1, images: false },
+          page: { offset: 2, limit: 1, images: false, pdfs: false },
         },
       ])
     }),
@@ -738,7 +741,7 @@ describe("ReadTool", () => {
       expect(readCalls).toEqual([
         {
           input: AbsolutePath.make(path.join(process.cwd(), "large.txt")),
-          page: { offset: 2, limit: 1, images: false },
+          page: { offset: 2, limit: 1, images: false, pdfs: false },
         },
       ])
     }),
