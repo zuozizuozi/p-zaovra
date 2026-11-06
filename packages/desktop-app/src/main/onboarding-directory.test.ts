@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { completeFirstLaunch } from "./onboarding-directory"
 
-test("fresh profile creates Documents/Default Project and can restore the same default on restart", async () => {
+test("fresh profile creates Documents/Zaovra Projects and can restore the same default on restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "first-launch-"))
   let pending = true
   const input = {
@@ -18,8 +18,8 @@ test("fresh profile creates Documents/Default Project and can restore the same d
   }
   try {
     const result = await completeFirstLaunch(input)
-    expect(result).toEqual({ directory: join(root, "documents", "Default Project"), fallback: false })
-    expect((await stat(join(root, "documents", "Default Project"))).isDirectory()).toBe(true)
+    expect(result).toEqual({ directory: join(root, "documents", "Zaovra Projects"), fallback: false })
+    expect((await stat(join(root, "documents", "Zaovra Projects"))).isDirectory()).toBe(true)
     expect(pending).toBe(false)
     expect(await completeFirstLaunch({ ...input, pending })).toEqual(result)
     expect(await Bun.file(join(root, "home")).exists()).toBe(false)
@@ -43,8 +43,8 @@ test("unavailable Documents falls back to home without requiring a model", async
           completed = true
         },
       }),
-    ).toEqual({ directory: join(root, "home", "Default Project"), fallback: true })
-    expect((await stat(join(root, "home", "Default Project"))).isDirectory()).toBe(true)
+    ).toEqual({ directory: join(root, "home", "Zaovra Projects"), fallback: true })
+    expect((await stat(join(root, "home", "Zaovra Projects"))).isDirectory()).toBe(true)
     expect(completed).toBe(true)
   } finally {
     await cleanup(root)
@@ -106,7 +106,7 @@ test("completion storage errors stay visible instead of creating a second projec
         },
       }),
     ).rejects.toThrow("store unavailable")
-    expect((await stat(join(root, "documents", "Default Project"))).isDirectory()).toBe(true)
+    expect((await stat(join(root, "documents", "Zaovra Projects"))).isDirectory()).toBe(true)
     expect(await Bun.file(join(root, "home")).exists()).toBe(false)
   } finally {
     await cleanup(root)
@@ -128,8 +128,8 @@ test("687 completed empty profile can ensure the default directory again", async
       mkdir: (directory) => mkdir(directory, { recursive: true }),
       complete: () => {},
     })
-    expect(result).toEqual({ directory: join(root, "documents", "Default Project"), fallback: false })
-    expect((await stat(join(root, "documents", "Default Project"))).isDirectory()).toBe(true)
+    expect(result).toEqual({ directory: join(root, "documents", "Zaovra Projects"), fallback: false })
+    expect((await stat(join(root, "documents", "Zaovra Projects"))).isDirectory()).toBe(true)
   } finally {
     await cleanup(root)
   }

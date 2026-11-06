@@ -8,6 +8,13 @@ export function enrichLocalProject(
   icon: string | undefined,
 ) {
   const override = !metadata?.id || metadata.id === "global" ? local : undefined
-  const base = { ...metadata, ...override, ...project, icon: { ...metadata?.icon, ...override?.icon } }
+  const base = {
+    ...project,
+    ...metadata,
+    ...override,
+    worktree: project.worktree,
+    expanded: project.expanded,
+    icon: { ...metadata?.icon, ...override?.icon },
+  }
   return icon ? { ...base, icon: { ...base.icon, override: icon } } : base
 }

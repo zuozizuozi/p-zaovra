@@ -597,12 +597,6 @@ export function NewHome() {
     tabs.newDraft({ server: ServerConnection.key(conn), directory })
   }
 
-  function editProject(conn: ServerConnection.Any, project: LocalProject) {
-    void import("@/components/dialog-edit-project-v2").then((x) => {
-      void dialog.show(() => <x.DialogEditProjectV2 server={conn} project={project} />)
-    })
-  }
-
   function unseenCount(conn: ServerConnection.Any, project: LocalProject) {
     const state = notification.ensureServerState(ServerConnection.key(conn))
     return directories(project).reduce((total, directory) => total + state.project.unseenCount(directory), 0)
@@ -707,7 +701,6 @@ export function NewHome() {
               openNewSession={openProjectNewSession}
               openRecentProject={(conn, directory) => addProjects(conn, [directory])}
               chooseProject={(conn) => void chooseProject(conn)}
-              editProject={editProject}
               closeProject={(conn, directory) => {
                 const next = closeHomeProject(
                   selection(),
@@ -850,7 +843,6 @@ function HomeProjectColumn(props: {
   openNewSession: (server: ServerConnection.Any, directory: string) => void
   openRecentProject: (server: ServerConnection.Any, directory: string) => void
   chooseProject: (server: ServerConnection.Any) => void
-  editProject: (server: ServerConnection.Any, project: LocalProject) => void
   closeProject: (server: ServerConnection.Any, directory: string) => void
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
@@ -1095,7 +1087,6 @@ function HomeProjectList(props: {
   selected: HomeProjectSelection
   selectProject: (server: ServerConnection.Any, directory: string) => void
   openNewSession: (server: ServerConnection.Any, directory: string) => void
-  editProject: (server: ServerConnection.Any, project: LocalProject) => void
   closeProject: (server: ServerConnection.Any, directory: string) => void
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
@@ -1115,7 +1106,6 @@ function HomeProjectList(props: {
             unseenCount={props.unseenCount(props.server, project)}
             selectProject={props.selectProject}
             openNewSession={props.openNewSession}
-            editProject={props.editProject}
             closeProject={props.closeProject}
             clearNotifications={props.clearNotifications}
             language={props.language}
@@ -1193,7 +1183,6 @@ function HomeProjectRow(props: {
   unseenCount: number
   selectProject: (server: ServerConnection.Any, directory: string) => void
   openNewSession: (server: ServerConnection.Any, directory: string) => void
-  editProject: (server: ServerConnection.Any, project: LocalProject) => void
   closeProject: (server: ServerConnection.Any, directory: string) => void
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   language: ReturnType<typeof useLanguage>
@@ -1254,9 +1243,6 @@ function HomeProjectRow(props: {
             <MenuV2.Content>
               <MenuV2.Item onSelect={() => props.openNewSession(props.server, props.project.worktree)}>
                 {props.language.t("command.session.new")}
-              </MenuV2.Item>
-              <MenuV2.Item onSelect={() => props.editProject(props.server, props.project)}>
-                {props.language.t("dialog.project.edit.title")}
               </MenuV2.Item>
               <Show when={canRevealInFileManager()}>
                 <MenuV2.Item onSelect={revealInFileManager}>{fileManagerActionLabel()}</MenuV2.Item>

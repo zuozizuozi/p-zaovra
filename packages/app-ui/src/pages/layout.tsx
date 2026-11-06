@@ -1333,14 +1333,6 @@ export default function LegacyLayout(props: ParentProps) {
     layout.sidebar.toggleWorkspaces(project.worktree)
   }
 
-  const showEditProjectDialog = (conn: ServerConnection.Any, project: LocalProject) => {
-    const run = ++dialogRun
-    void import("@/components/dialog-edit-project").then((x) => {
-      if (dialogDead || dialogRun !== run) return
-      dialog.show(() => <x.DialogEditProject server={conn} project={project} />)
-    })
-  }
-
   function chooseProject() {
     const conn = server.current
     if (!conn) return
@@ -1894,7 +1886,6 @@ export default function LegacyLayout(props: ParentProps) {
     navigateToProject,
     openSidebar: () => layout.sidebar.open(),
     closeProject,
-    showEditProjectDialog: (proj) => showEditProjectDialog(server.current!, proj),
     toggleProjectWorkspaces,
     workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
     workspaceIds,
@@ -2039,13 +2030,6 @@ export default function LegacyLayout(props: ParentProps) {
                     />
                     <DropdownMenu.Portal>
                       <DropdownMenu.Content class="mt-1">
-                        <DropdownMenu.Item
-                          onSelect={() => {
-                            showEditProjectDialog(server.current!, project)
-                          }}
-                        >
-                          <DropdownMenu.ItemLabel>{language.t("common.edit")}</DropdownMenu.ItemLabel>
-                        </DropdownMenu.Item>
                         <DropdownMenu.Item
                           data-action="project-workspaces-toggle"
                           data-project={slug()}

@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js"
+import { For } from "solid-js"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { useLanguage } from "@/context/language"
 import type { PermissionMode } from "@/context/permission-auto-respond"
@@ -21,13 +21,17 @@ export function PermissionModeControl(props: { mode: PermissionMode; onChange: (
           {language.t("permission.mode." + props.mode)} ⌄
         </MenuV2.Trigger>
         <MenuV2.Portal>
-          <MenuV2.Content>
+          <MenuV2.Content class="w-80 max-w-[calc(100vw-24px)]" data-permission-menu="">
             <For each={["ask", "automatic", "full"] as const}>
               {(mode) => (
-                <MenuV2.Item onSelect={() => props.onChange(mode)}>
-                  <div class="flex max-w-80 flex-col gap-1">
-                    <span>{language.t("permission.mode." + mode)}</span>
-                    <span class="text-xs text-text-weak whitespace-normal">
+                <MenuV2.Item
+                  data-mode={mode}
+                  onSelect={() => props.onChange(mode)}
+                  style={{ height: "auto", padding: "10px 12px" }}
+                >
+                  <div class="flex min-w-0 flex-col gap-1.5 whitespace-normal">
+                    <span class="leading-5">{language.t("permission.mode." + mode)}</span>
+                    <span class="text-xs leading-5 text-text-weak whitespace-normal">
                       {language.t("permission.mode." + mode + ".description")}
                     </span>
                   </div>
@@ -37,15 +41,6 @@ export function PermissionModeControl(props: { mode: PermissionMode; onChange: (
           </MenuV2.Content>
         </MenuV2.Portal>
       </MenuV2>
-      <Show when={props.mode === "full"}>
-        <p
-          role="status"
-          class="mt-1 rounded-md bg-surface-critical-base p-2 text-xs text-text-on-critical-base max-w-80"
-          data-slot="full-access-warning"
-        >
-          {language.t("permission.mode.full.warning")}
-        </p>
-      </Show>
     </div>
   )
 }

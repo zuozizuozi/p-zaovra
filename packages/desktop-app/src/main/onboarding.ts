@@ -37,6 +37,8 @@ export async function finishFirstLaunchOnboarding(createDefaultProject: boolean)
   const result = await completeFirstLaunch({
     pending: true,
     create: createDefaultProject,
+    locale: app.getLocale(),
+    exists: existsSync,
     path: (name) => app.getPath(name),
     mkdir: (directory) => mkdir(directory, { recursive: true }),
     complete: () => getStore().set(FIRST_LAUNCH_ONBOARDING_COMPLETE_KEY, true),
