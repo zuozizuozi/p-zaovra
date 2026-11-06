@@ -95,78 +95,81 @@ export function SessionPermissionDock(props: {
       </div>
       <div data-slot="permission-row">
         <span data-slot="permission-spacer" aria-hidden="true" />
-        <details class="min-w-0 text-12-regular text-text-weak">
-          <summary class="cursor-pointer">{language.t("session.permission.details")}</summary>
-          <code class="block break-all py-1">{props.request.permission}</code>
-        </details>
+        <code data-slot="permission-command" title={patterns()[0]}>
+          {patterns()[0] ?? toolDescription()}
+        </code>
       </div>
-      <Show when={props.request.metadata.shell}>
-        <div data-slot="permission-row">
-          <span data-slot="permission-spacer" aria-hidden="true" />
-          <code data-slot="shell-identity" class="min-w-0 text-12-regular break-all">
-            {JSON.stringify(props.request.metadata.shell)}
-          </code>
-        </div>
-      </Show>
-      <Show when={typeof props.request.metadata.mcpTool === "string"}>
-        <div data-slot="permission-row">
-          <span data-slot="permission-spacer" aria-hidden="true" />
-          <div data-slot="mcp-approval" class="min-w-0 flex-1 text-12-regular">
-            <p>
-              {language.t("session.permission.mcpServer")}: {String(props.request.metadata.mcpServer ?? "—")}
-            </p>
-            <p>
-              {language.t("session.permission.mcpTool")}: {String(props.request.metadata.mcpTool)}
-            </p>
-            <details open={JSON.stringify(props.request.metadata.mcpArguments ?? {}).length <= 500}>
-              <summary class="cursor-pointer">{language.t("session.permission.mcpArguments")}</summary>
-              <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-all">
-                {JSON.stringify(props.request.metadata.mcpArguments ?? {}, null, 2)}
-              </pre>
+      <details data-slot="permission-details">
+        <summary>{language.t("session.permission.details")}</summary>
+        <code class="block break-all py-1">{props.request.permission}</code>
+        <Show when={props.request.metadata.shell}>
+          <div data-slot="permission-row">
+            <span data-slot="permission-spacer" aria-hidden="true" />
+            <code data-slot="shell-identity" class="min-w-0 text-12-regular break-all">
+              {JSON.stringify(props.request.metadata.shell)}
+            </code>
+          </div>
+        </Show>
+        <Show when={typeof props.request.metadata.mcpTool === "string"}>
+          <div data-slot="permission-row">
+            <span data-slot="permission-spacer" aria-hidden="true" />
+            <div data-slot="mcp-approval" class="min-w-0 flex-1 text-12-regular">
+              <p>
+                {language.t("session.permission.mcpServer")}: {String(props.request.metadata.mcpServer ?? "—")}
+              </p>
+              <p>
+                {language.t("session.permission.mcpTool")}: {String(props.request.metadata.mcpTool)}
+              </p>
+              <details>
+                <summary class="cursor-pointer">{language.t("session.permission.mcpArguments")}</summary>
+                <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                  {JSON.stringify(props.request.metadata.mcpArguments ?? {}, null, 2)}
+                </pre>
+              </details>
+            </div>
+          </div>
+        </Show>
+        <Show when={props.request.permission === "bash"}>
+          <div data-slot="permission-row">
+            <span data-slot="permission-spacer" aria-hidden="true" />
+            <div data-slot="permission-hint">
+              <p>{language.t("session.permission.bashAuthority")}</p>
+              <p>
+                {language.t("session.permission.directory")}: {directory() ?? language.t("usage.unknown")}
+              </p>
+              <p>{language.t("session.permission.decisions")}</p>
+            </div>
+          </div>
+        </Show>
+        <Show when={props.request.always.length > 0}>
+          <div data-slot="permission-row">
+            <span data-slot="permission-spacer" aria-hidden="true" />
+            <details class="min-w-0 text-12-regular text-text-base">
+              <summary class="cursor-pointer">{language.t("session.permission.rememberScope")}</summary>
+              <p class="py-1 text-text-weak">{language.t("session.permission.rememberHint")}</p>
+              <For each={remembered()}>{(pattern) => <code class="block break-all">{pattern}</code>}</For>
             </details>
           </div>
-        </div>
-      </Show>
-      <Show when={props.request.permission === "bash"}>
-        <div data-slot="permission-row">
-          <span data-slot="permission-spacer" aria-hidden="true" />
-          <div data-slot="permission-hint">
-            <p>{language.t("session.permission.bashAuthority")}</p>
-            <p>
-              {language.t("session.permission.directory")}: {directory() ?? language.t("usage.unknown")}
-            </p>
-            <p>{language.t("session.permission.decisions")}</p>
-          </div>
-        </div>
-      </Show>
-      <Show when={props.request.always.length > 0}>
-        <div data-slot="permission-row">
-          <span data-slot="permission-spacer" aria-hidden="true" />
-          <details class="min-w-0 text-12-regular text-text-base">
-            <summary class="cursor-pointer">{language.t("session.permission.rememberScope")}</summary>
-            <p class="py-1 text-text-weak">{language.t("session.permission.rememberHint")}</p>
-            <For each={remembered()}>{(pattern) => <code class="block break-all">{pattern}</code>}</For>
-          </details>
-        </div>
-      </Show>
+        </Show>
 
-      <Show when={props.request.patterns.length > 0}>
-        <div data-slot="permission-row">
-          <span data-slot="permission-spacer" aria-hidden="true" />
-          <div data-slot="permission-patterns">
-            <For each={patterns()}>
-              {(pattern) => (
-                <div>
-                  <code class="text-12-regular text-text-base break-all">{pattern}</code>
-                  <Show when={props.request.always.includes(pattern)}>
-                    <p class="text-12-regular text-text-weak">{language.t("session.permission.sameScope")}</p>
-                  </Show>
-                </div>
-              )}
-            </For>
+        <Show when={props.request.patterns.length > 0}>
+          <div data-slot="permission-row">
+            <span data-slot="permission-spacer" aria-hidden="true" />
+            <div data-slot="permission-patterns">
+              <For each={patterns()}>
+                {(pattern) => (
+                  <div>
+                    <code class="text-12-regular text-text-base break-all">{pattern}</code>
+                    <Show when={props.request.always.includes(pattern)}>
+                      <p class="text-12-regular text-text-weak">{language.t("session.permission.sameScope")}</p>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
           </div>
-        </div>
-      </Show>
+        </Show>
+      </details>
     </DockPrompt>
   )
 }

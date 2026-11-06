@@ -719,24 +719,28 @@
   flex-direction: column;
   gap: 0;
   min-height: 0;
-  max-height: 100dvh;
+  max-height: min(420px, 45dvh);
+  min-width: 0;
+  width: 100%;
 
   [data-slot="permission-body"] {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    flex: 1;
+    gap: 8px;
+    flex: 1 1 auto;
+    overflow: hidden;
     min-height: 0;
     padding: 12px 12px 0;
   }
 
   [data-slot="permission-header"] {
+    flex-shrink: 0;
     padding: 0;
   }
 
   [data-slot="permission-row"] {
     display: grid;
-    grid-template-columns: 20px 1fr;
+    grid-template-columns: 20px minmax(0, 1fr);
     column-gap: 8px;
     align-items: start;
   }
@@ -765,6 +769,8 @@
   }
 
   [data-slot="permission-content"] {
+    overflow-y: auto;
+    overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -781,27 +787,32 @@
     padding: 0;
   }
 
+  [data-slot="permission-command"] {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  [data-slot="permission-details"] {
+    min-width: 0;
+    padding-left: 28px;
+    font-size: 12px;
+
+    > summary {
+      cursor: pointer;
+      color: var(--v2-text-text-muted);
+      padding-block: 4px;
+    }
+  }
+
   [data-slot="permission-patterns"] {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-top: 8px;
-    margin-bottom: 16px;
-    padding: 1px 0 8px;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-
-    &::-webkit-scrollbar {
-      display: none;
-    }
-
-    code {
-      font-size: 14px;
-      line-height: var(--line-height-large);
-    }
+    margin-block: 8px;
   }
 
   [data-slot="permission-footer"] {
@@ -809,12 +820,14 @@
     align-items: center;
     justify-content: space-between;
     flex-shrink: 0;
-    padding: 32px 8px 8px;
-    margin-top: -24px;
+    padding: 8px;
   }
 
   [data-slot="permission-footer-actions"] {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
     align-items: center;
     gap: 8px;
 
