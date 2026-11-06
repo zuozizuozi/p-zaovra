@@ -37,12 +37,14 @@ test.each(["prod", "beta", "dev"])(
   },
 )
 
-test("existing profile does not create a default directory", async () => {
+test("completed empty profile requests a directory when known folders are unavailable", async () => {
+  const lookups: string[] = []
   const result = await completeFirstLaunch({
     pending: false,
     create: true,
-    path: () => {
-      throw new Error("unexpected path lookup")
+    path: (name) => {
+      lookups.push(name)
+      throw new Error("known folder unavailable")
     },
     mkdir: async () => {
       throw new Error("unexpected directory creation")
@@ -51,5 +53,6 @@ test("existing profile does not create a default directory", async () => {
       throw new Error("unexpected completion")
     },
   })
-  expect(result).toBe(null)
+  expect(result).toEqual({ needsDirectory: true })
+  expect(lookups).toEqual(["documents", "home"])
 })
