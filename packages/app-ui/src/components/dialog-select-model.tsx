@@ -28,7 +28,7 @@ import { matchesModelSearch } from "./dialog-select-model-search"
 type ModelState = ReturnType<typeof useLocal>["model"]
 type ModelItem = ReturnType<ModelState["list"]>[number]
 
-const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
+const modelKey = (model: ModelItem) => `${model.provider.id}:${model.baseModelID}`
 const manageKey = "action:manage"
 
 const ModelList: Component<{
@@ -53,7 +53,7 @@ const ModelList: Component<{
       class={`flex-1 px-3 min-h-0 [&_[data-slot=list-scroll]]:flex-1 [&_[data-slot=list-scroll]]:min-h-0 ${props.class ?? ""}`}
       search={{ placeholder: language.t("dialog.model.search.placeholder"), autofocus: true, action: props.action }}
       emptyMessage={language.t("dialog.model.empty")}
-      key={(x) => `${x.provider.id}:${x.id}`}
+      key={modelKey}
       items={models}
       current={model.current()}
       filterKeys={["provider.name", "name", "id"]}
@@ -246,7 +246,7 @@ export function ModelSelectorPopoverV2(props: {
   const keys = () => [...models().map(modelKey), ...(store.source === "own" ? [manageKey] : [])]
   const current = () => {
     const value = model.current()
-    return value ? `${value.provider.id}:${value.id}` : undefined
+    return value ? modelKey(value) : undefined
   }
   const initialActive = () => {
     const selected = current()
@@ -480,16 +480,7 @@ export function ModelSelectorPopoverV2(props: {
                           </Show>
                         </span>
                         <TagV2 class="ml-2 max-w-28 shrink-0 truncate">{item.provider.name}</TagV2>
-                        <span aria-hidden="true" class="ml-2 shrink-0 text-[11px] text-v2-text-text-muted">
-                          {language.t(
-                            item.provider.id === "openrouter" &&
-                              (item.id.endsWith(":free") || item.id === "openrouter/free")
-                              ? "model.price.free"
-                              : item.cost.input > 0 || item.cost.output > 0
-                                ? "model.price.paid"
-                                : "model.price.unknown",
-                          )}
-                        </span>
+
                         <Show when={current() === modelKey(item)}>
                           <Icon name="check" size="small" class="shrink-0" />
                         </Show>

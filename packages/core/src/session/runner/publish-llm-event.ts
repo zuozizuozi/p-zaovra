@@ -62,6 +62,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
   let assistantFailed = false
   let providerFailed = false
   let failureMessage: string | undefined
+  let responseModel: string | undefined
   let stepSettlement:
     | { readonly finish: string; readonly tokens: ReturnType<typeof usageTokens>; readonly usageReported: boolean }
     | undefined
@@ -237,6 +238,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         timestamp: yield* timestamp,
         assistantMessageID,
         finish: "error",
+        responseModel,
         cost: 0,
         tokens: stepSettlement.tokens,
         usageReported: true,
@@ -286,6 +288,18 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     outputPaths: ReadonlyArray<string> = [],
     errorMetadata?: Record<string, string>,
   ) {
+    if ("providerMetadata" in event) {
+      const metadata =
+        event.providerMetadata?.openai ?? event.providerMetadata?.anthropic ?? event.providerMetadata?.google
+      if (
+        metadata &&
+        typeof metadata === "object" &&
+        "model" in metadata &&
+        typeof metadata.model === "string" &&
+        metadata.model.trim()
+      )
+        responseModel = metadata.model.trim()
+    }
     switch (event.type) {
       case "step-start":
         return
@@ -473,7 +487,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     hasAssistantStarted: () => assistantMessageID !== undefined,
     hasProviderError: () => providerFailed,
     failureMessage: () => failureMessage,
-    stepSettlement: () => stepSettlement,
+    stepSettlement: () => stepSettlement && { ...stepSettlement, responseModel },
     startAssistant,
     assistantMessageID: assistantMessageIDForTool,
   }

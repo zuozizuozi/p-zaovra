@@ -1,7 +1,8 @@
+import { groupModelChoices } from "./model-choice"
+import { modelSource } from "@/utils/model-source"
 import { type Accessor, createMemo, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
-import { DateTime } from "luxon"
-import { filter, firstBy, flat, groupBy, mapValues, pipe, uniqueBy, values } from "remeda"
+import { uniqueBy } from "remeda"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
@@ -40,70 +41,37 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
     )
 
     const available = createMemo(() =>
-      providers.connected().flatMap((p) =>
-        Object.values(p.models).map((m) => ({
-          ...m,
-          provider: p,
-        })),
-      ),
-    )
-
-    const release = createMemo(
-      () =>
-        new Map(
-          available().map((model) => {
-            const parsed = DateTime.fromISO(model.release_date)
-            return [modelKey({ providerID: model.provider.id, modelID: model.id }), parsed] as const
-          }),
+      providers
+        .connected()
+        .filter((p) => modelSource(p) === "own")
+        .flatMap((p) =>
+          Object.values(p.models).map((m) => ({
+            ...m,
+            provider: p,
+          })),
         ),
     )
 
-    const latest = createMemo(() =>
-      pipe(
-        available(),
-        filter(
-          (x) =>
-            Math.abs(
-              (release().get(modelKey({ providerID: x.provider.id, modelID: x.id })) ?? DateTime.invalid("invalid"))
-                .diffNow()
-                .as("months"),
-            ) < 6,
-        ),
-        groupBy((x) => x.provider.id),
-        mapValues((models) =>
-          pipe(
-            models,
-            groupBy((x) => x.family),
-            values(),
-            (groups) =>
-              groups.flatMap((g) => {
-                const first = firstBy(g, [(x) => x.release_date, "desc"])
-                return first ? [{ modelID: first.id, providerID: first.provider.id }] : []
-              }),
-          ),
-        ),
-        values(),
-        flat(),
-      ),
-    )
-
-    const latestSet = createMemo(() => new Set(latest().map((x) => modelKey(x))))
-
-    const visibility = createMemo(() => {
-      const map = new Map<string, Visibility>()
-      for (const item of store.user) map.set(`${item.providerID}:${item.modelID}`, item.visibility)
-      return map
-    })
-
+    const choices = createMemo(() => groupModelChoices(available()))
     const list = createMemo(() =>
-      available().map((m) => ({
+      choices().map((m) => ({
         ...m,
-        name: m.name.replace("(latest)", "").trim(),
+        name: m.name
+          .replace("(latest)", "")
+          .replace(/:(off|minimal|low|medium|high|xhigh|max)$/, "")
+          .trim(),
         latest: m.name.includes("(latest)"),
       })),
     )
 
-    const find = (key: ModelKey) => list().find((m) => m.id === key.modelID && m.provider.id === key.providerID)
+    const find = (key: ModelKey) => {
+      const exact = list().find((m) => m.id === key.modelID && m.provider.id === key.providerID)
+      if (exact) return exact
+      const base = list().find(
+        (m) => m.provider.id === key.providerID && Object.values(m.reasoningModels ?? {}).includes(key.modelID),
+      )
+      return base ? { ...base, id: key.modelID } : undefined
+    }
     const type = (key: ModelKey): ProviderModelType => {
       const item = find(key)
       return (
@@ -129,16 +97,7 @@ export const { use: useModels, provider: ModelsProvider } = createSimpleContext(
       setStore("user", store.user.length, { ...model, visibility: state })
     }
 
-    const visible = (model: ModelKey) => {
-      const key = modelKey(model)
-      const state = visibility().get(key)
-      if (state === "hide") return false
-      if (state === "show") return true
-      if (latestSet().has(key)) return true
-      const date = release().get(key)
-      if (!date?.isValid) return true
-      return false
-    }
+    const visible = (model: ModelKey) => !!find(model)
 
     const setVisibility = (model: ModelKey, state: boolean) => {
       update(model, state ? "show" : "hide")

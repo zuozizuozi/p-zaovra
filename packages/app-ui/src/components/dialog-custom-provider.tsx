@@ -1,3 +1,4 @@
+import { primaryProviderModel, isProviderAutoModel } from "@/context/model-choice"
 import { useModelService } from "@/hooks/use-model-service"
 import { Button } from "@zaovra-ai/ui/button"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -29,14 +30,12 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { providerOperation, reconnectDisabledProviders, resolveProviderIntegration } from "@/utils/provider-integration"
-import { ProviderEnableChoice } from "./provider-enable-choice"
 import {
   type FormState,
   type ModelRow,
   headerRow,
   modelRow,
   customProviderDefaults,
-  customProviderEnable,
   validateCustomProvider,
   validateProviderURL,
 } from "./dialog-custom-provider-form"
@@ -85,10 +84,9 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     query: "",
     pending: false,
     error: "",
-    manual: false,
+
     advanced: false,
     normalizedURL: "",
-    enable: undefined as { providerID: string; value: boolean } | undefined,
   })
   const alive = { value: true }
   const operation = providerOperation()
@@ -132,15 +130,22 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           form.headers.filter((h) => h.key.trim()).map((h) => [h.key.trim(), h.value.trim()]),
         ),
       }
-      const models = await (platform.discoverProviderModels ?? discoverProviderModels)(input)
+      const models = (await (platform.discoverProviderModels ?? discoverProviderModels)(input)).filter(
+        (m) => !isProviderAutoModel(m.id),
+      )
       if (!current() || !alive.value || protocol !== form.protocol || input.apiKey !== form.apiKey) return
+      if (models.length === 0) throw new Error("noChatModels")
       batch(() => {
-        setDiscovery({ models, manual: false, query: "" })
+        setDiscovery({ models, query: "" })
         setForm("baseURL", input.baseURL)
-        const first = models.find((model) => !model.type || model.type === "chat") ?? models[0]
-        setForm("models", [
-          { ...modelRow(), ...first, protocol: form.protocol === undefined ? first?.protocol : undefined },
-        ])
+        setForm(
+          "models",
+          models.map((model) => ({
+            ...modelRow(),
+            ...model,
+            protocol: form.protocol === undefined ? model.protocol : undefined,
+          })),
+        )
       })
     } catch (error) {
       if (!current() || !alive.value) return
@@ -169,30 +174,10 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           /http40[04]/.test(message) && discovery.normalizedURL
             ? language.t("provider.custom.discovery.endpointError", { url: discovery.normalizedURL })
             : language.t(`provider.custom.discovery.${key}`),
-        manual: true,
       })
     } finally {
       if (current() && alive.value) setDiscovery("pending", false)
     }
-  }
-
-  const addModel = () => {
-    setForm(
-      "models",
-      produce((rows) => {
-        rows.push(modelRow())
-      }),
-    )
-  }
-
-  const removeModel = (index: number) => {
-    if (form.models.length <= 1) return
-    setForm(
-      "models",
-      produce((rows) => {
-        rows.splice(index, 1)
-      }),
-    )
   }
 
   const addHeader = () => {
@@ -208,7 +193,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     if (form.headers.length <= 1) return
     if (discovery.models.length) {
       setDiscovery({ models: [], error: "" })
-      if (!discovery.manual) setForm("models", [modelRow()])
+      setForm("models", [modelRow()])
     }
     setForm(
       "headers",
@@ -222,25 +207,17 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     if (key === "baseURL") setDiscovery("normalizedURL", "")
     if ((key === "baseURL" || key === "apiKey") && discovery.models.length) {
       setDiscovery({ models: [], error: "" })
-      if (!discovery.manual) setForm("models", [modelRow()])
+      setForm("models", [modelRow()])
     }
     setForm(key, value)
     if (key === "apiKey") return
     setForm("err", key, undefined)
   }
 
-  const setModel = (index: number, key: "id" | "name", value: string) => {
-    batch(() => {
-      if (key === "id") setForm("models", index, "type", undefined)
-      setForm("models", index, key, value)
-      setForm("models", index, "err", key, undefined)
-    })
-  }
-
   const setHeader = (index: number, key: "key" | "value", value: string) => {
     if (discovery.models.length) {
       setDiscovery({ models: [], error: "" })
-      if (!discovery.manual) setForm("models", [modelRow()])
+      setForm("models", [modelRow()])
     }
     batch(() => {
       setForm("headers", index, key, value)
@@ -275,8 +252,6 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     return output.result
   }
 
-  const enable = (providerID = automatic().providerID) =>
-    customProviderEnable(providerID, service.disconnected(providerID), discovery.enable)
   const snapshot = (result: NonNullable<ReturnType<typeof validate>>) => {
     const valid = operation.start()
     const sdk = serverSDK()
@@ -287,7 +262,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       models: form.models.map((model) => ({ ...model })),
       sdk,
       sync: serverSync(),
-      enable: enable(result.providerID),
+      enable: true,
       current: () => valid() && alive.value && serverSDK() === sdk,
     }
   }
@@ -295,10 +270,12 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     mutationFn: async (result: ReturnType<typeof snapshot>) => {
       if (!result.current()) return
       if (result.protocol === undefined) {
+        const detected: { protocol?: ProviderProtocol } = {}
         for (const model of result.models) {
           if (modelType(model) !== "chat") continue
           const protocol =
             model.protocol ??
+            detected.protocol ??
             (await (platform.detectProviderProtocol ?? detectProviderProtocol)({
               baseURL: result.config.options.baseURL,
               apiKey: result.apiKey,
@@ -307,6 +284,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
               headers: result.config.options.headers,
             }))
           if (!result.current()) return
+          detected.protocol = protocol
           result.config.models[model.id.trim()] = {
             ...result.config.models[model.id.trim()]!,
             provider: {
@@ -319,13 +297,14 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       }
       const before = result.sync.data.config.provider?.[result.providerID]
       if (result.protocol === undefined && before?.npm) result.config.npm = before.npm
-      result.config.models = { ...before?.models, ...result.config.models }
-      result.config.whitelist = [
-        ...new Set([...(before?.whitelist ?? Object.keys(before?.models ?? {})), ...result.config.whitelist]),
-      ]
+      result.config.models = Object.fromEntries(
+        Object.entries(result.config.models).map(([id, model]) => [id, { ...before?.models?.[id], ...model }]),
+      )
       if (!result.current()) return
+      const primary = primaryProviderModel(result.models)
       await result.sync.updateConfig({
         provider: { [result.providerID]: result.config },
+        ...(primary ? { model: result.providerID + "/" + primary.id } : {}),
       })
       if (!result.current()) return
       for (const model of result.models)
@@ -413,7 +392,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
     if (saveMutation.isPending || discovery.pending) return
 
     if (!form.models.some((model) => model.id.trim())) {
-      setDiscovery({ manual: true, error: language.t("provider.custom.discovery.choose") })
+      setDiscovery({ error: language.t("provider.custom.discovery.choose") })
       return
     }
     const url = normalizeURL()
@@ -439,13 +418,6 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       <form onSubmit={save} class="px-2.5 pb-6 flex flex-col gap-6">
         <p class="text-14-regular text-text-base">{language.t("provider.custom.discovery.intro")}</p>
         <fieldset disabled={discovery.pending || saveMutation.isPending} class="flex min-w-0 flex-col gap-6">
-          <Show when={serverSync().data.config.disabled_providers?.includes(automatic().providerID)}>
-            <ProviderEnableChoice
-              disconnected={service.disconnected(automatic().providerID)}
-              checked={enable()}
-              onChange={(value) => setDiscovery("enable", { providerID: automatic().providerID, value })}
-            />
-          </Show>
           <div class="flex flex-col gap-4">
             <TextField
               autofocus={props.autofocus ?? true}
@@ -482,16 +454,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
                 ? language.t("provider.custom.discovery.loading")
                 : language.t("provider.custom.discovery.fetch")}
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setDiscovery("manual", !discovery.manual)}>
-              {language.t("provider.custom.discovery.manual")}
-            </Button>
           </div>
           <Show when={discovery.error}>
             <p role="alert" class="text-14-regular text-text-danger">
               {discovery.error}
             </p>
           </Show>
-          <Show when={discovery.models.length > 0 && !discovery.manual}>
+          <Show when={discovery.models.length > 0}>
             <section class="flex flex-col gap-3">
               <p role="status" class="text-12-regular text-text-weak">
                 {language.t("provider.custom.discovery.success")}
@@ -510,31 +479,6 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
                 >
                   {(model) => (
                     <label class="flex items-center gap-2 text-14-regular">
-                      <input
-                        type="checkbox"
-                        checked={form.models.some((row) => row.id === model.id)}
-                        onChange={(event) => {
-                          if (event.currentTarget.checked) {
-                            if (model.type && model.type !== "chat")
-                              showToast({
-                                title: language.t(`provider.custom.modelType.${model.type}`),
-                                description: language.t("provider.custom.modelType.notice"),
-                              })
-                            return setForm("models", [
-                              ...form.models.filter((row) => row.id.trim()),
-                              {
-                                ...modelRow(),
-                                ...model,
-                                protocol: form.protocol === undefined ? model.protocol : undefined,
-                              },
-                            ])
-                          }
-                          setForm(
-                            "models",
-                            form.models.filter((row) => row.id !== model.id),
-                          )
-                        }}
-                      />
                       <span class="min-w-0 break-all">
                         {model.name === model.id ? model.id : `${model.name} · ${model.id}`}
                         <Show when={model.type && model.type !== "chat"}>
@@ -550,78 +494,12 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
               </div>
             </section>
           </Show>
-          <Show when={discovery.manual}>
-            <div class="flex flex-col gap-3">
-              <label class="text-12-medium text-text-weak">{language.t("provider.custom.models.label")}</label>
-              <For each={form.models}>
-                {(m, i) => (
-                  <div class="flex gap-2 items-start" data-row={m.row}>
-                    <div class="flex-1">
-                      <TextField
-                        label={language.t("provider.custom.models.id.label")}
-                        hideLabel
-                        placeholder={language.t("provider.custom.models.id.placeholder")}
-                        value={m.id}
-                        onChange={(v) => setModel(i(), "id", v)}
-                        validationState={m.err.id ? "invalid" : undefined}
-                        error={m.err.id}
-                        description={
-                          !m.err.id && modelType(m) !== "chat"
-                            ? language.t("provider.custom.error.nonChatModel", {
-                                type: language.t(`provider.custom.modelType.${modelType(m)}`),
-                              })
-                            : undefined
-                        }
-                      />
-                    </div>
-                    <div class="flex-1">
-                      <TextField
-                        label={language.t("provider.custom.models.name.label")}
-                        hideLabel
-                        placeholder={language.t("provider.custom.models.name.placeholder")}
-                        value={m.name}
-                        onChange={(v) => setModel(i(), "name", v)}
-                        validationState={m.err.name ? "invalid" : undefined}
-                        error={m.err.name}
-                      />
-                    </div>
-                    <label class="mt-2 flex items-center gap-1 text-12-regular">
-                      <input
-                        type="checkbox"
-                        checked={m.images ?? false}
-                        onChange={(event) => setForm("models", i(), "images", event.currentTarget.checked)}
-                      />
-                      {language.t("provider.custom.models.images")}
-                    </label>
-                    <IconButton
-                      type="button"
-                      icon="trash"
-                      variant="ghost"
-                      class="mt-1.5"
-                      onClick={() => removeModel(i())}
-                      disabled={form.models.length <= 1}
-                      aria-label={language.t("provider.custom.models.remove")}
-                    />
-                  </div>
-                )}
-              </For>
-              <Button
-                type="button"
-                size="small"
-                variant="ghost"
-                icon="plus-small"
-                onClick={addModel}
-                class="self-start"
-              >
-                {language.t("provider.custom.models.add")}
-              </Button>
-            </div>
-          </Show>
+
           <Show
             when={
               discovery.advanced &&
               (form.protocol === undefined || form.protocol === "openai" || form.protocol === "responses") &&
-              (discovery.manual || discovery.models.length > 0)
+              discovery.models.length > 0
             }
           >
             <For each={form.models}>
@@ -706,7 +584,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
                       setForm("protocol", protocol)
                       setForm("baseURL", baseURL)
                       setForm("models", [modelRow()])
-                      setDiscovery({ models: [], error: "", query: "", manual: false })
+                      setDiscovery({ models: [], error: "", query: "" })
                     })
                   }}
                 >
@@ -796,7 +674,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           type="submit"
           size="large"
           variant="primary"
-          disabled={saveMutation.isPending || discovery.pending}
+          disabled={saveMutation.isPending || discovery.pending || discovery.models.length === 0}
         >
           {saveMutation.isPending ? language.t("common.saving") : language.t("provider.custom.discovery.save")}
         </Button>

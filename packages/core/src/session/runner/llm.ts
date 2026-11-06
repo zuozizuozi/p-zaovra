@@ -1822,6 +1822,7 @@ const layer = Layer.effect(
                 cost: 0,
                 tokens: stepSettlement.tokens,
                 usageReported: stepSettlement.usageReported,
+                responseModel: stepSettlement.responseModel,
                 requestPerformed: !(subtask?.type === "user" && subtask.subtask),
                 snapshot: endSnapshot,
                 files,
@@ -1966,6 +1967,7 @@ const layer = Layer.effect(
                 cost: 0,
                 tokens: stepSettlement.tokens,
                 usageReported: stepSettlement.usageReported,
+                responseModel: stepSettlement.responseModel,
               }),
             )
           }

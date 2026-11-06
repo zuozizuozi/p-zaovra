@@ -209,7 +209,15 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
                 messageID: item.id,
                 type: "text",
                 text: content.superseded ? `[被替代的未完成输出]\n${content.text}` : content.text,
-                metadata: content.superseded ? { superseded: true } : undefined,
+                metadata:
+                  content.superseded || typeof item.metadata?.responseModel === "string"
+                    ? {
+                        ...(content.superseded ? { superseded: true } : {}),
+                        ...(typeof item.metadata?.responseModel === "string"
+                          ? { zaovraResponseModel: item.metadata.responseModel }
+                          : {}),
+                      }
+                    : undefined,
               },
             ]
           if (content.type === "reasoning")

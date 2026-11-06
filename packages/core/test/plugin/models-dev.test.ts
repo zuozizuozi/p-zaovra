@@ -1,6 +1,8 @@
 import path from "path"
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
+import { Config } from "@zaovra-ai/core/config"
+import { ConfigProviderPlugin } from "@zaovra-ai/core/config/plugin/provider"
 import { Catalog } from "@zaovra-ai/core/catalog"
 import { Integration } from "@zaovra-ai/core/integration"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
@@ -99,6 +101,8 @@ describe("ModelsDevPlugin", () => {
 
         expect(base?.capabilities).toMatchObject({ interleavedThinking: interleaved === true })
         expect(base?.variants).toEqual([])
+        expect(base?.enabled).toBe(false)
+        expect(yield* catalog.provider.available()).toEqual([])
         expect(base?.request.body).toEqual({})
         expect(fast).toMatchObject({
           id: "gpt-5.4-fast",
@@ -133,18 +137,46 @@ describe("ModelsDevPlugin", () => {
             cache: { read: 0.5, write: 0 },
           },
         ])
+        if (interleaved === true) {
+          yield* integrations.connection.key({ integrationID: Integration.ID.make("acme"), key: "synthetic-user-key" })
+          expect(yield* catalog.model.available()).toEqual([])
+          yield* ConfigProviderPlugin.Plugin.effect(
+            host({
+              catalog: catalogHost(catalog),
+              integration: integrationHost(integrations),
+            }),
+          ).pipe(
+            Effect.provideService(
+              Config.Service,
+              Config.Service.of({
+                entries: () =>
+                  Effect.succeed([
+                    new Config.Document({
+                      type: "document",
+                      info: Schema.decodeUnknownSync(Config.Info)({
+                        providers: { acme: { models: { "gpt-5.4": {} } } },
+                      }),
+                    }),
+                  ]),
+              }),
+            ),
+          )
+          expect((yield* catalog.model.available()).map((model) => String(model.id))).toEqual(["gpt-5.4"])
+        }
       }),
     )
 
-  it.effect("registers key methods for providers with environment variables", () =>
+  it.effect("catalog credentials are explicit: ambient environment does not connect providers", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const previous = {
           path: Flag.ZAOVRA_MODELS_PATH,
           disabled: Flag.ZAOVRA_DISABLE_MODELS_FETCH,
+          ambient: process.env.ACME_API_KEY,
         }
         Flag.ZAOVRA_MODELS_PATH = path.join(import.meta.dir, "fixtures", "models-dev.json")
         Flag.ZAOVRA_DISABLE_MODELS_FETCH = true
+        process.env.ACME_API_KEY = "synthetic-ambient-key"
         return previous
       }),
       () =>
@@ -161,21 +193,26 @@ describe("ModelsDevPlugin", () => {
             new Integration.Info({
               id: Integration.ID.make("acme"),
               name: "Acme",
-              methods: [
-                { type: "key" },
-                {
-                  type: "env",
-                  names: ["ACME_API_KEY"],
-                },
-              ],
+              methods: [{ type: "key" }],
+              connections: [],
+            }),
+            new Integration.Info({
+              id: Integration.ID.make("local"),
+              name: "Local",
+              methods: [{ type: "key" }],
               connections: [],
             }),
           ])
+          expect(yield* catalog.provider.available()).toEqual([])
+          yield* integrations.connection.key({ integrationID: Integration.ID.make("acme"), key: "synthetic-saved-key" })
+          expect((yield* catalog.provider.available()).map((p) => String(p.id))).toEqual(["acme"])
         }).pipe(Effect.provide(AppNodeBuilder.build(ModelsDev.node))),
       (previous) =>
         Effect.sync(() => {
           Flag.ZAOVRA_MODELS_PATH = previous.path
           Flag.ZAOVRA_DISABLE_MODELS_FETCH = previous.disabled
+          if (previous.ambient === undefined) delete process.env.ACME_API_KEY
+          else process.env.ACME_API_KEY = previous.ambient
         }),
     ),
   )

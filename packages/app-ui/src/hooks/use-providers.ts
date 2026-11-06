@@ -34,14 +34,8 @@ export function useProviders(directory?: Accessor<string | undefined>) {
     // a key is saved or when native V2 config has no legacy provider projection.
     return {
       ...selected,
-      all: new Map(
-        [...selected.all].filter(
-          ([id]) => id !== "zaovra-go" && (id !== "zaovra" || import.meta.env.ZAOVRA_ACCOUNT_ENABLED === true),
-        ),
-      ),
-      connected: selected.connected.filter(
-        (id) => id !== "zaovra-go" && (id !== "zaovra" || import.meta.env.ZAOVRA_ACCOUNT_ENABLED === true),
-      ),
+      all: new Map([...selected.all].filter(([id]) => id !== "zaovra-go" && id !== "zaovra")),
+      connected: selected.connected.filter((id) => id !== "zaovra-go" && id !== "zaovra"),
     }
   })
   return {

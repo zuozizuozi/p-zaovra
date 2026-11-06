@@ -1,3 +1,4 @@
+import { primaryProviderModel } from "@/context/model-choice"
 import { useModelService } from "@/hooks/use-model-service"
 import { modelSource } from "@/utils/model-source"
 import type { IntegrationAttempt, IntegrationMethod } from "@zaovra-ai/sdk/v2/types"
@@ -45,7 +46,6 @@ import {
   providerConnectionMethods,
   resolveProviderIntegration,
 } from "@/utils/provider-integration"
-import { ProviderEnableChoice } from "./provider-enable-choice"
 import { CustomProviderForm } from "./dialog-custom-provider"
 import { usePlatform } from "@/context/platform"
 import { discoverProviderModels, providerDiscoveryPresets, providerProtocols } from "@/provider-discovery"
@@ -960,23 +960,9 @@ function ProviderConnection(props: {
       value: "",
       pending: false,
       error: undefined as string | undefined,
-      enable: undefined as boolean | undefined,
     })
     const operation = providerOperation()
     onCleanup(operation.cancel)
-    const disabled = () => serverSync().data.config.disabled_providers?.includes(props.provider) === true
-    const enable = () => formStore.enable ?? service.disconnected(props.provider)
-    const enableChoice = () => (
-      <Show when={disabled()}>
-        <ProviderEnableChoice
-          disconnected={service.disconnected(props.provider)}
-          checked={enable()}
-          disabled={formStore.pending}
-          onChange={(value) => setFormStore("enable", value)}
-        />
-      </Show>
-    )
-
     onMount(() => {
       if (!newLayout()) return
       apiKey?.focus({ preventScroll: true })
@@ -997,7 +983,6 @@ function ProviderConnection(props: {
       const providerID = props.provider
       const integration = auth.latest!
       const inputs = { ...store.promptInputs }
-      const shouldEnable = enable()
       const current = () =>
         valid() && alive.value && serverSDK() === sdk && props.provider === providerID && formStore.value.trim() === key
       try {
@@ -1028,6 +1013,9 @@ function ProviderConnection(props: {
             : undefined,
           saveModels: (discovered) =>
             sync.updateConfig({
+              ...(primaryProviderModel(discovered)
+                ? { model: providerID + "/" + primaryProviderModel(discovered)!.id }
+                : {}),
               provider: {
                 [providerID]: {
                   whitelist: discovered.map((model) => model.id),
@@ -1036,10 +1024,6 @@ function ProviderConnection(props: {
               },
             }),
           enable: async () => {
-            if (!shouldEnable) {
-              service.disconnect(providerID, false)
-              return
-            }
             const disabled = sync.data.config.disabled_providers ?? []
             if (disabled.includes(providerID))
               await sync.updateConfig({ disabled_providers: reconnectDisabledProviders(disabled, providerID, true) })
@@ -1090,7 +1074,6 @@ function ProviderConnection(props: {
             </div>
           </Show>
           <form onSubmit={handleSubmit} class="flex flex-col items-start gap-5 self-stretch">
-            {enableChoice()}
             <Show when={providerDiscoveryPresets[props.provider]}>
               {(preset) => (
                 <p>
@@ -1153,7 +1136,6 @@ function ProviderConnection(props: {
           </Match>
         </Switch>
         <form onSubmit={handleSubmit} class="flex flex-col items-start gap-4">
-          {enableChoice()}
           <TextField
             autofocus={!newLayout()}
             ref={apiKey}

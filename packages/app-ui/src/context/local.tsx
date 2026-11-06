@@ -1,3 +1,5 @@
+import { isProviderAutoModel } from "@/context/model-choice"
+import { aliasModelVariant, modelVariantChoice } from "./model-choice"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
 import { useParams } from "@solidjs/router"
@@ -100,7 +102,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const validModel = (model: ModelKey) => {
       const provider = providers.all().get(model.providerID)
-      return !!provider?.models[model.modelID] && connected().has(model.providerID)
+      return !!provider?.models[model.modelID] && connected().has(model.providerID) && !!models.find(model)
     }
 
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {
@@ -233,6 +235,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const current = () => {
       const selected = scope()?.model
+      if (selected && isProviderAutoModel(selected.modelID))
+        return models.list().find((model) => model.provider.id === selected.providerID)
       if (selected) return validModel(selected) ? models.find(selected) : undefined
       const item = firstModel(
         () => scope()?.model,
@@ -328,6 +332,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         configured,
         selected,
         current() {
+          if (current()?.reasoningModels) return aliasModelVariant(current())
           const resolved = resolveModelVariant({
             variants: this.list(),
             selected: this.selected(),
@@ -341,20 +346,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         list() {
           const item = current()
-          if (!item?.variants) return []
-          return Object.keys(item.variants)
+          return Object.keys(item?.reasoningModels ?? item?.variants ?? {})
         },
         set(value: string | undefined) {
           startTransition(() =>
             batch(() => {
               const model = current()
+              if (!model) return
+              const choice = modelVariantChoice(model, value)
+              if (!choice) return
               setStore("last", {
                 type: "variant",
                 agent: agent.current()?.name,
                 model: model ? { providerID: model.provider.id, modelID: model.id } : null,
                 variant: value ?? null,
               })
-              write({ variant: value ?? null })
+              write({ model: { providerID: model.provider.id, modelID: choice.modelID }, variant: choice.variant })
               if (model) {
                 models.variant.set({ providerID: model.provider.id, modelID: model.id }, value ?? undefined)
               }
@@ -367,7 +374,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           this.set(
             cycleModelVariant({
               variants: items,
-              selected: this.selected(),
+              selected: current()?.reasoningModels ? (this.current() ?? null) : this.selected(),
               configured: this.configured(),
             }),
           )

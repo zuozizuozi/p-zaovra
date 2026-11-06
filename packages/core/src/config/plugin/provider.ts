@@ -39,6 +39,7 @@ export const Plugin = define({
       Effect.fn(function* (catalog) {
         const entries = yield* config.entries()
         const files = entries.filter((entry): entry is Config.Document => entry.type === "document")
+        const configuredModels = new Set<string>()
         const configuredDefault = Config.latest(entries, "model")
         if (configuredDefault !== undefined) {
           const model = ModelV2.parse(configuredDefault)
@@ -61,6 +62,7 @@ export const Plugin = define({
               if (record) record.configuredEndpoint = !!item.api.url
             }
             for (const [id, config] of Object.entries(item.models ?? {})) {
+              const key = providerID + "/" + id
               catalog.model.update(providerID, id, (model) => {
                 if (config.family !== undefined) model.family = config.family
                 if (config.name !== undefined) model.name = config.name
@@ -113,9 +115,11 @@ export const Plugin = define({
                     },
                   }))
                 }
-                if (config.disabled !== undefined) model.enabled = !config.disabled
+                if (!configuredModels.has(key) || config.disabled !== undefined)
+                  model.enabled = config.disabled !== true
                 if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
               })
+              configuredModels.add(key)
             }
           }
         }

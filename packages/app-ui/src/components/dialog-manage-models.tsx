@@ -1,14 +1,11 @@
 import { Dialog } from "@zaovra-ai/ui/dialog"
 import { List } from "@zaovra-ai/ui/list"
-import { Switch } from "@zaovra-ai/ui/switch"
-import { Tooltip } from "@zaovra-ai/ui/tooltip"
 import { Button } from "@zaovra-ai/ui/button"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { Dialog as DialogV2, DialogBody, DialogHeader, DialogTitleGroup } from "@zaovra-ai/ui/v2/dialog-v2"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
-import { Switch as SwitchV2 } from "@zaovra-ai/ui/v2/switch-v2"
 import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
 import { useFilteredList } from "@zaovra-ai/ui/hooks"
 import { For, Show, type Component } from "solid-js"
@@ -34,15 +31,6 @@ export const DialogManageModels: Component = () => {
     void dialog.show(() => <DialogConnectProvider directory={directory} />)
   }
   const providerRank = (id: string) => popularProviders.indexOf(id)
-  const providerList = (providerID: string) => local.model.list().filter((x) => x.provider.id === providerID)
-  const providerVisible = (providerID: string) =>
-    providerList(providerID).every((x) => local.model.visible({ modelID: x.id, providerID: x.provider.id }))
-  const setProviderVisibility = (providerID: string, checked: boolean) => {
-    providerList(providerID).forEach((x) => {
-      local.model.setVisibility({ modelID: x.id, providerID: x.provider.id }, checked)
-    })
-  }
-
   return (
     <Dialog
       title={language.t("dialog.model.manage")}
@@ -67,19 +55,6 @@ export const DialogManageModels: Component = () => {
           return (
             <>
               <span>{provider.name}</span>
-              <Tooltip
-                placement="top"
-                value={language.t("dialog.model.manage.provider.toggle", { provider: provider.name })}
-              >
-                <Switch
-                  class="-mr-1"
-                  checked={providerVisible(provider.id)}
-                  onChange={(checked) => setProviderVisibility(provider.id, checked)}
-                  hideLabel
-                >
-                  {provider.name}
-                </Switch>
-              </Tooltip>
             </>
           )
         }}
@@ -95,17 +70,24 @@ export const DialogManageModels: Component = () => {
         onSelect={(x) => {
           if (!x) return
           const key = { modelID: x.id, providerID: x.provider.id }
-          local.model.setVisibility(key, !local.model.visible(key))
+          local.model.set(key, { recent: true })
+          dialog.close()
         }}
       >
         {(i) => (
           <div class="w-full flex items-center justify-between gap-x-3">
             <span>{i.name}</span>
             <div onClick={(e) => e.stopPropagation()}>
-              <Switch
-                checked={!!local.model.visible({ modelID: i.id, providerID: i.provider.id })}
-                onChange={(checked) => {
-                  local.model.setVisibility({ modelID: i.id, providerID: i.provider.id }, checked)
+              <input
+                type="radio"
+                name="manage-model"
+                aria-label={i.name}
+                checked={
+                  local.model.current()?.provider.id === i.provider.id && local.model.current()?.baseModelID === i.id
+                }
+                onChange={() => {
+                  local.model.set({ providerID: i.provider.id, modelID: i.id }, { recent: true })
+                  dialog.close()
                 }}
               />
             </div>
@@ -124,17 +106,6 @@ export const DialogManageModelsV2: Component = () => {
 
   const handleConnectProvider = () => {
     void dialog.show(() => <DialogConnectProvider directory={directory} />)
-  }
-  const providerList = (providerID: string) => local.model.list().filter((x) => x.provider.id === providerID)
-  const providerVisible = (providerID: string) =>
-    providerList(providerID).every((x) => local.model.visible({ modelID: x.id, providerID: x.provider.id }))
-  const setProviderVisibility = (providerID: string, checked: boolean) => {
-    providerList(providerID).forEach((x) => {
-      local.model.setVisibility({ modelID: x.id, providerID: x.provider.id }, checked)
-    })
-  }
-  const setModelVisibility = (item: ModelItem, checked: boolean) => {
-    local.model.setVisibility({ modelID: item.id, providerID: item.provider.id }, checked)
   }
   const list = useFilteredList<ModelItem>({
     items: () => local.model.list(),
@@ -224,29 +195,29 @@ export const DialogManageModelsV2: Component = () => {
                           <ProviderIcon id={group.category} width={16} height={16} class="ml-4 shrink-0" />
                           <h3 class="settings-v2-section-title">{group.items[0].provider.name}</h3>
                         </div>
-                        <div>
-                          <SwitchV2
-                            class="mr-6"
-                            checked={providerVisible(group.category)}
-                            onChange={(checked) => setProviderVisibility(group.category, checked)}
-                            hideLabel
-                          >
-                            {group.items[0].provider.name}
-                          </SwitchV2>
-                        </div>
+                        <div></div>
                       </div>
                       <SettingsListV2>
                         <For each={group.items}>
                           {(item) => (
                             <SettingsRowV2 title={item.name} description="">
                               <div>
-                                <SwitchV2
-                                  checked={local.model.visible({ modelID: item.id, providerID: item.provider.id })}
-                                  onChange={(checked) => setModelVisibility(item, checked)}
-                                  hideLabel
-                                >
-                                  {item.name}
-                                </SwitchV2>
+                                <input
+                                  type="radio"
+                                  name="manage-model"
+                                  aria-label={item.name}
+                                  checked={
+                                    local.model.current()?.provider.id === item.provider.id &&
+                                    local.model.current()?.baseModelID === item.id
+                                  }
+                                  onChange={() => {
+                                    local.model.set(
+                                      { providerID: item.provider.id, modelID: item.id },
+                                      { recent: true },
+                                    )
+                                    dialog.close()
+                                  }}
+                                />
                               </div>
                             </SettingsRowV2>
                           )}

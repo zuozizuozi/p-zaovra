@@ -1,3 +1,5 @@
+import { isProviderAutoModel } from "@/context/model-choice"
+import { aliasModelVariant, modelVariantChoice } from "@/context/model-choice"
 import { batch, createMemo, startTransition } from "solid-js"
 import { useModels } from "@/context/models"
 import type { ModelKey, ModelSelection } from "@/context/local"
@@ -18,7 +20,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
 
   const valid = (model: ModelKey) => {
     const provider = providers.all().get(model.providerID)
-    return !!provider?.models[model.modelID] && connected().has(model.providerID)
+    return !!provider?.models[model.modelID] && connected().has(model.providerID) && !!models.find(model)
   }
 
   const configured = () => {
@@ -31,14 +33,19 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   const recent = () => models.recent.list().find(valid)
   const fallback = () => {
     const defaults = providers.default()
-    return providers.connected().flatMap((provider) => {
-      const modelID = defaults[provider.id] ?? Object.values(provider.models)[0]?.id
-      return modelID ? [{ providerID: provider.id, modelID }] : []
-    })[0]
+    return providers
+      .connected()
+      .flatMap((provider) => {
+        const modelID = defaults[provider.id] ?? Object.values(provider.models)[0]?.id
+        return modelID ? [{ providerID: provider.id, modelID }] : []
+      })
+      .filter(valid)[0]
   }
 
   const current = () => {
     const selected = prompt.model.current()
+    if (selected && isProviderAutoModel(selected.modelID))
+      return models.list().find((model) => model.provider.id === selected.providerID)
     // An unavailable explicit choice must never silently change the billing source.
     if (selected)
       return valid({ providerID: selected.providerID, modelID: selected.modelID }) ? models.find(selected) : undefined
@@ -95,6 +102,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         return prompt.model.current()?.variant
       },
       current() {
+        if (current()?.reasoningModels) return aliasModelVariant(current())
         const resolved = resolveModelVariant({
           variants: this.list(),
           selected: this.selected(),
@@ -107,14 +115,17 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         if (saved && this.list().includes(saved)) return saved
       },
       list() {
-        return Object.keys(current()?.variants ?? {})
+        const model = current()
+        return Object.keys(model?.reasoningModels ?? model?.variants ?? {})
       },
       set(value: string | undefined) {
         startTransition(() =>
           batch(() => {
             const model = current()
             if (!model) return
-            prompt.model.set({ providerID: model.provider.id, modelID: model.id, variant: value ?? null })
+            const choice = modelVariantChoice(model, value)
+            if (!choice) return
+            prompt.model.set({ providerID: model.provider.id, ...choice })
             models.variant.set({ providerID: model.provider.id, modelID: model.id }, value)
           }),
         )
@@ -125,7 +136,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         this.set(
           cycleModelVariant({
             variants,
-            selected: this.selected(),
+            selected: current()?.reasoningModels ? (this.current() ?? null) : this.selected(),
             configured: this.configured(),
           }),
         )
