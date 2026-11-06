@@ -9,6 +9,7 @@ import {
 } from "../provider-discovery"
 import type { Config } from "@zaovra-ai/sdk/v2/types"
 import { providerDisplayName } from "../provider-label"
+import { isProviderAutoModel } from "../context/model-choice"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -148,12 +149,14 @@ export function validateCustomProvider(input: ValidateArgs) {
     const id = m.id.trim()
     const idError = !id
       ? input.t("provider.custom.error.required")
-      : seenModels.has(id)
-        ? input.t("provider.custom.error.duplicate")
-        : (() => {
-            seenModels.add(id)
-            return undefined
-          })()
+      : isProviderAutoModel(id) || /\s/.test(id)
+        ? input.t("provider.models.required")
+        : seenModels.has(id)
+          ? input.t("provider.custom.error.duplicate")
+          : (() => {
+              seenModels.add(id)
+              return undefined
+            })()
     return { id: idError, name: undefined }
   })
   const modelsValid = models.length > 0 && models.every((m) => !m.id && !m.name)

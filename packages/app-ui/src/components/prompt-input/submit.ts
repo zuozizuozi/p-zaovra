@@ -428,7 +428,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const modelSelection = input.model ?? local.model
     const currentModel = modelSelection.current()
     const currentAgent = local.agent.current()
-    const variant = modelSelection.variant.current()
+    const variant = currentModel?.reasoningModels ? undefined : modelSelection.variant.current()
     if (!currentModel) {
       showToast({
         title: language.t("prompt.toast.modelUnavailable.title"),

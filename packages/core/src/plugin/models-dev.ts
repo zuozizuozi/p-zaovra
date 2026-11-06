@@ -128,7 +128,8 @@ function applyModel(
   draft.time.released = released(model.release_date)
   draft.cost = input.cost ?? cost(model.cost)
   draft.status = model.status ?? "active"
-  draft.enabled = true
+  // Discovery/configuration explicitly enables the models this user's connection offers.
+  draft.enabled = false
   draft.limit = {
     context: model.limit.context,
     input: model.limit.input,
@@ -148,16 +149,11 @@ export const ModelsDevPlugin = define({
         const data = yield* modelsDev.get()
         for (const item of Object.values(data)) {
           if (!accountEnabled && item.id === "zaovra") continue
-          if (item.env.length === 0) continue
           const integrationID = item.id
           integrations.update(integrationID, (integration) => (integration.name = item.name))
           integrations.method.update({
             integrationID,
             method: { type: "key" },
-          })
-          integrations.method.update({
-            integrationID,
-            method: { type: "env", names: [...item.env] },
           })
         }
       }),

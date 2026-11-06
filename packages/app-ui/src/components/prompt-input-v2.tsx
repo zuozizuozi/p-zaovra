@@ -1,3 +1,4 @@
+import { ReasoningControl } from "./reasoning-control"
 import { ImagePreview } from "@zaovra-ai/ui/image-preview"
 import { useFeedbackModel } from "@/feedback"
 import { SessionUsageBar } from "./usage-dashboard"
@@ -93,6 +94,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
                 onClose={props.controller.restoreFocus}
               />
             </div>
+            <ReasoningControl model={props.controller.model.selection} />
           </>
         }
       />
@@ -411,7 +413,6 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       keybind: command.keybindParts(item.id),
     })),
   )
-  const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
   const controller = createPromptInputV2Controller({
     store: () => prompt.capture().store,
     state: interaction,
@@ -491,11 +492,6 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
               onSelect: props.controls.agents.select,
             }
           : undefined,
-      variant: {
-        options: () => variants().map((value) => ({ id: value, label: value })),
-        current: () => props.controls.model.selection.variant.current() ?? "default",
-        onSelect: (value) => props.controls.model.selection.variant.set(value === "default" ? undefined : value),
-      },
       submit: {
         stopping,
         working,

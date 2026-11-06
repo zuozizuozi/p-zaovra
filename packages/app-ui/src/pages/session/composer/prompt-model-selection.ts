@@ -1,3 +1,5 @@
+import { resolveModelSelection } from "@/context/model-choice"
+import { aliasModelVariant, modelVariantChoice } from "@/context/model-choice"
 import { batch, createMemo, startTransition } from "solid-js"
 import { useModels } from "@/context/models"
 import type { ModelKey, ModelSelection } from "@/context/local"
@@ -15,39 +17,27 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   const prompt = usePrompt()
   const providers = useProviders(() => sdk().directory)
   const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
+  const chatModels = createMemo(() =>
+    models.list().filter((model) => models.type({ providerID: model.provider.id, modelID: model.id }) === "chat"),
+  )
 
   const valid = (model: ModelKey) => {
     const provider = providers.all().get(model.providerID)
-    return !!provider?.models[model.modelID] && connected().has(model.providerID)
+    return !!provider?.models[model.modelID] && connected().has(model.providerID) && !!models.find(model)
   }
 
-  const configured = () => {
-    const value = sync().data.config.model
-    if (!value) return
-    const model = parseModelKey(value)
-    if (model && valid(model)) return model
-  }
-
-  const recent = () => models.recent.list().find(valid)
-  const fallback = () => {
-    const defaults = providers.default()
-    return providers.connected().flatMap((provider) => {
-      const modelID = defaults[provider.id] ?? Object.values(provider.models)[0]?.id
-      return modelID ? [{ providerID: provider.id, modelID }] : []
-    })[0]
-  }
-
-  const current = () => {
-    const selected = prompt.model.current()
-    // An unavailable explicit choice must never silently change the billing source.
-    if (selected)
-      return valid({ providerID: selected.providerID, modelID: selected.modelID }) ? models.find(selected) : undefined
-    const key = [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()].find(
-      (item): item is ModelKey => !!item && valid(item),
-    )
-    if (!key) return
-    return models.find(key)
-  }
+  const current = () =>
+    resolveModelSelection({
+      selected: prompt.model.current(),
+      agent: input.agent()?.model,
+      configured: parseModelKey(sync().data.config.model ?? ""),
+      recent: models.recent.list(),
+      providers: providers.connected(),
+      defaults: providers.default(),
+      models: chatModels(),
+      valid,
+      find: models.find,
+    })
   const recentModels = createMemo(() =>
     models.recent
       .list()
@@ -95,6 +85,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         return prompt.model.current()?.variant
       },
       current() {
+        if (current()?.reasoningModels) return aliasModelVariant(current())
         const resolved = resolveModelVariant({
           variants: this.list(),
           selected: this.selected(),
@@ -107,14 +98,17 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         if (saved && this.list().includes(saved)) return saved
       },
       list() {
-        return Object.keys(current()?.variants ?? {})
+        const model = current()
+        return Object.keys(model?.reasoningModels ?? model?.variants ?? {})
       },
       set(value: string | undefined) {
         startTransition(() =>
           batch(() => {
             const model = current()
             if (!model) return
-            prompt.model.set({ providerID: model.provider.id, modelID: model.id, variant: value ?? null })
+            const choice = modelVariantChoice(model, value)
+            if (!choice) return
+            prompt.model.set({ providerID: model.provider.id, ...choice })
             models.variant.set({ providerID: model.provider.id, modelID: model.id }, value)
           }),
         )
@@ -125,7 +119,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
         this.set(
           cycleModelVariant({
             variants,
-            selected: this.selected(),
+            selected: current()?.reasoningModels ? (this.current() ?? null) : this.selected(),
             configured: this.configured(),
           }),
         )

@@ -14,6 +14,23 @@ const session: SessionV2Info = {
   location: { directory: "/repo" },
 }
 
+test("701 actual provider model reaches text footers without changing the selected model", () => {
+  const rows = adaptSessionMessages(session, [
+    { id: "user", type: "user", text: "test", time: { created: 0 } },
+    {
+      id: "answer",
+      type: "assistant",
+      agent: "build",
+      model: session.model!,
+      metadata: { responseModel: "actually-returned" },
+      time: { created: 1, completed: 2 },
+      content: [{ id: "text", type: "text", text: "answer" }],
+    },
+  ])
+  expect(rows[1]?.message).toMatchObject({ modelID: "model", providerID: "provider" })
+  expect(rows[1]?.parts[0]).toMatchObject({ metadata: { zaovraResponseModel: "actually-returned" } })
+})
+
 describe("V2 session timeline adapter", () => {
   test("352 replayed host context stays outside visible user turns", () => {
     const result = adaptSessionMessages(session, [

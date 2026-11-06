@@ -1900,6 +1900,7 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly assistantMessageID: string
           readonly finish: string
+          readonly responseModel?: string
           readonly termination?: {
             readonly category:
               | "provider-turn-limit"
@@ -2777,6 +2778,7 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly assistantMessageID: string
         readonly finish: string
+        readonly responseModel?: string
         readonly termination?: {
           readonly category:
             | "provider-turn-limit"

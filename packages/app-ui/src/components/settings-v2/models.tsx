@@ -1,6 +1,5 @@
 import { useFilteredList } from "@zaovra-ai/ui/hooks"
 import { Tag } from "@zaovra-ai/ui/v2/badge-v2"
-import { Switch } from "@zaovra-ai/ui/v2/switch-v2"
 import { Icon as IconV2 } from "@zaovra-ai/ui/v2/icon"
 import { IconButtonV2 } from "@zaovra-ai/ui/v2/icon-button-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
@@ -106,15 +105,6 @@ export const SettingsModelsV2: Component = () => {
                         {(type) => <option value={type}>{language.t(`provider.custom.modelType.${type}`)}</option>}
                       </For>
                     </select>
-                    <Switch
-                      checked={models.visible({ providerID: item.provider.id, modelID: item.id })}
-                      onChange={(checked) =>
-                        models.setVisibility({ providerID: item.provider.id, modelID: item.id }, checked)
-                      }
-                      hideLabel
-                    >
-                      {item.name}
-                    </Switch>
                   </SettingsRowV2>
                 )}
               </For>

@@ -3,6 +3,7 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "ui.message.actualModelUnknown": "实际模型未报告",
   "ui.reasoning.active": "思考中…",
   "ui.reasoning.completed": "思考过程",
   "ui.toolErrorCard.commandAction": "命令没有成功执行。请展开结果查看原因，修复后重试。",

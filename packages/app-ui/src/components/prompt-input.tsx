@@ -1,3 +1,4 @@
+import { ReasoningControl } from "./reasoning-control"
 import { useFilteredList } from "@zaovra-ai/ui/hooks"
 import { useFeedbackModel } from "@/feedback"
 import { useSpring } from "@zaovra-ai/ui/motion-spring"
@@ -1209,7 +1210,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     />
   )
 
-  const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
   const accepting = createMemo(() => {
@@ -1778,28 +1778,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         data-component="prompt-variant-control"
                         classList={{ "animate-in fade-in duration-300": providersShouldFadeIn() }}
                       >
-                        <TooltipKeybind
-                          placement="top"
-                          gutter={4}
-                          title={language.t("command.model.variant.cycle")}
-                          keybind={command.keybind("model.variant.cycle")}
-                        >
-                          <Select
-                            size="normal"
-                            options={variants()}
-                            current={props.controls.model.selection.variant.current() ?? "default"}
-                            label={(x) => (x === "default" ? language.t("common.default") : x)}
-                            onSelect={(value) => {
-                              props.controls.model.selection.variant.set(value === "default" ? undefined : value)
-                              restoreFocus()
-                            }}
-                            class="capitalize max-w-[160px] text-text-base"
-                            valueClass="truncate text-13-regular text-text-base"
-                            triggerStyle={control()}
-                            triggerProps={{ "data-action": "prompt-model-variant" }}
-                            variant="ghost"
-                          />
-                        </TooltipKeybind>
+                        <ReasoningControl model={props.controls.model.selection} />
                       </div>
                     </Show>
                   </Show>

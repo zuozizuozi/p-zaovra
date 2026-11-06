@@ -1,4 +1,5 @@
 export const dict: Record<string, string> = {
+  "ui.message.actualModelUnknown": "Actual model not reported",
   "ui.reasoning.active": "Thinking…",
   "ui.reasoning.completed": "Thought process",
   "ui.toolErrorCard.readAction": "Could not read {{target}}. Check access or tell me which file to use instead.",

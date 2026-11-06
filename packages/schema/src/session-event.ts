@@ -228,6 +228,7 @@ export namespace Step {
       ...Base,
       assistantMessageID: SessionMessage.ID,
       finish: Schema.String,
+      responseModel: Schema.String.pipe(optional),
       termination: SessionOutcome.Termination.pipe(optional),
       error: UnknownError.pipe(optional),
       cost: Schema.Finite,

@@ -1643,7 +1643,9 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     if (props.message.role !== "assistant") return ""
     const message = props.message as AssistantMessage
     const match = data.store.provider?.all?.get(message.providerID)
-    return match?.models?.[message.modelID]?.name ?? message.modelID
+    const actual = part().metadata?.zaovraResponseModel
+    if (typeof actual === "string" && actual.trim()) return actual
+    return (match?.models?.[message.modelID]?.name ?? message.modelID) + " · " + i18n.t("ui.message.actualModelUnknown")
   })
 
   const duration = createMemo(() => {

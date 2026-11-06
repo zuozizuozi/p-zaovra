@@ -1,6 +1,5 @@
 import { useFilteredList } from "@zaovra-ai/ui/hooks"
 import { ProviderIcon } from "@zaovra-ai/ui/provider-icon"
-import { Switch } from "@zaovra-ai/ui/switch"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
 import { TextField } from "@zaovra-ai/ui/text-field"
@@ -116,22 +115,10 @@ const SettingsModelsContent: Component = () => {
                   <SettingsList>
                     <For each={group.items}>
                       {(item) => {
-                        const key = { providerID: item.provider.id, modelID: item.id }
                         return (
                           <div class="flex flex-wrap items-center justify-between gap-4 py-3 border-b border-border-weak-base last:border-none">
                             <div class="min-w-0">
                               <span class="text-14-regular text-text-strong truncate block">{item.name}</span>
-                            </div>
-                            <div class="flex-shrink-0">
-                              <Switch
-                                checked={models.visible(key)}
-                                onChange={(checked) => {
-                                  models.setVisibility(key, checked)
-                                }}
-                                hideLabel
-                              >
-                                {item.name}
-                              </Switch>
                             </div>
                           </div>
                         )
