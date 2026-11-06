@@ -1,0 +1,65 @@
+data: {"response":{"id":"resp_bdfe0678-9ff6-9bc3-9829-b16efb08c912","error":null,"incomplete_details":null,"model":"qwen3.7-flash","service_tier":"default","status":"queued","usage":null},"sequence_number":0,"type":"response.created"}
+
+data: {"response":{"id":"resp_bdfe0678-9ff6-9bc3-9829-b16efb08c912","error":null,"incomplete_details":null,"model":"qwen3.7-flash","service_tier":"default","status":"in_progress","usage":null},"sequence_number":1,"type":"response.in_progress"}
+
+data: {"item":{"id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":null},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+data: {"content_index":0,"delta":"The","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":3,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":" user wants","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":" me to","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":" run a simple","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":" shell command and then","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":" reply DONE. Let","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":" me execute that command","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":".","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"delta":"","item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+data: {"content_index":0,"item_id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","output_index":0,"sequence_number":12,"text":"The user wants me to run a simple shell command and then reply DONE. Let me execute that command.","type":"response.reasoning_text.done"}
+
+data: {"item":{"id":"msg_8543046b-bc45-481c-80c1-9ed32bab55d0","summary":[{"text":"The user wants me to run a simple shell command and then reply DONE. Let me execute that command.","type":"summary_text"}],"type":"reasoning","content":null,"encrypted_content":null,"status":null},"output_index":0,"sequence_number":13,"type":"response.output_item.done"}
+
+data: {"item":{"arguments":"","call_id":"call_ad9de1acbb9b4ebab5027eb3","name":"bash","type":"function_call","id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","status":"in_progress"},"output_index":1,"sequence_number":14,"type":"response.output_item.added"}
+
+data: {"delta":"","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":15,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"{\"command\": ","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":16,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"\"printf R5_S","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":17,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"SE_CAPTURE","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":18,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"674 >","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":19,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":" r5-sse","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":20,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"-capture67","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":21,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"4","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":22,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":".txt; cat r","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":23,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"5-sse-c","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":24,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"apture674","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":25,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":".txt","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":26,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"\"","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":27,"type":"response.function_call_arguments.delta"}
+
+data: {"delta":"}","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","output_index":1,"sequence_number":28,"type":"response.function_call_arguments.delta"}
+
+data: {"arguments":"{\"command\": \"printf R5_SSE_CAPTURE674 > r5-sse-capture674.txt; cat r5-sse-capture674.txt\"}","item_id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","name":"bash","output_index":1,"sequence_number":29,"type":"response.function_call_arguments.done"}
+
+data: {"item":{"arguments":"{\"command\": \"printf R5_SSE_CAPTURE674 > r5-sse-capture674.txt; cat r5-sse-capture674.txt\"}","call_id":"call_ad9de1acbb9b4ebab5027eb3","name":"bash","type":"function_call","id":"msg_d60ba9c3-6a36-4f57-bfc0-84138930a4ee","status":"completed"},"output_index":1,"sequence_number":30,"type":"response.output_item.done"}
+
+data: {"response":{"id":"resp_bdfe0678-9ff6-9bc3-9829-b16efb08c912","error":null,"incomplete_details":null,"model":"qwen3.7-flash","service_tier":"default","status":"completed","usage":{"input_tokens":9605,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens":80,"output_tokens_details":{"reasoning_tokens":21},"total_tokens":9685,"x_details":[{"input_tokens":9605,"output_tokens":80,"total_tokens":9685,"output_tokens_details":{"reasoning_tokens":21},"prompt_tokens_details":{"cached_tokens":0},"x_billing_type":"response_api"}]}},"sequence_number":31,"type":"response.completed"}
+
+: End of minimized fixture
