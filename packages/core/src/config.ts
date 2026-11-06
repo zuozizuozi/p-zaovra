@@ -336,17 +336,11 @@ const layer = Layer.effect(
       }),
       activateModels: Effect.fn("Config.activateModels")(function* (connected) {
         if (!connected.length) return configs
-        const selected = new Map<string, string>()
-        for (const document of configs) {
-          if (document.type !== "document") continue
-          if (document.info.model) selected.set("default", document.info.model)
-          for (const [name, agent] of Object.entries(document.info.agents ?? {}))
-            if (agent.model) selected.set("agent:" + name, agent.model)
-        }
-        // Recover only the selected empty-model entries emitted by the old writer.
+        // Recover the empty-model-only entries emitted by the old writer, even
+        // when the user has selected another model since that migration.
         // Explicit native settings keep the normal whole-entry decode precedence.
         for (const [index] of configs.entries())
-          yield* rewriteActivation(index, (text) => recoverActivation(text, connected, [...selected.values()]))
+          yield* rewriteActivation(index, (text) => recoverActivation(text, connected))
         for (const item of ConfigProviderActivation.plan(configs, connected)) {
           const index = item.index
           const document = configs[index]
@@ -403,7 +397,7 @@ type ActivationDocument = Pick<typeof ConfigV1.Info.Type, "provider"> & {
   providers?: Record<string, ConfigProvider.Info>
 }
 
-function recoverActivation(text: string, connected: readonly string[], selected: readonly string[]) {
+function recoverActivation(text: string, connected: readonly string[]) {
   const input = parse(text) as ActivationDocument
   const edits = Object.entries(input.providers ?? {}).flatMap(([id, native]) => {
     if (!connected.includes(id) || !input.provider?.[id]) return []
@@ -411,10 +405,7 @@ function recoverActivation(text: string, connected: readonly string[], selected:
     const models = Object.entries(native.models ?? {})
     if (
       !models.length ||
-      models.some(
-        ([model, value]) =>
-          Object.keys(value).length !== 0 || !selected.includes(id + "/" + model) || /(^|\/)auto(?::|$)/i.test(model),
-      )
+      models.some(([model, value]) => Object.keys(value).length !== 0 || /(^|\/)auto(?::|$)/i.test(model))
     )
       return []
     const legacy = Option.getOrUndefined(decode({ provider: { [id]: input.provider[id] } }))?.providers?.[id]

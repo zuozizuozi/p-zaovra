@@ -68,6 +68,13 @@ const cases = [
     header: "preserved",
   },
   {
+    name: "recover persisted shadow after the saved selection changes",
+    raw: { provider: { openai: legacy }, providers: { openai: { models: { "gpt-agent": {} } } } },
+    key: "providers",
+    url: legacy.options.baseURL,
+    header: "preserved",
+  },
+  {
     name: "cross-layer blacklist",
     raw: { provider: { openai: legacy }, providers: { unrelated: {} } },
     project: { providers: { openai: { models: { "gpt-4o-mini": {} } } } },
