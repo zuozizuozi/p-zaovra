@@ -121,7 +121,7 @@ jobs:
             Pop-Location
           }
           Push-Location packages/desktop-app
-          bun test --timeout 30000 scripts/notices.test.ts scripts/beta-release.test.ts scripts/beta-storage.test.ts scripts/beta-ci.test.ts scripts/beta-signing.test.ts scripts/beta-build-report.test.ts src/main/wsl/environment.test.ts src/main/wsl/upgrade.test.ts src/main/onboarding-directory.test.ts src/main/feedback.test.ts src/main/updater-install.test.ts electron-builder.config.test.ts ./test/install-channel.test.ts
+          bun test --timeout 30000 scripts/beta-error.test.ts scripts/notices.test.ts scripts/beta-release.test.ts scripts/beta-storage.test.ts scripts/beta-ci.test.ts scripts/beta-signing.test.ts scripts/beta-build-report.test.ts src/main/wsl/environment.test.ts src/main/wsl/upgrade.test.ts src/main/onboarding-directory.test.ts src/main/feedback.test.ts src/main/updater-install.test.ts electron-builder.config.test.ts ./test/install-channel.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --experimental-strip-types --test test-node/update-backup.node.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

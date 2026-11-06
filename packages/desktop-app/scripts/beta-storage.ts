@@ -4,6 +4,8 @@ import { join } from "node:path"
 import { digest, retiredVersions } from "./beta-release"
 import type { planBeta } from "./beta-release"
 
+import { BetaError, betaErrorDetails, betaOperation, betaResponseError } from "./beta-error"
+
 export const versionPattern = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
 
 export function nextBetaVersion(keys: string[], current?: string) {
@@ -55,19 +57,21 @@ async function objectRequest(
   body?: Blob | string,
   headers?: HeadersInit,
 ) {
-  return fetch(bucket.presign(key, { method, expiresIn: 300 }), {
-    method,
-    body,
-    headers,
-    redirect: "error",
-    signal: AbortSignal.timeout(120000),
-  })
+  return betaOperation(method === "GET" ? "R2 GET" : "R2 PUT", () =>
+    fetch(bucket.presign(key, { method, expiresIn: 300 }), {
+      method,
+      body,
+      headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(120000),
+    }),
+  )
 }
 
 async function pointer(bucket: S3Client) {
   const response = await objectRequest(bucket, "beta/beta.yml", "GET")
   if (response.status === 404) return { body: undefined, etag: undefined, version: undefined }
-  if (!response.ok) throw new Error("Cannot read current Beta pointer")
+  if (!response.ok) throw await betaResponseError(response, "R2 GET", "Cannot read current Beta pointer")
   const body = await response.text()
   const metadata = YAML.parse(body) as { version?: string }
   const etag = response.headers.get("etag")
@@ -79,7 +83,9 @@ export async function reserveBetaVersion(bucket: S3Client, identity: ReturnType<
   const keys: string[] = []
   const cursors = new Set<string>()
   for (let page = 0; page < 100; page++) {
-    const result = await bucket.list({ prefix: "beta/", maxKeys: 1000, continuationToken: [...cursors].at(-1) })
+    const result = await betaOperation("R2 LIST", () =>
+      bucket.list({ prefix: "beta/", maxKeys: 1000, continuationToken: [...cursors].at(-1) }),
+    )
     keys.push(...(result.contents ?? []).map((entry) => entry.key))
     if (!result.isTruncated) break
     if (!result.nextContinuationToken || cursors.has(result.nextContinuationToken) || page === 99)
@@ -98,20 +104,22 @@ export async function reserveBetaVersion(bucket: S3Client, identity: ReturnType<
       keys.push(key)
       continue
     }
-    if (!response.ok) throw new Error("Beta version reservation failed")
+    if (!response.ok) throw await betaResponseError(response, "R2 PUT", "Beta version reservation failed")
     return version
   }
   throw new Error("Concurrent Beta version reservations; retry a new run")
 }
 
 async function publicRead(base: string, key: string) {
-  const response = await fetch(base + key + "?verify=" + crypto.randomUUID(), {
-    headers: { "cache-control": "no-cache" },
-    cache: "no-store",
-    redirect: "error",
-    signal: AbortSignal.timeout(120000),
-  })
-  if (!response.ok) throw new Error("Public Beta readback failed")
+  const response = await betaOperation("Public GET", () =>
+    fetch(base + key + "?verify=" + crypto.randomUUID(), {
+      headers: { "cache-control": "no-cache" },
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(120000),
+    }),
+  )
+  if (!response.ok) throw await betaResponseError(response, "Public GET", "Public Beta readback failed")
   return response
 }
 
@@ -127,7 +135,7 @@ export async function deliverBeta(
     throw new Error("Beta versions must increase; do not overwrite a published version")
   if (identity) {
     const reservation = await objectRequest(bucket, "beta/reservations/" + plan.manifest.version + ".json", "GET")
-    if (!reservation.ok) throw new Error("Missing Beta version reservation")
+    if (!reservation.ok) throw await betaResponseError(reservation, "R2 GET", "Missing Beta version reservation")
     const owner = (await reservation.json()) as Record<string, unknown>
     if (
       owner.version !== plan.manifest.version ||
@@ -141,10 +149,12 @@ export async function deliverBeta(
   for (const entry of plan.manifest.files) {
     const key = plan.prefix + entry.name
     const put = await objectRequest(bucket, key, "PUT", Bun.file(join(directory, entry.name)), { "if-none-match": "*" })
-    if (!put.ok && put.status !== 412) throw new Error("Immutable Beta upload failed")
+    if (!put.ok && put.status !== 412) throw await betaResponseError(put, "R2 PUT", "Immutable Beta upload failed")
     const stored = await objectRequest(bucket, key, "GET")
     if (!stored.ok || (await digest(new Blob([await stored.arrayBuffer()]))) !== entry.sha512)
-      throw new Error("Stored Beta artifact hash mismatch")
+      throw stored.ok
+        ? new Error("Stored Beta artifact hash mismatch")
+        : await betaResponseError(stored, "R2 GET", "Stored Beta artifact hash mismatch")
     const live = await publicRead(publicBase, key)
     if ((await digest(new Blob([await live.arrayBuffer()]))) !== entry.sha512)
       throw new Error("Public Beta artifact hash mismatch")
@@ -157,9 +167,13 @@ export async function deliverBeta(
       "if-none-match": "*",
       "content-type": type,
     })
-    if (!response.ok && response.status !== 412) throw new Error("Beta release metadata upload failed")
+    if (!response.ok && response.status !== 412)
+      throw await betaResponseError(response, "R2 PUT", "Beta release metadata upload failed")
     const read = await objectRequest(bucket, plan.prefix + name, "GET")
-    if (!read.ok || (await read.text()) !== body) throw new Error("Immutable Beta release metadata differs")
+    if (!read.ok || (await read.text()) !== body)
+      throw read.ok
+        ? new Error("Immutable Beta release metadata differs")
+        : await betaResponseError(read, "R2 GET", "Immutable Beta release metadata differs")
   }
   // The pointer is the last release object written. A competing publisher cannot be overwritten.
   const commit = await objectRequest(bucket, "beta/beta.yml", "PUT", plan.metadata, {
@@ -167,32 +181,47 @@ export async function deliverBeta(
     "content-type": "text/yaml",
     "cache-control": "no-store, max-age=0",
   })
-  if (!commit.ok) throw new Error("Beta pointer changed; old release remains active")
+  if (!commit.ok) throw await betaResponseError(commit, "R2 PUT", "Beta pointer changed; old release remains active")
   const committedETag = commit.headers.get("etag")
   try {
     const stored = await pointer(bucket)
     if (stored.body !== plan.metadata) throw new Error("Beta pointer storage readback failed")
     if ((await (await publicRead(publicBase, "beta/beta.yml")).text()) !== plan.metadata)
       throw new Error("Public Beta pointer readback failed")
-  } catch {
+  } catch (error) {
     if (previous.body && committedETag) {
       const restore = await objectRequest(bucket, "beta/beta.yml", "PUT", previous.body, {
         "if-match": committedETag,
         "content-type": "text/yaml",
         "cache-control": "no-store, max-age=0",
       })
-      if (!restore.ok) throw new Error("Beta readback failed; concurrent pointer prevents rollback; inspect delivery")
+      if (!restore.ok)
+        throw await betaResponseError(
+          restore,
+          "R2 PUT",
+          "Beta readback failed; concurrent pointer prevents rollback; inspect delivery",
+        )
       if ((await pointer(bucket)).body !== previous.body)
         throw new Error("Beta rollback readback failed; inspect delivery")
-      throw new Error("Beta readback failed; previous release restored")
+      throw new BetaError(
+        error instanceof BetaError ? error.operation : "VerifyBetaPointer",
+        error,
+        "Beta readback failed; previous release restored",
+      )
     }
-    throw new Error("Beta pointer readback failed; inspect initial delivery")
+    throw new BetaError(
+      error instanceof BetaError ? error.operation : "VerifyBetaPointer",
+      error,
+      "Beta pointer readback failed; inspect initial delivery",
+    )
   }
 }
 
 export async function retainBetaVersions(bucket: S3Client, version: string) {
   const indexFile = bucket.file("beta/versions.json")
-  const index: unknown = (await indexFile.exists()) ? await indexFile.json() : []
+  const index: unknown = (await betaOperation("R2 HEAD", () => indexFile.exists()))
+    ? await betaOperation("R2 GET", () => indexFile.json())
+    : []
   if (
     !Array.isArray(index) ||
     index.some((value) => typeof value !== "string" || !versionPattern.test(value) || semver.order(value, version) > 0)
@@ -205,7 +234,7 @@ export async function retainBetaVersions(bucket: S3Client, version: string) {
   const owned = await Promise.all(
     retired.map(async (old) => {
       const prefix = "beta/" + old + "/"
-      const release = (await bucket.file(prefix + "release.json").json()) as {
+      const release = (await betaOperation("R2 GET", () => bucket.file(prefix + "release.json").json())) as {
         version?: unknown
         files?: { name?: unknown }[]
       }
@@ -221,18 +250,21 @@ export async function retainBetaVersions(bucket: S3Client, version: string) {
       return [...names.map((name) => prefix + name), prefix + "notes.md", prefix + "release.json"]
     }),
   )
-  for (const key of owned.flat()) await bucket.file(key).delete()
+  for (const key of owned.flat()) await betaOperation("R2 DELETE", () => bucket.file(key).delete())
   const retained = versions.filter((value) => !retired.includes(value))
-  await indexFile.write(JSON.stringify(retained), { type: "application/json" })
+  await betaOperation("R2 PUT", () => indexFile.write(JSON.stringify(retained), { type: "application/json" }))
   return { retained, retired }
 }
 
 if (import.meta.main) {
-  const identity = continuousIdentity()
-  const version = await reserveBetaVersion(betaBucket(), identity).catch(() => {
-    throw new Error("Continuous Beta reservation failed; check bucket configuration. Credentials are not logged.")
+  await betaOperation("ReserveBeta", async () => {
+    const identity = continuousIdentity()
+    const version = await reserveBetaVersion(betaBucket(), identity)
+    if (!process.env.GITHUB_ENV) throw new Error("Missing workflow environment output")
+    await appendFile(process.env.GITHUB_ENV, "ZAOVRA_VERSION=" + version + "\n")
+    console.log("Reserved " + version)
+  }).catch((error) => {
+    console.error(JSON.stringify(betaErrorDetails(error, "ReserveBeta")))
+    process.exitCode = 1
   })
-  if (!process.env.GITHUB_ENV) throw new Error("Missing workflow environment output")
-  await appendFile(process.env.GITHUB_ENV, "ZAOVRA_VERSION=" + version + "\n")
-  console.log("Reserved " + version)
 }

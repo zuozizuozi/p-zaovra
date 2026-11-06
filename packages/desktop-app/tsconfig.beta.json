@@ -6,6 +6,8 @@
   },
   "references": [],
   "include": [
+    "scripts/beta-error.ts",
+    "scripts/beta-error.test.ts",
     "scripts/beta-ci.ts",
     "scripts/beta-signing.ts",
     "scripts/beta-release.ts",

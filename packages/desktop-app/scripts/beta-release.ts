@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import { basename, join, resolve } from "node:path"
 
 import { betaBucket, continuousIdentity, deliverBeta, retainBetaVersions, versionPattern } from "./beta-storage"
+import { betaErrorDetails, betaOperation } from "./beta-error"
 export { versionPattern } from "./beta-storage"
 
 export async function digest(file: Blob) {
@@ -70,7 +71,7 @@ export function unsignedBeta(args: string[], channel: string | undefined) {
 
 export async function publishBeta(directory: string, commit: string, notes: string) {
   const unsigned = unsignedBeta(process.argv, process.env.ZAOVRA_CHANNEL)
-  const plan = await planBeta(directory, commit, notes)
+  const plan = await betaOperation("PlanBeta", () => planBeta(directory, commit, notes))
   if (!process.argv.includes("--publish")) {
     console.log(
       JSON.stringify(
@@ -112,7 +113,8 @@ export async function publishBeta(directory: string, commit: string, notes: stri
   }
   const bucket = betaBucket()
   await deliverBeta(bucket, directory, plan, undefined, identity)
-  const retention = await retainBetaVersions(bucket, plan.manifest.version).catch(() => {
+  const retention = await retainBetaVersions(bucket, plan.manifest.version).catch((error) => {
+    console.warn(JSON.stringify(betaErrorDetails(error, "Retention")))
     console.warn("Beta is published and verified; old-version retention is deferred. Credentials are not logged.")
     return { deferred: true }
   })
@@ -134,10 +136,13 @@ if (import.meta.main) {
     .filter((value) => value !== "--publish" && value !== "--allow-unsigned-beta" && value !== "--continuous")
   if (!directory || !commit || !notesPath)
     throw new Error("Usage: beta-release.ts <artifact-dir> <sha> <notes.md> [--publish] [--allow-unsigned-beta]")
-  await publishBeta(directory, commit, await Bun.file(notesPath).text()).catch(() => {
-    console.error(
-      "Beta delivery failed. Run the offline dry-run and verify the approved SHA, signing policy and bucket configuration. Credential details are not logged.",
-    )
-    process.exitCode = 1
-  })
+  await betaOperation("ReadReleaseNotes", () => Bun.file(notesPath).text())
+    .then((notes) => publishBeta(directory, commit, notes))
+    .catch((error) => {
+      console.error(JSON.stringify(betaErrorDetails(error, "PublishBeta")))
+      console.error(
+        "Beta delivery failed. Run the offline dry-run and verify the approved SHA, signing policy and bucket configuration. Credential details are not logged.",
+      )
+      process.exitCode = 1
+    })
 }
