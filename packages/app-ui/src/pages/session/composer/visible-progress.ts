@@ -1,5 +1,6 @@
 import type { Message, Part } from "@zaovra-ai/sdk/v2/client"
 import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
+import { processToolFailures } from "../timeline/tool-process"
 import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 
 export function visibleProgress(input: {
@@ -39,8 +40,14 @@ export function visibleProgress(input: {
           historyComplete: input.historyComplete,
         })
       : []
+  const process = processToolFailures(
+    current.filter((message) => message.role === "assistant"),
+    (id) => input.parts[id] ?? [],
+    input.busy || input.waiting,
+  )
   const failed = tools.filter(
     (part) =>
+      !process.has(part.id) &&
       !quiet.some((item) => item.id === part.id) &&
       (part.state.status === "error" ||
         (part.state.status === "completed" &&

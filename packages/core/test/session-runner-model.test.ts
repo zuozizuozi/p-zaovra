@@ -263,6 +263,35 @@ describe("SessionRunnerModel", () => {
     )
   }
 
+  it.effect("enables native PDF input for a configured Claude alias without changing the catalog", () =>
+    Effect.gen(function* () {
+      const configured = ModelV2.Info.make({
+        ...model({ type: "aisdk", package: "@ai-sdk/anthropic", url: "https://offline.example.test/v1" }),
+        api: {
+          id: ModelV2.ID.make("claude-haiku-5-5"),
+          type: "aisdk",
+          package: "@ai-sdk/anthropic",
+          url: "https://offline.example.test/v1",
+        },
+      })
+      const original = JSON.stringify(configured)
+      const session = SessionV2.Info.make({
+        id: SessionV2.ID.make("ses_pdf_alias"),
+        projectID: ProjectV2.ID.global,
+        title: "PDF alias",
+        model: { id: configured.id, providerID: configured.providerID },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/project") },
+      })
+      const resolved = yield* SessionRunnerModel.resolve(session, configured)
+      expect(resolved.inputModalities).toEqual(["text", "pdf"])
+      expect(resolved.catalogModel).toEqual({ id: configured.id, providerID: configured.providerID })
+      expect(JSON.stringify(configured)).toBe(original)
+    }),
+  )
+
   it.effect("retains catalog visual capabilities when the API model name is an alias", () =>
     Effect.gen(function* () {
       const configured = ModelV2.Info.make({

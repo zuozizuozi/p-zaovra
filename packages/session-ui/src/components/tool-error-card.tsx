@@ -8,6 +8,8 @@ import { Button } from "@zaovra-ai/ui/button"
 import { Tooltip } from "@zaovra-ai/ui/tooltip"
 import { useI18n } from "@zaovra-ai/ui/context/i18n"
 
+import { toolErrorText } from "./tool-error-text"
+
 export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "children" | "variant"> {
   tool: string
   error: string
@@ -132,14 +134,14 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     if (!key.includes(".")) return key
     return i18n.t(key)
   })
-  const cleaned = createMemo(() => split.error.replace(/^Error:\s*/, "").trim())
+  const cleaned = createMemo(() => toolErrorText(split.error))
   const subtitle = createMemo(() => {
     if (split.subtitle) return split.subtitle
     const message = toolFailureMessage(props)
     return i18n.t(message.key, { target: message.target }) + (message.causeKey ? ` ${i18n.t(message.causeKey)}` : "")
   })
   const body = createMemo(() => {
-    return split.error
+    return cleaned()
   })
 
   const copy = async () => {

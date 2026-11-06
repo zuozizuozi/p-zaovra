@@ -24,6 +24,7 @@ function setup(input: {
   active?: () => Partial<Record<string, { type: "running" }>>
   interrupt?: () => Promise<void>
   pageWait?: () => Promise<void>
+  getWait?: () => Promise<void>
 }) {
   const sessions = input.sessions ?? { ses_child: info("ses_child") }
   const pages = input.pages ?? [{ data: [] }]
@@ -35,13 +36,16 @@ function setup(input: {
   }
   const client = {
     v2: {
+      permission: { request: { list: async () => ({ data: { data: [] } }) } },
       session: {
         interrupt: input.interrupt ?? (() => Promise.resolve()),
         wait: input.wait ?? (() => Promise.resolve()),
         active: async () => ({ data: { data: input.active?.() ?? {} } }),
         get: async ({ sessionID }: { sessionID: string }) => {
           requests.get.push(sessionID)
-          return { data: { data: sessions[sessionID] } }
+          const session = sessions[sessionID]
+          await input.getWait?.()
+          return { data: { data: session } }
         },
         messages: async ({ sessionID, cursor, limit }: { sessionID: string; cursor?: string; limit: number }) => {
           requests.messages.push({ sessionID, cursor })
@@ -497,7 +501,7 @@ describe("V2 server session store", () => {
     })
   })
 
-  test("restores queued inputs separately without inventing a visible user turn", async () => {
+  test("701 restores queued inputs as visible pending bubbles before promotion", async () => {
     const ctx = setup({
       pending: [
         {
@@ -512,7 +516,8 @@ describe("V2 server session store", () => {
     })
     await ctx.store.sync("ses_child")
     expect(ctx.store.data.pending_input.ses_child[0].id).toBe("msg_queue")
-    expect(ctx.store.data.message.ses_child.length).toBe(0)
+    expect(ctx.store.data.message.ses_child).toHaveLength(1)
+    expect(ctx.store.data.part.msg_queue).toMatchObject([{ metadata: { zaovraDelivery: "queue" } }])
     ctx.store.apply({
       type: "session.next.prompted",
       properties: {
@@ -983,4 +988,140 @@ test("an empty streaming assistant shell still counts as first-output Stop", asy
   })
   await ctx.store.interrupt("ses_child")
   expect(ctx.store.stopped("msg_first")).toBe(true)
+})
+
+test("700 terminal text is visible immediately when its start event was missed", () => {
+  const ctx = setup({})
+  ctx.store.remember({
+    id: "ses_child",
+    slug: "ses_child",
+    projectID: "project",
+    directory: "/repo",
+    title: "child",
+    version: "",
+    agent: "build",
+    model: { id: "model", providerID: "provider" },
+    time: { created: 1, updated: 1 },
+  })
+  ctx.store.apply({
+    type: "session.next.prompted",
+    properties: { timestamp: 1, sessionID: "ses_child", messageID: "msg_700_user", prompt: { text: "你是什么模型" } },
+  })
+  ctx.store.apply({
+    type: "session.next.step.started",
+    properties: {
+      timestamp: 2,
+      sessionID: "ses_child",
+      assistantMessageID: "msg_700_answer",
+      agent: "build",
+      model: { id: "model", providerID: "provider" },
+    },
+  })
+  ctx.store.apply({
+    type: "session.next.text.ended",
+    properties: {
+      timestamp: 5,
+      sessionID: "ses_child",
+      assistantMessageID: "msg_700_answer",
+      textID: "text_0",
+      text: "我是当前选择的模型。",
+    },
+  })
+  expect(ctx.store.data.part.msg_700_answer).toMatchObject([
+    { id: "msg_700_answer:text_0", type: "text", text: "我是当前选择的模型。" },
+  ])
+})
+
+test("700 revert clear refresh does not join an older stale session snapshot", async () => {
+  const gate = Promise.withResolvers<void>()
+  const sessions: Record<string, SessionV2Info> = {
+    ses_child: { ...info("ses_child"), revert: { messageID: "msg_undone" } },
+  }
+  const ctx = setup({ sessions, getWait: () => gate.promise })
+  const first = ctx.store.resolve("ses_child")
+  sessions.ses_child = info("ses_child")
+  ctx.store.apply({ type: "session.next.revert.cleared", properties: { sessionID: "ses_child" } })
+  gate.resolve()
+  await first
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(ctx.requests.get).toHaveLength(2)
+  expect(ctx.store.get("ses_child")?.revert).toBeUndefined()
+})
+
+test("701 silent current-view resync clears stale busy and stale permissions and reads the final answer", async () => {
+  const ctx = setup({ pages: [{ data: [user("msg_user", "go", 1), assistant("msg_final", "final without SSE", 2)] }] })
+  await ctx.store.resolve("ses_child")
+  ctx.store.pin("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  ctx.store.set("permission", "ses_child", [
+    { id: "per_stale", sessionID: "ses_child", permission: "bash", patterns: [], always: [], metadata: {} },
+  ])
+  await ctx.store.resyncSilent()
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+  expect(ctx.store.data.permission.ses_child).toEqual([])
+  expect(ctx.store.data.part.msg_final).toMatchObject([{ text: "final without SSE" }])
+  ctx.store.unpin("ses_child")
+})
+test("701 admitted queue is immediately visible and does not make an idle session busy", async () => {
+  const ctx = setup({})
+  await ctx.store.resolve("ses_child")
+  ctx.store.apply({
+    type: "session.next.prompt.admitted",
+    properties: {
+      sessionID: "ses_child",
+      messageID: "msg_queue",
+      timestamp: 5,
+      delivery: "queue",
+      prompt: { text: "after task" },
+    },
+  })
+  expect(ctx.store.data.message.ses_child).toContainEqual(expect.objectContaining({ id: "msg_queue", role: "user" }))
+  expect(ctx.store.data.part.msg_queue).toMatchObject([{ text: "after task", metadata: { zaovraDelivery: "queue" } }])
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+})
+
+test("701 reconnect refreshes pinned current history without switching windows", async () => {
+  const loaded = Promise.withResolvers<void>()
+  const ctx = setup({
+    pages: [{ data: [user("msg_user", "go", 1), assistant("msg_reconnected", "answer after reconnect", 2)] }],
+    pageWait: async () => {
+      loaded.resolve()
+    },
+  })
+  await ctx.store.resolve("ses_child")
+  ctx.store.pin("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  ctx.store.apply({ type: "server.connected", properties: {} })
+  await loaded.promise
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(ctx.store.data.part.msg_reconnected).toMatchObject([{ text: "answer after reconnect" }])
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+  ctx.store.unpin("ses_child")
+})
+
+test("701 legacy text deltas count as session activity before silent resync", async () => {
+  const ctx = setup({})
+  await ctx.store.resolve("ses_child")
+  ctx.store.pin("ses_child")
+  ctx.store.set("message", "ses_child", [
+    {
+      id: "msg_legacy",
+      sessionID: "ses_child",
+      role: "user",
+      agent: "build",
+      model: { providerID: "p", modelID: "m" },
+      time: { created: 1 },
+    },
+  ])
+  ctx.store.set("part", "msg_legacy", [
+    { id: "prt_legacy", messageID: "msg_legacy", sessionID: "ses_child", type: "text", text: "begin" },
+  ])
+  const before = ctx.requests.get.length
+  ctx.store.apply({
+    type: "message.part.delta",
+    properties: { messageID: "msg_legacy", partID: "prt_legacy", field: "text", delta: " more" },
+  })
+  await ctx.store.resyncSilent(Date.now() + 14000)
+  expect(ctx.requests.get.length).toBe(before)
+  ctx.store.unpin("ses_child")
 })

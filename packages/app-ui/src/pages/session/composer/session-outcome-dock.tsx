@@ -17,6 +17,7 @@ import { commandVerification, staleVerification } from "@/utils/verification-lab
 import { artifactPath } from "@/utils/artifact-path"
 import { visibleProgress } from "./visible-progress"
 import { SessionEndBar, budgetAttention } from "./session-end-bar"
+import { toolErrorText } from "@zaovra-ai/session-ui/tool-error-text"
 import { toolFailureMessage } from "@zaovra-ai/session-ui/tool-error-card"
 
 export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.Element; onUndo?: () => void }) {
@@ -223,7 +224,6 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
                 <span>
                   <Show when={progress().visible} fallback={language.t("session.progress.details")}>
                     {" "}
-                    <Show when={progress().target}>{progress().target} · </Show>
                     {language.t(
                       `session.progress.${progress().state === "idle" && progress().preview ? "preview" : progress().state}`,
                     )}
@@ -281,84 +281,84 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
                     <For each={progress().failures}>
                       {(failure) => (
                         <p class="break-words">
-                          {failure.tool}: {failure.error}
+                          {failure.tool}: {toolErrorText(failure.error)}
                         </p>
                       )}
                     </For>
                   </details>
                 </Show>
+                <Popover
+                  triggerAs="button"
+                  triggerProps={{ type: "button", class: "shrink-0" }}
+                  trigger={language.t("session.budget.title")}
+                  title={language.t("session.budget.title")}
+                >
+                  <div data-component="session-budget" class="max-h-80 overflow-auto text-xs">
+                    <Show when={budgetQuery.data}>
+                      {(current) => (
+                        <p data-component="session-budget-usage">
+                          {language.t("session.budget.used", {
+                            tokens: current().used.tokens.toLocaleString(),
+                            limit: current().limits.tokens?.toLocaleString() ?? language.t("session.budget.unlimited"),
+                            minutes: Math.floor(current().used.durationMs / 60_000),
+                            duration:
+                              current().limits.durationMs === undefined
+                                ? language.t("session.budget.unlimited")
+                                : Math.floor(current().limits.durationMs! / 60_000),
+                          })}
+                        </p>
+                      )}
+                    </Show>
+                    <p>{language.t("session.budget.hint")}</p>
+                    <Show when={budgetQuery.data?.unreported}>
+                      <p>{language.t("session.budget.unreported", { count: budgetQuery.data!.unreported })}</p>
+                    </Show>
+                    <div class="flex flex-wrap items-end gap-3 py-2">
+                      <label>
+                        {language.t("session.budget.tokens")}
+                        <input
+                          class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
+                          type="number"
+                          min="1"
+                          step="1"
+                          disabled={updateBudget.isPending || recover.isPending}
+                          value={budget.tokens}
+                          onInput={(event) => setBudget({ tokens: event.currentTarget.value, dirty: true })}
+                        />
+                      </label>
+                      <label>
+                        {language.t("session.budget.minutes")}
+                        <input
+                          class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
+                          type="number"
+                          min="1"
+                          step="1"
+                          disabled={updateBudget.isPending || recover.isPending}
+                          value={budget.minutes}
+                          onInput={(event) => setBudget({ minutes: event.currentTarget.value, dirty: true })}
+                        />
+                      </label>
+                      <Button
+                        size="small"
+                        disabled={updateBudget.isPending || recover.isPending}
+                        onClick={() => updateBudget.mutate(false)}
+                      >
+                        {language.t("session.budget.apply")}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="ghost"
+                        disabled={updateBudget.isPending || recover.isPending}
+                        onClick={() => updateBudget.mutate(true)}
+                      >
+                        {language.t("session.budget.remove")}
+                      </Button>
+                    </div>
+                  </div>
+                </Popover>
               </div>
             </Popover>
           </div>
-          <Popover
-            triggerAs="button"
-            triggerProps={{ type: "button", class: "shrink-0" }}
-            trigger={language.t("session.budget.title")}
-            title={language.t("session.budget.title")}
-          >
-            <div data-component="session-budget" class="max-h-80 overflow-auto text-xs">
-              <Show when={budgetQuery.data}>
-                {(current) => (
-                  <p data-component="session-budget-usage">
-                    {language.t("session.budget.used", {
-                      tokens: current().used.tokens.toLocaleString(),
-                      limit: current().limits.tokens?.toLocaleString() ?? language.t("session.budget.unlimited"),
-                      minutes: Math.floor(current().used.durationMs / 60_000),
-                      duration:
-                        current().limits.durationMs === undefined
-                          ? language.t("session.budget.unlimited")
-                          : Math.floor(current().limits.durationMs! / 60_000),
-                    })}
-                  </p>
-                )}
-              </Show>
-              <p>{language.t("session.budget.hint")}</p>
-              <Show when={budgetQuery.data?.unreported}>
-                <p>{language.t("session.budget.unreported", { count: budgetQuery.data!.unreported })}</p>
-              </Show>
-              <div class="flex flex-wrap items-end gap-3 py-2">
-                <label>
-                  {language.t("session.budget.tokens")}
-                  <input
-                    class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={updateBudget.isPending || recover.isPending}
-                    value={budget.tokens}
-                    onInput={(event) => setBudget({ tokens: event.currentTarget.value, dirty: true })}
-                  />
-                </label>
-                <label>
-                  {language.t("session.budget.minutes")}
-                  <input
-                    class="ml-2 w-28 rounded border border-border-base px-2 py-1 tabular-nums"
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={updateBudget.isPending || recover.isPending}
-                    value={budget.minutes}
-                    onInput={(event) => setBudget({ minutes: event.currentTarget.value, dirty: true })}
-                  />
-                </label>
-                <Button
-                  size="small"
-                  disabled={updateBudget.isPending || recover.isPending}
-                  onClick={() => updateBudget.mutate(false)}
-                >
-                  {language.t("session.budget.apply")}
-                </Button>
-                <Button
-                  size="small"
-                  variant="ghost"
-                  disabled={updateBudget.isPending || recover.isPending}
-                  onClick={() => updateBudget.mutate(true)}
-                >
-                  {language.t("session.budget.remove")}
-                </Button>
-              </div>
-            </div>
-          </Popover>
         </div>
         <Show when={progress().visible && (outcome()?.missing.length || staleChecks() || incompleteChecks())}>
           <div role="status" class="px-1 text-xs text-text-weak" data-component="session-evidence-risk">

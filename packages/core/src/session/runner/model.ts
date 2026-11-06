@@ -300,7 +300,13 @@ export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, creden
         // custom aliases may share the same API ID with different settings.
         Effect.map((resolved) =>
           Object.assign(resolved, {
-            inputModalities: configured.capabilities.input,
+            // Claude document input also applies through user-configured Anthropic endpoints.
+            inputModalities:
+              configured.api.type === "aisdk" &&
+              configured.api.package === "@ai-sdk/anthropic" &&
+              /^claude-(?:3[.-]|(?:haiku|sonnet|opus)-[4-9](?:[.-]|$))/i.test(configured.api.id)
+                ? [...new Set([...configured.capabilities.input, "pdf"])]
+                : configured.capabilities.input,
             catalogModel: { id: configured.id, providerID: configured.providerID },
             pricing: {
               ...ModelV2.Info.empty(configured.providerID, configured.id),

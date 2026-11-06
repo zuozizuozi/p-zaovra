@@ -18,11 +18,11 @@ import {
   LLMEvent,
   Message,
   SystemPart,
-  TransportReason,
   isContextOverflowFailure,
   providerEventError,
   type ProviderErrorEvent,
 } from "@zaovra-ai/llm"
+import { providerProgress } from "./provider-progress"
 import { RequestExecutor } from "@zaovra-ai/llm/route"
 import {
   Cause,
@@ -73,7 +73,7 @@ import { SessionRunnerModel } from "./model"
 import { PluginV2 } from "../../plugin"
 import { PluginInternal } from "../../plugin/internal"
 import { createLLMEventPublisher } from "./publish-llm-event"
-import { toLLMMessages } from "./to-llm-message"
+import { prepareLLMMessages } from "./prepare-llm-message"
 import { TextRecovery } from "./text-recovery"
 import { maxStepsPrompt } from "./max-steps"
 import { Snapshot } from "../../snapshot"
@@ -1040,7 +1040,7 @@ const layer = Layer.effect(
         )
           ? SessionProgress.facts(factsInput)
           : undefined
-      const durableMessages = toLLMMessages(context, model, originalRequests)
+      const durableMessages = yield* prepareLLMMessages(context, model, originalRequests)
       const baseRequest = LLM.request({
         model,
         cache: { tools: true, system: true, messages: { tail: 1 } },
@@ -1320,25 +1320,7 @@ const layer = Layer.effect(
               onStart: () => contextWindow.start(request, windowEpoch),
             })
       ).pipe(
-        (stream) =>
-          request.model.route.transport.id === "http-json"
-            ? stream
-            : stream.pipe(
-                Stream.timeoutOrElse({
-                  duration: "180 seconds",
-                  orElse: () =>
-                    Stream.fail(
-                      new LLMError({
-                        module: "SessionRunner",
-                        method: "stream",
-                        reason: new TransportReason({
-                          kind: "ProgressTimeout",
-                          message: "模型连接连续 180 秒没有有效事件；请求已停止。",
-                        }),
-                      }),
-                    ),
-                }),
-              ),
+        providerProgress,
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             if (overflowFailure || publisher.hasProviderError()) return

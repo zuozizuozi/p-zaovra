@@ -193,7 +193,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       agent: input.draft.agent,
       model: { id: input.draft.model.modelID, providerID: input.draft.model.providerID, variant: input.draft.variant },
     },
-    { id: messageID, timeCreated: Date.now(), prompt: admission },
+    { id: messageID, timeCreated: Date.now(), prompt: admission, delivery: input.delivery ?? "steer" },
   )
 
   const add = () =>
@@ -213,7 +213,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
 
   batch(() => {
     setBusy()
-    if (input.delivery !== "queue" && input.resume !== false) add()
+    if (input.resume !== false) add()
   })
 
   try {

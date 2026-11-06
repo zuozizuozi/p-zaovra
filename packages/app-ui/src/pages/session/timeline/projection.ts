@@ -6,6 +6,7 @@ import { Timeline, TimelineRow } from "./rows"
 import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
 import { processMessages } from "./process-messages"
 import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
+import { processToolFailures } from "./tool-process"
 import { placeToolFailuresAfterAnswer } from "./tool-failure-rows"
 
 export { reuseTimelineRows } from "./row-reconciliation"
@@ -91,6 +92,31 @@ export function createTimelineProjection(input: {
     if (input.status().type === "idle") return
     return input.userMessages().at(-1)?.id
   })
+  const answerMessages = createMemo(() => {
+    const result = new Map<string, string>()
+    assistantMessagesByTurn().forEach((messages, owner) => {
+      const working =
+        input.status().type !== "idle" && (displayTurns().get(activeMessageID() ?? "") ?? activeMessageID()) === owner
+      const answer = messages.findLast(
+        (message) =>
+          (working || message.finish !== "tool-calls") &&
+          input
+            .parts(message.id)
+            .some((part) => part.type === "text" && part.text.trim() && !part.metadata?.superseded),
+      )
+      if (answer) result.set(owner, answer.id)
+    })
+    return result
+  })
+  const processParts = createMemo(() => {
+    const result = new Set<string>()
+    assistantMessagesByTurn().forEach((messages, owner) => {
+      const working =
+        input.status().type !== "idle" && (displayTurns().get(activeMessageID() ?? "") ?? activeMessageID()) === owner
+      processToolFailures(messages, input.parts, working).forEach((id) => result.add(id))
+    })
+    return result
+  })
   const messageRowMemos = createMemo(
     mapArray(input.userMessages, (userMessage, indexAccessor) =>
       createMemo((previous: TimelineRow.TimelineRow[] | undefined) =>
@@ -161,7 +187,7 @@ export function createTimelineProjection(input: {
         return placeToolFailuresAfterAnswer(
           filtered,
           input.parts,
-          quietParts(),
+          new Set([...quietParts(), ...processParts()]),
           !working && typeof last?.time.completed === "number" && last.finish !== "tool-calls",
         )
       })
@@ -210,6 +236,8 @@ export function createTimelineProjection(input: {
 
   return {
     activeMessageID,
+    answerMessages,
+    processParts,
     quietParts,
     assistantMessagesByParent,
     assistantMessagesByTurn,

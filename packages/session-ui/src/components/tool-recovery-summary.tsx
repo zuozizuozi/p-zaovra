@@ -4,6 +4,8 @@ import { Collapsible } from "@zaovra-ai/ui/collapsible"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { useI18n } from "@zaovra-ai/ui/context/i18n"
 
+import { toolErrorText } from "./tool-error-text"
+
 export function ToolRecoverySummary(props: {
   parts: readonly ToolPart[]
   recovered?: boolean
@@ -32,7 +34,7 @@ export function ToolRecoverySummary(props: {
                 {part.id} · {part.callID}
               </div>
               <pre>{JSON.stringify(part.state.input, null, 2)}</pre>
-              <pre>{part.state.status === "error" ? part.state.error : ""}</pre>
+              <pre>{part.state.status === "error" ? toolErrorText(part.state.error) : ""}</pre>
             </div>
           )}
         </For>

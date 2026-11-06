@@ -225,6 +225,11 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   })
 
   const session = createServerSession(serverSDK.client)
+  const sessionRefresh = setInterval(() => {
+    if (document.visibilityState === "hidden") return
+    void session.resyncSilent().catch(() => {})
+  }, 15_000)
+  onCleanup(() => clearInterval(sessionRefresh))
 
   const children = createChildStoreManager({
     owner,

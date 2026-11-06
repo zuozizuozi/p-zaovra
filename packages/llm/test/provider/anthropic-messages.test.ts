@@ -380,7 +380,66 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
-  it.effect("rejects non-image media in tool-result content with a clear error", () =>
+  it.effect("prepares PDF attachments as native document blocks", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+        LLM.request({
+          model,
+          messages: [
+            Message.user([
+              {
+                type: "media",
+                mediaType: "application/pdf",
+                data: "data:application/pdf;base64,JVBERi0xLjc=",
+                filename: "guide.pdf",
+              },
+            ]),
+          ],
+          cache: "none",
+        }),
+      )
+      expect(prepared.body.messages).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBERi0xLjc=" } },
+          ],
+        },
+      ])
+    }),
+  )
+
+  it.effect("prepares PDF read results as native document blocks", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+        LLM.request({
+          model,
+          messages: [
+            Message.assistant([ToolCallPart.make({ id: "pdf_read", name: "read", input: { path: "guide.pdf" } })]),
+            Message.tool({
+              id: "pdf_read",
+              name: "read",
+              resultType: "content",
+              result: [
+                {
+                  type: "file",
+                  uri: "data:application/pdf;base64,JVBERi0xLjc=",
+                  mime: "application/pdf",
+                  name: "guide.pdf",
+                },
+              ],
+            }),
+          ],
+          cache: "none",
+        }),
+      )
+      expect(expectToolResult(prepared.body).content).toEqual([
+        { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBERi0xLjc=" } },
+      ])
+    }),
+  )
+
+  it.effect("rejects unsupported audio in tool-result content with a clear error", () =>
     Effect.gen(function* () {
       const error = yield* LLMClient.prepare(
         LLM.request({

@@ -556,3 +556,58 @@ test.each(["pending", "running"] as const)("idle persisted %s tools do not claim
   expect(visibleProgress(input).visible).toBe(true)
   expect(visibleProgress(input).updating).toBe(false)
 })
+
+test("700 successful delivery keeps nonzero exploratory bash in history without a failed-turn notice", () => {
+  const rows = adaptSessionMessages(session, [
+    { type: "user", id: "u700", text: "Generate report", time: { created: 1 } },
+    {
+      type: "assistant",
+      id: "a700-probe",
+      agent: "build",
+      model: { id: "m", providerID: "p" },
+      time: { created: 2, completed: 3 },
+      finish: "tool-calls",
+      content: [
+        {
+          type: "tool",
+          id: "probe",
+          name: "bash",
+          time: { created: 2, completed: 3 },
+          state: {
+            status: "completed",
+            input: { command: "probe" },
+            content: [{ type: "text", text: "not found" }],
+            structured: { exit: 1 },
+          },
+        },
+      ],
+    },
+    {
+      type: "assistant",
+      id: "a700-final",
+      agent: "build",
+      model: { id: "m", providerID: "p" },
+      time: { created: 4, completed: 6 },
+      finish: "stop",
+      content: [
+        {
+          type: "tool",
+          id: "write",
+          name: "write",
+          time: { created: 4, completed: 5 },
+          state: { status: "completed", input: { filePath: "report.txt" }, content: [], structured: {} },
+        },
+        { type: "text", id: "answer", text: "Report generated" },
+      ],
+    },
+  ])
+  const parts = Object.fromEntries(rows.map((row) => [row.message.id, row.parts]))
+  const input = { sessionID: session.id, messages: rows.map((row) => row.message), parts, busy: false, waiting: false }
+  expect(visibleProgress(input).failures).toEqual([])
+  expect(visibleProgress({ ...input, busy: true }).failures).toHaveLength(1)
+  const probe = parts["a700-probe"][0]
+  if (probe.type !== "tool" || probe.state.status !== "completed") throw Error("Expected completed probe")
+  expect(probe.state.metadata.exit).toBe(1)
+  probe.state.metadata.verification = { kind: "test" }
+  expect(visibleProgress(input).failures).toHaveLength(1)
+})

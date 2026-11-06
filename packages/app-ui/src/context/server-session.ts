@@ -27,6 +27,7 @@ import {
   adaptSessionMessages,
   type SessionView,
 } from "./v2-session-adapter"
+import { adaptPermissionRequest } from "./global-sync/utils"
 import { adaptServerEvent } from "./server-event"
 
 function appendOffsetText(text: string, chunks: ReadonlyMap<number, string>) {
@@ -182,6 +183,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const orphanParts = new Map<string, Set<string>>()
   const removedMessages = new Map<string, Set<string>>()
   const v2Refreshes = new Map<string, ReturnType<typeof setTimeout>>()
+  const resyncs = new Map<string, Promise<void>>()
+  const eventAt = new Map<string, number>()
+  const eventVersion = new Map<string, object>()
   const executionWaits = new Map<string, Promise<void>>()
   const deltaBases = new Map<string, { base: string; sessionID: string }>()
   const offsetChunks = new Map<string, { sessionID: string; chunks: Map<number, string> }>()
@@ -287,19 +291,22 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     return session
   }
 
-  const resolve = (sessionID: string, options?: { force?: boolean }) => {
+  const resolve = (sessionID: string, options?: { force?: boolean }): Promise<SessionView> => {
     const cached = data.info[sessionID]
     if (cached && !options?.force) return Promise.resolve(cached)
     const pending = requests.get(sessionID)
-    if (pending) return pending
+    if (pending)
+      return options?.force ? pending.catch(() => undefined).then(() => resolve(sessionID, options)) : pending
     const active = generation(sessionID)
-    const request = client.v2.session.get({ sessionID }).then((result) => {
-      if (!result.data?.data) throw sessionNotFoundError(sessionID)
-      v2Info.set(sessionID, result.data.data)
-      const session = adaptSession(result.data.data)
-      if (generations.get(sessionID) !== active) return session
-      return remember(session)
-    })
+    const request = client.v2.session
+      .get({ sessionID }, { signal: AbortSignal.timeout(10_000), throwOnError: true })
+      .then((result) => {
+        if (!result.data?.data) throw sessionNotFoundError(sessionID)
+        v2Info.set(sessionID, result.data.data)
+        const session = adaptSession(result.data.data)
+        if (generations.get(sessionID) !== active) return session
+        return remember(session)
+      })
     requests.set(sessionID, request)
     const cleanup = () => {
       if (requests.get(sessionID) === request) requests.delete(sessionID)
@@ -454,6 +461,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     sessionIDs.forEach((sessionID) => {
       setData("live_shell", sessionID, undefined!)
       generations.delete(sessionID)
+      eventAt.delete(sessionID)
+      eventVersion.delete(sessionID)
+      resyncs.delete(sessionID)
       clearOptimistic(sessionID)
       requests.delete(sessionID)
       v2Info.delete(sessionID)
@@ -587,9 +597,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     ]
     const adapted = [
       ...adaptSessionMessages(session, items, cachedParent),
-      ...(await pending)
-        .filter((input) => input.delivery !== "queue")
-        .map((input) => adaptSessionInput(session, input)),
+      ...(await pending).map((input) => adaptSessionInput(session, input)),
     ].sort((a, b) => cmpMessage(a.message, b.message))
     const adaptedIDs = new Set(adapted.map((item) => item.message.id))
     return {
@@ -798,6 +806,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     const properties = event.properties
     if (!properties || typeof properties !== "object") return
     if ("sessionID" in properties && typeof properties.sessionID === "string") return properties.sessionID
+    if ("messageID" in properties && typeof properties.messageID === "string") {
+      const owner = data.part[properties.messageID]?.[0]?.sessionID
+      if (owner) return owner
+    }
     if (
       "info" in properties &&
       properties.info &&
@@ -821,6 +833,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     if (normalized !== event) return apply(normalized)
     if (event.type === "server.connected" || event.type === "global.disposed") {
       setData("live_shell", reconcile({}))
+      pinned.forEach((_, id) => void resync(id).catch(() => {}))
     }
     const eventID = eventSessionID(event)
     if (eventID && (event.type === "session.next.shell.started" || event.type === "session.next.shell.ended")) {
@@ -834,6 +847,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       }
     }
     if (eventID) {
+      eventAt.set(eventID, Date.now())
+      eventVersion.set(eventID, {})
       touch(eventID)
       if (
         !data.info[eventID] &&
@@ -881,10 +896,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           agents?: { name: string; source?: { text: string; start: number; end: number } }[]
         }
       }
-      if (event.type === "session.next.prompt.admitted" && props.delivery === "queue") {
-        refreshV2(props.sessionID)
-        return
-      }
+      if (event.type === "session.next.prompt.admitted") refreshV2(props.sessionID)
       if (event.type === "session.next.prompted") {
         setData("pending_input", props.sessionID, (items = []) => items.filter((item) => item.id !== props.messageID))
         if (props.prompt.selection) {
@@ -925,6 +937,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
               messageID: props.messageID,
               type: "text",
               text: props.prompt.invocation ?? props.prompt.text,
+              metadata:
+                event.type === "session.next.prompt.admitted"
+                  ? { zaovraDelivery: props.delivery ?? "steer" }
+                  : undefined,
             },
           },
         })
@@ -961,7 +977,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           },
         }),
       )
-      setData("session_status", props.sessionID, { type: "busy" })
+      if (props.delivery !== "queue") setData("session_status", props.sessionID, { type: "busy" })
       return
     }
     if (event.type === "session.next.retried") {
@@ -1112,17 +1128,32 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       const partID = id ? adaptPartID(props.assistantMessageID, id) : undefined
       const current = partID ? data.part[props.assistantMessageID]?.find((part) => part.id === partID) : undefined
       if (partID) offsetChunks.delete(partID)
-      if (current && "text" in current)
+      // A reconnect can miss text.started; the terminal event carries the full answer.
+      // Normal part admission below still requires its ordered parent message.
+      const ended =
+        current && "text" in current
+          ? current
+          : props.textID && partID
+            ? {
+                id: partID,
+                sessionID: props.sessionID,
+                messageID: props.assistantMessageID,
+                type: "text" as const,
+                text: "",
+                metadata: undefined,
+              }
+            : undefined
+      if (ended)
         apply({
           type: "message.part.updated",
           properties: {
             part: {
-              ...current,
+              ...ended,
               text: props.superseded
-                ? `[被替代的未完成${current.type === "reasoning" ? "推理" : "输出"}]\n${props.text}`
+                ? `[被替代的未完成${ended.type === "reasoning" ? "推理" : "输出"}]\n${props.text}`
                 : props.text,
-              metadata: { ...current.metadata, ...(props.superseded ? { superseded: true } : {}) },
-              ...(current.type === "reasoning" ? { time: { ...current.time, end: props.timestamp } } : {}),
+              metadata: { ...ended.metadata, ...(props.superseded ? { superseded: true } : {}) },
+              ...(ended.type === "reasoning" ? { time: { ...ended.time, end: props.timestamp } } : {}),
             },
           },
         })
@@ -1487,8 +1518,45 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     }
   }
 
+  const resync = (sessionID: string) =>
+    runInflight(resyncs, sessionID, async () => {
+      const active = generation(sessionID)
+      const version = eventVersion.get(sessionID)
+      const session = await resolve(sessionID, { force: true })
+      const [ownership, permissions] = await Promise.all([
+        client.v2.session.active({ throwOnError: true, signal: AbortSignal.timeout(10_000) }).catch(() => undefined),
+        client.v2.permission.request
+          .list(
+            { location: { directory: session.directory } },
+            { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+          )
+          .catch(() => undefined),
+      ])
+      if (generations.get(sessionID) !== active) return
+      if (eventVersion.get(sessionID) === version) {
+        if (ownership)
+          setData("session_status", sessionID, ownership.data.data[sessionID] ? { type: "busy" } : { type: "idle" })
+        if (permissions)
+          setData(
+            "permission",
+            sessionID,
+            reconcile(
+              permissions.data.data.map(adaptPermissionRequest).filter((item) => item.sessionID === sessionID),
+              { key: "id" },
+            ),
+          )
+      }
+      await inflight.get(sessionID)?.catch(() => {})
+      if (generations.get(sessionID) !== active) return
+      await sync(sessionID, { force: true })
+    })
+
   return {
     data,
+    resync,
+    resyncSilent(now = Date.now()) {
+      return Promise.all([...pinned.keys()].filter((id) => now - (eventAt.get(id) ?? 0) >= 15_000).map(resync))
+    },
     stopped: (messageID: string) => stoppedTurns[messageID] !== undefined,
     async interrupt(sessionID: string) {
       const active = generation(sessionID)

@@ -24,6 +24,12 @@ export function decide(input: Input) {
       message: "工具效果不确定，已停止自动重试；请核对现场后继续。",
     }
   const reason = input.error.reason
+  if (reason._tag === "Transport" && reason.kind === "ProgressTimeout")
+    return {
+      action: "stop" as const,
+      category: "timeout",
+      message: "模型长时间没有返回数据，已停止请求。请检查服务状态后重新发送。",
+    }
   const permanent: Record<string, string> = {
     QuotaExceeded: "额度或余额不足，请检查套餐或切换提供商后继续。",
     Authentication: "鉴权或权限失败，请检查密钥和访问权限后继续。",

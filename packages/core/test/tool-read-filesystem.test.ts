@@ -132,4 +132,24 @@ describe("ReadToolFileSystem", () => {
       expect(next.content).toBe("continue")
     }),
   )
+
+  it.effect("reads PDF bytes for PDF-capable models and extracts paged text otherwise", () =>
+    Effect.gen(function* () {
+      const { fs, files, directory } = yield* fixture
+      const file = path.join(directory, "document.pdf")
+      const bytes = yield* Effect.promise(() => Bun.file(new URL("./fixtures/pdf-text.pdf", import.meta.url)).bytes())
+      yield* files.writeFile(file, bytes)
+      const native = yield* ReadToolFileSystem.read(fs, file, "document.pdf", { pdfs: true })
+      expect(native).toMatchObject({ mime: "application/pdf", encoding: "base64" })
+      expect(Buffer.from(native.content, "base64")).toEqual(Buffer.from(bytes))
+      const text = yield* ReadToolFileSystem.read(fs, file, "document.pdf", { pdfs: false })
+      expect(text.mime).toBe("text/plain")
+      expect(text.content).toContain("Zaovra PDF text fixture")
+      const page = yield* ReadToolFileSystem.read(fs, file, "document.pdf", { pdfs: false, offset: 2, limit: 1 })
+      expect(page).toMatchObject({ type: "text-page", offset: 2 })
+      expect(page.content).toContain("Zaovra PDF text fixture")
+      const beyond = yield* ReadToolFileSystem.read(fs, file, "document.pdf", { offset: 10_000 }).pipe(Effect.flip)
+      expect(beyond).toBeInstanceOf(ReadToolFileSystem.OffsetOutOfRangeError)
+    }),
+  )
 })

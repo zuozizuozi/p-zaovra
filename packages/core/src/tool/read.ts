@@ -6,6 +6,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { FileSystem } from "../filesystem"
 import { FSUtil } from "../fs-util"
 import { Image } from "../image"
+import { Pdf } from "../pdf"
 import { Catalog } from "../catalog"
 import { SessionStore } from "../session/store"
 import { LocationMutation } from "../location-mutation"
@@ -46,14 +47,21 @@ const layer = Layer.effectDiscard(
         [name]: Tool.make({
           observation: true,
           description:
-            "Read a text file or supported image, page through a large UTF-8 text file by line offset, or list a directory page. Relative paths resolve from the current location; absolute paths inside it are accepted, while external absolute paths require external_directory approval.",
+            "Read a text file, PDF or supported image, page through a large UTF-8 text file or extracted PDF text by line offset, or list a directory page. Relative paths resolve from the current location; absolute paths inside it are accepted, while external absolute paths require external_directory approval.",
           input: Input,
           output: Output,
           toModelOutput: ({ input, output }) => {
-            if (!("encoding" in output) || output.encoding !== "base64" || !SUPPORTED_IMAGE_MIMES.has(output.mime))
+            if (
+              !("encoding" in output) ||
+              output.encoding !== "base64" ||
+              (!SUPPORTED_IMAGE_MIMES.has(output.mime) && output.mime !== "application/pdf")
+            )
               return []
             return [
-              { type: "text", text: "Image read successfully" },
+              {
+                type: "text",
+                text: output.mime === "application/pdf" ? "PDF read successfully" : "Image read successfully",
+              },
               { type: "file", data: output.content, mime: output.mime, name: input.path },
             ]
           },
@@ -96,12 +104,15 @@ const layer = Layer.effectDiscard(
                 offset: input.offset,
                 limit: input.limit,
                 images: (context.inputModalities ?? model?.capabilities.input)?.includes("image") === true,
+                pdfs: (context.inputModalities ?? model?.capabilities.input)?.includes("pdf") === true,
               })
               if ("encoding" in content && content.encoding === "base64" && SUPPORTED_IMAGE_MIMES.has(content.mime)) {
                 return yield* image
                   .normalize(resource, { ...content, encoding: "base64" })
                   .pipe(Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(content)))
               }
+              if ("encoding" in content && content.encoding === "base64" && content.mime === "application/pdf")
+                return content
               if ("encoding" in content && content.encoding === "base64")
                 return yield* Effect.fail(new ReadToolFileSystem.BinaryFileError({ resource }))
               return content
@@ -110,6 +121,7 @@ const layer = Layer.effectDiscard(
                 const message =
                   error instanceof ReadToolFileSystem.BinaryFileError ||
                   error instanceof ReadToolFileSystem.MalformedUtf8Error ||
+                  error instanceof Pdf.DecodeError ||
                   error instanceof ReadToolFileSystem.MediaIngestLimitError ||
                   error instanceof Image.DecodeError ||
                   error instanceof Image.SizeError

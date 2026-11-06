@@ -35,7 +35,7 @@ export function adaptSession(session: SessionV2Info): SessionView {
 
 export function adaptSessionInput(
   session: Pick<SessionV2Info, "id" | "agent" | "model">,
-  input: Pick<SessionInputAdmitted, "id" | "timeCreated" | "prompt">,
+  input: Pick<SessionInputAdmitted, "id" | "timeCreated" | "prompt"> & Partial<Pick<SessionInputAdmitted, "delivery">>,
 ) {
   return {
     message: {
@@ -59,9 +59,10 @@ export function adaptSessionInput(
               messageID: input.id,
               type: "text" as const,
               text: input.prompt.invocation ?? input.prompt.text,
-              ...(input.prompt.invocation
+              ...(input.prompt.invocation || input.delivery
                 ? {
                     metadata: {
+                      zaovraDelivery: input.delivery,
                       zaovraRequestText: input.prompt.text,
                       zaovraRequestInvocation: input.prompt.invocation,
                     },
