@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import { basename, join, resolve } from "node:path"
 
 import { betaBucket, continuousIdentity, deliverBeta, retainBetaVersions, versionPattern } from "./beta-storage"
-import { betaErrorDetails, betaOperation } from "./beta-error"
+import { BetaError, betaErrorDetails, betaOperation } from "./beta-error"
 export { versionPattern } from "./beta-storage"
 
 export async function digest(file: Blob) {
@@ -70,7 +70,9 @@ export function unsignedBeta(args: string[], channel: string | undefined) {
 }
 
 export async function publishBeta(directory: string, commit: string, notes: string) {
-  const unsigned = unsignedBeta(process.argv, process.env.ZAOVRA_CHANNEL)
+  const unsigned = await betaOperation("VerifySigningPolicy", () =>
+    unsignedBeta(process.argv, process.env.ZAOVRA_CHANNEL),
+  )
   const plan = await betaOperation("PlanBeta", () => planBeta(directory, commit, notes))
   if (!process.argv.includes("--publish")) {
     console.log(
@@ -83,17 +85,19 @@ export async function publishBeta(directory: string, commit: string, notes: stri
     return
   }
   const continuous = process.argv.includes("--continuous")
-  const identity = continuous ? continuousIdentity() : undefined
+  const identity = continuous ? await betaOperation("ValidatePublishIdentity", continuousIdentity) : undefined
   if (identity && (identity.commit !== commit || process.env.ZAOVRA_VERSION !== plan.manifest.version))
-    throw new Error("Continuous Beta version or source identity mismatch")
+    throw new BetaError("ValidatePublishIdentity", new Error("Continuous Beta version or source identity mismatch"))
   if (!continuous && (process.env.BETA_APPROVED_SHA !== commit || !process.env.BETA_APPROVAL_REF?.trim()))
-    throw new Error("Evaluator approval for this exact SHA is required")
+    throw new BetaError("ValidatePublishIdentity", new Error("Evaluator approval for this exact SHA is required"))
   if (!process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY)
-    throw new Error("Minimal zaovra-updates bucket credentials are required")
-  if (process.platform !== "win32") throw new Error("Windows publishing is required")
+    throw new BetaError("ConfigureR2Bucket", new Error("Minimal zaovra-updates bucket credentials are required"))
+  if (process.platform !== "win32")
+    throw new BetaError("VerifySigningPolicy", new Error("Windows publishing is required"))
   if (unsigned) console.log("unsigned beta")
   if (!unsigned) {
-    if (!process.env.WINDOWS_SIGNING_PUBLISHER_NAME) throw new Error("Signed Windows publishing is required")
+    if (!process.env.WINDOWS_SIGNING_PUBLISHER_NAME)
+      throw new BetaError("VerifySigningPolicy", new Error("Signed Windows publishing is required"))
     const signature = Bun.spawn(
       [
         "pwsh",
@@ -109,9 +113,10 @@ export async function publishBeta(directory: string, commit: string, notes: stri
       ],
       { stdout: "inherit", stderr: "inherit" },
     )
-    if ((await signature.exited) !== 0) throw new Error("Installer signature validation failed")
+    if ((await signature.exited) !== 0)
+      throw new BetaError("VerifySigningPolicy", new Error("Installer signature validation failed"))
   }
-  const bucket = betaBucket()
+  const bucket = await betaOperation("ConfigureR2Bucket", betaBucket)
   await deliverBeta(bucket, directory, plan, undefined, identity)
   const retention = await retainBetaVersions(bucket, plan.manifest.version).catch((error) => {
     console.warn(JSON.stringify(betaErrorDetails(error, "Retention")))

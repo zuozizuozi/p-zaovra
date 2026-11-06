@@ -1,4 +1,7 @@
 type Operation =
+  | "ValidatePublishIdentity"
+  | "VerifySigningPolicy"
+  | "ConfigureR2Bucket"
   | "VerifyBetaPointer"
   | "PublishBeta"
   | "PlanBeta"

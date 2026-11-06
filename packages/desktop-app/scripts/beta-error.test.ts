@@ -233,3 +233,36 @@ test("679 HTTP error survives rollback with the original public or R2 operation"
     }
   }
 })
+
+test("679 publishing still rejects an unavailable signing policy before any R2 request", async () => {
+  const value = await artifact()
+  const notes = join(value.directory, "notes.md")
+  await Bun.write(notes, "offline signing guard")
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, "beta-release.ts"), value.directory, sha, notes, "--publish"],
+    {
+      env: {
+        HOME: root!,
+        TEMP: root!,
+        TMP: root!,
+        BETA_APPROVED_SHA: sha,
+        BETA_APPROVAL_REF: "offline",
+        R2_ACCESS_KEY_ID: secret,
+        R2_SECRET_ACCESS_KEY: secret,
+        WINDOWS_SIGNING_PUBLISHER_NAME: "",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const [stdout, stderr, exit] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(exit).toBe(1)
+  expect(stdout).toBe("")
+  expect(stderr).toContain('"operation":"VerifySigningPolicy"')
+  expect(stderr).not.toContain(secret)
+  expect(stderr).not.toContain("Signed Windows publishing is required")
+})
