@@ -11,6 +11,7 @@ import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { useTheme, type ColorScheme } from "@zaovra-ai/ui/theme/context"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
+import { useHighlights } from "@/context/highlights"
 import { usePermission } from "@/context/permission"
 import { usePlatform } from "@/context/platform"
 import { useServerSync } from "@/context/server-sync"
@@ -101,6 +102,7 @@ export const SettingsGeneralV2: Component<{
     !props.section || props.section === section
   const theme = useTheme()
   const language = useLanguage()
+  const highlights = useHighlights()
   const permissions = usePermission()
   const permission = () => (props.serverKey ? permissions.ensureServerState(props.serverKey) : permissions)
   const platform = usePlatform()
@@ -738,6 +740,17 @@ export const SettingsGeneralV2: Component<{
             </Switch>
           </div>
         </SettingsRowV2>
+
+        <Show when={highlights.available()}>
+          <SettingsRowV2
+            title={language.t("settings.general.row.releaseNotes.view")}
+            description={platform.version ?? ""}
+          >
+            <ButtonV2 data-action="view-release-notes" size="normal" variant="neutral" onClick={highlights.show}>
+              {language.t("settings.general.row.releaseNotes.open")}
+            </ButtonV2>
+          </SettingsRowV2>
+        </Show>
 
         <SettingsRowV2 title={language.t("settings.updates.row.check.title")} description={updateDescription()}>
           <ButtonV2 size="normal" variant="neutral" disabled={!updater.action().run} onClick={updater.run}>
