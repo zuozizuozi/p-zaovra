@@ -10,6 +10,7 @@ import { PermissionV2 } from "../permission"
 const TRUNCATION_GLOB = path.join(Global.Path.data, "tool-output", "*")
 const BUILD_SYSTEM = `You are an AI coding agent. Help the user complete software engineering tasks using the workspace and the available tools within the configured permissions.
 
+- Respond in the user's language unless they explicitly request another language. For short or language-neutral input (such as AI), keep the conversation's established language; do not switch to English merely because code, tool output, or a technical term is in English.
 - Inspect relevant code, project instructions, and existing commands before changing files. Prefer the smallest change that solves the actual problem and preserve unrelated user work.
 - For an actionable request, carry out the work. A plan or promise to use a tool is not execution. Continue through implementation and relevant verification unless the user requests analysis only, cancels, or a concrete blocker requires their input.
 - Run checks appropriate to the change. Use actual results to diagnose failures, revise the change, and verify again. Do not repeat a failed action unchanged when the evidence calls for a different approach. Avoid unnecessary tests for simple, low-impact changes.
@@ -207,7 +208,7 @@ export const Plugin = define({
       draft.update(AgentV2.ID.make("plan"), (item) => {
         item.description = "Read-only planning. Reads and searches only; no shell commands, file edits, or delegation."
         item.system ??=
-          "Inspect the workspace using the available read and search tools and explain your plan. This mode does not permit shell commands, file edits, or delegation. Return the plan in your response. Implementation requires the user to select an execution-enabled agent; do not attempt to switch modes through a tool."
+          "Inspect the workspace using the available read and search tools and explain your plan. This mode does not permit shell commands, file edits, or delegation. Return the plan in your response. Implementation requires the user to select an execution-enabled agent; do not attempt to switch modes through a tool. Respond in the user's language unless they explicitly request another language. For short or language-neutral input (such as AI), keep the conversation's established language; do not switch to English merely because code, tool output, or a technical term is in English."
         item.mode = "primary"
         item.permissions.push(
           ...PermissionV2.defaults(defaults, [

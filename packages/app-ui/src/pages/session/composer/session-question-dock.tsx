@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, onCleanup, onMount, type Component } from "solid-js"
+import { For, Show, batch, createEffect, createMemo, onCleanup, onMount, type Component } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useMutation } from "@tanstack/solid-query"
 import { Button } from "@zaovra-ai/ui/button"
@@ -12,6 +12,8 @@ import { useSDK } from "@/context/sdk"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useServerSDK } from "@/context/server-sdk"
+import { useServerSync } from "@/context/server-sync"
+import { isQuestionNotFoundError } from "@/utils/server-errors"
 import { questionOptions } from "@/utils/question-options"
 import { ScopedKey } from "@/utils/server-scope"
 
@@ -75,6 +77,7 @@ function Option(props: {
 export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: () => void }> = (props) => {
   const sdk = useSDK()
   const serverSDK = useServerSDK()
+  const serverSync = useServerSync()
   const language = useLanguage()
   const cacheKey = ScopedKey.from(serverSDK().scope, props.request.id)
 
@@ -207,7 +210,12 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
       if (raf !== undefined) cancelAnimationFrame(raf)
     })
 
-    if (!document.activeElement || document.activeElement === document.body || root?.contains(document.activeElement)) {
+    if (
+      !document.activeElement ||
+      document.activeElement === document.body ||
+      root?.contains(document.activeElement) ||
+      document.activeElement.closest('[data-slot="question-composer"]')
+    ) {
       focus(pickFocus())
     }
   })
@@ -237,6 +245,16 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
     showToast({ title: language.t("common.requestFailed"), description: message })
   }
 
+  const complete = () =>
+    batch(() => {
+      replied = true
+      cache.delete(cacheKey)
+      serverSync().session.set("question", props.request.sessionID, (items = []) =>
+        items.filter((item) => item.id !== props.request.id),
+      )
+      if (mounted) props.onSubmit()
+    })
+
   const replyMutation = useMutation(() => ({
     mutationFn: (answers: QuestionAnswer[]) =>
       sdk().client.v2.session.question.reply(
@@ -247,11 +265,7 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
         },
         { throwOnError: true },
       ),
-    onSuccess: () => {
-      replied = true
-      cache.delete(cacheKey)
-      if (mounted) props.onSubmit()
-    },
+    onSuccess: complete,
     onError: fail,
   }))
 
@@ -264,12 +278,12 @@ export const SessionQuestionDock: Component<{ request: QuestionView; onSubmit: (
         },
         { throwOnError: true },
       ),
-    onSuccess: () => {
-      replied = true
-      cache.delete(cacheKey)
-      if (mounted) props.onSubmit()
+    onSuccess: complete,
+    onError: (error) => {
+      if (!isQuestionNotFoundError(error, props.request.id)) return fail(error)
+      // Interruption can retire the broker request before its old card is dismissed.
+      complete()
     },
-    onError: fail,
   }))
 
   const sending = createMemo(() => replyMutation.isPending || rejectMutation.isPending)

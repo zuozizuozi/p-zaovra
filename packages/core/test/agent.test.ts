@@ -186,3 +186,21 @@ describe("AgentV2", () => {
     }),
   )
 })
+
+it.effect("730 default conversation agents follow user language for neutral input", () =>
+  Effect.gen(function* () {
+    const agent = yield* AgentV2.Service
+    yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+      Effect.provideService(
+        Location.Service,
+        Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+      ),
+    )
+    for (const id of ["build", "plan"]) {
+      const info = yield* agent.get(AgentV2.ID.make(id))
+      expect(info?.system).toContain("Respond in the user's language")
+      expect(info?.system).toContain("language-neutral input")
+      expect(info?.system).toContain("conversation's established language")
+    }
+  }),
+)
