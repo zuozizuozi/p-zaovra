@@ -131,7 +131,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun test scripts/beta-storage.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          bun test --test-name-pattern "646" scripts/beta-ci.test.ts scripts/beta-signing.test.ts
+          bun test scripts/beta-ci.test.ts scripts/beta-signing.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install NSIS compiler
         shell: pwsh
