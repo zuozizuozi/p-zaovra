@@ -1,10 +1,14 @@
-import { expect, test } from "bun:test"
+import { beforeAll, expect, test } from "bun:test"
 import { mkdir, writeFile, readFile, symlink } from "node:fs/promises"
 import { join } from "node:path"
 import { archiveFeedback } from "./archive-feedback"
 
 const root = process.env.ZAOVRA_WORKER_TEST_DIR
 if (!root) throw new Error("Use the current isolated record directory")
+
+beforeAll(async () => {
+  await mkdir(root, { recursive: true })
+})
 const serviceToken = { clientId: "fixture.access", clientSecret: "fixture-service-secret" }
 function original(receipt: string) {
   return {
