@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { render } from "solid-js/web"
-import { Platform, PlatformProvider } from "../src/context/platform"
-import { SettingsProvider, useSettings } from "../src/context/settings"
+import { Platform, PlatformProvider } from "../../src/context/platform"
+import { SettingsProvider, useSettings } from "../../src/context/settings"
 
 test("upgrade disables a saved WorkGraph opt-in and keeps other settings on reopen", async () => {
   const saved = { general: { workGraph: true, showCustomAgents: true }, keybinds: { "session.new": "ctrl+alt+n" } }
