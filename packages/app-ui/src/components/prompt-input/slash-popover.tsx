@@ -287,83 +287,96 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
               }
             >
               <For each={props.slashFlat}>
-                {(cmd) => {
+                {(cmd, index) => {
                   const keybind = () => props.commandKeybind(cmd.id)
                   const keybindParts = () => props.commandKeybindParts(cmd.id)
                   return (
-                    <button
-                      data-slash-id={cmd.id}
-                      classList={{
-                        "w-full flex items-center justify-between gap-4 px-2 py-1": true,
-                        "rounded-[4px] scroll-my-2": props.newLayoutDesigns,
-                        "rounded-md": !props.newLayoutDesigns,
-                        "bg-v2-overlay-simple-overlay-hover": props.newLayoutDesigns && props.slashActive === cmd.id,
-                        "bg-surface-raised-base-hover": !props.newLayoutDesigns && props.slashActive === cmd.id,
-                      }}
-                      onClick={() => props.onSlashSelect(cmd)}
-                      onPointerMove={() => props.setSlashActive(cmd.id)}
-                    >
-                      <div class="flex items-center gap-2 min-w-0">
-                        <span
-                          class="whitespace-nowrap"
-                          classList={{
-                            "text-[13px] leading-[calc(var(--font-size-base)*1.8)] tracking-[-0.04px] [font-weight:440]":
-                              props.newLayoutDesigns,
-                            "text-v2-text-text-base": props.newLayoutDesigns,
-                            "text-14-regular": !props.newLayoutDesigns,
-                            "text-text-strong": !props.newLayoutDesigns,
-                          }}
-                        >
-                          /{cmd.trigger}
-                        </span>
-                        <Show when={cmd.description}>
+                    <>
+                      <Show when={index() === 0 || props.slashFlat[index() - 1]?.source !== cmd.source}>
+                        <div data-slot="command-group" class="px-2 pb-1 pt-2 text-xs font-medium text-text-weak">
+                          {props.t(
+                            cmd.source === "skill"
+                              ? "prompt.slash.group.skill"
+                              : cmd.source === "mcp"
+                                ? "prompt.slash.group.mcp"
+                                : "prompt.slash.group.builtin",
+                          )}
+                        </div>
+                      </Show>
+                      <button
+                        data-slash-id={cmd.id}
+                        classList={{
+                          "w-full flex items-center justify-between gap-4 px-2 py-1": true,
+                          "rounded-[4px] scroll-my-2": props.newLayoutDesigns,
+                          "rounded-md": !props.newLayoutDesigns,
+                          "bg-v2-overlay-simple-overlay-hover": props.newLayoutDesigns && props.slashActive === cmd.id,
+                          "bg-surface-raised-base-hover": !props.newLayoutDesigns && props.slashActive === cmd.id,
+                        }}
+                        onClick={() => props.onSlashSelect(cmd)}
+                        onPointerMove={() => props.setSlashActive(cmd.id)}
+                      >
+                        <div class="flex items-center gap-2 min-w-0">
                           <span
-                            class="truncate"
+                            class="whitespace-nowrap"
                             classList={{
                               "text-[13px] leading-[calc(var(--font-size-base)*1.8)] tracking-[-0.04px] [font-weight:440]":
                                 props.newLayoutDesigns,
-                              "text-v2-text-text-muted": props.newLayoutDesigns,
+                              "text-v2-text-text-base": props.newLayoutDesigns,
                               "text-14-regular": !props.newLayoutDesigns,
-                              "text-text-weak": !props.newLayoutDesigns,
+                              "text-text-strong": !props.newLayoutDesigns,
                             }}
                           >
-                            {cmd.description}
+                            /{cmd.trigger}
                           </span>
-                        </Show>
-                      </div>
-                      <div class="flex items-center gap-2 shrink-0">
-                        <Show when={cmd.type === "custom" && cmd.source !== "command"}>
-                          <Show
-                            when={props.newLayoutDesigns}
-                            fallback={
-                              <span class="text-11-regular px-1.5 py-0.5 rounded bg-surface-base text-text-subtle">
+                          <Show when={cmd.description}>
+                            <span
+                              class="truncate"
+                              classList={{
+                                "text-[13px] leading-[calc(var(--font-size-base)*1.8)] tracking-[-0.04px] [font-weight:440]":
+                                  props.newLayoutDesigns,
+                                "text-v2-text-text-muted": props.newLayoutDesigns,
+                                "text-14-regular": !props.newLayoutDesigns,
+                                "text-text-weak": !props.newLayoutDesigns,
+                              }}
+                            >
+                              {cmd.description}
+                            </span>
+                          </Show>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <Show when={cmd.type === "custom" && cmd.source !== "command"}>
+                            <Show
+                              when={props.newLayoutDesigns}
+                              fallback={
+                                <span class="text-11-regular px-1.5 py-0.5 rounded bg-surface-base text-text-subtle">
+                                  {cmd.source === "skill"
+                                    ? props.t("prompt.slash.badge.skill")
+                                    : cmd.source === "mcp"
+                                      ? props.t("prompt.slash.badge.mcp")
+                                      : props.t("prompt.slash.badge.custom")}
+                                </span>
+                              }
+                            >
+                              <Tag>
                                 {cmd.source === "skill"
                                   ? props.t("prompt.slash.badge.skill")
                                   : cmd.source === "mcp"
                                     ? props.t("prompt.slash.badge.mcp")
                                     : props.t("prompt.slash.badge.custom")}
-                              </span>
-                            }
-                          >
-                            <Tag>
-                              {cmd.source === "skill"
-                                ? props.t("prompt.slash.badge.skill")
-                                : cmd.source === "mcp"
-                                  ? props.t("prompt.slash.badge.mcp")
-                                  : props.t("prompt.slash.badge.custom")}
-                            </Tag>
+                              </Tag>
+                            </Show>
                           </Show>
-                        </Show>
-                        <Show when={props.newLayoutDesigns ? keybindParts().length > 0 : keybind()}>
-                          <Show
-                            when={props.newLayoutDesigns}
-                            fallback={<span class="text-12-regular text-text-subtle">{keybind()}</span>}
-                          >
-                            <KeybindV2 keys={keybindParts()} variant="neutral" />
+                          <Show when={props.newLayoutDesigns ? keybindParts().length > 0 : keybind()}>
+                            <Show
+                              when={props.newLayoutDesigns}
+                              fallback={<span class="text-12-regular text-text-subtle">{keybind()}</span>}
+                            >
+                              <KeybindV2 keys={keybindParts()} variant="neutral" />
+                            </Show>
                           </Show>
-                        </Show>
-                      </div>
-                    </button>
+                        </div>
+                      </button>
+                    </>
                   )
                 }}
               </For>

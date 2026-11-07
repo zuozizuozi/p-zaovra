@@ -474,6 +474,9 @@ function DesktopCommands() {
       id: "feedback.open",
       slash: "bug",
       title: language.locale().startsWith("zh") ? "发送反馈" : "Send feedback",
+      description: language.locale().startsWith("zh")
+        ? "打开反馈窗口，附上问题描述与可选诊断信息"
+        : "Open feedback with a problem description and optional diagnostics",
       onSelect: () => openFeedback(),
     })
     if (platform.platform === "desktop" && platform.exportDebugLogs) {

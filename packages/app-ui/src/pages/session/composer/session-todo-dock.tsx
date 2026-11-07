@@ -41,6 +41,8 @@ function dot(status: Todo["status"]) {
 
 export function SessionTodoDock(props: {
   todos: Todo[]
+  delivered?: boolean
+  deliveryKey?: string
   collapsed: boolean
   onToggle: () => void
   collapseLabel: string
@@ -50,11 +52,21 @@ export function SessionTodoDock(props: {
   const language = useLanguage()
   const [store, setStore] = createStore({
     height: 78,
+    expandedDelivery: "",
   })
 
+  const collapsed = () => (props.delivered ? store.expandedDelivery !== props.deliveryKey : props.collapsed)
+  const toggle = () => {
+    if (!props.delivered) return props.onToggle()
+    setStore("expandedDelivery", collapsed() ? (props.deliveryKey ?? "") : "")
+  }
   const total = createMemo(() => props.todos.length)
   const done = createMemo(() => props.todos.filter((todo) => todo.status === "completed").length)
-  const label = createMemo(() => language.t("session.todo.progress", { done: done(), total: total() }))
+  const label = createMemo(() =>
+    props.delivered
+      ? language.t("session.todo.completed", { count: done() })
+      : language.t("session.todo.progress", { done: done(), total: total() }),
+  )
   const progress = createMemo(() =>
     language
       .t("session.todo.progress", { done: doneToken, total: totalToken })
@@ -70,7 +82,7 @@ export function SessionTodoDock(props: {
   )
 
   const preview = createMemo(() => active()?.content ?? "")
-  const collapse = useSpring(() => (props.collapsed ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
+  const collapse = useSpring(() => (collapsed() ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
   const dock = createMemo(() => Math.max(0, Math.min(1, props.dockProgress)))
   const shut = createMemo(() => 1 - dock())
   const value = createMemo(() => Math.max(0, Math.min(1, collapse())))
@@ -103,6 +115,7 @@ export function SessionTodoDock(props: {
   return (
     <DockTray
       data-component="session-todo-dock"
+      data-delivered={props.delivered || undefined}
       style={{
         "overflow-x": "visible",
         "overflow-y": "hidden",
@@ -113,13 +126,14 @@ export function SessionTodoDock(props: {
         <div
           data-action="session-todo-toggle"
           class="pl-3 pr-2 py-2 flex items-center gap-2 overflow-visible"
+          aria-expanded={!collapsed()}
           role="button"
           tabIndex={0}
-          onClick={props.onToggle}
+          onClick={toggle}
           onKeyDown={(event) => {
             if (event.key !== "Enter" && event.key !== " ") return
             event.preventDefault()
-            props.onToggle()
+            toggle()
           }}
         >
           <span
@@ -134,17 +148,21 @@ export function SessionTodoDock(props: {
               opacity: `${Math.max(0, Math.min(1, 1 - shut()))}`,
             }}
           >
-            <Index each={progress()}>
-              {(item) =>
-                item() === doneToken ? (
-                  <AnimatedNumber value={done()} />
-                ) : item() === totalToken ? (
-                  <AnimatedNumber value={total()} />
-                ) : (
-                  <span>{item()}</span>
-                )
-              }
-            </Index>
+            {props.delivered ? (
+              language.t("session.todo.completed", { count: done() })
+            ) : (
+              <Index each={progress()}>
+                {(item) =>
+                  item() === doneToken ? (
+                    <AnimatedNumber value={done()} />
+                  ) : item() === totalToken ? (
+                    <AnimatedNumber value={total()} />
+                  ) : (
+                    <span>{item()}</span>
+                  )
+                }
+              </Index>
+            )}
           </span>
           <div
             data-slot="session-todo-preview"
@@ -156,7 +174,7 @@ export function SessionTodoDock(props: {
           >
             <TextReveal
               class="text-14-regular text-text-base cursor-default"
-              text={props.collapsed ? preview() : undefined}
+              text={collapsed() && !props.delivered ? preview() : undefined}
               duration={600}
               travel={25}
               edge={17}
@@ -169,7 +187,7 @@ export function SessionTodoDock(props: {
           <div class="ml-auto">
             <IconButton
               data-action="session-todo-toggle-button"
-              data-collapsed={props.collapsed ? "true" : "false"}
+              data-collapsed={collapsed() ? "true" : "false"}
               icon="chevron-down"
               size="normal"
               variant="ghost"
@@ -180,16 +198,16 @@ export function SessionTodoDock(props: {
               }}
               onClick={(event) => {
                 event.stopPropagation()
-                props.onToggle()
+                toggle()
               }}
-              aria-label={props.collapsed ? props.expandLabel : props.collapseLabel}
+              aria-label={collapsed() ? props.expandLabel : props.collapseLabel}
             />
           </div>
         </div>
 
         <div
           data-slot="session-todo-list"
-          aria-hidden={props.collapsed || off()}
+          aria-hidden={collapsed() || off()}
           classList={{
             "pointer-events-none": hide() > 0.1,
           }}

@@ -1,3 +1,4 @@
+import { ConversationViewSelect } from "@/components/conversation-view-select"
 import { SettingsSessionBudget } from "@/components/settings-session-budget"
 import { createSettingsShells } from "@/utils/settings-shells"
 import { ShellStatus } from "@/components/shell-status"
@@ -385,39 +386,13 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
-          title={language.t("settings.general.row.reasoningSummaries.title")}
-          description={language.t("settings.general.row.reasoningSummaries.description")}
+          title={language.t("conversation.view.setting")}
+          description={language.t("conversation.view.description")}
         >
-          <div data-action="settings-feed-reasoning-summaries">
-            <Switch
-              checked={settings.general.showReasoningSummaries()}
-              onChange={(checked) => settings.general.setShowReasoningSummaries(checked)}
-            />
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.shellToolPartsExpanded.title")}
-          description={language.t("settings.general.row.shellToolPartsExpanded.description")}
-        >
-          <div data-action="settings-feed-shell-tool-parts-expanded">
-            <Switch
-              checked={settings.general.shellToolPartsExpanded()}
-              onChange={(checked) => settings.general.setShellToolPartsExpanded(checked)}
-            />
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.editToolPartsExpanded.title")}
-          description={language.t("settings.general.row.editToolPartsExpanded.description")}
-        >
-          <div data-action="settings-feed-edit-tool-parts-expanded">
-            <Switch
-              checked={settings.general.editToolPartsExpanded()}
-              onChange={(checked) => settings.general.setEditToolPartsExpanded(checked)}
-            />
-          </div>
+          <ConversationViewSelect
+            value={settings.general.conversationView()}
+            onChange={(value) => value && settings.general.setConversationView(value)}
+          />
         </SettingsRow>
       </SettingsList>
     </div>

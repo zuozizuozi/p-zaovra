@@ -33,6 +33,7 @@ import { KeybindV2 } from "@zaovra-ai/ui/v2/keybind-v2"
 import { TooltipV2 } from "@zaovra-ai/ui/v2/tooltip-v2"
 import { reviewTooltipKeybind } from "../command-tooltip-keybind"
 import { useTitlebarRightMount } from "../titlebar"
+import { ConversationViewSelect } from "../conversation-view-select"
 
 const OPEN_APPS = [
   "vscode",
@@ -326,6 +327,13 @@ export function SessionHeader() {
       <Show when={rightMount()}>
         {(mount) => (
           <Portal mount={mount()}>
+            <Show when={params.id}>
+              <ConversationViewSelect
+                temporary
+                value={view().conversationView.get() ?? "default"}
+                onChange={(value) => view().conversationView.set(value)}
+              />
+            </Show>
             <Show
               when={isV2}
               fallback={

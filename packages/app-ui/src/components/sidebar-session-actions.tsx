@@ -9,6 +9,8 @@ import type { ServerConnection } from "@/context/server"
 import type { Session } from "@zaovra-ai/sdk/v2"
 import { useTabs } from "@/context/tabs"
 import { showToast } from "@/utils/toast"
+import { useLayout } from "@/context/layout"
+import { useNotification } from "@/context/notification"
 
 export function SidebarSessionActions(props: {
   session: Session
@@ -21,6 +23,8 @@ export function SidebarSessionActions(props: {
   const language = useLanguage()
   const dialog = useDialog()
   const tabs = useTabs()
+  const layout = useLayout()
+  const notifications = useNotification().ensureServerState(props.server)
   const [, setStore] = props.ctx.sync.child(session.directory, { bootstrap: false })
   const [busy, setBusy] = createSignal(false)
   const client = () => props.ctx.sdk.createClient({ directory: session.directory, throwOnError: true })
@@ -33,6 +37,8 @@ export function SidebarSessionActions(props: {
         : client().v2.session.update({ sessionID: session.id, archived: true })
     )
       .then(() => {
+        layout.pins.remove(props.server, session.id)
+        notifications.session.markViewed(session.id)
         setStore("session", (items) => items.filter((item) => item.id !== session.id))
         tabs.removeSessions({
           server: props.server,
@@ -78,6 +84,21 @@ export function SidebarSessionActions(props: {
   }
   return (
     <>
+      <MenuV2.Item disabled={busy()} onSelect={() => layout.pins.toggle(props.server, session)}>
+        {language.t(layout.pins.has(props.server, session.id) ? "sidebar.session.unpin" : "sidebar.session.pin")}
+      </MenuV2.Item>
+      <MenuV2.Item
+        disabled={busy()}
+        onSelect={() => {
+          if (notifications.session.unseenCount(session.id)) notifications.session.markViewed(session.id)
+          else notifications.session.markUnread(session.id, session.directory)
+        }}
+      >
+        {language.t(
+          notifications.session.unseenCount(session.id) ? "sidebar.session.markRead" : "sidebar.session.markUnread",
+        )}
+      </MenuV2.Item>
+      <MenuV2.Separator />
       <MenuV2.Item disabled={busy()} onSelect={props.rename}>
         {language.t("common.rename")}
       </MenuV2.Item>

@@ -1198,6 +1198,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         sessionID: string
         assistantMessageID: string
         finish?: string
+        responseModel?: string
         cost?: number
         tokens?: {
           input: number
@@ -1208,7 +1209,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         error?: { message: string }
       }
       const current = data.message[props.sessionID]?.find((message) => message.id === props.assistantMessageID)
-      if (current?.role === "assistant")
+      if (current?.role === "assistant") {
         apply({
           type: "message.updated",
           properties: {
@@ -1222,6 +1223,16 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
             },
           },
         })
+        const model = props.responseModel?.trim()
+        if (model)
+          data.part[props.assistantMessageID]?.forEach((part) => {
+            if (part.type !== "text") return
+            apply({
+              type: "message.part.updated",
+              properties: { part: { ...part, metadata: { ...part.metadata, zaovraResponseModel: model } } },
+            })
+          })
+      }
       void watchExecution(props.sessionID).catch(() => {})
       refreshV2(props.sessionID)
       return

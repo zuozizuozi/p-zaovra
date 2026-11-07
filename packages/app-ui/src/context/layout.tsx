@@ -1,3 +1,4 @@
+import { createPinnedSessions } from "@/utils/sidebar-session-preferences"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { enrichLocalProject } from "./local-project"
 import { batch, createEffect, createMemo, onCleanup, onMount, type Accessor } from "solid-js"
@@ -21,6 +22,7 @@ import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./la
 import { requireServerKey } from "@/utils/session-route"
 import { type DraftTab, useTabs } from "./tabs"
 import { closeSessionTab, openSessionTab, previewSessionTab, type SessionTabs } from "./layout-tabs"
+import type { ConversationView } from "@/utils/conversation-view"
 
 export { createSessionKeyReader, ensureSessionKey, pruneSessionKeys }
 
@@ -276,6 +278,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           width: DEFAULT_SIDEBAR_WIDTH,
           workspaces: {} as Record<string, boolean>,
           workspacesDefault: false,
+          pinnedSessions: [] as { server: ServerConnection.Key; sessionID: string; directory: string }[],
         },
         terminal: {
           height: DEFAULT_TERMINAL_HEIGHT,
@@ -307,6 +310,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }),
     )
     const [ephemeral, setEphemeral] = createStore({
+      conversationViews: {} as Record<string, ConversationView | undefined>,
       reviewPanelSource: "other" as ReviewPanelSource,
       sessionTabPreview: {} as Record<string, string | undefined>,
     })
@@ -596,6 +600,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     return {
       route,
       ready,
+      pins: createPinnedSessions({
+        read: () => store.sidebar.pinnedSessions ?? [],
+        write: (items) => setStore("sidebar", "pinnedSessions", items),
+      }),
       home: {
         selection: createMemo(() => store.home.selection),
         setSelection(selection: HomeProjectSelection) {
@@ -843,6 +851,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           },
           setScroll(tab: string, pos: SessionScroll) {
             scroll.setScroll(key(), tab, pos)
+          },
+          conversationView: {
+            get: () => ephemeral.conversationViews[key()],
+            set: (value: ConversationView | undefined) => setEphemeral("conversationViews", key(), value),
           },
           todoCollapsed: {
             get: () => s().todoCollapsed ?? false,

@@ -82,6 +82,8 @@ export function SessionComposerRegion(props: {
               <div ref={controller.setDockBodyRef}>
                 <SessionTodoDock
                   todos={controller.state.todos()}
+                  delivered={controller.state.delivered()}
+                  deliveryKey={controller.state.deliveryKey()}
                   collapsed={controller.todo.collapsed()}
                   onToggle={controller.todo.onToggle}
                   collapseLabel={language.t("session.todo.collapse")}
