@@ -38,6 +38,14 @@ const ctx = {
 mock.module("../../src/context/global", () => ({
   useGlobal: () => ({ servers: { list: () => servers }, ensureServerCtx: () => ctx }),
 }))
+// Avatar attention services are outside the tab-cache feedback boundary.
+mock.module("@/pages/layout/project-avatar-state", () => ({
+  useSessionTabAvatarState: () => ({
+    unread: () => false,
+    loading: () => false,
+    status: () => "session.activity.idle",
+  }),
+}))
 const layout = await import("../../src/context/layout")
 mock.module("../../src/context/layout", () => ({ ...layout, useLayout: () => ({ pins }) }))
 // These actions' dialogs/network are outside the cache feedback path under test.

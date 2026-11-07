@@ -702,8 +702,6 @@ export default function Page() {
   })
 
   let reviewFrame: number | undefined
-  let todoFrame: number | undefined
-  let todoTimer: number | undefined
   let diffFrame: number | undefined
   let diffTimer: number | undefined
 
@@ -1004,41 +1002,6 @@ export default function Page() {
   }
 
   const hasScrollGesture = () => Date.now() - ui.scrollGesture < scrollGestureWindowMs
-
-  createEffect(
-    on(
-      () => {
-        const id = params.id
-        return [
-          sdk().directory,
-          id,
-          id ? (sync().data.session_status[id]?.type ?? "idle") : "idle",
-          id ? composer.blocked() : false,
-        ] as const
-      },
-      ([dir, id, status, blocked]) => {
-        if (todoFrame !== undefined) cancelAnimationFrame(todoFrame)
-        if (todoTimer !== undefined) window.clearTimeout(todoTimer)
-        todoFrame = undefined
-        todoTimer = undefined
-        if (!id) return
-        if (status === "idle" && !blocked) return
-        const cached = untrack(() => sync().data.todo[id] !== undefined)
-
-        todoFrame = requestAnimationFrame(() => {
-          todoFrame = undefined
-          todoTimer = window.setTimeout(() => {
-            todoTimer = undefined
-            if (sdk().directory !== dir || params.id !== id) return
-            untrack(() => {
-              void sync().session.todo(id, cached ? { force: true } : undefined)
-            })
-          }, 0)
-        })
-      },
-      { defer: true },
-    ),
-  )
 
   createEffect(
     on(
@@ -2314,8 +2277,6 @@ export default function Page() {
 
   onCleanup(() => {
     if (reviewFrame !== undefined) cancelAnimationFrame(reviewFrame)
-    if (todoFrame !== undefined) cancelAnimationFrame(todoFrame)
-    if (todoTimer !== undefined) window.clearTimeout(todoTimer)
     if (diffFrame !== undefined) cancelAnimationFrame(diffFrame)
     if (diffTimer !== undefined) window.clearTimeout(diffTimer)
     if (scrollStateFrame !== undefined) cancelAnimationFrame(scrollStateFrame)

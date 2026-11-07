@@ -1,4 +1,4 @@
-import { createEffect, createMemo, on } from "solid-js"
+import { createEffect, createMemo, on, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { PermissionView, QuestionView, Todo } from "@zaovra-ai/sdk/v2"
 import { useLocation, useParams } from "@solidjs/router"
@@ -64,6 +64,28 @@ export function createSessionComposerController() {
   })
 
   const live = createMemo(() => sync().data.session_working(params.id ?? "") || blocked())
+  createEffect(
+    on(
+      () => [sdk().directory, params.id, live()] as const,
+      ([directory, id, working]) => {
+        if (!id) return
+        const cached = untrack(() => serverSync().session.data.todo[id] !== undefined)
+        if (cached && !working) return
+        // Completed lists are durable too: hydrate an idle session on its first open.
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const frame = requestAnimationFrame(() => {
+          timer = setTimeout(() => {
+            if (sdk().directory !== directory || params.id !== id) return
+            void serverSync().session.todo(id, cached ? { force: true } : undefined)
+          }, 0)
+        })
+        onCleanup(() => {
+          cancelAnimationFrame(frame)
+          if (timer !== undefined) clearTimeout(timer)
+        })
+      },
+    ),
+  )
   const lastMessage = createMemo(() =>
     (sync().data.message[params.id ?? ""] ?? []).findLast((message) => message.role === "assistant"),
   )

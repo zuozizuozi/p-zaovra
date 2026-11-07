@@ -1624,6 +1624,7 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <ExecutionErrorCard
+                detailsOnly
                 mascot={false}
                 detail={errorRow().text}
                 recoveryID={errorRow().userMessageID}

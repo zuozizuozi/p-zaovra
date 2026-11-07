@@ -282,6 +282,12 @@ html[data-theme="oc-2"] body[data-new-layout] {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    &[data-details-only] {
+      margin: 8px auto;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
     h3 {
       font-size: 14px;
       font-weight: 600;

@@ -1,7 +1,7 @@
 import type { Message, Part } from "@zaovra-ai/sdk/v2/client"
 import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
 import { processToolFailures } from "../timeline/tool-process"
-import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
+import { quietToolFailures, toolExecutionInterrupted } from "@zaovra-ai/session-ui/tool-recovery"
 
 export function visibleProgress(input: {
   sessionID: string
@@ -25,9 +25,11 @@ export function visibleProgress(input: {
   const owner = assistant ? owners.get(assistant.parentID) : request
   const user = messages.find((message) => message.role === "user" && message.id === owner)
   const current = messages.filter(
-    (message) => message.role === "assistant" && owner !== undefined && owners.get(message.parentID) === owner,
+    (message): message is Extract<Message, { role: "assistant" }> =>
+      message.role === "assistant" && owner !== undefined && owners.get(message.parentID) === owner,
   )
   const parts = current.flatMap((message) => input.parts[message.id] ?? [])
+  const byID = new Map(current.map((message) => [message.id, message]))
   const tools = parts.filter((part) => part.type === "tool")
   const active = tools.findLast((part) => part.state.status === "running" || part.state.status === "pending")
   const quiet =
@@ -47,6 +49,7 @@ export function visibleProgress(input: {
   )
   const failed = tools.filter(
     (part) =>
+      !toolExecutionInterrupted(byID.get(part.messageID), part) &&
       !process.has(part.id) &&
       !quiet.some((item) => item.id === part.id) &&
       (part.state.status === "error" ||

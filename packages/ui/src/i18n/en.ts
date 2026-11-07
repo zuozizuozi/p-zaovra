@@ -15,7 +15,7 @@ export const dict: Record<string, string> = {
   "ui.toolErrorCard.permissionCause": "The underlying error also reports restricted access.",
   "ui.toolErrorCard.permissionAction":
     "Could not access {{target}}. Allow access or choose an accessible file, then retry.",
-  "ui.toolErrorCard.actionable": "This operation could not finish. Expand the details and tell me how to continue.",
+  "ui.toolErrorCard.actionable": "This operation did not finish. Please retry.",
   "ui.toolRecovery.summary": "{{count}} attempts did not succeed during the process; resolved automatically",
   "ui.browserScreenshot.loading": "Loading screenshot…",
   "ui.browserScreenshot.unavailable": "Screenshot unavailable or expired.",
