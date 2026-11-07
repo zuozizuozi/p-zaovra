@@ -7,19 +7,20 @@ import type { AssistantMessage, Todo, ToolPart, UserMessage, ZaovraClient } from
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
 import { DataProvider } from "@zaovra-ai/session-ui/context"
 import { createServerSession } from "../../src/context/server-session"
-import { dict as en } from "../../src/i18n/en"
-import { dict as zh } from "../../src/i18n/zh"
-import { dict as uiEn } from "../../../ui/src/i18n/en"
-import { dict as uiZh } from "../../../ui/src/i18n/zh"
+const english = await import("../../src/i18n/en")
+const chinese = await import("../../src/i18n/zh")
+const uiEnglish = await import("../../../ui/src/i18n/en")
+const uiChinese = await import("../../../ui/src/i18n/zh")
+const dictionaries: Record<"en" | "zh", Record<string, string>> = {
+  en: { ...uiEnglish.dict, ...english.dict },
+  zh: { ...uiChinese.dict, ...chinese.dict },
+}
 
 const [route, setRoute] = createStore({ id: "session732", locale: "en" as "en" | "zh" })
 const language = {
   locale: () => route.locale,
   t: (key: string, values?: Record<string, string | number | boolean>) =>
-    ((route.locale === "en" ? { ...uiEn, ...en } : { ...uiZh, ...zh }) as Record<string, string>)[key]?.replace(
-      /{{\s*(\w+)\s*}}/g,
-      (_, name) => String(values?.[name] ?? ""),
-    ) ?? key,
+    dictionaries[route.locale][key]?.replace(/{{\s*(\w+)\s*}}/g, (_, name) => String(values?.[name] ?? "")) ?? key,
 }
 const fixture = { state: "interrupted", calls: 0, termination: true }
 const requests: string[] = []
