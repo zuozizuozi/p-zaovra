@@ -222,6 +222,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
   init: () => {
     const platform = usePlatform()
     const [store, setStore, _, ready] = persisted("settings.v3", createStore<Settings>(defaultSettings))
+    // Retire the saved opt-in after hydration; no stale preference can re-enable WorkGraph.
+    createEffect(() => {
+      if (ready() && store.general?.workGraph) setStore("general", "workGraph", false)
+    })
     const [launch, setLaunch, , launchReady] = persisted(
       "app-version.v1",
       createStore<{ version?: string }>({ version: undefined }),
@@ -386,8 +390,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "editToolPartsExpanded", value)
         },
         showCustomAgents,
-        workGraph: () => store.general?.workGraph ?? false,
-        setWorkGraph: (value: boolean) => setStore("general", "workGraph", value),
+        workGraph: () => false,
         setShowCustomAgents(value: boolean) {
           setStore("general", "showCustomAgents", value)
         },

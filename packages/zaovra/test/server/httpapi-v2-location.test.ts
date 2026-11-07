@@ -161,10 +161,8 @@ describe("v2 location HttpApi", () => {
           ...(duration === undefined ? {} : { budget: { maxDurationMs: duration } }),
         }),
       })
-      expect(response.status).toBe(200)
-      const goal = (await response.json()).data.goal
-      expect(goal.budget.maxDurationMs).toBe(duration === undefined ? 43_200_000 : duration)
-      expect(goal.status).toBe("draft")
+      expect(response.status).toBe(410)
+      expect(await response.text()).toBe("")
     }
   })
 

@@ -5,7 +5,7 @@ const source = (file: string) => Bun.file(path.join(import.meta.dir, "../../src"
 const workspace = (file: string) => Bun.file(path.join(import.meta.dir, "../../../..", file)).text()
 
 describe("Session V2 production wiring", () => {
-  test("starts the desktop backend with Work merge approval services", async () => {
+  test("starts the desktop backend with retired WorkGraph routes", async () => {
     const { Server } = await import("../../src/server/server")
     const { Work } = await import("@zaovra-ai/schema/work")
     const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
@@ -14,18 +14,21 @@ describe("Session V2 production wiring", () => {
       expect(health.status).toBe(200)
       expect(await health.json()).toMatchObject({ healthy: true })
       const list = await fetch(new URL("/api/work", listener.url))
-      expect(list.status).toBe(200)
+      expect(list.status).toBe(410)
       const url = new URL(`/api/work/${Work.GoalID.create()}/merge/${Work.TaskID.create()}`, listener.url)
       for (const method of ["GET", "POST"]) {
         const response = await fetch(url, {
           method,
           ...(method === "POST"
-            ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: "stale", approved: true }) }
+            ? {
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token: "stale", approved: true }),
+              }
             : {}),
         })
-        // A domain conflict proves the approval service resolved; a missing service fails startup.
-        expect(response.status).toBe(409)
-        expect(await response.json()).toMatchObject({ message: "Task is not awaiting a merge in an active Goal" })
+        // The backend stays healthy without assembling the retired Work runtime.
+        expect(response.status).toBe(410)
+        expect(await response.text()).toBe("")
       }
     } finally {
       await listener.stop(true)
@@ -77,12 +80,10 @@ describe("Session V2 production wiring", () => {
     const api = await source("server/routes/instance/httpapi/api.ts")
     const server = await source("server/routes/instance/httpapi/server.ts")
 
-    ;["SessionApi", "PermissionApi", "QuestionApi", "CommandApi", "ToolApi", "McpApi"].forEach(
-      (legacyApi) => {
-        expect(api).not.toContain(legacyApi)
-        expect(server).not.toContain(`${legacyApi.slice(0, -3).toLowerCase()}Handlers`)
-      },
-    )
+    ;["SessionApi", "PermissionApi", "QuestionApi", "CommandApi", "ToolApi", "McpApi"].forEach((legacyApi) => {
+      expect(api).not.toContain(legacyApi)
+      expect(server).not.toContain(`${legacyApi.slice(0, -3).toLowerCase()}Handlers`)
+    })
   })
 
   test("keeps the generated SDK and formal Zaovra sources free of V1 Session calls", async () => {
@@ -115,9 +116,9 @@ describe("Session V2 production wiring", () => {
       "packages/sdk/js/src/gen/types.gen.ts",
     ]
 
-    expect(await Promise.all(retired.map((file) => Bun.file(path.join(import.meta.dir, "../../../..", file)).exists()))).toEqual(
-      retired.map(() => false),
-    )
+    expect(
+      await Promise.all(retired.map((file) => Bun.file(path.join(import.meta.dir, "../../../..", file)).exists())),
+    ).toEqual(retired.map(() => false))
     expect(await workspace("packages/sdk/js/src/client.ts")).toContain('export * from "./v2/client.js"')
     expect(await workspace("packages/sdk/js/src/server.ts")).toContain('export * from "./v2/server.js"')
   })
