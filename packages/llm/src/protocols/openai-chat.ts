@@ -685,23 +685,38 @@ const decodeFrame = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 export const framing: Framing.Framing<string> = {
   id: "sse/chat",
   frame: (bytes) =>
-    Framing.sse.frame(bytes).pipe(
-      Stream.filter((frame) => {
-        const value = decodeFrame(frame).pipe(Option.getOrUndefined)
-        if (!isRecord(value) || value.usage != null || value.error != null || !Array.isArray(value.choices)) return true
-        return !value.choices.every(
-          (choice) =>
-            isRecord(choice) &&
-            choice.finish_reason == null &&
-            (choice.delta == null ||
-              (isRecord(choice.delta) &&
-                Object.entries(choice.delta).every(
-                  ([key, item]) =>
-                    key === "role" || item == null || item === "" || (Array.isArray(item) && item.length === 0),
-                ))),
-        )
-      }),
-    ),
+    Stream.suspend(() => {
+      const identity = new Map<string, string>()
+      return Framing.sse.frame(bytes).pipe(
+        Stream.filter((frame) => {
+          const value = decodeFrame(frame).pipe(Option.getOrUndefined)
+          if (!isRecord(value)) return true
+          // Some providers report identity only in the initial role-only frame.
+          // Preserve new identity while repeated identity-only keepalives stay no-ops.
+          const changed = ["model", "system_fingerprint"]
+            .map((key) => {
+              const text = value[key]
+              if (typeof text !== "string" || !text.trim()) return false
+              const previous = identity.get(key)
+              identity.set(key, text)
+              return previous !== text
+            })
+            .some(Boolean)
+          if (changed || value.usage != null || value.error != null || !Array.isArray(value.choices)) return true
+          return !value.choices.every(
+            (choice) =>
+              isRecord(choice) &&
+              choice.finish_reason == null &&
+              (choice.delta == null ||
+                (isRecord(choice.delta) &&
+                  Object.entries(choice.delta).every(
+                    ([key, item]) =>
+                      key === "role" || item == null || item === "" || (Array.isArray(item) && item.length === 0),
+                  ))),
+          )
+        }),
+      )
+    }),
 }
 
 export const httpTransport = HttpTransport.httpJson<OpenAIChatBody, string>({ framing })
