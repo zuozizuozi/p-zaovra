@@ -79,6 +79,7 @@ it.live("chunkTimeout raises a response stream error when SSE body stalls", () =
             }
           })
           expect(error).toBeInstanceOf(ProviderError.ResponseStreamError)
+          expect(error).toMatchObject({ message: "SSE read timed out" })
         }),
       { config: providerConfig(server.url, { chunkTimeout: 50 }) },
     )

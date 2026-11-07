@@ -50,7 +50,8 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
         const id = setTimeout(() => {
           const err = new ProviderError.ResponseStreamError("SSE read timed out")
           ctl.abort(err)
-          void reader.cancel(err)
+          // Aborting fetch may already error its reader; preserve the timeout as the stream error.
+          void reader.cancel(err).catch(() => {})
           reject(err)
         }, ms)
 
@@ -2021,15 +2022,7 @@ export function parseModel(model: string) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [
-    FSUtil.node,
-    Config.node,
-    Env.node,
-    Plugin.node,
-    ModelsDev.node,
-    RuntimeFlags.node,
-    LocationServiceMap.node,
-  ],
+  deps: [FSUtil.node, Config.node, Env.node, Plugin.node, ModelsDev.node, RuntimeFlags.node, LocationServiceMap.node],
 })
 
 export * as Provider from "./provider"
