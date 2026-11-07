@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 
-test("merge approval dispatch survives a stopped listener", async () => {
+test("retired WorkGraph routes survive a stopped listener", async () => {
   // A fresh process ensures Server.Default has not already retained the projector.
   const child = Bun.spawn(
     [
@@ -13,7 +13,7 @@ test("merge approval dispatch survives a stopped listener", async () => {
       "./test/fixture/work-listener-cycle.ts",
       "test/server/httpapi-merge-wake.test.ts",
       "--test-name-pattern",
-      "merge approval dispatch: idle",
+      "retired WorkGraph HTTP operations stay Gone without dispatch",
     ],
     { cwd: path.resolve(import.meta.dir, "../.."), env: process.env, stdout: "pipe", stderr: "pipe" },
   )
