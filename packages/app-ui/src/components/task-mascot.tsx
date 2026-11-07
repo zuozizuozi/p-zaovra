@@ -1,105 +1,69 @@
-import { createEffect, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createUniqueId, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
-import { BrandMark } from "./brand-mark"
-import thinking from "@/assets/zaovra-thinking-128.webp"
-import thinking2x from "@/assets/zaovra-thinking-256.webp"
-import success from "@/assets/zaovra-success-128.webp"
-import success2x from "@/assets/zaovra-success-256.webp"
-import error from "@/assets/zaovra-error-128.webp"
-import error2x from "@/assets/zaovra-error-256.webp"
-import awaiting from "@/assets/zaovra-awaiting-128.webp"
-import awaiting2x from "@/assets/zaovra-awaiting-256.webp"
+import { MascotSvg } from "./mascot/mascot-svg"
+import { createMascotRig, type MascotPose } from "./mascot/rig"
 import "./task-mascot.css"
 
 export type MascotState = "idle" | "thinking" | "working" | "success" | "error" | "awaiting"
-const pictures = {
-  thinking: [thinking, thinking2x],
-  success: [success, success2x],
-  error: [error, error2x],
-  awaiting: [awaiting, awaiting2x],
-}
 
-export function TaskMascot(props: { state: MascotState; size?: "large"; animated?: boolean }) {
+/**
+ * 小造, the Zaovra mascot. `working` (a tool is running) shows the orbit; `output` marks a thinking turn that is
+ * streaming text, which switches to the reading pose with the typing `>_` badge.
+ */
+export function TaskMascot(props: { state: MascotState; size?: "large"; animated?: boolean; output?: boolean }) {
   let element!: HTMLSpanElement
-  const [motion, setMotion] = createStore({ visible: false, reduced: true, blink: "" })
+  let svg!: SVGSVGElement
+  const id = createUniqueId()
+  const [view, setView] = createStore({ visible: false, reduced: true, compact: false, ready: false })
+  const pose = (): MascotPose => {
+    if (props.state === "working") return "processing"
+    if (props.state === "thinking" && props.output) return "speaking"
+    return props.state
+  }
+
   onMount(() => {
+    const rig = createMascotRig(svg)
     const media = window.matchMedia("(prefers-reduced-motion: reduce)")
-    let intersecting = false
-    const update = () => setMotion({ visible: intersecting && !document.hidden, reduced: media.matches })
+    const intersection = { on: false }
+    const update = () => setView({ visible: intersection.on && !document.hidden, reduced: media.matches })
     const observer = new IntersectionObserver(([entry]) => {
-      intersecting = entry.isIntersecting
+      intersection.on = entry.isIntersecting
       update()
     })
+    // Below ~30px the badges and highlights turn to noise, so crop to the body and drop them.
+    const resize = new ResizeObserver(() => setView("compact", element.clientWidth > 0 && element.clientWidth < 30))
     observer.observe(element)
+    resize.observe(element)
     document.addEventListener("visibilitychange", update)
     media.addEventListener("change", update)
     update()
+    setView("ready", true)
+    createEffect(() => rig.setPose(pose()))
+    createEffect(() => rig.setStill(!view.visible || view.reduced || props.animated === false))
     onCleanup(() => {
+      rig.dispose()
       observer.disconnect()
+      resize.disconnect()
       document.removeEventListener("visibilitychange", update)
       media.removeEventListener("change", update)
     })
   })
   createEffect(() => {
-    if (!motion.visible || motion.reduced || props.animated === false) {
-      setMotion("blink", "")
-      return
-    }
-    let timer: ReturnType<typeof setTimeout>
-    const schedule = (elapsed = 0) => {
-      timer = setTimeout(
-        () => {
-          setMotion("blink", Math.random() < 0.2 ? "double" : "single")
-          timer = setTimeout(() => {
-            setMotion("blink", "")
-            schedule(440)
-          }, 440)
-        },
-        3000 + Math.random() * 3000 - elapsed,
-      )
-    }
-    schedule()
-    onCleanup(() => clearTimeout(timer))
+    if (!view.ready) return
+    svg.setAttribute("viewBox", view.compact ? "20 36 196 196" : "0 0 256 256")
   })
-  const picture = () => (props.state === "idle" || props.state === "working" ? undefined : pictures[props.state])
+
   return (
     <span
       ref={element}
       data-component="task-mascot"
       data-state={props.state}
+      data-pose={pose()}
       data-size={props.size}
-      data-motion={motion.visible && !motion.reduced && props.animated !== false ? "running" : "paused"}
-      data-blink={motion.blink}
+      data-compact={view.compact ? "" : undefined}
       aria-hidden="true"
     >
-      <Show when={picture()} fallback={<BrandMark class="size-full" />}>
-        {(image) => <img src={image()[0]} srcset={`${image()[0]} 1x, ${image()[1]} 2x`} alt="" />}
-      </Show>
-      <Show when={picture() && ["awaiting", "error", "success"].includes(props.state)}>
-        <span data-slot="mascot-mark">
-          <img src={picture()![0]} srcset={`${picture()![0]} 1x, ${picture()![1]} 2x`} alt="" />
-        </span>
-        <Show when={props.state === "success"}>
-          <span data-slot="mascot-mark" data-ray="2">
-            <img src={success} srcset={`${success} 1x, ${success2x} 2x`} alt="" />
-          </span>
-          <span data-slot="mascot-mark" data-ray="3">
-            <img src={success} srcset={`${success} 1x, ${success2x} 2x`} alt="" />
-          </span>
-        </Show>
-      </Show>
-      <span data-slot="mascot-eyelid" data-eye="left" />
-      <span data-slot="mascot-eyelid" data-eye="right" />
-      <Show when={props.state === "working"}>
-        <span data-slot="mascot-cursor">&gt;_</span>
-      </Show>
-      <Show when={props.state === "thinking"}>
-        <span data-slot="mascot-dots">
-          <i />
-          <i />
-          <i />
-        </span>
-      </Show>
+      <MascotSvg id={id} ref={(node) => (svg = node)} />
     </span>
   )
 }
