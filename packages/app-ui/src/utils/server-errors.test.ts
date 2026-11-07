@@ -5,6 +5,7 @@ import {
   formatServerError,
   isDirectoryUnavailableError,
   isSessionNotFoundError,
+  isQuestionNotFoundError,
   parseReadableConfigInvalidError,
   serverErrorDetails,
 } from "./server-errors"
@@ -201,4 +202,26 @@ test("directory missing matches only an explicit error for the same project", ()
     null,
   ])
     expect(isDirectoryUnavailableError(error, "C:/work/project")).toBe(false)
+})
+
+describe("730 expired question dismissal", () => {
+  test("matches only the same retired question, directly or SDK-wrapped", () => {
+    const body = { _tag: "QuestionNotFoundError", requestID: "que_retired", message: "Question request not found" }
+    expect(isQuestionNotFoundError(body, "que_retired")).toBe(true)
+    expect(isQuestionNotFoundError(new Error("404", { cause: { body, status: 404 } }), "que_retired")).toBe(true)
+    expect(isQuestionNotFoundError(body, "que_live")).toBe(false)
+  })
+
+  test("keeps authentication, network, server and unrelated 404 failures visible", () => {
+    for (const error of [
+      new Error("Failed to fetch"),
+      new Error("HTTP 401"),
+      new Error("HTTP 500"),
+      { _tag: "SessionNotFoundError", sessionID: "ses_missing" },
+      { status: 404, message: "Question request not found" },
+      { _tag: "QuestionNotFoundError" },
+      null,
+    ])
+      expect(isQuestionNotFoundError(error, "que_retired")).toBe(false)
+  })
 })
