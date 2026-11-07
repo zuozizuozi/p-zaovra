@@ -254,13 +254,19 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
   const snapshot = (result: NonNullable<ReturnType<typeof validate>>) => {
     const valid = operation.start()
     const sdk = serverSDK()
+    const sync = serverSync()
     return {
       ...result,
       protocol: form.protocol,
       apiKey: form.apiKey,
       models: form.models.map((model) => ({ ...model })),
-      sdk,
-      sync: serverSync(),
+      // Solid mutation state recursively unwraps fields; preserve live service handles.
+      get sdk() {
+        return sdk
+      },
+      get sync() {
+        return sync
+      },
       enable: true,
       current: () => valid() && alive.value && serverSDK() === sdk,
     }

@@ -230,12 +230,10 @@
     align-items: center;
     justify-content: flex-start;
     gap: 10px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s ease;
-    will-change: opacity;
-
-    [data-component="tooltip-trigger"] {
+    > :not([data-slot="text-part-meta"]) {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
       display: inline-flex;
       width: fit-content;
     }
@@ -251,8 +249,8 @@
     gap: 12px;
   }
 
-  &:hover [data-slot="text-part-copy-wrapper"],
-  &:focus-within [data-slot="text-part-copy-wrapper"] {
+  &:hover [data-slot="text-part-copy-wrapper"] > :not([data-slot="text-part-meta"]),
+  &:focus-within [data-slot="text-part-copy-wrapper"] > :not([data-slot="text-part-meta"]) {
     opacity: 1;
     pointer-events: auto;
   }
