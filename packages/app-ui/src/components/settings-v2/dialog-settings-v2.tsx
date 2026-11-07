@@ -29,8 +29,10 @@ export const DialogSettings: Component<{
   const language = useLanguage()
   const platform = usePlatform()
   const dialog = useDialog()
-  const [tab, setTab] = createSignal(props.defaultValue ?? "general")
-  createEffect(() => setTab(props.defaultValue ?? "general"))
+  const [tab, setTab] = createSignal(
+    props.defaultValue === "experiments" ? "general" : (props.defaultValue ?? "general"),
+  )
+  createEffect(() => setTab(props.defaultValue === "experiments" ? "general" : (props.defaultValue ?? "general")))
   const [search, setSearch] = createStore({ value: "" })
   const groups = [
     {
@@ -60,7 +62,6 @@ export const DialogSettings: Component<{
       label: "settings.group.other",
       items: [
         { value: "servers", label: "status.popover.tab.servers", icon: "server" },
-        { value: "experiments", label: "settings.experiments", icon: "branch" },
         { value: "about", label: "settings.about.title", icon: "help" },
       ],
     },
@@ -152,19 +153,36 @@ export const DialogSettings: Component<{
           </div>
         </TabsV2.List>
         <TabsV2.Content value="general" class="settings-v2-panel">
-          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="general" />
+          <SettingsGeneralV2
+            directory={props.directory}
+            serverKey={props.serverKey}
+            sessionID={props.sessionID}
+            section="general"
+          />
         </TabsV2.Content>
         <TabsV2.Content value="permissions" class="settings-v2-panel">
-          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="permissions" />
+          <SettingsGeneralV2
+            directory={props.directory}
+            serverKey={props.serverKey}
+            sessionID={props.sessionID}
+            section="permissions"
+          />
         </TabsV2.Content>
         <TabsV2.Content value="appearance" class="settings-v2-panel">
-          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="appearance" />
+          <SettingsGeneralV2
+            directory={props.directory}
+            serverKey={props.serverKey}
+            sessionID={props.sessionID}
+            section="appearance"
+          />
         </TabsV2.Content>
         <TabsV2.Content value="privacy" class="settings-v2-panel">
-          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="privacy" />
-        </TabsV2.Content>
-        <TabsV2.Content value="experiments" class="settings-v2-panel">
-          <SettingsGeneralV2 directory={props.directory} serverKey={props.serverKey} sessionID={props.sessionID} section="experiments" />
+          <SettingsGeneralV2
+            directory={props.directory}
+            serverKey={props.serverKey}
+            sessionID={props.sessionID}
+            section="privacy"
+          />
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />

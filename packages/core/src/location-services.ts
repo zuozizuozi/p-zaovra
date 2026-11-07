@@ -41,8 +41,6 @@ import { BrowserTool } from "./tool/browser"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { ToolRegistry } from "./tool/registry"
 import { ToolOutputStore } from "./tool-output-store"
-import { WorkMemory } from "./work/memory"
-import { WorkOrganization } from "./work/organization"
 
 export { LocationServiceMap } from "./location-service-map"
 
@@ -68,8 +66,6 @@ export const locationServices = LayerNode.group([
   SkillV2.node,
   SystemContextRegistry.node,
   SystemContextBuiltIns.node,
-  WorkMemory.node,
-  WorkOrganization.node,
   LocationMutation.node,
   FileMutation.node,
   PermissionV2.node,

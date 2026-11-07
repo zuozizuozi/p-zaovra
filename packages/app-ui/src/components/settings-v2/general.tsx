@@ -96,9 +96,9 @@ export const SettingsGeneralV2: Component<{
   serverKey?: ServerConnection.Key
   directory?: string
   sessionID?: string
-  section?: "general" | "appearance" | "privacy" | "experiments" | "permissions"
+  section?: "general" | "appearance" | "privacy" | "permissions"
 }> = (props) => {
-  const visible = (section: "general" | "appearance" | "privacy" | "experiments" | "permissions") =>
+  const visible = (section: "general" | "appearance" | "privacy" | "permissions") =>
     !props.section || props.section === section
   const theme = useTheme()
   const language = useLanguage()
@@ -792,11 +792,9 @@ export const SettingsGeneralV2: Component<{
               ? "settings.general.section.appearance"
               : props.section === "privacy"
                 ? "settings.network.privacy"
-                : props.section === "experiments"
-                  ? "settings.experiments"
-                  : props.section === "permissions"
-                    ? "settings.permissions.title"
-                    : "settings.tab.general",
+                : props.section === "permissions"
+                  ? "settings.permissions.title"
+                  : "settings.tab.general",
           )}
         </h2>
       </div>
@@ -901,22 +899,6 @@ export const SettingsGeneralV2: Component<{
           </Show>
 
           <AdvancedSection />
-        </Show>
-
-        <Show when={visible("experiments")}>
-          <div class="settings-v2-section">
-            <h3 class="settings-v2-section-title">{language.t("settings.experiments")}</h3>
-            <SettingsListV2>
-              <SettingsRowV2
-                title={language.t("work.experimental")}
-                description={language.t("work.experimental.description")}
-              >
-                <Switch hideLabel checked={settings.general.workGraph()} onChange={settings.general.setWorkGraph}>
-                  {language.t("work.experimental")}
-                </Switch>
-              </SettingsRowV2>
-            </SettingsListV2>
-          </div>
         </Show>
       </div>
     </>

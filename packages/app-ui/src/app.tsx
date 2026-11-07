@@ -77,7 +77,6 @@ import { NewHome, LegacyHome } from "@/pages/home"
 import { DraftLoading } from "./components/draft-loading"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
-const WorkPage = lazy(() => import("@/pages/work"))
 
 const SessionRoute = () => {
   const settings = useSettings()
@@ -466,22 +465,11 @@ function AccountGate(props: ParentProps) {
 
 function DesktopCommands() {
   const command = useCommand()
-  const settings = useSettings()
   const language = useLanguage()
   const platform = usePlatform()
-  const navigate = useNavigate()
 
   command.register("desktop", () => {
-    const commands: CommandOption[] = settings.general.workGraph()
-      ? [
-          {
-            id: "work.open",
-            title: language.t("work.open"),
-            category: "Agent",
-            onSelect: () => navigate("/work"),
-          },
-        ]
-      : []
+    const commands: CommandOption[] = []
     commands.push({
       id: "feedback.open",
       slash: "bug",
@@ -783,7 +771,6 @@ function Routes(props: { serverScoped?: JSX.Element }) {
             <>
               <Route path="/" component={LegacyHome} />
               <Route path="/server/:serverKey/session/:id" component={LegacyTargetSessionRoute} />
-              <Route path="/work/:goalID?" component={WorkPage} />
             </>
           }
         </Show>
@@ -794,10 +781,10 @@ function Routes(props: { serverScoped?: JSX.Element }) {
       </Route>
       <Show when={settings.general.newLayoutDesigns()}>
         <Route path="/" component={NewHome} />
-        <Route path="/work/:goalID?" component={WorkPage} />
         <Route path="/:dir/session/:id" component={NewLayoutLegacySessionRedirect} />
         <Route path="/server/:serverKey/session/:id" component={TargetSessionRoute} />
       </Show>
+      <Route path="/work/:goalID?" component={() => <Navigate href="/" />} />
       <Route path="/new-session" component={DraftRoute} />
     </>
   )

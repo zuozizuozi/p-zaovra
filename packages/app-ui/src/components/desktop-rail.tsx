@@ -1,12 +1,10 @@
 import { openFeedback } from "@/feedback"
-import { Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
-import { useSettings } from "@/context/settings"
 import { useSettingsDialog } from "./settings-dialog"
 import { BrandMark } from "./brand-mark"
 
@@ -15,7 +13,6 @@ export function DesktopRail() {
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
-  const settings = useSettings()
   const openSettings = useSettingsDialog()
   const openUsage = useSettingsDialog("usage")
   const openAbout = useSettingsDialog("about")
@@ -32,19 +29,6 @@ export function DesktopRail() {
       >
         <Icon name="bubble-5" />
       </button>
-      <Show when={settings.general.workGraph()}>
-        <button
-          title={language.t("work.open")}
-          aria-label={language.t("work.open")}
-          onClick={() => {
-            closeSettings()
-            command.trigger("work.open")
-          }}
-        >
-          <Icon name="branch" />
-          <span class="absolute right-0 top-0 text-[9px]">β</span>
-        </button>
-      </Show>
       <button
         title={language.t("command.palette")}
         aria-label={language.t("command.palette")}
