@@ -15,6 +15,7 @@ import { Account } from "@/account/account"
 import { isRecord } from "@/util/record"
 import type { ConsoleState } from "@zaovra-ai/core/v1/config/console-state"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
+import { ConfigFile } from "@zaovra-ai/core/config/file"
 import { InstanceState } from "@/effect/instance-state"
 import { Context, Duration, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -182,8 +183,11 @@ const layer = Layer.effect(
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
       if (!data.$schema) {
         data.$schema = "https://zaovra.com/config.json"
-        const updated = text.replace(/^\s*\{/, '{\n  "$schema": "https://zaovra.com/config.json",')
-        yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
+        yield* ConfigFile.update(fs, options.path, (current) =>
+          Effect.succeed(
+            current === text ? patchJsonc(current, "https://zaovra.com/config.json", ["$schema"]) : undefined,
+          ),
+        ).pipe(Effect.catch(() => Effect.void))
       }
       return data
     })
@@ -202,9 +206,11 @@ const layer = Layer.effect(
       if (!Flag.ZAOVRA_CONFIG && !Flag.ZAOVRA_CONFIG_DIR && !Flag.ZAOVRA_CONFIG_CONTENT) {
         const file = globalConfigFile()
         if (!existsSync(file)) {
-          yield* fs
-            .writeWithDirs(file, JSON.stringify({ $schema: "https://zaovra.com/config.json" }, null, 2))
-            .pipe(Effect.catch(() => Effect.void))
+          yield* ConfigFile.update(fs, file, (before) =>
+            Effect.succeed(
+              before === undefined ? JSON.stringify({ $schema: "https://zaovra.com/config.json" }, null, 2) : undefined,
+            ),
+          ).pipe(Effect.catch(() => Effect.void))
         }
       }
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
@@ -220,8 +226,12 @@ const layer = Layer.effect(
               if (provider && model) result.model = `${provider}/${model}`
               result["$schema"] = "https://zaovra.com/config.json"
               result = mergeConfig(result, rest)
-              await fsNode.writeFile(path.join(Global.Path.config, "config.json"), JSON.stringify(result, null, 2))
-              await fsNode.unlink(legacy)
+              const saved = await Effect.runPromise(
+                ConfigFile.update(fs, path.join(Global.Path.config, "config.json"), (before) =>
+                  Effect.succeed(before === undefined ? JSON.stringify(result, null, 2) : undefined),
+                ),
+              )
+              if (saved.changed) await fsNode.unlink(legacy)
             })
             .catch(() => {}),
         )
@@ -545,9 +555,13 @@ const layer = Layer.effect(
         dir,
         (yield* fs.existsSafe(path.join(dir, "zaovra.jsonc"))) ? "zaovra.jsonc" : "zaovra.json",
       )
-      const updated = patchPreferences((yield* readConfigFile(file)) ?? "{}", writable(config), file)
-      ConfigParse.configuration(normalizeLoadedConfig(ConfigParse.jsonc(updated, file)), file)
-      yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+      yield* ConfigFile.update(fs, file, (before) =>
+        Effect.sync(() => {
+          const updated = patchPreferences(before ?? "{}", writable(config), file)
+          ConfigParse.configuration(normalizeLoadedConfig(ConfigParse.jsonc(updated, file)), file)
+          return updated
+        }),
+      ).pipe(Effect.orDie)
     })
 
     const invalidate = Effect.fn("Config.invalidate")(function* () {
@@ -561,14 +575,15 @@ const layer = Layer.effect(
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
-      const before = (yield* readConfigFile(file)) ?? "{}"
-      const patch = writableGlobal(config)
-      const updated = patchPreferences(before, patch, file)
-      const data = ConfigParse.jsonc(updated, file)
-      ConfigParse.configuration(normalizeLoadedConfig(data), file)
-      const changed = updated !== before
-      if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
-
+      const saved = yield* ConfigFile.update(fs, file, (before) =>
+        Effect.sync(() => {
+          const updated = patchPreferences(before ?? "{}", writableGlobal(config), file)
+          ConfigParse.configuration(normalizeLoadedConfig(ConfigParse.jsonc(updated, file)), file)
+          return updated
+        }),
+      ).pipe(Effect.orDie)
+      const data = ConfigParse.jsonc(saved.text ?? "{}", file)
+      const changed = saved.changed
       if (changed) yield* invalidate()
       // The legacy response schema cannot represent every native configuration.
       // Acknowledge the accepted patch in that case; the authored file stays intact.

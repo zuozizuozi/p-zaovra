@@ -15,6 +15,7 @@ import path from "path"
 import { Global } from "@zaovra-ai/core/global"
 import { modify, applyEdits, parse } from "jsonc-parser"
 import { Filesystem } from "@/util/filesystem"
+import { ConfigFile } from "@zaovra-ai/core/config/file"
 import { Effect, Exit } from "effect"
 
 type AuthStatus = "authenticated" | "expired" | "not_authenticated"
@@ -445,22 +446,26 @@ async function resolveConfigPath(baseDir: string, global = false) {
 }
 
 async function addMcpToConfig(name: string, mcpConfig: McpConfigured, configPath: string) {
-  let text = "{}"
-  if (await Filesystem.exists(configPath)) {
-    text = await Filesystem.readText(configPath)
-  }
+  return ConfigFile.withLockPromise(configPath, async () => {
+    let text = "{}"
+    if (await Filesystem.exists(configPath)) {
+      text = await Filesystem.readText(configPath)
+    }
 
-  const document: unknown = parse(text)
-  const legacy = ConfigMigrateV1.isV1(document)
-  const value = legacy ? legacyMcpConfig(mcpConfig) : mcpConfig
-  const edits = modify(text, legacy ? ["mcp", name] : ["mcp", "servers", name], value, {
-    formattingOptions: { tabSize: 2, insertSpaces: true },
+    const document: unknown = parse(text)
+    const legacy = ConfigMigrateV1.isV1(document)
+    const value = legacy ? legacyMcpConfig(mcpConfig) : mcpConfig
+    const edits = modify(text, legacy ? ["mcp", name] : ["mcp", "servers", name], value, {
+      formattingOptions: { tabSize: 2, insertSpaces: true },
+    })
+    const result = applyEdits(text, edits)
+
+    const current = (await Filesystem.exists(configPath)) ? await Filesystem.readText(configPath) : "{}"
+    if (current !== text) throw new ConfigFile.ConflictError({ path: configPath })
+    await Filesystem.write(configPath, result)
+
+    return configPath
   })
-  const result = applyEdits(text, edits)
-
-  await Filesystem.write(configPath, result)
-
-  return configPath
 }
 
 function legacyMcpConfig(config: McpConfigured) {

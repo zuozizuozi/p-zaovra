@@ -11,6 +11,7 @@ import { Location } from "./location"
 import { Policy } from "./policy"
 import { AbsolutePath, PositiveInt } from "./schema"
 import { ConfigAgent } from "./config/agent"
+import { ConfigFile } from "./config/file"
 import { ConfigAttachments } from "./config/attachments"
 import { ConfigCompaction } from "./config/compaction"
 import { ConfigCommand } from "./config/command"
@@ -309,25 +310,23 @@ const layer = Layer.effect(
     const rewriteActivation = Effect.fnUntraced(function* (index: number, edit: (text: string) => string) {
       const document = configs[index]
       if (document?.type !== "document" || !document.path) return
-      const text = yield* fs.readFileStringSafe(document.path).pipe(Effect.orDie)
-      if (!text) return
-      const current = yield* loadText(text, document.path)
-      // Adopt edits that completed before this read instead of migrating stale info.
-      if (JSON.stringify(current.info) !== JSON.stringify(document.info)) {
-        configs[index] = current
-        return
-      }
-      const next = edit(text)
-      if (next === text) return
-      const written = yield* fs.writeFileString(document.path, next).pipe(
-        Effect.as(true),
+      const saved = yield* ConfigFile.update(fs, document.path, (text) =>
+        Effect.gen(function* () {
+          if (!text) return
+          const current = yield* loadText(text, document.path)
+          // Only migrate the snapshot that was planned. A newer Settings save wins.
+          if (JSON.stringify(current.info) !== JSON.stringify(document.info)) return text
+          return edit(text)
+        }),
+      ).pipe(
         Effect.catch(() =>
-          Effect.logWarning("Selected model migration could not be saved; configure models in Settings").pipe(
-            Effect.as(false),
-          ),
+          Effect.gen(function* () {
+            yield* Effect.logWarning("Selected model migration could not be saved; configure models in Settings")
+            return { text: yield* fs.readFileStringSafe(document.path!).pipe(Effect.orDie) }
+          }),
         ),
       )
-      if (written) configs[index] = yield* loadText(next, document.path)
+      if (saved.text) configs[index] = yield* loadText(saved.text, document.path)
     })
 
     return Service.of({

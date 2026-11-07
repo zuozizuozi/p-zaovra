@@ -6,6 +6,7 @@ import { TuiConfig } from "@zaovra-ai/tui/config"
 import { Flag } from "@zaovra-ai/core/flag/flag"
 import { Global } from "@zaovra-ai/core/global"
 import { Filesystem } from "@/util/filesystem"
+import { ConfigFile } from "@zaovra-ai/core/config/file"
 import * as ConfigPaths from "@/config/paths"
 
 const TUI_SCHEMA_URL = "https://zaovra.com/tui.json"
@@ -87,29 +88,33 @@ function normalizeTui(data: Record<string, unknown>):
 }
 
 async function backupAndStripLegacy(file: string, source: string) {
-  const backup = file + ".tui-migration.bak"
-  const hasBackup = await Filesystem.exists(backup)
-  const backed = hasBackup
-    ? true
-    : await Filesystem.write(backup, source)
-        .then(() => true)
-        .catch(() => false)
-  if (!backed) return false
+  return ConfigFile.withLockPromise(file, async () => {
+    if ((await Filesystem.readText(file)) !== source) return false
+    const backup = file + ".tui-migration.bak"
+    const hasBackup = await Filesystem.exists(backup)
+    const backed = hasBackup
+      ? true
+      : await Filesystem.write(backup, source)
+          .then(() => true)
+          .catch(() => false)
+    if (!backed) return false
 
-  const text = ["theme", "keybinds", "tui"].reduce((acc, key) => {
-    const edits = modify(acc, [key], undefined, {
-      formattingOptions: {
-        insertSpaces: true,
-        tabSize: 2,
-      },
-    })
-    if (!edits.length) return acc
-    return applyEdits(acc, edits)
-  }, source)
+    const text = ["theme", "keybinds", "tui"].reduce((acc, key) => {
+      const edits = modify(acc, [key], undefined, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      })
+      if (!edits.length) return acc
+      return applyEdits(acc, edits)
+    }, source)
 
-  return Filesystem.write(file, text)
-    .then(() => true)
-    .catch(() => false)
+    if ((await Filesystem.readText(file)) !== source) return false
+    return Filesystem.write(file, text)
+      .then(() => true)
+      .catch(() => false)
+  })
 }
 
 async function zaovraFiles(input: { directories: string[]; cwd: string }) {
