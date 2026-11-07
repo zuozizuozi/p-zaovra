@@ -429,6 +429,8 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
       rememberSessionInfo(tab: SessionTab, session: Session) {
         const key = tabKey(tab)
+        // This cache belongs to open tabs; pin-only rows resolve their own session.
+        if (!store.some((entry) => tabKey(entry) === key)) return
         const next = { title: session.title, directory: session.directory }
         const current = info[key]
         if (current?.title === next.title && current.directory === next.directory) return

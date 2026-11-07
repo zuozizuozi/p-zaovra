@@ -1,4 +1,4 @@
-import { createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
+import { children, createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
 import { FileIcon } from "@zaovra-ai/ui/file-icon"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { IconButton } from "@zaovra-ai/ui/icon-button"
@@ -44,6 +44,8 @@ export type PromptInputV2Props = {
 }
 
 export function PromptInputV2(props: PromptInputV2Props) {
+  // Resolve this JSX slot once: controlled menus must share one mounted trigger.
+  const modelControl = children(() => props.modelControl)
   const state = props.controller.state
   const view = props.controller.view
   let editor: HTMLDivElement | undefined
@@ -235,7 +237,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
               )}
             </Show>
             <Show
-              when={props.modelControl}
+              when={modelControl()}
               fallback={
                 <Show when={view.model}>
                   {(control) => (
@@ -249,7 +251,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
                 </Show>
               }
             >
-              {props.modelControl}
+              {modelControl()}
             </Show>
             <Show when={view.variant}>
               {(control) => (

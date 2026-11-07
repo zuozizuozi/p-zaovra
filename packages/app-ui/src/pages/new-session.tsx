@@ -33,7 +33,7 @@ import { Persist, persisted } from "@/utils/persist"
 import createPresence from "solid-presence"
 import { useLocal } from "@/context/local"
 import { createPromptModelSelection } from "@/pages/session/composer/prompt-model-selection"
-import { SessionStartOptions } from "@/components/session/session-start-options"
+import { recentStartSessions, SessionStartOptions } from "@/components/session/session-start-options"
 import { useTabs } from "@/context/tabs"
 import { useServer } from "@/context/server"
 
@@ -77,11 +77,7 @@ export default function NewSessionPage() {
       ),
   )
   const recent = createMemo(() =>
-    serverSync()
-      .child(sdk().directory, { bootstrap: false })[0]
-      .session.filter((session) => !session.parentID && !session.time.archived)
-      .toSorted((a, b) => b.time.updated - a.time.updated)
-      .slice(0, 5),
+    recentStartSessions(serverSync().child(sdk().directory, { bootstrap: false })[0].session),
   )
   const local = useLocal()
   const model = createPromptModelSelection({ agent: local.agent.current })

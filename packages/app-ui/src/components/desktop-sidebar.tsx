@@ -28,7 +28,7 @@ type ProjectGroup = {
   ctx: ServerCtx
 }
 
-function DesktopSessionTab(props: {
+export function DesktopSessionTab(props: {
   tab: SessionTab
   active: () => boolean
   serverCtx: () => ServerCtx | undefined

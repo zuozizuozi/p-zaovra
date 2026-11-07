@@ -4,6 +4,13 @@ import type { Session } from "@zaovra-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
 import { sessionTitle } from "@/utils/session-title"
 
+export function recentStartSessions(sessions: Session[]) {
+  return sessions
+    .filter((session) => !session.parentID && !session.time.archived)
+    .toSorted((a, b) => b.time.updated - a.time.updated)
+    .slice(0, 5)
+}
+
 export function SessionStartOptions(props: {
   recent: Session[]
   disabled: boolean

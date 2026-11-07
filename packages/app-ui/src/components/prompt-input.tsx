@@ -78,6 +78,7 @@ import {
 import { createPromptSubmit } from "./prompt-input/submit"
 import { useLocal } from "@/context/local"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
+import { customSlashCommands } from "./prompt-input/custom-slash-commands"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
@@ -710,16 +711,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         source: "command" as const,
       }))
 
-    const custom = sync()
-      .data.command.filter((cmd) => cmd.name !== "bug")
-      .map((cmd) => ({
-        id: `custom.${cmd.source}.${cmd.name}`,
-        trigger: cmd.name,
-        title: cmd.name,
-        description: cmd.description || language.t("prompt.slash.customDescription", { name: cmd.name }),
-        type: "custom" as const,
-        source: cmd.source ?? "command",
-      }))
+    const custom = customSlashCommands(sync().data.command, (name) =>
+      language.t("prompt.slash.customDescription", { name }),
+    )
 
     return [...custom, ...builtin]
   })

@@ -4,6 +4,7 @@ import { useFeedbackModel } from "@/feedback"
 import { SessionUsageBar } from "./usage-dashboard"
 import { SessionContextUsage } from "./session-context-usage"
 import { PermissionModeControl } from "./permission-mode-control"
+import { customSlashCommands } from "./prompt-input/custom-slash-commands"
 import { useParams } from "@solidjs/router"
 import { DialogAttachmentText } from "./dialog-attachment-text"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -422,16 +423,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     })),
   ])
   const slashCommands = createMemo(() => [
-    ...sync()
-      .data.command.filter((item) => item.name !== "bug")
-      .map((item) => ({
-        id: `custom.${item.source}.${item.name}`,
-        trigger: item.name,
-        title: item.name,
-        description: item.description || language.t("prompt.slash.customDescription", { name: item.name }),
-        type: "custom" as const,
-        source: item.source,
-      })),
+    ...customSlashCommands(sync().data.command, (name) => language.t("prompt.slash.customDescription", { name })),
     ...command.options
       .filter((item) => !item.disabled && !item.id.startsWith("suggested.") && item.slash)
       .map((item) => ({
