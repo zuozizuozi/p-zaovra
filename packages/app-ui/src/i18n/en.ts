@@ -537,6 +537,9 @@ export const dict = {
   "session.permission.rememberScope": "What does Always allow remember?",
   "session.permission.rememberHint":
     "Allow future matching operations in this project. Explicit deny rules still apply. Allow once only approves this request.",
+  "session.sidebar.status.running": "In progress",
+  "session.sidebar.status.unread": "Needs review",
+  "session.sidebar.status.pending": "Needs action",
   "session.activity.permission": "Waiting for approval",
   "session.activity.question": "Waiting for your answer",
   "session.activity.running": "Running",
