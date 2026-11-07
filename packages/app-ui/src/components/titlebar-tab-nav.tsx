@@ -9,6 +9,7 @@ import { useLanguage } from "@/context/language"
 import { ServerConnection, serverName } from "@/context/server"
 import { displayName, projectForSession } from "@/pages/layout/helpers"
 import { SessionTabAvatar } from "@/pages/layout/session-tab-avatar"
+import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
 import { showToast } from "@/utils/toast"
 import { createImeKeyOwnership } from "@/utils/ime-key-ownership"
 import { sessionTitle } from "@/utils/session-title"
@@ -323,6 +324,9 @@ export function TabNavItem(props: {
               event.preventDefault()
             }}
           />
+          <Show when={props.conversationIcon && !editing() && props.session()}>
+            {(session) => <SidebarSessionStatus server={props.server} session={session()} />}
+          </Show>
         </a>
       </Show>
 
@@ -385,6 +389,35 @@ export function TabNavItem(props: {
         </MenuV2.Portal>
       </Show>
     </MenuV2>
+  )
+}
+
+function SidebarSessionStatus(props: { server: ServerConnection.Key; session: Session }) {
+  const language = useLanguage()
+  const state = useSessionTabAvatarState(
+    () => props.server,
+    () => props.session.directory,
+    () => props.session.id,
+  )
+  const label = createMemo(() => {
+    const status = state.status()
+    if (status === "session.activity.permission" || status === "session.activity.question")
+      return language.t("session.sidebar.status.pending")
+    if (status === "session.activity.running" || status === "session.activity.shell")
+      return language.t("session.sidebar.status.running")
+    if (status === "session.activity.unread" || status === "session.activity.error")
+      return language.t("session.sidebar.status.unread")
+  })
+  return (
+    <Show when={label()}>
+      <span
+        data-slot="sidebar-session-status"
+        class="shrink-0 text-[11px] leading-4 text-text-weak"
+        title={language.t(state.status())}
+      >
+        {label()}
+      </span>
+    </Show>
   )
 }
 

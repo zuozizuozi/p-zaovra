@@ -394,9 +394,29 @@ function createServerNotificationState(input: {
     })
   }
 
+  // V2 has no legacy session.idle event. A provider step can finish while tools
+  // or another turn still run, so notify only after the ownership check sets idle.
+  const [v2Completions, setV2Completions] = createStore<Record<string, string | undefined>>({})
+  createEffect(() => {
+    Object.entries(serverSync().session.data.session_status).forEach(([sessionID, status]) => {
+      const directory = v2Completions[sessionID]
+      if (status.type !== "idle" || !directory) return
+      setV2Completions(sessionID, undefined)
+      handleSessionIdle(directory, { properties: { sessionID } }, Date.now())
+    })
+  })
+
   const alerted = new Map<string, number>()
   const unsub = serverSDK().event.listen((e) => {
     const event = e.details
+    if (event.type === "session.next.step.ended") {
+      setV2Completions(event.properties.sessionID, e.name)
+      return
+    }
+    if (event.type === "session.next.step.failed" || event.type === "session.next.deleted") {
+      setV2Completions(event.properties.sessionID, undefined)
+      return
+    }
     if (
       event.type === "question.replied" ||
       event.type === "question.rejected" ||

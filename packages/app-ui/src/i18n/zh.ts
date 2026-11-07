@@ -507,6 +507,9 @@ export const dict = {
   "session.permission.rememberScope": "“始终允许”会记住哪些范围？",
   "session.permission.rememberHint":
     "允许此项目今后匹配下列范围的操作，明确的拒绝规则仍然有效。“允许一次”只批准本次请求。",
+  "session.sidebar.status.running": "进行中",
+  "session.sidebar.status.unread": "待看",
+  "session.sidebar.status.pending": "待处理",
   "session.activity.permission": "等待审批",
   "session.activity.question": "等待你回答",
   "session.activity.running": "执行中",
