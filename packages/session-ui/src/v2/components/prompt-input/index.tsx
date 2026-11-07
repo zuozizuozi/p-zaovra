@@ -34,6 +34,7 @@ export type PromptInputV2Mode = "normal" | "shell"
 
 export type PromptInputV2Props = {
   attachLabel?: string
+  suggestionLabels?: { empty: string; search: string; builtin: string; skill: string; mcp: string }
   controller: PromptInputV2Interaction
   disabled?: boolean
   readOnly?: boolean
@@ -84,14 +85,15 @@ export function PromptInputV2(props: PromptInputV2Props) {
       />
       <Show when={state.popover.type !== "closed"}>
         <PromptInputV2Popover
-          emptyLabel="No matching items"
+          emptyLabel={props.suggestionLabels?.empty ?? "No matching items"}
+          groupLabels={props.suggestionLabels}
           items={props.controller.suggestions()}
           activeID={state.popover.type === "closed" ? undefined : state.popover.activeID}
           search={
             state.popover.type === "command-menu"
               ? {
                   value: state.popover.query,
-                  label: "Commands",
+                  label: props.suggestionLabels?.search ?? "Commands",
                   placeholder: "/",
                   onValueChange: props.controller.setQuery,
                   onKeyDown: props.controller.onKeyDown,
@@ -580,6 +582,7 @@ export function PromptInputV2Select(props: {
 
 export function PromptInputV2Popover(props: {
   emptyLabel: string
+  groupLabels?: { builtin: string; skill: string; mcp: string }
   items: PromptInputV2Suggestion[]
   activeID?: string
   search?: {
@@ -618,26 +621,33 @@ export function PromptInputV2Popover(props: {
         fallback={<div class="px-2 py-1 text-v2-text-text-muted">{props.emptyLabel}</div>}
       >
         <For each={props.items}>
-          {(item) => (
-            <button
-              type="button"
-              data-suggestion-id={item.id}
-              class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-v2-overlay-simple-overlay-hover"
-              classList={{ "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id }}
-              onPointerMove={() => props.onActiveChange(item)}
-              onClick={() => props.onSelect(item)}
-            >
-              <div class="flex min-w-0 flex-1 items-center gap-2">
-                <PromptInputV2SuggestionIcon item={item} />
-                <span class="shrink-0 text-v2-text-text-base">{item.label}</span>
-                <Show when={item.description}>
-                  <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
-                </Show>
-              </div>
-              <Show when={item.keybind?.length}>
-                <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>
+          {(item, index) => (
+            <>
+              <Show when={item.kind === "command" && (index() === 0 || props.items[index() - 1]?.group !== item.group)}>
+                <div data-slot="command-group" class="px-2 pb-1 pt-2 text-xs font-medium text-v2-text-text-muted">
+                  {props.groupLabels?.[item.group ?? "builtin"] ?? item.group ?? "Commands"}
+                </div>
               </Show>
-            </button>
+              <button
+                type="button"
+                data-suggestion-id={item.id}
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-v2-overlay-simple-overlay-hover"
+                classList={{ "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id }}
+                onPointerMove={() => props.onActiveChange(item)}
+                onClick={() => props.onSelect(item)}
+              >
+                <div class="flex min-w-0 flex-1 items-center gap-2">
+                  <PromptInputV2SuggestionIcon item={item} />
+                  <span class="shrink-0 text-v2-text-text-base">{item.label}</span>
+                  <Show when={item.description}>
+                    <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
+                  </Show>
+                </div>
+                <Show when={item.keybind?.length}>
+                  <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>
+                </Show>
+              </button>
+            </>
           )}
         </For>
       </Show>

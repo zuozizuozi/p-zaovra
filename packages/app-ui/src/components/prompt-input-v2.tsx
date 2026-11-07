@@ -14,6 +14,7 @@ import { KeybindV2 } from "@zaovra-ai/ui/v2/keybind-v2"
 import { TooltipV2 } from "@zaovra-ai/ui/v2/tooltip-v2"
 import type { Prompt, ReferenceInfo } from "@zaovra-ai/sdk/v2/client"
 import { createEffect, createMemo, on, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
 import { modelSource } from "@/utils/model-source"
 import type { PromptInputProps } from "@/components/prompt-input/contracts"
@@ -60,6 +61,35 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const params = useParams<{ id?: string }>()
   const sdk = useSDK()
   const permission = usePermission()
+  const platform = usePlatform()
+  const [menus, setMenus] = createStore({ permissions: false })
+  command.register("composer-shortcuts", () => [
+    ...(!params.id
+      ? [
+          {
+            id: "session.new",
+            title: language.t("command.session.new"),
+            description: language.t("command.session.new.description"),
+            slash: "new",
+            onSelect: () => command.trigger("tab.new"),
+          },
+        ]
+      : []),
+    {
+      id: "permissions.choose",
+      title: language.t("command.permissions.choose"),
+      description: language.t("command.permissions.choose.description"),
+      slash: "permissions",
+      onSelect: () => setMenus("permissions", true),
+    },
+    {
+      id: "help.documentation",
+      title: language.t("command.help.documentation"),
+      description: language.t("command.help.documentation.description"),
+      slash: "help",
+      onSelect: () => platform.openLink("https://zaovra.com/docs"),
+    },
+  ])
 
   useCommands(props)
   useEditHandler(props)
@@ -68,6 +98,13 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
     <div class="flex flex-col gap-3">
       <PromptInputV2
         attachLabel={language.t("prompt.addFiles")}
+        suggestionLabels={{
+          empty: language.t("prompt.popover.emptyResults"),
+          search: language.t("prompt.menu.commands"),
+          builtin: language.t("prompt.slash.group.builtin"),
+          skill: language.t("prompt.slash.group.skill"),
+          mcp: language.t("prompt.slash.group.mcp"),
+        }}
         controller={props.controller}
         class={props.class}
         usageControl={
@@ -80,6 +117,8 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
         modelControl={
           <>
             <PermissionModeControl
+              open={menus.permissions}
+              onOpenChange={(open) => setMenus("permissions", open)}
               mode={permission.mode(sdk().directory, params.id)}
               onChange={(mode) => permission.setMode(sdk().directory, mode)}
             />
@@ -386,11 +425,12 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     ...sync()
       .data.command.filter((item) => item.name !== "bug")
       .map((item) => ({
-        id: `custom.${item.name}`,
+        id: `custom.${item.source}.${item.name}`,
         trigger: item.name,
         title: item.name,
-        description: item.description,
+        description: item.description || language.t("prompt.slash.customDescription", { name: item.name }),
         type: "custom" as const,
+        source: item.source,
       })),
     ...command.options
       .filter((item) => !item.disabled && !item.id.startsWith("suggested.") && item.slash)
@@ -406,6 +446,12 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     slashCommands().map((item) => ({
       id: item.id,
       kind: "command",
+      group:
+        "source" in item && item.source === "skill"
+          ? "skill"
+          : "source" in item && item.source === "mcp"
+            ? "mcp"
+            : "builtin",
       label: `/${item.trigger}`,
       trigger: item.trigger,
       title: item.title,

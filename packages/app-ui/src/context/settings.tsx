@@ -3,6 +3,7 @@ import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import { persisted } from "@/utils/persist"
 import { usePlatform } from "@/context/platform"
+import { conversationViewFlags, conversationViewFromLegacy, type ConversationView } from "@/utils/conversation-view"
 
 export interface NotificationSettings {
   agent: boolean
@@ -32,6 +33,7 @@ export interface Settings {
     showReasoningSummaries: boolean
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
+    conversationView?: ConversationView
     showCustomAgents: boolean
     workGraph?: boolean
     mobileTitlebarPosition: "top" | "bottom"
@@ -363,6 +365,22 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         showTerminal: withFallback(() => store.general?.showTerminal, defaultSettings.general.showTerminal),
         setShowTerminal(value: boolean) {
           setStore("general", "showTerminal", value)
+        },
+        conversationView: () =>
+          store.general?.conversationView ??
+          conversationViewFromLegacy(
+            store.general?.showReasoningSummaries ?? false,
+            store.general?.shellToolPartsExpanded ?? false,
+            store.general?.editToolPartsExpanded ?? false,
+          ),
+        setConversationView(value: ConversationView) {
+          const flags = conversationViewFlags(value)
+          setStore("general", {
+            conversationView: value,
+            showReasoningSummaries: flags.reasoning,
+            shellToolPartsExpanded: flags.shell,
+            editToolPartsExpanded: flags.edit,
+          })
         },
         showReasoningSummaries: withFallback(
           () => store.general?.showReasoningSummaries,

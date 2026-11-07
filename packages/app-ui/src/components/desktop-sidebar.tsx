@@ -34,9 +34,11 @@ function DesktopSessionTab(props: {
   serverCtx: () => ServerCtx | undefined
   onClose: () => void
   onNavigate: () => void
+  pinned?: boolean
 }) {
   const language = useLanguage()
   const tabs = useTabs()
+  const layout = useLayout()
   const cached = createMemo(() => props.serverCtx()?.sync.session.peek(props.tab.sessionId))
   const [loaded] = createResource(
     () => {
@@ -49,6 +51,10 @@ function DesktopSessionTab(props: {
 
   createEffect(() => {
     const value = session()
+    if (props.pinned && value?.time.archived) {
+      layout.pins.remove(props.tab.server, props.tab.sessionId)
+      return
+    }
     if (value) tabs.rememberSessionInfo(props.tab, value)
   })
 
@@ -150,6 +156,7 @@ export function DesktopSidebar() {
   const groupForTab = (tab: Tab) => desktopProjectGroup(groups(), tab.server, directory(tab))
   const tabsForGroup = (group: ProjectGroup) =>
     tabs.store.filter((tab) => {
+      if (tab.type === "session" && layout.pins.has(tab.server, tab.sessionId)) return false
       if (tab.type === "draft" && tab !== currentTab()) {
         const prompt = tabs.stateValue<PromptSession>(tab, "prompt")
         if (prompt?.ready() && !prompt.dirty() && prompt.context.items().length === 0) return false
@@ -162,6 +169,7 @@ export function DesktopSidebar() {
     return [...new Set([group.project.worktree, ...(group.project.sandboxes ?? [])])]
       .flatMap((directory) => group.ctx.sync.child(directory, { bootstrap: false })[0].session)
       .filter((session) => !session.parentID && !session.time.archived && !open.has(session.id))
+      .filter((session) => !layout.pins.has(group.server, session.id))
       .filter((session) => desktopProjectGroup(groups(), group.server, session.directory) === group)
       .filter((session, index, all) => all.findIndex((item) => item.id === session.id) === index)
       .toSorted((a, b) => b.time.updated - a.time.updated)
@@ -191,6 +199,7 @@ export function DesktopSidebar() {
   const recent = createMemo(() =>
     tabs.store
       .filter((tab): tab is SessionTab => tab.type === "session")
+      .filter((tab) => !layout.pins.has(tab.server, tab.sessionId))
       .filter((tab) => {
         const group = groupForTab(tab)
         return !group
@@ -213,6 +222,18 @@ export function DesktopSidebar() {
       (tab) => tab.type === "session" && tab.server === route.server && tab.sessionId === route.sessionId,
     )
   }
+  const pinned = createMemo(() =>
+    layout.pins.list().flatMap((pin) => {
+      const connection = global.servers.list().find((item) => ServerConnection.key(item) === pin.server)
+      if (!connection) return []
+      return [
+        {
+          tab: { type: "session", server: pin.server, sessionId: pin.sessionID } as SessionTab,
+          ctx: global.ensureServerCtx(connection),
+        },
+      ]
+    }),
+  )
   const selectProject = (group: ProjectGroup) => {
     layout.home.setSelection({ server: group.server, directory: group.project.worktree })
     setView("collapsed", groupKey(group), false)
@@ -277,6 +298,25 @@ export function DesktopSidebar() {
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col px-3">
+        <Show when={pinned().length}>
+          <section data-slot="sidebar-pinned" class="mb-3 max-h-48 shrink-0 overflow-y-auto">
+            <div class="px-2 py-2 text-xs font-medium text-v2-text-text-faint">
+              {language.t("sidebar.session.pinned")}
+            </div>
+            <For each={pinned()}>
+              {(item) => (
+                <DesktopSessionTab
+                  pinned
+                  tab={item.tab}
+                  active={() => currentTab()?.type === "session" && tabKey(currentTab()!) === tabKey(item.tab)}
+                  serverCtx={() => item.ctx}
+                  onClose={() => layout.pins.remove(item.tab.server, item.tab.sessionId)}
+                  onNavigate={() => tabs.select(item.tab)}
+                />
+              )}
+            </For>
+          </section>
+        </Show>
         <div class="flex h-8 shrink-0 items-center px-2 text-xs font-medium text-v2-text-text-faint">
           {language.t("home.projects")}
         </div>
@@ -393,6 +433,14 @@ export function DesktopSidebar() {
                           if (view.editingProject === groupKey(group)) event.preventDefault()
                         }}
                       >
+                        <MenuV2.Item
+                          onSelect={() => {
+                            layout.home.setSelection({ server: group.server, directory: group.project.worktree })
+                            void tabs.newDraft({ server: group.server, directory: group.project.worktree })
+                          }}
+                        >
+                          {language.t("command.session.new")}
+                        </MenuV2.Item>
                         <MenuV2.Item
                           onSelect={() =>
                             setView({

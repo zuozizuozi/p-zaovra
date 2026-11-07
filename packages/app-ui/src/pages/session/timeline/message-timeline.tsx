@@ -78,6 +78,8 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
+import { useLayout } from "@/context/layout"
+import { conversationViewFlags } from "@/utils/conversation-view"
 import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { useSDK } from "@/context/sdk"
@@ -304,6 +306,16 @@ export function MessageTimeline(props: {
   const openProviderSettings = useSettingsDialog("providers")
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
+  const conversationView = useLayout().view(sessionKey).conversationView
+  const display = createMemo(() => {
+    const temporary = conversationView.get()
+    if (temporary) return conversationViewFlags(temporary)
+    return {
+      reasoning: settings.general.showReasoningSummaries(),
+      shell: settings.general.shellToolPartsExpanded(),
+      edit: settings.general.editToolPartsExpanded(),
+    }
+  })
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
   const initialMeasurements = cached?.measurements
@@ -362,7 +374,7 @@ export function MessageTimeline(props: {
     userMessages: () => props.userMessages,
     parts: getMsgParts,
     status: sessionStatus,
-    showReasoningSummaries: settings.general.showReasoningSummaries,
+    showReasoningSummaries: () => display().reasoning,
     inlineComments: settings.general.newLayoutDesigns,
     historyComplete: () => {
       const id = sessionID()
@@ -1234,7 +1246,7 @@ export function MessageTimeline(props: {
     const defaultOpen = createMemo(() => {
       const item = part()
       if (!item) return
-      return partDefaultOpen(item, settings.general.shellToolPartsExpanded(), settings.general.editToolPartsExpanded())
+      return partDefaultOpen(item, display().shell, display().edit)
     })
 
     return (
@@ -1553,7 +1565,7 @@ export function MessageTimeline(props: {
               <TimelineThinkingRow
                 reasoningHeading={thinkingRow().reasoningHeading}
                 reviewing={thinkingRow().reviewing}
-                showReasoningSummaries={settings.general.showReasoningSummaries()}
+                showReasoningSummaries={display().reasoning}
               />
             </div>
           </TimelineRowFrame>

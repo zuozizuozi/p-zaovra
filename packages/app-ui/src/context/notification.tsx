@@ -14,6 +14,7 @@ import { base64Encode } from "@zaovra-ai/core/util/encode"
 import { decode64 } from "@/utils/base64"
 import { EventSessionError } from "@zaovra-ai/sdk/v2"
 import { Persist, persisted } from "@/utils/persist"
+import { createUnreadMarker } from "@/utils/sidebar-session-preferences"
 import { playSoundById } from "@/utils/sound"
 import { useGlobal } from "./global"
 import { ServerConnection, useServer } from "./server"
@@ -193,6 +194,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         unseenCount: (session: string) => selected().session.unseenCount(session),
         unseenHasError: (session: string) => selected().session.unseenHasError(session),
         markViewed: (session: string) => selected().session.markViewed(session),
+        markUnread: (session: string, directory: string) => selected().session.markUnread(session, directory),
       },
       project: {
         all: (directory: string) => selected().project.all(directory),
@@ -234,9 +236,14 @@ function createServerNotificationState(input: {
     Persist.serverGlobal(serverSDK().scope, "notification", ["notification.v1"]),
     createStore({
       list: [] as Notification[],
+      manualUnread: {} as Record<string, string | undefined>,
     }),
   )
   const [index, setIndex] = createStore<NotificationIndex>(buildNotificationIndex(store.list))
+  const manualUnread = createUnreadMarker({
+    read: () => store.manualUnread ?? {},
+    write: (id, directory) => setStore("manualUnread", id, directory),
+  })
 
   const meta = { pruned: false, disposed: false }
 
@@ -457,12 +464,17 @@ function createServerNotificationState(input: {
         return index.session.unseen[session] ?? empty
       },
       unseenCount(session: string) {
-        return index.session.unseenCount[session] ?? 0
+        return manualUnread.count(session, index.session.unseenCount[session] ?? 0)
       },
       unseenHasError(session: string) {
         return index.session.unseenHasError[session] ?? false
       },
+      markUnread(session: string, directory: string) {
+        // A reading preference shares the unread indicator; it never sends an OS notification.
+        manualUnread.markUnread(session, directory)
+      },
       markViewed(session: string) {
+        manualUnread.markViewed(session)
         const unseen = index.session.unseen[session] ?? empty
         if (!unseen.length) return
 

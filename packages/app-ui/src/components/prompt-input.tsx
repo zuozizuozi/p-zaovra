@@ -707,17 +707,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         description: opt.description,
         keybind: opt.keybind,
         type: "builtin" as const,
+        source: "command" as const,
       }))
 
     const custom = sync()
       .data.command.filter((cmd) => cmd.name !== "bug")
       .map((cmd) => ({
-        id: `custom.${cmd.name}`,
+        id: `custom.${cmd.source}.${cmd.name}`,
         trigger: cmd.name,
         title: cmd.name,
-        description: cmd.description,
+        description: cmd.description || language.t("prompt.slash.customDescription", { name: cmd.name }),
         type: "custom" as const,
-        source: cmd.source,
+        source: cmd.source ?? "command",
       }))
 
     return [...custom, ...builtin]
@@ -763,7 +764,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   } = useFilteredList<SlashCommand>({
     items: slashCommands,
     key: (x) => x?.id,
-    filterKeys: ["trigger", "title"],
+    filterKeys: ["trigger", "title", "description"],
+    groupBy: (item) => (item.source === "skill" ? "skill" : item.source === "mcp" ? "mcp" : "builtin"),
+    sortGroupsBy: (a, b) =>
+      ["builtin", "skill", "mcp"].indexOf(a.category) - ["builtin", "skill", "mcp"].indexOf(b.category),
     onSelect: handleSlashSelect,
   })
 

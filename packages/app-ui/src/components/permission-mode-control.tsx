@@ -3,11 +3,16 @@ import { MenuV2 } from "@zaovra-ai/ui/v2/menu-v2"
 import { useLanguage } from "@/context/language"
 import type { PermissionMode } from "@/context/permission-auto-respond"
 
-export function PermissionModeControl(props: { mode: PermissionMode; onChange: (mode: PermissionMode) => void }) {
+export function PermissionModeControl(props: {
+  mode: PermissionMode
+  onChange: (mode: PermissionMode) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const language = useLanguage()
   return (
     <div class="min-w-0" data-component="permission-mode-control">
-      <MenuV2>
+      <MenuV2 open={props.open} onOpenChange={props.onOpenChange}>
         <MenuV2.Trigger
           data-component="permission-chip"
           data-mode={props.mode}

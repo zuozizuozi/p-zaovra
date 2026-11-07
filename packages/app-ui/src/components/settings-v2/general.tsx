@@ -1,3 +1,4 @@
+import { ConversationViewSelect } from "@/components/conversation-view-select"
 import { SettingsSessionBudget } from "@/components/settings-session-budget"
 import { createSettingsShells } from "@/utils/settings-shells"
 import { ShellStatus } from "@/components/shell-status"
@@ -356,50 +357,14 @@ export const SettingsGeneralV2: Component<{
         </SettingsRowV2>
 
         <SettingsRowV2
-          title={language.t("settings.general.row.reasoningSummaries.title")}
-          description={language.t("settings.general.row.reasoningSummaries.description")}
+          title={language.t("conversation.view.setting")}
+          description={language.t("conversation.view.description")}
         >
-          <div data-action="settings-feed-reasoning-summaries">
-            <Switch
-              hideLabel
-              checked={settings.general.showReasoningSummaries()}
-              onChange={(checked) => settings.general.setShowReasoningSummaries(checked)}
-            >
-              {language.t("settings.general.row.reasoningSummaries.title")}
-            </Switch>
-          </div>
+          <ConversationViewSelect
+            value={settings.general.conversationView()}
+            onChange={(value) => value && settings.general.setConversationView(value)}
+          />
         </SettingsRowV2>
-
-        <SettingsRowV2
-          title={language.t("settings.general.row.shellToolPartsExpanded.title")}
-          description={language.t("settings.general.row.shellToolPartsExpanded.description")}
-        >
-          <div data-action="settings-feed-shell-tool-parts-expanded">
-            <Switch
-              hideLabel
-              checked={settings.general.shellToolPartsExpanded()}
-              onChange={(checked) => settings.general.setShellToolPartsExpanded(checked)}
-            >
-              {language.t("settings.general.row.shellToolPartsExpanded.title")}
-            </Switch>
-          </div>
-        </SettingsRowV2>
-
-        <SettingsRowV2
-          title={language.t("settings.general.row.editToolPartsExpanded.title")}
-          description={language.t("settings.general.row.editToolPartsExpanded.description")}
-        >
-          <div data-action="settings-feed-edit-tool-parts-expanded">
-            <Switch
-              hideLabel
-              checked={settings.general.editToolPartsExpanded()}
-              onChange={(checked) => settings.general.setEditToolPartsExpanded(checked)}
-            >
-              {language.t("settings.general.row.editToolPartsExpanded.title")}
-            </Switch>
-          </div>
-        </SettingsRowV2>
-
         <Show when={mobile() && import.meta.env.VITE_ZAOVRA_CHANNEL !== "prod"}>
           <SettingsRowV2
             title={language.t("settings.general.row.mobileTitlebarBottom.title")}
