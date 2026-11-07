@@ -1635,6 +1635,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         ? messages.toSorted(cmpMessage).findLast((message) => message.role === "user")
         : undefined
       await client.v2.session.interrupt({ sessionID }, { throwOnError: true })
+      // A missed start event or failed earlier watch must not leave a confirmed Stop busy forever.
+      void watchExecution(sessionID).catch(() => {})
       // Capture before awaiting: a newly admitted prompt must never inherit the old Stop.
       if (
         !user ||

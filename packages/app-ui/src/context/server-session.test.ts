@@ -924,6 +924,37 @@ test("shell liveness is connection-local and ends without waiting for history re
   expect(store.data.live_shell?.ses_child?.job_live).toBeUndefined()
 })
 
+test("732 Stop confirms idle from process ownership when execution events were missed", async () => {
+  let activeCalls = 0
+  const ctx = setup({
+    pages: [{ data: [user("msg_first", "Task", 1)] }],
+    active: () => {
+      activeCalls++
+      return {}
+    },
+  })
+  await ctx.store.sync("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  await ctx.store.interrupt("ses_child")
+  const deadline = Date.now() + 2000
+  while (ctx.store.data.session_working("ses_child") && Date.now() < deadline) await Bun.sleep(0)
+  expect(activeCalls).toBeGreaterThan(0)
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+})
+
+test("732 Stop stays busy until process ownership can be confirmed idle", async () => {
+  const owner = Promise.withResolvers<void>()
+  const ctx = setup({ wait: () => owner.promise })
+  await ctx.store.sync("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  await ctx.store.interrupt("ses_child")
+  expect(ctx.store.data.session_working("ses_child")).toBe(true)
+  owner.resolve()
+  const deadline = Date.now() + 2000
+  while (ctx.store.data.session_working("ses_child") && Date.now() < deadline) await Bun.sleep(0)
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+})
+
 test("a confirmed Stop before any assistant belongs to the captured turn, not a later input", async () => {
   const gate = Promise.withResolvers<void>()
   const ctx = setup({ pages: [{ data: [user("msg_first", "Task", 1)] }], interrupt: () => gate.promise })
