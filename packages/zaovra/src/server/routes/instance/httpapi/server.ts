@@ -45,17 +45,6 @@ import { Ripgrep } from "@zaovra-ai/core/ripgrep"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionRuntime } from "@/effect/session-runtime"
-import { Work } from "@zaovra-ai/core/work"
-import { WorkArtifact } from "@zaovra-ai/core/work/artifact"
-import { WorkMergeReview } from "@zaovra-ai/core/work/merge-review"
-import { WorkController } from "@zaovra-ai/core/work/controller"
-import { WorkExecution } from "@zaovra-ai/core/work/execution"
-import { WorkExecutionLocal } from "@zaovra-ai/core/work/execution-local"
-import { WorkRecovery } from "@zaovra-ai/core/work/recovery"
-import { WorkStore } from "@zaovra-ai/core/work/store"
-import { WorkPlacement } from "@zaovra-ai/core/work/placement"
-import { WorkWorker } from "@zaovra-ai/core/work/worker"
-import { WorkRemoteJob } from "@zaovra-ai/core/work/remote-job"
 import { TaskTool } from "@zaovra-ai/core/tool/task"
 import { TaskRecovery } from "@zaovra-ai/core/tool/task-recovery"
 import { lazy } from "@/util/lazy"
@@ -227,23 +216,8 @@ export function createRoutes(
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const sharedLocationServiceMap = Layer.effect(LocationServiceMap.Service, LocationServiceMap.Service)
   const v2Runtime = AppNodeBuilderV1.build(
-    LayerNode.group([
-      Global.node,
-      SessionV2.node,
-      Workspace.node,
-      TaskTool.node,
-      TaskRecovery.startupNode,
-      Work.node,
-      WorkArtifact.node,
-      WorkMergeReview.node,
-      WorkController.node,
-      WorkStore.node,
-      WorkWorker.node,
-      WorkRemoteJob.node,
-      WorkPlacement.node,
-      WorkRecovery.startupNode,
-    ]),
-    [...SessionRuntime.replacements, [WorkExecution.node, WorkExecutionLocal.node]],
+    LayerNode.group([Global.node, SessionV2.node, Workspace.node, TaskTool.node, TaskRecovery.startupNode]),
+    SessionRuntime.replacements,
   )
 
   return Layer.mergeAll(
