@@ -17,6 +17,8 @@ const calls = {
   check: 0,
   download: 0,
   install: 0,
+  links: [] as string[],
+  legalReads: 0,
 }
 const [state, setState] = createStore({
   directoryAvailable: true,
@@ -29,14 +31,20 @@ const [state, setState] = createStore({
 })
 const language = { locale: () => "zh", t: (key: string) => (appDict as Record<string, string>)[key] ?? key }
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
-mock.module("@/context/highlights", () => ({ useHighlights: () => ({ available: () => false, show: () => undefined }) }))
+mock.module("@/context/highlights", () => ({
+  useHighlights: () => ({ available: () => false, show: () => undefined }),
+}))
 mock.module("@/context/platform", () => ({
   usePlatform: () => ({
     platform: "desktop",
     get channel() {
       return state.channel
     },
-    legalDocument: async () => await Bun.file("../desktop-app/resources/licenses/Zaovra-MIT.txt").text(),
+    openLink: (url: string) => calls.links.push(url),
+    legalDocument: async () => {
+      calls.legalReads++
+      return await Bun.file("../desktop-app/resources/licenses/Zaovra-MIT.txt").text()
+    },
     updater: {
       state: () => state.update,
       check: async () => {
@@ -101,6 +109,7 @@ afterEach(() => {
     channel: "beta",
     update: { status: "idle" },
   })
+  calls.links.length = calls.legalReads = 0
   calls.restored = 0
   calls.sidebar = calls.loaded = calls.picker = calls.check = calls.download = calls.install = 0
   calls.opened.length = calls.touched.length = calls.drafts.length = calls.selected.length = calls.finished.length = 0
@@ -248,7 +257,7 @@ for (const input of [
     expect(calls.selected).toEqual([])
     expect(calls.loaded).toBe(1)
   })
-test("687 About has only third-party notices and preserves original MIT text", async () => {
+test("751 About opens the website without reading bundled notices and preserves MIT files", async () => {
   const { SettingsAbout } = await import("../../src/components/settings-v2/about")
   const host = document.createElement("main")
   document.body.append(host)
@@ -265,8 +274,13 @@ test("687 About has only third-party notices and preserves original MIT text", a
   await settle()
   expect(document.body.textContent).toContain("© 2026 Zaovra")
   expect(button(language.t("settings.about.license"))).toBeUndefined()
-  button(language.t("settings.about.notices")).click()
-  await settle()
-  expect(document.body.textContent).toContain("Copyright (c) 2025 opencode")
-  expect(document.body.textContent).toContain("Permission is hereby granted")
+  expect(!!button("第三方声明")).toBe(false)
+  const website = document.querySelector<HTMLAnchorElement>('[data-action="open-website"]')!
+  expect(website.getAttribute("href")).toBe("https://zaovra.com")
+  website.click()
+  expect(calls.links).toEqual(["https://zaovra.com"])
+  expect(calls.legalReads).toBe(0)
+  const license = await Bun.file("../desktop-app/resources/licenses/Zaovra-MIT.txt").text()
+  expect(license).toContain("Copyright (c) 2025 opencode")
+  expect(license).toContain("Permission is hereby granted")
 })
