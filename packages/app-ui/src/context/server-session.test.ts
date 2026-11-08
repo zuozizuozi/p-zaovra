@@ -1333,3 +1333,50 @@ test("707 pending HTTP admission remains excluded when unrelated SSE arrives dur
   })
   expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a")).toMatchObject({ parentID: "msg_u1" })
 })
+
+test("742 background completion recovers after its final ownership check disconnects", async () => {
+  const disconnected = Promise.withResolvers<void>()
+  let waits = 0
+  let ownership = 0
+  const ctx = setup({
+    wait: () => (++waits === 1 ? disconnected.promise : Promise.resolve()),
+    active: () => {
+      if (++ownership === 1) throw new Error("ownership disconnected")
+      return {}
+    },
+    pages: [{ data: [user("msg_user", "go", 1), assistant("msg_done", "background final", 2)] }],
+  })
+  await ctx.store.resolve("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  const watching = ctx.store.watchExecution("ses_child")
+  ctx.store.apply({
+    type: "session.next.step.ended",
+    properties: { sessionID: "ses_child", assistantMessageID: "msg_done", timestamp: 3, finish: "stop" },
+  })
+  disconnected.reject(new Error("wait disconnected"))
+  await expect(watching).rejects.toThrow("ownership disconnected")
+  expect(ctx.store.data.session_working("ses_child")).toBe(true)
+  await ctx.store.resyncSilent(Date.now() + 1000)
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+  expect(ctx.store.data.part.msg_done).toMatchObject([{ text: "background final" }])
+})
+
+test("742 recovery leaves an owned continuing task busy and does not duplicate its wait", async () => {
+  const owner = Promise.withResolvers<void>()
+  let waits = 0
+  const ctx = setup({
+    wait: () => {
+      waits++
+      return owner.promise
+    },
+  })
+  await ctx.store.resolve("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  const watching = ctx.store.watchExecution("ses_child")
+  await ctx.store.resyncSilent(Date.now() + 1000)
+  expect(waits).toBe(1)
+  expect(ctx.store.data.session_working("ses_child")).toBe(true)
+  owner.resolve()
+  await watching
+  expect(ctx.store.data.session_working("ses_child")).toBe(false)
+})
