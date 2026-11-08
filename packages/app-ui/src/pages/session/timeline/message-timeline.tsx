@@ -91,7 +91,7 @@ import { createTimelineFrame } from "./layout-frame"
 import { turnPartFoldable } from "./turn-part-visibility"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
-import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap, endsWithInterruption } from "./rows"
+import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { filterVirtualIndexes } from "./virtual-items"
 import { TurnProcessSummary, settledTurnStatus } from "./turn-process-summary"
 
@@ -474,11 +474,13 @@ export function MessageTimeline(props: {
     const part = latest && getMsgParts(latest.id).at(-1)
     return !!part && serverSync().session.data.streaming_text[sessionID() ?? ""] === part.id
   }
-  // The divider in the conversation already announces an interruption; repeating it here would make two lines.
+  // Only an actual interruption divider can replace the heading's confirmation.
+  // A first-output Stop receipt or compaction can suppress that divider entirely.
   const turnStatus = (user: string) => {
-    const messages = assistantMessagesByTurn().get(user) ?? emptyAssistantMessages
+    const owner = displayTurn(user)
+    const messages = assistantMessagesByTurn().get(owner) ?? emptyAssistantMessages
     const status = settledTurnStatus(messages, unresolvedTools(user), serverSync().session.stopped(user))
-    return status !== "error" && messages.some(endsWithInterruption) ? undefined : status
+    return status !== "error" && interruptionDividers().has(owner) ? undefined : status
   }
   const unresolvedTools = (user: string) => {
     const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
@@ -499,6 +501,14 @@ export function MessageTimeline(props: {
   const messageRowIndex = projection.messageRowIndex
   const timelineRowByKey = projection.rowByKey
   const timelineRows = projection.rows
+  const interruptionDividers = createMemo(
+    () =>
+      new Set(
+        timelineRows().flatMap((row) =>
+          row._tag === "TurnDivider" && row.label !== "compaction" ? [displayTurn(row.userMessageID)] : [],
+        ),
+      ),
+  )
   const processEntriesByTurn = createMemo(
     () =>
       new Map(
