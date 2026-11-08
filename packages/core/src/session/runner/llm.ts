@@ -163,7 +163,13 @@ const layer = Layer.effect(
     const plugins = yield* PluginV2.Service
     const database = yield* Database.Service
     const db = database.db
-    const compaction = SessionCompaction.make({ db, events, llm, config: yield* config.entries() })
+    const compaction = SessionCompaction.make({
+      db, events, llm, config: yield* config.entries(),
+      canRetry: (input) => Effect.gen(function* () {
+        const session = yield* getSession(input.sessionID)
+        return !(yield* checkBudget(session, input.model, false, false))
+      }),
+    })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)

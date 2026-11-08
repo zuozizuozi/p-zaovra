@@ -96,7 +96,7 @@ import { Location } from "@zaovra-ai/core/location"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
 import { PluginV2 } from "@zaovra-ai/core/plugin"
 import { Cause, Clock, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
-import { asc, eq } from "drizzle-orm"
+import { asc, eq, inArray } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -128,6 +128,8 @@ let responses: (LLMEvent[] | LLMError)[] | undefined
 let responseStream: Stream.Stream<LLMEvent, LLMError> | undefined
 let replayProvider = false
 let replayFailures = 0
+let replaySummaryFailures: number | undefined
+let replaySummaryCalls = 0
 const replayBodies: string[] = []
 let streamGate: Deferred.Deferred<void> | undefined
 let streamStarted: Deferred.Deferred<void> | undefined
@@ -143,6 +145,26 @@ const client = Layer.succeed(
     prepare: () => Effect.die("unused"),
     stream: ((request: LLMRequest) => {
       requests.push(request)
+      if (
+        replaySummaryFailures !== undefined &&
+        request.tools.length === 0 &&
+        request.system.some((part) => part.text.includes("conversation summarizer"))
+      )
+        return LLMClient.stream(request).pipe(
+          Stream.provide(
+            dynamicResponse((input) => {
+              replaySummaryCalls++
+              return Effect.succeed(
+                replaySummaryFailures!-- > 0
+                  ? input.respond('{"error":{"code":"server_error","message":"temporary"}}', { status: 503 })
+                  : input.respond(
+                      sseEvents(deltaChunk({ content: handoff("Physical retry") }), deltaChunk({}, "stop")),
+                      { headers: { "content-type": "text/event-stream" } },
+                    ),
+              )
+            }),
+          ),
+        )
       if (replayProvider)
         return LLMClient.stream(request).pipe(
           Stream.provide(
@@ -574,6 +596,8 @@ const setup = Effect.gen(function* () {
   requests.length = 0
   replayProvider = false
   replayFailures = 0
+  replaySummaryFailures = undefined
+  replaySummaryCalls = 0
   replayBodies.length = 0
   sessionTokenBudget = undefined
   sessionDuration = undefined
@@ -4441,6 +4465,165 @@ describe("SessionRunnerLLM", () => {
         { type: "compaction", summary: handoff("Recover raw overflow") },
         { type: "assistant", finish: "stop" },
       ])
+    }),
+  )
+
+  it.effect("751 retries a transient summary with separate settlements and installs only the final handoff", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      responses = [
+        [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+        new LLMError({
+          module: "fixture",
+          method: "stream",
+          reason: new ProviderInternalReason({ message: "temporary", status: 503 }),
+        }),
+        fragmentFixture("text", "retry-summary", [handoff("Recovered transient")]).completeEvents,
+        fragmentFixture("text", "final", ["Recovered"]).completeEvents,
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* adjust(5000)
+      yield* Fiber.join(run)
+      expect(requests).toHaveLength(4)
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "compaction")).toHaveLength(1)
+      const database = yield* Database.Service
+      const settlements = yield* database.db
+        .select({ type: EventTable.type, data: EventTable.data })
+        .from(EventTable)
+        .where(
+          inArray(EventTable.type, [
+            EventV2.versionedType("session.next.compaction.failed", 1),
+            EventV2.versionedType("session.next.compaction.ended", 1),
+          ]),
+        )
+        .all()
+        .pipe(Effect.orDie)
+      expect(settlements).toHaveLength(2)
+      expect(new Set(settlements.map((row) => row.data.messageID)).size).toBe(2)
+      const usage = yield* SessionUsageQuery.readTotal(sessionID)
+      expect(usage.calls).toBeGreaterThanOrEqual(4)
+      expect(usage.unreported).toBeGreaterThan(0)
+    }),
+  )
+
+  it.effect("751 real HTTP summary retries do not stack a second transport allowance", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      replaySummaryFailures = 2
+      responses = [
+        [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+        fragmentFixture("text", "final", ["Recovered"]).completeEvents,
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* adjust(15_000)
+      yield* Fiber.join(run)
+      expect(replaySummaryCalls).toBe(3)
+      const points = (yield* SessionUsageQuery.read(sessionID)).cache!.points.filter(
+        (point) => point.purpose === "summary",
+      )
+      expect(points).toHaveLength(3)
+      expect(points.map((point) => point.attempts?.length)).toEqual([1, 1, 1])
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "compaction")).toHaveLength(1)
+    }),
+  )
+
+  it.effect("751 transient summary retries stop after three physical attempts", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      responses = [
+        [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+        ...Array.from(
+          { length: 3 },
+          () =>
+            new LLMError({
+              module: "fixture",
+              method: "stream",
+              reason: new RateLimitReason({ message: "temporary" }),
+            }),
+        ),
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.flip, Effect.forkChild)
+      yield* adjust(15_000)
+      yield* Fiber.join(run)
+      expect(requests).toHaveLength(4)
+      expect((yield* session.context(sessionID)).some((message) => message.type === "compaction")).toBe(false)
+    }),
+  )
+
+  for (const failure of [
+    LLMEvent.providerError({ message: "explicit no retry", status: 503, retryable: false }),
+    LLMEvent.providerError({ message: "authentication", status: 401, retryable: true }),
+    LLMEvent.providerError({ message: "quota", status: 429, reason: new QuotaExceededReason({ message: "quota" }) }),
+    LLMEvent.providerError({
+      message: "overflow",
+      status: 503,
+      reason: new InvalidRequestReason({ message: "context", classification: "context-overflow" }),
+    }),
+  ])
+    it.effect("751 summary never retries " + failure.message, () =>
+      Effect.gen(function* () {
+        const session = yield* setupOverflowRecovery
+        responses = [
+          [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+          [failure],
+        ]
+        expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+        expect(requests).toHaveLength(2)
+      }),
+    )
+
+  it.effect("751 summary cancellation during backoff dispatches no retry", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      responses = [
+        [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+        new LLMError({ module: "fixture", method: "stream", reason: new RateLimitReason({ message: "temporary" }) }),
+      ]
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* adjust(1000)
+      yield* session.interrupt(sessionID)
+      yield* Fiber.await(run)
+      yield* adjust(10_000)
+      expect(requests).toHaveLength(2)
+      expect((yield* session.context(sessionID)).some((message) => message.type === "compaction")).toBe(false)
+    }),
+  )
+
+  it.effect("751 summary retry-after cannot exceed the shared two-minute deadline", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      responses = [
+        [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+        new LLMError({
+          module: "fixture",
+          method: "stream",
+          reason: new RateLimitReason({ message: "wait", retryAfterMs: 120_000 }),
+        }),
+      ]
+      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBeInstanceOf(LLMError)
+      expect(requests).toHaveLength(2)
+    }),
+  )
+
+  it.effect("751 summary retry checks the session token budget after settling failed usage", () =>
+    Effect.gen(function* () {
+      const session = yield* setupOverflowRecovery
+      sessionTokenBudget = (yield* SessionUsageQuery.readTotal(sessionID)).total + 50
+      responses = [
+        [LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })],
+        [
+          LLMEvent.providerError({ message: "temporary", status: 503 }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "error",
+            usage: { inputTokens: 100, outputTokens: 0, nonCachedInputTokens: 100 },
+          }),
+        ],
+      ]
+      yield* session.resume(sessionID).pipe(Effect.ignore)
+      expect(requests).toHaveLength(2)
+      expect((yield* SessionUsageQuery.readTotal(sessionID)).total).toBeGreaterThanOrEqual(sessionTokenBudget)
+      expect((yield* session.context(sessionID)).some((message) => message.type === "compaction")).toBe(false)
     }),
   )
 

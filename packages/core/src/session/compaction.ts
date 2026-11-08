@@ -16,7 +16,8 @@ import {
   type Usage,
 } from "@zaovra-ai/llm"
 import { usageTokens, usageReported } from "./usage-tokens"
-import { DateTime, Effect, Stream, Schema } from "effect"
+import { RequestExecutor } from "@zaovra-ai/llm/route"
+import { Clock, DateTime, Effect, Stream, Schema } from "effect"
 import type { Config } from "../config"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
@@ -148,13 +149,14 @@ type Settings = {
   readonly tokens: number
 }
 
-type Dependencies = {
+type Dependencies<E = never> = {
   readonly db: Database.Interface["db"]
   readonly events: EventV2.Interface
   readonly llm: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
   }
   readonly config: readonly Config.Entry[]
+  readonly canRetry?: (input: Input) => Effect.Effect<boolean, E>
 }
 
 type Input = {
@@ -297,7 +299,7 @@ const prepareSummary = (input: Input, tokens: number, budget: number, reducedOnl
   }
 }
 
-export const make = (dependencies: Dependencies) => {
+export const make = <E = never>(dependencies: Dependencies<E>) => {
   const config = settings(dependencies.config)
   const failedSources = new Map<SessionSchema.ID, number>()
   const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
@@ -369,82 +371,113 @@ export const make = (dependencies: Dependencies) => {
       return false
     }
 
-    const chunks: string[] = []
-    let usage: Usage | undefined
-    let failure: string | undefined
-    let finished = false
-    yield* SessionOwnership.check
     const request = summaryRequest({
       model: input.model,
       prompt: prepared.prompt,
       maxTokens: summaryOutput,
     })
-    const summarized = yield* SessionCache.track(dependencies.llm.stream(request), {
-      purpose: "summary",
-      durableMessages: 0,
-      request,
-      epoch: -sourceSequence - 1,
-      sessionID: input.sessionID,
-      db: dependencies.db,
-      events: dependencies.events,
-    }).pipe(
-      Stream.runForEach((event) => {
-        if (LLMEvent.is.providerError(event)) failure = event.message
-        if (LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputStart(event))
-          failure = "Compaction attempted a tool call; no tool was executed"
-        if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
-        if (LLMEvent.is.stepFinish(event)) {
-          usage = event.usage
-          finished = event.reason === "stop"
-        }
-        if (LLMEvent.is.finish(event)) {
-          usage = event.usage ?? usage
-          finished = event.reason === "stop"
-        }
-        return Effect.void
-      }),
-      Effect.as(true),
-      Effect.timeout("2 minutes"),
-      Effect.catchTag("TimeoutError", () => {
-        failure = "Compaction exceeded its 2 minute deadline"
-        return Effect.succeed(false)
-      }),
-      Effect.catchTag("LLM.Error", (error) => {
-        failure = error.reason.message
-        return Effect.succeed(false)
-      }),
-    )
-    const summary = chunks.join("")
-    failure ??= invalidSummary(summary)
-    if (!summarized || failure || !finished || !summary.trim()) {
-      failedSources.set(input.sessionID, sourceSequence)
-      yield* dependencies.events.publish(SessionEvent.Compaction.Failed, {
+    const deadline = (yield* Clock.currentTimeMillis) + 120_000
+    // Retry only this read-only summary, with a fresh durable settlement for every physical request.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const attemptID = attempt === 0 ? messageID : SessionMessage.ID.create()
+      if (attempt > 0)
+        yield* dependencies.events.publish(SessionEvent.Compaction.Started, {
+          sessionID: input.sessionID,
+          messageID: attemptID,
+          timestamp: yield* DateTime.now,
+          reason: input.reason ?? "auto",
+          sourceSequence,
+        })
+      const chunks: string[] = []
+      let usage: Usage | undefined
+      let failure: string | undefined
+      let finished = false
+      let toolCall = false
+      let retryAfter: number | undefined
+      yield* SessionOwnership.check
+      const summarized = yield* SessionCache.track(
+        dependencies.llm.stream(request).pipe(Stream.provideService(RequestExecutor.AutomaticRetries, false)),
+        {
+          purpose: "summary",
+          durableMessages: 0,
+          request,
+          epoch: -sourceSequence - 1,
+          sessionID: input.sessionID,
+          db: dependencies.db,
+          events: dependencies.events,
+        },
+      ).pipe(
+        Stream.runForEach((event) => {
+          if (LLMEvent.is.providerError(event)) {
+            failure = event.message
+            retryAfter = transientSummaryFailure(event.reason, event.status, event.retryable)
+              ? ((event.reason && "retryAfterMs" in event.reason ? event.reason.retryAfterMs : undefined) ?? 0)
+              : undefined
+          }
+          if (LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputStart(event)) toolCall = true
+          if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+          if (LLMEvent.is.stepFinish(event)) {
+            usage = event.usage
+            finished = event.reason === "stop"
+          }
+          if (LLMEvent.is.finish(event)) {
+            usage = event.usage ?? usage
+            finished = event.reason === "stop"
+          }
+          return Effect.void
+        }),
+        Effect.as(true),
+        Effect.timeout(Math.max(0, deadline - (yield* Clock.currentTimeMillis))),
+        Effect.catchTag("TimeoutError", () => {
+          failure = "Compaction exceeded its 2 minute deadline"
+          return Effect.succeed(false)
+        }),
+        Effect.catchTag("LLM.Error", (error) => {
+          failure = error.reason.message
+          retryAfter = transientSummaryFailure(error.reason) ? (error.retryAfterMs ?? 0) : undefined
+          return Effect.succeed(false)
+        }),
+      )
+      const summary = chunks.join("")
+      if (toolCall) failure = "Compaction attempted a tool call; no tool was executed"
+      failure ??= invalidSummary(summary)
+      if (!summarized || failure || !finished || !summary.trim()) {
+        failedSources.set(input.sessionID, sourceSequence)
+        yield* dependencies.events.publish(SessionEvent.Compaction.Failed, {
+          sessionID: input.sessionID,
+          messageID: attemptID,
+          timestamp: yield* DateTime.now,
+          reason: input.reason ?? "auto",
+          sourceSequence,
+          error: {
+            type: "unknown",
+            message:
+              failure ?? (finished ? "Compaction returned an empty summary" : "Compaction did not finish normally"),
+          },
+          usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
+        })
+        if (toolCall || retryAfter === undefined || attempt === 2 || !dependencies.canRetry) return false
+        if (!(yield* dependencies.canRetry(input))) return false
+        const delay = Math.max(5_000 * (attempt + 1), retryAfter)
+        if (!Number.isFinite(delay) || delay >= deadline - (yield* Clock.currentTimeMillis)) return false
+        yield* Effect.sleep(delay)
+        if (!(yield* dependencies.canRetry(input))) return false
+        continue
+      }
+      yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
         sessionID: input.sessionID,
-        messageID,
+        messageID: attemptID,
         timestamp: yield* DateTime.now,
         reason: input.reason ?? "auto",
         sourceSequence,
-        error: {
-          type: "unknown",
-          message:
-            failure ?? (finished ? "Compaction returned an empty summary" : "Compaction did not finish normally"),
-        },
+        text: summary,
+        recent: prepared.recent,
         usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
       })
-      return false
+      failedSources.delete(input.sessionID)
+      return true
     }
-    yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
-      sessionID: input.sessionID,
-      messageID,
-      timestamp: yield* DateTime.now,
-      reason: input.reason ?? "auto",
-      sourceSequence,
-      text: summary,
-      recent: prepared.recent,
-      usage: { providerID: input.model.provider, tokens: usageTokens(usage), reported: usageReported(usage) },
-    })
-    failedSources.delete(input.sessionID)
-    return true
+    return false
   })
   const compactIfNeeded = Effect.fn("SessionCompaction.compactIfNeeded")(function* (input: Input) {
     if (!config.auto) return false
@@ -462,4 +495,14 @@ export const make = (dependencies: Dependencies) => {
     compactIfNeeded,
     compactAfterOverflow,
   }
+}
+
+function transientSummaryFailure(reason: LLMError["reason"] | undefined, status?: number, retryable?: boolean) {
+  if (retryable === false) return false
+  if (reason)
+    return (
+      reason._tag === "RateLimit" ||
+      (reason._tag === "ProviderInternal" && [500, 502, 503, 504, 529].includes(reason.status))
+    )
+  return status === 429 || status === 503 || status === 529
 }
