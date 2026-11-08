@@ -23,7 +23,8 @@
     "package:mac": "bun run package:check && electron-builder --mac --config electron-builder.config.ts",
     "package:win": "bun run package:check && electron-builder --win --config electron-builder.config.ts",
     "package:linux": "bun run package:check && electron-builder --linux --config electron-builder.config.ts",
-    "test:first-launch": "node e2e/first-launch.mjs"
+    "test:first-launch": "node e2e/first-launch.mjs",
+    "test:timeline": "node e2e/timeline-regression.mjs"
   },
   "main": "./out/main/index.js",
   "dependencies": {

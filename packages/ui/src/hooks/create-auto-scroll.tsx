@@ -8,6 +8,7 @@ export interface AutoScrollOptions {
   onUserInteracted?: () => void
   overflowAnchor?: "none" | "auto" | "dynamic"
   bottomThreshold?: number
+  scrollToBottom?: () => void
 }
 
 export function createAutoScroll(options: AutoScrollOptions) {
@@ -67,6 +68,10 @@ export function createAutoScroll(options: AutoScrollOptions) {
     const el = store.scrollRef
     if (!el) return
     markAuto(el)
+    if (options.scrollToBottom) {
+      options.scrollToBottom()
+      return
+    }
     if (behavior === "smooth") {
       el.scrollTo({ top: el.scrollHeight, behavior })
       return

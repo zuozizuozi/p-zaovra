@@ -82,6 +82,8 @@ export const dict = {
   "session.process.failed": "（{{count}}个失败）",
   "session.process.separator": "、",
   "session.process.details": "过程详情",
+  "session.process.thought": "思考 {{count}} 条",
+  "session.process.record": "过程记录 {{count}} 条",
   "session.turn.stopped": "已停止",
   "session.turn.interrupted": "已中断",
   "session.turn.error": "需要处理",

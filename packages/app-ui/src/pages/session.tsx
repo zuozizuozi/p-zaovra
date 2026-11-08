@@ -1650,6 +1650,7 @@ export default function Page() {
   const autoScroll = createAutoScroll({
     working: () => true,
     overflowAnchor: "none",
+    scrollToBottom: () => scrollToEnd(),
   })
   createEffect(
     on(

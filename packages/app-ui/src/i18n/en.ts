@@ -85,6 +85,8 @@ export const dict = {
   "session.process.failed": " ({{count}} failed)",
   "session.process.separator": ", ",
   "session.process.details": "Process details",
+  "session.process.thought": "{{count}} thoughts",
+  "session.process.record": "{{count}} process records",
   "session.turn.stopped": "Stopped",
   "session.turn.interrupted": "Interrupted",
   "session.turn.error": "Action needed",
