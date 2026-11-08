@@ -1,38 +1,54 @@
 {
   "zh": [
     {
-      "title": "后台状态更清楚，配置更可靠。",
-      "description": "侧栏进行中的圈圈会转了，后台完成后显示待查看，点开后清除"
+      "title": "输入框上方更干净",
+      "description": "状态文字都去掉了，只保留需要你当场处理的卡片"
     },
     {
-      "title": "配置并发写入",
-      "description": "修复同时修改配置时可能互相覆盖的问题"
+      "title": "停止后可以接着做",
+      "description": "停止或预算用完后，发一句“继续”就能接上；预算触顶可直接提高"
     },
     {
-      "title": "小造新动画",
-      "description": "小造换上新动画，回复时会转头、动嘴"
+      "title": "侧栏状态更准确",
+      "description": "进行中只显示转圈，后台完成的待看状态重启后也能恢复"
     },
     {
-      "title": "查看每版更新",
-      "description": "每个版本的更新内容都能在“关于”里查看"
+      "title": "拉伸窗口不再上下跳",
+      "description": "输出时调整窗口大小，内容保持稳定"
+    },
+    {
+      "title": "更新说明一屏看完",
+      "description": "不用再一页页点“下一步”"
+    },
+    {
+      "title": "错误信息完整显示",
+      "description": "错误卡的摘要不再被裁切"
     }
   ],
   "en": [
     {
-      "title": "Clearer background status and more reliable settings.",
-      "description": "The sidebar spinner now animates, and finished background sessions show as ready to review until opened."
+      "title": "A cleaner composer",
+      "description": "Status text is gone from above the input. Only cards that need your action stay"
     },
     {
-      "title": "Safer settings changes",
-      "description": "Fixed settings being overwritten when changed at the same time."
+      "title": "Continue after stopping",
+      "description": "After a stop or a budget limit, send “continue” to pick up where you left off. You can raise the budget right there"
     },
     {
-      "title": "New mascot animations",
-      "description": "The mascot has new animations and reacts while replying."
+      "title": "More accurate sidebar",
+      "description": "Running sessions just show a spinner, and finished background sessions stay marked after a restart"
     },
     {
-      "title": "Release notes in About",
-      "description": "You can now see what changed in each version from About."
+      "title": "Steadier window resizing",
+      "description": "Content stays put when you resize the window during a reply"
+    },
+    {
+      "title": "Release notes on one screen",
+      "description": "No more clicking Next through each page"
+    },
+    {
+      "title": "Full error details",
+      "description": "Error card summaries are no longer cut off"
     }
   ]
 }
