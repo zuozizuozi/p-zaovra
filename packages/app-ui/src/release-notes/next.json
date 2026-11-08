@@ -1,0 +1,42 @@
+{
+  "zh": [
+    {
+      "title": "后台状态更清楚，配置更可靠。",
+      "description": "侧栏进行中的圈圈会转了，后台完成后显示待查看，点开后清除",
+      "focus": true
+    },
+    {
+      "title": "配置并发写入",
+      "description": "修复同时修改配置时可能互相覆盖的问题",
+      "focus": true
+    },
+    {
+      "title": "小造新动画",
+      "description": "小造换上新动画，回复时会转头、动嘴"
+    },
+    {
+      "title": "查看每版更新",
+      "description": "每个版本的更新内容都能在“关于”里查看"
+    }
+  ],
+  "en": [
+    {
+      "title": "Clearer background status and more reliable settings.",
+      "description": "The sidebar spinner now animates, and finished background sessions show as ready to review until opened.",
+      "focus": true
+    },
+    {
+      "title": "Safer settings changes",
+      "description": "Fixed settings being overwritten when changed at the same time.",
+      "focus": true
+    },
+    {
+      "title": "New mascot animations",
+      "description": "The mascot has new animations and reacts while replying."
+    },
+    {
+      "title": "Release notes in About",
+      "description": "You can now see what changed in each version from About."
+    }
+  ]
+}

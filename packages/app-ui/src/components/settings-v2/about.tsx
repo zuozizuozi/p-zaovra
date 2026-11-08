@@ -1,4 +1,5 @@
 import { useLanguage } from "@/context/language"
+import { useHighlights } from "@/context/highlights"
 import { Show, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
@@ -10,6 +11,7 @@ export function SettingsAbout() {
   const language = useLanguage()
   const platform = usePlatform()
   const updater = useUpdaterAction()
+  const highlights = useHighlights()
   const [state, setState] = createStore<{ document?: "notices" }>({})
   const update = () => platform.updater?.state()
   const [text] = createResource(
@@ -38,6 +40,11 @@ export function SettingsAbout() {
             {language.t(updater.action().label)}
           </ButtonV2>
         </div>
+      </Show>
+      <Show when={highlights.available()}>
+        <ButtonV2 variant="neutral" onClick={highlights.show}>
+          {language.t("settings.general.row.releaseNotes.view")}
+        </ButtonV2>
       </Show>
       <p>© 2026 Zaovra</p>
       <Show when={platform.legalDocument}>

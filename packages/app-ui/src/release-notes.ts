@@ -1,4 +1,5 @@
 import beta12 from "./release-notes/0.1.1-beta.12.json"
+import current from "./release-notes/current.json"
 
 export type ReleaseHighlight = {
   title: string
@@ -8,6 +9,7 @@ export type ReleaseHighlight = {
 
 const releases: Record<string, { zh: ReleaseHighlight[]; en: ReleaseHighlight[] }> = {
   "0.1.1-beta.12": beta12,
+  ...(current.version ? { [current.version]: current } : {}),
 }
 
 export function releaseNotes(version: string | undefined, locale: string) {

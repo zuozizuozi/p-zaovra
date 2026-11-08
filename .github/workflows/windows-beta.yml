@@ -78,6 +78,16 @@ jobs:
           bun packages/desktop-app/scripts/beta-ci.ts "$RUNNER_TEMP/beta-ci.json" "$SOURCE_SHA" "$CURRENT_RUN"
           echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Require pending bilingual release notes
+        if: steps.gate.outputs.build == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.gate.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "$SOURCE_SHA:packages/app-ui/src/release-notes/next.json" > "$RUNNER_TEMP/release-notes.json"
+          bun packages/desktop-app/scripts/release-notes.ts check "$RUNNER_TEMP/release-notes.json"
+
   build:
     if: (github.event_name == 'workflow_run' || inputs.build_only) && needs.gate.outputs.build == 'true'
     needs: gate
