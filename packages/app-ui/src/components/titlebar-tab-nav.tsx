@@ -403,8 +403,6 @@ function SidebarSessionStatus(props: { server: ServerConnection.Key; session: Se
     const status = state.status()
     if (status === "session.activity.permission" || status === "session.activity.question")
       return language.t("session.sidebar.status.pending")
-    if (status === "session.activity.running" || status === "session.activity.shell")
-      return language.t("session.sidebar.status.running")
     if (status === "session.activity.unread" || status === "session.activity.error")
       return language.t("session.sidebar.status.unread")
   })
