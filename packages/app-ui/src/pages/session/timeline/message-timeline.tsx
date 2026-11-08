@@ -607,6 +607,11 @@ export function MessageTimeline(props: {
     observeElementRect: (instance, callback) =>
       observeElementRect(instance, (rect) => {
         callback(rect)
+        // A native viewport resize must keep the bottom pinned before this frame paints.
+        if (props.shouldAnchorBottom() && !props.hasScrollGesture()) {
+          clearPrependAnchor()
+          instance.scrollToEnd()
+        }
         layoutFrame.follow()
       }),
     observeElementOffset: observeElementOffsetReconnectAware,
@@ -616,7 +621,12 @@ export function MessageTimeline(props: {
     scrollToFn: (offset, options, instance) => {
       // Expose the computed range before core writes an anchor correction so the browser does not clamp it to the old height.
       if (virtualContent) virtualContent.style.height = `${instance.getTotalSize()}px`
-      elementScroll(offset, options, instance)
+      // End alignment must use the live viewport while native resize observations catch up.
+      const bottom =
+        props.shouldAnchorBottom() &&
+        !props.hasScrollGesture() &&
+        offset >= Math.max(0, instance.getTotalSize() - (instance.scrollRect?.height ?? 0)) - 2
+      elementScroll(bottom && instance.scrollElement ? instance.scrollElement.scrollHeight : offset, options, instance)
     },
     get getItemKey() {
       const rows = timelineRows()
