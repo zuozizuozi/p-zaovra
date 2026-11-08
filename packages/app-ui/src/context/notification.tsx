@@ -2,7 +2,7 @@ import { usePermission } from "./permission"
 import { notificationText, permissionDescription } from "@/utils/notification-content"
 import { sessionHref } from "@/utils/session-route"
 import { createStore, reconcile } from "solid-js/store"
-import { type Accessor, batch, createEffect, createMemo, createRoot, getOwner, onCleanup } from "solid-js"
+import { type Accessor, batch, createEffect, createMemo, createRoot, getOwner, onCleanup, untrack } from "solid-js"
 import { useParams, useSearchParams } from "@solidjs/router"
 import { createSimpleContext } from "@zaovra-ai/ui/context"
 import type { ServerSDK } from "./server-sdk"
@@ -32,6 +32,7 @@ type NotificationBase = {
 
 type TurnCompleteNotification = NotificationBase & {
   type: "turn-complete"
+  completion?: string
 }
 
 type ErrorNotification = NotificationBase & {
@@ -209,7 +210,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
 
 type NotificationState = ReturnType<typeof createServerNotificationState>
 
-function createServerNotificationState(input: {
+export function createServerNotificationState(input: {
   sdk: ServerSDK
   key: ServerConnection.Key
   permission: ReturnType<ReturnType<typeof usePermission>["ensureServerState"]>
@@ -237,6 +238,7 @@ function createServerNotificationState(input: {
     createStore({
       list: [] as Notification[],
       manualUnread: {} as Record<string, string | undefined>,
+      pendingCompletions: {} as Record<string, string | undefined>,
     }),
   )
   const [index, setIndex] = createStore<NotificationIndex>(buildNotificationIndex(store.list))
@@ -340,12 +342,22 @@ function createServerNotificationState(input: {
     return sessionID === activeSession
   }
 
-  const handleSessionIdle = (directory: string, event: { properties: { sessionID?: string } }, time: number) => {
+  const handleSessionIdle = (
+    directory: string,
+    event: { properties: { sessionID?: string } },
+    time: number,
+    completion?: { messageID: string; valid: () => boolean },
+  ) => {
     const sessionID = event.properties.sessionID
-    void lookup(directory, sessionID).then((session) => {
-      if (meta.disposed) return
-      if (!session) return
-      if (session.parentID) return
+    return lookup(directory, sessionID).then((session) => {
+      if (meta.disposed || !session || session.parentID || completion?.valid() === false) return false
+      if (
+        completion &&
+        store.list.some(
+          (n) => n.type === "turn-complete" && n.session === sessionID && n.completion === completion.messageID,
+        )
+      )
+        return true
 
       const viewed = viewedInCurrentSession(directory, sessionID)
       if (!viewed && settings.sounds.agentEnabled()) {
@@ -358,12 +370,14 @@ function createServerNotificationState(input: {
         viewed,
         type: "turn-complete",
         session: sessionID,
+        completion: completion?.messageID,
       })
 
       const href = `/${base64Encode(directory)}/session/${sessionID}`
       if (!viewed && settings.notifications.agent()) {
         void platform.notify(language.t("notification.session.responseReady.title"), session.title ?? sessionID, href)
       }
+      return true
     })
   }
 
@@ -401,15 +415,80 @@ function createServerNotificationState(input: {
     })
   }
 
-  // V2 has no legacy session.idle event. A provider step can finish while tools
-  // or another turn still run, so notify only after the ownership check sets idle.
-  const [v2Completions, setV2Completions] = createStore<Record<string, string | undefined>>({})
+  // Persist observed work so a missed end event or a recreated notification root
+  // can recover from completed history, but never mark untouched idle history unread.
+  const observedBusy = new Set<string>()
+  const recovering = new Set<string>()
   createEffect(() => {
-    Object.entries(serverSync().session.data.session_status).forEach(([sessionID, status]) => {
-      const directory = v2Completions[sessionID]
-      if (status.type !== "idle" || !directory) return
-      setV2Completions(sessionID, undefined)
-      handleSessionIdle(directory, { properties: { sessionID } }, Date.now())
+    if (!ready()) return
+    const session = serverSync().session
+    Object.entries(session.data.session_status).forEach(([sessionID, status]) => {
+      if (status.type === "idle") {
+        observedBusy.delete(sessionID)
+        return
+      }
+      const info = session.data.info[sessionID]
+      if (!info || info.parentID || observedBusy.has(sessionID)) return
+      observedBusy.add(sessionID)
+      untrack(() => setStore("pendingCompletions", sessionID, info.directory))
+    })
+  })
+  const recoverCompletion = (sessionID: string, directory: string) => {
+    if (meta.disposed || !ready()) return
+    const session = serverSync().session
+    const status = session.data.session_status[sessionID]?.type
+    const messages = session.data.message[sessionID]
+    const latest = messages?.at(-1)
+    if (recovering.has(sessionID) || (status !== undefined && status !== "idle")) return
+    if (status === undefined || !messages) {
+      recovering.add(sessionID)
+      const refresh = status === undefined ? session.resync(sessionID) : session.sync(sessionID)
+      void refresh.then(
+        () => {
+          recovering.delete(sessionID)
+          if (session.data.session_status[sessionID] && session.data.message[sessionID])
+            recoverCompletion(sessionID, directory)
+        },
+        () => recovering.delete(sessionID),
+      )
+      return
+    }
+    const message = latest
+    if (!message) return
+    if (
+      session.data.info[sessionID]?.parentID ||
+      (message.role === "assistant" && (message.error || session.stopped(message.parentID)))
+    ) {
+      setStore("pendingCompletions", sessionID, undefined)
+      return
+    }
+    if (message.role !== "assistant" || !message.time.completed) return
+    const valid = () => {
+      const latest = session.data.message[sessionID]?.at(-1)
+      return (
+        !meta.disposed &&
+        store.pendingCompletions[sessionID] === directory &&
+        session.data.session_status[sessionID]?.type === "idle" &&
+        latest?.id === message.id &&
+        latest.role === "assistant" &&
+        !!latest.time.completed &&
+        !latest.error &&
+        !session.stopped(latest.parentID)
+      )
+    }
+    recovering.add(sessionID)
+    void handleSessionIdle(directory, { properties: { sessionID } }, Date.now(), { messageID: message.id, valid }).then(
+      (recorded) => {
+        recovering.delete(sessionID)
+        if (recorded && valid()) setStore("pendingCompletions", sessionID, undefined)
+      },
+      () => recovering.delete(sessionID),
+    )
+  }
+  createEffect(() => {
+    if (!ready()) return
+    Object.entries(store.pendingCompletions ?? {}).forEach(([sessionID, directory]) => {
+      if (directory) recoverCompletion(sessionID, directory)
     })
   })
 
@@ -417,11 +496,11 @@ function createServerNotificationState(input: {
   const unsub = serverSDK().event.listen((e) => {
     const event = e.details
     if (event.type === "session.next.step.ended") {
-      setV2Completions(event.properties.sessionID, e.name)
+      setStore("pendingCompletions", event.properties.sessionID, e.name)
       return
     }
     if (event.type === "session.next.step.failed" || event.type === "session.next.deleted") {
-      setV2Completions(event.properties.sessionID, undefined)
+      setStore("pendingCompletions", event.properties.sessionID, undefined)
       return
     }
     if (
