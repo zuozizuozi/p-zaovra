@@ -10,7 +10,12 @@ const executable = resolve(process.argv[2] ?? "")
 const record = resolve(process.argv[3] ?? "")
 const locale = process.argv[4] === "en" ? "en" : "zh"
 const development = process.argv[5] === "--development"
-const currentVersion = "0.1.1-beta.12"
+const current = process.argv.includes("--current")
+const currentNotes = current
+  ? JSON.parse(await readFile(new URL("../../app-ui/src/release-notes/current.json", import.meta.url), "utf8"))
+  : undefined
+const currentVersion = currentNotes?.version ?? "0.1.1-beta.12"
+if (current) assert.match(currentVersion, /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/)
 const disabledTail = process.argv.includes("--disabled-tail")
 assert(process.argv[2] && process.argv[3] && isAbsolute(executable) && isAbsolute(record))
 assert.equal(
@@ -71,6 +76,7 @@ for (const [key, dir] of Object.entries({
   await mkdir(env[key], { recursive: true })
 }
 env.ZAOVRA_TEST_ONBOARDING = "1"
+if (current) env.ZAOVRA_DISABLE_MODELS_FETCH = "true"
 const profile = join(record, "temp", "explicit-profile")
 const config = join(profile, "desktop", "backend", "config", "zaovra")
 const summary = {
@@ -195,22 +201,25 @@ async function store(page, key) {
   return page.evaluate(async (key) => JSON.parse(await window.api.storeGet("default.dat", key)), key)
 }
 async function priorVersion(page) {
-  await page.evaluate(async () => {
-    await window.api.storeSet("default.dat", "highlights.v1", JSON.stringify({ version: "0.1.1-beta.11" }))
-    await window.api.storeSet("default.dat", "app-version.v1", JSON.stringify({ version: "0.1.1-beta.11" }))
-  })
+  const previous = current ? currentVersion.replace(/\d+$/, (n) => String(Number(n) - 1)) : "0.1.1-beta.11"
+  await page.evaluate(async (previous) => {
+    await window.api.storeSet("default.dat", "highlights.v1", JSON.stringify({ version: previous }))
+    await window.api.storeSet("default.dat", "app-version.v1", JSON.stringify({ version: previous }))
+  }, previous)
 }
 async function ready(page) {
   await page
     .locator('[data-component="prompt-input"][contenteditable="true"]')
     .waitFor({ state: "visible", timeout: 90_000 })
   await page.waitForFunction(
-    async () => JSON.parse(await window.api.storeGet("default.dat", "highlights.v1"))?.version === "0.1.1-beta.12",
+    async (version) => JSON.parse(await window.api.storeGet("default.dat", "highlights.v1"))?.version === version,
+    currentVersion,
   )
 }
-const title = locale === "zh" ? "Zaovra 0.1.1-beta.12 更新内容" : "What’s new in Zaovra 0.1.1-beta.12"
-const titles =
-  locale === "zh"
+const title = locale === "zh" ? `Zaovra ${currentVersion} 更新内容` : `What’s new in Zaovra ${currentVersion}`
+const titles = current
+  ? currentNotes[locale].map((item) => item.title)
+  : locale === "zh"
     ? ["回复不再卡住", "任务中可以插话", "模型列表更清楚", "侧栏右键可重命名", "权限卡片更紧凑"]
     : [
         "Replies no longer get stuck",
@@ -225,7 +234,69 @@ async function openSettings(page) {
   await page.locator('[data-action="view-release-notes"]').waitFor({ state: "visible" })
 }
 try {
-  if (!disabledTail) {
+  if (current) {
+    let page = await launch()
+    await ready(page)
+    assert.equal(await notes(page).count(), 0, "new install does not auto-open current notes")
+    summary.assertions.currentFreshQuiet = true
+    await page.keyboard.press("Control+,")
+    await page.getByRole("tab", { name: locale === "zh" ? "关于 Zaovra" : "About Zaovra", exact: true }).click()
+    const about = page.getByRole("button", {
+      name: locale === "zh" ? "查看本版更新内容" : "View this version’s release notes",
+      exact: true,
+    })
+    await about.waitFor({ state: "visible" })
+    await page.screenshot({ path: join(record, "current-about-entry.png") })
+    await about.click()
+    await notes(page).waitFor({ state: "visible" })
+    for (let i = 0; i < titles.length; i++) {
+      await notes(page).getByText(titles[i], { exact: true }).waitFor({ state: "visible" })
+      await notes(page).getByText(currentNotes[locale][i].description, { exact: true }).waitFor({ state: "visible" })
+      if (currentNotes[locale][i].focus)
+        await notes(page)
+          .getByText(locale === "zh" ? "请重点测" : "Please focus testing here", { exact: true })
+          .waitFor({ state: "visible" })
+      await page.screenshot({ path: join(record, "current-about-item-" + i + ".png") })
+      await notes(page)
+        .getByRole("button", {
+          name:
+            i < titles.length - 1 ? (locale === "zh" ? "下一步" : "Next") : locale === "zh" ? "开始" : "Get started",
+          exact: true,
+        })
+        .click()
+    }
+    await notes(page).waitFor({ state: "hidden" })
+    summary.assertions.aboutAllCurrentNotes = true
+    await priorVersion(page)
+    await stop()
+    page = await launch()
+    await ready(page)
+    await notes(page).waitFor({ state: "visible" })
+    summary.assertions.currentVersionChangeAutoPopup = true
+    await page.screenshot({ path: join(record, "current-auto-popup.png") })
+    for (let i = 0; i < titles.length; i++) {
+      await notes(page).getByText(titles[i], { exact: true }).waitFor({ state: "visible" })
+      await notes(page)
+        .getByRole("button", {
+          name:
+            i < titles.length - 1 ? (locale === "zh" ? "下一步" : "Next") : locale === "zh" ? "开始" : "Get started",
+          exact: true,
+        })
+        .click()
+    }
+    await notes(page).waitFor({ state: "hidden" })
+    summary.assertions.currentAutoAllItems = true
+    await stop()
+    if (locale === "zh") {
+      page = await launch()
+      await ready(page)
+      assert.equal(await notes(page).count(), 0, "dismissed current version quiet after restart")
+      summary.assertions.currentRepeatQuiet = true
+      await page.screenshot({ path: join(record, "current-restart-quiet.png") })
+      await stop()
+    }
+  }
+  if (!current && !disabledTail) {
     let page = await launch()
     await ready(page)
     assert.equal(await notes(page).count(), 0, "fresh install has no automatic popup")
@@ -291,7 +362,7 @@ try {
       await stop()
     }
   }
-  if (disabledTail) {
+  if (!current && disabledTail) {
     // New isolated fixture for the previously unexecuted disabled-preference tail only.
     let page = await launch()
     await ready(page)
@@ -335,6 +406,7 @@ try {
     await new Promise((done) => fixture.close(done))
     summary.stopped = !desktop
     await writeFile(join(record, "result.json"), JSON.stringify(summary, null, 2) + "\n")
+    await writeFile(join(record, "finish.json"), JSON.stringify({ stopped: summary.stopped }))
   }
 }
 console.log(JSON.stringify(summary))
