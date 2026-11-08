@@ -64,6 +64,7 @@ export function TaskMascot(props: { state: MascotState; size?: "large"; animated
       data-pose={pose()}
       data-size={props.size}
       data-compact={view.compact ? "" : undefined}
+      data-motion={view.visible && !view.reduced && props.animated !== false ? "running" : "paused"}
       aria-hidden="true"
     >
       <MascotSvg id={id} ref={(node) => (svg = node)} />

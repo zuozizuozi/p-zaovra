@@ -85,6 +85,7 @@ export function createMascotRig(svg: SVGSVGElement) {
     last: { x: 0, y: 0 },
     prevJy: 0,
     actions: [] as Action[],
+    poke: 0,
     width: 0,
     lastStep: 0,
     rect: undefined as DOMRect | undefined,
@@ -174,10 +175,14 @@ export function createMascotRig(svg: SVGSVGElement) {
       f.sx *= kf(p, [[0, 1], [0.2, 1.1, "out"], [0.5, 0.96], [0.75, 1.01], [1, 1]])
     })
     if (motion.pose === "error") return blink()
-    const back = motion.expression
+    // Only the latest poke restores, and to the current pose's face rather than a face captured mid-poke.
+    const poked = ++motion.poke
     blink(() => (motion.expression = "happy"))
     play(0.9, () => undefined, {
-      mid: () => back !== "happy" && motion.expression === "happy" && blink(() => (motion.expression = back)),
+      mid: () => {
+        const rest = EXPRESSION[motion.pose]
+        if (poked === motion.poke && rest !== "happy" && motion.expression === "happy") blink(() => (motion.expression = rest))
+      },
       midAt: 1,
     })
   }
@@ -285,7 +290,10 @@ export function createMascotRig(svg: SVGSVGElement) {
       if (ts < 1.6) f.tx += osc(0.11) * 0.5
     }
 
-    motion.actions = motion.actions.filter((action) => {
+    // Callbacks can queue new actions, so filter a snapshot and keep whatever they added.
+    const running = motion.actions
+    motion.actions = []
+    const kept = running.filter((action) => {
       if (still) return false
       const p = (t - action.t0) / action.dur
       if (p < 0) return true
@@ -297,6 +305,7 @@ export function createMascotRig(svg: SVGSVGElement) {
       action.apply(Math.min(1, p), f)
       return p < 1
     })
+    motion.actions = [...kept, ...motion.actions]
 
     // Secondary motion: the horn lags the body and flops on take-off and landing.
     const jv = dt > 0 ? (f.jy - motion.prevJy) / dt : 0

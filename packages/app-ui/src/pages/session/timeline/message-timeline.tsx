@@ -466,11 +466,11 @@ export function MessageTimeline(props: {
     }
     return mascot.session === id && mascot.user === user ? mascot.terminal : "idle"
   }
-  // The newest part is text that has not ended: the turn is answering, not reasoning.
+  // Only the live delta stream can say text is being written, and only while that text is the turn's newest part.
   const streamingText = (user: string) => {
     const latest = (assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages).at(-1)
     const part = latest && getMsgParts(latest.id).at(-1)
-    return part?.type === "text" && part.text.length > 0 && part.time?.end === undefined
+    return !!part && serverSync().session.data.streaming_text[sessionID() ?? ""] === part.id
   }
   const unresolvedTools = (user: string) => {
     const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages

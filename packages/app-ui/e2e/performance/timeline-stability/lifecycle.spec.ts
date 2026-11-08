@@ -164,10 +164,6 @@ test.describe("timeline visual lifecycle stability", () => {
       "thinking",
     )
     await timeline.send(partUpdated(textPart(textID, "Starting")), 100)
-    await expect(page.locator('[data-timeline-row="AssistantHeading"] [data-component="task-mascot"]')).toHaveAttribute(
-      "data-pose",
-      "speaking",
-    )
     await timeline.send(partDelta(textID, " **stable"), 90)
     await timeline.send(partDelta(textID, " output** with `code` and [a link"), 130)
     await timeline.send(partDelta(textID, "](https://example.com)."), 220)
