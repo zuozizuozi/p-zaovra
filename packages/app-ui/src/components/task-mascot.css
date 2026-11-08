@@ -1,225 +1,66 @@
 [data-component="task-mascot"] {
+  --zm-b1: #a387ff;
+  --zm-b3: #5634cc;
+  --zm-foot1: #5a3bc8;
+  --zm-foot2: #3b2296;
+  --zm-halo: 0;
+  --zm-fresnel: 0.25;
+  --zm-glow: 0.55;
+  --zm-ground: 0.1;
+  --zm-shadow: 0.18;
   position: relative;
   display: inline-flex;
   width: 24px;
   height: 24px;
   flex-shrink: 0;
 }
-[data-component="task-mascot"] > img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+html[data-color-scheme="dark"] [data-component="task-mascot"] {
+  --zm-b1: #6a5bc4;
+  --zm-b3: #241d4a;
+  --zm-foot1: #2c2357;
+  --zm-foot2: #1a1436;
+  --zm-halo: 1;
+  --zm-fresnel: 1;
+  --zm-glow: 0.95;
+  --zm-ground: 0.5;
+  --zm-shadow: 0.55;
 }
 [data-component="task-mascot"][data-size="large"] {
   width: 36px;
   height: 36px;
 }
-[data-slot="mascot-cursor"] {
-  position: absolute;
-  right: -3px;
-  bottom: -2px;
-  font: 9px monospace;
-  color: var(--v2-text-text-base);
-  background: var(--v2-background-bg-base);
-  animation: mascot-pulse 2.4s ease-in-out infinite;
-}
-[data-slot="mascot-dots"] {
-  display: flex;
-  gap: 2%;
-  position: absolute;
-  top: 18%;
-  left: 30%;
-  width: 27%;
-  height: 9%;
-}
-[data-component="task-mascot"][data-state="thinking"] > img {
-  /* Hide only the baked-in dots; preserve the ear to their right. */
-  clip-path: polygon(0 0, 28% 0, 28% 30%, 58% 30%, 58% 0, 100% 0, 100% 100%, 0 100%);
-}
-[data-slot="mascot-dots"] i {
-  flex: 1;
-  height: 100%;
-  border-radius: 50%;
-  background: #8738ef;
-  animation: mascot-dot 2.4s ease-in-out infinite;
-}
-[data-slot="mascot-dots"] i:nth-child(2) {
-  animation-delay: 0.2s;
-}
-[data-slot="mascot-dots"] i:nth-child(3) {
-  animation-delay: 0.4s;
-}
-[data-component="task-mascot"][data-state="working"] {
-  animation: mascot-work 1.6s ease-in-out infinite;
-  transform-origin: 50% 80%;
-}
-@keyframes mascot-pulse {
-  50% {
-    opacity: 0.55;
-  }
-}
-@keyframes mascot-work {
-  25% {
-    transform: rotate(-3deg) translateY(-1px);
-  }
-  75% {
-    transform: rotate(3deg) translateY(-1px);
-  }
-}
-@keyframes mascot-dot {
-  30% {
-    transform: translateY(-2px);
-  }
-  60% {
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-component="task-mascot"],
-  [data-component="task-mascot"] * {
-    animation: none !important;
-  }
-}
-/* Move only the existing badge pixels; static clipping does not animate layout. */
-[data-slot="mascot-mark"] {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-[data-slot="mascot-mark"] img {
+[data-component="task-mascot"] > svg {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  overflow: visible;
 }
-[data-component="task-mascot"][data-state="awaiting"] > img {
-  clip-path: polygon(0 0, 68% 0, 68% 50%, 100% 50%, 100% 100%, 0 100%);
+/* No outlines anywhere: depth comes from the body gradients and the fresnel layer. */
+[data-component="task-mascot"] [data-part="shell"] {
+  fill: var(--zm-body-light);
 }
-[data-component="task-mascot"][data-state="awaiting"] > [data-slot="mascot-mark"] {
-  clip-path: polygon(68% 0, 100% 0, 100% 50%, 68% 50%);
-  animation: mascot-question 2.8s ease-in-out infinite;
+html[data-color-scheme="dark"] [data-component="task-mascot"] [data-part="shell"] {
+  fill: var(--zm-body-dark);
 }
-[data-component="task-mascot"][data-state="error"] > img {
-  clip-path: polygon(0 0, 67% 0, 67% 46%, 100% 46%, 100% 100%, 0 100%);
+[data-component="task-mascot"] [data-slot="fresnel"] {
+  opacity: var(--zm-fresnel);
 }
-[data-component="task-mascot"][data-state="error"] > [data-slot="mascot-mark"] {
-  clip-path: polygon(67% 0, 100% 0, 100% 46%, 67% 46%);
-  transform-origin: 81% 32%;
-  animation: mascot-alert 1.8s ease-in-out infinite;
+[data-component="task-mascot"] [data-slot="halo"] {
+  opacity: var(--zm-halo);
 }
-[data-component="task-mascot"][data-state="success"] > img {
-  clip-path: polygon(0 0, 71% 0, 71% 34%, 81% 34%, 81% 51%, 100% 51%, 100% 100%, 0 100%);
+[data-component="task-mascot"] [data-part="glow"] {
+  opacity: var(--zm-glow);
 }
-[data-component="task-mascot"][data-state="success"] > [data-slot="mascot-mark"] {
-  clip-path: polygon(71% 0, 84% 0, 84% 27%, 78% 34%, 71% 34%);
-  animation: mascot-sparkle 2.4s ease-in-out infinite;
+[data-component="task-mascot"] [data-part="ground"] {
+  opacity: var(--zm-ground);
 }
-[data-component="task-mascot"][data-state="success"] > [data-ray="2"] {
-  clip-path: polygon(84% 0, 100% 0, 100% 39%, 81% 39%, 78% 34%, 84% 27%);
-  animation-delay: 0.2s;
+[data-component="task-mascot"] [data-slot="shadow"] {
+  opacity: var(--zm-shadow);
 }
-[data-component="task-mascot"][data-state="success"] > [data-ray="3"] {
-  clip-path: polygon(81% 39%, 100% 39%, 100% 51%, 81% 51%);
-  animation-delay: 0.4s;
+[data-component="task-mascot"][data-compact] [data-badge],
+[data-component="task-mascot"][data-compact] [data-part="prompt"],
+[data-component="task-mascot"][data-compact] [data-detail] {
+  display: none !important;
 }
-@keyframes mascot-question {
-  50% {
-    transform: translateY(-2px);
-    opacity: 0.65;
-  }
-}
-@keyframes mascot-alert {
-  50% {
-    transform: scale(0.92);
-    opacity: 0.5;
-  }
-}
-@keyframes mascot-sparkle {
-  0%,
-  80%,
-  100% {
-    opacity: 0.35;
-  }
-  30% {
-    opacity: 1;
-  }
-}
-
-[data-slot="mascot-eyelid"] {
-  position: absolute;
-  top: var(--eye-top, 48%);
-  width: var(--eye-width, 13%);
-  height: var(--eye-height, 22%);
-  left: var(--eye-left, 23%);
-  border-radius: 35%;
-  background: #1c142a;
-  transform: scaleY(0);
-  transform-origin: center;
-  pointer-events: none;
-}
-[data-slot="mascot-eyelid"][data-eye="right"] {
-  left: var(--eye-right, 41%);
-}
-[data-slot="mascot-eyelid"]::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 15%;
-  width: 70%;
-  height: 1px;
-  border-radius: 50%;
-  background: #dec3ee;
-}
-[data-component="task-mascot"][data-state="thinking"] {
-  --eye-top: 58%;
-  --eye-width: 17%;
-  --eye-height: 10%;
-  --eye-left: 25%;
-  --eye-right: 44%;
-}
-[data-component="task-mascot"][data-state="awaiting"] {
-  --eye-top: 54%;
-  --eye-width: 12%;
-  --eye-height: 17%;
-  --eye-left: 22%;
-  --eye-right: 36%;
-}
-[data-component="task-mascot"][data-state="error"] {
-  --eye-top: 52%;
-  --eye-width: 14%;
-  --eye-height: 17%;
-  --eye-left: 23%;
-  --eye-right: 39%;
-}
-[data-component="task-mascot"][data-state="success"] {
-  --eye-top: 54%;
-  --eye-width: 16%;
-  --eye-height: 12%;
-  --eye-left: 25%;
-  --eye-right: 43%;
-}
-[data-component="task-mascot"][data-blink="single"] > [data-slot="mascot-eyelid"] {
-  animation: mascot-blink 220ms ease-in-out;
-}
-[data-component="task-mascot"][data-blink="double"] > [data-slot="mascot-eyelid"] {
-  animation: mascot-blink 220ms ease-in-out 2;
-}
-@keyframes mascot-blink {
-  0%,
-  100% {
-    transform: scaleY(0);
-  }
-  45%,
-  55% {
-    transform: scaleY(1);
-  }
-}
-[data-component="task-mascot"][data-motion="paused"],
-[data-component="task-mascot"][data-motion="paused"] * {
-  animation-play-state: paused !important;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-component="task-mascot"],
-  [data-component="task-mascot"] * {
-    animation: none !important;
-  }
+[data-component="task-mascot"][data-compact] [data-stroke] {
+  stroke-width: 6.5;
 }

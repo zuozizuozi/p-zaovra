@@ -65,20 +65,20 @@ test("completed work folds without hiding the delivered response", async ({ page
   await expect(page.getByText("Delivered result", { exact: true })).toBeVisible()
 })
 
-test("completion arriving after idle still shows once for five seconds", async ({ page }, info) => {
+test("completion arriving after idle settles without a success mascot", async ({ page }, info) => {
   const timeline = await setupTimeline(page, {
     messages: [userMessage(), assistantMessage([textPart("prt_finish", "Finishing")], { completed: false })],
   })
   await timeline.send(status("busy"))
   await timeline.send(status("idle"), 200)
   await timeline.send(messageUpdated(assistantMessage([textPart("prt_finish", "Finishing")]).info))
+  // The activity row belongs to a working turn, so a settled turn shows its summary and never a success mascot.
   const success = page.locator('[data-component="task-mascot"][data-state="success"]')
-  await expect(success.first()).toBeVisible()
+  await timeline.settle(5)
+  await expect(success).toHaveCount(0)
   await page.screenshot({ path: info.outputPath("delayed-completion.png") })
-  await page.waitForTimeout(3500)
-  await expect(success.first()).toBeVisible()
-  await expect(success).toHaveCount(0, { timeout: 4000 })
   await timeline.send(messageUpdated(assistantMessage([textPart("prt_finish", "Finishing")]).info))
+  await timeline.settle(5)
   await expect(success).toHaveCount(0)
 })
 

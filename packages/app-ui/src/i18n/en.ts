@@ -578,6 +578,7 @@ export const dict = {
   "session.activity.question": "Waiting for your answer",
   "session.activity.running": "Running",
   "session.activity.thinking": "Thinking",
+  "session.activity.output": "Writing",
   "session.title.child": "Child session",
   "session.activity.working": "Running",
   "session.activity.awaiting": "Waiting for confirmation",

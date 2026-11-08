@@ -164,6 +164,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     question: {} as Record<string, QuestionView[]>,
     pending_input: {} as Record<string, SessionInputAdmitted[]>,
     live_shell: {} as Record<string, Record<string, true>>,
+    // Live-only: the text part receiving deltas. Snapshots cannot tell finished text from streaming text.
+    streaming_text: {} as Record<string, string | undefined>,
     message: {} as Record<string, Message[]>,
     part: {} as Record<string, Part[]>,
     part_text_accum_delta: {} as Record<string, string>,
@@ -495,7 +497,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     setData(
       produce((draft) => {
         dropSessionCaches(draft, sessionIDs)
-        sessionIDs.forEach((sessionID) => delete draft.pending_input[sessionID])
+        sessionIDs.forEach((sessionID) => {
+          delete draft.pending_input[sessionID]
+          delete draft.streaming_text[sessionID]
+        })
       }),
     )
     setMeta(
@@ -853,6 +858,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     if (normalized !== event) return apply(normalized)
     if (event.type === "server.connected" || event.type === "global.disposed") {
       setData("live_shell", reconcile({}))
+      setData("streaming_text", reconcile({}))
       pinned.forEach((_, id) => void resync(id).catch(() => {}))
     }
     const eventID = eventSessionID(event)
@@ -1018,6 +1024,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         attempt: number
         error: { message: string; metadata?: Record<string, string> }
       }
+      setData("streaming_text", props.sessionID, undefined)
       const delay = Number(props.error.metadata?.delayMs ?? 0)
       setData("session_status", props.sessionID, {
         type: "retry",
@@ -1105,6 +1112,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       const id = props.textID ?? props.reasoningID
       if (!id) return
       const partID = adaptPartID(props.assistantMessageID, id)
+      if (props.textID && props.delta) setData("streaming_text", props.sessionID, partID)
       if (props.offset !== undefined) {
         const buffered = offsetChunks.get(partID) ?? { sessionID: props.sessionID, chunks: new Map<number, string>() }
         buffered.chunks.set(props.offset, props.delta)
@@ -1161,6 +1169,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       const partID = id ? adaptPartID(props.assistantMessageID, id) : undefined
       const current = partID ? data.part[props.assistantMessageID]?.find((part) => part.id === partID) : undefined
       if (partID) offsetChunks.delete(partID)
+      if (props.textID) setData("streaming_text", props.sessionID, undefined)
       // A reconnect can miss text.started; the terminal event carries the full answer.
       // Normal part admission below still requires its ordered parent message.
       const ended =
@@ -1209,6 +1218,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         }
         error?: { message: string }
       }
+      setData("streaming_text", props.sessionID, undefined)
       const current = data.message[props.sessionID]?.find((message) => message.id === props.assistantMessageID)
       if (current?.role === "assistant") {
         apply({
