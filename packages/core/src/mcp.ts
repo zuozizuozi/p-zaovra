@@ -1,6 +1,7 @@
 export * as MCP from "./mcp"
 
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
+import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/types"
 import Ajv from "ajv"
 import Ajv2020 from "ajv/dist/2020"
 import draft06 from "ajv/dist/refs/json-schema-draft-06.json"
@@ -42,7 +43,11 @@ import { Tools } from "./tool/tools"
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const MAX_LIST_PAGES = 1_000
-const CLIENT_OPTIONS = { capabilities: { roots: {} } } satisfies ClientOptions
+const CLIENT_OPTIONS = {
+  capabilities: { roots: {} },
+  // Compile on validation, so an unsupported output dialect cannot discard the entire tools/list response.
+  jsonSchemaValidator: { getValidator: mcpSchemaValidator },
+} satisfies ClientOptions
 
 export type Status =
   | { readonly status: "connected"; readonly tools: number }
@@ -99,6 +104,10 @@ const McpOutput = Schema.Struct({
   content: Schema.Array(Schema.Unknown),
   structuredContent: Schema.Record(Schema.String, Schema.Unknown).pipe(Schema.optional),
   isError: Schema.Boolean.pipe(Schema.optional),
+  outputSchemaDiagnostic: Schema.Struct({
+    code: Schema.Literals(["missing", "mismatch", "unsupported"]),
+    message: Schema.String,
+  }).pipe(Schema.optional),
 })
 const McpStructured = Schema.Record(Schema.String, Schema.Unknown)
 
@@ -484,35 +493,8 @@ function canonicalTool(
   permission: PermissionV2.Interface,
   fallback?: number,
 ) {
-  // These published dialect identifiers differ only in scheme or an empty fragment.
-  // Nonempty fragments and unrecognized dialects must not fall back to another draft.
-  const dialect =
-    typeof definition.inputSchema.$schema === "string"
-      ? definition.inputSchema.$schema.replace(/^https:\/\//, "http://").replace(/#$/, "")
-      : definition.inputSchema.$schema
-  const supported =
-    dialect === undefined ||
-    dialect === "http://json-schema.org/draft/2020-12/schema" ||
-    dialect === "http://json-schema.org/draft-07/schema" ||
-    dialect === "http://json-schema.org/draft-06/schema" ||
-    dialect === "http://json-schema.org/draft-04/schema"
-  const options = { strict: false, strictSchema: "log", validateSchema: true, allErrors: true } as const
-  const ajv =
-    dialect === "http://json-schema.org/draft-04/schema"
-      ? new AjvDraft04(options)
-      : dialect === "http://json-schema.org/draft-06/schema" || dialect === "http://json-schema.org/draft-07/schema"
-        ? new Ajv(options)
-        : new Ajv2020(options)
-  if (dialect === "http://json-schema.org/draft-06/schema") ajv.addMetaSchema(draft06)
-  addFormats(ajv)
-  const validator = new AjvJsonSchemaValidator(ajv)
-  const inputSchema = {
-    ...definition.inputSchema,
-    $schema:
-      dialect === undefined || dialect === "http://json-schema.org/draft/2020-12/schema"
-        ? "https://json-schema.org/draft/2020-12/schema"
-        : `${dialect}#`,
-  }
+  const validateInput = mcpSchemaValidator(definition.inputSchema)
+  const validateOutput = definition.outputSchema ? mcpSchemaValidator(definition.outputSchema) : undefined
   return Tool.make({
     effectLocation: "remote",
     description: definition.description ?? `Call ${definition.name} on an MCP server`,
@@ -520,8 +502,24 @@ function canonicalTool(
     inputJsonSchema: definition.inputSchema,
     output: McpOutput,
     structured: McpStructured,
-    toStructuredOutput: ({ output }) => output.structuredContent ?? {},
-    toModelOutput: ({ output }) => output.content.flatMap(modelContent),
+    toStructuredOutput: ({ output }) =>
+      output.outputSchemaDiagnostic
+        ? { unvalidated: output.structuredContent ?? {}, outputSchemaDiagnostic: output.outputSchemaDiagnostic }
+        : (output.structuredContent ?? {}),
+    toModelOutput: ({ output }) => [
+      ...output.content.flatMap(modelContent),
+      ...(output.outputSchemaDiagnostic
+        ? [
+            ...(output.content.length === 0 && output.structuredContent
+              ? [{ type: "text" as const, text: JSON.stringify(output.structuredContent) }]
+              : []),
+            {
+              type: "text" as const,
+              text: `MCP output schema diagnostic (${output.outputSchemaDiagnostic.code}): ${output.outputSchemaDiagnostic.message}. The received response is retained as unvalidated data. Verify effects before any retry.`,
+            },
+          ]
+        : []),
+    ],
     execute: (input, context) =>
       Effect.gen(function* () {
         // Capture before asking: later mutation of a caller's object cannot change an approved invocation.
@@ -531,8 +529,7 @@ function canonicalTool(
         })
         const checked = yield* Effect.try({
           try: () => {
-            if (!supported) throw new Error("Unsupported JSON Schema dialect")
-            return validator.getValidator(inputSchema)(args)
+            return validateInput(args)
           },
           catch: () =>
             new Tool.Failure({
@@ -569,24 +566,92 @@ function canonicalTool(
                 }),
             ),
           )
+        // Mirror SDK 1.29's pre-dispatch task guard; request once, then diagnose the received output locally.
+        if (definition.execution?.taskSupport === "required")
+          return yield* new Tool.Failure({
+            message: `Tool "${definition.name}" requires task-based execution. Use the experimental tasks API instead.`,
+          })
         const result = yield* Effect.tryPromise({
           try: (signal) =>
-            client.callTool({ name: definition.name, arguments: args }, CallToolResultSchema, {
-              signal,
-              timeout: server.timeout?.request ?? fallback ?? DEFAULT_REQUEST_TIMEOUT_MS,
-              resetTimeoutOnProgress: true,
-              onprogress: () => {},
-            }),
+            client.request(
+              { method: "tools/call", params: { name: definition.name, arguments: args } },
+              CallToolResultSchema,
+              {
+                signal,
+                timeout: server.timeout?.request ?? fallback ?? DEFAULT_REQUEST_TIMEOUT_MS,
+                resetTimeoutOnProgress: true,
+                onprogress: () => {},
+              },
+            ),
           catch: (error) => new Tool.Failure({ message: normalizeError(error).message }),
         })
         if (result.isError) return yield* new Tool.Failure({ message: errorContent(result.content) })
+        const outputSchemaDiagnostic = !validateOutput
+          ? undefined
+          : !result.structuredContent
+            ? {
+                code: "missing" as const,
+                message: "The server declared an output schema but returned no structured content",
+              }
+            : yield* Effect.try({
+                try: () => {
+                  const checked = validateOutput(result.structuredContent)
+                  return checked.valid
+                    ? undefined
+                    : { code: "mismatch" as const, message: checked.errorMessage.slice(0, 1000) }
+                },
+                catch: () => ({
+                  code: "unsupported" as const,
+                  message: "The declared output schema could not be validated",
+                }),
+              }).pipe(Effect.catch(Effect.succeed))
         return {
           content: result.content,
           structuredContent: result.structuredContent,
           isError: result.isError,
+          ...(outputSchemaDiagnostic ? { outputSchemaDiagnostic } : {}),
         }
       }),
   })
+}
+
+function mcpSchemaValidator<T = unknown>(schema: JsonSchemaType): JsonSchemaValidator<T> {
+  const cache: { validate?: JsonSchemaValidator<T> } = {}
+  return (value) => {
+    if (cache.validate) return cache.validate(value)
+    // Schemes and an empty fragment identify the same published dialect; other identifiers must fail closed.
+    const dialect =
+      typeof schema.$schema === "string"
+        ? schema.$schema.replace(/^https:\/\//, "http://").replace(/#$/, "")
+        : schema.$schema
+    if (
+      dialect !== undefined &&
+      ![
+        "http://json-schema.org/draft/2020-12/schema",
+        "http://json-schema.org/draft-07/schema",
+        "http://json-schema.org/draft-06/schema",
+        "http://json-schema.org/draft-04/schema",
+      ].includes(dialect)
+    )
+      throw new Error("Unsupported JSON Schema dialect")
+    const options = { strict: false, strictSchema: "log", validateSchema: true, allErrors: true } as const
+    const ajv =
+      dialect === "http://json-schema.org/draft-04/schema"
+        ? new AjvDraft04(options)
+        : dialect === "http://json-schema.org/draft-06/schema" || dialect === "http://json-schema.org/draft-07/schema"
+          ? new Ajv(options)
+          : new Ajv2020(options)
+    if (dialect === "http://json-schema.org/draft-06/schema") ajv.addMetaSchema(draft06)
+    addFormats(ajv)
+    cache.validate = new AjvJsonSchemaValidator(ajv).getValidator<T>({
+      ...schema,
+      $schema:
+        dialect === undefined || dialect === "http://json-schema.org/draft/2020-12/schema"
+          ? "https://json-schema.org/draft/2020-12/schema"
+          : `${dialect}#`,
+    })
+    return cache.validate(value)
+  }
 }
 
 function registerCatalogTools(
