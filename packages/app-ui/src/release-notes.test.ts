@@ -7,8 +7,6 @@ describe("versioned release notes", () => {
     const en = releaseNotes("0.1.1-beta.12", "en")
     expect(zh).toHaveLength(5)
     expect(en).toHaveLength(zh.length)
-    expect(zh.map((item) => !!item.focus)).toEqual([true, true, true, false, false])
-    expect(en.map((item) => !!item.focus)).toEqual(zh.map((item) => !!item.focus))
     expect([...zh, ...en].every((item) => item.title.trim() && item.description.trim())).toBe(true)
     expect(releaseNotes("0.1.1-beta.11", "zh")).toEqual([])
   })

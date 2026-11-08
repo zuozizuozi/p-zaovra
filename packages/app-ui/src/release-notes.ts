@@ -4,7 +4,6 @@ import current from "./release-notes/current.json"
 export type ReleaseHighlight = {
   title: string
   description: string
-  focus?: boolean
 }
 
 const releases: Record<string, { zh: ReleaseHighlight[]; en: ReleaseHighlight[] }> = {

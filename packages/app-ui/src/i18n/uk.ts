@@ -566,9 +566,7 @@ export const dict = {
   "dialog.project.edit.worktree.startup.placeholder": "напр. bun install",
 
   "dialog.releaseNotes.action.getStarted": "Розпочати",
-  "dialog.releaseNotes.action.next": "Далі",
   "dialog.releaseNotes.action.hideFuture": "Не показувати це в майбутньому",
-  "dialog.releaseNotes.media.alt": "Попередній перегляд релізу",
 
   "context.breakdown.title": "Розподіл контексту",
   "context.breakdown.note":

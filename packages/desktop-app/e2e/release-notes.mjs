@@ -216,7 +216,7 @@ async function ready(page) {
     currentVersion,
   )
 }
-const title = locale === "zh" ? `Zaovra ${currentVersion} 更新内容` : `What’s new in Zaovra ${currentVersion}`
+const title = locale === "zh" ? `${currentVersion} 更新内容` : `What’s new in ${currentVersion}`
 const titles = current
   ? currentNotes[locale].map((item) => item.title)
   : locale === "zh"
@@ -252,19 +252,11 @@ try {
     for (let i = 0; i < titles.length; i++) {
       await notes(page).getByText(titles[i], { exact: true }).waitFor({ state: "visible" })
       await notes(page).getByText(currentNotes[locale][i].description, { exact: true }).waitFor({ state: "visible" })
-      if (currentNotes[locale][i].focus)
-        await notes(page)
-          .getByText(locale === "zh" ? "请重点测" : "Please focus testing here", { exact: true })
-          .waitFor({ state: "visible" })
       await page.screenshot({ path: join(record, "current-about-item-" + i + ".png") })
-      await notes(page)
-        .getByRole("button", {
-          name:
-            i < titles.length - 1 ? (locale === "zh" ? "下一步" : "Next") : locale === "zh" ? "开始" : "Get started",
-          exact: true,
-        })
-        .click()
     }
+    await notes(page)
+      .getByRole("button", { name: locale === "zh" ? "知道了" : "Got it", exact: true })
+      .click()
     await notes(page).waitFor({ state: "hidden" })
     summary.assertions.aboutAllCurrentNotes = true
     await priorVersion(page)
@@ -276,14 +268,10 @@ try {
     await page.screenshot({ path: join(record, "current-auto-popup.png") })
     for (let i = 0; i < titles.length; i++) {
       await notes(page).getByText(titles[i], { exact: true }).waitFor({ state: "visible" })
-      await notes(page)
-        .getByRole("button", {
-          name:
-            i < titles.length - 1 ? (locale === "zh" ? "下一步" : "Next") : locale === "zh" ? "开始" : "Get started",
-          exact: true,
-        })
-        .click()
     }
+    await notes(page)
+      .getByRole("button", { name: locale === "zh" ? "知道了" : "Got it", exact: true })
+      .click()
     await notes(page).waitFor({ state: "hidden" })
     summary.assertions.currentAutoAllItems = true
     await stop()
@@ -311,19 +299,16 @@ try {
     assert.equal(await notes(page).getByText(titles[0], { exact: true }).isVisible(), true)
     assert.equal(
       await notes(page)
-        .getByText(locale === "zh" ? "请重点测" : "Please focus testing here", { exact: true })
-        .isVisible(),
-      true,
+        .getByText(/请重点测|Please focus testing here/)
+        .count(),
+      0,
     )
     await page.screenshot({ path: join(record, "upgrade-popup.png") })
     for (const heading of titles.slice(1)) {
-      await notes(page)
-        .getByRole("button", { name: locale === "zh" ? "下一步" : "Next", exact: true })
-        .click()
       await notes(page).getByText(heading, { exact: true }).waitFor({ state: "visible" })
     }
     await notes(page)
-      .getByRole("button", { name: locale === "zh" ? "开始" : "Get started", exact: true })
+      .getByRole("button", { name: locale === "zh" ? "知道了" : "Got it", exact: true })
       .click()
     await notes(page).waitFor({ state: "hidden" })
     summary.assertions.upgradeAndAllFive = true

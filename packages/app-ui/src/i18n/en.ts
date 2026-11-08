@@ -1214,14 +1214,11 @@ export const dict = {
   "dialog.project.edit.worktree.startup.description": "Runs after creating a new workspace (worktree).",
   "dialog.project.edit.worktree.startup.placeholder": "e.g. bun install",
 
-  "dialog.releaseNotes.title": "What’s new in Zaovra {{version}}",
-  "dialog.releaseNotes.focus": "Please focus testing here",
+  "dialog.releaseNotes.title": "What’s new in {{version}}",
   "settings.general.row.releaseNotes.view": "View this version’s release notes",
   "settings.general.row.releaseNotes.open": "View",
-  "dialog.releaseNotes.action.getStarted": "Get started",
-  "dialog.releaseNotes.action.next": "Next",
-  "dialog.releaseNotes.action.hideFuture": "Don't show these in the future",
-  "dialog.releaseNotes.media.alt": "Release preview",
+  "dialog.releaseNotes.action.getStarted": "Got it",
+  "dialog.releaseNotes.action.hideFuture": "Don't show again",
 
   "context.breakdown.title": "Context Breakdown",
   "context.breakdown.note": 'Approximate breakdown of input tokens. "Other" includes tool definitions and overhead.',
