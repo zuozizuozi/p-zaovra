@@ -1,5 +1,6 @@
 import { executionErrorKind } from "@/utils/execution-error"
 import { ExecutionErrorCard } from "@/components/execution-error-card"
+import { SessionRecovery } from "./session-recovery"
 import { useSettingsDialog } from "@/components/settings-dialog"
 import { protocolChoice } from "@/components/provider-protocol"
 import {
@@ -1661,6 +1662,32 @@ export function MessageTimeline(props: {
                   )}
                 </Show>
               </ExecutionErrorCard>
+            </div>
+          </TimelineRowFrame>
+        )
+      }
+      case "Recovery": {
+        const recoveryRow = row as Accessor<TimelineRowByTag<"Recovery">>
+        const message = () => {
+          const current = messageByID().get(recoveryRow().messageID)
+          return current?.role === "assistant" ? current : undefined
+        }
+        return (
+          <TimelineRowFrame row={recoveryRow}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <Show when={message()} keyed>
+                {(message) => (
+                  <SessionRecovery
+                    message={message}
+                    active={
+                      sessionStatus().type === "idle" &&
+                      sessionMessages().at(-1)?.id === message.id &&
+                      serverSync().session.history.complete(sessionID() ?? "") &&
+                      !info()?.time.archived
+                    }
+                  />
+                )}
+              </Show>
             </div>
           </TimelineRowFrame>
         )

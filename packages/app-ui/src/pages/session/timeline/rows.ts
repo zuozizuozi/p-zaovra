@@ -30,6 +30,7 @@ export type TimelineRowMap = {
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
+  Recovery: { userMessageID: string; messageID: string }
 }
 
 /** This message gets an interruption divider at its position in the conversation. */

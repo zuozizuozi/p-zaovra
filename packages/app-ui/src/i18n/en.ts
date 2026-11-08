@@ -481,6 +481,17 @@ export const dict = {
   "work.duration.hint":
     "Shared by planning, execution and review from goal creation. A limit stops work without marking it successful.",
   "session.budget.tokens": "Total tokens",
+  "session.recovery.budgetStopped": "The session budget was reached; work has stopped.",
+  "session.recovery.failed": "This run failed. You can continue from the retained conversation.",
+  "session.recovery.budgetHint": "Raise the limits for this session to continue. Default limits stay unchanged.",
+  "session.recovery.invalidBudget":
+    "Raise at least one limit above its current value and usage; keep the other limit unchanged or higher.",
+  "session.recovery.budgetUnavailable": "Could not load the current limits. Retry before continuing.",
+  "session.recovery.outcomeUnavailable": "Could not confirm why this run stopped. Retry to load recovery options.",
+  "session.recovery.continue": "Continue",
+  "session.recovery.increaseAndContinue": "Increase budget and continue",
+  "session.recovery.requested": "Continue requested",
+  "session.recovery.updatedWithoutContinue": "Budget updated; session was not continued.",
   "session.budget.minutes": "Total minutes",
   "session.budget.invalid": "Enter a positive whole number, or leave blank for no limit.",
   "session.review.loadFailed": "Changes could not be loaded. Retry to see the current changes.",
