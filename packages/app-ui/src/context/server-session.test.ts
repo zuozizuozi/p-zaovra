@@ -1380,3 +1380,141 @@ test("742 recovery leaves an owned continuing task busy and does not duplicate i
   await watching
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
 })
+
+describe("live text stream marker", () => {
+  // Keeps the execution watcher parked so ownership only changes through the path under test.
+  const hold = () => new Promise<void>(() => {})
+  const delta = (delta: string, textID = "text-0") => ({
+    type: "session.next.text.delta",
+    properties: { sessionID: "ses_child", assistantMessageID: "msg_answer", textID, delta },
+  })
+  const started = {
+    type: "session.next.step.started",
+    properties: {
+      sessionID: "ses_child",
+      timestamp: 1,
+      assistantMessageID: "msg_answer",
+      agent: "build",
+      model: { id: "model", providerID: "provider" },
+    },
+  }
+  const textStarted = {
+    type: "session.next.text.started",
+    properties: { sessionID: "ses_child", timestamp: 2, assistantMessageID: "msg_answer", textID: "text-0" },
+  }
+  const answer = (completed: boolean): SessionMessage => ({
+    ...assistant("msg_answer", "Written", 2),
+    content: [{ id: "text-0", type: "text", text: "Written" }],
+    time: completed ? { created: 2, completed: 3 } : { created: 2 },
+  })
+  const page = (completed: boolean) => ({ data: [user("msg_user", "Go", 1), answer(completed)] })
+  const live = async (ctx: ReturnType<typeof setup>) => {
+    await ctx.store.sync("ses_child")
+    ctx.store.apply(started)
+    ctx.store.apply(textStarted)
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+    ctx.store.apply(delta("Writ"))
+    expect(ctx.store.data.streaming_text.ses_child).toBeDefined()
+  }
+
+  test("a completed snapshot clears the marker while ownership stays busy", async () => {
+    const ctx = setup({ wait: hold, pages: [{ data: [] }, page(true)], active: () => ({ ses_child: { type: "running" } }) })
+    await live(ctx)
+    await ctx.store.resync("ses_child")
+    expect(ctx.store.data.session_status.ses_child).toEqual({ type: "busy" })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+  })
+
+  test("confirmed idle clears the marker so the same turn does not resume writing", async () => {
+    const ctx = setup({ wait: hold, pages: [{ data: [] }] })
+    await live(ctx)
+    ctx.store.apply({ type: "session.status", properties: { sessionID: "ses_child", status: { type: "idle" } } })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+    ctx.store.apply({ type: "session.status", properties: { sessionID: "ses_child", status: { type: "busy" } } })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+  })
+
+  test("ownership that confirms idle during resync clears the marker", async () => {
+    const ctx = setup({ wait: hold, pages: [{ data: [] }, page(false)], active: () => ({}) })
+    await live(ctx)
+    await ctx.store.resync("ses_child")
+    expect(ctx.store.data.session_status.ses_child).toEqual({ type: "idle" })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+  })
+
+  test("a normal reconnect clears the marker and the next delta restores it", async () => {
+    const ctx = setup({ wait: hold, pages: [{ data: [] }] })
+    await live(ctx)
+    ctx.store.apply({ type: "server.connected", properties: {} })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+    ctx.store.apply(delta("ten"))
+    expect(ctx.store.data.streaming_text.ses_child).toBeDefined()
+  })
+
+  test("a snapshot requested before a new delta cannot clear that delta's stream", async () => {
+    const gate = Promise.withResolvers<void>()
+    const requested = Promise.withResolvers<void>()
+    let held = false
+    const ctx = setup({
+      wait: hold,
+      pages: [{ data: [] }, page(true)],
+      active: () => ({ ses_child: { type: "running" } }),
+      pageWait: async () => {
+        if (!held) return
+        requested.resolve()
+        await gate.promise
+      },
+    })
+    await live(ctx)
+    held = true
+    const resync = ctx.store.resync("ses_child")
+    await requested.promise
+    ctx.store.apply(delta("ten"))
+    gate.resolve()
+    await resync
+    expect(ctx.store.data.streaming_text.ses_child).toBeDefined()
+  })
+
+  test("an unfinished live snapshot keeps the marker", async () => {
+    const ctx = setup({ wait: hold, pages: [{ data: [] }, page(false)], active: () => ({ ses_child: { type: "running" } }) })
+    await live(ctx)
+    await ctx.store.resync("ses_child")
+    expect(ctx.store.data.session_status.ses_child).toEqual({ type: "busy" })
+    expect(ctx.store.data.streaming_text.ses_child).toBeDefined()
+  })
+
+  test("a completed snapshot of another assistant leaves the marker alone", async () => {
+    const other = { ...assistant("msg_other", "Earlier", 0), time: { created: 0, completed: 1 } }
+    const ctx = setup({
+      wait: hold,
+      pages: [{ data: [] }, { data: [other, user("msg_user", "Go", 1), answer(false)] }],
+      active: () => ({ ses_child: { type: "running" } }),
+    })
+    await live(ctx)
+    await ctx.store.resync("ses_child")
+    expect(ctx.store.data.streaming_text.ses_child).toBeDefined()
+  })
+
+  test("text end, step end and retry still clear the marker", async () => {
+    const ctx = setup({ wait: hold, pages: [{ data: [] }] })
+    await live(ctx)
+    ctx.store.apply({
+      type: "session.next.text.ended",
+      properties: { sessionID: "ses_child", timestamp: 3, assistantMessageID: "msg_answer", textID: "text-0", text: "Writ" },
+    })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+    ctx.store.apply(delta("More", "text-1"))
+    expect(ctx.store.data.streaming_text.ses_child).toBeDefined()
+    ctx.store.apply({
+      type: "session.next.step.ended",
+      properties: { sessionID: "ses_child", timestamp: 4, assistantMessageID: "msg_answer", finish: "stop" },
+    })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+    ctx.store.apply(delta("Again", "text-2"))
+    ctx.store.apply({
+      type: "session.next.retried",
+      properties: { sessionID: "ses_child", timestamp: 5, attempt: 2, error: { message: "Retry" } },
+    })
+    expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
+  })
+})

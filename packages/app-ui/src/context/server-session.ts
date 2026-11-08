@@ -192,6 +192,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   let silentAt = 0
   const eventAt = new Map<string, number>()
   const eventVersion = new Map<string, object>()
+  // Bumped per text delta so a snapshot requested before a delta cannot end the stream that delta proves is alive.
+  const textDeltas = new Map<string, number>()
   const executionWaits = new Map<string, Promise<void>>()
   const deltaBases = new Map<string, { base: string; sessionID: string }>()
   const offsetChunks = new Map<string, { sessionID: string; chunks: Map<number, string> }>()
@@ -231,6 +233,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         if (generations.get(sessionID) !== active) return
         if (!result.data.data[sessionID]) {
           setData("session_status", sessionID, { type: "idle" })
+          setData("streaming_text", sessionID, undefined)
           // A final SSE event may be missed while a new task mounts or reconnects.
           // Reconcile persisted history after any older in-flight snapshot settles.
           await inflight.get(sessionID)?.catch(() => {})
@@ -469,6 +472,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       generations.delete(sessionID)
       eventAt.delete(sessionID)
       eventVersion.delete(sessionID)
+      textDeltas.delete(sessionID)
       resyncs.delete(sessionID)
       admitted.delete(sessionID)
       questionVersions.delete(sessionID)
@@ -768,6 +772,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     }
     messageLoads.set(sessionID, load)
     setMeta("loading", sessionID, true)
+    const deltas = textDeltas.get(sessionID)
     let applied = false
     try {
       const page = await fetchMessages(sessionID, limit, before, () => resetMessageLoad(sessionID, load))
@@ -787,6 +792,13 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         preserveUnfetched,
         mode !== "prepend",
       )
+      // The end event can be lost without a reconnect, so a completed owner is the remaining proof the text ended.
+      if (textDeltas.get(sessionID) === deltas) {
+        const marker = data.streaming_text[sessionID]
+        const owner = data.message[sessionID]?.find((message) => data.part[message.id]?.some((part) => part.id === marker))
+        if (owner?.role === "assistant" && (owner.time.completed !== undefined || owner.error))
+          setData("streaming_text", sessionID, undefined)
+      }
       applied = true
     } finally {
       if (!applied && generations.get(sessionID) === active && messageLoads.get(sessionID) === load) {
@@ -1112,7 +1124,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       const id = props.textID ?? props.reasoningID
       if (!id) return
       const partID = adaptPartID(props.assistantMessageID, id)
-      if (props.textID && props.delta) setData("streaming_text", props.sessionID, partID)
+      if (props.textID && props.delta) {
+        textDeltas.set(props.sessionID, (textDeltas.get(props.sessionID) ?? 0) + 1)
+        setData("streaming_text", props.sessionID, partID)
+      }
       if (props.offset !== undefined) {
         const buffered = offsetChunks.get(partID) ?? { sessionID: props.sessionID, chunks: new Map<number, string>() }
         buffered.chunks.set(props.offset, props.delta)
@@ -1310,6 +1325,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       case "session.status": {
         const props = event.properties as { sessionID: string; status: SessionStatus }
         setData("session_status", props.sessionID, reconcile(props.status))
+        if (props.status.type === "idle") setData("streaming_text", props.sessionID, undefined)
         return
       }
       case "message.updated": {
@@ -1616,6 +1632,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       if (eventVersion.get(sessionID) === version) {
         if (ownership)
           setData("session_status", sessionID, ownership.data.data[sessionID] ? { type: "busy" } : { type: "idle" })
+        if (ownership && !ownership.data.data[sessionID]) setData("streaming_text", sessionID, undefined)
         if (permissions)
           setData(
             "permission",
