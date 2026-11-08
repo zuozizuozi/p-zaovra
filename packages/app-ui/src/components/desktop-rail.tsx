@@ -6,7 +6,6 @@ import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useSettingsDialog } from "./settings-dialog"
-import { BrandMark } from "./brand-mark"
 
 export function DesktopRail() {
   const navigate = useNavigate()
@@ -45,7 +44,7 @@ export function DesktopRail() {
       <div class="flex-1" />
       <MenuV2>
         <MenuV2.Trigger aria-label={language.t("sidebar.settings")} title={language.t("sidebar.settings")}>
-          <BrandMark class="size-7" />
+          <Icon name="settings-gear" />
         </MenuV2.Trigger>
         <MenuV2.Portal>
           <MenuV2.Content>

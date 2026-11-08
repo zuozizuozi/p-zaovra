@@ -466,6 +466,12 @@ export function MessageTimeline(props: {
     }
     return mascot.session === id && mascot.user === user ? mascot.terminal : "idle"
   }
+  // The newest part is text that has not ended: the turn is answering, not reasoning.
+  const streamingText = (user: string) => {
+    const latest = (assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages).at(-1)
+    const part = latest && getMsgParts(latest.id).at(-1)
+    return part?.type === "text" && part.text.length > 0 && part.time?.end === undefined
+  }
   const unresolvedTools = (user: string) => {
     const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
     const latest = messages.at(-1)
@@ -1463,6 +1469,7 @@ export function MessageTimeline(props: {
                 <Show when={workingDisplayTurn(headingRow().userMessageID)}>
                   <TaskActivity
                     state={mascotState(headingRow().userMessageID)}
+                    output={streamingText(headingRow().userMessageID)}
                     tool={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.label : undefined}
                     started={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.started : undefined}
                   />

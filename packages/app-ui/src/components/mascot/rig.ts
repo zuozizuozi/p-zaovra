@@ -85,6 +85,10 @@ export function createMascotRig(svg: SVGSVGElement) {
     last: { x: 0, y: 0 },
     prevJy: 0,
     actions: [] as Action[],
+    width: 0,
+    lastStep: 0,
+    rect: undefined as DOMRect | undefined,
+    rectAt: 0,
   }
   const eye = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 } }
   const head = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 } }
@@ -179,7 +183,9 @@ export function createMascotRig(svg: SVGSVGElement) {
   }
 
   function lookAt(x: number, y: number) {
-    const rect = svg.getBoundingClientRect()
+    // Measuring every frame would force layout next to our own attribute writes.
+    if (!motion.rect || clock.t - motion.rectAt > 0.25) Object.assign(motion, { rect: svg.getBoundingClientRect(), rectAt: clock.t })
+    const rect = motion.rect!
     const dx = x - (rect.left + rect.width * 0.37)
     const dy = y - (rect.top + rect.height * 0.55)
     const d = Math.hypot(dx, dy)
@@ -415,24 +421,40 @@ export function createMascotRig(svg: SVGSVGElement) {
       )
   }
 
+  // Tiny mascots gain nothing from 60fps; a resting idle mascot only breathes, so it can drop further.
+  function step(t: number) {
+    const settled =
+      motion.pose === "idle" &&
+      !motion.actions.length &&
+      !(pointer.seen && t - pointer.t < 2.5) &&
+      Math.abs(head.x.v) + Math.abs(head.y.v) + Math.abs(eye.x.v) + Math.abs(eye.y.v) < 0.02
+    const interval = settled ? IDLE_FRAME : motion.width <= 48 ? SMALL_FRAME : 0
+    if (t - motion.lastStep < interval * 0.9) return
+    const dt = Math.min(0.1, t - motion.lastStep)
+    motion.lastStep = t
+    update(t, dt)
+  }
+
   svg.addEventListener("pointerdown", poke)
   return {
     setPose,
+    setWidth: (width: number) => (motion.width = width),
     /** Still mode renders each pose as a static frame: used for reduced motion, offscreen or `animated={false}`. */
     setStill(still: boolean) {
       if (still === motion.still && motion.enteredAt) return
       motion.still = still
       if (still) {
-        loop.delete(update)
+        loop.delete(step)
         motion.actions = []
         motion.expression = motion.pose === "error" ? "sad" : EXPRESSION[motion.pose]
         return update(clock.t, 0)
       }
-      loop.add(update)
+      motion.lastStep = clock.t
+      loop.add(step)
       start()
     },
     dispose() {
-      loop.delete(update)
+      loop.delete(step)
       svg.removeEventListener("pointerdown", poke)
     },
   }
@@ -449,7 +471,9 @@ function restingGaze(pose: MascotPose) {
 // One animation frame and one pointer listener serve every mascot on the page.
 const clock = { t: 0, last: 0, running: false }
 const pointer = { x: 0, y: 0, t: -99, seen: false, listening: false }
-const loop = new Set<(t: number, dt: number) => void>()
+const loop = new Set<(t: number) => void>()
+const IDLE_FRAME = 1 / 15
+const SMALL_FRAME = 1 / 30
 
 function start() {
   if (!pointer.listening) {
@@ -470,7 +494,7 @@ function tick(now: number) {
   const dt = Math.min(0.05, (now - clock.last) / 1000)
   clock.last = now
   clock.t += dt
-  loop.forEach((update) => update(clock.t, dt))
+  loop.forEach((step) => step(clock.t))
   if (!loop.size) {
     clock.running = false
     return

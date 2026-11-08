@@ -4,7 +4,7 @@ import { useLanguage } from "@/context/language"
 import { TaskMascot, type MascotState } from "./task-mascot"
 import "./task-activity.css"
 
-export function TaskActivity(props: { state: MascotState; tool?: string; started?: number }) {
+export function TaskActivity(props: { state: MascotState; tool?: string; started?: number; output?: boolean }) {
   const language = useLanguage()
   const [clock, setClock] = createStore({ now: Date.now(), started: Date.now() })
   createEffect(
@@ -21,9 +21,9 @@ export function TaskActivity(props: { state: MascotState; tool?: string; started
   const seconds = () => Math.max(0, Math.floor((clock.now - clock.started) / 1000))
   return (
     <div data-component="task-activity" data-state={props.state}>
-      <TaskMascot state={props.state} size="large" animated={props.state !== "idle"} />
+      <TaskMascot state={props.state} size="large" animated={props.state !== "idle"} output={props.output} />
       <span data-slot="activity-label" role="status" aria-live="polite">
-        {language.t(`session.activity.${props.state}`)}
+        {language.t(props.state === "thinking" && props.output ? "session.activity.output" : `session.activity.${props.state}`)}
       </span>
       <Show when={seconds() >= 10 && ["thinking", "working", "awaiting"].includes(props.state)}>
         <Show when={props.tool}>

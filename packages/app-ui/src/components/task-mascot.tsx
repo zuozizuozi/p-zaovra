@@ -31,7 +31,10 @@ export function TaskMascot(props: { state: MascotState; size?: "large"; animated
       update()
     })
     // Below ~30px the badges and highlights turn to noise, so crop to the body and drop them.
-    const resize = new ResizeObserver(() => setView("compact", element.clientWidth > 0 && element.clientWidth < 30))
+    const resize = new ResizeObserver(() => {
+      rig.setWidth(element.clientWidth)
+      setView("compact", element.clientWidth > 0 && element.clientWidth < 30)
+    })
     observer.observe(element)
     resize.observe(element)
     document.addEventListener("visibilitychange", update)
