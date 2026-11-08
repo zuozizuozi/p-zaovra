@@ -21,6 +21,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "src/release-notes/*.json", "package.json"],
+  "include": ["src", "src/release-notes/*.json", "package.json", "test-notification/notification.test.ts"],
   "exclude": ["dist", "ts-dist", "src/custom-elements.d.ts"]
 }
