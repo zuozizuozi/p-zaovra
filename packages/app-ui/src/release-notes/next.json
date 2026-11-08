@@ -2,13 +2,11 @@
   "zh": [
     {
       "title": "后台状态更清楚，配置更可靠。",
-      "description": "侧栏进行中的圈圈会转了，后台完成后显示待查看，点开后清除",
-      "focus": true
+      "description": "侧栏进行中的圈圈会转了，后台完成后显示待查看，点开后清除"
     },
     {
       "title": "配置并发写入",
-      "description": "修复同时修改配置时可能互相覆盖的问题",
-      "focus": true
+      "description": "修复同时修改配置时可能互相覆盖的问题"
     },
     {
       "title": "小造新动画",
@@ -22,13 +20,11 @@
   "en": [
     {
       "title": "Clearer background status and more reliable settings.",
-      "description": "The sidebar spinner now animates, and finished background sessions show as ready to review until opened.",
-      "focus": true
+      "description": "The sidebar spinner now animates, and finished background sessions show as ready to review until opened."
     },
     {
       "title": "Safer settings changes",
-      "description": "Fixed settings being overwritten when changed at the same time.",
-      "focus": true
+      "description": "Fixed settings being overwritten when changed at the same time."
     },
     {
       "title": "New mascot animations",

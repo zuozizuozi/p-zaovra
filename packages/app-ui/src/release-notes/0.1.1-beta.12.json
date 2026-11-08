@@ -2,18 +2,15 @@
   "zh": [
     {
       "title": "回复不再卡住",
-      "description": "断线自动重连，回复完成立即显示，不用再切换会话。",
-      "focus": true
+      "description": "断线自动重连，回复完成立即显示，不用再切换会话。"
     },
     {
       "title": "任务中可以插话",
-      "description": "运行中直接发送会显示“下一步生效”，也可选“任务结束后再发”。",
-      "focus": true
+      "description": "运行中直接发送会显示“下一步生效”，也可选“任务结束后再发”。"
     },
     {
       "title": "模型列表更清楚",
-      "description": "只显示你配置的模型，推理强度改为滑杆，回复下方显示实际使用的模型。",
-      "focus": true
+      "description": "只显示你配置的模型，推理强度改为滑杆，回复下方显示实际使用的模型。"
     },
     {
       "title": "侧栏右键可重命名",
@@ -27,18 +24,15 @@
   "en": [
     {
       "title": "Replies no longer get stuck",
-      "description": "Reconnect automatically after a disconnect and see completed replies immediately, without switching conversations.",
-      "focus": true
+      "description": "Reconnect automatically after a disconnect and see completed replies immediately, without switching conversations."
     },
     {
       "title": "Steer a running task",
-      "description": "Messages sent during a task show “Takes effect next”; you can also choose to send them after the task finishes.",
-      "focus": true
+      "description": "Messages sent during a task show “Takes effect next”; you can also choose to send them after the task finishes."
     },
     {
       "title": "Cleaner model picker",
-      "description": "See only your configured models, adjust reasoning effort with a slider, and see the model actually used below each reply.",
-      "focus": true
+      "description": "See only your configured models, adjust reasoning effort with a slider, and see the model actually used below each reply."
     },
     {
       "title": "Rename from the sidebar",

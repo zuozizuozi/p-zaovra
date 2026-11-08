@@ -86,7 +86,11 @@ jobs:
         run: |
           set -euo pipefail
           git show "$SOURCE_SHA:packages/app-ui/src/release-notes/next.json" > "$RUNNER_TEMP/release-notes.json"
-          bun packages/desktop-app/scripts/release-notes.ts check "$RUNNER_TEMP/release-notes.json"
+          PREVIOUS_SHA=$(bun packages/desktop-app/scripts/release-notes.ts previous)
+          [[ "$PREVIOUS_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git merge-base --is-ancestor "$PREVIOUS_SHA" "$SOURCE_SHA"
+          git show "$PREVIOUS_SHA:packages/app-ui/src/release-notes/next.json" > "$RUNNER_TEMP/previous-release-notes.json"
+          bun packages/desktop-app/scripts/release-notes.ts check "$RUNNER_TEMP/release-notes.json" "$RUNNER_TEMP/previous-release-notes.json"
 
   build:
     if: (github.event_name == 'workflow_run' || inputs.build_only) && needs.gate.outputs.build == 'true'
