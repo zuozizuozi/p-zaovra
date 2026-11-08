@@ -19,6 +19,10 @@ import { mockZaovraServer } from "../../utils/mock-server"
 import { installSseTransport } from "../../utils/sse-transport"
 import { expectSessionTitle } from "../../utils/waits"
 
+import { registerTimelineEvidence, recordTimelineDelivery } from "../../utils/timeline-evidence"
+
+registerTimelineEvidence()
+
 export const directory = "C:/Zaovra/TimelineStability"
 export const projectID = "proj_timeline_stability"
 export const sessionID = "ses_timeline_stability"
@@ -212,13 +216,15 @@ export async function setupTimeline(
         if (delay) await page.waitForTimeout(delay)
         return
       }
-      await transport.send(valid, { marker: describeEvent(valid) })
+      const acknowledgement = await transport.send(valid, { marker: describeEvent(valid) })
+      await recordTimelineDelivery(valid, acknowledgement)
       if (delay) await page.waitForTimeout(delay)
     },
     async sendAll(sequence: { event: TimelineEvent; delay: number }[]) {
       for (const item of sequence) {
         const valid = validateTimelineEvent(item.event)
-        await transport.send(valid, { marker: describeEvent(valid) })
+        const acknowledgement = await transport.send(valid, { marker: describeEvent(valid) })
+        await recordTimelineDelivery(valid, acknowledgement)
         await page.waitForTimeout(item.delay)
       }
     },

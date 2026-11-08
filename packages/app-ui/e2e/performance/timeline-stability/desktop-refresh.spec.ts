@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import {
+  assistantID,
   assistantMessage,
   messageUpdated,
   setupTimeline,
@@ -35,8 +36,9 @@ for (const [kind, detail] of Object.entries({
     const card = page.locator('[data-component="execution-error-card"]')
     await expect(card).toBeVisible()
     await expect(card.locator("pre")).toBeHidden()
-    await expect(card.getByRole("button", { name: "Check model service", exact: true })).toBeVisible()
+    await expect(card.getByRole("button", { name: "Check model service", exact: true })).toBeHidden()
     await card.locator("summary").click()
+    await expect(card.getByRole("button", { name: "Check model service", exact: true })).toBeVisible()
     await expect(card.locator("pre")).toHaveText(detail)
     await page.screenshot({ path: info.outputPath(`${kind}.png`) })
   })
@@ -59,9 +61,18 @@ test("completed work folds without hiding the delivered response", async ({ page
   await expect(toggle).toHaveAttribute("aria-expanded", "false")
   await toggle.click()
   await expect(toggle).toHaveAttribute("aria-expanded", "true")
-  await expect(page.getByRole("button", { name: "Shell npm test", exact: true })).toBeVisible()
+  const group = page.locator('[data-component="process-tool-group"]')
+  await expect(group).toHaveCount(1)
+  await group.locator(":scope > summary").click()
+  await expect(group).toHaveAttribute("open", "")
+  const command = page.locator(`[data-timeline-part-id="${assistantID}:prt_done"] [data-slot="collapsible-trigger"]`)
+  await expect(command).toHaveCount(1)
+  await expect(command).toBeVisible()
+  await expect(command).toContainText("npm test")
   await toggle.click()
-  await expect(page.getByRole("button", { name: "Shell npm test", exact: true })).toBeHidden()
+  await expect(
+    page.locator(`[data-timeline-part-id="${assistantID}:prt_done"] [data-slot="collapsible-trigger"]`),
+  ).toBeHidden()
   await expect(page.getByText("Delivered result", { exact: true })).toBeVisible()
 })
 
@@ -105,15 +116,27 @@ test("synthetic continuations share one disclosure and preserve final text", asy
   await expect(page.locator('[data-slot="assistant-brand"]')).toHaveCount(0)
   await expect(page.getByText("Final deliverable", { exact: true })).toBeVisible()
   await heads.click()
-  await expect(page.getByRole("button", { name: "Shell npm run build", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Shell npm test", exact: true })).toBeVisible()
+  const group = page.locator('[data-component="process-tool-group"]')
+  await expect(group).toHaveCount(1)
+  await group.locator(":scope > summary").click()
+  await expect(group).toHaveAttribute("open", "")
+  const build = page.locator(
+    '[data-timeline-part-id="msg_1003_second:prt_second_tool"] [data-slot="collapsible-trigger"]',
+  )
+  const test = page.locator(`[data-timeline-part-id="${assistantID}:prt_first_tool"] [data-slot="collapsible-trigger"]`)
+  await expect(build).toHaveCount(1)
+  await expect(build).toBeVisible()
+  await expect(build).toContainText("npm run build")
+  await expect(test).toHaveCount(1)
+  await expect(test).toBeVisible()
+  await expect(test).toContainText("npm test")
   const widths = await page
     .locator('[data-slot="session-turn-assistant-content"]')
     .evaluateAll((es) => es.map((e) => e.getBoundingClientRect().width))
   expect(Math.max(...widths)).toBeLessThanOrEqual(720)
 })
 
-test("empty checks remain absent and error recovery renders inside its card", async ({ page }) => {
+test("empty checks remain absent and error recovery remains available beside its card", async ({ page }) => {
   const requests: unknown[] = []
   const timeline = await setupTimeline(page, {
     settings: { newLayoutDesigns: true },
@@ -147,10 +170,17 @@ test("empty checks remain absent and error recovery renders inside its card", as
   )
   await timeline.send(status("idle"))
   const card = page.locator('[data-component="execution-error-card"]')
-  await expect(card.getByRole("button", { name: "Retry original request", exact: true })).toBeVisible()
+  await expect(card).toBeVisible()
+  await card.locator("summary").click()
+  await expect(card.locator("pre")).toHaveText("HTTP 401: invalid API key")
+  const retry = page
+    .locator('[data-component="session-recovery-actions"]')
+    .getByRole("button", { name: "Retry", exact: true })
+  await expect(retry).toHaveCount(1)
+  await expect(retry).toBeVisible()
   await expect(page.locator('[data-component="verification-summary"]')).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Refresh verification status", exact: true })).toHaveCount(0)
-  await card.getByRole("button", { name: "Retry original request", exact: true }).click()
+  await retry.click()
   await expect.poll(() => requests.length).toBe(1)
   expect(requests[0]).toMatchObject({ messageID: assistantMessage([]).info.id, action: "retry" })
 })

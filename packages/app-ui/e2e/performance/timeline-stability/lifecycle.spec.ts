@@ -39,6 +39,12 @@ test.describe("timeline visual lifecycle stability", () => {
       eventRetry: 24,
       seedHistory: true,
     })
+    const details = page.locator(
+      `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
+    )
+    await expect(details).toHaveAttribute("aria-expanded", "false")
+    await details.click()
+    await expect(details).toHaveAttribute("aria-expanded", "true")
     await timeline.send(status("busy"), 150)
     // Deliver live parts through SSE so their IDs match subsequent deltas;
     // historical hydration namespaces part IDs with their message ID.
@@ -97,6 +103,8 @@ test.describe("timeline visual lifecycle stability", () => {
     await startVisualProbe(page, terminalRegions)
     await timeline.send(messageUpdated(completedAssistantInfo(assistant.info)), 100)
     await timeline.send(status("idle"), 700)
+    await expect(details).toHaveAttribute("aria-expanded", "true")
+    await details.click()
     const terminal = await stopVisualProbe<keyof typeof terminalRegions>(page)
     await reportVisualStability(
       testInfo,
@@ -116,7 +124,7 @@ test.describe("timeline visual lifecycle stability", () => {
     expect(await following.evaluate((element, previous) => element === previous, resident)).toBe(true)
     await expect(following).toContainText("Following all parallel shells.")
     const heading = page.locator(`[data-timeline-row="AssistantHeading"][data-message-id="${userID}"]`)
-    await expect(heading.locator('[data-component="task-mascot"]')).toHaveCount(1)
+    await expect(heading.locator('[data-component="task-mascot"]')).toHaveCount(0)
     await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "false")
     await heading.locator("button[aria-expanded]").click()
     await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "true")
@@ -146,6 +154,12 @@ test.describe("timeline visual lifecycle stability", () => {
       "thinking",
     )
 
+    const details = page.locator(
+      `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
+    )
+    await expect(details).toHaveAttribute("aria-expanded", "false")
+    await details.click()
+    await expect(details).toHaveAttribute("aria-expanded", "true")
     const regions = defineVisualRegions({
       thinking: { selector: '[data-timeline-row="AssistantHeading"]' },
       reasoning: {

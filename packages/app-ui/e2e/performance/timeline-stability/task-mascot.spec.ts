@@ -184,13 +184,19 @@ test("the writing pose follows the live text stream", async ({ page }) => {
   await v2("text.started", { textID: "txt_d" })
   await v2("text.delta", { textID: "txt_d", delta: "Again" })
   await expectPose("speaking")
-  await timeline.transport.writeRaw(`data: ${JSON.stringify({ directory, payload: { type: "server.connected", properties: {} } })}\n\n`)
+  await timeline.transport.writeRaw(
+    `data: ${JSON.stringify({ directory, payload: { type: "server.connected", properties: {} } })}\n\n`,
+  )
   await expectPose("thinking")
 
   await v2("text.started", { textID: "txt_e" })
   await v2("text.delta", { textID: "txt_e", delta: "Stepping" })
   await expectPose("speaking")
-  await v2("step.ended", { finish: "tool-calls", cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } })
+  await v2("step.ended", {
+    finish: "tool-calls",
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
   await expectPose("thinking")
 
   await v2("text.ended", { textID: "txt_never_started", text: "Recovered terminal text" })
@@ -256,10 +262,14 @@ test("error-only replies and synthetic continuation share one resident heading",
     messages: [
       userMessage(),
       assistantMessage([], { error: { name: "APIError", data: { message: "HTTP 500", isRetryable: false } } }),
-      userMessage([{ type: "text", id: "prt_continuation", text: "Continue", synthetic: true }], { id: continuation }),
+      userMessage([{ type: "text", id: "prt_continuation", text: "Continue", synthetic: true }], {
+        id: continuation,
+        created: 1700000003000,
+      }),
       assistantMessage([shell("prt_continued_tool", "completed", "done", "npm test")], {
         id: "msg_1003_answer",
         parentID: continuation,
+        created: 1700000004000,
       }),
     ],
   })
@@ -312,7 +322,12 @@ test("unrelated part updates after completion do not replay a success mascot", a
     state.observer = new MutationObserver(() => {
       if (document.querySelector('[data-component="task-mascot"][data-state="success"]')) state.success = true
     })
-    state.observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-state"] })
+    state.observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-state"],
+    })
     return state
   })
   await timeline.send(status("idle"))
