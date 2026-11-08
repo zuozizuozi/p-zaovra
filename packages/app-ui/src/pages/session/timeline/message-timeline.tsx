@@ -90,7 +90,7 @@ import { createTimelineFrame } from "./layout-frame"
 import { turnPartFoldable } from "./turn-part-visibility"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
-import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
+import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap, endsWithInterruption } from "./rows"
 import { filterVirtualIndexes } from "./virtual-items"
 import { TurnProcessSummary, settledTurnStatus } from "./turn-process-summary"
 
@@ -472,6 +472,12 @@ export function MessageTimeline(props: {
     const latest = (assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages).at(-1)
     const part = latest && getMsgParts(latest.id).at(-1)
     return !!part && serverSync().session.data.streaming_text[sessionID() ?? ""] === part.id
+  }
+  // The divider in the conversation already announces an interruption; repeating it here would make two lines.
+  const turnStatus = (user: string) => {
+    const messages = assistantMessagesByTurn().get(user) ?? emptyAssistantMessages
+    const status = settledTurnStatus(messages, unresolvedTools(user), serverSync().session.stopped(user))
+    return status !== "error" && messages.some(endsWithInterruption) ? undefined : status
   }
   const unresolvedTools = (user: string) => {
     const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
@@ -1498,11 +1504,7 @@ export function MessageTimeline(props: {
                   thoughts={parts().filter((part) => part.type === "reasoning" && part.text.trim()).length}
                   processes={processEntriesByTurn().get(displayTurn(headingRow().userMessageID))?.length ?? 0}
                   tools={parts().filter((part): part is ToolPart => part.type === "tool")}
-                  status={settledTurnStatus(
-                    assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages,
-                    unresolvedTools(headingRow().userMessageID),
-                    serverSync().session.stopped(headingRow().userMessageID),
-                  )}
+                  status={turnStatus(headingRow().userMessageID)}
                   folded={folded()}
                   onToggle={() => setTurns(headingRow().userMessageID, !folded())}
                 />
@@ -1642,7 +1644,6 @@ export function MessageTimeline(props: {
                 detailsOnly
                 mascot={false}
                 detail={errorRow().text}
-                recoveryID={errorRow().userMessageID}
                 onConfigure={openProviderSettings}
               >
                 <Show when={provider()}>

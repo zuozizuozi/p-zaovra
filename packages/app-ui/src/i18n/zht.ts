@@ -49,13 +49,6 @@ export const dict = {
   "session.permission.directory": "工作目录（相对路径以项目目录为基准）",
   "session.permission.decisions":
     "允许一次仅放行本次请求；始终允许会保存此项目的匹配规则；拒绝会拒绝本次请求及本会话其他待批准请求。",
-  "session.outcome.noChecks": "暫無有效檢查",
-  "session.outcome.passedCount": "目前 {{count}} 項檢查通過",
-  "session.outcome.failedCount": "{{count}} 項檢查未通過",
-  "session.outcome.incompleteCount": "{{count}} 項檢查未取得有效結果",
-  "session.outcome.current": "目前檢查",
-  "session.outcome.history": "已覆蓋的歷史檢查",
-  "session.outcome.expandCheck": "展開檢查詳情與完整命令",
   "home.welcome.title": "今天，我們造點什麼？",
   "home.welcome.description": "寫下你的想法，選擇專案，和造物一起開始。",
   "home.welcome.continue": "繼續到對話",

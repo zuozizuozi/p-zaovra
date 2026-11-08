@@ -8,7 +8,6 @@ import { executionErrorKind } from "@/utils/execution-error"
 export function ExecutionErrorCard(props: {
   detail: string
   onConfigure?: () => void
-  recoveryID?: string
   mascot?: boolean
   detailsOnly?: boolean
   children?: import("solid-js").JSX.Element
@@ -47,8 +46,7 @@ export function ExecutionErrorCard(props: {
           >
             {language.locale().startsWith("zh") ? "反馈这个问题" : "Report this problem"}
           </ButtonV2>
-          <span data-recovery-target={props.recoveryID} class="contents" />
-        </div>
+          </div>
       </details>
     </section>
   )

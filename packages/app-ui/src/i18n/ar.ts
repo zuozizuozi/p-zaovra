@@ -48,13 +48,6 @@ export const dict = {
   "session.permission.directory": "Working directory (relative to the project)",
   "session.permission.decisions":
     "Allow once approves this request. Always allow saves matching rules for this project. Deny rejects this and other pending requests in this session.",
-  "session.outcome.noChecks": "لا توجد فحوصات حالية",
-  "session.outcome.passedCount": "نجح {{count}} من الفحوصات الحالية",
-  "session.outcome.failedCount": "فشل {{count}} من الفحوصات",
-  "session.outcome.incompleteCount": "لم ينتج {{count}} من الفحوصات نتيجة صالحة",
-  "session.outcome.current": "الفحوصات الحالية",
-  "session.outcome.history": "الفحوصات المستبدلة (السجل)",
-  "session.outcome.expandCheck": "عرض تفاصيل الفحص والأمر الكامل",
   "home.welcome.title": "ماذا سننشئ اليوم؟",
   "home.welcome.description": "صف فكرتك واختر مشروعًا وابدأ مع Zaovra.",
   "home.welcome.continue": "المتابعة إلى الجلسة",
