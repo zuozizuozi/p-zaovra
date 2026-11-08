@@ -71,7 +71,7 @@ import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
 import { BrowserScreenshot } from "./browser-screenshot"
-import { recoveredToolFailures } from "./tool-recovery"
+import { recoveredToolFailures, toolExecutionInterrupted } from "./tool-recovery"
 import { ToolRecoverySummary } from "./tool-recovery-summary"
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -1533,7 +1533,12 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const handleToolOpenChange = (open: boolean) => props.onToolOpenChange?.(open)
 
   return (
-    <Show when={!hideQuestion()}>
+    <Show
+      when={
+        !hideQuestion() &&
+        !toolExecutionInterrupted(props.message.role === "assistant" ? props.message : undefined, part())
+      }
+    >
       <div data-component="tool-part-wrapper" data-timeline-part-id={part().id}>
         <Switch>
           <Match when={props.quietFailure}>

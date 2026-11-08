@@ -171,7 +171,7 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
   const terminal = () => {
     const current = outcome()
     if (query.isError || !params.id || sync().session.data.session_working(params.id) || abandoned()) return
-    if (current?.state === "interrupted" || current?.state === "failed" || current?.state === "stopped") return current
+    if (current?.state === "failed" || current?.state === "stopped") return current
   }
   const requestRecovery = (action: "continue" | "retry" | "abandon") => {
     const current = selection()
@@ -187,6 +187,7 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
       : language.t("session.outcome.noChecks"))
   const notice = createMemo(() => {
     if (abandoned()) return
+    if (outcome()?.state === "interrupted" || outcome()?.state === "failed") return
     if (budgetAttention(budgetQuery.data, outcome()?.state === "stopped")) return language.t("session.end.budget")
     if (failedChecks() || staleChecks() || incompleteChecks()) return language.t("session.end.checkFailed")
     const failure = progress().failures[0]
@@ -206,8 +207,6 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
       )
     }
     if (outcome()?.outcomeUnknown) return language.t("session.end.uncertain")
-    if (outcome()?.state === "interrupted") return language.t("session.end.interrupted")
-    if (outcome()?.state === "failed" && progress().state !== "blocked") return language.t("session.end.failed")
   })
   const controls = () => (
     <>
@@ -600,34 +599,23 @@ export function SessionOutcomeDock(props: { hasChanges: boolean; changes?: JSX.E
       <Show when={terminal()}>
         {(current) => (
           <div class="px-1 py-2 flex flex-col gap-1 text-12-regular text-text-weak" role="status">
-            <Show when={current().termination}>
-              <p data-component="session-termination">
-                {language.t(`session.outcome.${current().state}`)} · {current().termination!.message}
-              </p>
-            </Show>
-            <Show when={current().outcomeUnknown}>
-              <span role="alert" class="text-icon-critical-base font-medium">
-                {language.t("session.outcome.unknown")}
-              </span>
-            </Show>
+            <p data-component="session-termination">
+              {language.t(current().state === "failed" ? "session.end.failed" : "session.end.budget")}
+            </p>
             <Show when={current().messageID}>
               <div
                 class="flex flex-wrap items-center gap-1"
                 data-component="session-recovery-actions"
                 aria-busy={recover.isPending}
               >
-                <For each={["continue", "retry", "abandon"] as const}>
-                  {(action) => (
-                    <ButtonV2
-                      size="small"
-                      variant={action === "continue" ? "outline" : "ghost-muted"}
-                      disabled={recover.isPending}
-                      onClick={() => requestRecovery(action)}
-                    >
-                      {language.t(`session.outcome.${action}`)}
-                    </ButtonV2>
-                  )}
-                </For>
+                <ButtonV2
+                  size="small"
+                  variant="ghost-muted"
+                  disabled={recover.isPending}
+                  onClick={() => requestRecovery(current().state === "failed" ? "retry" : "continue")}
+                >
+                  {language.t(current().state === "failed" ? "session.outcome.retry" : "session.outcome.continue")}
+                </ButtonV2>
               </div>
             </Show>
           </div>

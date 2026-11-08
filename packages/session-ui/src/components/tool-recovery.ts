@@ -12,6 +12,18 @@ type RecoveryInput = {
   historyComplete?: boolean
 }
 
+/** A cancelled in-flight tool belongs to the turn's interruption marker, not a second failure card. */
+export function toolExecutionInterrupted(message: Pick<AssistantMessage, "finish" | "error"> | undefined, part: Part) {
+  return (
+    (message?.finish === "interrupted" ||
+      message?.finish === "stopped" ||
+      message?.error?.name === "MessageAbortedError") &&
+    part.type === "tool" &&
+    part.state.status === "error" &&
+    /^(?:Error:\s*)?Tool execution interrupted[.!]?$/i.test(part.state.error.trim())
+  )
+}
+
 function settledTools(input: RecoveryInput) {
   const messages = input.messages
     .filter((message) => message.sessionID === input.message.sessionID)

@@ -191,13 +191,13 @@ for (const kind of ["provider", "permission", "query"] as const) {
           await until(() => fixture.calls >= 2)
         }
         const actions = () => document.querySelector<HTMLElement>("[data-component=session-recovery-actions]")
-        await until(() => !!actions()?.textContent?.includes(language.t("session.outcome.continue")))
+        await until(() => !!actions()?.textContent?.includes(language.t("session.outcome.retry")))
         view.setCard("mounted", true)
         await Promise.resolve()
         expect(actions()).not.toBeNull()
         view.setCard("mounted", false)
         await until(() => !!actions()?.isConnected)
-        for (const action of ["continue", "retry", "abandon"] as const) {
+        for (const action of ["retry"] as const) {
           const button = [...actions()!.querySelectorAll<HTMLButtonElement>("button")].find(
             (item) => item.textContent === language.t(`session.outcome.${action}`),
           )
