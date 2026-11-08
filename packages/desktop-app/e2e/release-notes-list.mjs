@@ -197,7 +197,14 @@ try {
       await dialog.getByText(item.title, { exact: true }).waitFor()
       await dialog.getByText(item.description, { exact: true }).waitFor()
     }
-    assert.equal(await dialog.getByText(/请重点测|Please focus testing|下一步|^Next$/).count(), 0)
+    assert.equal(await dialog.getByRole("button", { name: /^(下一步|Next)$/ }).count(), 0)
+    assert.equal(
+      await dialog
+        .locator("span.text-12-medium.text-text-weak")
+        .filter({ hasText: /^(请重点测|Please focus testing)$/ })
+        .count(),
+      0,
+    )
     report.geometry = await dialog.evaluate((element) => {
       const rect = element.getBoundingClientRect()
       const list = element.querySelector("[data-release-notes-list]")

@@ -40,11 +40,16 @@ async function setup(parentID?: string) {
   }
   const pages = { messages: [{ id: "msg_1", type: "user", text: "Run", time: { created: 1 } }] as SessionMessage[] }
   const ownership = { busy: false }
+  const history = { before: async () => {}, fail: false }
   const client = {
     v2: {
       session: {
         get: async () => ({ data: { data: session } }),
-        messages: async () => ({ data: { data: pages.messages, cursor: {} } }),
+        messages: async () => {
+          await history.before()
+          if (history.fail) throw new Error("758 synthetic history failure")
+          return { data: { data: pages.messages, cursor: {} } }
+        },
         pendingInputs: async () => ({ data: { data: [] } }),
         interrupt: async () => {},
         wait: async () => {},
@@ -148,7 +153,22 @@ async function setup(parentID?: string) {
     })) as unknown as typeof input.sync.ensureDirSyncContext
     return next
   }
-  return { id, store, state, mounted, mount, status, event, complete, notices, pages, session, ownership, resetStore }
+  return {
+    id,
+    store,
+    state,
+    mounted,
+    mount,
+    status,
+    event,
+    complete,
+    notices,
+    pages,
+    session,
+    ownership,
+    resetStore,
+    history,
+  }
 }
 
 test("237 recovers a successful idle snapshot when the end event was missed", async () => {
@@ -332,3 +352,203 @@ test("237 a restored candidate waits for authoritative busy ownership to finish"
   expect(restored.session.unseenCount(ctx.id)).toBe(1)
   expect(ctx.notices).toHaveLength(1)
 })
+
+for (const rebuild of [false, true])
+  test(
+    "758 old viewed A cannot consume B before its refreshed history" +
+      (rebuild ? " after notification recreation" : ""),
+    async () => {
+      const ctx = await setup()
+      ctx.status("busy")
+      await settle()
+      await ctx.complete()
+      ctx.status("idle")
+      await settle()
+      expect(ctx.state.session.unseenCount(ctx.id)).toBe(1)
+      ctx.state.session.markViewed(ctx.id)
+      ctx.status("busy")
+      await settle()
+      ctx.pages.messages = [
+        ...ctx.pages.messages,
+        { id: "msg_3", type: "user", text: "New B", time: { created: 4 } },
+        {
+          id: "msg_4",
+          type: "assistant",
+          agent: "build",
+          model: ctx.session.model!,
+          time: { created: 5, completed: 6 },
+          finish: "stop",
+          content: [{ type: "text", id: "text-b", text: "New B done" }],
+        },
+      ]
+      const started = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<void>()
+      ctx.history.before = async () => {
+        started.resolve()
+        await gate.promise
+      }
+      const resync = ctx.store.resync(ctx.id)
+      await started.promise
+      await settle()
+      expect(ctx.store.data.session_status[ctx.id]?.type).toBe("idle")
+      expect(ctx.store.data.message[ctx.id]?.at(-1)?.id).toBe("msg_2")
+      expect(ctx.state.session.unseenCount(ctx.id)).toBe(0)
+      if (rebuild) {
+        ctx.mounted.dispose()
+        ctx.mount()
+        await settle()
+      }
+      gate.resolve()
+      await resync
+      await settle()
+      const state = ctx.mounted.state!
+      expect(ctx.store.data.message[ctx.id]?.at(-1)?.id).toBe("msg_4")
+      expect(state.session.unseen(ctx.id).map((n) => n.type === "turn-complete" && n.completion)).toEqual(["msg_4"])
+      expect(ctx.notices).toHaveLength(2)
+    },
+  )
+
+for (const prior of ["unnotified", "failed", "stopped"])
+  test("758 boundary prior " + prior + " A never becomes the new B notification", async () => {
+    const ctx = await setup()
+    if (prior === "stopped") {
+      ctx.status("busy")
+      await settle()
+      await ctx.store.interrupt(ctx.id)
+      expect(ctx.store.stopped("msg_1")).toBe(true)
+    }
+    await ctx.complete(prior === "failed")
+    expect(ctx.state.session.unseenCount(ctx.id)).toBe(0)
+    ctx.status("busy")
+    await settle()
+    ctx.pages.messages = [
+      ...ctx.pages.messages,
+      { id: "msg_3", type: "user", text: "New B", time: { created: 4 } },
+      {
+        id: "msg_4",
+        type: "assistant",
+        agent: "build",
+        model: ctx.session.model!,
+        time: { created: 5, completed: 6 },
+        finish: "stop",
+        content: [{ type: "text", id: "text-b", text: "New B done" }],
+      },
+    ]
+    await ctx.store.resync(ctx.id)
+    await settle()
+    expect(ctx.mounted.state!.session.unseen(ctx.id).map((n) => n.type === "turn-complete" && n.completion)).toEqual([
+      "msg_4",
+    ])
+    expect(ctx.notices).toHaveLength(1)
+    await ctx.store.resync(ctx.id)
+    await settle()
+    expect(ctx.mounted.state!.session.unseenCount(ctx.id)).toBe(1)
+    expect(ctx.notices).toHaveLength(1)
+  })
+
+for (const terminal of ["error", "stop"])
+  test("758 boundary B " + terminal + " cannot recover successful A", async () => {
+    const ctx = await setup()
+    await ctx.complete()
+    ctx.pages.messages.push({ id: "msg_3", type: "user", text: "B", time: { created: 4 } })
+    await ctx.store.sync(ctx.id, { force: true })
+    ctx.status("busy")
+    await settle()
+    if (terminal === "stop") await ctx.store.interrupt(ctx.id)
+    ctx.pages.messages.push({
+      id: "msg_4",
+      type: "assistant",
+      agent: "build",
+      model: ctx.session.model!,
+      time: { created: 5, completed: 6 },
+      finish: terminal === "stop" ? "stopped" : "stop",
+      content: [{ type: "text", id: "text-b", text: "B ended" }],
+      ...(terminal === "error" ? { error: { type: "unknown", message: "B failed", metadata: {} } } : {}),
+    })
+    await ctx.store.resync(ctx.id)
+    await settle()
+    expect(ctx.mounted.state!.session.unseenCount(ctx.id)).toBe(0)
+    expect(ctx.notices).toHaveLength(0)
+  })
+
+test("758 boundary renewed busy ownership invalidates an in-flight B recovery", async () => {
+  const ctx = await setup()
+  await ctx.complete()
+  ctx.status("busy")
+  await settle()
+  ctx.pages.messages.push(
+    { id: "msg_3", type: "user", text: "B", time: { created: 4 } },
+    {
+      id: "msg_4",
+      type: "assistant",
+      agent: "build",
+      model: ctx.session.model!,
+      time: { created: 5, completed: 6 },
+      finish: "stop",
+      content: [{ type: "text", id: "text-b", text: "B done" }],
+    },
+  )
+  const started = Promise.withResolvers<void>()
+  const gate = Promise.withResolvers<void>()
+  ctx.history.before = async () => {
+    started.resolve()
+    await gate.promise
+  }
+  const refresh = ctx.store.resync(ctx.id)
+  await started.promise
+  await settle()
+  ctx.ownership.busy = true
+  ctx.status("busy")
+  await settle()
+  gate.resolve()
+  await refresh
+  await settle()
+  expect(ctx.state.session.unseenCount(ctx.id)).toBe(0)
+  expect(ctx.notices).toHaveLength(0)
+  ctx.pages.messages.push(
+    { id: "msg_5", type: "user", text: "C", time: { created: 7 } },
+    {
+      id: "msg_6",
+      type: "assistant",
+      agent: "build",
+      model: ctx.session.model!,
+      time: { created: 8, completed: 9 },
+      finish: "stop",
+      content: [{ type: "text", id: "text-c", text: "C done" }],
+    },
+  )
+  ctx.ownership.busy = false
+  await ctx.store.resync(ctx.id)
+  await settle()
+  expect(ctx.state.session.unseen(ctx.id).map((n) => n.type === "turn-complete" && n.completion)).toEqual(["msg_6"])
+  expect(ctx.notices).toHaveLength(1)
+})
+
+test("758 boundary failed history remains recoverable after reconnect", async () => {
+  const ctx = await setup()
+  await ctx.complete()
+  ctx.status("busy")
+  await settle()
+  ctx.pages.messages.push(
+    { id: "msg_3", type: "user", text: "B", time: { created: 4 } },
+    {
+      id: "msg_4",
+      type: "assistant",
+      agent: "build",
+      model: ctx.session.model!,
+      time: { created: 5, completed: 6 },
+      finish: "stop",
+      content: [{ type: "text", id: "text-b", text: "B done" }],
+    },
+  )
+  ctx.history.fail = true
+  await ctx.store.resync(ctx.id).catch(() => undefined)
+  await settle()
+  expect(ctx.state.session.unseenCount(ctx.id)).toBe(0)
+  expect(ctx.notices).toHaveLength(0)
+  ctx.history.fail = false
+  await ctx.store.resync(ctx.id)
+  await settle()
+  expect(ctx.state.session.unseen(ctx.id).map((n) => n.type === "turn-complete" && n.completion)).toEqual(["msg_4"])
+  expect(ctx.notices).toHaveLength(1)
+}, 15000)

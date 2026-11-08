@@ -419,6 +419,7 @@ export function createServerNotificationState(input: {
   // can recover from completed history, but never mark untouched idle history unread.
   const observedBusy = new Set<string>()
   const recovering = new Set<string>()
+  const completionVersions = new Map<string, object>()
   createEffect(() => {
     if (!ready()) return
     const session = serverSync().session
@@ -430,24 +431,27 @@ export function createServerNotificationState(input: {
       const info = session.data.info[sessionID]
       if (!info || info.parentID || observedBusy.has(sessionID)) return
       observedBusy.add(sessionID)
+      completionVersions.set(sessionID, {})
       untrack(() => setStore("pendingCompletions", sessionID, info.directory))
     })
   })
-  const recoverCompletion = (sessionID: string, directory: string) => {
+  const recoverCompletion = (sessionID: string, directory: string, refreshed = false) => {
     if (meta.disposed || !ready()) return
     const session = serverSync().session
     const status = session.data.session_status[sessionID]?.type
     const messages = session.data.message[sessionID]
     const latest = messages?.at(-1)
+    const version = completionVersions.get(sessionID)
     if (recovering.has(sessionID) || (status !== undefined && status !== "idle")) return
-    if (status === undefined || !messages) {
+    if (!refreshed || status === undefined || !messages) {
+      // Idle ownership may arrive before its history. Join that resync before
+      // consuming a persisted candidate, including after notification recreation.
       recovering.add(sessionID)
-      const refresh = status === undefined ? session.resync(sessionID) : session.sync(sessionID)
-      void refresh.then(
+      void session.resync(sessionID).then(
         () => {
           recovering.delete(sessionID)
-          if (session.data.session_status[sessionID] && session.data.message[sessionID])
-            recoverCompletion(sessionID, directory)
+          if (meta.disposed || store.pendingCompletions[sessionID] !== directory) return
+          recoverCompletion(sessionID, directory, completionVersions.get(sessionID) === version)
         },
         () => recovering.delete(sessionID),
       )
@@ -460,6 +464,7 @@ export function createServerNotificationState(input: {
       (message.role === "assistant" && (message.error || session.stopped(message.parentID)))
     ) {
       setStore("pendingCompletions", sessionID, undefined)
+      completionVersions.delete(sessionID)
       return
     }
     if (message.role !== "assistant" || !message.time.completed) return
@@ -467,6 +472,7 @@ export function createServerNotificationState(input: {
       const latest = session.data.message[sessionID]?.at(-1)
       return (
         !meta.disposed &&
+        completionVersions.get(sessionID) === version &&
         store.pendingCompletions[sessionID] === directory &&
         session.data.session_status[sessionID]?.type === "idle" &&
         latest?.id === message.id &&
@@ -480,7 +486,10 @@ export function createServerNotificationState(input: {
     void handleSessionIdle(directory, { properties: { sessionID } }, Date.now(), { messageID: message.id, valid }).then(
       (recorded) => {
         recovering.delete(sessionID)
-        if (recorded && valid()) setStore("pendingCompletions", sessionID, undefined)
+        if (recorded && valid()) {
+          setStore("pendingCompletions", sessionID, undefined)
+          completionVersions.delete(sessionID)
+        }
       },
       () => recovering.delete(sessionID),
     )
@@ -501,6 +510,7 @@ export function createServerNotificationState(input: {
     }
     if (event.type === "session.next.step.failed" || event.type === "session.next.deleted") {
       setStore("pendingCompletions", event.properties.sessionID, undefined)
+      completionVersions.delete(event.properties.sessionID)
       return
     }
     if (
