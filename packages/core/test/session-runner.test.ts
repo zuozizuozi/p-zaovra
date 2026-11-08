@@ -1106,6 +1106,62 @@ it.effect("367 cancellation before first review byte cannot restore its allowanc
   }),
 )
 
+for (const withTool of [false, true])
+  it.effect("753 stop then user continues the same durable context; tool=" + withTool, () =>
+    Effect.gen(function* () {
+      yield* setup
+      verificationEnabled = false
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const original = "只修改 entry.ts，保留旧配置；完成后检查结果。"
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: original }), resume: false })
+      const partial = yield* events
+        .subscribe(SessionEvent.Text.Delta)
+        .pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
+      const completed = withTool
+        ? yield* events.subscribe(SessionEvent.Tool.Success).pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
+        : undefined
+      yield* Effect.yieldNow
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          ...(withTool
+            ? [LLMEvent.toolCall({ id: "before-stop", name: "echo", input: { text: "completed-before-stop" } })]
+            : []),
+          LLMEvent.reasoningStart({ id: "unclosed-reasoning" }),
+          LLMEvent.reasoningDelta({ id: "unclosed-reasoning", text: "incomplete-private-reasoning" }),
+          LLMEvent.textStart({ id: "partial" }),
+          LLMEvent.textDelta({ id: "partial", text: "已经完成部分工作，尚未验证。" }),
+        ]),
+        Stream.never,
+      )
+      const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+      yield* Fiber.join(partial)
+      if (completed) yield* Fiber.join(completed)
+      yield* session.interrupt(sessionID)
+      yield* Fiber.join(run)
+      expect((yield* session.outcome(sessionID)).state).toBe("interrupted")
+      yield* replaySessionProjection(sessionID)
+      const saved = yield* session.context(sessionID)
+      expect(JSON.stringify(saved)).toContain("已经完成部分工作，尚未验证。")
+      expect(
+        saved
+          .flatMap((message) => (message.type === "assistant" ? message.content : []))
+          .find((part) => part.type === "text" && part.text === "已经完成部分工作，尚未验证。"),
+      ).toMatchObject({ type: "text", superseded: true })
+      response = fragmentFixture("text", "continued", ["继续核查剩余工作。"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(userTexts(requests[1])).toContain(original)
+      expect(userTexts(requests[1]).at(-1)).toContain("继续")
+      expect(JSON.stringify(requests[1].messages)).toContain("已经完成部分工作，尚未验证。")
+      expect(JSON.stringify(requests[1].messages)).not.toContain("incomplete-private-reasoning")
+      expect(executions.filter((text) => text === "completed-before-stop")).toHaveLength(withTool ? 1 : 0)
+      if (withTool) expect(JSON.stringify(requests[1].messages)).toContain("completed-before-stop")
+    }),
+  )
+
 it.effect("367 explicit recovery after a real Stop clears the stopped wake generation", () =>
   Effect.gen(function* () {
     yield* setup
@@ -8776,6 +8832,42 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(2)
       expect(JSON.stringify(requests.at(-1)?.messages)).toMatch(/remainingTokens\\?":180/)
+    }),
+  )
+
+  it.effect("756 raising budget then explicitly continuing retains the task and completed tool", () =>
+    Effect.gen(function* () {
+      yield* setup
+      qualityProgress = { facts: true }
+      sessionTokenBudget = 100
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Keep the original budgeted task" }), resume: false })
+      requests.length = 0
+      executions.length = 0
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "renewal-tool", name: "echo", input: { text: "retained-renewal-result" } }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls", usage: {
+          inputTokens: 100, nonCachedInputTokens: 100, outputTokens: 20,
+        } }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+      yield* session.resume(sessionID)
+      const stopped = yield* session.outcome(sessionID)
+      expect(stopped).toMatchObject({ state: "stopped", termination: { category: "budget" } })
+      expect(requests).toHaveLength(1)
+      expect(executions).toEqual(["retained-renewal-result"])
+      yield* session.update({ sessionID, budget: { tokens: 300 } })
+      response = fragmentFixture("text", "renewed", ["Continuing the retained task"]).completeEvents
+      yield* session.recover({ sessionID, messageID: stopped.messageID!, action: "continue" })
+      const execution = yield* SessionExecution.Service
+      yield* execution.wait!(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(executions).toEqual(["retained-renewal-result"])
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain("Keep the original budgeted task")
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain("retained-renewal-result")
+      expect((yield* session.outcome(sessionID)).runtime).toBe("completed")
+      expect(sessionTokenBudget).toBe(100)
     }),
   )
 

@@ -52,13 +52,6 @@ export const dict = {
   "session.permission.directory": "Working directory (relative to the project)",
   "session.permission.decisions":
     "Allow once approves this request. Always allow saves matching rules for this project. Deny rejects this and other pending requests in this session.",
-  "session.outcome.noChecks": "Güncel kontrol yok",
-  "session.outcome.passedCount": "{{count}} güncel kontrol geçti",
-  "session.outcome.failedCount": "{{count}} kontrol başarısız",
-  "session.outcome.incompleteCount": "{{count}} kontrol geçerli sonuç vermedi",
-  "session.outcome.current": "Güncel kontroller",
-  "session.outcome.history": "Yerine yenisi geçen kontroller (geçmiş)",
-  "session.outcome.expandCheck": "Kontrol ayrıntılarını ve tam komutu göster",
   "home.welcome.title": "Bugün ne oluşturalım?",
   "home.welcome.description": "Fikrinizi yazın, bir proje seçin ve Zaovra ile başlayın.",
   "home.welcome.continue": "Oturuma devam et",

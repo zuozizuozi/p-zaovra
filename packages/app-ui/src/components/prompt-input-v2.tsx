@@ -4,6 +4,7 @@ import { useFeedbackModel } from "@/feedback"
 import { SessionUsageBar } from "./usage-dashboard"
 import { SessionContextUsage } from "./session-context-usage"
 import { PermissionModeControl } from "./permission-mode-control"
+import { FollowupChip } from "./followup-chip"
 import { customSlashCommands } from "./prompt-input/custom-slash-commands"
 import { useParams } from "@solidjs/router"
 import { DialogAttachmentText } from "./dialog-attachment-text"
@@ -61,6 +62,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const language = useLanguage()
   const params = useParams<{ id?: string }>()
   const sdk = useSDK()
+  const sync = useSync()
   const permission = usePermission()
   const platform = usePlatform()
   const [menus, setMenus] = createStore({ permissions: false })
@@ -123,6 +125,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
               mode={permission.mode(sdk().directory, params.id)}
               onChange={(mode) => permission.setMode(sdk().directory, mode)}
             />
+            <FollowupChip working={!!params.id && sync().data.session_working(params.id)} />
             <div data-slot="prompt-model-control" class="min-w-0 max-w-full flex-1 basis-24">
               <PromptInputV2ModelControl
                 loading={props.controller.model.loading}

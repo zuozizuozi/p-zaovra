@@ -52,6 +52,7 @@ import { DialogSelectModelUnpaidV2 } from "@/components/dialog-select-model-unpa
 import { useCommand } from "@/context/command"
 import { usePermission } from "@/context/permission"
 import { PermissionModeControl } from "./permission-mode-control"
+import { FollowupChip } from "./followup-chip"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
@@ -1648,6 +1649,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   mode={permission.mode(sdk().directory, props.controls.session.id)}
                   onChange={(mode) => permission.setMode(sdk().directory, mode)}
                 />
+                <FollowupChip working={working()} />
                 <Show when={!agentsLoading()}>
                   <div
                     data-component="prompt-agent-control"

@@ -22,9 +22,7 @@ const language = {
   t: (key: string, values?: Record<string, string | number | boolean>) =>
     dictionaries[route.locale][key]?.replace(/{{\s*(\w+)\s*}}/g, (_, name) => String(values?.[name] ?? "")) ?? key,
 }
-const fixture = { state: "interrupted", calls: 0, termination: true }
 const requests: string[] = []
-const recoveries: { sessionID: string; messageID: string; action: string }[] = []
 const durable: Todo[] = [{ content: "Saved completed item", status: "completed", priority: "medium" }]
 const client = {
   v2: {
@@ -32,29 +30,6 @@ const client = {
       todos: async ({ sessionID }: { sessionID: string }) => {
         requests.push(sessionID)
         return { data: { data: sessionID === "session732" ? durable : [] } }
-      },
-      outcome: async () => {
-        fixture.calls++
-        return {
-          data: {
-            data: {
-              state: fixture.state,
-              messageID: "assistant732",
-              termination: fixture.termination
-                ? { message: "Execution interrupted; inspect workspace before continuing." }
-                : undefined,
-              outcomeUnknown: fixture.state === "interrupted",
-              checks: [],
-              missing: [],
-              recentChecks: [],
-            },
-          },
-        }
-      },
-      budget: async () => ({ data: { data: { used: { tokens: 0, durationMs: 0 }, limits: {} } } }),
-      recover: async (input: (typeof recoveries)[number]) => {
-        recoveries.push(input)
-        return { data: {} }
       },
     },
   },
@@ -87,7 +62,6 @@ mock.module("@/context/sync", () => ({ useSync: () => () => sync }))
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
 mock.module("@/context/permission", () => ({ usePermission: () => ({ autoResponds: () => false }) }))
 mock.module("@/context/prompt", () => ({ usePrompt: () => ({ dirty: () => false, set() {} }) }))
-const { SessionOutcomeDock } = await import("../../src/pages/session/composer/session-outcome-dock")
 const { ExecutionErrorCard } = await import("../../src/components/execution-error-card")
 const { createSessionComposerController } = await import("../../src/pages/session/composer/session-composer-state")
 const { SessionTodoDock } = await import("../../src/pages/session/composer/session-todo-dock")
@@ -140,14 +114,12 @@ afterEach(() => {
   queryClient.clear()
   document.body.replaceChildren()
   requests.length = 0
-  recoveries.length = 0
 })
 function seed(message = assistant) {
   store = createServerSession(client)
   store.set("message", "session732", [user, message])
   store.set("part", assistant.id, [cancelled])
   setRoute("id", "session732")
-  fixture.calls = 0
 }
 function mount(content: () => import("solid-js").JSX.Element) {
   const root = document.createElement("main")
@@ -189,20 +161,10 @@ function TodoView() {
   )
 }
 test.each(["en", "zh"] as const)(
-  "732 %s interruption has no recovery panel, internal message or duplicate tool failure",
+  "732 %s interruption is one divider in the conversation",
   async (locale) => {
     setRoute("locale", locale)
-    fixture.state = "interrupted"
     seed()
-    const view = mount(() => <SessionOutcomeDock hasChanges={false} />)
-    await until(() => fixture.calls > 0)
-    await tick()
-    expect(view.root.querySelector('[data-component="session-recovery-actions"]') === null).toBe(true)
-    expect(view.root.querySelector('[data-component="session-termination"]') === null).toBe(true)
-    expect(view.root.querySelector('[data-kind="tool-error-card"]') === null).toBe(true)
-    expect(view.root.querySelector('[data-component="session-end-bar"]') === null).toBe(true)
-    expect(view.root.textContent).not.toMatch(/核对现场|inspect workspace|操作未能完成|展开详情查看原因/i)
-    expect(recoveries).toHaveLength(0)
     const rows = Timeline.constructMessageRows(
       user,
       (id) => store.data.part[id] ?? [],
@@ -232,26 +194,14 @@ test.each([
   },
 )
 test.each(["en", "zh"] as const)(
-  "732 %s actual failure exposes one retry and keeps failed tool details",
+  "732 %s actual failure keeps its details in the conversation",
   async (locale) => {
     setRoute("locale", locale)
-    fixture.state = "failed"
     seed({ ...assistant, finish: "stop", error: { name: "UnknownError", data: { message: "HTTP 503" } } })
-    const view = mount(() => (
-      <>
-        <ExecutionErrorCard detailsOnly mascot={false} detail="HTTP 503" />
-        <SessionOutcomeDock hasChanges={false} />
-      </>
-    ))
-    await until(() => !!view.root.querySelector('[data-component="session-recovery-actions"]'))
-    const buttons = view.root.querySelectorAll('[data-component="session-recovery-actions"] button')
-    expect(buttons).toHaveLength(1)
-    expect(buttons[0].textContent).toBe(locale === "zh" ? "重试" : "Retry")
+    const view = mount(() => <ExecutionErrorCard detailsOnly mascot={false} detail="HTTP 503" />)
+    await tick()
     expect(view.root.querySelector('[data-component="execution-error-card"] h3') === null).toBe(true)
     expect(view.root.querySelector('[data-component="execution-error-card"] pre')?.textContent).toBe("HTTP 503")
-    ;(buttons[0] as HTMLButtonElement).click()
-    await until(() => recoveries.length === 1)
-    expect(recoveries[0]).toMatchObject({ sessionID: "session732", messageID: "assistant732", action: "retry" })
   },
 )
 test.each(["en", "zh"] as const)(

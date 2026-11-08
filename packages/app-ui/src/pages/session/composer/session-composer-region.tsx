@@ -1,20 +1,16 @@
-import { Show, Suspense, type JSX } from "solid-js"
+import { Show, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
-import { SessionOutcomeDock } from "./session-outcome-dock"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
 
 export function SessionComposerRegion(props: {
   controller: SessionComposerRegionController
   promptInput: JSX.Element
-  changes?: JSX.Element
-  hasChanges?: boolean
-  onUndo?: () => void
 }) {
   const language = useLanguage()
   const controller = props.controller
@@ -40,10 +36,6 @@ export function SessionComposerRegion(props: {
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": controller.centered(),
         }}
       >
-        {/* Outcome reads suspend on a cold query; keep that wait local to this optional status. */}
-        <Suspense>
-          <SessionOutcomeDock hasChanges={props.hasChanges ?? false} changes={props.changes} onUndo={props.onUndo} />
-        </Suspense>
         <Show when={controller.state.questionRequest()} keyed>
           {(request) => (
             <div>
@@ -151,16 +143,6 @@ export function SessionComposerRegion(props: {
                       aria-disabled={controller.state.blocked()}
                       data-slot="question-composer"
                     >
-                      <label class="flex items-center justify-end gap-1 px-2 text-xs text-text-weak">
-                        <input
-                          type="checkbox"
-                          checked={settings.general.followup() === "queue"}
-                          onChange={(event) =>
-                            settings.general.setFollowup(event.currentTarget.checked ? "queue" : "steer")
-                          }
-                        />
-                        {language.t("session.message.queueAfterTask")}
-                      </label>
                       {props.promptInput}
                     </div>
                   </Show>

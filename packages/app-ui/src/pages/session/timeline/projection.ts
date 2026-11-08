@@ -184,6 +184,12 @@ export function createTimelineProjection(input: {
         const last = assistantMessagesByTurn().get(owner)?.at(-1)
         const working =
           input.status().type !== "idle" && (displayTurns().get(activeMessageID() ?? "") ?? activeMessageID()) === owner
+        if (
+          !working &&
+          last?.time.completed !== undefined &&
+          (last.error || (last.finish && last.finish !== "stop" && last.finish !== "tool-calls"))
+        )
+          filtered.push(new TimelineRow.Recovery({ userMessageID: owner, messageID: last.id }))
         return placeToolFailuresAfterAnswer(
           filtered,
           input.parts,

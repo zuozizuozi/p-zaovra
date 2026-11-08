@@ -2453,37 +2453,6 @@ export default function Page() {
           return (
             <SessionComposerRegion
               controller={controller}
-              hasChanges={turnQuery.isFetched && !turnQuery.isError && !!turnQuery.data?.length}
-              onUndo={() => {
-                if (params.id && turnMessageID()) void revert({ sessionID: params.id, messageID: turnMessageID()! })
-              }}
-              changes={
-                <Show when={params.id && turnQuery.isFetched && !turnQuery.isError && turnQuery.data?.length}>
-                  <button
-                    type="button"
-                    data-component="session-changes-entry"
-                    class="flex h-7 min-w-0 shrink items-center gap-2 text-xs text-text-weak"
-                    title={language.t("session.changes.inspect")}
-                    onClick={() => {
-                      view().review.setMode("turn")
-                      if (isDesktop()) tabs().setActive("review")
-                      if (!isDesktop()) setStore("mobileTab", "changes")
-                      openReviewPanel()
-                    }}
-                  >
-                    <span class="min-w-0 truncate">
-                      {language.t("session.review.filesChanged", { count: turnQuery.data?.length ?? 0 })}
-                    </span>
-                    <Show when={turnQuery.isFetched && !turnQuery.isError}>
-                      <span class="shrink-0 tabular-nums">
-                        +{turnQuery.data?.reduce((sum, diff) => sum + diff.additions, 0) ?? 0} −
-                        {turnQuery.data?.reduce((sum, diff) => sum + diff.deletions, 0) ?? 0}
-                      </span>
-                    </Show>
-                    <span aria-hidden="true">›</span>
-                  </button>
-                </Show>
-              }
               promptInput={
                 <div
                   data-component="prompt-admission"

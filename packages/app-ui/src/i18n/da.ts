@@ -48,13 +48,6 @@ export const dict = {
   "session.permission.directory": "Working directory (relative to the project)",
   "session.permission.decisions":
     "Allow once approves this request. Always allow saves matching rules for this project. Deny rejects this and other pending requests in this session.",
-  "session.outcome.noChecks": "Ingen aktuelle kontroller",
-  "session.outcome.passedCount": "{{count}} aktuelle kontroller bestået",
-  "session.outcome.failedCount": "{{count}} kontroller mislykkedes",
-  "session.outcome.incompleteCount": "{{count}} kontroller uden gyldigt resultat",
-  "session.outcome.current": "Aktuelle kontroller",
-  "session.outcome.history": "Erstattede kontroller (historik)",
-  "session.outcome.expandCheck": "Vis kontroldetaljer og hele kommandoen",
   "home.welcome.title": "Hvad skal vi skabe i dag?",
   "home.welcome.description": "Beskriv din idé, vælg et projekt, og kom i gang med Zaovra.",
   "home.welcome.continue": "Fortsæt til session",

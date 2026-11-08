@@ -30,7 +30,12 @@ export type TimelineRowMap = {
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
+  Recovery: { userMessageID: string; messageID: string }
 }
+
+/** This message gets an interruption divider at its position in the conversation. */
+export const endsWithInterruption = (message: AssistantMessage) =>
+  message.error?.name === "MessageAbortedError" || message.finish === "interrupted" || message.finish === "stopped"
 
 export namespace Timeline {
   export function constructMessageRows(
@@ -51,9 +56,7 @@ export namespace Timeline {
     const userParts = getMessageParts(userMessage.id)
     const comments = userParts.flatMap((p) => MessageComment.fromPart(p) ?? [])
     const compaction = userParts.some((p) => p.type === "compaction")
-    const interruptedMessageIndex = assistantMessages.findIndex(
-      (m) => m.error?.name === "MessageAbortedError" || m.finish === "interrupted" || m.finish === "stopped",
-    )
+    const interruptedMessageIndex = assistantMessages.findIndex(endsWithInterruption)
     const interrupted = interruptedMessageIndex !== -1
     const error = assistantMessages.find((m) => m.error && m.error.name !== "MessageAbortedError")?.error
 

@@ -52,13 +52,6 @@ export const dict = {
   "session.permission.directory": "Working directory (relative to the project)",
   "session.permission.decisions":
     "Allow once approves this request. Always allow saves matching rules for this project. Deny rejects this and other pending requests in this session.",
-  "session.outcome.noChecks": "Keine aktuellen Prüfungen",
-  "session.outcome.passedCount": "{{count}} aktuelle Prüfungen bestanden",
-  "session.outcome.failedCount": "{{count}} Prüfungen fehlgeschlagen",
-  "session.outcome.incompleteCount": "{{count}} Prüfungen ohne gültiges Ergebnis",
-  "session.outcome.current": "Aktuelle Prüfungen",
-  "session.outcome.history": "Ersetzte Prüfungen (Verlauf)",
-  "session.outcome.expandCheck": "Prüfdetails und vollständigen Befehl anzeigen",
   "home.welcome.title": "Was erschaffen wir heute?",
   "home.welcome.description": "Beschreibe deine Idee, wähle ein Projekt und starte mit Zaovra.",
   "home.welcome.continue": "Weiter zur Sitzung",

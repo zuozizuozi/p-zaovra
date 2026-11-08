@@ -112,8 +112,10 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
   const sameModel =
     String(message.model.providerID) === String(model.provider) && String(message.model.id) === String(model.id)
   const reuseProviderMetadata = sameModel && message.error === undefined
+  // Earlier Stops persisted visible text as superseded. Retain it as history, including for existing Sessions.
+  const interrupted = message.termination?.category === "interrupted"
   const content = message.content.flatMap((item): ContentPart[] => {
-    if (item.type !== "tool" && item.superseded) return []
+    if (item.type !== "tool" && item.superseded && !(interrupted && item.type === "text")) return []
     if (item.type === "text") return [{ type: "text", text: item.text }]
     if (item.type === "reasoning")
       return sameModel

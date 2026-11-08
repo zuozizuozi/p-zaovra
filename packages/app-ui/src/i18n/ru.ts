@@ -48,13 +48,6 @@ export const dict = {
   "session.permission.directory": "Working directory (relative to the project)",
   "session.permission.decisions":
     "Allow once approves this request. Always allow saves matching rules for this project. Deny rejects this and other pending requests in this session.",
-  "session.outcome.noChecks": "Нет текущих проверок",
-  "session.outcome.passedCount": "Текущих проверок пройдено: {{count}}",
-  "session.outcome.failedCount": "Проверок не пройдено: {{count}}",
-  "session.outcome.incompleteCount": "Проверок без достоверного результата: {{count}}",
-  "session.outcome.current": "Текущие проверки",
-  "session.outcome.history": "Заменённые проверки (история)",
-  "session.outcome.expandCheck": "Показать подробности и полную команду",
   "home.welcome.title": "Что создадим сегодня?",
   "home.welcome.description": "Опишите идею, выберите проект и начните с Zaovra.",
   "home.welcome.continue": "Перейти к сеансу",
