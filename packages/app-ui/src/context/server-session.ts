@@ -187,6 +187,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const questionLoads = new Map<string, Promise<void>>()
   const questionVersions = new Map<string, number>()
   const admitted = new Map<string, Map<string, boolean>>()
+  let silentAt = 0
   const eventAt = new Map<string, number>()
   const eventVersion = new Map<string, object>()
   const executionWaits = new Map<string, Promise<void>>()
@@ -1625,7 +1626,16 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     resync,
     questions: { sync: syncQuestions },
     resyncSilent(now = Date.now()) {
-      return Promise.all([...pinned.keys()].filter((id) => now - (eventAt.get(id) ?? 0) >= 15_000).map(resync))
+      const refreshViews = now - silentAt >= 15_000
+      if (refreshViews) silentAt = now
+      const views = refreshViews ? [...pinned.keys()].filter((id) => now - (eventAt.get(id) ?? 0) >= 15_000) : []
+      return Promise.all([
+        // A failed final ownership request must also recover after its view unmounts.
+        ...Object.entries(data.session_status)
+          .filter(([id, status]) => status.type !== "idle" && !executionWaits.has(id) && !views.includes(id))
+          .map(([id]) => watchExecution(id)),
+        ...views.map(resync),
+      ])
     },
     stopped: (messageID: string) => stoppedTurns[messageID] !== undefined,
     async interrupt(sessionID: string) {

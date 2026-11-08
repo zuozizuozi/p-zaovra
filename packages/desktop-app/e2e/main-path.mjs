@@ -60,6 +60,7 @@ export async function mainPath(options) {
     source: options.source,
     executable,
     record,
+    profile,
     executableSHA256: createHash("sha256")
       .update(await readFile(executable))
       .digest("hex"),
@@ -209,7 +210,7 @@ export async function mainPath(options) {
     .launch({
       executablePath: executable,
       cwd: record,
-      args: ["--user-data-dir=" + profile, "--lang=zh-CN"],
+      args: [...(options.launchArgs ?? []), "--user-data-dir=" + profile, "--lang=zh-CN"],
       env,
       timeout: 90000,
     })
@@ -232,7 +233,7 @@ export async function mainPath(options) {
         content: win.getContentBounds(),
       })),
     }))
-    assert.equal(report.runtime.packaged, true, "actual packaged Electron")
+    assert.equal(report.runtime.packaged, options.packaged ?? true, "actual Electron distribution mode")
     for (const p of [report.runtime.userData, report.runtime.documents, report.runtime.home])
       assert(
         !relative(isolationRoot, p).startsWith("..") && !isAbsolute(relative(isolationRoot, p)),

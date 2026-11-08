@@ -66,7 +66,7 @@ export function SessionTabAvatar(props: {
             <span
               aria-hidden="true"
               data-slot="session-running-ring"
-              class="absolute inset-0 rounded-full border-2 border-current border-t-transparent text-v2-icon-icon-accent motion-safe:animate-spin"
+              class="absolute inset-0 rounded-full border-2 border-current border-t-transparent text-v2-icon-icon-accent"
               classList={{ "group-hover:invisible": props.revealProjectOnHover !== false }}
             />
           </Show>

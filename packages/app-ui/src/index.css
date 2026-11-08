@@ -162,6 +162,13 @@
     transform-origin: 50% 50%;
   }
 
+  @media (prefers-reduced-motion: no-preference) {
+    [data-slot="session-running-ring"] {
+      animation: titlebar-update-loader-spin 1s linear infinite;
+      transform-origin: 50% 50%;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     [data-slot="titlebar-update-loader"] {
       animation: none;
