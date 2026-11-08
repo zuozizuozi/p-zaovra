@@ -29,6 +29,7 @@ const [state, setState] = createStore({
 })
 const language = { locale: () => "zh", t: (key: string) => (appDict as Record<string, string>)[key] ?? key }
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
+mock.module("@/context/highlights", () => ({ useHighlights: () => ({ available: () => false, show: () => undefined }) }))
 mock.module("@/context/platform", () => ({
   usePlatform: () => ({
     platform: "desktop",
