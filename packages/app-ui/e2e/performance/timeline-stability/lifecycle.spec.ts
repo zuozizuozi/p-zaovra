@@ -138,14 +138,29 @@ test.describe("timeline visual lifecycle stability", () => {
     await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "false")
     await heading.locator("button[aria-expanded]").click()
     await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "true")
+    const terminalGroup = page.locator(
+      `[data-timeline-row="AssistantPart"][data-message-id="${userID}"] [data-component="process-tool-group"]`,
+    )
+    await expect(terminalGroup).toHaveCount(1)
+    await expect(terminalGroup).toHaveJSProperty("open", false)
+    await terminalGroup.locator("summary").click()
+    await expect(terminalGroup).toHaveJSProperty("open", true)
+    const long = page.locator(`[data-timeline-part-id="${assistantID}:${ids[2]}"]`)
+    await expect(long.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
+    await long.locator('[data-slot="collapsible-trigger"]').click()
+    await expect(long.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
     await expect(
       page.locator(`[data-timeline-part-id="${assistantID}:${ids[2]}"] [data-slot="bash-pre"]`),
     ).toContainText("line 50")
 
     const short = page.locator(`[data-timeline-part-id="${assistantID}:${ids[1]}"]`)
+    await expect(short.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
+    await short.locator('[data-slot="collapsible-trigger"]').click()
+    await expect(short.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
     await short.locator('[data-slot="collapsible-trigger"]').click()
     await expect(short.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
     await timeline.send(partUpdated(textPart("prt_late_sibling", "A later sibling rerender.")), 250)
+    await expect(page.getByText("A later sibling rerender.", { exact: true })).toHaveCount(1)
     await expect(short.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
   })
 
