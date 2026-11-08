@@ -86,7 +86,8 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 import { sessionTitle } from "@/utils/session-title"
-import { scheduleConnectedMeasure } from "./measure"
+import { createTimelineFrame } from "./layout-frame"
+import { turnPartFoldable } from "./turn-part-visibility"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
@@ -485,6 +486,35 @@ export function MessageTimeline(props: {
   const messageRowIndex = projection.messageRowIndex
   const timelineRowByKey = projection.rowByKey
   const timelineRows = projection.rows
+  const processEntriesByTurn = createMemo(
+    () =>
+      new Map(
+        timelineRows().flatMap((row) =>
+          row._tag !== "ProcessMessages"
+            ? []
+            : [
+                [
+                  row.userMessageID,
+                  processMessages(
+                    row.messageIDs.flatMap(getMsgParts),
+                    new Set(
+                      (assistantMessagesByTurn().get(row.userMessageID) ?? emptyAssistantMessages).flatMap((message) =>
+                        getMsgParts(message.id).flatMap((part) =>
+                          part.type === "tool" &&
+                          part.tool === "bash" &&
+                          part.state.status === "completed" &&
+                          typeof part.state.metadata.job_id === "string"
+                            ? [part.state.metadata.job_id]
+                            : [],
+                        ),
+                      ),
+                    ),
+                  ),
+                ] as const,
+              ],
+        ),
+      ),
+  )
 
   let prependAnchor: { key: string; offset: number } | undefined
   let prependAnchorFrame: number | undefined
@@ -551,6 +581,17 @@ export function MessageTimeline(props: {
   let resizePinnedIndexes: number[] = []
   let resizePinFrame: number | undefined
   let virtualContent: HTMLDivElement | undefined
+  const layoutFrame = createTimelineFrame<HTMLDivElement>({
+    measure: (element) => {
+      virtualizer.measureElement(element)
+    },
+    follow: () => {
+      // A restored history anchor must not keep undoing an explicit return to latest.
+      clearPrependAnchor()
+      virtualizer.scrollToEnd()
+    },
+    shouldFollow: () => props.shouldAnchorBottom() && !props.hasScrollGesture(),
+  })
   const virtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     get count() {
       return timelineRows().length
@@ -560,7 +601,7 @@ export function MessageTimeline(props: {
     observeElementRect: (instance, callback) =>
       observeElementRect(instance, (rect) => {
         callback(rect)
-        if (props.shouldAnchorBottom() && !props.hasScrollGesture()) instance.scrollToEnd()
+        layoutFrame.follow()
       }),
     observeElementOffset: observeElementOffsetReconnectAware,
     initialOffset: () => (props.shouldAnchorBottom() ? Number.MAX_SAFE_INTEGER : 0),
@@ -581,9 +622,7 @@ export function MessageTimeline(props: {
       }
     },
     anchorTo: "end",
-    get followOnAppend() {
-      return props.shouldAnchorBottom() && !props.hasScrollGesture()
-    },
+    followOnAppend: false,
     scrollEndThreshold: 80,
     get scrollMargin() {
       return showHeader() ? 64 : 0
@@ -601,16 +640,6 @@ export function MessageTimeline(props: {
     },
   })
   const resizeItem = virtualizer.resizeItem
-  let resizeAnchorScheduled = false
-  const anchorResizedBottom = () => {
-    if (resizeAnchorScheduled || props.hasScrollGesture()) return
-    resizeAnchorScheduled = true
-    queueMicrotask(() => {
-      resizeAnchorScheduled = false
-      if (!props.shouldAnchorBottom() || props.hasScrollGesture()) return
-      virtualizer.scrollToEnd()
-    })
-  }
   virtualizer.resizeItem = (index, size) => {
     const item = virtualizer.measurementsCache[index]
     const previous = item ? (virtualizer.itemSizeCache.get(item.key) ?? item.size) : undefined
@@ -632,7 +661,7 @@ export function MessageTimeline(props: {
       })
     }
     resizeItem(index, size)
-    if (root && props.shouldAnchorBottom()) anchorResizedBottom()
+    if (root) layoutFrame.follow()
   }
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
     if (props.shouldAnchorBottom()) return false
@@ -649,18 +678,18 @@ export function MessageTimeline(props: {
       if (index === undefined) return
       virtualizer.scrollToIndex(index, { align: "center" })
     })
-    props.setScrollToEnd?.(() => virtualizer.scrollToEnd())
+    props.setScrollToEnd?.(layoutFrame.follow)
     props.setHistoryAnchor?.({ capture: capturePrependAnchor, restore: restorePrependAnchor })
   })
 
   let overscanFrame: number | undefined
   onMount(() => {
     overscanFrame = requestAnimationFrame(() => {
-      if (props.shouldAnchorBottom()) virtualizer.scrollToEnd()
+      layoutFrame.follow()
       overscanFrame = requestAnimationFrame(() => {
         overscanFrame = undefined
         if (renderOverscan() < 20) setRenderOverscan(20)
-        if (props.shouldAnchorBottom()) virtualizer.scrollToEnd()
+        layoutFrame.follow()
       })
     })
   })
@@ -671,7 +700,7 @@ export function MessageTimeline(props: {
     if (resizePinFrame !== undefined) cancelAnimationFrame(resizePinFrame)
     clearPrependAnchor()
     if (prependAnchorFrame !== undefined) cancelAnimationFrame(prependAnchorFrame)
-    virtualizer.scrollToEnd()
+    layoutFrame.follow()
   }
 
   let measuredSessionKey = sessionKey()
@@ -686,6 +715,7 @@ export function MessageTimeline(props: {
   })
 
   onCleanup(() => {
+    layoutFrame.dispose()
     clearPrependAnchor()
     timelineCache.delete(ownerSessionKey)
     timelineCache.set(ownerSessionKey, { measurements: virtualizer.takeSnapshot(), toolOpen: { ...toolOpen } })
@@ -1401,25 +1431,9 @@ export function MessageTimeline(props: {
       }
       case "ProcessMessages": {
         const processRow = row as Accessor<TimelineRowByTag<"ProcessMessages">>
-        const entries = createMemo(() =>
-          processMessages(
-            processRow().messageIDs.flatMap(getMsgParts),
-            new Set(
-              (assistantMessagesByTurn().get(processRow().userMessageID) ?? emptyAssistantMessages).flatMap((message) =>
-                getMsgParts(message.id).flatMap((part) =>
-                  part.type === "tool" &&
-                  part.tool === "bash" &&
-                  part.state.status === "completed" &&
-                  typeof part.state.metadata.job_id === "string"
-                    ? [part.state.metadata.job_id]
-                    : [],
-                ),
-              ),
-            ),
-          ),
-        )
+        const entries = () => processEntriesByTurn().get(displayTurn(processRow().userMessageID)) ?? []
         return (
-          <TimelineRowFrame row={processRow}>
+          <TimelineRowFrame row={processRow} hidden={turns[displayTurn(processRow().userMessageID)] ?? true}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <ProcessMessages entries={entries()} />
             </div>
@@ -1456,10 +1470,15 @@ export function MessageTimeline(props: {
           )
           return start && ends.length ? Math.max(0, Math.round((Math.max(...ends) - start) / 1000)) : undefined
         })
+        const parts = createMemo(() =>
+          (assistantMessagesByTurn().get(displayTurn(headingRow().userMessageID)) ?? emptyAssistantMessages).flatMap(
+            (message) => getMsgParts(message.id),
+          ),
+        )
         return (
           <TimelineRowFrame row={headingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <div data-slot="assistant-heading">
+              <div data-slot="assistant-heading" class="flex h-9 min-w-0 items-center gap-2 overflow-hidden">
                 <Show when={workingDisplayTurn(headingRow().userMessageID)}>
                   <TaskActivity
                     state={mascotState(headingRow().userMessageID)}
@@ -1467,21 +1486,19 @@ export function MessageTimeline(props: {
                     started={workingDisplayTurn(headingRow().userMessageID) ? activeTool()?.started : undefined}
                   />
                 </Show>
-                <Show when={!workingDisplayTurn(headingRow().userMessageID)}>
-                  <TurnProcessSummary
-                    seconds={elapsed()}
-                    tools={(assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages)
-                      .flatMap((message) => getMsgParts(message.id))
-                      .filter((part): part is ToolPart => part.type === "tool")}
-                    status={settledTurnStatus(
-                      assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages,
-                      unresolvedTools(headingRow().userMessageID),
-                      serverSync().session.stopped(headingRow().userMessageID),
-                    )}
-                    folded={folded()}
-                    onToggle={() => setTurns(headingRow().userMessageID, !folded())}
-                  />
-                </Show>
+                <TurnProcessSummary
+                  seconds={workingDisplayTurn(headingRow().userMessageID) ? undefined : elapsed()}
+                  thoughts={parts().filter((part) => part.type === "reasoning" && part.text.trim()).length}
+                  processes={processEntriesByTurn().get(displayTurn(headingRow().userMessageID))?.length ?? 0}
+                  tools={parts().filter((part): part is ToolPart => part.type === "tool")}
+                  status={settledTurnStatus(
+                    assistantMessagesByTurn().get(headingRow().userMessageID) ?? emptyAssistantMessages,
+                    unresolvedTools(headingRow().userMessageID),
+                    serverSync().session.stopped(headingRow().userMessageID),
+                  )}
+                  folded={folded()}
+                  onToggle={() => setTurns(headingRow().userMessageID, !folded())}
+                />
               </div>
               <Show when={snapshotWarning() === headingRow().userMessageID}>
                 <div role="status" data-slot="snapshot-unavailable" class="py-1 text-xs text-text-weak">
@@ -1504,19 +1521,10 @@ export function MessageTimeline(props: {
           const refs = group.type === "part" ? [group.ref] : group.refs
           return refs.every((ref) => {
             const part = getMsgPart(ref.messageID, ref.partID)
-            if (part?.type === "text")
-              return ref.messageID !== answerMessages().get(displayTurn(assistantPartRow().userMessageID))
-            // Its own collapsed summary is the affordance for revealing reasoning.
-            if (part?.type === "reasoning") return false
-            if (part?.type !== "tool") return false
-            return (
-              part.state.status !== "error" ||
-              quietParts().has(part.id) ||
-              processParts().has(part.id) ||
-              (!!props.compactTurnID &&
-                part.state.metadata?.phase !== "permission" &&
-                displayTurn(assistantPartRow().userMessageID) === displayTurn(props.compactTurnID))
-            )
+            return turnPartFoldable(part, {
+              answer: ref.messageID === answerMessages().get(displayTurn(assistantPartRow().userMessageID)),
+              coveredFailure: !!part && (quietParts().has(part.id) || processParts().has(part.id)),
+            })
           })
         }
         const modelName = createMemo(() => {
@@ -1560,7 +1568,7 @@ export function MessageTimeline(props: {
       case "Thinking": {
         const thinkingRow = row as Accessor<TimelineRowByTag<"Thinking">>
         return (
-          <TimelineRowFrame row={thinkingRow}>
+          <TimelineRowFrame row={thinkingRow} hidden={turns[displayTurn(thinkingRow().userMessageID)] ?? true}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <TimelineThinkingRow
                 reasoningHeading={thinkingRow().reasoningHeading}
@@ -1670,23 +1678,18 @@ export function MessageTimeline(props: {
     }
     const asyncFile = () => ["edit", "write", "apply_patch"].includes(tool()?.tool ?? "")
     const [ready, setReady] = createSignal(initialItem.size <= timelineFallbackItemSize || !asyncFile())
-    let contentMeasureFrame: number | undefined
 
-    onMount(() => virtualizer.measureElement(element))
+    onMount(() => layoutFrame.measure(element))
 
     createEffect(
       on(
         () => item().index,
         () => {
-          virtualizer.measureElement(element)
+          layoutFrame.measure(element)
         },
         { defer: true },
       ),
     )
-
-    onCleanup(() => {
-      if (contentMeasureFrame !== undefined) cancelAnimationFrame(contentMeasureFrame)
-    })
 
     return (
       <div
@@ -1713,8 +1716,7 @@ export function MessageTimeline(props: {
             row={row()}
             onSizeChange={() => {
               setReady(true)
-              if (contentMeasureFrame !== undefined) cancelAnimationFrame(contentMeasureFrame)
-              contentMeasureFrame = scheduleConnectedMeasure(element, virtualizer.measureElement)
+              layoutFrame.measure(element)
             }}
           />
         </div>

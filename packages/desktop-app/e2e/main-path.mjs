@@ -112,6 +112,12 @@ export async function mainPath(options) {
       const body = JSON.parse(raw.toString("utf8"))
       requests.push(body)
       report.modelCalls++
+      if (options.respond) {
+        control.responses.add(res)
+        res.once("close", () => control.responses.delete(res))
+        await options.respond(body, res)
+        return
+      }
       const user = body.messages.filter((message) => message.role === "user").at(-1)
       const text = JSON.stringify(user?.content ?? "")
       const action = /MP[456]/.exec(text)?.[0] ?? control.action

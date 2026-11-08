@@ -13,6 +13,8 @@ export function settledTurnStatus(messages: readonly AssistantMessage[], unresol
 export function TurnProcessSummary(props: {
   seconds?: number
   tools: readonly ToolPart[]
+  thoughts?: number
+  processes?: number
   status?: ReturnType<typeof settledTurnStatus>
   folded: boolean
   onToggle: () => void
@@ -26,9 +28,11 @@ export function TurnProcessSummary(props: {
     const failed = tools.filter((part) => part.state.status === "error").length
     return [
       [
+        props.thoughts && i18n.t("session.process.thought", { count: props.thoughts }),
         edits && i18n.t("session.process.edit", { count: edits }),
         commands && i18n.t("session.process.command", { count: commands }),
         other && i18n.t("session.process.other", { count: other }),
+        props.processes && i18n.t("session.process.record", { count: props.processes }),
       ]
         .filter(Boolean)
         .join(i18n.t("session.process.separator")),
@@ -36,29 +40,36 @@ export function TurnProcessSummary(props: {
     ].join("")
   })
   return (
-    <div data-component="turn-process-summary" class="text-xs text-text-weak min-w-0">
-      <div class="flex flex-wrap items-center gap-2">
-        <Show when={props.status}>
-          {(status) => <span data-slot="turn-terminal-status">{i18n.t(`session.turn.${status()}`)}</span>}
-        </Show>
-        <button type="button" aria-expanded={!props.folded} onClick={props.onToggle}>
-          {props.seconds === undefined
-            ? i18n.t("session.process.details")
-            : i18n.t("session.turn.duration", { seconds: props.seconds })}{" "}
-          {props.folded ? "⌄" : "⌃"}
-        </button>
-      </div>
-      <Show when={!props.folded && counts()}>
-        <button
-          data-slot="process-counts"
-          class="text-left break-words"
-          type="button"
-          aria-expanded={!props.folded}
-          onClick={props.onToggle}
-        >
-          {counts()}
-        </button>
+    <div data-component="turn-process-summary" class="flex h-9 min-w-0 items-center gap-2 text-xs text-text-weak">
+      <Show when={props.status}>
+        {(status) => (
+          <span data-slot="turn-terminal-status" class="shrink-0">
+            {i18n.t(`session.turn.${status()}`)}
+          </span>
+        )}
       </Show>
+      <button
+        type="button"
+        class="flex h-9 min-w-0 items-center gap-2 text-left"
+        aria-expanded={!props.folded}
+        onClick={props.onToggle}
+      >
+        <Show when={counts()}>
+          <span data-slot="process-counts" class="min-w-0 truncate" style={{ "font-variant-numeric": "tabular-nums" }}>
+            {counts()}
+          </span>
+        </Show>
+        <span class="shrink-0">
+          {props.seconds === undefined
+            ? counts()
+              ? ""
+              : i18n.t("session.process.details")
+            : i18n.t("session.turn.duration", { seconds: props.seconds })}
+        </span>
+        <span aria-hidden="true" class="shrink-0">
+          {props.folded ? "⌄" : "⌃"}
+        </span>
+      </button>
     </div>
   )
 }
