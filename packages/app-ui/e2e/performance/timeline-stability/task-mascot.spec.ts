@@ -204,6 +204,47 @@ test("the writing pose follows the live text stream", async ({ page }) => {
   await expect(mascot).toHaveAttribute("data-pose", "error")
 })
 
+test("a completed snapshot ends the writing pose when the end event never arrives", async ({ page }) => {
+  const timeline = await setupTimeline(page, {
+    messages: [userMessage(), assistantMessage([], { completed: false })],
+    reducedMotion: false,
+  })
+  const mascot = page.locator(
+    `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="task-mascot"]`,
+  )
+  const v2 = (id: string, type: string, properties: Record<string, unknown>) =>
+    timeline.transport.writeRaw(
+      `data: ${JSON.stringify({ directory, payload: { id, type: `session.next.${type}`, properties: { timestamp: 1700000002000, sessionID, assistantMessageID: assistantID, ...properties } } })}\n\n`,
+    )
+  await page.route("**/api/session/active", (route) => route.fulfill({ json: { data: { [sessionID]: true } } }))
+  await timeline.send(status("busy"))
+  await v2("evt_snapshot_0", "text.started", { textID: "txt_snapshot" })
+  await v2("evt_snapshot_1", "text.delta", { textID: "txt_snapshot", delta: "Hello" })
+  await expect(mascot).toHaveAttribute("data-pose", "speaking")
+  await page.route(`**/api/session/${sessionID}/message?*`, (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          { id: userID, type: "user", text: "Build the timeline stability matrix.", time: { created: 1700000000000 } },
+          {
+            id: assistantID,
+            type: "assistant",
+            agent: "build",
+            model: { id: "claude-opus-4-6", providerID: "zaovra" },
+            time: { created: 1700000001000, completed: 1700000002000 },
+            content: [{ id: "txt_snapshot", type: "text", text: "Hello" }],
+          },
+        ],
+        cursor: {},
+      },
+    }),
+  )
+  // An offset gap makes the client refetch history, the same path a silent resync takes; no end event is sent.
+  await v2("evt_snapshot_2", "text.delta", { textID: "txt_snapshot", delta: "!", offset: 99 })
+  await expect(mascot).toHaveAttribute("data-pose", "thinking")
+  await expect(mascot).toHaveAttribute("data-state", "thinking")
+})
+
 test("poking the mascot returns to the current pose's face", async ({ page }) => {
   const timeline = await setupTimeline(page, {
     messages: [userMessage(), assistantMessage([], { completed: false })],
