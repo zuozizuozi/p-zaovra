@@ -3,11 +3,18 @@
   &[data-variant="warning"]::before {
     display: none;
   }
+  /* Error summaries wrap beyond the shared single-line trigger height. */
+  [data-slot="collapsible-trigger"] {
+    height: auto;
+    min-height: 32px;
+  }
+
   [data-slot="basic-tool-tool-info-main"] {
     flex-wrap: wrap;
   }
   [data-slot="basic-tool-tool-subtitle"] {
     white-space: normal;
+    overflow-wrap: anywhere;
   }
   --card-line-pad: 12px;
 
