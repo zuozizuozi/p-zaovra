@@ -8,6 +8,7 @@ import {
   visualPlan,
 } from "../../utils/visual-stability"
 import {
+  assistantID,
   assistantMessage,
   completedAssistantInfo,
   messageUpdated,
@@ -27,32 +28,47 @@ test.describe("timeline visual lifecycle stability", () => {
   test("streams empty, short, and long parallel shells to staggered completion", async ({ page }, testInfo) => {
     test.setTimeout(180_000)
     const ids = ["prt_parallel_01_empty", "prt_parallel_02_short", "prt_parallel_03_long"] as const
-    const initial = ids.map((id) => shell(id, "running"))
-    const followingID = "prt_parallel_04_following"
-    const assistant = assistantMessage([], {
-      completed: false,
-    })
+    const followingID = assistantID + ":prt_parallel_04_following"
+    const assistant = assistantMessage(
+      [
+        ...ids.map((id) => shell(id, "running")),
+        textPart("prt_parallel_04_following", "Following all parallel shells."),
+      ],
+      {
+        completed: false,
+      },
+    )
     const timeline = await setupTimeline(page, {
       messages: [userMessage(), assistant],
       settings: { shellToolPartsExpanded: true, showReasoningSummaries: true },
       cpuRate: 4,
       eventRetry: 24,
       seedHistory: true,
+      v2ToolUpdates: true,
     })
+    const details = page.locator(
+      `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
+    )
+    await expect(details).toHaveAttribute("aria-expanded", "false")
+    await details.click()
+    await expect(details).toHaveAttribute("aria-expanded", "true")
     await timeline.send(status("busy"), 150)
     // Deliver live parts through SSE so their IDs match subsequent deltas;
     // historical hydration namespaces part IDs with their message ID.
-    for (const part of [...initial, textPart(followingID, "Following all parallel shells.")])
-      await timeline.send(partUpdated(part))
-    for (const id of ids) await timeline.waitForPart(id)
+    for (const part of ids.map((id) => shell(id, "running"))) await timeline.send(partUpdated(part))
+    for (const id of ids) await timeline.waitForPart(assistantID + ":" + id)
     const scroller = page.locator(".scroll-view__viewport", {
       has: page.locator('[data-timeline-row="AssistantPart"]'),
     })
     await scroller.evaluate((element) => (element.scrollTop = element.scrollHeight))
+    // Enter follow mode through its user control; scrolling the DOM alone can retain a paused history anchor.
+    await scroller.hover()
+    await page.mouse.wheel(0, -180)
+    await page.getByRole("button", { name: "Jump to latest", exact: true }).click()
     const regions = defineVisualRegions({
-      prt_shell_empty: shellRegion(ids[0]),
-      prt_shell_short: shellRegion(ids[1]),
-      prt_shell_long: shellRegion(ids[2]),
+      prt_shell_empty: shellRegion(assistantID + ":" + ids[0]),
+      prt_shell_short: shellRegion(assistantID + ":" + ids[1]),
+      prt_shell_long: shellRegion(assistantID + ":" + ids[2]),
       following: shellRegion(followingID),
     })
     await waitForVisualSettle(page, [`[data-timeline-part-id="${followingID}"]`])
@@ -97,6 +113,8 @@ test.describe("timeline visual lifecycle stability", () => {
     await startVisualProbe(page, terminalRegions)
     await timeline.send(messageUpdated(completedAssistantInfo(assistant.info)), 100)
     await timeline.send(status("idle"), 700)
+    await expect(details).toHaveAttribute("aria-expanded", "true")
+    await details.click()
     const terminal = await stopVisualProbe<keyof typeof terminalRegions>(page)
     await reportVisualStability(
       testInfo,
@@ -116,13 +134,15 @@ test.describe("timeline visual lifecycle stability", () => {
     expect(await following.evaluate((element, previous) => element === previous, resident)).toBe(true)
     await expect(following).toContainText("Following all parallel shells.")
     const heading = page.locator(`[data-timeline-row="AssistantHeading"][data-message-id="${userID}"]`)
-    await expect(heading.locator('[data-component="task-mascot"]')).toHaveCount(1)
+    await expect(heading.locator('[data-component="task-mascot"]')).toHaveCount(0)
     await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "false")
     await heading.locator("button[aria-expanded]").click()
     await expect(heading.locator("button[aria-expanded]")).toHaveAttribute("aria-expanded", "true")
-    await expect(page.locator(`[data-timeline-part-id="${ids[2]}"] [data-slot="bash-pre"]`)).toContainText("line 50")
+    await expect(
+      page.locator(`[data-timeline-part-id="${assistantID}:${ids[2]}"] [data-slot="bash-pre"]`),
+    ).toContainText("line 50")
 
-    const short = page.locator(`[data-timeline-part-id="${ids[1]}"]`)
+    const short = page.locator(`[data-timeline-part-id="${assistantID}:${ids[1]}"]`)
     await short.locator('[data-slot="collapsible-trigger"]').click()
     await expect(short.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
     await timeline.send(partUpdated(textPart("prt_late_sibling", "A later sibling rerender.")), 250)
@@ -146,6 +166,12 @@ test.describe("timeline visual lifecycle stability", () => {
       "thinking",
     )
 
+    const details = page.locator(
+      `[data-timeline-row="AssistantHeading"][data-message-id="${userID}"] [data-component="turn-process-summary"] button`,
+    )
+    await expect(details).toHaveAttribute("aria-expanded", "false")
+    await details.click()
+    await expect(details).toHaveAttribute("aria-expanded", "true")
     const regions = defineVisualRegions({
       thinking: { selector: '[data-timeline-row="AssistantHeading"]' },
       reasoning: {

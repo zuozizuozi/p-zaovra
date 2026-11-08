@@ -65,12 +65,13 @@ export namespace Timeline {
         .filter((part) => renderable(part, showReasoning))
         .map((part) => ({ messageID: message.id, messageIndex, part })),
     )
+    // A completed process part keeps its row identity until its turn becomes idle or inactive.
     const assistantItems =
       interrupted && !compaction && !stopped
         ? [
             ...groupParts(
               assistantPartRefs.filter((ref) => ref.messageIndex <= interruptedMessageIndex),
-              true,
+              !isActive || status === "idle",
             ).map((group) => ({
               type: "part" as const,
               group,
@@ -78,13 +79,16 @@ export namespace Timeline {
             { type: "interrupted" as const },
             ...groupParts(
               assistantPartRefs.filter((ref) => ref.messageIndex > interruptedMessageIndex),
-              true,
+              !isActive || status === "idle",
             ).map((group) => ({
               type: "part" as const,
               group,
             })),
           ]
-        : groupParts(assistantPartRefs, true).map((group) => ({ type: "part" as const, group }))
+        : groupParts(assistantPartRefs, !isActive || status === "idle").map((group) => ({
+            type: "part" as const,
+            group,
+          }))
     if (previousUserMessage) rows.push(new TimelineRow.TurnGap({ userMessageID: userMessage.id }))
 
     if (comments.length > 0 && !inlineComments)

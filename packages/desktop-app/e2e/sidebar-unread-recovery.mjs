@@ -16,7 +16,7 @@ const previous = resumeName
 const profile = previous?.profile ?? join(record, "profile")
 const directory = previous?.directory ?? join(record, "project").replaceAll("\\", "/")
 const report = {
-  source: "ba6a4cb2",
+  source: process.env.ZAOVRA_TEST_SOURCE ?? "ba6a4cb2",
   scope: "237 actual DesktopSidebar/TabsProvider/native storage recovery",
   assertions: [],
   screenshots: [],
@@ -64,7 +64,7 @@ const mime = {
   ".woff": "font/woff",
   ".wasm": "application/wasm",
 }
-const renderer = join(resolve(root), "desktop-renderer-v3")
+const renderer = join(resolve(root), process.env.ZAOVRA_TEST_RENDERER ?? "desktop-renderer-v3")
 const server = createServer(async (request, response) => {
   report.requests.push({ method: request.method, path: new URL(request.url, "http://local").pathname })
   if (/^\/(global\/)?event(?:\?|$)/.test(request.url)) {

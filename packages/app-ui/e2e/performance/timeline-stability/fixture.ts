@@ -19,6 +19,10 @@ import { mockZaovraServer } from "../../utils/mock-server"
 import { installSseTransport } from "../../utils/sse-transport"
 import { expectSessionTitle } from "../../utils/waits"
 
+import { registerTimelineEvidence, recordTimelineDelivery } from "../../utils/timeline-evidence"
+
+registerTimelineEvidence()
+
 export const directory = "C:/Zaovra/TimelineStability"
 export const projectID = "proj_timeline_stability"
 export const sessionID = "ses_timeline_stability"
@@ -171,6 +175,11 @@ export async function setupTimeline(
     transport,
     async send(event: TimelineEvent, delay = 0) {
       const valid = validateTimelineEvent(event)
+      if (input.v2ToolUpdates && valid.payload.type === "message.updated") {
+        const index = messages.findIndex((message) => message.info.id === valid.payload.properties.info.id)
+        if (index < 0) throw new Error("Missing fixture message")
+        messages[index] = { ...messages[index]!, info: valid.payload.properties.info } as TimelineMessage
+      }
       if (input.v2ToolUpdates && valid.payload.type === "message.part.updated") {
         const part = valid.payload.properties.part
         if (part.type !== "tool") throw new Error("V2 scroll fixtures expect tool updates")
@@ -212,13 +221,19 @@ export async function setupTimeline(
         if (delay) await page.waitForTimeout(delay)
         return
       }
-      await transport.send(valid, { marker: describeEvent(valid) })
+      const acknowledgement = await transport.send(valid, { marker: describeEvent(valid) })
+      await recordTimelineDelivery(valid, acknowledgement)
       if (delay) await page.waitForTimeout(delay)
     },
     async sendAll(sequence: { event: TimelineEvent; delay: number }[]) {
+      if (input.v2ToolUpdates) {
+        for (const item of sequence) await this.send(item.event, item.delay)
+        return
+      }
       for (const item of sequence) {
         const valid = validateTimelineEvent(item.event)
-        await transport.send(valid, { marker: describeEvent(valid) })
+        const acknowledgement = await transport.send(valid, { marker: describeEvent(valid) })
+        await recordTimelineDelivery(valid, acknowledgement)
         await page.waitForTimeout(item.delay)
       }
     },
