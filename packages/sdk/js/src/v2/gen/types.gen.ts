@@ -1005,6 +1005,7 @@ export type GlobalEvent = {
           sessionID: string
           assistantMessageID: string
           finish: string
+          responseModel?: string
           termination?: SessionOutcomeTermination
           error?: SessionErrorUnknown
           cost: number
@@ -4427,6 +4428,7 @@ export type SyncEventSessionNextStepEnded = {
       sessionID: string
       assistantMessageID: string
       finish: string
+      responseModel?: string
       termination?: SessionOutcomeTermination
       error?: SessionErrorUnknown
       cost: number
@@ -6222,6 +6224,7 @@ export type SessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    responseModel?: string
     termination?: SessionOutcomeTermination
     error?: SessionErrorUnknown
     cost: number
@@ -9478,6 +9481,7 @@ export type EventSessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    responseModel?: string
     termination?: SessionOutcomeTermination6
     error?: SessionErrorUnknown
     cost: number
@@ -15251,6 +15255,56 @@ export type V2ProviderGetResponses = {
 }
 
 export type V2ProviderGetResponse = V2ProviderGetResponses[keyof V2ProviderGetResponses]
+
+export type V2ProviderModelsData = {
+  body?: never
+  path: {
+    providerID: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/provider/{providerID}/models"
+}
+
+export type V2ProviderModelsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProviderNotFoundError
+   */
+  404: ProviderNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type V2ProviderModelsError = V2ProviderModelsErrors[keyof V2ProviderModelsErrors]
+
+export type V2ProviderModelsResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: Array<{
+      id: string
+      name: string
+    }>
+  }
+}
+
+export type V2ProviderModelsResponse = V2ProviderModelsResponses[keyof V2ProviderModelsResponses]
 
 export type V2IntegrationListData = {
   body?: never

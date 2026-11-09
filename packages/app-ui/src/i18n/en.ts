@@ -45,6 +45,14 @@ export const dict = {
   "provider.models.duplicate": "Each model ID must be unique.",
   "provider.models.protocolRequired": "Choose the protocol in Advanced before saving manual model IDs.",
   "provider.models.save": "Save models",
+  "provider.models.add": "Add a model name",
+  "provider.models.savedService":
+    "Fetch models for this service, or add a missing model name using the saved key, headers and address.",
+  "provider.models.refresh": "Refresh upstream models",
+  "provider.models.discoveryFailed":
+    "Could not fetch the upstream list. Existing models are kept; you can add a model name directly.",
+  "provider.models.saved": "Models saved and available in the model selector.",
+  "provider.models.savedWithoutDiscovery": "Models saved. Could not fetch the upstream list; existing models are kept.",
   "settings.about.updater.error": "Update check failed. Try again.",
   "settings.about.updater.installing": "Updating…",
   "settings.about.updater.up-to-date": "You are up to date",

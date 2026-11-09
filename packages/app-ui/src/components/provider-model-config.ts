@@ -44,7 +44,7 @@ export function providerModelsPatch(
         models: {
           ...before?.models,
           ...Object.fromEntries(
-            concrete.map((model) => [model.id, { ...before?.models?.[model.id], name: model.name }]),
+            concrete.map((model) => [model.id, { name: model.name, ...before?.models?.[model.id] }]),
           ),
         },
       },
