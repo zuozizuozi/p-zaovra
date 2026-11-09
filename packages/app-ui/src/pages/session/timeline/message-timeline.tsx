@@ -80,6 +80,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { useLayout } from "@/context/layout"
+import { SessionViewMenu } from "@/components/session/session-view-menu"
 import { conversationViewFlags } from "@/utils/conversation-view"
 import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
@@ -308,7 +309,8 @@ export function MessageTimeline(props: {
   const openProviderSettings = useSettingsDialog("providers")
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
-  const conversationView = useLayout().view(sessionKey).conversationView
+  const layout = useLayout()
+  const conversationView = layout.view(sessionKey).conversationView
   const display = createMemo(() => {
     const temporary = conversationView.get()
     if (temporary) return conversationViewFlags(temporary)
@@ -1960,7 +1962,7 @@ export function MessageTimeline(props: {
                       placement="bottom"
                       buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}
                     />
-                    <Show when={!parentID()}>
+                    <Show when={sessionID()}>
                       <Show
                         when={settings.general.newLayoutDesigns()}
                         fallback={
@@ -1989,7 +1991,8 @@ export function MessageTimeline(props: {
                             />
                             <DropdownMenu.Portal>
                               <DropdownMenu.Content
-                                style={{ "min-width": "104px" }}
+                                data-slot="session-options-menu"
+                                style={{ "min-width": "208px" }}
                                 onCloseAutoFocus={(event) => {
                                   if (title.pendingRename) {
                                     event.preventDefault()
@@ -2006,34 +2009,49 @@ export function MessageTimeline(props: {
                                   }
                                 }}
                               >
-                                <DropdownMenu.Item
-                                  onSelect={() => {
-                                    setTitle("pendingRename", true)
-                                    setTitle("menuOpen", false)
+                                <SessionViewMenu
+                                  modern={settings.general.newLayoutDesigns()}
+                                  value={conversationView.get()}
+                                  onChange={(value) => conversationView.set(value)}
+                                  reviewOpened={layout.view(sessionKey).reviewPanel.opened()}
+                                  onReviewToggle={() => layout.view(sessionKey).reviewPanel.toggle()}
+                                  onArtifacts={() => {
+                                    const panelTabs = layout.tabs(sessionKey)
+                                    panelTabs.open("artifacts")
+                                    panelTabs.setActive("artifacts")
+                                    layout.view(sessionKey).reviewPanel.open()
                                   }}
-                                >
-                                  <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
-                                </DropdownMenu.Item>
-                                <Show when={shareEnabled()}>
+                                />
+                                <Show when={!parentID()}>
                                   <DropdownMenu.Item
                                     onSelect={() => {
-                                      setTitle({ pendingShare: true, menuOpen: false })
+                                      setTitle("pendingRename", true)
+                                      setTitle("menuOpen", false)
                                     }}
                                   >
-                                    <DropdownMenu.ItemLabel>
-                                      {language.t("session.share.action.share")}
-                                    </DropdownMenu.ItemLabel>
+                                    <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
+                                  </DropdownMenu.Item>
+                                  <Show when={shareEnabled()}>
+                                    <DropdownMenu.Item
+                                      onSelect={() => {
+                                        setTitle({ pendingShare: true, menuOpen: false })
+                                      }}
+                                    >
+                                      <DropdownMenu.ItemLabel>
+                                        {language.t("session.share.action.share")}
+                                      </DropdownMenu.ItemLabel>
+                                    </DropdownMenu.Item>
+                                  </Show>
+                                  <DropdownMenu.Item onSelect={() => void archiveSession(id)}>
+                                    <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
+                                  </DropdownMenu.Item>
+                                  <DropdownMenu.Separator />
+                                  <DropdownMenu.Item
+                                    onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}
+                                  >
+                                    <DropdownMenu.ItemLabel>{language.t("common.delete")}</DropdownMenu.ItemLabel>
                                   </DropdownMenu.Item>
                                 </Show>
-                                <DropdownMenu.Item onSelect={() => void archiveSession(id)}>
-                                  <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Separator />
-                                <DropdownMenu.Item
-                                  onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}
-                                >
-                                  <DropdownMenu.ItemLabel>{language.t("common.delete")}</DropdownMenu.ItemLabel>
-                                </DropdownMenu.Item>
                               </DropdownMenu.Content>
                             </DropdownMenu.Portal>
                           </DropdownMenu>
@@ -2062,7 +2080,8 @@ export function MessageTimeline(props: {
                           />
                           <MenuV2.Portal>
                             <MenuV2.Content
-                              style={{ width: "120px", "min-width": "120px" }}
+                              data-slot="session-options-menu"
+                              style={{ "min-width": "208px" }}
                               onCloseAutoFocus={(event) => {
                                 if (title.pendingRename) {
                                   event.preventDefault()
@@ -2079,30 +2098,45 @@ export function MessageTimeline(props: {
                                 }
                               }}
                             >
-                              <MenuV2.Item
-                                onSelect={() => {
-                                  setTitle("pendingRename", true)
-                                  setTitle("menuOpen", false)
+                              <SessionViewMenu
+                                modern={settings.general.newLayoutDesigns()}
+                                value={conversationView.get()}
+                                onChange={(value) => conversationView.set(value)}
+                                reviewOpened={layout.view(sessionKey).reviewPanel.opened()}
+                                onReviewToggle={() => layout.view(sessionKey).reviewPanel.toggle()}
+                                onArtifacts={() => {
+                                  const panelTabs = layout.tabs(sessionKey)
+                                  panelTabs.open("artifacts")
+                                  panelTabs.setActive("artifacts")
+                                  layout.view(sessionKey).reviewPanel.open()
                                 }}
-                              >
-                                {language.t("common.rename")}
-                              </MenuV2.Item>
-                              <Show when={shareEnabled()}>
+                              />
+                              <Show when={!parentID()}>
                                 <MenuV2.Item
                                   onSelect={() => {
-                                    setTitle({ pendingShare: true, menuOpen: false })
+                                    setTitle("pendingRename", true)
+                                    setTitle("menuOpen", false)
                                   }}
                                 >
-                                  {language.t("session.share.action.share")}...
+                                  {language.t("common.rename")}
+                                </MenuV2.Item>
+                                <Show when={shareEnabled()}>
+                                  <MenuV2.Item
+                                    onSelect={() => {
+                                      setTitle({ pendingShare: true, menuOpen: false })
+                                    }}
+                                  >
+                                    {language.t("session.share.action.share")}...
+                                  </MenuV2.Item>
+                                </Show>
+                                <MenuV2.Item onSelect={() => void archiveSession(id)}>
+                                  {language.t("common.archive")}
+                                </MenuV2.Item>
+                                <MenuV2.Separator />
+                                <MenuV2.Item onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}>
+                                  {language.t("common.delete")}...
                                 </MenuV2.Item>
                               </Show>
-                              <MenuV2.Item onSelect={() => void archiveSession(id)}>
-                                {language.t("common.archive")}
-                              </MenuV2.Item>
-                              <MenuV2.Separator />
-                              <MenuV2.Item onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}>
-                                {language.t("common.delete")}...
-                              </MenuV2.Item>
                             </MenuV2.Content>
                           </MenuV2.Portal>
                         </MenuV2>
