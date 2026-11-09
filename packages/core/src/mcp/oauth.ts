@@ -156,7 +156,6 @@ function authorize(name: string, server: Remote) {
               }
               if (url.searchParams.get("state") !== oauth.expectedState()) {
                 const message = "Invalid or expired OAuth state"
-                Effect.runFork(Deferred.fail(callback, new Error(message)))
                 sendHtml(response, OauthCallbackPage.error(message, { provider: `MCP ${name}` }), 400)
                 return
               }
