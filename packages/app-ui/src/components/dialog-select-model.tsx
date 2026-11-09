@@ -107,6 +107,7 @@ export function ModelSelectorPopover(props: {
   triggerProps?: ModelSelectorTriggerProps
   onClose?: (cause: "escape" | "select") => void
 }) {
+  const catalog = useModels().catalog
   const [store, setStore] = createStore<{
     open: boolean
     dismiss: Dismiss | null
@@ -203,6 +204,9 @@ export function ModelSelectorPopover(props: {
               </div>
             }
           />
+          <Button size="small" variant="ghost" disabled={catalog.loading()} onClick={() => void catalog.refresh()}>
+            {language.t("model.catalog.retry")}
+          </Button>
         </Kobalte.Content>
       </Kobalte.Portal>
     </Kobalte>
@@ -269,7 +273,7 @@ export function ModelSelectorPopoverV2(props: {
   const setOpen = (open: boolean) => {
     if (open) {
       // Reconcile catalogs that changed during startup or outside this window.
-      void catalog.refresh()
+      void catalog.refresh({ discover: false })
       restoreTrigger = true
       setStore({ open: true, active: initialActive() })
       setTimeout(() =>
@@ -524,6 +528,7 @@ export function ModelSelectorPopoverV2(props: {
 }
 
 export const DialogSelectModel: Component<{ provider?: string; model?: ModelState }> = (props) => {
+  const catalog = useModels().catalog
   const dialog = useDialog()
   const language = useLanguage()
   const local = useLocal()
@@ -551,6 +556,9 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
       }
     >
       <ModelList provider={props.provider} model={props.model} onSelect={() => dialog.close()} />
+      <Button variant="ghost" disabled={catalog.loading()} onClick={() => void catalog.refresh()}>
+        {language.t("model.catalog.retry")}
+      </Button>
       <Button variant="ghost" class="ml-3 mt-5 mb-6 text-text-base self-start" onClick={manage}>
         {language.t("dialog.model.manage")}
       </Button>

@@ -630,7 +630,21 @@ const Endpoint7_1 = (raw: RawClient["server.provider"]) => (input: Endpoint7_1In
     Effect.mapError(mapClientError),
   )
 
-const adaptGroup7 = (raw: RawClient["server.provider"]) => ({ list: Endpoint7_0(raw), get: Endpoint7_1(raw) })
+type Endpoint7_2Request = Parameters<RawClient["server.provider"]["provider.models"]>[0]
+type Endpoint7_2Input = {
+  readonly providerID: Endpoint7_2Request["params"]["providerID"]
+  readonly location?: Endpoint7_2Request["query"]["location"]
+}
+const Endpoint7_2 = (raw: RawClient["server.provider"]) => (input: Endpoint7_2Input) =>
+  raw["provider.models"]({ params: { providerID: input["providerID"] }, query: { location: input["location"] } }).pipe(
+    Effect.mapError(mapClientError),
+  )
+
+const adaptGroup7 = (raw: RawClient["server.provider"]) => ({
+  list: Endpoint7_0(raw),
+  get: Endpoint7_1(raw),
+  models: Endpoint7_2(raw),
+})
 
 type Endpoint8_0Request = Parameters<RawClient["server.integration"]["integration.list"]>[0]
 type Endpoint8_0Input = { readonly location?: Endpoint8_0Request["query"]["location"] }

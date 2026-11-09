@@ -230,6 +230,8 @@ import type {
   V2ProviderGetResponses,
   V2ProviderListErrors,
   V2ProviderListResponses,
+  V2ProviderModelsErrors,
+  V2ProviderModelsResponses,
   V2PtyConnectErrors,
   V2PtyConnectResponses,
   V2PtyConnectTokenErrors,
@@ -4841,6 +4843,39 @@ export class Provider2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<V2ProviderGetResponses, V2ProviderGetErrors, ThrowOnError>({
       url: "/api/provider/{providerID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Discover saved provider models
+   *
+   * List upstream model IDs using this provider's saved connection without exposing credentials or generating text.
+   */
+  public models<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2ProviderModelsResponses, V2ProviderModelsErrors, ThrowOnError>({
+      url: "/api/provider/{providerID}/models",
       ...options,
       ...params,
     })

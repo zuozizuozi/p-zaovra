@@ -37,6 +37,23 @@ export const ProviderGroup = HttpApiGroup.make("server.provider")
         }),
       ),
   )
+  .add(
+    HttpApiEndpoint.get("provider.models", "/api/provider/:providerID/models", {
+      params: { providerID: Provider.ID },
+      query: LocationQuery,
+      success: Location.response(Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+      error: [ProviderNotFoundError, ServiceUnavailableError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.provider.models",
+          summary: "Discover saved provider models",
+          description:
+            "List upstream model IDs using this provider's saved connection without exposing credentials or generating text.",
+        }),
+      ),
+  )
   .annotateMerge(
     OpenApi.annotations({
       title: "providers",
