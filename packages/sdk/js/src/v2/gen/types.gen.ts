@@ -1005,6 +1005,7 @@ export type GlobalEvent = {
           sessionID: string
           assistantMessageID: string
           finish: string
+          responseModel?: string
           termination?: SessionOutcomeTermination
           error?: SessionErrorUnknown
           cost: number
@@ -4427,6 +4428,7 @@ export type SyncEventSessionNextStepEnded = {
       sessionID: string
       assistantMessageID: string
       finish: string
+      responseModel?: string
       termination?: SessionOutcomeTermination
       error?: SessionErrorUnknown
       cost: number
@@ -6222,6 +6224,7 @@ export type SessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    responseModel?: string
     termination?: SessionOutcomeTermination
     error?: SessionErrorUnknown
     cost: number
@@ -7111,6 +7114,62 @@ export type IntegrationAttemptStatus =
       }
     }
 
+export type CustomizationInfo = {
+  mcpEditable: boolean
+  skillsEditable: boolean
+  mcp: Array<{
+    name: string
+    type: "local" | "remote"
+    disabled: boolean
+    command?: Array<string>
+    url?: string
+    status: "connected" | "disabled" | "needs_auth" | "failed"
+    error?: string
+    tools?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }>
+  skills: Array<{
+    name: string
+    description?: string
+    location: string
+    disabled: boolean
+  }>
+}
+
+export type ConfigV2McpTimeout = {
+  startup?: number
+  request?: number
+}
+
+export type ConfigV2McpLocal = {
+  type: "local"
+  command: Array<string>
+  cwd?: string
+  environment?: {
+    [key: string]: string
+  }
+  disabled?: boolean
+  timeout?: ConfigV2McpTimeout
+}
+
+export type ConfigV2McpoAuth = {
+  client_id?: string
+  client_secret?: string
+  scope?: string
+  callback_port?: number
+  redirect_uri?: string
+}
+
+export type ConfigV2McpRemote = {
+  type: "remote"
+  url: string
+  headers?: {
+    [key: string]: string
+  }
+  oauth?: ConfigV2McpoAuth | false
+  disabled?: boolean
+  timeout?: ConfigV2McpTimeout
+}
+
 export type PermissionV2Request = {
   id: string
   sessionID: string
@@ -7146,12 +7205,15 @@ export type CommandV2Info = {
   agent?: string
   model?: ModelRef
   subtask?: boolean
+  source?: "command" | "skill" | "mcp"
+  hints?: Array<string>
 }
 
 export type SkillV2Info = {
   name: string
   description?: string
   slash?: boolean
+  disabled?: boolean
   location: string
   content: string
 }
@@ -9478,6 +9540,7 @@ export type EventSessionNextStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: string
+    responseModel?: string
     termination?: SessionOutcomeTermination6
     error?: SessionErrorUnknown
     cost: number
@@ -15780,6 +15843,196 @@ export type V2McpDisconnectResponses = {
 
 export type V2McpDisconnectResponse = V2McpDisconnectResponses[keyof V2McpDisconnectResponses]
 
+export type V2CustomizationListData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/customization"
+}
+
+export type V2CustomizationListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2CustomizationListError = V2CustomizationListErrors[keyof V2CustomizationListErrors]
+
+export type V2CustomizationListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: CustomizationInfo
+  }
+}
+
+export type V2CustomizationListResponse = V2CustomizationListResponses[keyof V2CustomizationListResponses]
+
+export type V2CustomizationRemoveMcpData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/customization/mcp/{name}"
+}
+
+export type V2CustomizationRemoveMcpErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2CustomizationRemoveMcpError = V2CustomizationRemoveMcpErrors[keyof V2CustomizationRemoveMcpErrors]
+
+export type V2CustomizationRemoveMcpResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2CustomizationRemoveMcpResponse =
+  V2CustomizationRemoveMcpResponses[keyof V2CustomizationRemoveMcpResponses]
+
+export type V2CustomizationSaveMcpData = {
+  body: {
+    config: ConfigV2McpLocal | ConfigV2McpRemote
+  }
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/customization/mcp/{name}"
+}
+
+export type V2CustomizationSaveMcpErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2CustomizationSaveMcpError = V2CustomizationSaveMcpErrors[keyof V2CustomizationSaveMcpErrors]
+
+export type V2CustomizationSaveMcpResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2CustomizationSaveMcpResponse = V2CustomizationSaveMcpResponses[keyof V2CustomizationSaveMcpResponses]
+
+export type V2CustomizationToggleMcpData = {
+  body: {
+    enabled: boolean
+  }
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/customization/mcp/{name}/enabled"
+}
+
+export type V2CustomizationToggleMcpErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2CustomizationToggleMcpError = V2CustomizationToggleMcpErrors[keyof V2CustomizationToggleMcpErrors]
+
+export type V2CustomizationToggleMcpResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2CustomizationToggleMcpResponse =
+  V2CustomizationToggleMcpResponses[keyof V2CustomizationToggleMcpResponses]
+
+export type V2CustomizationToggleSkillData = {
+  body: {
+    enabled: boolean
+  }
+  path: {
+    name: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/customization/skill/{name}/enabled"
+}
+
+export type V2CustomizationToggleSkillErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2CustomizationToggleSkillError = V2CustomizationToggleSkillErrors[keyof V2CustomizationToggleSkillErrors]
+
+export type V2CustomizationToggleSkillResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2CustomizationToggleSkillResponse =
+  V2CustomizationToggleSkillResponses[keyof V2CustomizationToggleSkillResponses]
+
 export type V2PermissionRequestListData = {
   body?: never
   path?: never
@@ -16195,6 +16448,49 @@ export type V2CommandListResponses = {
 }
 
 export type V2CommandListResponse = V2CommandListResponses[keyof V2CommandListResponses]
+
+export type V2CommandRenderData = {
+  body: {
+    name: string
+    arguments: string
+    agent?: string
+  }
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/command/render"
+}
+
+export type V2CommandRenderErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2CommandRenderError = V2CommandRenderErrors[keyof V2CommandRenderErrors]
+
+export type V2CommandRenderResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      template: string
+    }
+  }
+}
+
+export type V2CommandRenderResponse = V2CommandRenderResponses[keyof V2CommandRenderResponses]
 
 export type V2SkillListData = {
   body?: never

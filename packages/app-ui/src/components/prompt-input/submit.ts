@@ -1,4 +1,4 @@
-import type { Message, Session, SessionInputAdmitted } from "@zaovra-ai/sdk/v2/client"
+import type { Message, Session, SessionInputAdmitted, CommandView } from "@zaovra-ai/sdk/v2/client"
 import { openFeedbackSlash } from "@/feedback"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@zaovra-ai/core/util/encode"
@@ -41,6 +41,7 @@ class CancelledFollowupInput extends Error {
 }
 
 export type FollowupDraft = {
+  resolvedCommand?: CommandView
   admission?: SessionInputAdmitted["prompt"]
   subtask?: SessionInputAdmitted["prompt"]["subtask"]
   sessionID: string
@@ -85,8 +86,8 @@ export function expandCommandTemplate(template: string, argumentsText: string) {
   return `${expanded}\n\n${argumentsText}`.trim()
 }
 
-const commandPrompt = (prompt: Prompt, template: string, argumentsText: string): Prompt => {
-  const content = expandCommandTemplate(template, argumentsText)
+const commandPrompt = (prompt: Prompt, template: string, argumentsText: string, rendered = false): Prompt => {
+  const content = rendered ? template : expandCommandTemplate(template, argumentsText)
   return [{ type: "text", content, start: 0, end: content.length }, ...prompt.filter((part) => part.type !== "text")]
 }
 
@@ -122,9 +123,13 @@ export function prepareFollowupDraft(input: Pick<FollowupSendInput, "draft" | "s
   if (input.draft.admission) return input.draft
   const originalText = draftText(input.draft.prompt)
   const invocation = originalText.match(/^\/(\S+)(?:\s+([\s\S]*))?$/)
-  const command = invocation ? input.sync.data.command.find((item) => item.name === invocation[1]) : undefined
+  const command =
+    input.draft.resolvedCommand ??
+    (invocation ? input.sync.data.command.find((item) => item.name === invocation[1]) : undefined)
+  if (command && (command.source === "skill" || command.source === "mcp") && !input.draft.resolvedCommand)
+    throw new Error(`Resolve /${command.name} before preparing its admission.`)
   const prompt = command
-    ? commandPrompt(input.draft.prompt, command.template, invocation?.[2] ?? "")
+    ? commandPrompt(input.draft.prompt, command.template, invocation?.[2] ?? "", !!input.draft.resolvedCommand)
     : input.draft.prompt
   const agent = command?.agent ?? input.draft.agent
   const separator = command?.model?.indexOf("/") ?? -1
@@ -164,8 +169,55 @@ export function prepareFollowupDraft(input: Pick<FollowupSendInput, "draft" | "s
   }
 }
 
+export async function resolveSlashCommand(input: {
+  client: DirectorySDK["client"]
+  sync: DirectorySync
+  prompt: Prompt
+  directory: string
+  agent: string
+}) {
+  const invocation = draftText(input.prompt).match(/^\/(\S+)(?:\s+([\s\S]*))?$/)
+  const command =
+    invocation &&
+    (input.sync.data.command.find((item) => item.name === invocation[1]) ??
+      (/^(skill|mcp):/.test(invocation[1]!)
+        ? {
+            name: invocation[1]!,
+            source: invocation[1]!.startsWith("skill:") ? ("skill" as const) : ("mcp" as const),
+            template: "",
+            hints: [],
+          }
+        : undefined))
+  if (!command || (command.source !== "skill" && command.source !== "mcp")) return
+  const rendered = await input.client.v2.command.render(
+    {
+      name: command.name,
+      arguments: invocation?.[2] ?? "",
+      agent: input.agent,
+      location: { directory: input.directory },
+    },
+    { throwOnError: true },
+  )
+  return { ...command, template: rendered.data.data.template }
+}
+
 export async function sendFollowupDraft(input: FollowupSendInput) {
-  const admission = prepareFollowupDraft(input).admission!
+  const draft =
+    input.draft.admission || input.draft.resolvedCommand
+      ? input.draft
+      : {
+          ...input.draft,
+          resolvedCommand: await resolveSlashCommand({
+            client: input.client,
+            sync: input.sync,
+            prompt: input.draft.prompt,
+            directory: input.draft.sessionDirectory,
+            agent: input.draft.agent,
+          }),
+        }
+  const admission = prepareFollowupDraft({ sync: input.sync, draft }).admission!
+  // A lost acknowledgement retries the same durable input, including remotely rendered content.
+  input.draft.admission = admission
   const setBusy = () => {
     if (input.delivery === "queue" || input.resume === false) return
     if (!input.optimisticBusy) return
@@ -519,6 +571,23 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       input.onNewSessionWorktreeReset?.()
     }
 
+    const resolvedCommand =
+      mode === "normal"
+        ? await resolveSlashCommand({
+            client,
+            sync: sync(),
+            prompt: currentPrompt,
+            directory: sessionDirectory,
+            agent: currentAgent.name,
+          })
+            .then((command) => ({ command, ok: true as const }))
+            .catch((error: unknown) => {
+              showToast({ title: language.t("prompt.toast.promptSendFailed.title"), description: errorMessage(error) })
+              return { command: undefined, ok: false as const }
+            })
+        : { command: undefined, ok: true as const }
+    if (!resolvedCommand.ok) return
+
     if (!session && isNewSession) {
       const created = await client.v2.session
         .create({
@@ -574,6 +643,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,
+      resolvedCommand: resolvedCommand.command,
       prompt: currentPrompt,
       context,
       agent,

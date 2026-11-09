@@ -28,7 +28,9 @@ export const Info = Skill.Info
 export type Info = Skill.Info
 
 export const available = (skills: ReadonlyArray<Info>, agent: AgentV2.Info) =>
-  skills.filter((skill) => PermissionV2.evaluate("skill", skill.name, agent.permissions).effect !== "deny")
+  skills.filter(
+    (skill) => !skill.disabled && PermissionV2.evaluate("skill", skill.name, agent.permissions).effect !== "deny",
+  )
 
 const Frontmatter = Schema.Struct({
   name: Schema.String.pipe(Schema.optional),
@@ -39,11 +41,13 @@ const decodeFrontmatter = Schema.decodeUnknownOption(Frontmatter)
 
 export type Data = {
   sources: Types.DeepMutable<Source>[]
+  disabled: string[]
 }
 
 export type Draft = {
   source: (source: Source) => void
   list: () => readonly Source[]
+  disable: (names: readonly string[]) => void
 }
 
 export interface Interface extends State.Transformable<Draft> {
@@ -60,8 +64,11 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
 
     const state = State.create<Data, Draft>({
-      initial: () => ({ sources: [] }),
+      initial: () => ({ sources: [], disabled: [] }),
       draft: (draft) => ({
+        disable: (names) => {
+          draft.disabled = [...names]
+        },
         source: (source) => {
           if (draft.sources.some((item) => Source.equals(item, source))) return
           draft.sources.push(source as Types.DeepMutable<Source>)
@@ -115,12 +122,16 @@ const layer = Layer.effect(
         cache.set(key, loaded)
         for (const skill of loaded) skills.set(skill.name, skill)
       }
-      return Array.from(skills.values())
+      const disabled = new Set(state.get().disabled)
+      return Array.from(skills.values(), (skill) => (disabled.has(skill.name) ? { ...skill, disabled: true } : skill))
     })
 
     return Service.of({
       transform: state.transform,
-      reload: state.reload,
+      reload: Effect.fn("SkillV2.reload")(function* () {
+        cache.clear()
+        yield* state.reload()
+      }),
       sources: Effect.fn("SkillV2.sources")(function* () {
         return state.get().sources
       }),

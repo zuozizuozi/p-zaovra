@@ -118,6 +118,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   skills: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs to discover skills from",
   }),
+  disabled_skills: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
+    description: "Skill names disabled through customization; applies to slash commands and skill tool loading",
+  }),
   commands: Schema.Record(Schema.String, ConfigCommand.Info).pipe(Schema.optional).annotate({
     description: "Named slash command definitions",
   }),

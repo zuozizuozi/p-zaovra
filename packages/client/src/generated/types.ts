@@ -7760,6 +7760,110 @@ export type McpDisconnectInput = {
 
 export type McpDisconnectOutput = void
 
+export type ServerCustomizationListInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type ServerCustomizationListOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly mcpEditable: boolean
+    readonly skillsEditable: boolean
+    readonly mcp: ReadonlyArray<{
+      readonly name: string
+      readonly type: "local" | "remote"
+      readonly disabled: boolean
+      readonly command?: ReadonlyArray<string>
+      readonly url?: string
+      readonly status: "connected" | "disabled" | "needs_auth" | "failed"
+      readonly error?: string
+      readonly tools?: number | "Infinity" | "-Infinity" | "NaN"
+    }>
+    readonly skills: ReadonlyArray<{
+      readonly name: string
+      readonly description?: string
+      readonly location: string
+      readonly disabled: boolean
+    }>
+  }
+}
+
+export type ServerCustomizationSaveMCPInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly config: {
+    readonly config:
+      | {
+          readonly type: "local"
+          readonly command: ReadonlyArray<string>
+          readonly cwd?: string | undefined
+          readonly environment?: { readonly [x: string]: string } | undefined
+          readonly disabled?: boolean | undefined
+          readonly timeout?:
+            | { readonly startup?: number | undefined; readonly request?: number | undefined }
+            | undefined
+        }
+      | {
+          readonly type: "remote"
+          readonly url: string
+          readonly headers?: { readonly [x: string]: string } | undefined
+          readonly oauth?:
+            | {
+                readonly client_id?: string | undefined
+                readonly client_secret?: string | undefined
+                readonly scope?: string | undefined
+                readonly callback_port?: number | undefined
+                readonly redirect_uri?: string | undefined
+              }
+            | false
+            | undefined
+          readonly disabled?: boolean | undefined
+          readonly timeout?:
+            | { readonly startup?: number | undefined; readonly request?: number | undefined }
+            | undefined
+        }
+  }["config"]
+}
+
+export type ServerCustomizationSaveMCPOutput = void
+
+export type ServerCustomizationRemoveMCPInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type ServerCustomizationRemoveMCPOutput = void
+
+export type ServerCustomizationToggleMCPInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly enabled: { readonly enabled: boolean }["enabled"]
+}
+
+export type ServerCustomizationToggleMCPOutput = void
+
+export type ServerCustomizationToggleSkillInput = {
+  readonly name: { readonly name: string }["name"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly enabled: { readonly enabled: boolean }["enabled"]
+}
+
+export type ServerCustomizationToggleSkillOutput = void
+
 export type PermissionsListRequestsInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -7992,7 +8096,31 @@ export type CommandsListOutput = {
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly subtask?: boolean
+    readonly source?: "command" | "skill" | "mcp"
+    readonly hints?: ReadonlyArray<string>
   }>
+}
+
+export type CommandsRenderInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly name: { readonly name: string; readonly arguments: string; readonly agent?: string | undefined }["name"]
+  readonly arguments: {
+    readonly name: string
+    readonly arguments: string
+    readonly agent?: string | undefined
+  }["arguments"]
+  readonly agent?: { readonly name: string; readonly arguments: string; readonly agent?: string | undefined }["agent"]
+}
+
+export type CommandsRenderOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly template: string }
 }
 
 export type SkillsListInput = {
@@ -8011,6 +8139,7 @@ export type SkillsListOutput = {
     readonly name: string
     readonly description?: string
     readonly slash?: boolean
+    readonly disabled?: boolean
     readonly location: string
     readonly content: string
   }>

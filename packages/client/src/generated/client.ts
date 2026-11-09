@@ -126,6 +126,16 @@ import type {
   McpConnectOutput,
   McpDisconnectInput,
   McpDisconnectOutput,
+  ServerCustomizationListInput,
+  ServerCustomizationListOutput,
+  ServerCustomizationSaveMCPInput,
+  ServerCustomizationSaveMCPOutput,
+  ServerCustomizationRemoveMCPInput,
+  ServerCustomizationRemoveMCPOutput,
+  ServerCustomizationToggleMCPInput,
+  ServerCustomizationToggleMCPOutput,
+  ServerCustomizationToggleSkillInput,
+  ServerCustomizationToggleSkillOutput,
   PermissionsListRequestsInput,
   PermissionsListRequestsOutput,
   PermissionsListSavedInput,
@@ -146,6 +156,8 @@ import type {
   FilesFindOutput,
   CommandsListInput,
   CommandsListOutput,
+  CommandsRenderInput,
+  CommandsRenderOutput,
   SkillsListInput,
   SkillsListOutput,
   EventsSubscribeOutput,
@@ -1114,6 +1126,71 @@ export function make(options: ClientOptions) {
           requestOptions,
         ),
     },
+    "server.customization": {
+      list: (input?: ServerCustomizationListInput, requestOptions?: RequestOptions) =>
+        request<ServerCustomizationListOutput>(
+          {
+            method: "GET",
+            path: `/api/customization`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      saveMCP: (input: ServerCustomizationSaveMCPInput, requestOptions?: RequestOptions) =>
+        request<ServerCustomizationSaveMCPOutput>(
+          {
+            method: "PUT",
+            path: `/api/customization/mcp/${encodeURIComponent(input.name)}`,
+            query: { location: input["location"] },
+            body: { config: input["config"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      removeMCP: (input: ServerCustomizationRemoveMCPInput, requestOptions?: RequestOptions) =>
+        request<ServerCustomizationRemoveMCPOutput>(
+          {
+            method: "DELETE",
+            path: `/api/customization/mcp/${encodeURIComponent(input.name)}`,
+            query: { location: input["location"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      toggleMCP: (input: ServerCustomizationToggleMCPInput, requestOptions?: RequestOptions) =>
+        request<ServerCustomizationToggleMCPOutput>(
+          {
+            method: "PUT",
+            path: `/api/customization/mcp/${encodeURIComponent(input.name)}/enabled`,
+            query: { location: input["location"] },
+            body: { enabled: input["enabled"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      toggleSkill: (input: ServerCustomizationToggleSkillInput, requestOptions?: RequestOptions) =>
+        request<ServerCustomizationToggleSkillOutput>(
+          {
+            method: "PUT",
+            path: `/api/customization/skill/${encodeURIComponent(input.name)}/enabled`,
+            query: { location: input["location"] },
+            body: { enabled: input["enabled"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
+    },
     permissions: {
       listRequests: (input?: PermissionsListRequestsInput, requestOptions?: RequestOptions) =>
         request<PermissionsListRequestsOutput>(
@@ -1240,6 +1317,19 @@ export function make(options: ClientOptions) {
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      render: (input: CommandsRenderInput, requestOptions?: RequestOptions) =>
+        request<CommandsRenderOutput>(
+          {
+            method: "POST",
+            path: `/api/command/render`,
+            query: { location: input["location"] },
+            body: { name: input["name"], arguments: input["arguments"], agent: input["agent"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
             empty: false,
           },
           requestOptions,

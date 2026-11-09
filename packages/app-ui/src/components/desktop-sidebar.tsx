@@ -93,7 +93,9 @@ export function DesktopSessionTab(props: {
   )
 }
 
-export function DesktopSidebar() {
+export function DesktopSidebar(
+  props: { onCustomize?: (target: { server: ServerConnection.Key; directory?: string }) => void } = {},
+) {
   const ime = createImeKeyOwnership()
   const command = useCommand()
   const global = useGlobal()
@@ -329,6 +331,21 @@ export function DesktopSidebar() {
         >
           {language.t("command.session.new")}
         </ButtonV2>
+        <Show when={props.onCustomize}>
+          <ButtonV2
+            data-action="customize"
+            class="w-full justify-start"
+            variant="ghost-muted"
+            onClick={() => {
+              const group = activeGroup()
+              props.onCustomize?.(
+                group ? { server: group.server, directory: group.project.worktree } : layout.home.selection(),
+              )
+            }}
+          >
+            {language.locale().startsWith("zh") ? "自定义" : "Customize"}
+          </ButtonV2>
+        </Show>
         <Show when={activeGroup()}>
           {(group) => (
             <p data-slot="new-session-project" class="px-2 pt-1 text-xs text-v2-text-text-faint truncate">

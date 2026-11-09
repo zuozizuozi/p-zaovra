@@ -18,8 +18,8 @@ export function adaptCommand(command: CommandV2Info): CommandView {
     ...command,
     model: command.model ? `${command.model.providerID}/${command.model.id}` : undefined,
     variant: command.model?.variant,
-    source: "command",
-    hints: [],
+    source: command.source ?? "command",
+    hints: command.hints ?? [],
   }
 }
 

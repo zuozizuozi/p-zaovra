@@ -15,6 +15,9 @@ export const Plugin = define({
     const config = yield* Config.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
+    const skills = yield* SkillV2.Service
+    const entries = yield* config.entries()
+    yield* skills.transform((draft) => draft.disable(Config.latest(entries, "disabled_skills") ?? []))
     yield* ctx.skill.transform(
       Effect.fn(function* (draft) {
         const entries = yield* config.entries()
