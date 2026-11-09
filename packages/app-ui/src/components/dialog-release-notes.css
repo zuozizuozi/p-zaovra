@@ -1,12 +1,12 @@
 [data-component="dialog"] [data-slot="dialog-container"]:has(.dialog-release-notes) {
   width: min(calc(100vw - 32px), 520px);
   height: auto;
-  max-height: calc(100vh - 48px);
+  max-height: min(599px, calc(100vh - 48px));
 }
 
 [data-component="dialog"] [data-slot="dialog-content"].dialog-release-notes {
   min-height: 0;
-  max-height: calc(100vh - 48px);
+  max-height: min(599px, calc(100vh - 48px));
   overflow: hidden;
 }
 
