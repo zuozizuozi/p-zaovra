@@ -807,3 +807,45 @@ test("666 validation isolates unsigned packaging env without changing the actual
   expect(workflow.jobs.build.env.ZAOVRA_ALLOW_UNSIGNED_BETA).toContain("vars.WINDOWS_SIGNING_ENABLED != 'true'")
   expect(workflow.jobs.build.env.ZAOVRA_ALLOW_UNSIGNED_BETA).toContain("inputs.unsigned_beta")
 })
+
+test("748 branch CI runs the complete Windows Beta contracts before release", async () => {
+  const source = Bun.YAML.parse(
+    await Bun.file(join(import.meta.dir, "../../../.github/workflows/windows-beta.yml")).text(),
+  ) as { jobs: { build: { steps: { name?: string; shell?: string; env?: Record<string, string>; run?: string }[] } } }
+  const workflow = Bun.YAML.parse(
+    await Bun.file(join(import.meta.dir, "../../../.github/workflows/test.yml")).text(),
+  ) as {
+    on: Record<string, unknown>
+    jobs: {
+      "nsis-compile": {
+        if?: string
+        "runs-on": string
+        steps: {
+          name?: string
+          uses?: string
+          with?: Record<string, unknown>
+          shell?: string
+          env?: Record<string, string>
+          run?: string
+        }[]
+      }
+    }
+  }
+  const contracts = source.jobs.build.steps.find(
+    (step) => step.name === "Validate changed desktop, UI and Worker contracts",
+  )!
+  const job = workflow.jobs["nsis-compile"]
+  const branch = job.steps.find((step) => step.name === "Check continuous Beta types and contracts")!
+  expect(workflow.on).toHaveProperty("workflow_dispatch")
+  expect(workflow.on).toHaveProperty("pull_request")
+  expect(job.if).toBeUndefined()
+  expect(job["runs-on"]).toBe("windows-2025")
+  expect(job.steps.find((step) => step.uses?.startsWith("actions/checkout@"))?.with).toMatchObject({
+    "fetch-depth": 0,
+    "persist-credentials": false,
+  })
+  expect(branch.shell).toBe(contracts.shell)
+  expect(branch.env).toEqual(contracts.env)
+  expect(branch.run).toBe(contracts.run)
+  expect(branch.env?.ZAOVRA_ALLOW_UNSIGNED_BETA).toBe("false")
+})
