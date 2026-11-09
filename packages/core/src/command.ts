@@ -13,8 +13,8 @@ export type Data = {
 }
 
 export type Draft = {
-  list: () => readonly Info[]
-  get: (name: string) => Info | undefined
+  list: () => readonly Types.DeepMutable<Info>[]
+  get: (name: string) => Types.DeepMutable<Info> | undefined
   update: (name: string, update: (command: Types.DeepMutable<Info>) => void) => void
   remove: (name: string) => void
 }
@@ -32,7 +32,7 @@ const layer = Layer.effect(
     const state = State.create<Data, Draft>({
       initial: () => ({ commands: new Map() }),
       draft: (draft) => ({
-        list: () => Array.from(draft.commands.values()) as Info[],
+        list: () => Array.from(draft.commands.values()),
         get: (name) => draft.commands.get(name),
         update: (name, update) => {
           const current = draft.commands.get(name) ?? ({ name, template: "" } as Types.DeepMutable<Info>)

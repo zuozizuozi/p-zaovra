@@ -68,6 +68,7 @@ function makeRoutes<AuthError, AuthServices>(auth: Layer.Layer<ServerAuth.Config
     Layer.provide(requestOriginLayer),
     Layer.provide(schemaErrorLayer),
     Layer.provide(auth),
+    HttpRouter.provideRequest(serviceLayer),
     Layer.provide(serviceLayer),
   )
 }

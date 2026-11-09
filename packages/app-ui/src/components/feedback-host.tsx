@@ -19,7 +19,7 @@ const labels = {
     conversation: "附带当前对话",
     conversationHint: "最近20条消息，可能包含代码；发送前会打码。",
     diagnostics: "附带诊断信息",
-    diagnosticsHint: "版本、系统、模型及最近30分钟的事件和错误摘要，不含原始日志。",
+    diagnosticsHint: "版本、系统、模型及最近30分钟的事件和错误摘要，含服务商错误码和脱敏摘要，不含原始日志。",
     capture: "截取当前页面",
     recapture: "重新截图",
     remove: "删除截图",
@@ -47,7 +47,8 @@ const labels = {
     conversation: "Include current conversation",
     conversationHint: "The latest 20 messages, which may contain code; redacted before sending.",
     diagnostics: "Include diagnostics",
-    diagnosticsHint: "Version, system, model, and event and error summaries from the last 30 minutes. No raw logs.",
+    diagnosticsHint:
+      "Version, system, model, and event and error summaries from the last 30 minutes, including provider codes and redacted summaries. No raw logs.",
     capture: "Capture current page",
     recapture: "Retake screenshot",
     remove: "Delete screenshot",

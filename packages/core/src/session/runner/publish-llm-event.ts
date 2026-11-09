@@ -1,4 +1,12 @@
-import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue } from "@zaovra-ai/llm"
+import {
+  ToolOutput,
+  providerEventError,
+  type LLMEvent,
+  type ProviderMetadata,
+  type ToolResultValue,
+} from "@zaovra-ai/llm"
+import { ProviderDiagnostics } from "../provider-diagnostics"
+import { SessionRetry } from "../retry"
 import { DateTime, Effect } from "effect"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { EventV2 } from "../../event"
@@ -225,7 +233,8 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     const category = categories[metadata?.category ?? ""] ?? "provider_output"
     if (category === "auth" || category === "quota")
       message = `提供商 ${input.model.providerID}：${category === "auth" ? "鉴权失败，请检查 API 密钥或访问权限" : "额度或余额不足，请检查余额或服务套餐"}，也可切换模型或提供商后继续。\n${message}`
-    if (category === "request") message = `请求格式或参数不受支持，请修正请求或切换模型后继续。\n${message}`
+    if (category === "request" && !message.startsWith(SessionRetry.invalidRequestMessage))
+      message = `${SessionRetry.invalidRequestMessage}\n${message}`
     if (category === "content_filter") message = `内容被提供商过滤，请调整请求后继续。\n${message}`
     failureMessage = message
     yield* flush()
@@ -473,7 +482,11 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
         return
       case "provider-error":
         providerFailed = true
-        yield* failAssistant(event.message)
+        yield* failAssistant(event.message, {
+          category: providerEventError(event).reason._tag,
+          ...ProviderDiagnostics.metadata(event),
+          ...(event.status !== undefined ? { statusCode: String(event.status) } : {}),
+        })
         return
     }
   })

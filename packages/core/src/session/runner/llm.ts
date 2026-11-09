@@ -6,6 +6,7 @@ import { BackgroundJob } from "../../background-job"
 import { EventTable } from "../../event/sql"
 import { SessionBudget } from "../budget"
 import { SessionRetry } from "../retry"
+import { ProviderDiagnostics } from "../provider-diagnostics"
 import { SessionOwnership } from "../ownership"
 import {
   LLM,
@@ -164,11 +165,15 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const db = database.db
     const compaction = SessionCompaction.make({
-      db, events, llm, config: yield* config.entries(),
-      canRetry: (input) => Effect.gen(function* () {
-        const session = yield* getSession(input.sessionID)
-        return !(yield* checkBudget(session, input.model, false, false))
-      }),
+      db,
+      events,
+      llm,
+      config: yield* config.entries(),
+      canRetry: (input) =>
+        Effect.gen(function* () {
+          const session = yield* getSession(input.sessionID)
+          return !(yield* checkBudget(session, input.model, false, false))
+        }),
     })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
@@ -747,8 +752,7 @@ const layer = Layer.effect(
           promoted += Number(yield* SessionInput.promoteNextQueued(db, events, sessionID))
           promoted += yield* SessionInput.promoteSteers(db, events, sessionID, cutoff)
         }
-        if (budgetStop?.admissionRequired && promoted === 0)
-          return { needsContinuation: false, step: currentStep }
+        if (budgetStop?.admissionRequired && promoted === 0) return { needsContinuation: false, step: currentStep }
         if (budgetStop && promoted > 0) budgetStop.admissionRequired = false
         if (promoted > 0 && SessionOutcome.requested(yield* store.context(sessionID)).userMessageID !== previousUser) {
           // A new task cannot reuse side effects belonging to the interrupted task.
@@ -1703,6 +1707,7 @@ const layer = Layer.effect(
                       : llmFailure.reason.message,
                 {
                   category: llmFailure.reason._tag,
+                  ...ProviderDiagnostics.metadata(llmFailure),
                   ...("http" in llmFailure.reason && llmFailure.reason.http?.response
                     ? { statusCode: String(llmFailure.reason.http.response.status) }
                     : {}),
@@ -2496,21 +2501,15 @@ const layer = Layer.effect(
       admissionRequired: boolean,
     ) => Effect.Effect<{ readonly needsContinuation: boolean; readonly step: number }, RunError>
 
-    const runTurn: RunTurn = Effect.fnUntraced(function* (
-      sessionID,
-      promotion,
-      step,
-      toolCallAttempts,
-      contextWindow,
-      admissionRequired,
-    ) {
-      const budgetStop: TurnBudget = {
-        admissionRequired,
-        providerReady: yield* Deferred.make<void>(),
-        expired: false,
-        repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
-      }
-      const deadline = Effect.gen(function* () {
+    const runTurn: RunTurn = Effect.fnUntraced(
+      function* (sessionID, promotion, step, toolCallAttempts, contextWindow, admissionRequired) {
+        const budgetStop: TurnBudget = {
+          admissionRequired,
+          providerReady: yield* Deferred.make<void>(),
+          expired: false,
+          repairScope: yield* Deferred.make<typeof DeliveryContract.Receipt.Type | undefined>(),
+        }
+        const deadline = Effect.gen(function* () {
           while (true) {
             const session = yield* getSession(sessionID)
             if (!budgetStop.model) {
@@ -2544,250 +2543,257 @@ const layer = Layer.effect(
           }
         })
         const recovery = {
-        id: SessionMessage.ID.create(),
-        attempt: 0,
-        started: undefined as number | undefined,
-        eligible: false,
-        waiting: false,
-        step,
-        failureKey: "",
-        repeated: 0,
-        operations: new Map<
-          string,
-          {
-            id: string
-            status: "dispatched" | "settled" | "unknown"
-            effects?: "reported" | "uncertain"
-            settlement?: ToolRegistry.Settlement
-          }
-        >(),
-      }
-      const recordRecovery = (phase: string, details: Record<string, string | number | boolean>) =>
-        Effect.gen(function* () {
-          yield* events.publish(SessionEvent.QualityProgress, {
-            sessionID,
-            timestamp: yield* DateTime.now,
-            category: "recovery",
-            details: {
-              recoveryID: recovery.id,
-              phase,
-              attempts: recovery.attempt,
-              started: recovery.started ?? null,
-              ...details,
-            },
-          })
-          if (phase === "backoff" || recovery.started === undefined) return
-          const ended = typeof details.ended === "number" ? details.ended : yield* Clock.currentTimeMillis
-          yield* events.publish(SessionEvent.Synthetic, {
-            sessionID,
-            timestamp: yield* DateTime.now,
-            messageID: SessionMessage.ID.create(),
-            text: `恢复记录：${new Date(recovery.started ?? ended).toLocaleTimeString()} 至 ${new Date(ended).toLocaleTimeString()}，重试 ${recovery.attempt} 次；${phase === "recovered" ? "连接恢复，任务继续。" : phase === "interrupted" ? "等待已取消。" : (details.message ?? "已停止恢复。")}`,
-            recovery: {
-              id: recovery.id,
-              started: recovery.started ?? ended,
-              ended,
-              attempts: recovery.attempt,
-              phase: phase === "recovered" ? "recovered" : phase === "interrupted" ? "interrupted" : "stopped",
-            },
-          })
-        })
-      const turn = Effect.gen(function* () {
-        while (true) {
-          recovery.eligible = false
-          const result = yield* runTurnAttempt(
-            sessionID,
-            recovery.attempt ? "steer" : promotion,
-            recovery.step,
-            toolCallAttempts,
-            contextWindow,
-            compaction.compactAfterOverflow,
-            true,
-            budgetStop,
-            recovery,
-          ).pipe(
-            Effect.catchDefect(
-              Effect.fnUntraced(function* (defect) {
-                if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
-                yield* Effect.yieldNow
-                return yield* runTurnAttempt(
-                  sessionID,
-                  undefined,
-                  defect.transition.step,
-                  toolCallAttempts,
-                  contextWindow,
-                  undefined,
-                  false,
-                  budgetStop,
-                  recovery,
-                )
-              }),
-            ),
-            Effect.exit,
-          )
-          if (result._tag === "Success") {
-            if (recovery.started !== undefined)
-              yield* recordRecovery("recovered", { ended: yield* Clock.currentTimeMillis })
-            return result.value
-          }
-          if (Cause.hasInterrupts(result.cause)) return yield* Effect.failCause(result.cause)
-          const error = Option.getOrUndefined(Cause.findErrorOption(result.cause))
-          if (!(error instanceof LLMError) || !recovery.eligible) return yield* Effect.failCause(result.cause)
-          const session = yield* getSession(sessionID)
-          const context = yield* getContext(sessionID)
-          const last = context.findLast((message) => message.type === "assistant")
-          const unknown =
-            [...recovery.operations.values()].some((operation) => operation.status !== "settled") ||
-            (last?.type === "assistant" &&
-              last.content.some(
-                (part) => part.type === "tool" && part.provider?.executed && part.state.status !== "completed",
-              ))
-          const budget = yield* readBudget(sessionID)
-          const now = yield* Clock.currentTimeMillis
-          const bound = SessionBudget.deadline(session, budget.duration, budget.policy?.deadline)
-          const failureKey = `${error.reason._tag}:${"status" in error.reason ? error.reason.status : ""}:${error.reason.message}`
-          recovery.repeated = recovery.failureKey === failureKey ? recovery.repeated + 1 : 0
-          recovery.failureKey = failureKey
-          const decision = SessionRetry.decide({
-            error,
-            attempt: recovery.attempt,
-            repeated: recovery.repeated,
-            cancelled: false,
-            committed: !!last?.content.length,
-            operations: unknown ? "unknown" : "settled",
-            remainingMs: bound === undefined ? undefined : bound - now,
-          })
-          if (decision.action === "stop") {
-            yield* recordRecovery("stopped", { ended: now, category: decision.category, message: decision.message })
-            if (decision.category === "budget") {
-              yield* checkBudget(session, budgetStop.model!, false, true, decision.message)
-              return { needsContinuation: false, step }
+          id: SessionMessage.ID.create(),
+          attempt: 0,
+          started: undefined as number | undefined,
+          eligible: false,
+          waiting: false,
+          step,
+          failureKey: "",
+          repeated: 0,
+          operations: new Map<
+            string,
+            {
+              id: string
+              status: "dispatched" | "settled" | "unknown"
+              effects?: "reported" | "uncertain"
+              settlement?: ToolRegistry.Settlement
             }
-            // The original typed failure remains the caller's error and durable evidence.
-            return yield* Effect.failCause(result.cause)
-          }
-          if (yield* checkBudget(session, budgetStop.model!)) return { needsContinuation: false, step }
-          recovery.started ??= now
-          recovery.attempt++
-          yield* recordRecovery("backoff", {
-            category: decision.category,
-            next: now + decision.delayMs,
-            committed: decision.committed,
-          })
-          yield* events.publish(SessionEvent.Retried, {
-            sessionID,
-            timestamp: yield* DateTime.now,
-            attempt: recovery.attempt,
-            error: {
-              message: `第 ${recovery.attempt} 次重试，${Math.ceil(decision.delayMs / 1000)} 秒后继续。${error.reason.message}`,
-              isRetryable: true,
-              metadata: {
-                phase: "recovery",
-                delayMs: String(decision.delayMs),
-                category: decision.category,
-                recoveryID: recovery.id,
-              },
-            },
-          })
-          recovery.waiting = true
-          yield* Effect.sleep(decision.delayMs)
-          yield* SessionOwnership.check
-          recovery.waiting = false
+          >(),
         }
-      }).pipe(
-        Effect.onInterrupt(() =>
+        const recordRecovery = (phase: string, details: Record<string, string | number | boolean>) =>
           Effect.gen(function* () {
-            if (recovery.started === undefined) return
-            yield* recordRecovery(budgetStop.expired || budgetStop.closing ? "stopped" : "interrupted", {
-              ended: yield* Clock.currentTimeMillis,
-            })
-            if (!recovery.waiting) return
-            const session = yield* getSession(sessionID)
-            const assistantMessageID = SessionMessage.ID.create()
-            yield* events.publish(SessionEvent.Step.Started, {
+            yield* events.publish(SessionEvent.QualityProgress, {
               sessionID,
-              assistantMessageID,
               timestamp: yield* DateTime.now,
-              agent: session.agent ?? AgentV2.defaultID,
-              model: {
-                id: ModelV2.ID.make(budgetStop.model!.id),
-                providerID: ProviderV2.ID.make(budgetStop.model!.provider),
+              category: "recovery",
+              details: {
+                recoveryID: recovery.id,
+                phase,
+                attempts: recovery.attempt,
+                started: recovery.started ?? null,
+                ...details,
               },
             })
-            yield* events.publish(SessionEvent.Step.Ended, {
-              sessionID,
-              assistantMessageID,
-              timestamp: yield* DateTime.now,
-              finish: "interrupted",
-              termination: budgetStop.expired || budgetStop.closing
-                ? { category: "budget", message: budgetStop.closing ? "进入显式收尾余量，已取消退避等待；硬截止尚未到达，任务未完成。" : "预算到期，已取消退避等待。" }
-                : { category: "interrupted", source: "user", message: "已取消退避等待，未发起新的模型请求。" },
-              requestPerformed: false,
-              cost: 0,
-              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            })
-          }),
-        ),
-      )
-      const bounded = Effect.raceFirst(
-        turn,
-        Effect.gen(function* () {
-          const receipt = yield* Deferred.await(budgetStop.repairScope)
-          if (!receipt) return yield* Effect.never
-          yield* Effect.sleep(
-            Math.max(1, DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - receipt.started)),
-          )
-          budgetStop.repairExpired = true
-          return { needsContinuation: false, step }
-        }),
-      ).pipe(
-        Effect.tap(() =>
-          Effect.gen(function* () {
-            if (!budgetStop.repairExpired) return
-            const receipt = yield* Deferred.await(budgetStop.repairScope)
-            if (!receipt) return
-            const current = yield* SessionOutcome.history(db, sessionID)
-            const consumed = DeliveryContract.receipt(current, receipt.request) ?? receipt
+            if (phase === "backoff" || recovery.started === undefined) return
+            const ended = typeof details.ended === "number" ? details.ended : yield* Clock.currentTimeMillis
             yield* events.publish(SessionEvent.Synthetic, {
               sessionID,
               timestamp: yield* DateTime.now,
               messageID: SessionMessage.ID.create(),
-              text:
-                DeliveryContract.prefix +
-                JSON.stringify({
-                  ...consumed,
-                  decision: "unverified",
-                  reason: "wall-clock budget exhausted",
-                  missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
-                }),
+              text: `恢复记录：${new Date(recovery.started ?? ended).toLocaleTimeString()} 至 ${new Date(ended).toLocaleTimeString()}，重试 ${recovery.attempt} 次；${phase === "recovered" ? "连接恢复，任务继续。" : phase === "interrupted" ? "等待已取消。" : (details.message ?? "已停止恢复。")}`,
+              recovery: {
+                id: recovery.id,
+                started: recovery.started ?? ended,
+                ended,
+                attempts: recovery.attempt,
+                phase: phase === "recovered" ? "recovered" : phase === "interrupted" ? "interrupted" : "stopped",
+              },
             })
-          }),
-        ),
-      )
-      return yield* bounded.pipe((turn) =>
-        Effect.acquireUseRelease(
-          Effect.forkChild(turn, { startImmediately: true }),
-          (fiber) =>
-            Effect.raceFirst(Fiber.join(fiber), deadline).pipe(
-              Effect.tap(
-                Effect.gen(function* () {
-                  if (!budgetStop.expired && !budgetStop.closing) return
-                  yield* Fiber.interrupt(fiber)
-                  yield* checkBudget(
-                    yield* getSession(sessionID),
-                    budgetStop.model!,
-                    false,
-                    true,
+          })
+        const turn = Effect.gen(function* () {
+          while (true) {
+            recovery.eligible = false
+            const result = yield* runTurnAttempt(
+              sessionID,
+              recovery.attempt ? "steer" : promotion,
+              recovery.step,
+              toolCallAttempts,
+              contextWindow,
+              compaction.compactAfterOverflow,
+              true,
+              budgetStop,
+              recovery,
+            ).pipe(
+              Effect.catchDefect(
+                Effect.fnUntraced(function* (defect) {
+                  if (!(defect instanceof TurnTransitionError)) return yield* Effect.die(defect)
+                  yield* Effect.yieldNow
+                  return yield* runTurnAttempt(
+                    sessionID,
                     undefined,
-                    budgetStop.providerDeadline,
+                    defect.transition.step,
+                    toolCallAttempts,
+                    contextWindow,
+                    undefined,
+                    false,
+                    budgetStop,
+                    recovery,
                   )
                 }),
               ),
-            ),
-          (fiber) => Fiber.interrupt(fiber),
-        ),
-      )
-    })
+              Effect.exit,
+            )
+            if (result._tag === "Success") {
+              if (recovery.started !== undefined)
+                yield* recordRecovery("recovered", { ended: yield* Clock.currentTimeMillis })
+              return result.value
+            }
+            if (Cause.hasInterrupts(result.cause)) return yield* Effect.failCause(result.cause)
+            const error = Option.getOrUndefined(Cause.findErrorOption(result.cause))
+            if (!(error instanceof LLMError) || !recovery.eligible) return yield* Effect.failCause(result.cause)
+            const session = yield* getSession(sessionID)
+            const context = yield* getContext(sessionID)
+            const last = context.findLast((message) => message.type === "assistant")
+            const unknown =
+              [...recovery.operations.values()].some((operation) => operation.status !== "settled") ||
+              (last?.type === "assistant" &&
+                last.content.some(
+                  (part) => part.type === "tool" && part.provider?.executed && part.state.status !== "completed",
+                ))
+            const budget = yield* readBudget(sessionID)
+            const now = yield* Clock.currentTimeMillis
+            const bound = SessionBudget.deadline(session, budget.duration, budget.policy?.deadline)
+            const failureKey = `${error.reason._tag}:${"status" in error.reason ? error.reason.status : ""}:${error.reason.message}`
+            recovery.repeated = recovery.failureKey === failureKey ? recovery.repeated + 1 : 0
+            recovery.failureKey = failureKey
+            const decision = SessionRetry.decide({
+              error,
+              attempt: recovery.attempt,
+              repeated: recovery.repeated,
+              cancelled: false,
+              committed: !!last?.content.length,
+              operations: unknown ? "unknown" : "settled",
+              remainingMs: bound === undefined ? undefined : bound - now,
+            })
+            if (decision.action === "stop") {
+              yield* recordRecovery("stopped", { ended: now, category: decision.category, message: decision.message })
+              if (decision.category === "budget") {
+                yield* checkBudget(session, budgetStop.model!, false, true, decision.message)
+                return { needsContinuation: false, step }
+              }
+              // The original typed failure remains the caller's error and durable evidence.
+              return yield* Effect.failCause(result.cause)
+            }
+            if (yield* checkBudget(session, budgetStop.model!)) return { needsContinuation: false, step }
+            recovery.started ??= now
+            recovery.attempt++
+            yield* recordRecovery("backoff", {
+              category: decision.category,
+              next: now + decision.delayMs,
+              committed: decision.committed,
+            })
+            yield* events.publish(SessionEvent.Retried, {
+              sessionID,
+              timestamp: yield* DateTime.now,
+              attempt: recovery.attempt,
+              error: {
+                message: `第 ${recovery.attempt} 次重试，${Math.ceil(decision.delayMs / 1000)} 秒后继续。${error.reason.message}`,
+                isRetryable: true,
+                metadata: {
+                  phase: "recovery",
+                  delayMs: String(decision.delayMs),
+                  category: decision.category,
+                  recoveryID: recovery.id,
+                },
+              },
+            })
+            recovery.waiting = true
+            yield* Effect.sleep(decision.delayMs)
+            yield* SessionOwnership.check
+            recovery.waiting = false
+          }
+        }).pipe(
+          Effect.onInterrupt(() =>
+            Effect.gen(function* () {
+              if (recovery.started === undefined) return
+              yield* recordRecovery(budgetStop.expired || budgetStop.closing ? "stopped" : "interrupted", {
+                ended: yield* Clock.currentTimeMillis,
+              })
+              if (!recovery.waiting) return
+              const session = yield* getSession(sessionID)
+              const assistantMessageID = SessionMessage.ID.create()
+              yield* events.publish(SessionEvent.Step.Started, {
+                sessionID,
+                assistantMessageID,
+                timestamp: yield* DateTime.now,
+                agent: session.agent ?? AgentV2.defaultID,
+                model: {
+                  id: ModelV2.ID.make(budgetStop.model!.id),
+                  providerID: ProviderV2.ID.make(budgetStop.model!.provider),
+                },
+              })
+              yield* events.publish(SessionEvent.Step.Ended, {
+                sessionID,
+                assistantMessageID,
+                timestamp: yield* DateTime.now,
+                finish: "interrupted",
+                termination:
+                  budgetStop.expired || budgetStop.closing
+                    ? {
+                        category: "budget",
+                        message: budgetStop.closing
+                          ? "进入显式收尾余量，已取消退避等待；硬截止尚未到达，任务未完成。"
+                          : "预算到期，已取消退避等待。",
+                      }
+                    : { category: "interrupted", source: "user", message: "已取消退避等待，未发起新的模型请求。" },
+                requestPerformed: false,
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              })
+            }),
+          ),
+        )
+        const bounded = Effect.raceFirst(
+          turn,
+          Effect.gen(function* () {
+            const receipt = yield* Deferred.await(budgetStop.repairScope)
+            if (!receipt) return yield* Effect.never
+            yield* Effect.sleep(
+              Math.max(1, DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - receipt.started)),
+            )
+            budgetStop.repairExpired = true
+            return { needsContinuation: false, step }
+          }),
+        ).pipe(
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              if (!budgetStop.repairExpired) return
+              const receipt = yield* Deferred.await(budgetStop.repairScope)
+              if (!receipt) return
+              const current = yield* SessionOutcome.history(db, sessionID)
+              const consumed = DeliveryContract.receipt(current, receipt.request) ?? receipt
+              yield* events.publish(SessionEvent.Synthetic, {
+                sessionID,
+                timestamp: yield* DateTime.now,
+                messageID: SessionMessage.ID.create(),
+                text:
+                  DeliveryContract.prefix +
+                  JSON.stringify({
+                    ...consumed,
+                    decision: "unverified",
+                    reason: "wall-clock budget exhausted",
+                    missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
+                  }),
+              })
+            }),
+          ),
+        )
+        return yield* bounded.pipe((turn) =>
+          Effect.acquireUseRelease(
+            Effect.forkChild(turn, { startImmediately: true }),
+            (fiber) =>
+              Effect.raceFirst(Fiber.join(fiber), deadline).pipe(
+                Effect.tap(
+                  Effect.gen(function* () {
+                    if (!budgetStop.expired && !budgetStop.closing) return
+                    yield* Fiber.interrupt(fiber)
+                    yield* checkBudget(
+                      yield* getSession(sessionID),
+                      budgetStop.model!,
+                      false,
+                      true,
+                      undefined,
+                      budgetStop.providerDeadline,
+                    )
+                  }),
+                ),
+              ),
+            (fiber) => Fiber.interrupt(fiber),
+          ),
+        )
+      },
+    )
 
     const run = Effect.fn("SessionRunner.run")(function* (input: {
       readonly sessionID: SessionSchema.ID

@@ -15,6 +15,8 @@ export namespace Feedback {
       message?: string
       diagnosticMessage?: string
       requestID?: string
+      providerCode?: string
+      providerMessage?: string
     }[]
   }
   export type Snapshot = Readonly<{
@@ -23,8 +25,8 @@ export namespace Feedback {
     image?: string
   }>
 
-  // Automatic errors contain structured status only. Arbitrary message/output/stack
-  // text belongs in the separately selected error-details attachment.
+  // Automatic errors allow bounded, redacted provider diagnostics. Legacy arbitrary
+  // message/output/stack text stays in the separately selected error-details attachment.
   const credentialNames =
     "access[-_]*token|refresh[-_]*token|id[-_]*token|client[-_]*secret|api[-_]*key|token|secret|password|passwd|authorization|proxy[-_]*authorization|cookie|set[-_]*cookie|private[-_]*key"
   const credentialKey = new RegExp("^(?:" + credentialNames + ")$", "i")
@@ -41,6 +43,23 @@ export namespace Feedback {
       return JSON.stringify(redactJSON(JSON.parse(text), 0), null, 2)
     } catch {
       return redactText(text)
+    }
+  }
+
+  /** Only explicitly supplied provider diagnostics enter the automatic error snapshot. */
+  export function providerDiagnostic(input: { code?: unknown; message?: unknown }) {
+    const code = typeof input.code === "string" ? input.code.trim() : ""
+    const message =
+      typeof input.message === "string"
+        ? redact(input.message)
+            .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 512)
+        : ""
+    return {
+      ...(/^[a-z0-9_.:-][a-z0-9_.: -]{0,95}$/i.test(code) && redact(code) === code ? { providerCode: code } : {}),
+      ...(message ? { providerMessage: message } : {}),
     }
   }
 
@@ -212,6 +231,7 @@ export namespace Feedback {
                   Number.isInteger(item.status) && item.status! >= 400 && item.status! <= 599 ? item.status : undefined,
                 category: allowed(item.category, ["auth", "credit", "rate", "network", "model", "unknown"]),
                 ...(item.requestID ? { requestID: redact(item.requestID.slice(0, 128)) } : {}),
+                ...providerDiagnostic({ code: item.providerCode, message: item.providerMessage }),
               })),
           }
         : {}),

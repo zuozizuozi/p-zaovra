@@ -26,6 +26,7 @@ export function sessionFeedback(messages: readonly Message[], parts: (id: string
         at: message.time.completed ?? message.time.created,
         status: status ?? (metadata?.statusCode ? Number(metadata.statusCode) : undefined),
         diagnosticMessage: Feedback.redact(text.slice(0, 2000)),
+        ...Feedback.providerDiagnostic({ code: metadata?.providerCode, message: metadata?.providerMessage }),
         requestID: requestID ? Feedback.redact(requestID.slice(0, 128)) : undefined,
         category: Feedback.suggestion(text),
       },
@@ -70,6 +71,7 @@ export function sessionFeedback(messages: readonly Message[], parts: (id: string
           status: item.status,
           requestID: item.requestID,
           category: item.category,
+          ...Feedback.providerDiagnostic({ code: item.providerCode, message: item.providerMessage }),
         })),
         ...tools.flatMap((part) =>
           part.state.status === "error"

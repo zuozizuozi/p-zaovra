@@ -13,5 +13,5 @@ export const Info = Schema.Struct({
   model: Model.Ref.pipe(optional),
   subtask: Schema.Boolean.pipe(optional),
   source: Schema.Literals(["command", "skill", "mcp"]).pipe(optional),
-  hints: Schema.mutable(Schema.Array(Schema.String)).pipe(optional),
+  hints: Schema.Array(Schema.String).pipe(optional),
 }).annotate({ identifier: "CommandV2.Info" })

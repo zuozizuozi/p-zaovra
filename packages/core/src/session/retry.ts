@@ -2,6 +2,9 @@ export * as SessionRetry from "./retry"
 
 import { LLMError } from "@zaovra-ai/llm"
 
+export const invalidRequestMessage =
+  "服务无法处理这次请求。可新建对话或切换模型后继续；若仍失败，请通过“反馈这个问题”提交错误信息。"
+
 export type Input = {
   error: LLMError
   attempt: number
@@ -33,7 +36,7 @@ export function decide(input: Input) {
   const permanent: Record<string, string> = {
     QuotaExceeded: "额度或余额不足，请检查套餐或切换提供商后继续。",
     Authentication: "鉴权或权限失败，请检查密钥和访问权限后继续。",
-    InvalidRequest: "请求格式或参数不受支持，请修正请求或切换模型后继续。",
+    InvalidRequest: invalidRequestMessage,
     NoRoute: "模型线路不可用，请修正配置后继续。",
     ContentPolicy: "内容被提供商过滤，请调整请求后继续。",
   }
