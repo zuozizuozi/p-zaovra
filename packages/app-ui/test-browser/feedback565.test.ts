@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-test("565 shared feedback entries, session selection, payload and screenshot limits", async () => {
+test("766 shared feedback entries, default attachments, payload and screenshot limits", async () => {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -10,7 +10,7 @@ test("565 shared feedback entries, session selection, payload and screenshot lim
       "./happydom.ts",
       "--preload",
       "./test-browser/fixtures/solid-preload.ts",
-      "./test-browser/fixtures/feedback565.fixture.tsx",
+      "./test-browser/fixtures/feedback-entries766.fixture.tsx",
     ],
     { cwd: import.meta.dir + "/..", stdout: "pipe", stderr: "pipe" },
   )

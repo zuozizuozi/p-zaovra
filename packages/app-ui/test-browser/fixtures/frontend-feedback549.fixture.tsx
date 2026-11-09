@@ -175,9 +175,9 @@ mock.module("@/context/platform", () => ({
     platform: "desktop",
     os: "windows",
     version: "1.18.3",
-    saveFeedback: async (snapshot: Feedback.Snapshot) => {
+    submitFeedback: async (snapshot: Feedback.Snapshot) => {
       archive = snapshot
-      return true
+      return { submitted: true, receipt: "12345678-1234-4123-8123-123456789abc" }
     },
   }),
 }))
@@ -191,7 +191,7 @@ afterEach(() => {
 })
 const button = (name: string) =>
   [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === name)!
-test("menu feedback for the very first 400 saves status/request id and message events without bodies or credentials", async () => {
+test("766 first error feedback submits structured status/request id without raw provider bodies", async () => {
   const now = Date.now()
   const adapted = adaptSessionMessages(session, [
     { type: "user", id: "msg_user", text: "PRIVATE_USER_BODY", time: { created: now - 2 } },
@@ -226,9 +226,9 @@ test("menu feedback for the very first 400 saves status/request id and message e
   )
   openFeedback({ description: "First message failed" })
   await new Promise((resolve) => setTimeout(resolve, 25))
-  button("继续反馈").click()
-  await new Promise((resolve) => setTimeout(resolve, 25))
-  button("保存诊断包 ZIP").click()
+  const conversation766 = document.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  conversation766.click()
+  button("提交反馈").click()
   await new Promise((resolve) => setTimeout(resolve, 25))
   expect(archive).toBeDefined()
   expect(archive!.files.map((file) => file.name)).toEqual(["report.json", "model.txt"])
@@ -241,17 +241,5 @@ test("menu feedback for the very first 400 saves status/request id and message e
   expect(report.events.filter((event: { kind: string }) => event.kind === "message")).toHaveLength(2)
   for (const secret of ["PRIVATE_USER_BODY", "PRIVATE_PROVIDER_BODY", "SYNTHETICSECRET549"])
     expect(text).not.toContain(secret)
-  button("返回修改").click()
-  await new Promise((resolve) => setTimeout(resolve, 25))
-  const details = [...document.querySelectorAll("label")]
-    .find((label) => label.textContent?.includes("附带此错误的原始详情"))!
-    .querySelector<HTMLInputElement>("input")!
-  expect(details.checked).toBe(false)
-  details.click()
-  button("继续反馈").click()
-  await new Promise((resolve) => setTimeout(resolve, 25))
-  button("保存诊断包 ZIP").click()
-  await new Promise((resolve) => setTimeout(resolve, 25))
-  expect(archive!.files.find((file) => file.name === "details.txt")?.text).toContain("HTTP 400 invalid tool request")
-  expect(archive!.files.find((file) => file.name === "details.txt")?.text).not.toContain("SYNTHETICSECRET549")
+  expect(archive!.files.some((file) => file.name === "details.txt")).toBe(false)
 })

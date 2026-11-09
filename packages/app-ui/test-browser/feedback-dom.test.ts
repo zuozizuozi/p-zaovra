@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-test("real feedback dialog respects preview, offline and self-check contracts", async () => {
+test("766 single-page feedback respects preview, attachments, offline and submission contracts", async () => {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -10,7 +10,7 @@ test("real feedback dialog respects preview, offline and self-check contracts", 
       "./happydom.ts",
       "--preload",
       "./test-browser/fixtures/solid-preload.ts",
-      "./test-browser/fixtures/feedback.fixture.tsx",
+      "./test-browser/fixtures/feedback766.fixture.tsx",
     ],
     {
       cwd: import.meta.dir + "/..",
