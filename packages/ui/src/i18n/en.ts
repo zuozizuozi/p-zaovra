@@ -90,10 +90,10 @@ export const dict: Record<string, string> = {
   "ui.sessionTurn.diffs.showLess": "Show less",
   "ui.sessionTurn.diffs.more": "+{{count}} more files",
 
-  "ui.sessionTurn.retry.retrying": "retrying",
+  "ui.sessionTurn.retry.retrying": "Network issue, retrying",
   "ui.sessionTurn.retry.inSeconds": "in {{seconds}}s",
   "ui.sessionTurn.retry.attempt": "attempt #{{attempt}}",
-  "ui.sessionTurn.retry.attemptLine": "{{line}} - attempt #{{attempt}}",
+  "ui.sessionTurn.retry.attemptLine": "{{line}} (attempt {{attempt}})",
   "ui.sessionTurn.retry.geminiHot": "gemini is way too hot right now",
   "ui.sessionTurn.error.freeUsageExceeded": "Free usage exceeded",
   "ui.sessionTurn.error.addCredits": "Add credits",

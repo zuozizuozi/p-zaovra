@@ -94,7 +94,7 @@ import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { filterVirtualIndexes } from "./virtual-items"
-import { TurnProcessSummary, settledTurnStatus } from "./turn-process-summary"
+import { TurnProcessSummary, settledTurnStatus, hasTurnProcessContent } from "./turn-process-summary"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
@@ -462,8 +462,6 @@ export function MessageTimeline(props: {
         return "awaiting"
       if (activeTool()) return "working"
       const messages = assistantMessagesByTurn().get(displayTurn(user)) ?? emptyAssistantMessages
-      const latest = messages.at(-1)
-      if (latest?.error && latest.error.name !== "MessageAbortedError") return "error"
       const tool = messages.flatMap((message) => getMsgParts(message.id)).findLast((part) => part.type === "tool")
       if (tool?.type === "tool" && tool.state.status === "error") return "error"
       return "thinking"
@@ -1514,7 +1512,7 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={headingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <div data-slot="assistant-heading" class="flex h-9 min-w-0 items-center gap-2 overflow-hidden">
-                <Show when={workingDisplayTurn(headingRow().userMessageID)}>
+                <Show when={workingDisplayTurn(headingRow().userMessageID) && sessionStatus().type !== "retry"}>
                   <TaskActivity
                     state={mascotState(headingRow().userMessageID)}
                     output={streamingText(headingRow().userMessageID)}
@@ -1528,6 +1526,13 @@ export function MessageTimeline(props: {
                   processes={processEntriesByTurn().get(displayTurn(headingRow().userMessageID))?.length ?? 0}
                   tools={parts().filter((part): part is ToolPart => part.type === "tool")}
                   status={turnStatus(headingRow().userMessageID)}
+                  working={workingDisplayTurn(headingRow().userMessageID)}
+                  hasContent={hasTurnProcessContent(parts(), {
+                    answerMessageID: answerMessages().get(displayTurn(headingRow().userMessageID)),
+                    showReasoning: display().reasoning,
+                    coveredFailure: (id) => quietParts().has(id) || processParts().has(id),
+                    processes: processEntriesByTurn().get(displayTurn(headingRow().userMessageID))?.length ?? 0,
+                  })}
                   folded={folded()}
                   onToggle={() => setTurns(headingRow().userMessageID, !folded())}
                 />

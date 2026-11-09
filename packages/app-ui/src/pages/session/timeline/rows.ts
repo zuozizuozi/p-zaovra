@@ -58,7 +58,9 @@ export namespace Timeline {
     const compaction = userParts.some((p) => p.type === "compaction")
     const interruptedMessageIndex = assistantMessages.findIndex(endsWithInterruption)
     const interrupted = interruptedMessageIndex !== -1
-    const error = assistantMessages.find((m) => m.error && m.error.name !== "MessageAbortedError")?.error
+    // Earlier failed attempts remain durable evidence, but only the settled final attempt is an error.
+    const lastError = assistantMessages.at(-1)?.error
+    const error = (isActive && status !== "idle") || lastError?.name === "MessageAbortedError" ? undefined : lastError
 
     const assistantPartRefs = assistantMessages.flatMap((message, messageIndex) =>
       getMessageParts(message.id)

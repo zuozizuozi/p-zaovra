@@ -294,9 +294,17 @@ export function SessionTurn(
     if (interrupted()) return i18n.t("ui.message.interrupted")
     return ""
   })
-  const error = createMemo(
-    () => assistantMessages().find((m) => m.error && m.error.name !== "MessageAbortedError")?.error,
-  )
+  const status = createMemo(() => {
+    if (props.status !== undefined) return props.status
+    if (typeof props.active === "boolean" && !props.active) return idle
+    return data.store.session_status[props.sessionID] ?? idle
+  })
+  const working = createMemo(() => status().type !== "idle" && active())
+  const error = createMemo(() => {
+    if (working()) return
+    const current = assistantMessages().at(-1)?.error
+    return current?.name === "MessageAbortedError" ? undefined : current
+  })
   const showAssistantCopyPartID = createMemo(() => {
     const messages = assistantMessages()
 
@@ -322,12 +330,6 @@ export function SessionTurn(
     return unwrap(String(msg))
   })
 
-  const status = createMemo(() => {
-    if (props.status !== undefined) return props.status
-    if (typeof props.active === "boolean" && !props.active) return idle
-    return data.store.session_status[props.sessionID] ?? idle
-  })
-  const working = createMemo(() => status().type !== "idle" && active())
   const showReasoningSummaries = createMemo(() => props.showReasoningSummaries ?? true)
 
   const assistantCopyPartID = createMemo(() => {
