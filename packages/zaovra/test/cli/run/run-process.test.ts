@@ -289,7 +289,7 @@ describe("zaovra run (non-interactive subprocess)", () => {
         const result = yield* zaovra.run("trigger midstream error", { timeoutMs: 30_000 })
         expect(result.exitCode).not.toBe(0)
         expect(result.stdout).toBe("partial response\n")
-        expect(result.stderr).toContain("请求格式或参数不受支持")
+        expect(result.stderr).toContain("服务无法处理这次请求")
         expect(result.stderr).toContain("HTTP 400")
       }),
     60_000,
