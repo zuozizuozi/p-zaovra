@@ -41,7 +41,7 @@ export function DialogReleaseNotes(props: { version: string; highlights: Release
       fit
       class="dialog-release-notes"
     >
-      <div class="flex flex-col min-h-0" data-release-notes>
+      <div class="flex flex-col min-h-0 outline-none" data-release-notes tabIndex={-1} autofocus>
         <ul
           class="m-0 flex flex-col gap-5 px-5 pb-2 list-none overflow-y-auto min-h-0"
           data-release-notes-list
@@ -60,7 +60,7 @@ export function DialogReleaseNotes(props: { version: string; highlights: Release
           <Button variant="ghost" size="small" onClick={handleDisable}>
             {language.t("dialog.releaseNotes.action.hideFuture")}
           </Button>
-          <Button variant="primary" size="large" autofocus onClick={() => dialog.close()}>
+          <Button variant="primary" size="large" onClick={() => dialog.close()}>
             {language.t("dialog.releaseNotes.action.getStarted")}
           </Button>
         </div>

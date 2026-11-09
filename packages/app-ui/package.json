@@ -18,6 +18,7 @@
   "scripts": {
     "typecheck": "tsgo -b",
     "typecheck:e2e": "tsgo -p e2e/tsconfig.json",
+    "typecheck:inline-home": "tsgo -p e2e/inline-home/tsconfig.json",
     "start": "vite",
     "dev": "vite",
     "build": "vite build",

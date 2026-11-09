@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "emitDeclarationOnly": false,
+    "noEmit": true,
+    "types": ["node", "bun", "vite/client"]
+  },
+  "include": ["../../src", "./*.ts", "./*.tsx", "../utils/**/*.ts"]
+}

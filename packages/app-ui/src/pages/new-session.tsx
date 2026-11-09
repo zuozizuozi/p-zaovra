@@ -33,9 +33,6 @@ import { Persist, persisted } from "@/utils/persist"
 import createPresence from "solid-presence"
 import { useLocal } from "@/context/local"
 import { createPromptModelSelection } from "@/pages/session/composer/prompt-model-selection"
-import { recentStartSessions, SessionStartOptions } from "@/components/session/session-start-options"
-import { useTabs } from "@/context/tabs"
-import { useServer } from "@/context/server"
 
 const workspaceBarEnabled = import.meta.env.VITE_ZAOVRA_CHANNEL !== "prod"
 const providerTipDismissalDuration = 30 * 24 * 60 * 60 * 1000
@@ -66,19 +63,6 @@ export default function NewSessionPage() {
   const route = useSessionKey()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string }>()
-  const tabs = useTabs()
-  const server = useServer()
-  const [recentLoad, recentActions] = createResource(
-    () => ({ directory: sdk().directory, sync: serverSync() }),
-    ({ directory, sync }) =>
-      sync.project.loadSessions(directory).then(
-        () => true,
-        () => false,
-      ),
-  )
-  const recent = createMemo(() =>
-    recentStartSessions(serverSync().child(sdk().directory, { bootstrap: false })[0].session),
-  )
   const local = useLocal()
   const model = createPromptModelSelection({ agent: local.agent.current })
 
@@ -188,27 +172,7 @@ export default function NewSessionPage() {
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
         <div class="@container relative flex flex-col min-h-0 h-full flex-1">
           <div class="flex-1 min-h-0 overflow-hidden rounded-[10px]">
-            <NewSessionDesignView
-              options={
-                <SessionStartOptions
-                  recent={recent()}
-                  failed={recentLoad() === false}
-                  disabled={!prompt.ready() || prompt.dirty()}
-                  onRetry={() => void recentActions.refetch()}
-                  onOpen={(session) => {
-                    const draft = tabs.store.find((tab) => tab.type === "draft" && tab.draftID === searchParams.draftId)
-                    const tab = { type: "session" as const, server: draft?.server ?? server.key, sessionId: session.id }
-                    tabs.rememberSessionInfo(tab, session)
-                    tabs.select(tab)
-                  }}
-                  onSuggest={(text) => {
-                    if (!prompt.ready() || prompt.dirty()) return
-                    prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-                    promptInputV2Controller.restoreFocus()
-                  }}
-                />
-              }
-            >
+            <NewSessionDesignView>
               <div data-slot="new-session-task" class={NEW_SESSION_CONTENT_WIDTH}>
                 <div class="flex flex-col" classList={{ "gap-3": true }}>
                   <Show when={projectController.empty()}>

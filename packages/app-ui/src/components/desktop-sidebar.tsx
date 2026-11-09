@@ -343,58 +343,60 @@ export function DesktopSidebar() {
                       setView("menuProject", groupKey(group))
                     }}
                   >
-                    <Show
-                      when={view.editingProject === groupKey(group)}
-                      fallback={
-                        <>
-                          <button
-                            type="button"
-                            class="flex min-w-0 flex-1 items-center gap-2 px-2 text-left"
-                            onClick={() => selectProject(group)}
-                            title={group.project.worktree}
-                            data-slot="project-heading"
-                          >
-                            <span class="size-5 shrink-0">
-                              <ProjectGlyph project={group.project} />
-                            </span>
-                            <span class="min-w-0 flex-1 truncate text-[13px] font-normal text-v2-text-text-base">
-                              {displayName(group.project, language)}
-                            </span>
-                          </button>
-                        </>
-                      }
-                    >
-                      <input
-                        data-action="project-rename"
-                        aria-label={language.t("common.rename")}
-                        class="mx-2 min-w-0 flex-1 rounded border border-v2-border-border-focus bg-transparent px-1 text-[13px] text-v2-text-text-base outline-none"
-                        value={view.projectTitle}
-                        disabled={view.savingProject}
-                        ref={(input) =>
-                          queueMicrotask(() => {
-                            input.focus()
-                            input.select()
-                          })
-                        }
-                        onInput={(event) => setView("projectTitle", event.currentTarget.value)}
-                        onCompositionStart={ime.start}
-                        onCompositionEnd={ime.end}
-                        onKeyDown={(event) => {
-                          if (ime.owns(event)) return
-                          event.stopPropagation()
-                          if (event.key === "Escape") {
-                            event.preventDefault()
-                            setView("editingProject", "")
-                            return
-                          }
-                          if (event.key === "Enter") {
-                            event.preventDefault()
-                            void renameProject(group)
-                          }
+                    <div data-slot="project-heading" class="relative flex min-w-0 flex-1 items-center px-2">
+                      <button
+                        type="button"
+                        class="flex h-5 min-w-0 flex-1 items-center gap-2 text-left"
+                        onClick={() => {
+                          if (view.editingProject !== groupKey(group)) selectProject(group)
                         }}
-                        onBlur={() => void renameProject(group)}
-                      />
-                    </Show>
+                        tabIndex={view.editingProject === groupKey(group) ? -1 : undefined}
+                        title={group.project.worktree}
+                      >
+                        <span class="size-5 shrink-0">
+                          <ProjectGlyph project={group.project} />
+                        </span>
+                        <span
+                          data-slot="project-name"
+                          class="min-w-0 flex-1 truncate text-[13px] font-normal leading-5 text-v2-text-text-base"
+                          classList={{ invisible: view.editingProject === groupKey(group) }}
+                        >
+                          {displayName(group.project, language)}
+                        </span>
+                      </button>
+                      <Show when={view.editingProject === groupKey(group)}>
+                        <input
+                          data-action="project-rename"
+                          aria-label={language.t("common.rename")}
+                          class="absolute left-9 right-2 top-1/2 h-5 min-w-0 -translate-y-1/2 border-0 bg-transparent p-0 text-[13px] font-normal leading-5 text-v2-text-text-base outline-none"
+                          value={view.projectTitle}
+                          disabled={view.savingProject}
+                          ref={(input) =>
+                            queueMicrotask(() => {
+                              input.focus({ preventScroll: true })
+                              input.select()
+                            })
+                          }
+                          onInput={(event) => setView("projectTitle", event.currentTarget.value)}
+                          onCompositionStart={ime.start}
+                          onCompositionEnd={ime.end}
+                          onKeyDown={(event) => {
+                            if (ime.owns(event)) return
+                            event.stopPropagation()
+                            if (event.key === "Escape") {
+                              event.preventDefault()
+                              setView("editingProject", "")
+                              return
+                            }
+                            if (event.key === "Enter") {
+                              event.preventDefault()
+                              void renameProject(group)
+                            }
+                          }}
+                          onBlur={() => void renameProject(group)}
+                        />
+                      </Show>
+                    </div>
                     <button
                       type="button"
                       data-slot="project-action"
