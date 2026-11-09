@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { useLanguage } from "@/context/language"
 import { useHighlights } from "@/context/highlights"
 import { Show } from "solid-js"
@@ -17,7 +18,7 @@ export function SettingsAbout() {
       <BrandMark class="size-16" />
       <h2 class="text-24-semibold">Zaovra</h2>
       <p>
-        {language.t("settings.about.version")} {platform.version ?? language.t("settings.about.dev")}
+        {language.t("settings.about.version")} {formatVersion(platform.version) || language.t("settings.about.dev")}
       </p>
       <Show when={platform.channel}>
         <p>

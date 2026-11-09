@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { createEffect, onCleanup } from "solid-js"
 import { toaster } from "@zaovra-ai/ui/toast"
 import { usePlatform } from "@/context/platform"
@@ -17,8 +18,12 @@ export function UpdaterNotification() {
     const toastId = showToast({
       persistent: true,
       icon: "download",
-      title: language.t(ready ? "toast.update.title" : "settings.updates.toast.available", { version: update.version }),
-      description: ready ? language.t("toast.update.description", { version: update.version }) : undefined,
+      title: language.t(ready ? "toast.update.title" : "settings.updates.toast.available", {
+        version: formatVersion(update.version),
+      }),
+      description: ready
+        ? language.t("toast.update.description", { version: formatVersion(update.version) })
+        : undefined,
       actions: [
         {
           label: language.t(ready ? "toast.update.action.installRestart" : "settings.updates.action.download"),

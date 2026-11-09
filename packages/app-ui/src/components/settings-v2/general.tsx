@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { ConversationViewSelect } from "@/components/conversation-view-select"
 import { SettingsSessionBudget } from "@/components/settings-session-budget"
 import { createSettingsShells } from "@/utils/settings-shells"
@@ -118,7 +119,7 @@ export const SettingsGeneralV2: Component<{
   const updateDescription = createMemo(() => {
     const state = platform.updater?.state()
     return state && "version" in state
-      ? language.t("settings.updates.toast.available", { version: state.version })
+      ? language.t("settings.updates.toast.available", { version: formatVersion(state.version) })
       : language.t("settings.updates.row.check.description")
   })
   const [network, { refetch: reloadNetwork }] = createResource(
@@ -709,7 +710,7 @@ export const SettingsGeneralV2: Component<{
         <Show when={highlights.available()}>
           <SettingsRowV2
             title={language.t("settings.general.row.releaseNotes.view")}
-            description={platform.version ?? ""}
+            description={formatVersion(platform.version)}
           >
             <ButtonV2 data-action="view-release-notes" size="normal" variant="neutral" onClick={highlights.show}>
               {language.t("settings.general.row.releaseNotes.open")}

@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { ConversationViewSelect } from "@/components/conversation-view-select"
 import { SettingsSessionBudget } from "@/components/settings-session-budget"
 import { createSettingsShells } from "@/utils/settings-shells"
@@ -703,7 +704,7 @@ export const SettingsGeneral: Component = () => {
         <Show when={highlights.available()}>
           <SettingsRow
             title={language.t("settings.general.row.releaseNotes.view")}
-            description={platform.version ?? ""}
+            description={formatVersion(platform.version)}
           >
             <Button data-action="view-release-notes" size="small" variant="secondary" onClick={highlights.show}>
               {language.t("settings.general.row.releaseNotes.open")}

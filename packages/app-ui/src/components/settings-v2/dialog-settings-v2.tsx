@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import type { ServerConnection } from "@/context/server"
 import { Component, For, Show, createEffect, createSignal, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -148,7 +149,7 @@ export const DialogSettings: Component<{
             </For>
             <div class="settings-v2-nav-footer mt-auto">
               <span>{language.t("app.name.desktop")}</span>
-              <span>v{platform.version}</span>
+              <span>{formatVersion(platform.version)}</span>
             </div>
           </div>
         </TabsV2.List>

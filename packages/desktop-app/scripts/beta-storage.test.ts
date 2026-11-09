@@ -8,6 +8,7 @@ import {
   continuousIdentity,
   deliverBeta,
   nextBetaVersion,
+  requireBetaVersion,
   reserveBetaVersion,
   retainBetaVersions,
 } from "./beta-storage"
@@ -17,7 +18,7 @@ if (!root) throw new Error("Use an isolated ZAOVRA_BETA_TEST_DIR")
 const sha = "a".repeat(40)
 const identity = { commit: sha, run: "123", attempt: "1" }
 
-async function fixture() {
+async function fixture(version = "0.1.1-beta.4", previous = "0.1.1-beta.3") {
   const directory = join(root!, crypto.randomUUID())
   await mkdir(directory, { recursive: true })
   const installer = "synthetic compiler output, never executed"
@@ -27,17 +28,17 @@ async function fixture() {
   await Bun.write(
     join(directory, "beta.yml"),
     YAML.stringify({
-      version: "0.1.1-beta.4",
+      version,
       path: "zaovra-desktop-win-x64.exe",
       sha512: hash,
       files: [{ url: "zaovra-desktop-win-x64.exe", size: Buffer.byteLength(installer), sha512: hash }],
     }),
   )
   const plan = await planBeta(directory, sha, "reviewed synthetic release")
-  const old = YAML.stringify({ version: "0.1.1-beta.3", path: "0.1.1-beta.3/zaovra-desktop-win-x64.exe" })
+  const old = YAML.stringify({ version: previous, path: previous + "/zaovra-desktop-win-x64.exe" })
   const objects = new Map<string, string>([
     ["beta/beta.yml", old],
-    ["beta/reservations/0.1.1-beta.4.json", JSON.stringify({ version: plan.manifest.version, ...identity })],
+    ["beta/reservations/" + version + ".json", JSON.stringify({ version: plan.manifest.version, ...identity })],
   ])
   const writes: string[] = []
   const control = { publicArtifactBad: false, publicPointerBad: false, compete: false }
@@ -100,17 +101,71 @@ async function fixture() {
   return { directory, plan, old, objects, writes, control, server, bucket }
 }
 
-test("646 counter includes reservations and immutable directories, rejects overflow and newer base", () => {
+test("780 visible patch sequence includes reservations and immutable directories, preserves legacy inventory", () => {
   expect(
     nextBetaVersion(
       ["beta/0.1.0-beta.99/release.json", "beta/0.1.1-beta.9/installer.exe", "beta/reservations/0.1.1-beta.11.json"],
       "0.1.1-beta.10",
     ),
-  ).toBe("0.1.1-beta.12")
-  expect(nextBetaVersion([], "0.1.1-beta.3")).toBe("0.1.1-beta.4")
-  expect(() => nextBetaVersion([], "0.1.2-beta.1")).toThrow()
-  expect(() => nextBetaVersion([], "0.1.1-beta.65535")).toThrow()
+  ).toBe("0.2.0-beta.1")
+  expect(nextBetaVersion([], "0.1.1-beta.19")).toBe("0.2.0-beta.1")
+  expect(nextBetaVersion(["beta/reservations/0.2.0-beta.1.json"], "0.1.1-beta.19")).toBe("0.2.1-beta.1")
+  expect(nextBetaVersion(["beta/0.2.1-beta.1/release.json"], "0.2.0-beta.1")).toBe("0.2.2-beta.1")
+  expect(() => nextBetaVersion([], "0.3.0-beta.1")).toThrow()
+  expect(() => nextBetaVersion([], "0.2.65535-beta.1")).toThrow()
+  expect(() => nextBetaVersion([], "0.2.0-beta.2")).toThrow()
   expect(() => nextBetaVersion([], "prod")).toThrow()
+})
+
+test("780 manual builds require an explicit canonical reviewed version", () => {
+  expect(requireBetaVersion("0.2.0-beta.1")).toBe("0.2.0-beta.1")
+  for (const version of [undefined, "0.1.1-beta.20", "0.2.01-beta.1", "0.2.0-beta.2", "0.2.65536-beta.1", "prod"])
+    expect(() => requireBetaVersion(version)).toThrow()
+})
+
+test("780 manual CLI writes only the reviewed version to workflow output without storage credentials", async () => {
+  const output = join(root!, "manual780-" + crypto.randomUUID())
+  const command = async (version: string) => {
+    const child = Bun.spawn([process.execPath, "scripts/beta-storage.ts", "manual"], {
+      env: {
+        ...process.env,
+        BETA_VERSION: version,
+        GITHUB_ENV: output,
+        R2_ACCESS_KEY_ID: "",
+        R2_SECRET_ACCESS_KEY: "",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [out, error, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { out, error, code }
+  }
+  const selected = await command("0.2.0-beta.1")
+  expect(selected.code).toBe(0)
+  expect(selected.out).toContain("Selected reviewed 0.2.0-beta.1")
+  expect(await Bun.file(output).text()).toBe("ZAOVRA_VERSION=0.2.0-beta.1\n")
+  expect((await command("0.1.1-beta.20")).code).toBe(1)
+  expect(await Bun.file(output).text()).toBe("ZAOVRA_VERSION=0.2.0-beta.1\n")
+})
+
+test("780 Beta.19 pointer upgrades through the existing immutable delivery and rollback contract", async () => {
+  const f = await fixture("0.2.0-beta.1", "0.1.1-beta.19")
+  try {
+    await deliverBeta(f.bucket, f.directory, f.plan, f.server.url.origin + "/public/", identity)
+    const published = YAML.parse(f.objects.get("beta/beta.yml")!)
+    expect(published.version).toBe("0.2.0-beta.1")
+    expect(published.path).toBe("0.2.0-beta.1/zaovra-desktop-win-x64.exe")
+    expect(f.writes.at(-1)).toBe("beta/beta.yml")
+    await expect(
+      deliverBeta(f.bucket, f.directory, f.plan, f.server.url.origin + "/public/", identity),
+    ).rejects.toThrow("increase")
+  } finally {
+    await f.server.stop(true)
+  }
 })
 
 test("646 continuous permission requires trusted exact workflow identity", () => {
@@ -135,7 +190,7 @@ test("646 concurrent HTTP reservations allocate distinct never-reused versions",
       reserveBetaVersion(f.bucket, { ...identity, attempt: "2" }),
     ])
     expect(new Set(versions).size).toBe(2)
-    expect(versions.toSorted()).toEqual(["0.1.1-beta.5", "0.1.1-beta.6"])
+    expect(versions.toSorted()).toEqual(["0.2.0-beta.1", "0.2.1-beta.1"])
   } finally {
     await f.server.stop(true)
   }

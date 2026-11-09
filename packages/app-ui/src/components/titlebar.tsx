@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { createEffect, createMemo, createResource, createSignal, Match, onMount, Show, Switch, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
@@ -115,7 +116,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; contained?: boolean; 
       installing,
       label: installing ? language.t("settings.updates.action.installing") : "Update",
       ariaLabel: language.t(installing ? "settings.updates.action.installing" : "toast.update.action.installRestart"),
-      title: version ? `Update ${version}` : undefined,
+      title: version ? `Update ${formatVersion(version)}` : undefined,
       onInstall: () => props.update?.install(),
     }
   })

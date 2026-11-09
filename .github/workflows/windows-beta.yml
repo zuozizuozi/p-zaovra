@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      beta_version:
+        description: Reviewed internal Beta version for a manual build (displayed as Beta 0.2.x)
+        required: false
+        default: 0.2.0-beta.1
+        type: string
       unsigned_beta:
         description: Explicit unsigned Beta exception (must match the reviewed artifact on publish)
         required: false
@@ -141,9 +146,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test test-node/beta-flags.node.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test test-node/beta-version.node.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/app-ui
-          bun test src/components/updater-action.test.ts ./test-browser/desktop-entry-dom.test.ts ./test-browser/feedback-dom.test.ts
+          bun test src/updater.test.ts src/components/updater-action.test.ts ./test-browser/version-dom.test.ts ./test-browser/desktop-entry-dom.test.ts ./test-browser/feedback-dom.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/feedback-worker
@@ -166,12 +173,14 @@ jobs:
         run: |
           bun verifier/packages/desktop-app/scripts/beta-storage.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Monotonic Beta version
+      - name: Reviewed Beta version
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
+        env:
+          BETA_VERSION: ${{ inputs.beta_version }}
         run: |
-          $baseVersion = (Get-Content packages/desktop-app/package.json | ConvertFrom-Json).version.Split('-')[0]
-          "ZAOVRA_VERSION=$baseVersion-beta.${{ github.run_number }}" >> $env:GITHUB_ENV
+          bun verifier/packages/desktop-app/scripts/beta-storage.ts manual
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare Windows Beta with packaged updater
         working-directory: packages/desktop-app
         shell: pwsh

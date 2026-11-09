@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { openFeedback } from "@/feedback"
 import { TextField } from "@zaovra-ai/ui/text-field"
 import { Logo } from "@zaovra-ai/ui/logo"
@@ -323,7 +324,7 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             >
               {(version) => (
                 <Button size="large" onClick={installUpdate}>
-                  {language.t("error.page.action.updateTo", { version: version() })}
+                  {language.t("error.page.action.updateTo", { version: formatVersion(version()) })}
                 </Button>
               )}
             </Show>
@@ -345,7 +346,9 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           </div>
           <Show when={platform.version}>
             {(version) => (
-              <p class="text-xs text-text-weak">{language.t("error.page.version", { version: version() })}</p>
+              <p class="text-xs text-text-weak">
+                {language.t("error.page.version", { version: formatVersion(version()) })}
+              </p>
             )}
           </Show>
         </div>

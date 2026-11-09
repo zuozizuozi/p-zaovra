@@ -1,3 +1,4 @@
+import { formatVersion } from "@zaovra-ai/app/updater"
 import electron, { app, dialog } from "electron"
 import pkg from "electron-updater"
 import { CHANNEL, UPDATER_ENABLED } from "./constants"
@@ -94,7 +95,7 @@ export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoU
   if (state.status === "available") {
     const response = await dialog.showMessageBox({
       type: "info",
-      message: `发现新版本 ${state.version}，是否下载？`,
+      message: `发现新版本 ${formatVersion(state.version)}，是否下载？`,
       title: "更新可用",
       buttons: ["下载", "稍后"],
       defaultId: 0,
@@ -111,7 +112,7 @@ export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoU
 
   const response = await dialog.showMessageBox({
     type: "info",
-    message: `新版本 ${state.version} 已准备好，重启以完成更新。`,
+    message: `新版本 ${formatVersion(state.version)} 已准备好，重启以完成更新。`,
     title: "更新已就绪",
     buttons: ["重启以完成更新", "稍后"],
     defaultId: 0,

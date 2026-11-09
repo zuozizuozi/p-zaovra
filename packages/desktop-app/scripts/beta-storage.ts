@@ -8,6 +8,12 @@ import { BetaError, betaErrorDetails, betaOperation, betaResponseError } from ".
 
 export const versionPattern = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
 
+export function requireBetaVersion(version: string | undefined) {
+  const match = /^0\.2\.(0|[1-9]\d*)-beta\.1$/.exec(version ?? "")
+  if (!match || Number(match[1]) > 65535) throw new Error("Expected a reviewed 0.2.x-beta.1 version (patch <= 65535)")
+  return version!
+}
+
 export function nextBetaVersion(keys: string[], current?: string) {
   const versions = keys.flatMap((key) => {
     const match = /^beta\/(?:reservations\/)?(\d+\.\d+\.\d+-beta\.[1-9]\d*)(?:\/|\.json$)/.exec(key)
@@ -17,12 +23,10 @@ export function nextBetaVersion(keys: string[], current?: string) {
     if (!versionPattern.test(current)) throw new Error("Invalid current Beta version")
     versions.push(current)
   }
-  if (versions.some((v) => semver.order(v, "0.1.1") >= 0)) throw new Error("A newer base version requires review")
-  const numbers = versions.filter((v) => v.startsWith("0.1.1-beta.")).map((v) => Number(v.split(".").at(-1)))
-  const number = Math.max(0, ...numbers) + 1
-  if (!Number.isSafeInteger(number) || number > 65535)
-    throw new Error("Beta counter exhausted; review the base version")
-  return "0.1.1-beta." + number
+  // Legacy releases remain readable; each new release advances the visible patch number.
+  const releases = versions.filter((v) => semver.order(v, "0.2.0-beta.1") >= 0).map(requireBetaVersion)
+  const patch = Math.max(-1, ...releases.map((v) => Number(v.split(".")[2].split("-")[0]))) + 1
+  return requireBetaVersion(`0.2.${patch}-beta.1`)
 }
 
 export function continuousIdentity(env = process.env) {
@@ -258,11 +262,13 @@ export async function retainBetaVersions(bucket: S3Client, version: string) {
 
 if (import.meta.main) {
   await betaOperation("ReserveBeta", async () => {
-    const identity = continuousIdentity()
-    const version = await reserveBetaVersion(betaBucket(), identity)
+    const manual = process.argv[2] === "manual"
+    const version = manual
+      ? requireBetaVersion(process.env.BETA_VERSION)
+      : await reserveBetaVersion(betaBucket(), continuousIdentity())
     if (!process.env.GITHUB_ENV) throw new Error("Missing workflow environment output")
     await appendFile(process.env.GITHUB_ENV, "ZAOVRA_VERSION=" + version + "\n")
-    console.log("Reserved " + version)
+    console.log((manual ? "Selected reviewed " : "Reserved ") + version)
   }).catch((error) => {
     console.error(JSON.stringify(betaErrorDetails(error, "ReserveBeta")))
     process.exitCode = 1

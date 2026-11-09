@@ -21,7 +21,7 @@ describe("743 every Beta has exact version release notes", () => {
   })
 
   test("the same pending copy binds to the actual assigned version without predicting a Beta number", () => {
-    for (const version of ["0.1.1-beta.17", "0.1.1-beta.18"]) {
+    for (const version of ["0.1.1-beta.17", "0.1.1-beta.18", "0.2.0-beta.1", "0.2.1-beta.1", "0.2.2-beta.1"]) {
       expect(versionReleaseNotes(version, notes)).toEqual({ version, ...notes })
     }
     expect(requireReleaseNotes(notes)).toEqual(notes)
@@ -54,6 +54,8 @@ describe("743 every Beta has exact version release notes", () => {
     expect(await Bun.file(target).json()).toEqual({ version: "0.1.1-beta.17", ...notes })
     await prepareReleaseNotes("0.1.1-beta.18", source, target)
     expect(await Bun.file(target).json()).toEqual({ version: "0.1.1-beta.18", ...notes })
+    await prepareReleaseNotes("0.2.0-beta.1", source, target)
+    expect(await Bun.file(target).json()).toEqual({ version: "0.2.0-beta.1", ...notes })
     const before = await Bun.file(target).text()
     await Bun.write(source, JSON.stringify({ zh: [], en: [] }))
     await expect(prepareReleaseNotes("0.1.1-beta.19", source, target)).rejects.toThrow("empty")

@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { For, onCleanup, onMount } from "solid-js"
 import type { ReleaseHighlight } from "@/release-notes"
 import { Dialog } from "@zaovra-ai/ui/dialog"
@@ -37,7 +38,7 @@ export function DialogReleaseNotes(props: { version: string; highlights: Release
 
   return (
     <Dialog
-      title={language.t("dialog.releaseNotes.title", { version: props.version })}
+      title={language.t("dialog.releaseNotes.title", { version: formatVersion(props.version) })}
       fit
       class="dialog-release-notes"
     >

@@ -1,3 +1,4 @@
+import { formatVersion } from "@/updater"
 import { createMemo } from "solid-js"
 import type { UpdaterState } from "@/updater"
 import { usePlatform } from "@/context/platform"
@@ -48,14 +49,16 @@ export function useUpdaterAction() {
 
       const state = await platform.updater?.[run]()
       if (state?.status === "available") {
-        showToast({ title: language.t("settings.updates.toast.available", { version: state.version }) })
+        showToast({ title: language.t("settings.updates.toast.available", { version: formatVersion(state.version) }) })
       }
       if (state?.status === "up-to-date") {
         showToast({
           variant: "success",
           icon: "circle-check",
           title: language.t("settings.updates.toast.latest.title"),
-          description: language.t("settings.updates.toast.latest.description", { version: platform.version ?? "" }),
+          description: language.t("settings.updates.toast.latest.description", {
+            version: formatVersion(platform.version),
+          }),
         })
       }
       if (state?.status === "error") {
