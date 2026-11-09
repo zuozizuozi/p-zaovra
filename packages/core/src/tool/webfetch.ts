@@ -3,7 +3,7 @@ export * as WebFetchTool from "./webfetch"
 import { ToolFailure } from "@zaovra-ai/llm"
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { Duration, Effect, Layer, Schema } from "effect"
+import { Clock, Duration, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
 import TurndownService from "turndown"
@@ -165,16 +165,28 @@ function ipv6Words(address: string) {
   return words
 }
 
-const execute = (http: HttpClient.HttpClient, url: URL, format: Format, userAgent = browserUserAgent) => {
+const execute = (
+  http: HttpClient.HttpClient,
+  url: URL,
+  format: Format,
+  authorize: (url: URL) => Effect.Effect<void, unknown>,
+  timed: ReturnType<typeof networkBudget>,
+  userAgent = browserUserAgent,
+) => {
   const loop = (current: URL, redirects: number): Effect.Effect<HttpClientResponse.HttpClientResponse, unknown> =>
-    Effect.tryPromise({
-      try: () => validateNetworkTarget(current),
-      catch: (error) => error,
-    }).pipe(
+    timed(
+      Effect.tryPromise({
+        try: () => validateNetworkTarget(current),
+        catch: (error) => error,
+      }),
+    ).pipe(
+      Effect.andThen(authorize(current)),
       Effect.andThen(
-        http
-          .execute(request(current.href, format, userAgent))
-          .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
+        timed(
+          http
+            .execute(request(current.href, format, userAgent))
+            .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
+        ),
       ),
       Effect.flatMap((response) => {
         if (response.status < 300 || response.status >= 400 || !response.headers.location) {
@@ -182,12 +194,37 @@ const execute = (http: HttpClient.HttpClient, url: URL, format: Format, userAgen
         }
         if (redirects >= MAX_REDIRECTS) return Effect.fail(new Error(`Too many redirects (maximum ${MAX_REDIRECTS})`))
         return Effect.try({
-          try: () => new URL(response.headers.location!, current),
+          try: () => {
+            const next = new URL(response.headers.location!, current)
+            next.hash = ""
+            return next
+          },
           catch: (error) => error,
         }).pipe(Effect.flatMap((next) => loop(next, redirects + 1)))
       }),
     )
   return loop(url, 0)
+}
+
+// Share the transport/body budget across redirects and challenge retries; waiting for permission consumes none.
+function networkBudget(seconds: number) {
+  const budget = { remaining: seconds * 1000 }
+  return <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const started = yield* Clock.currentTimeMillis
+      return yield* effect.pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.millis(budget.remaining),
+          orElse: () => Effect.fail(new Error("Request timed out")),
+        }),
+        Effect.ensuring(
+          Effect.gen(function* () {
+            const ended = yield* Clock.currentTimeMillis
+            budget.remaining = Math.max(0, budget.remaining - (ended - started))
+          }),
+        ),
+      )
+    })
 }
 
 const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
@@ -231,29 +268,32 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [{ type: "text", text: output.output }],
           execute: (input, context) =>
             Effect.try({
-              try: () => new URL(input.url),
+              try: () => {
+                const url = new URL(input.url)
+                url.hash = ""
+                return url
+              },
               catch: () => new ToolFailure({ message: "Invalid URL" }),
             }).pipe(
               Effect.flatMap((url) =>
                 Effect.gen(function* () {
-                  yield* Effect.tryPromise({
-                    try: () => validateNetworkTarget(url),
-                    catch: (error) => error,
-                  })
-
-                  yield* permission.assert({
-                    action: name,
-                    resources: [url.href],
-                    save: ["*"],
-                    metadata: input,
-                    sessionID: context.sessionID,
-                    agent: context.agent,
-                    source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-                  })
+                  const authorize = (target: URL) =>
+                    permission.assert({
+                      action: name,
+                      resources: [target.href],
+                      save: ["*"],
+                      metadata: input,
+                      sessionID: context.sessionID,
+                      agent: context.agent,
+                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                    })
+                  const timed = networkBudget(input.timeout ?? DEFAULT_TIMEOUT_SECONDS)
 
                   const { body, contentType } = yield* Effect.gen(function* () {
-                    const response = yield* execute(http, url, input.format).pipe(
-                      Effect.catchIf(isCloudflareChallenge, () => execute(http, url, input.format, "zaovra")),
+                    const response = yield* execute(http, url, input.format, authorize, timed).pipe(
+                      Effect.catchIf(isCloudflareChallenge, () =>
+                        execute(http, url, input.format, authorize, timed, "zaovra"),
+                      ),
                     )
                     const contentType = response.headers["content-type"] || ""
                     const mime = mimeFrom(contentType)
@@ -261,13 +301,8 @@ const layer = Layer.effectDiscard(
                       return yield* Effect.fail(new Error(`Unsupported fetched image content type: ${mime}`))
                     if (!isTextualMime(mime))
                       return yield* Effect.fail(new Error(`Unsupported fetched file content type: ${mime}`))
-                    return { body: yield* collectBody(response), contentType }
-                  }).pipe(
-                    Effect.timeoutOrElse({
-                      duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
-                      orElse: () => Effect.fail(new Error("Request timed out")),
-                    }),
-                  )
+                    return { body: yield* timed(collectBody(response)), contentType }
+                  })
                   const content = new TextDecoder().decode(body)
                   const output = yield* Effect.try({
                     try: () => convert(content, contentType, input.format),

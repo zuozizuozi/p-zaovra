@@ -29,6 +29,7 @@ const variants = [
   "https://1.1.1.1:443/secret",
   "https://1.1.1.1/public/../secret",
   "https://1.1.1.1:443/public/../secret",
+  "https://1.1.1.1/secret#section",
 ]
 
 for (const url of variants) {
@@ -124,6 +125,53 @@ for (const reply of ["once", "always"] as const) {
   )
 }
 
+for (const target of ["https://8.8.8.8/secret", "https://1.1.1.1/secret#section"]) {
+  test("751 redirect target denial precedes its transport: " + target, () =>
+    withWebFetch(
+      [
+        { action: "webfetch", resource: "*", effect: "allow" },
+        { action: "webfetch", resource: target.split("#")[0], effect: "deny" },
+      ],
+      (sessionID, requests) =>
+        Effect.gen(function* () {
+          const registry = yield* ToolRegistry.Service
+          const result = yield* settleTool(registry, call(sessionID, "https://1.1.1.1/public"))
+          expect(result.result.type).toBe("error")
+          expect(requests).toEqual(["https://1.1.1.1/public"])
+        }),
+      (url) =>
+        url.endsWith("/public")
+          ? new Response("", { status: 302, headers: { location: target } })
+          : new Response("must not fetch"),
+    ),
+  )
+}
+
+test(
+  "751 redirect asks for the normalized next URL before fetching it",
+  () =>
+    withWebFetch(
+      [{ action: "webfetch", resource: "https://1.1.1.1/public", effect: "allow" }],
+      (sessionID, requests) =>
+        Effect.gen(function* () {
+          const registry = yield* ToolRegistry.Service
+          const permissions = yield* PermissionV2.Service
+          const fiber = yield* Effect.forkChild(settleTool(registry, call(sessionID, "https://1.1.1.1/public")))
+          const pending = yield* pendingRequest(permissions, sessionID)
+          expect(pending.resources).toEqual(["https://8.8.8.8/secret"])
+          expect(requests).toEqual(["https://1.1.1.1/public"])
+          yield* permissions.reply({ requestID: pending.id, reply: "once" })
+          expect((yield* Fiber.join(fiber)).result.type).not.toBe("error")
+          expect(requests).toEqual(["https://1.1.1.1/public", "https://8.8.8.8/secret"])
+        }),
+      (url) =>
+        url.endsWith("/public")
+          ? new Response("", { status: 302, headers: { location: "https://8.8.8.8/secret#section" } })
+          : new Response("allowed after reply"),
+    ),
+  10000,
+)
+
 for (const action of ["*", "webfetch"])
   test(
     `149 whole-tool deny is preserved: ${action}`,
@@ -187,6 +235,8 @@ async function withWebFetch(
     unknown,
     AgentV2.Service | PermissionV2.Service | PermissionSaved.Service | ToolRegistry.Service | Scope.Scope
   >,
+  respond: (url: string) => Response = () =>
+    new Response("local transport", { headers: { "content-type": "text/plain" } }),
 ) {
   await using tmp = await tmpdir()
   const requests: string[] = []
@@ -239,10 +289,7 @@ async function withWebFetch(
                 HttpClient.make((request) =>
                   Effect.sync(() => {
                     requests.push(request.url)
-                    return HttpClientResponse.fromWeb(
-                      request,
-                      new Response("local transport", { headers: { "content-type": "text/plain" } }),
-                    )
+                    return HttpClientResponse.fromWeb(request, respond(request.url))
                   }),
                 ),
               ),

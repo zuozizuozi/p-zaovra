@@ -16,6 +16,7 @@ import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/to
 const sessionID = SessionV2.ID.make("ses_webfetch_test")
 const requests: Array<{ readonly url: string; readonly headers: Record<string, string> }> = []
 const assertions: PermissionV2.AssertInput[] = []
+let permissionDelay = 0
 let respond = (_request: HttpClientRequest.HttpClientRequest) =>
   Effect.succeed(new Response("hello", { headers: { "content-type": "text/plain" } }))
 
@@ -31,7 +32,7 @@ const http = Layer.succeed(
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
-    assert: (input) => Effect.sync(() => assertions.push(input)),
+    assert: (input) => Effect.sleep(permissionDelay).pipe(Effect.andThen(Effect.sync(() => assertions.push(input)))),
     ask: () => Effect.die("unused"),
     reply: () => Effect.die("unused"),
     get: () => Effect.die("unused"),
@@ -50,6 +51,7 @@ const it = testEffect(toolLayer([[LayerNodePlatform.httpClient, http]]))
 const reset = () => {
   requests.length = 0
   assertions.length = 0
+  permissionDelay = 0
   respond = () => Effect.succeed(new Response("hello", { headers: { "content-type": "text/plain" } }))
 }
 
@@ -159,6 +161,7 @@ describe("WebFetchTool registration", () => {
       })
       expect(assertions).toMatchObject([
         { sessionID, action: "webfetch", resources: [url], save: ["*"], metadata: { url, format: "text" } },
+        { sessionID, action: "webfetch", resources: ["https://8.8.8.8/target"], metadata: { url, format: "text" } },
       ])
       expect(requests.map((request) => request.url)).toEqual([url, "https://8.8.8.8/target"])
     }),
@@ -298,6 +301,41 @@ describe("WebFetchTool registration", () => {
       expect(requests).toHaveLength(2)
       expect(requests[0]?.headers["user-agent"]).toContain("Mozilla/5.0")
       expect(requests[1]?.headers["user-agent"]).toBe("zaovra")
+    }),
+  )
+
+  it.effect("751 permission wait does not consume the network timeout", () =>
+    Effect.gen(function* () {
+      reset()
+      permissionDelay = 2000
+      const registry = yield* ToolRegistry.Service
+      const fiber = yield* executeTool(registry, call({ url: "https://1.1.1.1/ask", format: "text", timeout: 1 })).pipe(
+        Effect.forkChild,
+      )
+      yield* TestClock.adjust(Duration.seconds(2))
+      expect(yield* Fiber.join(fiber)).toEqual({ type: "text", value: "hello" })
+    }),
+  )
+
+  it.effect("751 redirects share one cumulative network timeout", () =>
+    Effect.gen(function* () {
+      reset()
+      respond = (request) =>
+        Effect.sleep(600).pipe(
+          Effect.as(
+            request.url.endsWith("/first")
+              ? new Response("", { status: 302, headers: { location: "https://8.8.8.8/second" } })
+              : new Response("too late"),
+          ),
+        )
+      const registry = yield* ToolRegistry.Service
+      const fiber = yield* executeTool(
+        registry,
+        call({ url: "https://1.1.1.1/first", format: "text", timeout: 1 }),
+      ).pipe(Effect.forkChild)
+      yield* TestClock.adjust(Duration.seconds(2))
+      expect((yield* Fiber.join(fiber)).type).toBe("error")
+      expect(requests).toHaveLength(2)
     }),
   )
 
