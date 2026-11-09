@@ -202,7 +202,7 @@ export function CustomizationPage(props: {
               if (element.isConnected) element.focus({ preventScroll: true })
             })
           }
-          class="text-base font-medium outline-none"
+          class="text-base font-medium text-v2-text-text-base outline-none"
         >
           {text().title}
         </h1>
