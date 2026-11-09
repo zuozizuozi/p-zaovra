@@ -26,6 +26,14 @@ export function providerFailure(input: {
   const code = [input.code, input.type].filter(Boolean).join(" ").toLowerCase()
   const common = { message: input.message, http: input.http }
   const detail = code || input.message
+  if (
+    (input.status === undefined || input.status === 400 || input.status === 422) &&
+    code.split(/\s+/).includes("invalid_encrypted_content")
+  )
+    return new InvalidRequestReason({
+      ...common,
+      providerMetadata: { compatibility: { code: "invalid_encrypted_content" } },
+    })
   if (input.quota || isQuotaExceeded(code + " " + input.message)) return new QuotaExceededReason(common)
   if (/content_filter|content[-_\s]?policy|safety|permission_denied/i.test(detail))
     return /permission_denied/.test(code)

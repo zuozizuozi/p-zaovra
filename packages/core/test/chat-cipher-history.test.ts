@@ -21,7 +21,7 @@ import { SessionProjector } from "@zaovra-ai/core/session/projector"
 import { SessionStore } from "@zaovra-ai/core/session/store"
 import { createLLMEventPublisher } from "@zaovra-ai/core/session/runner/publish-llm-event"
 import { toLLMMessages } from "@zaovra-ai/core/session/runner/to-llm-message"
-import { fixedResponse } from "../../llm/test/lib/http"
+import { dynamicResponse, fixedResponse } from "../../llm/test/lib/http"
 import { sseEvents } from "../../llm/test/lib/sse"
 import { testEffect } from "./lib/effect"
 
@@ -141,6 +141,41 @@ for (const fixture of [
       const reasoning = assistant.content.find((part) => part.type === "reasoning")!
       expect(DateTime.toEpochMillis(reasoning.time!.completed!)).toBe(DateTime.toEpochMillis(firstEnd!))
       if (fixture.name === "ciphertext before text") expect(ends).toBe(1)
+      if (fixture.encrypted === undefined) return
+      let attempts = 0
+      const response = yield* LLMClient.generate(LLM.request({ model, messages: toLLMMessages(history, model) })).pipe(
+        Effect.provide(
+          dynamicResponse(({ text, respond }) =>
+            Effect.sync(() => {
+              const body = JSON.parse(text)
+              attempts++
+              const assistant = body.messages.find((message: { role: string }) => message.role === "assistant")
+              if (attempts === 1) {
+                expect(assistant.encrypted_content).toBe(fixture.encrypted)
+                return respond(
+                  JSON.stringify({ error: { code: "invalid_encrypted_content", message: "local rejection" } }),
+                  { status: 400 },
+                )
+              }
+              expect(assistant).not.toHaveProperty("encrypted_content")
+              expect(assistant.reasoning_content).toBe("summary")
+              return respond(
+                sseEvents(
+                  { choices: [{ delta: { content: "recovered" } }] },
+                  { choices: [{ delta: {}, finish_reason: "stop" }] },
+                ),
+                { headers: { "content-type": "text/event-stream" } },
+              )
+            }),
+          ),
+        ),
+      )
+      expect(attempts).toBe(2)
+      expect(response.message.content).toContainEqual(expect.objectContaining({ type: "text", text: "recovered" }))
+      const after = yield* store.runnerContext(created.id, 0)
+      expect(
+        (yield* LLMClient.prepare<OpenAIChatBody>(LLM.request({ model, messages: toLLMMessages(after, model) }))).body,
+      ).toEqual(prepared.body)
     }),
   )
 }
