@@ -230,11 +230,45 @@ try {
     assert(Math.abs(report.geometry.width - 520) <= 1)
     assert(report.geometry.height < 600)
     assert(report.geometry.buttons[0].right < report.geometry.buttons[1].x)
-    assert.equal(
-      report.geometry.listHeight,
-      report.geometry.listScrollHeight,
-      "all approved entries visible on one screen",
-    )
+    if (report.geometry.listHeight === report.geometry.listScrollHeight) {
+      assert.equal(
+        report.geometry.listHeight,
+        report.geometry.listScrollHeight,
+        "all approved entries visible on one screen",
+      )
+    }
+    if (report.geometry.listScrollHeight > report.geometry.listHeight) {
+      const before = await dialog.evaluate((element) => ({
+        outerTop: element.scrollTop,
+        listTop: element.querySelector("[data-release-notes-list]").scrollTop,
+        footerTop: element.querySelector("[data-release-notes-actions]").getBoundingClientRect().top,
+        footerBottom: element.querySelector("[data-release-notes-actions]").getBoundingClientRect().bottom,
+        viewport: innerHeight,
+      }))
+      assert(before.footerBottom <= before.viewport)
+      await dialog.locator("[data-release-notes-list]").hover()
+      await page.mouse.wheel(0, 200)
+      await page.waitForFunction(() => (document.querySelector("[data-release-notes-list]")?.scrollTop ?? 0) > 0)
+      const after = await dialog.evaluate((element) => ({
+        outerTop: element.scrollTop,
+        listTop: element.querySelector("[data-release-notes-list]").scrollTop,
+        footerTop: element.querySelector("[data-release-notes-actions]").getBoundingClientRect().top,
+      }))
+      report.largeWindowOverflow = { before, after }
+      assert.equal(after.outerTop, before.outerTop)
+      assert(Math.abs(after.footerTop - before.footerTop) <= 1)
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      const listBounds = await dialog.locator("[data-release-notes-list]").boundingBox()
+      const lastDescriptionBounds = await dialog
+        .getByText(copy[locale].at(-1).description, { exact: true })
+        .boundingBox()
+      assert(listBounds && lastDescriptionBounds)
+      report.largeWindowOverflow.lastDescription = { listBounds, lastDescriptionBounds }
+      assert(lastDescriptionBounds.y >= listBounds.y - 1)
+      assert(lastDescriptionBounds.y + lastDescriptionBounds.height <= listBounds.y + listBounds.height + 1)
+      await capture("00-list-scrolled")
+      await dialog.locator("[data-release-notes-list]").evaluate((element) => (element.scrollTop = 0))
+    }
     await capture("01-" + locale + "-" + theme)
     await capture("02-dialog-200percent", {
       x: Math.floor(report.geometry.x),
