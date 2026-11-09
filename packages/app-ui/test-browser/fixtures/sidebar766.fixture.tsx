@@ -20,10 +20,10 @@ const [tabs, setTabs] = createStore<
   Array<{ type: "session" | "draft"; server: string; sessionId?: string; directory?: string; draftID?: string }>
 >([])
 const language = { t: (key: string) => (dict as Record<string, string>)[key] ?? key }
-const projects = [
+const [projects, setProjects] = createStore([
   { worktree: "F:/one", name: "One" },
   { worktree: "F:/two", name: "Two" },
-]
+])
 const key = (tab: { server: string; sessionId?: string }) => `${tab.server}:${tab.sessionId}`
 const ctx = {
   projects: { list: () => projects },
@@ -35,7 +35,11 @@ const ctx = {
     child: (directory: string) => [
       { session: state.sessions.filter((s) => s.directory === directory), sessionTotal: 2, limit: 20 },
     ],
-    project: { loadSessions: async () => {} },
+    project: {
+      loadSessions: async () => {},
+      meta: (directory: string, value: { name: string }) =>
+        setProjects((project) => project.worktree === directory, "name", value.name),
+    },
   },
 }
 mock.module("@solidjs/router", () => ({ useNavigate: () => () => setState("navigations", (n) => n + 1) }))
@@ -104,6 +108,8 @@ afterEach(() => {
   disposals.splice(0).forEach((dispose) => dispose())
   document.body.replaceChildren()
   setTabs([])
+  setProjects(0, "name", "One")
+  setProjects(1, "name", "Two")
   setState({
     selection: { server: "local", directory: "F:/one" },
     route: { type: "home", sessionId: "" },
@@ -157,6 +163,57 @@ if (process.env.ZAOVRA_SIDEBAR_BENCH === "1") {
     )
   })
 } else {
+  test("775 integrated inline rename keeps its glyph, blocks reorder while editing and saves without a draft", async () => {
+    const value = mount()
+    disposals.push(value.dispose)
+    await settle()
+    const section = value.host.querySelector<HTMLElement>('[data-slot="sidebar-project"]')!
+    const row = section.querySelector<HTMLElement>('[data-reorder-id="local:F:/one"]')!
+    const heading = section.querySelector<HTMLElement>('[data-slot="project-heading"]')!
+    const glyph = heading.querySelector("button > span")!
+    const name = heading.querySelector<HTMLElement>('[data-slot="project-name"]')!
+    const open = async () => {
+      heading.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))
+      await settle()
+      const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (item) => item.textContent?.trim() === "Rename",
+      )!
+      expect(rename).toBeDefined()
+      rename.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerType: "mouse" }))
+      await settle()
+      return heading.querySelector<HTMLInputElement>('[data-action="project-rename"]')!
+    }
+    const cancelled = await open()
+    expect(cancelled).toBeDefined()
+    expect(cancelled.value).toBe("One")
+    expect(document.activeElement).toBe(cancelled)
+    expect([cancelled.selectionStart, cancelled.selectionEnd]).toEqual([0, 3])
+    expect(heading.querySelector("button > span")).toBe(glyph)
+    expect(name.classList.contains("invisible")).toBe(true)
+    expect(cancelled.classList.contains("absolute")).toBe(true)
+    expect(row.getAttribute("draggable")).toBe("false")
+    expect(row.tabIndex).toBe(-1)
+    cancelled.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true }))
+    expect(state.projectOrder).toEqual([])
+    cancelled.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
+    await settle()
+    expect(heading.querySelector("input")).toBeNull()
+    expect(name.textContent).toBe("One")
+    expect(row.getAttribute("draggable")).toBe("true")
+    const input = await open()
+    input.value = "Combined project"
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    await settle()
+    expect(heading.querySelector("input")).toBeNull()
+    expect(name.textContent).toBe("Combined project")
+    expect(heading.querySelector("button > span")).toBe(glyph)
+    expect(state.drafts).toBe(0)
+    expect(state.navigations).toBe(0)
+    row.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true, cancelable: true }))
+    await settle()
+    expect(state.projectOrder).toEqual(["local:F:/two", "local:F:/one"])
+  })
   test("766 project heading toggles and selects without navigation or draft", async () => {
     const value = mount()
     disposals.push(value.dispose)
