@@ -1,54 +1,54 @@
 {
   "zh": [
     {
-      "title": "输入框上方更干净",
-      "description": "状态文字都去掉了，只保留需要你当场处理的卡片"
+      "title": "并行命令显示更稳",
+      "description": "多条命令同时运行时，完成的那一刻不再跳动错位"
     },
     {
-      "title": "停止后可以接着做",
-      "description": "停止或预算用完后，发一句“继续”就能接上；预算触顶可直接提高"
+      "title": "回复结束后贴底更准",
+      "description": "输出结束时停在最底部"
     },
     {
-      "title": "侧栏状态更准确",
-      "description": "进行中只显示转圈，后台完成的待看状态重启后也能恢复"
+      "title": "后台完成状态更可靠",
+      "description": "网络波动或页面重建后，待看状态不丢"
     },
     {
-      "title": "拉伸窗口不再上下跳",
-      "description": "输出时调整窗口大小，内容保持稳定"
+      "title": "网页抓取权限更严格",
+      "description": "每次跳转都会按你的权限规则核对"
     },
     {
-      "title": "更新说明一屏看完",
-      "description": "不用再一页页点“下一步”"
+      "title": "MCP 与授权更稳",
+      "description": "MCP 返回格式异常时保留结果；无关的回调不再打断授权"
     },
     {
-      "title": "错误信息完整显示",
-      "description": "错误卡的摘要不再被裁切"
+      "title": "上下文压缩更耐网络波动",
+      "description": "压缩时遇到临时故障会自动重试"
     }
   ],
   "en": [
     {
-      "title": "A cleaner composer",
-      "description": "Status text is gone from above the input. Only cards that need your action stay"
+      "title": "Steadier parallel commands",
+      "description": "Rows no longer jump when commands running side by side finish"
     },
     {
-      "title": "Continue after stopping",
-      "description": "After a stop or a budget limit, send “continue” to pick up where you left off. You can raise the budget right there"
+      "title": "Stays at the bottom",
+      "description": "The view rests at the very end when a reply finishes"
     },
     {
-      "title": "More accurate sidebar",
-      "description": "Running sessions just show a spinner, and finished background sessions stay marked after a restart"
+      "title": "More reliable background status",
+      "description": "Ready-to-review markers survive network hiccups and page rebuilds"
     },
     {
-      "title": "Steadier window resizing",
-      "description": "Content stays put when you resize the window during a reply"
+      "title": "Stricter web fetch permissions",
+      "description": "Every redirect is checked against your permission rules"
     },
     {
-      "title": "Release notes on one screen",
-      "description": "No more clicking Next through each page"
+      "title": "Sturdier MCP and sign-in",
+      "description": "Malformed MCP output is kept with a diagnostic, and unrelated callbacks no longer interrupt sign-in"
     },
     {
-      "title": "Full error details",
-      "description": "Error card summaries are no longer cut off"
+      "title": "Compaction handles network blips",
+      "description": "Temporary failures during compaction now retry automatically"
     }
   ]
 }
