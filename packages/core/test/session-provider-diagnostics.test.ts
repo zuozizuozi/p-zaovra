@@ -135,6 +135,7 @@ testEffect(Layer.empty).effect("776 generic HTTP 400 has a summary but never inv
     )
     expect(ProviderDiagnostics.metadata(error)).toEqual({
       providerMessage: expect.stringContaining("generic rejection"),
+      providerMessageSource: "structured",
     })
   }),
 )

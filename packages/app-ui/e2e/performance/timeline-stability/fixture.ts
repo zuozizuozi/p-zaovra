@@ -185,13 +185,15 @@ export async function setupTimeline(
         if (status.type !== "idle") activeSessions[sessionID] = { type: "running" }
       }
       if (input.v2ToolUpdates && valid.payload.type === "message.updated") {
-        const index = messages.findIndex((message) => message.info.id === valid.payload.properties.info.id)
+        const info = valid.payload.properties.info
+        const index = messages.findIndex((message) => message.info.id === info.id)
         if (index < 0) throw new Error("Missing fixture message")
-        messages[index] = { ...messages[index]!, info: valid.payload.properties.info } as TimelineMessage
+        messages[index] = { ...messages[index]!, info } as TimelineMessage
       }
       if (input.v2ToolUpdates && valid.payload.type === "message.part.updated") {
         const part = valid.payload.properties.part
-        if (part.type === "tool" && part.state.status !== "running" && part.state.status !== "completed")
+        const toolState = part.type === "tool" ? part.state : undefined
+        if (toolState && toolState.status !== "running" && toolState.status !== "completed")
           throw new Error("V2 scroll fixtures expect running or completed tools")
         const index = messages.findIndex((message) => message.info.id === part.messageID)
         if (index < 0) throw new Error("Missing fixture message")
@@ -204,7 +206,7 @@ export async function setupTimeline(
         } as TimelineMessage
         decodeMessage(updated, decodeOptions)
         messages[index] = updated
-        if (part.type !== "tool") {
+        if (!toolState) {
           const acknowledgement = await transport.send(valid, { marker: describeEvent(valid) })
           await recordTimelineDelivery(valid, acknowledgement)
           if (delay) await page.waitForTimeout(delay)
@@ -217,15 +219,15 @@ export async function setupTimeline(
             directory,
             payload: {
               id: valid.payload.id,
-              type: part.state.status === "completed" ? "session.next.tool.success" : "session.next.tool.progress",
+              type: toolState.status === "completed" ? "session.next.tool.success" : "session.next.tool.progress",
               properties: {
                 timestamp: 1700000002000,
                 sessionID,
                 assistantMessageID: part.messageID,
                 callID: part.id,
-                structured: part.state.metadata,
-                content: part.state.status === "completed" ? [{ type: "text", text: part.state.output }] : [],
-                ...(part.state.status === "completed" ? { provider: { executed: false } } : {}),
+                structured: toolState.metadata,
+                content: toolState.status === "completed" ? [{ type: "text", text: toolState.output }] : [],
+                ...(toolState.status === "completed" ? { provider: { executed: false } } : {}),
               },
             },
           })}\n\n`,
@@ -515,7 +517,7 @@ export function toolPart(
   state: "completed",
   input: Record<string, unknown>,
   options?: ToolOptions<"completed">,
-): Omit<ToolPart, "sessionID" | "messageID">
+): Omit<ToolPart, "sessionID" | "messageID"> & { state: Extract<ToolState, { status: "completed" }> }
 export function toolPart(
   id: string,
   tool: string,

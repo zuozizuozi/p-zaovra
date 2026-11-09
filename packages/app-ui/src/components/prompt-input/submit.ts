@@ -254,6 +254,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       sessionID: input.draft.sessionID,
       message: optimistic.message,
       parts: optimistic.parts,
+      delivery: input.delivery ?? "steer",
     })
 
   const remove = () =>

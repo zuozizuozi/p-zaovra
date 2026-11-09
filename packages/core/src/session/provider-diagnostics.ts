@@ -3,7 +3,7 @@ export * as ProviderDiagnostics from "./provider-diagnostics"
 import { LLMError, type ProviderErrorEvent } from "@zaovra-ai/llm"
 import { Feedback } from "@zaovra-ai/schema/feedback"
 
-/** Project the provider's diagnostic, never the request, response body, headers or stack. */
+/** Only proven structured summaries enter default diagnostics; HTTP bodies remain opt-in. */
 export function metadata(error: LLMError | ProviderErrorEvent): Record<string, string> {
   const reason = error.reason
   const http = reason && "http" in reason ? reason.http : undefined
@@ -13,6 +13,7 @@ export function metadata(error: LLMError | ProviderErrorEvent): Record<string, s
     ...Feedback.providerDiagnostic({
       code: error instanceof LLMError ? diagnostic?.code : (error.code ?? diagnostic?.code),
       message: reason?.message ?? error.message,
+      source: diagnostic?.messageSource ?? (!(error instanceof LLMError) && !reason ? "structured" : undefined),
     }),
     ...(http?.requestId ? { requestID: Feedback.redact(http.requestId).slice(0, 128) } : {}),
   }

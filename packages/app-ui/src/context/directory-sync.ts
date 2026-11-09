@@ -85,7 +85,13 @@ export const createDirSyncContext = (
         if (session?.directory === directory) return session
       },
       optimistic: {
-        add(input: { directory?: string; sessionID: string; message: Message; parts: Part[] }) {
+        add(input: {
+          directory?: string
+          sessionID: string
+          message: Message
+          parts: Part[]
+          delivery?: "steer" | "queue"
+        }) {
           serverSync.session.optimistic.add(input)
         },
         remove(input: { directory?: string; sessionID: string; messageID: string }) {

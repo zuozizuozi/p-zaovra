@@ -1222,10 +1222,23 @@ export function UserMessageDisplay(props: {
                   <div
                     data-slot="user-message-attachment"
                     data-type={type}
-                    data-clickable={type === "image" ? "true" : undefined}
+                    data-clickable={type === "image" || props.actions?.openAttachment ? "true" : undefined}
+                    role={type === "file" && props.actions?.openAttachment ? "button" : undefined}
+                    tabIndex={type === "file" && props.actions?.openAttachment ? 0 : undefined}
                     title={type === "file" ? name : undefined}
                     onClick={() => {
                       if (type === "image") openImagePreview(file.url, name)
+                      if (type === "file") props.actions?.openAttachment?.(file)
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        type !== "file" ||
+                        !props.actions?.openAttachment ||
+                        (event.key !== "Enter" && event.key !== " ")
+                      )
+                        return
+                      event.preventDefault()
+                      props.actions.openAttachment(file)
                     }}
                   >
                     <Show

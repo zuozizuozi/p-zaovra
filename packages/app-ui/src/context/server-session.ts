@@ -188,7 +188,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const resyncs = new Map<string, Promise<void>>()
   const questionLoads = new Map<string, Promise<void>>()
   const questionVersions = new Map<string, number>()
-  const admitted = new Map<string, Map<string, boolean>>()
+  const admitted = new Map<string, Map<string, false | "steer" | "queue">>()
   let silentAt = 0
   const eventAt = new Map<string, number>()
   const eventVersion = new Map<string, object>()
@@ -232,17 +232,21 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         const result = await client.v2.session.active({ throwOnError: true })
         if (generations.get(sessionID) !== active) return
         if (!result.data.data[sessionID]) {
-          setData("session_status", sessionID, { type: "idle" })
-          setData("streaming_text", sessionID, undefined)
+          const version = eventVersion.get(sessionID)
           // A final SSE event may be missed while a new task mounts or reconnects.
           // Reconcile persisted history after any older in-flight snapshot settles.
           await inflight.get(sessionID)?.catch(() => {})
           if (generations.get(sessionID) !== active) return
           await sync(sessionID, { force: true })
-          // Buffered SSE may start a later step while the final snapshot loads.
-          // Its watch joins this promise, so it must get another ownership check.
-          if (!data.session_working(sessionID)) return
-          continue
+          if (generations.get(sessionID) !== active) return
+          // A new provider event wins over this older ownership check.
+          if (eventVersion.get(sessionID) !== version && data.session_working(sessionID)) continue
+          // Admission and process ownership are separate. A wake may not have acquired
+          // the coordinator yet; keep waiting presentation without spinning wait/active.
+          if ([...(admitted.get(sessionID)?.values() ?? [])].some(Boolean)) return
+          setData("session_status", sessionID, { type: "idle" })
+          setData("streaming_text", sessionID, undefined)
+          return
         }
         if (failure) throw failure
       }
@@ -555,13 +559,19 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     const pending = (options?.retry ?? retry)(() => client.v2.session.pendingInputs({ sessionID })).then((response) => {
       if (!response.data) throw new Error(`Unable to load pending inputs: ${sessionID}`)
       if (generations.get(sessionID) === active) {
-        const current = admitted.get(sessionID) ?? new Map<string, boolean>()
+        const current = admitted.get(sessionID) ?? new Map<string, false | "steer" | "queue">()
         // A later promotion wins over an older pending-input snapshot.
         response.data.data.forEach((input) => {
-          if (current.get(input.id) !== false) current.set(input.id, true)
+          if (current.get(input.id) !== false) current.set(input.id, input.delivery)
         })
         admitted.set(sessionID, current)
-        if (eventVersion.get(sessionID) === version) setData("pending_input", sessionID, response.data.data)
+        if (eventVersion.get(sessionID) === version) {
+          const pendingIDs = new Set(response.data.data.map((input) => input.id))
+          current.forEach((pending, id) => {
+            if (pending && !pendingIDs.has(id) && !optimistic.get(sessionID)?.has(id)) current.delete(id)
+          })
+          setData("pending_input", sessionID, response.data.data)
+        }
       }
       return response.data.data
     })
@@ -599,7 +609,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         .filter(
           (message) =>
             message.role === "user" &&
-            admitted.get(sessionID)?.get(message.id) !== true &&
+            !admitted.get(sessionID)?.get(message.id) &&
             (message.time.created < oldest.time.created ||
               (message.time.created === oldest.time.created && message.id <= oldest.id)),
         )
@@ -795,7 +805,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       // The end event can be lost without a reconnect, so a completed owner is the remaining proof the text ended.
       if (textDeltas.get(sessionID) === deltas) {
         const marker = data.streaming_text[sessionID]
-        const owner = data.message[sessionID]?.find((message) => data.part[message.id]?.some((part) => part.id === marker))
+        const owner = data.message[sessionID]?.find((message) =>
+          data.part[message.id]?.some((part) => part.id === marker),
+        )
         if (owner?.role === "assistant" && (owner.time.completed !== undefined || owner.error))
           setData("streaming_text", sessionID, undefined)
       }
@@ -938,13 +950,13 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         }
       }
       if (event.type === "session.next.prompt.admitted") {
-        const pending = admitted.get(props.sessionID) ?? new Map<string, boolean>()
-        pending.set(props.messageID, true)
+        const pending = admitted.get(props.sessionID) ?? new Map<string, false | "steer" | "queue">()
+        pending.set(props.messageID, props.delivery ?? "steer")
         admitted.set(props.sessionID, pending)
         refreshV2(props.sessionID)
       }
       if (event.type === "session.next.prompted") {
-        const current = admitted.get(props.sessionID) ?? new Map<string, boolean>()
+        const current = admitted.get(props.sessionID) ?? new Map<string, false | "steer" | "queue">()
         current.set(props.messageID, false)
         admitted.set(props.sessionID, current)
         setData("pending_input", props.sessionID, (items = []) => items.filter((item) => item.id !== props.messageID))
@@ -1059,7 +1071,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       void watchExecution(props.sessionID).catch(() => {})
       const session = data.info[props.sessionID]
       const parentID = data.message[props.sessionID]?.findLast(
-        (message) => message.role === "user" && admitted.get(props.sessionID)?.get(message.id) !== true,
+        (message) => message.role === "user" && !admitted.get(props.sessionID)?.get(message.id),
       )?.id
       if (!session || !parentID) return refreshV2(props.sessionID)
       apply({
@@ -1630,9 +1642,6 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       ])
       if (generations.get(sessionID) !== active) return
       if (eventVersion.get(sessionID) === version) {
-        if (ownership)
-          setData("session_status", sessionID, ownership.data.data[sessionID] ? { type: "busy" } : { type: "idle" })
-        if (ownership && !ownership.data.data[sessionID]) setData("streaming_text", sessionID, undefined)
         if (permissions)
           setData(
             "permission",
@@ -1646,6 +1655,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       await inflight.get(sessionID)?.catch(() => {})
       if (generations.get(sessionID) !== active) return
       await sync(sessionID, { force: true })
+      if (generations.get(sessionID) !== active || eventVersion.get(sessionID) !== version || !ownership) return
+      if (!ownership.data.data[sessionID] && [...(admitted.get(sessionID)?.values() ?? [])].some(Boolean)) return
+      setData("session_status", sessionID, ownership.data.data[sessionID] ? { type: "busy" } : { type: "idle" })
+      if (!ownership.data.data[sessionID]) setData("streaming_text", sessionID, undefined)
     })
 
   return {
@@ -1712,6 +1725,17 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     },
     sync,
     watchExecution,
+    pendingDelivery(sessionID: string, messageID: string) {
+      const inputs = data.pending_input[sessionID] ?? []
+      const parts = data.part[messageID] ?? []
+      const known = admitted.get(sessionID)?.get(messageID)
+      if (known === false) return
+      if (known) return known
+      const delivery = inputs.find((input) => input.id === messageID)?.delivery
+      if (delivery) return delivery
+      const value = parts.find((part) => part.type === "text")?.metadata?.zaovraDelivery
+      return value === "steer" || value === "queue" ? value : undefined
+    },
     prefetch,
     shouldPrefetch(sessionID: string, limit: number) {
       if (data.message[sessionID] === undefined) return true
@@ -1723,10 +1747,11 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       return Date.now() - (meta.at[sessionID] ?? 0) <= ttl
     },
     optimistic: {
-      add(input: { sessionID: string; message: Message; parts: Part[] }) {
-        if (input.parts.some((part) => part.type === "text" && part.metadata?.zaovraDelivery)) {
-          const pending = admitted.get(input.sessionID) ?? new Map<string, boolean>()
-          pending.set(input.message.id, true)
+      add(input: { sessionID: string; message: Message; parts: Part[]; delivery?: "steer" | "queue" }) {
+        const delivery = input.delivery ?? input.parts.find((part) => part.type === "text")?.metadata?.zaovraDelivery
+        if (delivery === "steer" || delivery === "queue") {
+          const pending = admitted.get(input.sessionID) ?? new Map<string, false | "steer" | "queue">()
+          if (pending.get(input.message.id) !== false) pending.set(input.message.id, delivery)
           admitted.set(input.sessionID, pending)
         }
         const parts = input.parts.filter((part) => !!part?.id && !SKIP_PARTS.has(part.type))

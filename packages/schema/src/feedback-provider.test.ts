@@ -7,7 +7,15 @@ test("776 explicitly supplied diagnostics survive the frozen report and copied f
     now: 0,
     description: "second turn failed",
     context: {
-      errors: [{ at: 0, status: 400, providerCode: "invalid_encrypted_content", providerMessage: "cipher rejected" }],
+      errors: [
+        {
+          at: 0,
+          status: 400,
+          providerCode: "invalid_encrypted_content",
+          providerMessage: "cipher rejected",
+          providerMessageSource: "structured",
+        },
+      ],
     },
     include: { environment: false, events: false, errors: true },
   })
@@ -26,7 +34,11 @@ for (const sample of redactionSamples)
     const snapshot = Feedback.snapshot({
       now: 0,
       description: "",
-      context: { errors: [{ at: 0, providerCode: "bad_request", providerMessage: sample.text }] },
+      context: {
+        errors: [
+          { at: 0, providerCode: "bad_request", providerMessage: sample.text, providerMessageSource: "structured" },
+        ],
+      },
       include: { environment: false, events: false, errors: true },
     })
     expect(Feedback.copy(snapshot)).not.toContain(sample.marker)
@@ -34,11 +46,21 @@ for (const sample of redactionSamples)
   })
 
 test("776 diagnostics are bounded, single line, and never inferred from legacy arbitrary text", () => {
-  expect(Feedback.providerDiagnostic({ code: "x".repeat(97), message: "a".repeat(600) })).toEqual({
-    providerMessage: "a".repeat(512),
-  })
-  expect(Feedback.providerDiagnostic({ code: "sk-synthetic", message: "first\n\u202esecond\u0000third" })).toEqual({
+  expect(Feedback.providerDiagnostic({ code: "x".repeat(97), message: "a".repeat(600), source: "structured" })).toEqual(
+    {
+      providerMessage: "a".repeat(512),
+      providerMessageSource: "structured",
+    },
+  )
+  expect(
+    Feedback.providerDiagnostic({
+      code: "sk-synthetic",
+      message: "first\n\u202esecond\u0000third",
+      source: "structured",
+    }),
+  ).toEqual({
     providerMessage: "first second third",
+    providerMessageSource: "structured",
   })
   expect(Feedback.providerDiagnostic({ code: "https://synthetic.invalid/secret" })).toEqual({})
   const input = {

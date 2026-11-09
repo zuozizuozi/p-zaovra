@@ -31,6 +31,7 @@ test("776 API diagnostics reach automatic feedback without raw API bodies or hea
             statusCode: 400,
             metadata: {
               providerCode: "invalid_encrypted_content",
+              providerMessageSource: "structured",
               providerMessage: 'cipher rejected; api_key="SYNTHETIC_SECRET_776"',
               requestID: "req_synthetic",
               responseBody: "UNSELECTED_BODY_776",
@@ -69,4 +70,44 @@ test("776 a historical bare 400 remains unknown instead of being relabelled as e
   expect(result.context.errors[0]).toMatchObject({ status: 400, category: "unknown" })
   expect(result.context.errors[0]).not.toHaveProperty("providerCode")
   expect(result.context.errors[0]).not.toHaveProperty("providerMessage")
+})
+
+test("791 stored body or unknown source cannot re-enter default feedback through the UI collector", () => {
+  for (const source of [undefined, "body", "status"]) {
+    const result = sessionFeedback(
+      [
+        {
+          ...assistant,
+          error: {
+            name: "APIError",
+            data: {
+              message: "服务无法处理这次请求。",
+              statusCode: 400,
+              isRetryable: false,
+              metadata: {
+                providerCode: "bad_request",
+                requestID: "req_791",
+                providerMessage: "PRIVATE_STORED_BODY_791",
+                ...(source ? { providerMessageSource: source } : {}),
+              },
+            },
+          },
+        },
+      ],
+      () => [],
+      1,
+    )
+    expect(result.context.errors[0]).toMatchObject({ status: 400, providerCode: "bad_request", requestID: "req_791" })
+    expect(result.context.errors[0]).not.toHaveProperty("providerMessage")
+    expect(
+      Feedback.copy(
+        Feedback.snapshot({
+          now: 1,
+          description: "",
+          context: result.context,
+          include: { environment: false, events: false, errors: true },
+        }),
+      ),
+    ).not.toContain("PRIVATE_STORED_BODY_791")
+  }
 })

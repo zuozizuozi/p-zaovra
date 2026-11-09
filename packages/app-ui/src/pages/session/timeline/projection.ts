@@ -1,9 +1,8 @@
-import { Binary } from "@zaovra-ai/core/util/binary"
 import type { AssistantMessage, Message, Part, SessionStatus, UserMessage } from "@zaovra-ai/sdk/v2"
 import { createMemo, mapArray, type Accessor } from "solid-js"
 import { reuseTimelineRows } from "./row-reconciliation"
 import { Timeline, TimelineRow } from "./rows"
-import { displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
+import { activeTurnMessage, displayTurnOwners, isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
 import { processMessages } from "./process-messages"
 import { quietToolFailures } from "@zaovra-ai/session-ui/tool-recovery"
 import { processToolFailures } from "./tool-process"
@@ -22,6 +21,7 @@ export function createTimelineProjection(input: {
   inlineComments: Accessor<boolean>
   historyComplete?: Accessor<boolean>
   stopped?: (messageID: string) => boolean
+  pending?: (messageID: string) => boolean
 }) {
   const messageByID = createMemo(() => new Map(input.messages().map((message) => [message.id, message] as const)))
   const chronologicalMessages = createMemo(() =>
@@ -77,21 +77,9 @@ export function createTimelineProjection(input: {
     })
     return result
   })
-  const activeMessageID = createMemo(() => {
-    const parentID = chronologicalMessages().findLast(
-      (message): message is AssistantMessage =>
-        message.role === "assistant" && typeof message.time.completed !== "number",
-    )?.parentID
-    if (parentID) {
-      const messages = input.messages()
-      const result = Binary.search(messages, parentID, (message) => message.id)
-      const message = result.found ? messages[result.index] : messages.find((item) => item.id === parentID)
-      if (message?.role === "user") return message.id
-    }
-
-    if (input.status().type === "idle") return
-    return input.userMessages().at(-1)?.id
-  })
+  const activeMessageID = createMemo(() =>
+    activeTurnMessage(input.messages(), input.parts, input.status(), input.pending),
+  )
   const answerMessages = createMemo(() => {
     const result = new Map<string, string>()
     assistantMessagesByTurn().forEach((messages, owner) => {

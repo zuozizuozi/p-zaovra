@@ -17,6 +17,7 @@ export namespace Feedback {
       requestID?: string
       providerCode?: string
       providerMessage?: string
+      providerMessageSource?: string
     }[]
   }
   export type Snapshot = Readonly<{
@@ -46,11 +47,11 @@ export namespace Feedback {
     }
   }
 
-  /** Only explicitly supplied provider diagnostics enter the automatic error snapshot. */
-  export function providerDiagnostic(input: { code?: unknown; message?: unknown }) {
+  /** Summary provenance is required; redaction and length alone cannot authorize raw body inclusion. */
+  export function providerDiagnostic(input: { code?: unknown; message?: unknown; source?: unknown }) {
     const code = typeof input.code === "string" ? input.code.trim() : ""
     const message =
-      typeof input.message === "string"
+      input.source === "structured" && typeof input.message === "string"
         ? redact(input.message)
             .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ")
             .replace(/\s+/g, " ")
@@ -59,7 +60,7 @@ export namespace Feedback {
         : ""
     return {
       ...(/^[a-z0-9_.:-][a-z0-9_.: -]{0,95}$/i.test(code) && redact(code) === code ? { providerCode: code } : {}),
-      ...(message ? { providerMessage: message } : {}),
+      ...(message ? { providerMessage: message, providerMessageSource: "structured" } : {}),
     }
   }
 
@@ -231,7 +232,11 @@ export namespace Feedback {
                   Number.isInteger(item.status) && item.status! >= 400 && item.status! <= 599 ? item.status : undefined,
                 category: allowed(item.category, ["auth", "credit", "rate", "network", "model", "unknown"]),
                 ...(item.requestID ? { requestID: redact(item.requestID.slice(0, 128)) } : {}),
-                ...providerDiagnostic({ code: item.providerCode, message: item.providerMessage }),
+                ...providerDiagnostic({
+                  code: item.providerCode,
+                  message: item.providerMessage,
+                  source: item.providerMessageSource,
+                }),
               })),
           }
         : {}),

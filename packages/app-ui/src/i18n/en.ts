@@ -1390,6 +1390,7 @@ export const dict = {
   "session.followupDock.collapse": "Collapse queued messages",
   "session.followupDock.expand": "Expand queued messages",
   "session.message.waitingToJoin": "Inserted; takes effect at the next step",
+  "session.message.waitingToStart": "Waiting to start",
   "session.message.queueAfterTask": "Send after this task",
   "session.message.queued": "Queued; sends after this task ends",
   "session.permission.expired": "This permission request has expired. Wait for a new request.",

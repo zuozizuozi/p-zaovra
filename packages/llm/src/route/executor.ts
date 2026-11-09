@@ -257,8 +257,12 @@ const providerMessage = (status: number, body: string | void, request: HttpClien
       : responsesUnavailable && !context
         ? " This model may require Chat Completions. Select Chat Completions in Settings > Providers > Protocol settings, then continue."
         : ""
-  if (message) return `Provider request failed with HTTP ${status}: ${message}${hint}`
-  return `Provider request failed with HTTP ${status}`
+  return {
+    message: message
+      ? `Provider request failed with HTTP ${status}: ${message}${hint}`
+      : `Provider request failed with HTTP ${status}`,
+    messageSource: detail ? ("structured" as const) : message ? ("body" as const) : ("status" as const),
+  }
 }
 
 const responseHttp = (input: {
@@ -320,7 +324,7 @@ const statusError =
         reason: providerFailure({
           ...evidence,
           status: response.status,
-          message: providerMessage(response.status, body, request),
+          ...providerMessage(response.status, body, request),
           retryAfterMs: retryAfter,
           http: responseHttp({
             request,

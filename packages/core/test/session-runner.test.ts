@@ -1781,7 +1781,7 @@ describe("S2 fixed recovery matrix", () => {
         expect((failure as LLMError).reason._tag).toBe(category)
         expect(requests).toHaveLength(1)
         expect(JSON.stringify(yield* session.context(sessionID))).toContain(
-          code === "insufficient_quota" ? "额度或余额不足" : "请求格式或参数不受支持",
+          code === "insufficient_quota" ? "额度或余额不足" : "服务无法处理这次请求",
         )
       }),
     )
@@ -9024,15 +9024,25 @@ describe("SessionRunnerLLM", () => {
       qualityProgress = { facts: true }
       sessionTokenBudget = 100
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Keep the original budgeted task" }), resume: false })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Keep the original budgeted task" }),
+        resume: false,
+      })
       requests.length = 0
       executions.length = 0
       response = [
         LLMEvent.stepStart({ index: 0 }),
         LLMEvent.toolCall({ id: "renewal-tool", name: "echo", input: { text: "retained-renewal-result" } }),
-        LLMEvent.stepFinish({ index: 0, reason: "tool-calls", usage: {
-          inputTokens: 100, nonCachedInputTokens: 100, outputTokens: 20,
-        } }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "tool-calls",
+          usage: {
+            inputTokens: 100,
+            nonCachedInputTokens: 100,
+            outputTokens: 20,
+          },
+        }),
         LLMEvent.finish({ reason: "tool-calls" }),
       ]
       yield* session.resume(sessionID)

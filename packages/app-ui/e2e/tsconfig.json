@@ -18,6 +18,7 @@
     "./regression/session-timeline-context-resize.spec.ts",
     "./regression/session-timeline-lifecycle-state.spec.ts",
     "./regression/session-timeline-reasoning-projection.spec.ts",
-    "./utils/**/*.ts"
+    "./utils/**/*.ts",
+    "./performance/timeline-stability/ownership790-browser.ts"
   ]
 }

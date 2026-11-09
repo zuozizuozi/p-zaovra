@@ -1290,6 +1290,7 @@ export const dict = {
   "session.followupDock.collapse": "折叠排队消息",
   "session.followupDock.expand": "展开排队消息",
   "session.message.waitingToJoin": "已插入，下一步生效",
+  "session.message.waitingToStart": "待开始",
   "session.message.queueAfterTask": "任务结束后再发",
   "session.message.queued": "排队中，任务结束后发送",
   "session.permission.expired": "此权限请求已失效，请等待新的请求。",

@@ -56,6 +56,7 @@ import { DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@zaovra-
 import { InlineInput } from "@zaovra-ai/ui/inline-input"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { SessionRetry } from "@zaovra-ai/session-ui/session-retry"
+import { pendingTurnLabel } from "@zaovra-ai/session-ui/turn-ownership"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@zaovra-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@zaovra-ai/ui/sticky-accordion-header"
 import { TextField } from "@zaovra-ai/ui/text-field"
@@ -93,7 +94,7 @@ import { turnPartFoldable } from "./turn-part-visibility"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
-import { filterVirtualIndexes } from "./virtual-items"
+import { filterVirtualIndexes, shouldAdjustTimelineSize } from "./virtual-items"
 import { TurnProcessSummary, settledTurnStatus, hasTurnProcessContent } from "./turn-process-summary"
 
 const emptyMessages: MessageType[] = []
@@ -385,6 +386,7 @@ export function MessageTimeline(props: {
       return !!id && serverSync().session.history.complete(id)
     },
     stopped: (messageID) => serverSync().session.stopped(messageID),
+    pending: (messageID) => !!serverSync().session.pendingDelivery(sessionID() ?? "", messageID),
   })
   const activeMessageID = projection.activeMessageID
   const [turns, setTurns] = createStore<Record<string, boolean>>({})
@@ -561,7 +563,16 @@ export function MessageTimeline(props: {
       .map((element) => ({ element, rect: element.getBoundingClientRect() }))
       .filter((item) => item.rect.bottom > view.top && item.rect.top < view.bottom)
       .sort((a, b) => a.rect.top - b.rect.top)[0]
-    if (!anchor) return
+    if (!anchor) {
+      // A fast gesture can reach the next range before its DOM rows mount.
+      const item = virtualizer.getVirtualItemForOffset(root.scrollTop)
+      if (!item || typeof item.key !== "string" || !virtualContent) return
+      prependAnchor = {
+        key: item.key,
+        offset: virtualContent.getBoundingClientRect().top - view.top + item.start - (showHeader() ? 64 : 0),
+      }
+      return
+    }
     if (!anchor.element.dataset.timelineKey) return
     prependAnchor = { key: anchor.element.dataset.timelineKey, offset: anchor.rect.top - view.top }
   }
@@ -698,8 +709,7 @@ export function MessageTimeline(props: {
   }
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
     if (props.shouldAnchorBottom()) return false
-    const first = virtualizer.range?.startIndex
-    return first !== undefined && item.index < first
+    return shouldAdjustTimelineSize(item, virtualizer)
   }
   const virtualItemByKey = createMemo(
     () => new Map(virtualizer.getVirtualItems().map((item) => [item.key, item] as const)),
@@ -1175,14 +1185,9 @@ export function MessageTimeline(props: {
     activeMessageID() !== undefined &&
     displayTurn(activeMessageID()!) === displayTurn(userMessageID)
   const pendingDelivery = (userMessageID: string) =>
-    serverSync().session.data.pending_input[sessionID() ?? ""]?.find((input) => input.id === userMessageID)?.delivery ??
-    getMsgParts(userMessageID).find((part) => part.type === "text")?.metadata?.zaovraDelivery
+    serverSync().session.pendingDelivery(sessionID() ?? "", userMessageID)
   const waitingToJoin = (userMessageID: string) =>
-    !!pendingDelivery(userMessageID) ||
-    !!serverSync().session.data.pending_input[sessionID() ?? ""]?.some((input) => input.id === userMessageID) ||
-    (sessionStatus().type !== "idle" &&
-      (assistantMessagesByParent().get(userMessageID)?.length ?? 0) === 0 &&
-      activeMessageID() !== userMessageID)
+    pendingTurnLabel(pendingDelivery(userMessageID), activeMessageID(), userMessageID)
 
   const turnDurationMs = (userMessageID: string) => {
     const message = messageByID().get(userMessageID)
@@ -1442,18 +1447,20 @@ export function MessageTimeline(props: {
                     <Message
                       message={message()}
                       parts={getMsgParts(userMessageRow().userMessageID)}
-                      actions={pendingDelivery(userMessageRow().userMessageID) ? undefined : props.actions}
+                      actions={
+                        pendingDelivery(userMessageRow().userMessageID)
+                          ? { openAttachment: props.actions?.openAttachment }
+                          : props.actions
+                      }
                       useV2Actions={settings.general.newLayoutDesigns()}
                       comments={messageComments()}
                     />
                     <Show when={waitingToJoin(userMessageRow().userMessageID)}>
-                      <div class="flex justify-end pt-1 pr-1 text-11-regular text-text-weak" role="status">
-                        {language.t(
-                          pendingDelivery(userMessageRow().userMessageID) === "queue"
-                            ? "session.message.queued"
-                            : "session.message.waitingToJoin",
-                        )}
-                      </div>
+                      {(label) => (
+                        <div class="flex justify-end pt-1 pr-1 text-11-regular text-text-weak" role="status">
+                          {language.t(label())}
+                        </div>
+                      )}
                     </Show>
                   </div>
                 </div>

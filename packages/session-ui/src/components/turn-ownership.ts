@@ -1,4 +1,33 @@
-import type { Message, Part } from "@zaovra-ai/sdk/v2"
+import type { Message, Part, SessionStatus } from "@zaovra-ai/sdk/v2"
+
+/** Pending inputs have no provider turn yet. Older unfinished history cannot claim a newer promoted turn. */
+export function activeTurnMessage(
+  messages: readonly Message[],
+  parts: (id: string) => readonly Part[],
+  status: SessionStatus,
+  pending?: (id: string) => boolean,
+) {
+  if (status.type === "idle") return
+  const chronological = messages.toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
+  const current = chronological.findLast(
+    (message) =>
+      message.role === "user" &&
+      !(pending
+        ? pending(message.id)
+        : parts(message.id).some((part) => part.type === "text" && part.metadata?.zaovraDelivery)),
+  )
+  if (!current) return
+  const latest = chronological.findLast((message) => message.role === "assistant" && message.parentID === current.id)
+  if (latest?.role === "assistant" && typeof latest.time.completed === "number" && latest.finish !== "tool-calls")
+    return
+  return current.id
+}
+
+export function pendingTurnLabel(delivery: unknown, active: string | undefined, messageID: string) {
+  if (delivery === "queue") return "session.message.queued"
+  if (delivery !== "steer") return
+  return active && active !== messageID ? "session.message.waitingToJoin" : "session.message.waitingToStart"
+}
 
 export function isContinuation(parts: readonly Part[]) {
   return (

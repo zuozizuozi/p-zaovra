@@ -147,9 +147,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test test-node/beta-flags.node.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test test-node/beta-version.node.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/app-ui
-          bun test src/components/updater-action.test.ts ./test-browser/desktop-entry-dom.test.ts ./test-browser/feedback-dom.test.ts
+          bun test src/updater.test.ts src/components/updater-action.test.ts ./test-browser/version-dom.test.ts ./test-browser/desktop-entry-dom.test.ts ./test-browser/feedback-dom.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location packages/feedback-worker

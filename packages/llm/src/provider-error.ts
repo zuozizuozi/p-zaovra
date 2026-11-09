@@ -15,6 +15,7 @@ import {
 /** Use provider codes before HTTP fallbacks; generic messages must not imply transience. */
 export function providerFailure(input: {
   message: string
+  messageSource?: "structured" | "body" | "status"
   quota?: boolean
   parameter?: string
   code?: string
@@ -25,10 +26,12 @@ export function providerFailure(input: {
 }) {
   const code = [input.code, input.type].filter(Boolean).join(" ").toLowerCase()
   const diagnostic = input.code ?? input.type
+  // Protocol codecs supply decoded error fields; HTTP callers must identify their extraction source.
+  const messageSource = input.messageSource ?? (input.http ? undefined : "structured")
   const common = {
     message: input.message,
     http: input.http,
-    ...(diagnostic ? { providerMetadata: { diagnostic: { code: diagnostic } } } : {}),
+    providerMetadata: { diagnostic: { code: diagnostic, messageSource } },
   }
   const detail = code || input.message
   if (
