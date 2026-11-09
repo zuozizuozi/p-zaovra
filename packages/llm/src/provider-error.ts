@@ -24,7 +24,12 @@ export function providerFailure(input: {
   http?: HttpContext
 }) {
   const code = [input.code, input.type].filter(Boolean).join(" ").toLowerCase()
-  const common = { message: input.message, http: input.http }
+  const diagnostic = input.code ?? input.type
+  const common = {
+    message: input.message,
+    http: input.http,
+    ...(diagnostic ? { providerMetadata: { diagnostic: { code: diagnostic } } } : {}),
+  }
   const detail = code || input.message
   if (
     (input.status === undefined || input.status === 400 || input.status === 422) &&
@@ -32,7 +37,7 @@ export function providerFailure(input: {
   )
     return new InvalidRequestReason({
       ...common,
-      providerMetadata: { compatibility: { code: "invalid_encrypted_content" } },
+      providerMetadata: { ...common.providerMetadata, compatibility: { code: "invalid_encrypted_content" } },
     })
   if (input.quota || isQuotaExceeded(code + " " + input.message)) return new QuotaExceededReason(common)
   if (/content_filter|content[-_\s]?policy|safety|permission_denied/i.test(detail))

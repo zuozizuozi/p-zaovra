@@ -6,6 +6,7 @@ import { BackgroundJob } from "../../background-job"
 import { EventTable } from "../../event/sql"
 import { SessionBudget } from "../budget"
 import { SessionRetry } from "../retry"
+import { ProviderDiagnostics } from "../provider-diagnostics"
 import { SessionOwnership } from "../ownership"
 import {
   LLM,
@@ -1703,6 +1704,7 @@ const layer = Layer.effect(
                       : llmFailure.reason.message,
                 {
                   category: llmFailure.reason._tag,
+                  ...ProviderDiagnostics.metadata(llmFailure),
                   ...("http" in llmFailure.reason && llmFailure.reason.http?.response
                     ? { statusCode: String(llmFailure.reason.http.response.status) }
                     : {}),
