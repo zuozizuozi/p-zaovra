@@ -3,6 +3,7 @@ import * as Option from "effect/Option"
 import { Auth, type Auth as AuthDef } from "./auth"
 import { Endpoint, type EndpointPatch } from "./endpoint"
 import { RequestExecutor } from "./executor"
+import { recoverEncryptedContent } from "./encrypted-recovery"
 import { randomUUID } from "node:crypto"
 import { usageNumbers } from "./diagnostics"
 import type { Framing } from "./framing"
@@ -385,6 +386,13 @@ const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest) =
       const compiled = yield* compile(request).pipe(Effect.annotateLogs(annotations))
       return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime).pipe(
         compiled.route.transport.id === "http-json" ? RequestExecutor.retryBeforeOutput : (stream) => stream,
+        recoverEncryptedContent(compiled.request, (next) =>
+          Stream.unwrap(
+            compile(next).pipe(
+              Effect.map((recovered) => recovered.route.streamPrepared(recovered.prepared, recovered.request, runtime)),
+            ),
+          ),
+        ),
         Stream.tap((event) =>
           event.type === "step-finish"
             ? Effect.logInfo("provider.response.usage", {
