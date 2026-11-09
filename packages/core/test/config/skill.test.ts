@@ -21,6 +21,7 @@ describe("ConfigSkillPlugin.Plugin", () => {
       const sources: SkillV2.Source[] = []
       const transform = Effect.fnUntraced(function* (update: (draft: SkillV2.Draft) => void | Effect.Effect<void>) {
         const result = update({
+          disable: () => {},
           source: (source) => {
             sources.push(source)
           },
@@ -39,6 +40,15 @@ describe("ConfigSkillPlugin.Plugin", () => {
           skill: { transform, reload: () => Effect.void },
         }),
       ).pipe(
+        Effect.provideService(
+          SkillV2.Service,
+          SkillV2.Service.of({
+            transform,
+            reload: () => Effect.void,
+            sources: () => Effect.succeed(sources),
+            list: () => Effect.succeed([]),
+          }),
+        ),
         Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home: "/home/test" })),
         Effect.provideService(Location.Service, Location.Service.of(location({ directory }))),
         Effect.provideService(

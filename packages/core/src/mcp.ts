@@ -21,6 +21,8 @@ import {
   CallToolResultSchema,
   ListRootsRequestSchema,
   ToolListChangedNotificationSchema,
+  PromptListChangedNotificationSchema,
+  type Prompt,
   type Tool as MCPTool,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Context, Effect, Exit, Layer, Schema, Scope, Semaphore } from "effect"
@@ -83,6 +85,8 @@ export interface Interface {
   readonly status: () => Effect.Effect<Readonly<Record<string, Status>>>
   readonly resources: () => Effect.Effect<Readonly<Record<string, Resource>>>
   readonly instructions: () => Effect.Effect<ReadonlyArray<ServerInstructions>>
+  readonly prompts: () => Effect.Effect<ReadonlyArray<Prompt & { server: string }>>
+  readonly renderPrompt: (server: string, name: string, args: Record<string, string>) => Effect.Effect<string, Error>
   readonly reconnect: (name: string) => Effect.Effect<void, NotFoundError>
   readonly disconnect: (name: string) => Effect.Effect<void, NotFoundError>
 }
@@ -140,6 +144,25 @@ const layer = Layer.effect(
     const defaults = Config.latest(entries, "mcp")?.timeout
     const statuses: Record<string, Status> = {}
     const active = new Map<string, Active>()
+    const promptCache = new WeakMap<Client, Effect.Effect<ReadonlyArray<Prompt>, Error>>()
+    const promptsFor = Effect.fnUntraced(function* (item: Active) {
+      if (!item.client.getServerCapabilities()?.prompts) return []
+      const cached = promptCache.get(item.client)
+      if (cached) return yield* cached
+      const load = yield* Effect.cached(
+        listAll((cursor) =>
+          Effect.tryPromise({
+            try: () =>
+              item.client.listPrompts(cursor ? { cursor } : undefined, {
+                timeout: item.server.timeout?.request ?? defaults?.request ?? DEFAULT_REQUEST_TIMEOUT_MS,
+              }),
+            catch: normalizeError,
+          }),
+        ).pipe(Effect.map((pages) => pages.flatMap((page) => page.prompts))),
+      )
+      promptCache.set(item.client, load)
+      return yield* load
+    })
 
     yield* integrations.transform((draft) => {
       Object.entries(configured).forEach(([name, server]) => {
@@ -268,6 +291,10 @@ const layer = Layer.effect(
       client.onclose = () => {
         runFork(markClosed(name, client))
       }
+      if (client.getServerCapabilities()?.prompts)
+        client.setNotificationHandler(PromptListChangedNotificationSchema, () => {
+          promptCache.delete(client)
+        })
       if (!client.getServerCapabilities()?.tools) return
       client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
         runFork(
@@ -375,6 +402,40 @@ const layer = Layer.effect(
     yield* Effect.addFinalizer(() => Effect.forEach(active.keys(), close, { concurrency: "unbounded", discard: true }))
 
     return Service.of({
+      prompts: Effect.fn("MCP.prompts")(function* () {
+        const results = yield* Effect.forEach(
+          active,
+          ([server, item]) =>
+            promptsFor(item).pipe(
+              Effect.map((prompts) => prompts.map((prompt) => ({ ...prompt, server }))),
+              Effect.catch((error) =>
+                Effect.sync(() => promptCache.delete(item.client)).pipe(
+                  Effect.andThen(Effect.logWarning("failed to list MCP prompts", { server, error: error.message })),
+                  Effect.as([]),
+                ),
+              ),
+            ),
+          { concurrency: "unbounded" },
+        )
+        return results.flat()
+      }),
+      renderPrompt: Effect.fn("MCP.renderPrompt")(function* (server, name, args) {
+        const item = active.get(server)
+        if (!item) return yield* Effect.fail(new Error("The MCP server is not connected. Enable it in Customization."))
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            item.client.getPrompt(
+              { name, arguments: args },
+              { timeout: item.server.timeout?.request ?? defaults?.request ?? DEFAULT_REQUEST_TIMEOUT_MS },
+            ),
+          catch: normalizeError,
+        })
+        if (result.messages.some((message) => message.content.type !== "text"))
+          return yield* Effect.fail(new Error("This MCP prompt contains non-text content. Use its MCP tools instead."))
+        return result.messages
+          .map((message) => `[${message.role}]\n${message.content.type === "text" ? message.content.text : ""}`)
+          .join("\n\n")
+      }),
       status: Effect.fn("MCP.status")(function* () {
         return { ...statuses }
       }),

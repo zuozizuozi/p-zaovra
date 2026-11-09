@@ -16,6 +16,8 @@ import type {
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
+  ConfigV2McpLocal,
+  ConfigV2McpRemote,
   EventSubscribeResponses,
   EventTuiCommandExecute,
   EventTuiPromptAppend,
@@ -160,10 +162,22 @@ import type {
   V2AgentListResponses,
   V2CommandListErrors,
   V2CommandListResponses,
+  V2CommandRenderErrors,
+  V2CommandRenderResponses,
   V2CredentialRemoveErrors,
   V2CredentialRemoveResponses,
   V2CredentialUpdateErrors,
   V2CredentialUpdateResponses,
+  V2CustomizationListErrors,
+  V2CustomizationListResponses,
+  V2CustomizationRemoveMcpErrors,
+  V2CustomizationRemoveMcpResponses,
+  V2CustomizationSaveMcpErrors,
+  V2CustomizationSaveMcpResponses,
+  V2CustomizationToggleMcpErrors,
+  V2CustomizationToggleMcpResponses,
+  V2CustomizationToggleSkillErrors,
+  V2CustomizationToggleSkillResponses,
   V2EventSubscribeErrors,
   V2EventSubscribeResponses,
   V2FsFindErrors,
@@ -5311,6 +5325,189 @@ export class Mcp extends HeyApiClient {
   }
 }
 
+export class Customization extends HeyApiClient {
+  /**
+   * List MCP servers and skills
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<V2CustomizationListResponses, V2CustomizationListErrors, ThrowOnError>({
+      url: "/api/customization",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove one MCP server
+   */
+  public removeMcp<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      V2CustomizationRemoveMcpResponses,
+      V2CustomizationRemoveMcpErrors,
+      ThrowOnError
+    >({
+      url: "/api/customization/mcp/{name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Save one MCP server
+   */
+  public saveMcp<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      config?: ConfigV2McpLocal | ConfigV2McpRemote
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "location" },
+            { in: "body", key: "config" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      V2CustomizationSaveMcpResponses,
+      V2CustomizationSaveMcpErrors,
+      ThrowOnError
+    >({
+      url: "/api/customization/mcp/{name}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Persist MCP enabled state
+   */
+  public toggleMcp<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      enabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "location" },
+            { in: "body", key: "enabled" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      V2CustomizationToggleMcpResponses,
+      V2CustomizationToggleMcpErrors,
+      ThrowOnError
+    >({
+      url: "/api/customization/mcp/{name}/enabled",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Persist skill enabled state
+   */
+  public toggleSkill<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      enabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "location" },
+            { in: "body", key: "enabled" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      V2CustomizationToggleSkillResponses,
+      V2CustomizationToggleSkillErrors,
+      ThrowOnError
+    >({
+      url: "/api/customization/skill/{name}/enabled",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Request extends HeyApiClient {
   /**
    * List pending permission requests
@@ -5513,6 +5710,46 @@ export class Command extends HeyApiClient {
       url: "/api/command",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Render one available skill or MCP prompt
+   */
+  public render<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      name?: string
+      arguments?: string
+      agent?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "name" },
+            { in: "body", key: "arguments" },
+            { in: "body", key: "agent" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2CommandRenderResponses, V2CommandRenderErrors, ThrowOnError>({
+      url: "/api/command/render",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }
@@ -6031,6 +6268,11 @@ export class V2 extends HeyApiClient {
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
+  }
+
+  private _customization?: Customization
+  get customization(): Customization {
+    return (this._customization ??= new Customization({ client: this.client }))
   }
 
   private _permission?: Permission2

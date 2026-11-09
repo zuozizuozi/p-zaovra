@@ -1,4 +1,5 @@
-import { createEffect, lazy, Show, Suspense, type ParentProps } from "solid-js"
+import { createEffect, createMemo, lazy, Show, Suspense, type ParentProps } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
 import { createEmbeddedSettings } from "./layout/embedded-settings"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
@@ -27,6 +28,10 @@ const DesktopSettings = lazy(() =>
   import("@/components/settings-v2/dialog-settings-v2").then((module) => ({ default: module.DialogSettings })),
 )
 
+const CustomizationPage = lazy(() =>
+  import("@/components/customization-page").then((module) => ({ default: module.CustomizationPage })),
+)
+
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
   const desktop = () => platform.platform === "desktop"
@@ -42,6 +47,23 @@ export default function NewLayout(props: ParentProps) {
   const settingsPage = createEmbeddedSettings(desktop, () => location.pathname + location.search + location.hash)
   const settingsServer = () =>
     global.servers.list().find((item) => ServerConnection.key(item) === settingsPage.serverKey)
+  const [customization, setCustomization] = createStore({
+    open: false,
+    server: undefined as ServerConnection.Key | undefined,
+    directory: "",
+  })
+  const customizationTarget = createMemo(() => {
+    const connection = global.servers.list().find((item) => ServerConnection.key(item) === customization.server)
+    return connection ? { connection, directory: customization.directory } : undefined
+  })
+  const routeKey = () => location.pathname + location.search + location.hash
+  createEffect(() => {
+    routeKey()
+    setCustomization("open", false)
+  })
+  createEffect(() => {
+    if (settingsPage.open) setCustomization("open", false)
+  })
   setNavigate(navigate)
 
   createEffect(() => setV2Toast(true))
@@ -167,7 +189,11 @@ export default function NewLayout(props: ParentProps) {
             inert={settingsPage.open || !layout.sidebar.opened()}
             aria-hidden={settingsPage.open || !layout.sidebar.opened()}
           >
-            <DesktopSidebar />
+            <DesktopSidebar
+              onCustomize={(target) =>
+                setCustomization({ open: true, server: target.server, directory: target.directory ?? "" })
+              }
+            />
           </div>
         </Show>
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -175,9 +201,40 @@ export default function NewLayout(props: ParentProps) {
             data-component={desktop() ? "desktop-workspace" : undefined}
             class="relative flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict"
           >
-            <div class="size-full min-h-0 flex flex-col" classList={{ hidden: settingsPage.open }}>
+            <div
+              class="size-full min-h-0 flex flex-col"
+              classList={{ hidden: settingsPage.open || customization.open }}
+            >
               <Suspense fallback={<DraftLoading />}>{props.children}</Suspense>
             </div>
+            <Show when={customization.open}>
+              <Suspense fallback={<DraftLoading />}>
+                <Show
+                  when={customizationTarget()}
+                  keyed
+                  fallback={
+                    <p role="status">{language.t("app.server.unreachable", { server: customization.server ?? "" })}</p>
+                  }
+                >
+                  {(target) => (
+                    <CustomizationPage
+                      client={global
+                        .ensureServerCtx(target.connection)
+                        .sdk.createClient({ directory: target.directory })}
+                      directory={target.directory}
+                      onClose={() => setCustomization("open", false)}
+                      onCommands={(commands) => {
+                        if (!target.directory) return
+                        const [, setStore] = global
+                          .ensureServerCtx(target.connection)
+                          .sync.child(target.directory, { bootstrap: false })
+                        setStore("command", reconcile(commands))
+                      }}
+                    />
+                  )}
+                </Show>
+              </Suspense>
+            </Show>
             <Show when={settingsPage.open}>
               <Suspense fallback={<DraftLoading />}>
                 <Show
