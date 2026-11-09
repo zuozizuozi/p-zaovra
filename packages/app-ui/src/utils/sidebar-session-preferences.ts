@@ -1,4 +1,5 @@
 import type { ServerConnection } from "@/context/server"
+import { sortSidebarItems } from "./sidebar-order"
 
 export type PinnedSession = { server: ServerConnection.Key; sessionID: string; directory: string }
 
@@ -11,6 +12,9 @@ export function createPinnedSessions(input: { read: () => PinnedSession[]; write
     list: input.read,
     has,
     remove,
+    reorder(keys: string[]) {
+      input.write(sortSidebarItems(input.read(), keys, (item) => `${item.server}:${item.sessionID}`))
+    },
     toggle(server: ServerConnection.Key, session: { id: string; directory: string }) {
       if (has(server, session.id)) return remove(server, session.id)
       input.write([...input.read(), { server, sessionID: session.id, directory: session.directory }])

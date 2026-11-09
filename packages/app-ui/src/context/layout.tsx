@@ -1,4 +1,5 @@
 import { createPinnedSessions } from "@/utils/sidebar-session-preferences"
+import { createSidebarOrder } from "@/utils/sidebar-order"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { enrichLocalProject } from "./local-project"
 import { batch, createEffect, createMemo, onCleanup, onMount, type Accessor } from "solid-js"
@@ -279,6 +280,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           workspaces: {} as Record<string, boolean>,
           workspacesDefault: false,
           pinnedSessions: [] as { server: ServerConnection.Key; sessionID: string; directory: string }[],
+          projectOrder: [] as string[],
+          sessionOrder: {} as Record<string, string[]>,
         },
         terminal: {
           height: DEFAULT_TERMINAL_HEIGHT,
@@ -650,6 +653,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
       },
       sidebar: {
+        ...createSidebarOrder({
+          read: () => store.sidebar,
+          writeProjects: (keys) => setStore("sidebar", "projectOrder", keys),
+          writeSessions: (group, ids) => setStore("sidebar", "sessionOrder", group, ids),
+        }),
         opened: createMemo(() => store.sidebar.opened),
         open() {
           setStore("sidebar", "opened", true)
