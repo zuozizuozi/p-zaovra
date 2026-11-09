@@ -1,6 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { once } from "node:events"
+import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js"
 import {
   CallToolRequestSchema,
   GetPromptRequestSchema,
@@ -26,6 +27,7 @@ const server = new Server(
 )
 let revision = 0
 let approvalCalls = 0
+let outputCalls = 0
 let toolName = process.env.MCP_TEST_TOOL ?? "echo"
 
 server.setRequestHandler(ListToolsRequestSchema, () =>
@@ -47,18 +49,43 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
               required: ["text"],
               additionalProperties: false,
             },
-        outputSchema: {
-          type: "object",
-          properties: { echo: { type: "string" } },
-          required: ["echo"],
-          additionalProperties: false,
-        },
+        ...(process.env.MCP_TEST_OUTPUT_MODE === "required" ? { execution: { taskSupport: "required" as const } } : {}),
+        outputSchema:
+          process.env.MCP_TEST_OUTPUT_MODE === "no-schema"
+            ? undefined
+            : {
+                ...(process.env.MCP_TEST_OUTPUT_MODE === "unsupported"
+                  ? { $schema: "https://invalid.test/output-schema" }
+                  : {}),
+                type: "object",
+                properties: {
+                  echo: { type: "string", ...(process.env.MCP_TEST_OUTPUT_MODE === "enum" ? { enum: ["ok"] } : {}) },
+                },
+                required: ["echo"],
+                additionalProperties: false,
+              },
       },
     ],
   }),
 )
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (process.env.MCP_TEST_OUTPUT_MODE) {
+    if (process.env.MCP_TEST_CALL_FILE) await Bun.write(process.env.MCP_TEST_CALL_FILE, String(++outputCalls))
+    const mode = process.env.MCP_TEST_OUTPUT_MODE
+    if (mode === "rpc-error") throw new McpError(ErrorCode.InternalError, "fixture result unavailable")
+    if (mode === "timeout" || mode === "cancel") await new Promise(() => {})
+    return {
+      content:
+        mode === "structured" || mode === "missing-text"
+          ? []
+          : [{ type: "text" as const, text: "fixture side effect receipt" }],
+      ...(mode === "missing" || mode === "missing-text"
+        ? {}
+        : { structuredContent: { echo: mode === "valid" ? "ok" : mode === "enum" ? "other" : 123 } }),
+      ...(mode === "error" ? { isError: true } : {}),
+    }
+  }
   const text = typeof request.params.arguments?.text === "string" ? request.params.arguments.text : ""
   if (text === "notify" || text === "change-schema" || text === "change-name") {
     if (text === "change-schema") revision++
