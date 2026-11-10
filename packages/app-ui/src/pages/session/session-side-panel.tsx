@@ -70,6 +70,8 @@ export function SessionSidePanel(props: {
   diffsReady: () => boolean
   empty: () => string
   hasReview: () => boolean
+  hasChanges: () => boolean
+  onReview: () => void
   reviewHasFocusableContent: () => boolean
   reviewCount: () => number
   reviewPanel: () => JSX.Element
@@ -217,6 +219,7 @@ export function SessionSidePanel(props: {
   }
   const activateTab = (value: string) => {
     const next = normalizeTab(value)
+    if (next === "review") props.onReview()
     if (next === "artifacts") tabs().open(next)
     const path = file.pathFromTab(next)
     if (path) void file.load(path)
@@ -350,7 +353,7 @@ export function SessionSidePanel(props: {
                                 onCleanup(stop)
                               }}
                             >
-                              <Show when={reviewTab() && props.hasReview()}>
+                              <Show when={reviewTab() && props.hasChanges()}>
                                 <Tabs.Trigger
                                   value="review"
                                   id={reviewTabID}
@@ -584,7 +587,7 @@ export function SessionSidePanel(props: {
                                 </div>
                               )}
                             </Show>
-                            <Show when={reviewTab() && props.hasReview()}>
+                            <Show when={reviewTab() && props.hasChanges()}>
                               <Tabs.Trigger
                                 value="review"
                                 id={reviewTabID}
