@@ -38,6 +38,8 @@ export interface DiffInput extends CompareInput {
 export interface RestoreInput {
   /** Paths are relative to the project root. */
   readonly files: ReadonlyMap<RelativePath, ID>
+  /** Reject changed worktree paths before restoring any selected file. */
+  readonly expected?: ReadonlyMap<RelativePath, ID>
 }
 
 export interface PreviewInput extends RestoreInput {
@@ -282,7 +284,11 @@ const layer = Layer.effect(
       if (!(yield* enabled())) return yield* new Error({ operation: "restore", message: "Snapshots are disabled" })
       const repo = yield* repository().pipe(Effect.mapError((cause) => failure("restore", cause)))
       yield* git.tree
-        .restore({ repository: repo, files: yield* plan("restore", input) })
+        .restore({
+          repository: repo,
+          files: yield* plan("restore", input),
+          expected: input.expected ? yield* plan("restore", { files: input.expected }) : undefined,
+        })
         .pipe(Effect.mapError((cause) => failure("restore", cause)))
     })
 

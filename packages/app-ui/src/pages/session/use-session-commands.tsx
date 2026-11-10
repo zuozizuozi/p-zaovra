@@ -21,6 +21,8 @@ import { UserMessage } from "@zaovra-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionOwnership } from "./session-ownership"
 import { createStore } from "solid-js/store"
+import { isContinuation } from "@zaovra-ai/session-ui/turn-ownership"
+import { formatRevertError } from "@/utils/revert-errors"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -67,9 +69,20 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     updatePrompt: (prompt: T) => void
     updateViewport: () => void
   }) => {
-    await input.request()
-    input.updatePrompt(input.prompt)
-    input.owner.run(input.updateViewport)
+    await input.request().then(
+      () => {
+        input.updatePrompt(input.prompt)
+        input.owner.run(input.updateViewport)
+      },
+      (error: unknown) =>
+        input.owner.run(() =>
+          showToast({
+            variant: "error",
+            title: language.t("session.revert.restoreFailed"),
+            description: formatRevertError(error, language.t),
+          }),
+        ),
+    )
   }
 
   const info = () => {
@@ -99,7 +112,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     if (!id) return []
     return sync().data.message[id] ?? []
   }
-  const userMessages = () => messages().filter((m) => m.role === "user") as UserMessage[]
+  const userMessages = () =>
+    messages().filter((message): message is UserMessage => {
+      if (message.role !== "user") return false
+      const parts = sync().data.part[message.id] ?? []
+      return parts.length > 0 && !isContinuation(parts)
+    })
   const visibleUserMessages = () => {
     const revert = info()?.revert?.messageID
     if (!revert) return userMessages()

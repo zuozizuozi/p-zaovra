@@ -99,6 +99,35 @@ export const plan = Effect.fn("SessionRevert.plan")(function* (input: Parameters
   return (yield* prepare(input)).plan
 })
 
+// Reconstruct the post-reset state from durable message snapshots, including
+// paths absent from their selected tree. This also survives a process restart.
+const expectedFiles = Effect.fn("SessionRevert.expectedFiles")(function* (session: SessionSchema.Info) {
+  if (!session.revert?.files?.length) return
+  const location = yield* Location.Service
+  if (location.vcs?.type !== "git") return
+  const selected = yield* selectFiles({ sessionID: session.id, messageID: session.revert.messageID }).pipe(
+    Effect.catchTag(
+      "Session.MessageNotFoundError",
+      () =>
+        new Snapshot.Error({
+          operation: "restore",
+          message: "Cannot verify the files after this reset. No files were restored.",
+        }),
+    ),
+  )
+  const expected = new Map<RelativePath, Snapshot.ID>()
+  for (const file of session.revert.files) {
+    const tree = selected.get(file.path)
+    if (!tree)
+      return yield* new Snapshot.Error({
+        operation: "restore",
+        message: "Cannot verify the files after this reset. No files were restored.",
+      })
+    expected.set(file.path, tree)
+  }
+  return expected
+})
+
 export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
   readonly session: SessionSchema.Info
   readonly messageID: SessionMessage.ID
@@ -119,7 +148,8 @@ export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
       operation: "restore",
       message: "Could not back up the current files. No files were restored.",
     })
-  if (prepared.restore.size) yield* snapshot.restore({ files: prepared.restore })
+  if (prepared.restore.size)
+    yield* snapshot.restore({ files: prepared.restore, expected: yield* expectedFiles(input.session) })
   const paths = input.files === false ? [] : Array.from(prepared.next.keys())
   const files = original
     ? yield* snapshot.diff({
@@ -152,6 +182,7 @@ export const clear = Effect.fn("SessionRevert.clear")(function* (session: Sessio
   if (original && session.revert.files?.length)
     yield* snapshot.restore({
       files: new Map((session.revert.files ?? []).map((file) => [file.path, original])),
+      expected: yield* expectedFiles(session),
     })
   const events = yield* EventV2.Service
   yield* events.publish(SessionEvent.RevertEvent.Cleared, {

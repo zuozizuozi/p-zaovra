@@ -1142,6 +1142,7 @@ const layer = Layer.effect(
         clear: Effect.fn("V2Session.revert.clear")(function* (sessionID) {
           const session = yield* result.get(sessionID)
           yield* SessionRevert.clear(session).pipe(
+            Effect.provideService(Database.Service, database),
             Effect.provideService(EventV2.Service, events),
             Effect.provide(locations.get(session.location)),
           )

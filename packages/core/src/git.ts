@@ -178,6 +178,7 @@ export interface Interface {
     readonly restore: (input: {
       repository: Repository
       files: ReadonlyMap<RelativePath, TreeID>
+      expected?: ReadonlyMap<RelativePath, TreeID>
     }) => Effect.Effect<void, OperationError>
     readonly checkout: (input: { repository: Repository; tree: TreeID }) => Effect.Effect<void, OperationError>
   }
@@ -767,31 +768,86 @@ const layer = Layer.effect(
     )
 
     const restore = Effect.fn("Git.tree.restore")(
-      (input: { repository: Repository; files: ReadonlyMap<RelativePath, TreeID> }) =>
+      (input: {
+        repository: Repository
+        files: ReadonlyMap<RelativePath, TreeID>
+        expected?: ReadonlyMap<RelativePath, TreeID>
+      }) =>
         locked(
           input.repository,
-          Effect.forEach(
-            input.files,
-            ([file, tree]) =>
-              Effect.gen(function* () {
-                if (yield* entry(input.repository, tree, file)) {
-                  yield* repositoryOperation("restore", input.repository, ["checkout", tree, "--", file])
-                  return
-                }
-                yield* fs.remove(path.join(input.repository.worktree, file), { recursive: true, force: true }).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OperationError({
-                        operation: "restore",
-                        directory: input.repository.worktree,
-                        message: `Failed to remove ${file}`,
-                        cause,
-                      }),
+          Effect.gen(function* () {
+            // Check every path before the first checkout/removal. Hash through
+            // Git so its normal working-tree filters (including CRLF) apply.
+            yield* Effect.forEach(
+              input.expected ?? [],
+              ([file, tree]) =>
+                Effect.gen(function* () {
+                  const source = yield* entry(input.repository, tree, file)
+                  const absolute = path.join(input.repository.worktree, file)
+                  const current = (yield* fs
+                    .readDirectoryEntries(path.dirname(absolute))
+                    .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed([])))).find(
+                    (item) => item.name === path.basename(absolute),
+                  )
+                  if (!source && !current) return
+                  const object =
+                    source &&
+                    current &&
+                    (current.type === "file" || (source.mode === "120000" && current.type === "symlink"))
+                      ? current.type === "symlink"
+                        ? (yield* repositoryOperation("restore", input.repository, ["hash-object", "--stdin"], {
+                            stdin: yield* fs.readLink(absolute),
+                          })).text.trim()
+                        : (yield* repositoryOperation("restore", input.repository, [
+                            "hash-object",
+                            "--path=" + file,
+                            "--",
+                            file,
+                          ])).text.trim()
+                      : undefined
+                  if (source && object === source.object) return
+                  return yield* new OperationError({
+                    operation: "restore",
+                    directory: input.repository.worktree,
+                    message: `Cannot restore ${file}: the file changed after the reset. Keep or back up your changes before trying again. No files were restored.`,
+                  })
+                }).pipe(
+                  Effect.mapError((cause) =>
+                    cause instanceof OperationError
+                      ? cause
+                      : new OperationError({
+                          operation: "restore",
+                          directory: input.repository.worktree,
+                          message: `Could not verify ${file}. No files were restored.`,
+                          cause,
+                        }),
                   ),
-                )
-              }),
-            { discard: true },
-          ),
+                ),
+              { discard: true },
+            )
+            yield* Effect.forEach(
+              input.files,
+              ([file, tree]) =>
+                Effect.gen(function* () {
+                  if (yield* entry(input.repository, tree, file)) {
+                    yield* repositoryOperation("restore", input.repository, ["checkout", tree, "--", file])
+                    return
+                  }
+                  yield* fs.remove(path.join(input.repository.worktree, file), { recursive: true, force: true }).pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new OperationError({
+                          operation: "restore",
+                          directory: input.repository.worktree,
+                          message: `Failed to remove ${file}`,
+                          cause,
+                        }),
+                    ),
+                  )
+                }),
+              { discard: true },
+            )
+          }),
         ),
     )
 
