@@ -1,4 +1,4 @@
-import { createEffect, createResource, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, Show } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
@@ -82,17 +82,25 @@ function useUsage(sessionID: () => string | undefined, enabled: () => boolean = 
 }
 
 export function SessionUsageBar() {
-  let trigger!: HTMLButtonElement
   const params = useParams<{ id?: string }>()
+  const sdk = useServerSDK()
+  // Retain data across refreshes, but start fresh when the session or server changes.
+  const scope = createMemo(() => (params.id ? { sessionID: params.id, server: sdk() } : undefined))
+  return (
+    <Show when={scope()} keyed>
+      {(scope) => <SessionUsageBarContent sessionID={scope.sessionID} />}
+    </Show>
+  )
+}
+
+function SessionUsageBarContent(props: { sessionID: string }) {
+  let trigger!: HTMLButtonElement
   const language = useLanguage()
   const open = useSettingsDialog("usage")
-  const { usage } = useUsage(
-    () => params.id,
-    () => !!params.id,
-  )
-  const value = () => (!params.id || usage.loading || usage.error ? undefined : usage())
+  const { usage } = useUsage(() => props.sessionID)
+  const value = () => (usage.state === "pending" || usage.error ? undefined : usage.latest)
   return (
-    <Show when={params.id && (usage.error || (value()?.total.total ?? 0) > 0 || value()?.total.unreported)}>
+    <Show when={usage.error || (value()?.total.total ?? 0) > 0 || value()?.total.unreported}>
       <Popover placement="top-end" gutter={8} modal={false}>
         <Popover.Trigger ref={trigger} class="session-usage-bar" title={language.t("usage.sessionScope")}>
           {usage.error
