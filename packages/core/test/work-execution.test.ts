@@ -372,6 +372,7 @@ function executionLayer(controller: WorkController.Interface, run: WorkRunner.In
     Layer.provide(
       Layer.mock(SessionV2.Service, {
         revert: {
+          plan: () => Effect.die("Unexpected Session revert"),
           stage: () => Effect.die("Unexpected Session revert"),
           clear: () => Effect.die("Unexpected Session revert"),
           commit: () => Effect.die("Unexpected Session revert"),
@@ -472,6 +473,7 @@ it.live("executes approval claimed after durable settlement before local cleanup
       Layer.provide(
         Layer.mock(SessionV2.Service, {
           revert: {
+            plan: () => Effect.die("Unexpected Session revert"),
             stage: () => Effect.die("Unexpected Session revert"),
             clear: () => Effect.die("Unexpected Session revert"),
             commit: () => Effect.die("Unexpected Session revert"),

@@ -1,4 +1,4 @@
-import type { FilePart, Project, UserMessage, VcsFileDiff } from "@zaovra-ai/sdk/v2"
+import type { FilePart, UserMessage, VcsFileDiff } from "@zaovra-ai/sdk/v2"
 import { FeedbackScene } from "@/components/feedback-scene"
 import { getFilename } from "@zaovra-ai/core/util/path"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
@@ -96,7 +96,8 @@ import {
 } from "@/pages/session/session-panel-width"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { sessionPanelLayout } from "@/pages/session/session-panel-layout"
-import { SessionReviewEmptyNoGitV2 } from "@zaovra-ai/session-ui/v2/session-review-empty-no-git-v2"
+import { useRevertConfirmation } from "@/components/dialog-revert-session"
+import { formatRevertError } from "@/utils/revert-errors"
 import { SessionReviewV2SidebarToggle } from "@zaovra-ai/session-ui/v2/session-review-v2"
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
 import { createReviewPanelV2State } from "@/pages/session/v2/review-panel-v2-state"
@@ -827,7 +828,8 @@ export default function Page() {
     if (selected && diffs.some((diff) => diff.file === selected)) return selected
     return diffs[0]?.file
   }
-  const turnTracked = () => sync().project?.vcs === "git" && !turnQuery.isError
+  // A successful turn diff is authoritative for both Git snapshots and FileBackup.
+  const turnTracked = () => turnQuery.isFetched && !turnQuery.isError
   const reviewCount = () => reviewDiffs().length
   const hasReview = () => reviewCount() > 0
   const reviewReady = () => {
@@ -937,45 +939,6 @@ export default function Page() {
 
     autoScroll.pause()
     scrollToMessage(msgs[targetIndex], "auto")
-  }
-
-  function upsert(next: Project) {
-    const list = serverSync().data.project
-    sync().set("project", next.id)
-    const idx = list.findIndex((item) => item.id === next.id)
-    if (idx >= 0) {
-      serverSync().set(
-        "project",
-        list.map((item, i) => (i === idx ? { ...item, ...next } : item)),
-      )
-      return
-    }
-    const at = list.findIndex((item) => item.id > next.id)
-    if (at >= 0) {
-      serverSync().set("project", [...list.slice(0, at), next, ...list.slice(at)])
-      return
-    }
-    serverSync().set("project", [...list, next])
-  }
-
-  const gitMutation = useMutation(() => ({
-    mutationFn: () => sdk().client.project.initGit(),
-    onSuccess: (x) => {
-      if (!x.data) return
-      upsert(x.data)
-    },
-    onError: (err) => {
-      showToast({
-        variant: "error",
-        title: language.t("common.requestFailed"),
-        description: formatServerError(err, language.t),
-      })
-    },
-  }))
-
-  function initGit() {
-    if (gitMutation.isPending) return
-    gitMutation.mutate()
   }
 
   let inputRef!: HTMLDivElement
@@ -1297,23 +1260,8 @@ export default function Page() {
     </div>
   )
 
-  const createGit = (input: { emptyClass: string }) => (
-    <div class={input.emptyClass}>
-      <div class="flex flex-col gap-3">
-        <div class="text-14-medium text-text-strong">{language.t("session.review.noVcs.createGit.title")}</div>
-        <div class="text-14-regular text-text-base max-w-md" style={{ "line-height": "var(--line-height-normal)" }}>
-          {language.t("session.review.noVcs.createGit.description")}
-        </div>
-      </div>
-      <Button size="large" disabled={gitMutation.isPending} onClick={initGit}>
-        {gitMutation.isPending
-          ? language.t("session.review.noVcs.createGit.actionLoading")
-          : language.t("session.review.noVcs.createGit.action")}
-      </Button>
-    </div>
-  )
-
   const reviewEmptyText = createMemo(() => {
+    if (nogit()) return language.t("session.revert.nonGitChanges")
     if (reviewMode() === "git") return language.t("session.review.noUncommittedChanges")
     if (reviewMode() === "branch") return language.t("session.review.noBranchChanges")
     if (!turnTracked())
@@ -1343,7 +1291,6 @@ export default function Page() {
     }
 
     if (reviewMode() === "turn") {
-      if (nogit()) return createGit(input)
       return empty(reviewEmptyText())
     }
 
@@ -1359,9 +1306,6 @@ export default function Page() {
     if (failure) return failure
     if (!reviewReady()) {
       return <div class="px-6 py-4 text-text-weak">{language.t("session.review.loadingChanges")}</div>
-    }
-    if (reviewMode() === "turn" && nogit()) {
-      return <SessionReviewEmptyNoGitV2 pending={gitMutation.isPending} onInitGit={initGit} />
     }
     return (
       <div role="status" class="px-6 py-4 text-text-weak">
@@ -2086,8 +2030,15 @@ export default function Page() {
           .catch(() => {})
       : Promise.resolve()
 
+  const failRevert = (error: unknown) =>
+    showToast({
+      variant: "error",
+      title: language.t("session.revert.restoreFailed"),
+      description: formatRevertError(error, language.t),
+    })
+  const confirmRevert = useRevertConfirmation()
   const revertMutation = useMutation(() => ({
-    mutationFn: async (input: { sessionID: string; messageID: string }) => {
+    mutationFn: async (input: { sessionID: string; messageID: string; planToken: string }) => {
       const client = sdk().client
       const target = sync()
       const last = target.session.get(input.sessionID)?.revert
@@ -2113,7 +2064,7 @@ export default function Page() {
             )
         },
         rollback: () => roll(input.sessionID, last, target),
-        fail,
+        fail: failRevert,
       })
     },
   }))
@@ -2148,7 +2099,7 @@ export default function Page() {
         },
         complete: () => undefined,
         rollback: () => roll(sessionID, last, target),
-        fail,
+        fail: failRevert,
       })
     },
   }))
@@ -2156,9 +2107,12 @@ export default function Page() {
   const reverting = createMemo(() => revertMutation.isPending || restoreMutation.isPending)
   const restoring = createMemo(() => (restoreMutation.isPending ? restoreMutation.variables : undefined))
 
-  const revert = (input: { sessionID: string; messageID: string }) => {
+  const revert = async (input: { sessionID: string; messageID: string }) => {
     if (reverting()) return
-    return revertMutation.mutateAsync(input)
+    const owner = sessionOwnership.capture()
+    const plan = await confirmRevert(input)
+    if (!plan || !owner.current()) return
+    return revertMutation.mutateAsync({ ...input, planToken: plan.token })
   }
 
   const restore = (id: string) => {

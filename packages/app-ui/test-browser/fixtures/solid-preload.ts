@@ -12,7 +12,11 @@ plugin({
       loader: "js",
     }))
     build.onLoad({ filter: /\.tsx$/ }, async (args) => {
-      const result = await compiler.transform.call({} as never, await Bun.file(args.path).text(), args.path)
+      const source =
+        process.env.QA_REVERT_BENCH_DOCK_SOURCE && args.path.replaceAll("\\", "/").endsWith("/session-revert-dock.tsx")
+          ? process.env.QA_REVERT_BENCH_DOCK_SOURCE
+          : args.path
+      const result = await compiler.transform.call({} as never, await Bun.file(source).text(), args.path)
       if (!result || typeof result === "string") throw new Error(`Solid transform failed: ${args.path}`)
       return { contents: result.code, loader: "ts" }
     })

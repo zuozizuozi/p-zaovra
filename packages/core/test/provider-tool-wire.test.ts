@@ -64,6 +64,7 @@ const it = testEffect(
         SessionV2.node,
         Layer.mock(SessionV2.Service, {
           revert: {
+            plan: () => Effect.die("unused"),
             stage: () => Effect.die("unused"),
             clear: () => Effect.die("unused"),
             commit: () => Effect.die("unused"),

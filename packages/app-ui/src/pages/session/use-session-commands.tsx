@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "@solidjs/router"
 import { useCommand, type CommandOption } from "@/context/command"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
+import { useRevertConfirmation } from "@/components/dialog-revert-session"
 import { previewSelectedLines } from "@zaovra-ai/session-ui/pierre/selection-bridge"
 import { useFile, selectionFromLines, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
@@ -38,6 +39,7 @@ const withCategory = (category: string) => {
 export const useSessionCommands = (actions: SessionCommandContext) => {
   const command = useCommand()
   const dialog = useDialog()
+  const confirmRevert = useRevertConfirmation()
   const file = useFile()
   const language = useLanguage()
   const local = useLocal()
@@ -295,6 +297,8 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     const message = findLast(messages, (x) => !revert || x.id < revert)
     if (!message) return
     const parts = sync().data.part[message.id]
+    const plan = await confirmRevert({ sessionID, messageID: message.id })
+    if (!plan || !owner.current()) return
 
     if (sync().data.session_working(sessionID)) {
       await client.v2.session.interrupt({ sessionID }).catch(() => {})
@@ -303,7 +307,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     await runCommand({
       owner,
       prompt: promptSession,
-      request: () => client.v2.session.revert.stage({ sessionID, messageID: message.id }),
+      request: () => client.v2.session.revert.stage({ sessionID, messageID: message.id, planToken: plan.token }),
       updatePrompt: (promptSession) => {
         if (parts) promptSession.set(extractPromptFromParts(parts, { directory }))
       },

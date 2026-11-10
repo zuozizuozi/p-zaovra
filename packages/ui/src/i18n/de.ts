@@ -37,11 +37,6 @@ export const dict = {
   "ui.sessionReviewV2.previousFile": "Vorherige Datei",
   "ui.sessionReviewV2.nextFile": "Nächste Datei",
   "ui.sessionReviewV2.diffView": "Diff-Ansicht",
-  "ui.sessionReviewV2.empty.noGit.title": "Keine verfolgten Änderungen",
-  "ui.sessionReviewV2.empty.noGit.description":
-    "Änderungen in diesem Projekt verfolgen, überprüfen und rückgängig machen",
-  "ui.sessionReviewV2.empty.noGit.action": "Git-Repository erstellen",
-  "ui.sessionReviewV2.empty.noGit.actionLoading": "Git-Repository wird erstellt...",
   "ui.sessionReviewV2.empty.changes.title": "Noch keine Dateiänderungen",
   "ui.sessionReviewV2.empty.changes.description": "Projektänderungen werden hier angezeigt",
   "ui.fileMedia.kind.image": "bild",

@@ -7,7 +7,6 @@ import { SessionTable } from "@zaovra-ai/core/session/sql"
 import { WorkspaceTable } from "@zaovra-ai/core/control-plane/workspace.sql"
 import { Flag } from "@zaovra-ai/core/flag/flag"
 import { GlobalBus } from "@/bus/global"
-import { which } from "@zaovra-ai/core/util/which"
 import { InstanceState } from "@/effect/instance-state"
 import { Effect, Layer, Scope, Context, Stream, Types, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -89,7 +88,6 @@ export interface Interface {
   readonly list: () => Effect.Effect<Info[]>
   readonly get: (id: ProjectV2.ID) => Effect.Effect<Info | undefined>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
-  readonly initGit: (input: { directory: string; project: Info }) => Effect.Effect<Info>
   readonly setInitialized: (id: ProjectV2.ID) => Effect.Effect<void>
   readonly sandboxes: (id: ProjectV2.ID) => Effect.Effect<string[]>
   readonly addSandbox: (id: ProjectV2.ID, directory: string) => Effect.Effect<void>
@@ -359,17 +357,6 @@ const layer = Layer.effect(
       return data
     })
 
-    const initGit = Effect.fn("Project.initGit")(function* (input: { directory: string; project: Info }) {
-      if (input.project.vcs === "git") return input.project
-      if (!(yield* Effect.sync(() => which("git")))) throw new Error("Git is not installed")
-      const result = yield* git(["init", "--quiet"], { cwd: input.directory })
-      if (result.code !== 0) {
-        throw new Error(result.stderr.trim() || result.text.trim() || "Failed to initialize git repository")
-      }
-      const { project } = yield* fromDirectory(input.directory)
-      return project
-    })
-
     const setInitialized = Effect.fn("Project.setInitialized")(function* (id: ProjectV2.ID) {
       yield* db
         .update(ProjectTable)
@@ -436,7 +423,6 @@ const layer = Layer.effect(
       list,
       get,
       update,
-      initGit,
       setInitialized,
       sandboxes,
       addSandbox,

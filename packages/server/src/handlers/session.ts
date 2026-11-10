@@ -481,6 +481,32 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.revert.plan",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session.revert.plan(ctx.params).pipe(
+              Effect.catchTag(
+                "Session.NotFoundError",
+                (error) =>
+                  new SessionNotFoundError({
+                    sessionID: error.sessionID,
+                    message: `Session not found: ${error.sessionID}`,
+                  }),
+              ),
+              Effect.catchTag(
+                "Session.MessageNotFoundError",
+                (error) =>
+                  new MessageNotFoundError({
+                    sessionID: error.sessionID,
+                    messageID: error.messageID,
+                    message: `Message not found: ${error.messageID}`,
+                  }),
+              ),
+            ),
+          }
+        }),
+      )
+      .handle(
         "session.revert.stage",
         Effect.fn(function* (ctx) {
           return {
@@ -502,13 +528,21 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                     message: `Message not found: ${error.messageID}`,
                   }),
               ),
+              Effect.catchTag(
+                "Session.RevertPlanChangedError",
+                () =>
+                  new ConflictError({
+                    message: "The restore plan changed. Preview it again before confirming.",
+                    resource: "revert-plan",
+                  }),
+              ),
               Effect.catchTag("Snapshot.Error", (error) => {
                 const ref = `err_${crypto.randomUUID().slice(0, 8)}`
                 return Effect.logError("failed to stage session revert", { cause: error }).pipe(
                   Effect.andThen(
                     Effect.fail(
                       new UnknownError({
-                        message: "Unexpected server error. Check server logs for details.",
+                        message: error.message,
                         ref,
                       }),
                     ),
@@ -537,7 +571,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 Effect.andThen(
                   Effect.fail(
                     new UnknownError({
-                      message: "Unexpected server error. Check server logs for details.",
+                      message: error.message,
                       ref,
                     }),
                   ),

@@ -47,6 +47,7 @@ export function SessionRevertDock(props: {
       when={settings.general.newLayoutDesigns()}
       fallback={
         <DockTray data-component="session-revert-dock">
+          <p class="px-3 pt-2 text-xs text-text-weak">{language.t("session.revert.hiddenWarning")}</p>
           <div
             class="pl-3 pr-2 py-2 flex items-center gap-2"
             role="button"
@@ -110,6 +111,7 @@ export function SessionRevertDock(props: {
         data-component="session-revert-dock"
         class="w-full overflow-hidden rounded-xl border-[0.5px] border-v2-border-border-base bg-v2-background-bg-layer-01"
       >
+        <p class="px-4 pt-3 text-xs text-v2-text-text-muted">{language.t("session.revert.hiddenWarning")}</p>
         <div
           class="flex h-[42px] items-center gap-2 pl-4 pr-2"
           role="button"

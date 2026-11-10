@@ -5650,6 +5650,13 @@ export type SessionInputAdmitted = {
   cancelledSeq?: number
 }
 
+export type RevertPlan = {
+  messageID: string
+  files: Array<string>
+  coverage: "snapshot" | "file-tools"
+  token: string
+}
+
 export type SessionMessageAgentSwitched = {
   id: string
   metadata?: {
@@ -12061,34 +12068,6 @@ export type ProjectCurrentResponses = {
 
 export type ProjectCurrentResponse = ProjectCurrentResponses[keyof ProjectCurrentResponses]
 
-export type ProjectInitGitData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/project/git/init"
-}
-
-export type ProjectInitGitErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type ProjectInitGitError = ProjectInitGitErrors[keyof ProjectInitGitErrors]
-
-export type ProjectInitGitResponses = {
-  /**
-   * Project information after git initialization
-   */
-  200: Project
-}
-
-export type ProjectInitGitResponse = ProjectInitGitResponses[keyof ProjectInitGitResponses]
-
 export type ProjectUpdateData = {
   body?: {
     name?: string
@@ -14074,10 +14053,49 @@ export type V2SessionWaitResponses = {
 
 export type V2SessionWaitResponse = V2SessionWaitResponses[keyof V2SessionWaitResponses]
 
+export type V2SessionRevertPlanData = {
+  body?: never
+  path: {
+    sessionID: string
+    messageID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/revert/plan/{messageID}"
+}
+
+export type V2SessionRevertPlanErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MessageNotFoundError | SessionNotFoundError
+   */
+  404: MessageNotFoundError | SessionNotFoundError
+}
+
+export type V2SessionRevertPlanError = V2SessionRevertPlanErrors[keyof V2SessionRevertPlanErrors]
+
+export type V2SessionRevertPlanResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: RevertPlan
+  }
+}
+
+export type V2SessionRevertPlanResponse = V2SessionRevertPlanResponses[keyof V2SessionRevertPlanResponses]
+
 export type V2SessionRevertStageData = {
   body: {
     messageID: string
     files?: boolean
+    planToken?: string
   }
   path: {
     sessionID: string
@@ -14099,6 +14117,10 @@ export type V2SessionRevertStageErrors = {
    * MessageNotFoundError | SessionNotFoundError
    */
   404: MessageNotFoundError | SessionNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
   /**
    * UnknownError
    */

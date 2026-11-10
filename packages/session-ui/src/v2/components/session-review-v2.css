@@ -388,45 +388,6 @@
   padding-bottom: 160px;
 }
 
-[data-slot="session-review-v2-empty-no-git"] {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 24px;
-  padding-bottom: 160px;
-  text-align: center;
-}
-
-[data-slot="session-review-v2-empty-no-git"] [data-component="file-icon"] {
-  width: 20px;
-  height: 20px;
-  color: var(--v2-icon-icon-muted);
-}
-
-[data-slot="session-review-v2-empty-no-git-title"] {
-  flex: none;
-  font-size: 13px;
-  font-weight: 530;
-  line-height: 100%;
-  letter-spacing: -0.04px;
-  color: var(--v2-text-text-base);
-}
-
-[data-slot="session-review-v2-empty-no-git-description"] {
-  flex: none;
-  margin: 0 0 4px;
-  max-width: 360px;
-  font-size: 13px;
-  font-weight: 440;
-  line-height: 20px;
-  text-align: center;
-  letter-spacing: -0.04px;
-  color: var(--v2-text-text-muted);
-}
-
 [data-slot="session-review-v2-empty-changes"] {
   flex: 1;
   display: flex;

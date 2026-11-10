@@ -371,11 +371,29 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
+      HttpApiEndpoint.get("session.revert.plan", "/api/session/:sessionID/revert/plan/:messageID", {
+        params: { sessionID: Session.ID, messageID: SessionMessage.ID },
+        success: Schema.Struct({ data: Revert.Plan }),
+        error: [MessageNotFoundError, SessionNotFoundError, InvalidRequestError],
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.revert.plan",
+          summary: "Preview session revert",
+          description:
+            "Read the exact file selection for a revert without writing files, capturing snapshots, or interrupting the session.",
+        }),
+      ),
+    )
+    .add(
       HttpApiEndpoint.post("session.revert.stage", "/api/session/:sessionID/revert/stage", {
         params: { sessionID: Session.ID },
-        payload: Schema.Struct({ messageID: SessionMessage.ID, files: Schema.Boolean.pipe(Schema.optional) }),
+        payload: Schema.Struct({
+          messageID: SessionMessage.ID,
+          files: Schema.Boolean.pipe(Schema.optional),
+          planToken: Schema.String.pipe(Schema.optional),
+        }),
         success: Schema.Struct({ data: Revert.State }),
-        error: [MessageNotFoundError, SessionNotFoundError, UnknownError],
+        error: [MessageNotFoundError, SessionNotFoundError, ConflictError, UnknownError],
       })
         .middleware(sessionLocationMiddleware)
         .annotateMerge(

@@ -142,6 +142,8 @@ export class PromptConflictError extends Schema.TaggedErrorClass<PromptConflictE
 }) {}
 export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
+export const RevertPlanChangedError = SessionRevert.PlanChangedError
+export type RevertPlanChangedError = SessionRevert.PlanChangedError
 
 export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
 
@@ -225,11 +227,16 @@ export interface Interface {
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly revert: {
+    readonly plan: (input: {
+      sessionID: SessionSchema.ID
+      messageID: SessionMessage.ID
+    }) => Effect.Effect<Revert.Plan, NotFoundError | MessageNotFoundError>
     readonly stage: (input: {
       sessionID: SessionSchema.ID
       messageID: SessionMessage.ID
       files?: boolean
-    }) => Effect.Effect<Revert.State, NotFoundError | MessageNotFoundError | Snapshot.Error>
+      planToken?: string
+    }) => Effect.Effect<Revert.State, NotFoundError | MessageNotFoundError | RevertPlanChangedError | Snapshot.Error>
     readonly clear: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | Snapshot.Error>
     readonly commit: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   }
@@ -1109,9 +1116,24 @@ const layer = Layer.effect(
         )
       }),
       revert: {
+        plan: Effect.fn("V2Session.revert.plan")(function* (input) {
+          const session = yield* result.get(input.sessionID)
+          // Loading the full Location would start watchers and project-copy refreshes.
+          const project = yield* projects.resolve(session.location.directory)
+          return yield* SessionRevert.plan({
+            session,
+            messageID: input.messageID,
+            coverage: project.vcs?.type === "git" ? "snapshot" : "file-tools",
+          }).pipe(Effect.provideService(Database.Service, database))
+        }),
         stage: Effect.fn("V2Session.revert.stage")(function* (input) {
           const session = yield* result.get(input.sessionID)
-          return yield* SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
+          return yield* SessionRevert.stage({
+            session,
+            messageID: input.messageID,
+            files: input.files,
+            planToken: input.planToken,
+          }).pipe(
             Effect.provideService(Database.Service, database),
             Effect.provideService(EventV2.Service, events),
             Effect.provide(locations.get(session.location)),

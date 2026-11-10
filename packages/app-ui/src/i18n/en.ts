@@ -1,4 +1,26 @@
 export const dict = {
+  "session.revert.planChanged":
+    "The restore plan changed. Open Reset to this point again, review the updated files, and confirm.",
+  "session.revert.confirmTitle": "Reset to this point?",
+  "session.revert.confirmDescription":
+    "This hides the conversation from this point onward and restores files according to the plan below.",
+  "session.revert.loadingPlan": "Reading the restore plan…",
+  "session.revert.planFailed": "Could not read the restore plan. Nothing was reset. Please retry.",
+  "session.revert.noFiles": "No files will be restored.",
+  "session.revert.files": "These {{count}} files will be restored:",
+  "session.revert.fileToolsOnly":
+    "This project does not use Git. Only backed-up changes from Zaovra file tools are restored. Command-line changes will not be restored.",
+  "session.revert.listedOnly":
+    "Only the files in this plan will be restored. Unlisted command-line or other changes will not be restored.",
+  "session.revert.permanentWarning":
+    "Sending a new message after resetting permanently deletes the conversation after this point. Restore messages will no longer recover it.",
+  "session.revert.confirm": "Confirm reset",
+  "session.revert.restoreFailed":
+    "Files could not be restored. The reset did not complete. Check whether they were changed outside Zaovra and retry.",
+  "session.revert.hiddenWarning":
+    "Sending a new message permanently deletes the conversation after the reset point. It cannot be recovered afterward.",
+  "session.revert.nonGitChanges":
+    "This project does not use Git. Only backed-up changes from Zaovra file tools appear here. Command-line changes are not shown.",
   "conversation.view.label": "View",
   "prompt.slash.customDescription": "Insert /{{name}} into the draft to review and send",
   "sidebar.session.pin": "Pin conversation",
@@ -90,7 +112,7 @@ export const dict = {
   "session.turn.interrupted": "Interrupted",
   "session.turn.error": "Action needed",
   "session.snapshot.unconfirmed":
-    "Git tracking has not been confirmed. Authoritative change totals are unavailable; changes without snapshots cannot be undone.",
+    "Recoverable file changes could not be confirmed. Changes without a backup cannot be restored.",
   "session.snapshot.nogit":
     "Some operations, such as ordinary shell commands, have no undo snapshot. Captured file changes remain available in the turn changes bar.",
   "session.snapshot.unknown": "No usable snapshot was recorded. Changes without a snapshot cannot be undone.",
@@ -1348,11 +1370,6 @@ export const dict = {
   "session.review.loadingChanges": "Loading changes...",
   "session.review.empty": "No changes in this session yet",
   "session.review.noVcs": "No Git Version Control System detected, changes not displayed",
-  "session.review.noVcs.createGit.title": "Create a Git repository",
-  "session.review.noVcs.createGit.description":
-    "Create a Git repository to track, review, and undo changes. You can view project files in the artifacts panel without a repository.",
-  "session.review.noVcs.createGit.actionLoading": "Creating Git repository...",
-  "session.review.noVcs.createGit.action": "Create Git repository",
   "session.review.noSnapshot": "Snapshot tracking is disabled in config, so session changes are unavailable",
   "session.snapshot.unavailable": "No usable snapshot is available. File changes in this step cannot be undone.",
   "session.review.noChanges": "No changes",

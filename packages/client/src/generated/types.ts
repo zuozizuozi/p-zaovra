@@ -979,10 +979,37 @@ export type SessionsWaitInput = { readonly sessionID: { readonly sessionID: stri
 
 export type SessionsWaitOutput = void
 
+export type SessionsPlanInput = {
+  readonly sessionID: { readonly sessionID: string; readonly messageID: string }["sessionID"]
+  readonly messageID: { readonly sessionID: string; readonly messageID: string }["messageID"]
+}
+
+export type SessionsPlanOutput = {
+  readonly data: {
+    readonly messageID: string
+    readonly files: ReadonlyArray<string>
+    readonly coverage: "snapshot" | "file-tools"
+    readonly token: string
+  }
+}["data"]
+
 export type SessionsStageInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
-  readonly messageID: { readonly messageID: string; readonly files?: boolean | undefined }["messageID"]
-  readonly files?: { readonly messageID: string; readonly files?: boolean | undefined }["files"]
+  readonly messageID: {
+    readonly messageID: string
+    readonly files?: boolean | undefined
+    readonly planToken?: string | undefined
+  }["messageID"]
+  readonly files?: {
+    readonly messageID: string
+    readonly files?: boolean | undefined
+    readonly planToken?: string | undefined
+  }["files"]
+  readonly planToken?: {
+    readonly messageID: string
+    readonly files?: boolean | undefined
+    readonly planToken?: string | undefined
+  }["planToken"]
 }
 
 export type SessionsStageOutput = {

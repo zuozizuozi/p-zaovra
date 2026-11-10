@@ -99,8 +99,6 @@ import type {
   ProjectDirectoriesErrors,
   ProjectDirectoriesResponses,
   ProjectIcon,
-  ProjectInitGitErrors,
-  ProjectInitGitResponses,
   ProjectListErrors,
   ProjectListResponses,
   ProjectUpdateErrors,
@@ -304,6 +302,8 @@ import type {
   V2SessionRevertClearResponses,
   V2SessionRevertCommitErrors,
   V2SessionRevertCommitResponses,
+  V2SessionRevertPlanErrors,
+  V2SessionRevertPlanResponses,
   V2SessionRevertStageErrors,
   V2SessionRevertStageResponses,
   V2SessionScreenshotErrors,
@@ -2130,36 +2130,6 @@ export class Project extends HeyApiClient {
   }
 
   /**
-   * Initialize git repository
-   *
-   * Create a git repository for the current project and return the refreshed project info.
-   */
-  public initGit<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<ProjectInitGitResponses, ProjectInitGitErrors, ThrowOnError>({
-      url: "/project/git/init",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
    * Update project
    *
    * Update project properties such as name, icon, and commands.
@@ -3196,6 +3166,36 @@ export class Agent extends HeyApiClient {
 
 export class Revert extends HeyApiClient {
   /**
+   * Preview session revert
+   *
+   * Read the exact file selection for a revert without writing files, capturing snapshots, or interrupting the session.
+   */
+  public plan<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "messageID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2SessionRevertPlanResponses, V2SessionRevertPlanErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/revert/plan/{messageID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Stage session revert
    *
    * Stage or move a reversible session boundary and optionally apply its file changes.
@@ -3205,6 +3205,7 @@ export class Revert extends HeyApiClient {
       sessionID: string
       messageID?: string
       files?: boolean
+      planToken?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3216,6 +3217,7 @@ export class Revert extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "body", key: "messageID" },
             { in: "body", key: "files" },
+            { in: "body", key: "planToken" },
           ],
         },
       ],

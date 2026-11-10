@@ -1072,11 +1072,6 @@ export const dict = {
   "dialog.server.add.usernamePlaceholder": "Benutzername",
   "dialog.server.add.passwordPlaceholder": "Passwort",
   "server.row.noUsername": "Kein Benutzername",
-  "session.review.noVcs.createGit.title": "Git-Repository erstellen",
-  "session.review.noVcs.createGit.description":
-    "Änderungen in diesem Projekt verfolgen, überprüfen und rückgängig machen",
-  "session.review.noVcs.createGit.actionLoading": "Git-Repository wird erstellt...",
-  "session.review.noVcs.createGit.action": "Git-Repository erstellen",
   "session.todo.progress": "{{done}} von {{total}} Aufgaben erledigt",
   "session.question.progress": "{{current}} von {{total}} Fragen",
   "session.header.open.finder": "Finder",

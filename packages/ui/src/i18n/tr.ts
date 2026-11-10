@@ -36,10 +36,6 @@ export const dict = {
   "ui.sessionReviewV2.previousFile": "Önceki dosya",
   "ui.sessionReviewV2.nextFile": "Sonraki dosya",
   "ui.sessionReviewV2.diffView": "Fark görünümü",
-  "ui.sessionReviewV2.empty.noGit.title": "İzlenen değişiklik yok",
-  "ui.sessionReviewV2.empty.noGit.description": "Bu projedeki değişiklikleri takip et, incele ve geri al",
-  "ui.sessionReviewV2.empty.noGit.action": "Git deposu oluştur",
-  "ui.sessionReviewV2.empty.noGit.actionLoading": "Git deposu oluşturuluyor...",
   "ui.sessionReviewV2.empty.changes.title": "Henüz dosya değişikliği yok",
   "ui.sessionReviewV2.empty.changes.description": "Proje değişiklikleri burada görünecek",
 

@@ -39,16 +39,6 @@ export const ProjectApi = HttpApi.make("project")
             description: "Retrieve the currently active project that Zaovra is working with.",
           }),
         ),
-        HttpApiEndpoint.post("initGit", `${root}/git/init`, {
-          query: WorkspaceRoutingQuery,
-          success: described(Project.Info, "Project information after git initialization"),
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "project.initGit",
-            summary: "Initialize git repository",
-            description: "Create a git repository for the current project and return the refreshed project info.",
-          }),
-        ),
         HttpApiEndpoint.patch("update", `${root}/:projectID`, {
           params: { projectID: ProjectV2.ID },
           query: WorkspaceRoutingQuery,

@@ -22,3 +22,11 @@ export const State = Schema.Struct({
   files: Schema.Array(FileDiff).pipe(optional),
 }).annotate({ identifier: "Revert.State" })
 export interface State extends Schema.Schema.Type<typeof State> {}
+
+export const Plan = Schema.Struct({
+  messageID: SessionMessage.ID,
+  files: Schema.Array(RelativePath),
+  coverage: Schema.Literals(["snapshot", "file-tools"]),
+  token: Schema.String,
+}).annotate({ identifier: "Revert.Plan" })
+export interface Plan extends Schema.Schema.Type<typeof Plan> {}

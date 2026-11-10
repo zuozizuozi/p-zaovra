@@ -50,11 +50,6 @@ export const dict: Record<string, string> = {
   "ui.sessionReviewV2.previousFile": "Previous file",
   "ui.sessionReviewV2.nextFile": "Next file",
   "ui.sessionReviewV2.diffView": "Diff view",
-  "ui.sessionReviewV2.empty.noGit.title": "No tracked changes",
-  "ui.sessionReviewV2.empty.noGit.description":
-    "Create a Git repository to track, review, and undo changes. You can view project files in the artifacts panel without a repository.",
-  "ui.sessionReviewV2.empty.noGit.action": "Create Git repository",
-  "ui.sessionReviewV2.empty.noGit.actionLoading": "Creating Git repository...",
   "ui.sessionReviewV2.empty.changes.title": "No file changes yet",
   "ui.sessionReviewV2.empty.changes.description": "Project changes will appear here",
 

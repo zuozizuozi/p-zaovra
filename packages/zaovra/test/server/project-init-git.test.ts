@@ -1,15 +1,13 @@
 import { afterEach, describe, expect } from "bun:test"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
-import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
 import { Effect, Layer } from "effect"
-import { HttpClientResponse } from "effect/unstable/http"
+import { OpenApi } from "effect/unstable/httpapi"
 import path from "path"
-import { InstanceRef } from "../../src/effect/instance-ref"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
-import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
-import { Snapshot } from "../../src/snapshot"
+import { PublicApi } from "../../src/server/routes/instance/httpapi/public"
+import { UI_UPSTREAM } from "../../src/server/shared/ui"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -22,97 +20,57 @@ afterEach(async () => {
 
 const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 const testInstanceStore = AppNodeBuilder.build(InstanceStore.node, [[InstanceStore.bootstrapNode, noopBootstrap]])
+const it = testEffect(Layer.mergeAll(AppNodeBuilder.build(FSUtil.node), testInstanceStore, httpApiLayer))
 
-const it = testEffect(
-  Layer.mergeAll(AppNodeBuilder.build(LayerNode.group([FSUtil.node, Snapshot.node])), testInstanceStore, httpApiLayer),
-)
-
-function request(directory: string, url: string, init: RequestInit = {}) {
-  return requestInDirectory(url, directory, init)
-}
-
-function json<T>(response: HttpClientResponse.HttpClientResponse) {
-  return response.json.pipe(Effect.map((value) => value as T))
-}
-
-function collectGlobalEvents() {
-  return Effect.acquireRelease(
-    Effect.sync(() => {
-      const seen: GlobalEvent[] = []
-      const on = (event: GlobalEvent) => {
-        seen.push(event)
-      }
-      GlobalBus.on("event", on)
-      return { seen, on }
-    }),
-    ({ on }) => Effect.sync(() => GlobalBus.off("event", on)),
-  )
-}
-
-const disposedEvents = (seen: GlobalEvent[], dir: string) =>
-  seen.filter((evt) => evt.directory === dir && evt.payload.type === "server.instance.disposed").length
-
-describe("project.initGit endpoint", () => {
-  it.instance("initializes git and reloads immediately", () =>
-    Effect.gen(function* () {
-      const tmp = yield* TestInstance
-      const fs = yield* FSUtil.Service
-      const events = yield* collectGlobalEvents()
-
-      const init = yield* request(tmp.directory, "/project/git/init", {
-        method: "POST",
-      })
-      const body = yield* json(init)
-      expect(init.status).toBe(200)
-      expect(body).toMatchObject({
-        id: "global",
-        vcs: "git",
-        worktree: tmp.directory,
-      })
-      // Reload behavior: bus emits exactly one server.instance.disposed for the directory.
-      expect(disposedEvents(events.seen, tmp.directory)).toBe(1)
-      expect(yield* fs.exists(path.join(tmp.directory, ".git", "zaovra"))).toBe(false)
-
-      const current = yield* request(tmp.directory, "/project/current")
-      expect(current.status).toBe(200)
-      expect(yield* json(current)).toMatchObject({
-        id: "global",
-        vcs: "git",
-        worktree: tmp.directory,
-      })
-
-      const ctx = yield* InstanceStore.use.reload({ directory: tmp.directory })
-      const tracked = yield* Snapshot.Service.use((snapshot) => snapshot.track()).pipe(
-        Effect.provideService(InstanceRef, ctx),
-      )
-      expect(tracked).toBeTruthy()
-    }),
-  )
-
-  it.instance(
-    "does not reload when the project is already git",
-    () =>
-      Effect.gen(function* () {
-        const tmp = yield* TestInstance
-        const events = yield* collectGlobalEvents()
-
-        const init = yield* request(tmp.directory, "/project/git/init", {
-          method: "POST",
-        })
-        expect(init.status).toBe(200)
-        expect(yield* json(init)).toMatchObject({
-          vcs: "git",
-          worktree: tmp.directory,
-        })
-        expect(disposedEvents(events.seen, tmp.directory)).toBe(0)
-
-        const current = yield* request(tmp.directory, "/project/current")
-        expect(current.status).toBe(200)
-        expect(yield* json(current)).toMatchObject({
-          vcs: "git",
-          worktree: tmp.directory,
-        })
-      }),
-    { git: true },
-  )
+describe("789 removed project initialization endpoint", () => {
+  for (const git of [false, true])
+    it.instance(
+      `does not create or change a repository (git=${git})`,
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* TestInstance
+          const fs = yield* FSUtil.Service
+          const forwarded: string[] = []
+          // The real router sends unmatched paths to the UI. Keep that request
+          // on loopback and restore the shared URL when this test scope closes.
+          const upstream = yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              const previous = UI_UPSTREAM.href
+              const server = Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                fetch(request) {
+                  forwarded.push(request.url)
+                  return new Response("Not Found", { status: 404 })
+                },
+              })
+              UI_UPSTREAM.href = `http://127.0.0.1:${server.port}/`
+              return { server, previous }
+            }),
+            (value) =>
+              Effect.sync(() => {
+                UI_UPSTREAM.href = value.previous
+                value.server.stop(true)
+              }),
+          )
+          expect(OpenApi.fromApi(PublicApi).paths?.["/project/git/init"]).toBeUndefined()
+          const before = yield* requestInDirectory("/project/current", tmp.directory)
+          expect(before.status).toBe(200)
+          const project = yield* before.json
+          const exists = yield* fs.exists(path.join(tmp.directory, ".git"))
+          const response = yield* requestInDirectory("/project/git/init", tmp.directory, { method: "POST" })
+          if (response.status !== 404) {
+            const body = yield* response.text
+            yield* Effect.sync(() =>
+              console.error("removed endpoint response", { status: response.status, body, forwarded }),
+            )
+          }
+          expect(response.status).toBe(404)
+          expect(forwarded).toEqual([`http://127.0.0.1:${upstream.server.port}/project/git/init`])
+          expect(yield* fs.exists(path.join(tmp.directory, ".git"))).toBe(exists)
+          const after = yield* requestInDirectory("/project/current", tmp.directory)
+          expect(yield* after.json).toEqual(project)
+        }),
+      { git },
+    )
 })

@@ -35,6 +35,8 @@ import type {
   SessionsCompactOutput,
   SessionsWaitInput,
   SessionsWaitOutput,
+  SessionsPlanInput,
+  SessionsPlanOutput,
   SessionsStageInput,
   SessionsStageOutput,
   SessionsClearInput,
@@ -560,14 +562,25 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      plan: (input: SessionsPlanInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsPlanOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/revert/plan/${encodeURIComponent(input.messageID)}`,
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       stage: (input: SessionsStageInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: SessionsStageOutput }>(
           {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/revert/stage`,
-            body: { messageID: input["messageID"], files: input["files"] },
+            body: { messageID: input["messageID"], files: input["files"], planToken: input["planToken"] },
             successStatus: 200,
-            declaredStatuses: [404, 500, 400, 401],
+            declaredStatuses: [404, 409, 500, 400, 401],
             empty: false,
           },
           requestOptions,

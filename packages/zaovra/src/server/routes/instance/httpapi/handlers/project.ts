@@ -5,7 +5,6 @@ import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ProjectNotFoundError } from "../errors"
-import { markInstanceForReload } from "../lifecycle"
 
 export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", (handlers) =>
   Effect.gen(function* () {
@@ -18,19 +17,6 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {
       return (yield* InstanceState.context).project
-    })
-
-    const initGit = Effect.fn("ProjectHttpApi.initGit")(function* () {
-      const ctx = yield* InstanceState.context
-      const next = yield* svc.initGit({ directory: ctx.directory, project: ctx.project })
-      if (next.id === ctx.project.id && next.vcs === ctx.project.vcs && next.worktree === ctx.project.worktree)
-        return next
-      yield* markInstanceForReload(ctx, {
-        directory: ctx.directory,
-        worktree: ctx.directory,
-        project: next,
-      })
-      return next
     })
 
     const update = Effect.fn("ProjectHttpApi.update")(function* (ctx: {
@@ -56,7 +42,6 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     return handlers
       .handle("list", list)
       .handle("current", current)
-      .handle("initGit", initGit)
       .handle("update", update)
       .handle("directories", directories)
   }),

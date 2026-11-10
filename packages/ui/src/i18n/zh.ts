@@ -53,11 +53,6 @@ export const dict = {
   "ui.sessionReviewV2.previousFile": "上一个文件",
   "ui.sessionReviewV2.nextFile": "下一个文件",
   "ui.sessionReviewV2.diffView": "差异视图",
-  "ui.sessionReviewV2.empty.noGit.title": "无已跟踪的变更",
-  "ui.sessionReviewV2.empty.noGit.description":
-    "创建 Git 仓库用于跟踪、审查和撤销更改。无需创建仓库，也可在成果面板查看项目文件。",
-  "ui.sessionReviewV2.empty.noGit.action": "创建 Git 仓库",
-  "ui.sessionReviewV2.empty.noGit.actionLoading": "正在创建 Git 仓库...",
   "ui.sessionReviewV2.empty.changes.title": "尚无文件变更",
   "ui.sessionReviewV2.empty.changes.description": "项目变更将显示在此处",
   "ui.fileMedia.kind.image": "图片",

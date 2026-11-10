@@ -5,6 +5,9 @@ import { DateTime, Effect, Schema } from "effect"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { RelativePath } from "../schema"
+import { Location } from "../location"
+import { Revert } from "@zaovra-ai/schema/revert"
+import { Hash } from "../util/hash"
 import { Snapshot } from "../snapshot"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
@@ -24,7 +27,11 @@ interface BoundaryInput {
   readonly messageID: SessionMessage.ID
 }
 
-const plan = Effect.fn("SessionRevert.plan")(function* (input: BoundaryInput) {
+export class PlanChangedError extends Schema.TaggedErrorClass<PlanChangedError>()("Session.RevertPlanChangedError", {
+  sessionID: SessionSchema.ID,
+}) {}
+
+const selectFiles = Effect.fn("SessionRevert.selectFiles")(function* (input: BoundaryInput) {
   const db = (yield* Database.Service).db
   const boundary = yield* db
     .select({ seq: SessionMessageTable.seq })
@@ -57,24 +64,63 @@ const plan = Effect.fn("SessionRevert.plan")(function* (input: BoundaryInput) {
   return files
 })
 
+// The same selection drives preview and execution. Reading a plan must not
+// capture a snapshot, publish events, or interrupt a running session.
+const prepare = Effect.fn("SessionRevert.prepare")(function* (input: {
+  readonly session: SessionSchema.Info
+  readonly messageID: SessionMessage.ID
+  readonly files?: boolean
+  readonly coverage: Revert.Plan["coverage"]
+}) {
+  const next = yield* selectFiles({ sessionID: input.session.id, messageID: input.messageID })
+  const restore = new Map<RelativePath, Snapshot.ID>()
+  const original = input.session.revert?.snapshot
+  if (original) for (const file of input.session.revert?.files ?? []) restore.set(file.path, Snapshot.ID.make(original))
+  if (input.files !== false) for (const [file, tree] of next) restore.set(file, tree)
+  const plan = {
+    messageID: input.messageID,
+    files: Array.from(restore.keys()).sort(),
+    coverage: input.coverage,
+    token: Hash.sha256(
+      JSON.stringify([
+        input.session.id,
+        input.messageID,
+        input.files !== false,
+        input.coverage,
+        original,
+        [...restore],
+      ]),
+    ),
+  } satisfies Revert.Plan
+  return { next, restore, plan }
+})
+
+export const plan = Effect.fn("SessionRevert.plan")(function* (input: Parameters<typeof prepare>[0]) {
+  return (yield* prepare(input)).plan
+})
+
 export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
   readonly session: SessionSchema.Info
   readonly messageID: SessionMessage.ID
   readonly files?: boolean
+  readonly planToken?: string
 }) {
+  const location = yield* Location.Service
+  const prepared = yield* prepare({ ...input, coverage: location.vcs?.type === "git" ? "snapshot" : "file-tools" })
+  if (input.planToken !== undefined && input.planToken !== prepared.plan.token)
+    return yield* new PlanChangedError({ sessionID: input.session.id })
   const snapshot = yield* Snapshot.Service
   const events = yield* EventV2.Service
   const original = input.session.revert?.snapshot
     ? Snapshot.ID.make(input.session.revert.snapshot)
     : yield* snapshot.capture({ sessionID: input.session.id })
-  const next = yield* plan({ sessionID: input.session.id, messageID: input.messageID })
-  const restore = new Map<RelativePath, Snapshot.ID>()
-  if (original) {
-    for (const file of input.session.revert?.files ?? []) restore.set(file.path, original)
-  }
-  if (input.files !== false) for (const [file, tree] of next) restore.set(file, tree)
-  if (restore.size) yield* snapshot.restore({ files: restore })
-  const paths = input.files === false ? [] : Array.from(next.keys())
+  if (prepared.restore.size && !original)
+    return yield* new Snapshot.Error({
+      operation: "restore",
+      message: "Could not back up the current files. No files were restored.",
+    })
+  if (prepared.restore.size) yield* snapshot.restore({ files: prepared.restore })
+  const paths = input.files === false ? [] : Array.from(prepared.next.keys())
   const files = original
     ? yield* snapshot.diff({
         from: original,

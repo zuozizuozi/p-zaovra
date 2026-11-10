@@ -3,6 +3,20 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "session.revert.planChanged": "恢复计划已经变化，请重新点击“重置到此点”核对后再确认。",
+  "session.revert.confirmTitle": "重置到此点？",
+  "session.revert.confirmDescription": "确认后，会隐藏此点及之后的对话，并按下面的真实计划恢复文件。",
+  "session.revert.loadingPlan": "正在读取恢复计划…",
+  "session.revert.planFailed": "无法取得恢复计划，未执行重置。请重试。",
+  "session.revert.noFiles": "不会恢复任何文件。",
+  "session.revert.files": "将恢复以下 {{count}} 个文件：",
+  "session.revert.fileToolsOnly": "此项目没有 Git。只恢复造物文件工具已备份的改动；命令行做的改动不会恢复。",
+  "session.revert.listedOnly": "只恢复计划中列出的文件；未列出的命令行或其他改动不会恢复。",
+  "session.revert.permanentWarning": "重置后发送新消息，此点之后的对话将永久删除，无法再通过“恢复消息”找回。",
+  "session.revert.confirm": "确认重置",
+  "session.revert.restoreFailed": "文件恢复失败，未完成重置。请检查文件是否被外部修改后重试。",
+  "session.revert.hiddenWarning": "发送新消息后，重置点之后的对话将永久删除，无法找回。",
+  "session.revert.nonGitChanges": "此项目没有 Git。这里只显示造物文件工具已备份的改动，命令行改动不显示。",
   "conversation.view.label": "视图",
   "prompt.slash.customDescription": "将 /{{name}} 填入草稿，编辑后发送",
   "sidebar.session.pin": "置顶对话",
@@ -85,7 +99,7 @@ export const dict = {
   "session.turn.stopped": "已停止",
   "session.turn.interrupted": "已中断",
   "session.turn.error": "需要处理",
-  "session.snapshot.unconfirmed": "尚未确认 Git 跟踪，无法提供权威改动统计；没有快照的改动无法撤销。",
+  "session.snapshot.unconfirmed": "暂时无法确认可恢复的文件改动；未备份的改动不能恢复。",
   "session.snapshot.nogit":
     "部分操作（如普通 shell 命令）没有可撤销的快照。已捕获的文件改动仍可在本轮改动条中查看和撤销。",
   "session.snapshot.unknown": "本次未能保存可用快照；没有快照的改动无法撤销。",
@@ -1676,11 +1690,6 @@ export const dict = {
   "dialog.server.add.usernamePlaceholder": "用户名",
   "dialog.server.add.passwordPlaceholder": "密码",
   "server.row.noUsername": "无用户名",
-  "session.review.noVcs.createGit.title": "创建 Git 仓库",
-  "session.review.noVcs.createGit.description":
-    "创建 Git 仓库用于跟踪、审查和撤消更改。无需创建仓库，也可在成果面板查看项目文件。",
-  "session.review.noVcs.createGit.actionLoading": "正在创建 Git 仓库...",
-  "session.review.noVcs.createGit.action": "创建 Git 仓库",
   "session.todo.progress": "已完成 {{done}} 个任务（共 {{total}} 个）",
   "session.question.skip": "跳过",
   "session.question.recommended": "推荐",
