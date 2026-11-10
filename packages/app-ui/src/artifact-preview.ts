@@ -7,6 +7,11 @@ export function artifactViewer(target: string) {
 }
 export type ArtifactState = { title: string; url: string; loading: boolean; error?: string; zoom: number }
 export type ArtifactPreviewAPI = {
+  inspectFile?(input: { target: string; directory: string }): Promise<{ bytes: number }>
+  saveFile?(input: {
+    target: string
+    directory: string
+  }): Promise<{ path: string; bytes: number; sha256: string } | undefined>
   fileAction?(input: { target: string; directory: string; action: "open" | "reveal" }): Promise<void>
   readPDF(input: { target: string; directory: string }): Promise<ArrayBuffer>
   open(input: { id: string; target: string; directory: string }): Promise<void>

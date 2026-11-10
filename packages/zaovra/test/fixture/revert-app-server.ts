@@ -3,8 +3,10 @@ import path from "node:path"
 import { Context, Schema } from "effect"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { UI_UPSTREAM } from "../../src/server/shared/ui"
+import { artifactOutputs } from "./artifact-outputs"
 
 const [root, renderer, mode] = process.argv.slice(2)
+const artifacts = process.env.QA_ARTIFACTS_FIXTURE === "1"
 if (!root || !renderer) throw new Error("Missing isolated profile and built renderer paths")
 if (!(await Bun.file(path.join(renderer, "index.html")).exists())) throw new Error("Built renderer unavailable")
 const resume = mode === "--resume"
@@ -32,7 +34,10 @@ const projects = resume
                 npm: "@ai-sdk/openai-compatible",
                 options: { baseURL: "http://127.0.0.1:4565/v1", apiKey: "fixture" },
                 models: {
-                  "audit-model": { name: "789 local scripted model", limit: { context: 128000, output: 1024 } },
+                  "audit-model": {
+                    name: artifacts ? "792 local scripted model" : "789 local scripted model",
+                    limit: { context: 128000, output: 1024 },
+                  },
                 },
               },
             },
@@ -78,31 +83,45 @@ const provider = Bun.serve({
     )(await request.json())
     providerRequests++
     const last = body.messages.at(-1)
-    const tools = last?.role === "user" && JSON.stringify(last.content).includes("789-create-files")
+    const tools =
+      last?.role === "user" &&
+      JSON.stringify(last.content).includes(artifacts ? "792-create-files" : "789-create-files")
     const delta = tools
       ? {
           tool_calls: [
+            ...(artifacts
+              ? artifactOutputs.map((file, index) => ({
+                  index,
+                  id: `artifact-write-${index}`,
+                  type: "function",
+                  function: { name: "write", arguments: JSON.stringify(file) },
+                }))
+              : [
+                  {
+                    index: 0,
+                    id: "write-existing",
+                    type: "function",
+                    function: {
+                      name: "write",
+                      arguments: JSON.stringify({
+                        path: "existing.txt",
+                        content: "tool-after",
+                        expectedContent: "tool-before",
+                      }),
+                    },
+                  },
+                  {
+                    index: 1,
+                    id: "write-new",
+                    type: "function",
+                    function: {
+                      name: "write",
+                      arguments: JSON.stringify({ path: "new.txt", content: "tool-created" }),
+                    },
+                  },
+                ]),
             {
-              index: 0,
-              id: "write-existing",
-              type: "function",
-              function: {
-                name: "write",
-                arguments: JSON.stringify({
-                  path: "existing.txt",
-                  content: "tool-after",
-                  expectedContent: "tool-before",
-                }),
-              },
-            },
-            {
-              index: 1,
-              id: "write-new",
-              type: "function",
-              function: { name: "write", arguments: JSON.stringify({ path: "new.txt", content: "tool-created" }) },
-            },
-            {
-              index: 2,
+              index: artifacts ? 3 : 2,
               id: "bash-change",
               type: "function",
               function: {
@@ -116,7 +135,11 @@ const provider = Bun.serve({
             },
           ],
         }
-      : { content: "789 fixture completed. Files were produced by actual tools." }
+      : {
+          content: artifacts
+            ? "792 fixture completed. Files were produced by actual tools. [Local result](http://127.0.0.1:4566/fixture-result)"
+            : "789 fixture completed. Files were produced by actual tools.",
+        }
     console.log("local-provider:" + JSON.stringify({ request: providerRequests, tools }))
     await Bun.write(path.join(root, "provider-count.json"), JSON.stringify({ providerRequests }))
     return new Response(
@@ -129,6 +152,13 @@ const assets = Bun.serve({
   hostname: "127.0.0.1",
   port: 4566,
   async fetch(request) {
+    if (artifacts && new URL(request.url).pathname === "/fixture-result") {
+      const directory = projects.find((project) => project.git)!.directory
+      const file = Bun.file(path.join(directory, "成果 报告.html"))
+      return (await file.exists())
+        ? new Response(file, { headers: { "content-type": "text/html; charset=utf-8" } })
+        : new Response("File unavailable", { status: 404 })
+    }
     const filename = path.resolve(renderer, "." + decodeURIComponent(new URL(request.url).pathname))
     if (!filename.startsWith(path.resolve(renderer) + path.sep))
       return new Response(Bun.file(path.join(renderer, "index.html")))

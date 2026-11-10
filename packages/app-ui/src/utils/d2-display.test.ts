@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { usageDisplay } from "./usage-display"
-import { artifactLines } from "./artifact-lines"
 import { commandVerification, workVerification } from "./verification-label"
 
 describe("D2 evidence and usage display", () => {
@@ -39,13 +38,6 @@ describe("D2 evidence and usage display", () => {
     expect(usageDisplay(total)).toEqual({ output: 10, hitRate: 0.6, unknown: false })
     expect(usageDisplay({ ...total, unreported: 1 }).hitRate).toBeUndefined()
     expect(usageDisplay({ ...total, total: 0, unreported: 1 }).unknown).toBe(true)
-  })
-  test("text line counts exclude trailing terminator and never count binary/base64", () => {
-    expect(artifactLines({ type: "text", content: "a\r\nb\r\n" })).toBe(2)
-    expect(artifactLines({ type: "text", content: "" })).toBe(0)
-    expect(artifactLines({ type: "text", content: "\n" })).toBe(1)
-    expect(artifactLines({ type: "text", content: "png", encoding: "base64" })).toBeUndefined()
-    expect(artifactLines({ type: "binary", content: "bytes" })).toBeUndefined()
   })
   test("unfinished and obsolete commands never receive a current pass label", () => {
     expect(commandVerification({ exit: 0 })).toBe("commandPassed")

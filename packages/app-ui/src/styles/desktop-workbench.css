@@ -531,13 +531,8 @@ html[data-theme="oc-2"] body[data-new-layout] {
     }
   }
 
-  [data-component="artifacts-panel"] {
+  [data-component="artifact-preview-panel"] {
     background: var(--zaovra-surface);
-  }
-
-  [data-component="artifacts-panel"] form input {
-    background: var(--zaovra-canvas);
-    border-color: var(--zaovra-line);
   }
 
   [data-component="text-input-v2"] {
@@ -549,17 +544,7 @@ html[data-theme="oc-2"] body[data-new-layout] {
     box-shadow: none;
   }
 
-  [data-component="artifacts-panel"] [data-slot="artifact-address-row"] button {
-    background: transparent;
-    color: var(--zaovra-ink);
-    border-radius: 8px;
-  }
-
-  [data-component="artifacts-panel"] [data-slot="artifact-address-row"] button:not(:disabled):hover {
-    background: var(--zaovra-selection);
-  }
-
-  [data-component="artifacts-panel"] [role="tab"][aria-selected="true"] {
+  [data-component="artifact-preview-panel"] [role="tab"][aria-selected="true"] {
     background: var(--zaovra-selection);
     color: var(--zaovra-ink);
   }
@@ -988,7 +973,6 @@ html[data-theme="oc-2"] body[data-new-layout] {
     [data-component="prompt-input-v2"] [data-component="prompt-input"] {
       max-height: 60px;
     }
-
   }
 
   @media (max-width: 640px) {
@@ -1208,4 +1192,3 @@ html[data-theme="oc-2"]
 html[data-color-scheme="dark"] [data-component="empty-binary-background"] {
   opacity: 0.065;
 }
-

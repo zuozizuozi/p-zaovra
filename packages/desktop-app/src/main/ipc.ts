@@ -1,5 +1,6 @@
 import { createArtifactPreview } from "./artifact-preview"
 import { artifactFileAction } from "./artifact-server"
+import { inspectArtifactFile, saveArtifactFile } from "./artifact-save"
 import type { ArtifactPreviewAPI } from "@zaovra-ai/app/artifact-preview"
 import { execFile } from "node:child_process"
 import {
@@ -136,6 +137,17 @@ export function registerIpcHandlers(deps: Deps) {
       if (action === "reveal") return shell.showItemInFolder(file)
       const error = await shell.openPath(file)
       if (error) throw new Error("无法使用本机应用打开文件")
+    }),
+  )
+  handle("artifact-inspect-file", (_event, input: Parameters<typeof inspectArtifactFile>[0]) =>
+    inspectArtifactFile(input),
+  )
+  handle("artifact-save-file", (event, input: Parameters<typeof saveArtifactFile>[0]) =>
+    saveArtifactFile(input, async (name) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (!window) throw new Error("另存窗口不可用")
+      const result = await dialog.showSaveDialog(window, { defaultPath: name })
+      return result.canceled ? undefined : result.filePath
     }),
   )
   const rememberResolvedApp = (event: IpcMainInvokeEvent, value: string) => {

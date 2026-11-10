@@ -424,7 +424,10 @@ function adaptTool(sessionID: string, messageID: string, tool: SessionMessageAss
       input,
       output,
       title: tool.name,
-      metadata,
+      metadata: {
+        ...metadata,
+        ...(tool.state.outputPaths?.length ? { zaovraOutputPaths: tool.state.outputPaths } : {}),
+      },
       time: { start: tool.time.ran ?? tool.time.created, end: tool.time.completed ?? tool.time.created },
       attachments: tool.state.attachments?.map((file, index) => ({
         id: `${tool.id}:attachment:${index}`,

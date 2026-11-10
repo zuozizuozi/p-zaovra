@@ -4,6 +4,9 @@ import { getFilename } from "@zaovra-ai/core/util/path"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { FileLinkContext } from "@zaovra-ai/session-ui/context/file-link"
 import { artifactPath, artifactPreviewable } from "@/utils/artifact-path"
+import { turnDeliverables } from "@/utils/turn-deliverables"
+import { TurnDeliverables } from "@/components/turn-deliverables"
+import { SessionPanelControls } from "@/components/session/session-panel-controls"
 import { createQuery, skipToken, useMutation, useQueryClient } from "@tanstack/solid-query"
 import {
   batch,
@@ -33,7 +36,6 @@ import { ResizeHandle } from "@zaovra-ai/ui/resize-handle"
 import { Select } from "@zaovra-ai/ui/select"
 import { SelectV2 } from "@zaovra-ai/ui/v2/select-v2"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner } from "@zaovra-ai/ui/scroll-view"
-import { Tabs } from "@zaovra-ai/ui/tabs"
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
 import { createAutoScroll } from "@zaovra-ai/ui/hooks"
 import { previewSelectedLines } from "@zaovra-ai/session-ui/pierre/selection-bridge"
@@ -77,7 +79,13 @@ import {
   createSessionComposerRegionController,
   SessionComposerRegion,
 } from "@/pages/session/composer"
-import { createOpenReviewFile, createSessionTabs, createSizing, shouldShowFileTree } from "@/pages/session/helpers"
+import {
+  createOpenReviewFile,
+  createSessionTabs,
+  createSizing,
+  shouldShowFileTree,
+  SESSION_OPEN_FILE_TAB,
+} from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/timeline/message-timeline"
 import { createTimelineModel } from "@/pages/session/timeline/model"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
@@ -129,7 +137,6 @@ type VcsMode = "git" | "branch"
 
 const sessionViewState = () => ({
   messageId: undefined as string | undefined,
-  mobileTab: "session" as "session" | "changes",
 })
 
 function isCurrentSessionNotFoundError(error: unknown, sessionID: string | undefined) {
@@ -399,9 +406,25 @@ export default function Page() {
   const location = useLocation()
   const navigate = useNavigate()
   const { params, sessionKey, workspaceKey, tabs, view } = useSessionLayout()
-  const [artifactTarget, setArtifactTarget] = createSignal<{ path: string }>()
+  const [artifactTarget, setArtifactTarget] = createSignal<{ path: string; request: string }>()
   createEffect(on(sessionKey, () => setArtifactTarget(undefined)))
   const openResultFile = (input: string, encoded = false) => {
+    if (/^https?:\/\//i.test(input)) {
+      const url = URL.canParse(input) ? new URL(input) : undefined
+      if (!url || url.username || url.password) {
+        showToast({
+          variant: "error",
+          title: language.t("artifact.openError"),
+          description: language.t("artifact.pathError"),
+        })
+        return
+      }
+      setArtifactTarget({ path: url.href, request: crypto.randomUUID() })
+      tabs().open("artifacts")
+      tabs().setActive("artifacts")
+      view().reviewPanel.open()
+      return
+    }
     const target = artifactPath(input, sdk().directory, encoded)
     if (!target) {
       showToast({
@@ -415,7 +438,7 @@ export default function Page() {
       artifactPreviewable(target.path) ||
       /\.(?:docx?|xlsx?|pptx?|odt|ods|odp|zip|7z|rar|tar|gz|exe|dll|bin)$/i.test(target.path)
     ) {
-      setArtifactTarget({ path: target.path })
+      setArtifactTarget({ path: target.path, request: crypto.randomUUID() })
       tabs().open("artifacts")
       tabs().setActive("artifacts")
       view().reviewPanel.open()
@@ -603,13 +626,14 @@ export default function Page() {
   const isChildSession = createMemo(() => !!info()?.parentID)
   const diffs = createMemo(() => (params.id ? list(sync().data.session_diff[params.id]) : []))
   const canReview = createMemo(() => !!sync().project || !!params.id)
-  const reviewTab = createMemo(() => isDesktop())
+  const reviewTab = () => true
   const tabState = createSessionTabs({
     tabs,
     pathFromTab: file.pathFromTab,
     normalizeTab,
     review: reviewTab,
     hasReview: canReview,
+    fileBrowser: () => newSessionDesign() || !isDesktop(),
   })
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
@@ -734,11 +758,10 @@ export default function Page() {
     list.push("turn")
     return list
   })
-  const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
   const wantsReview = createMemo(() =>
     isDesktop()
       ? desktopFileTreeOpen() || (desktopReviewOpen() && activeTab() === "review")
-      : store.mobileTab === "changes",
+      : view().reviewPanel.opened() && activeTab() === "review",
   )
   const vcsMode = createMemo<VcsMode | undefined>(() => {
     const mode = reviewMode()
@@ -776,6 +799,11 @@ export default function Page() {
           !(sync().data.part[message.id] ?? []).some((part) => part.type === "text" && part.synthetic),
       )?.id,
   )
+  const delivered = createMemo(() => {
+    const messageID = turnMessageID()
+    if (!params.id || !messageID || info()?.revert || sync().data.session_working(params.id)) return []
+    return turnDeliverables({ messages: messages(), parts: sync().data.part, messageID, directory: sdk().directory })
+  })
   const turnQuery = createQuery(() => {
     const sessionID = params.id
     // Shell and synthetic history rows render as users, but do not own a turn diff.
@@ -2240,44 +2268,39 @@ export default function Page() {
 
   useUsageExceededDialogs()
 
-  const mobileTabs = (compact = false, bottom = false) => (
-    <Tabs value={store.mobileTab} class="h-auto">
-      <Tabs.List
-        classList={{
-          "!h-9": compact,
-          "[&::after]:!border-b-0 [&::after]:!border-t [&::after]:!border-border-weak-base": bottom,
+  const openSideTab = (tab: string) => {
+    if (view().reviewPanel.opened() && tabs().active() === tab) return view().reviewPanel.close()
+    tabs().open(tab)
+    tabs().setActive(tab)
+    view().reviewPanel.open()
+  }
+  const panelControls = () => (
+    <Show when={params.id}>
+      <SessionPanelControls
+        hasChanges={hasReview() || (turnTracked() && list(turnQuery.data).length > 0)}
+        terminal
+        opened={view().reviewPanel.opened()}
+        onFiles={() => {
+          if (isDesktop() && !newSessionDesign()) return command.trigger("file.open")
+          openSideTab(SESSION_OPEN_FILE_TAB)
         }}
-      >
-        <Tabs.Trigger
-          value="session"
-          classList={{
-            "!w-1/2 !max-w-none": true,
-            "!border-b-0 !border-t !border-border-weak-base [&:has([data-selected])]:!border-t-transparent": bottom,
-          }}
-          classes={{ button: compact ? "w-full !py-2" : "w-full" }}
-          onClick={() => setStore("mobileTab", "session")}
-        >
-          {language.t("session.tab.session")}
-        </Tabs.Trigger>
-        <Tabs.Trigger
-          value="changes"
-          classList={{
-            "!w-1/2 !max-w-none !border-r-0": true,
-            "!border-b-0 !border-t !border-border-weak-base [&:has([data-selected])]:!border-t-transparent": bottom,
-          }}
-          classes={{ button: compact ? "w-full !py-2" : "w-full" }}
-          onClick={() => setStore("mobileTab", "changes")}
-        >
-          {hasReview()
-            ? language.t("session.review.filesChanged", { count: reviewCount() })
-            : language.t("session.review.change.other")}
-        </Tabs.Trigger>
-      </Tabs.List>
-    </Tabs>
+        onChanges={() => {
+          if (!hasReview() && turnTracked() && list(turnQuery.data).length > 0) view().review.setMode("turn")
+          openSideTab("review")
+        }}
+        onContext={() => openSideTab("context")}
+        onTerminal={() => command.trigger("terminal.toggle")}
+      />
+    </Show>
   )
-  const mobileTabsBottom = createMemo(
-    () => !isDesktop() && settings.general.newLayoutDesigns() && settings.general.mobileTitlebarPosition() === "bottom",
-  )
+  let mobilePanel: HTMLDialogElement | undefined
+  createEffect(() => {
+    const opened = !isDesktop() && view().reviewPanel.opened() && !!params.id
+    if (!mobilePanel) return
+    if (opened && !mobilePanel.open) mobilePanel.showModal()
+    if (!opened && mobilePanel.open) mobilePanel.close()
+  })
+  onCleanup(() => mobilePanel?.close())
 
   const sessionErrorFallback = (error: unknown, reset: () => void) => {
     createEffect(on(sessionKey, reset, { defer: true }))
@@ -2287,25 +2310,8 @@ export default function Page() {
   const sessionPanelContent = () => (
     <>
       {sessionSync() ?? ""}
-      <Show when={!isDesktop() && !!params.id && settings.general.newLayoutDesigns() && !mobileTabsBottom()}>
-        {mobileTabs(true)}
-      </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
-          <Match when={params.id && mobileChanges()}>
-            <div class="relative h-full overflow-hidden">
-              {reviewContent({
-                diffStyle: "unified",
-                classes: {
-                  root: "pb-8 [&_[data-slot=session-review-list]]:pb-0",
-                  header: "px-4 !h-16 !pb-4",
-                  container: "px-4",
-                },
-                loadingClass: "px-4 py-4 text-text-weak",
-                emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
-              })}
-            </div>
-          </Match>
           <Match when={params.id}>
             <Show when={messagesReady() ? params.id : undefined} keyed>
               {(_id) => (
@@ -2355,7 +2361,25 @@ export default function Page() {
         </Switch>
       </div>
 
-      <Show when={(params.id || !newSessionDesign()) && !mobileChanges()}>
+      <Show when={params.id}>
+        <Show when={sessionKey()} keyed>
+          {(_) => (
+            <TurnDeliverables
+              items={delivered()}
+              directory={sdk().directory}
+              onPreview={openResultFile}
+              onOpenFile={(target) => {
+                const tab = file.tab(target)
+                void file.load(target)
+                tabs().open(tab)
+                tabs().setActive(tab)
+                view().reviewPanel.open()
+              }}
+            />
+          )}
+        </Show>
+      </Show>
+      <Show when={params.id || !newSessionDesign()}>
         {(_) => {
           const controller = createSessionComposerRegionController({
             state: composer,
@@ -2479,7 +2503,6 @@ export default function Page() {
           )
         }}
       </Show>
-      <Show when={!!params.id && mobileTabsBottom()}>{mobileTabs(true, true)}</Show>
     </>
   )
 
@@ -2487,7 +2510,63 @@ export default function Page() {
     <FileLinkContext.Provider value={openResultFile}>
       <FeedbackScene />
       <SessionRouteFrame>
-        <SessionHeader />
+        <SessionHeader controls={panelControls} />
+        <Show when={!isDesktop() && !!params.id}>
+          <dialog
+            ref={mobilePanel}
+            data-component="session-side-drawer"
+            aria-label={language.t("session.panel.reviewAndFiles")}
+            class="fixed inset-y-0 right-0 m-0 ml-auto hidden h-dvh max-h-dvh w-full max-w-[540px] flex-col border-0 bg-background-base p-0 text-text-base shadow-xl open:flex backdrop:bg-black/25"
+            onCancel={(event) => {
+              event.preventDefault()
+              view().reviewPanel.close()
+            }}
+            onClose={() => {
+              if (!isDesktop()) view().reviewPanel.close()
+            }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) view().reviewPanel.close()
+            }}
+          >
+            <div class="flex min-h-12 shrink-0 items-center justify-between border-b border-border-weak-base px-3">
+              <strong class="text-sm">{language.t("session.panel.reviewAndFiles")}</strong>
+              <button
+                type="button"
+                class="size-11 text-xl"
+                aria-label={language.t("session.panel.close")}
+                onClick={() => view().reviewPanel.close()}
+              >
+                ×
+              </button>
+            </div>
+            <div class="min-h-0 flex-1">
+              <SessionSidePanel
+                mobile
+                artifactTarget={artifactTarget()}
+                canReview={canReview}
+                diffs={reviewDiffs}
+                diffsReady={reviewReady}
+                empty={reviewEmptyText}
+                hasReview={hasReview}
+                reviewHasFocusableContent={() => hasReview() || reviewV2State.sidebarOpened()}
+                reviewCount={reviewCount}
+                reviewPanel={newSessionDesign() ? reviewPanelV2 : reviewPanel}
+                reviewSidebarToggle={(disabled) => (
+                  <SessionReviewV2SidebarToggle
+                    opened={reviewV2State.sidebarOpened()}
+                    disabled={disabled}
+                    onToggle={reviewV2State.toggleSidebar}
+                  />
+                )}
+                fileBrowserState={reviewV2State}
+                activeDiff={activeReviewFile()}
+                focusReviewDiff={focusReviewDiff}
+                reviewSnap={false}
+                size={size}
+              />
+            </div>
+          </dialog>
+        </Show>
         <div
           ref={panelRow}
           class="flex-1 min-h-0 flex flex-col md:flex-row"
@@ -2495,8 +2574,6 @@ export default function Page() {
             "gap-2 p-2": settings.general.newLayoutDesigns(),
           }}
         >
-          <Show when={!isDesktop() && !!params.id && !settings.general.newLayoutDesigns()}>{mobileTabs()}</Show>
-
           <div
             classList={{
               "@container relative shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none transition-[width]": true,

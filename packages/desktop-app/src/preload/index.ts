@@ -111,6 +111,8 @@ const api: ElectronAPI = {
   storeAttachment: (input) => ipcRenderer.invoke("store-attachment", input),
   cancelAttachment: (id) => ipcRenderer.invoke("cancel-attachment", id),
   artifactPreview: {
+    inspectFile: (input) => ipcRenderer.invoke("artifact-inspect-file", input),
+    saveFile: (input) => ipcRenderer.invoke("artifact-save-file", input),
     fileAction: (input) => ipcRenderer.invoke("artifact-file-action", input),
     readPDF: (input) => ipcRenderer.invoke("artifact-read-pdf", input),
     open: (input) => ipcRenderer.invoke("artifact-open", input),

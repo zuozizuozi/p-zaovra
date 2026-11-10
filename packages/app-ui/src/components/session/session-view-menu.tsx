@@ -11,7 +11,6 @@ export function SessionViewMenu(props: {
   onChange: (value: ConversationView | undefined) => void
   reviewOpened: boolean
   onReviewToggle: () => void
-  onArtifacts: () => void
 }) {
   const language = useLanguage()
   const Menu = props.modern ? MenuV2 : DropdownMenu
@@ -42,7 +41,6 @@ export function SessionViewMenu(props: {
         </Menu.RadioGroup>
       </Menu.Group>
       <Menu.Separator />
-      <Menu.Item onSelect={props.onArtifacts}>{language.t("artifact.view")}</Menu.Item>
       <Menu.CheckboxItem checked={props.reviewOpened} onChange={props.onReviewToggle}>
         {language.t("command.review.toggle")}
         <Show when={!props.modern}>

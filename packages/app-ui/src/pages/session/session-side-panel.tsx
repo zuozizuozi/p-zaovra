@@ -1,4 +1,4 @@
-import { ArtifactsPanel } from "@/components/artifacts-panel"
+import { ArtifactPreviewPanel } from "@/components/artifact-preview-panel"
 import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -64,7 +64,7 @@ function renderDiff(value: SnapshotFileDiff | VcsFileDiff): value is RenderDiff 
 }
 
 export function SessionSidePanel(props: {
-  artifactTarget?: { path: string }
+  artifactTarget?: { path: string; request: string }
   canReview: () => boolean
   diffs: () => (SnapshotFileDiff | VcsFileDiff)[]
   diffsReady: () => boolean
@@ -80,6 +80,7 @@ export function SessionSidePanel(props: {
   reviewSnap: boolean
   size: Sizing
   stacked?: boolean
+  mobile?: boolean
 }) {
   const layout = useLayout()
   const settings = useSettings()
@@ -94,7 +95,7 @@ export function SessionSidePanel(props: {
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const shown = settings.visibility.fileTree
 
-  const reviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
+  const reviewOpen = createMemo(() => (isDesktop() || props.mobile) && view().reviewPanel.opened())
   const fileOpen = createMemo(
     () =>
       isDesktop() &&
@@ -104,8 +105,9 @@ export function SessionSidePanel(props: {
       }),
   )
   const open = createMemo(() => reviewOpen() || fileOpen())
-  const reviewTab = createMemo(() => isDesktop())
+  const reviewTab = createMemo(() => isDesktop() || !!props.mobile)
   const panelWidth = createMemo(() => {
+    if (props.mobile) return "100%"
     if (!open()) return "0px"
     if (reviewOpen()) return "auto"
     return `${layout.fileTree.width()}px`
@@ -287,7 +289,7 @@ export function SessionSidePanel(props: {
   })
 
   return (
-    <Show when={isDesktop() && !(settings.general.newLayoutDesigns() && !params.id)}>
+    <Show when={(isDesktop() || props.mobile) && !(settings.general.newLayoutDesigns() && !params.id)}>
       <aside
         id="review-panel"
         aria-label={language.t("session.panel.reviewAndFiles")}
@@ -348,7 +350,7 @@ export function SessionSidePanel(props: {
                                 onCleanup(stop)
                               }}
                             >
-                              <Show when={reviewTab() && props.canReview()}>
+                              <Show when={reviewTab() && props.hasReview()}>
                                 <Tabs.Trigger
                                   value="review"
                                   id={reviewTabID}
@@ -362,7 +364,9 @@ export function SessionSidePanel(props: {
                                   </div>
                                 </Tabs.Trigger>
                               </Show>
-                              <Tabs.Trigger value="artifacts">{language.t("artifact.panel")}</Tabs.Trigger>
+                              <Show when={tabs().all().includes("artifacts")}>
+                                <Tabs.Trigger value="artifacts">{language.t("artifact.preview")}</Tabs.Trigger>
+                              </Show>
                               <Show when={contextOpen()}>
                                 <Tabs.Trigger
                                   value="context"
@@ -467,16 +471,15 @@ export function SessionSidePanel(props: {
                           <Show when={tabs().all().includes("artifacts")}>
                             <div
                               role="tabpanel"
-                              aria-label={language.t("artifact.panel")}
+                              aria-label={language.t("artifact.preview")}
                               class="h-full min-h-0 overflow-hidden"
                               classList={{ hidden: activeTab() !== "artifacts" }}
                             >
                               <Show when={sessionKey()} keyed>
                                 {(_key) => (
-                                  <ArtifactsPanel
+                                  <ArtifactPreviewPanel
                                     active={activeTab() === "artifacts"}
                                     target={props.artifactTarget}
-                                    onReview={() => activateTab("review")}
                                   />
                                 )}
                               </Show>
@@ -581,7 +584,7 @@ export function SessionSidePanel(props: {
                                 </div>
                               )}
                             </Show>
-                            <Show when={reviewTab() && props.canReview()}>
+                            <Show when={reviewTab() && props.hasReview()}>
                               <Tabs.Trigger
                                 value="review"
                                 id={reviewTabID}
@@ -592,7 +595,9 @@ export function SessionSidePanel(props: {
                                   : language.t("session.tab.review")}
                               </Tabs.Trigger>
                             </Show>
-                            <Tabs.Trigger value="artifacts">{language.t("artifact.panel")}</Tabs.Trigger>
+                            <Show when={tabs().all().includes("artifacts")}>
+                              <Tabs.Trigger value="artifacts">{language.t("artifact.preview")}</Tabs.Trigger>
+                            </Show>
                             <Show when={contextOpen()}>
                               <Tabs.Trigger
                                 value="context"
@@ -717,16 +722,15 @@ export function SessionSidePanel(props: {
                         <Show when={tabs().all().includes("artifacts")}>
                           <div
                             role="tabpanel"
-                            aria-label={language.t("artifact.panel")}
+                            aria-label={language.t("artifact.preview")}
                             class="h-full min-h-0 overflow-hidden"
                             classList={{ hidden: activeTab() !== "artifacts" }}
                           >
                             <Show when={sessionKey()} keyed>
                               {(_key) => (
-                                <ArtifactsPanel
+                                <ArtifactPreviewPanel
                                   active={activeTab() === "artifacts"}
                                   target={props.artifactTarget}
-                                  onReview={() => activateTab("review")}
                                 />
                               )}
                             </Show>

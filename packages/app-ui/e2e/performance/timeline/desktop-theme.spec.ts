@@ -106,17 +106,12 @@ for (const scheme of ["light", "dark", "system"] as const) {
     await info.attach("computed-colors", { body: JSON.stringify(results), contentType: "application/json" })
     await page.screenshot({ path: info.outputPath(`${scheme}-wide.png`) })
     if (scheme !== "system") {
-      await page.getByRole("button", { name: "查看成果", exact: true }).click()
-      const artifacts = page.locator('[data-component="artifacts-panel"]')
-      await expect(artifacts).toBeVisible()
-      await artifacts.locator("input").fill("index.html")
-      await expect(artifacts.getByRole("button", { name: "打开", exact: true })).toHaveCSS("color", results.foreground)
-      await expect(artifacts.getByRole("button", { name: "打开", exact: true })).toHaveCSS(
-        "background-color",
-        results.background,
-      )
-      await page.screenshot({ path: info.outputPath(`${scheme}-artifacts.png`) })
-      await page.getByRole("button", { name: "Toggle review", exact: true }).click()
+      const controls = page.locator('[data-component="session-panel-controls"]')
+      await expect(controls).toBeVisible()
+      await controls.getByRole("button").first().click()
+      await expect(page.locator("#review-panel")).toHaveAttribute("aria-hidden", "false")
+      await page.screenshot({ path: info.outputPath(`${scheme}-file-panel.png`) })
+      await controls.getByRole("button").first().click()
       await page.keyboard.press("Control+Comma")
       const settings = page.getByRole("dialog", { name: "Settings", exact: true })
       await settings.locator('[data-action="settings-theme"]').click()

@@ -8,7 +8,6 @@ const [state, setState] = createStore({
   modern: true,
   view: undefined as ConversationView | undefined,
   review: false,
-  artifact: 0,
 })
 const language = { locale: () => "en", t: (key: string) => (dict as Record<string, string>)[key] ?? key }
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
@@ -51,19 +50,41 @@ mock.module("@/utils/persist", () => ({
   persisted: <T,>(_: unknown, value: T) => value,
 }))
 const { SessionHeader } = await import("../../src/components/session/session-header")
+const { SessionPanelControls } = await import("../../src/components/session/session-panel-controls")
 const disposals: Array<() => void> = []
 afterEach(() => {
   disposals.splice(0).forEach((dispose) => dispose())
   document.body.replaceChildren()
-  setState({ modern: true, view: undefined, review: false, artifact: 0 })
+  setState({ modern: true, view: undefined, review: false })
 })
-function mountHeader() {
+function mountHeader(onAction?: (action: string) => void) {
   const caption = document.createElement("div")
   caption.id = "zaovra-titlebar-right"
   document.body.append(caption)
   const host = document.createElement("main")
   document.body.append(host)
-  const dispose = render(() => <SessionHeader />, host)
+  const dispose = render(
+    () => (
+      <SessionHeader
+        controls={
+          onAction
+            ? () => (
+                <SessionPanelControls
+                  hasChanges
+                  terminal
+                  opened={state.review}
+                  onFiles={() => onAction("files")}
+                  onChanges={() => onAction("changes")}
+                  onContext={() => onAction("context")}
+                  onTerminal={() => onAction("terminal")}
+                />
+              )
+            : undefined
+        }
+      />
+    ),
+    host,
+  )
   return { caption, host, dispose }
 }
 if (process.env.ZAOVRA_HEADER_BENCH === "1") {
@@ -89,12 +110,27 @@ if (process.env.ZAOVRA_HEADER_BENCH === "1") {
     )
   })
 } else {
-  test("763 modern caption remains free of session view and panel actions", () => {
+  test("792 caption without supplied panel controls does not invent actions", () => {
     const mounted = mountHeader()
     disposals.push(mounted.dispose)
     expect(mounted.caption.textContent).not.toContain("View")
     expect(mounted.caption.querySelectorAll("button")).toHaveLength(0)
   })
+  test.each([true, false])(
+    "792 %s caption mounts the actual shared file/change/context/terminal controls",
+    (modern) => {
+      setState("modern", modern)
+      const actions: string[] = []
+      const mounted = mountHeader((action) => actions.push(action))
+      disposals.push(mounted.dispose)
+      const buttons = mounted.caption.querySelectorAll<HTMLButtonElement>(
+        '[data-component="session-panel-controls"] button',
+      )
+      expect(buttons).toHaveLength(4)
+      for (const button of buttons) button.click()
+      expect(actions).toEqual(["files", "changes", "context", "terminal"])
+    },
+  )
 }
 
 if (process.env.ZAOVRA_HEADER_BENCH !== "1") {
@@ -119,7 +155,6 @@ if (process.env.ZAOVRA_HEADER_BENCH !== "1") {
                   onChange={(value) => setState("view", value)}
                   reviewOpened={state.review}
                   onReviewToggle={() => setState("review", !state.review)}
-                  onArtifacts={() => setState("artifact", state.artifact + 1)}
                 />
               </Menu.Content>
             </Menu.Portal>
@@ -144,7 +179,7 @@ if (process.env.ZAOVRA_HEADER_BENCH !== "1") {
       expect(item.getAttribute("aria-checked")).toBe("true")
     }
   })
-  test.each([true, false])("763 %s menu keeps review and artifact actions reachable", async (modern) => {
+  test.each([true, false])("792 %s view menu keeps review and removes the empty artifact entry", async (modern) => {
     mountMenu(modern)
     await settle()
     const review = document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!
@@ -153,11 +188,11 @@ if (process.env.ZAOVRA_HEADER_BENCH !== "1") {
     await settle()
     expect(state.review).toBe(true)
     expect(review.getAttribute("aria-checked")).toBe("true")
-    const artifact = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-      (node) => node.textContent?.trim() === language.t("artifact.view"),
-    )!
-    artifact.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerType: "mouse" }))
-    expect(state.artifact).toBe(1)
+    expect(
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].some(
+        (node) => node.textContent?.trim() === "View artifacts",
+      ),
+    ).toBe(false)
   })
   test("763 old layout no longer exposes its temporary view select in caption", () => {
     setState("modern", false)

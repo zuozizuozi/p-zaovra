@@ -2027,12 +2027,6 @@ export function MessageTimeline(props: {
                                   onChange={(value) => conversationView.set(value)}
                                   reviewOpened={layout.view(sessionKey).reviewPanel.opened()}
                                   onReviewToggle={() => layout.view(sessionKey).reviewPanel.toggle()}
-                                  onArtifacts={() => {
-                                    const panelTabs = layout.tabs(sessionKey)
-                                    panelTabs.open("artifacts")
-                                    panelTabs.setActive("artifacts")
-                                    layout.view(sessionKey).reviewPanel.open()
-                                  }}
                                 />
                                 <Show when={!parentID()}>
                                   <DropdownMenu.Item
@@ -2116,12 +2110,6 @@ export function MessageTimeline(props: {
                                 onChange={(value) => conversationView.set(value)}
                                 reviewOpened={layout.view(sessionKey).reviewPanel.opened()}
                                 onReviewToggle={() => layout.view(sessionKey).reviewPanel.toggle()}
-                                onArtifacts={() => {
-                                  const panelTabs = layout.tabs(sessionKey)
-                                  panelTabs.open("artifacts")
-                                  panelTabs.setActive("artifacts")
-                                  layout.view(sessionKey).reviewPanel.open()
-                                }}
                               />
                               <Show when={!parentID()}>
                                 <MenuV2.Item

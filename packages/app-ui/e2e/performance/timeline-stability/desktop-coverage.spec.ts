@@ -45,7 +45,7 @@ test("empty authoritative turn diff does not claim a file was changed", async ({
 test("optional HTML build inspection cannot suspend the workspace", async ({ page }) => {
   await setupTimeline(page, {
     settings: { newLayoutDesigns: true },
-    messages: [userMessage(), assistantMessage([textPart("prt_preview", "Preview ready")])],
+    messages: [userMessage(), assistantMessage([textPart("prt_preview", "[Preview](index.html)")])],
   })
   let release = () => {}
   const gate = new Promise<void>((resolve) => {
@@ -58,10 +58,8 @@ test("optional HTML build inspection cannot suspend the workspace", async ({ pag
     await route.fulfill({ json: { type: "text", content: "<html></html>" } })
   })
   try {
-    await page.getByRole("button", { name: "View artifacts", exact: true }).click()
-    const panel = page.locator('[data-component="artifacts-panel"]')
-    await panel.getByRole("textbox").first().fill("index.html")
-    await panel.getByRole("button", { name: "Open", exact: true }).click()
+    await page.getByRole("link", { name: "Preview", exact: true }).click()
+    const panel = page.locator('[data-component="artifact-preview-panel"]')
     await expect.poll(() => inspected).toBe(true)
     await expect(page.locator('[data-component="prompt-admission"]')).toBeVisible()
     await expect(panel).toBeVisible()
