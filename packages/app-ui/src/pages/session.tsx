@@ -109,6 +109,7 @@ import { formatRevertError } from "@/utils/revert-errors"
 import { SessionReviewV2SidebarToggle } from "@zaovra-ai/session-ui/v2/session-review-v2"
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
 import { createReviewPanelV2State } from "@/pages/session/v2/review-panel-v2-state"
+import { createReviewEntry } from "@/pages/session/review-entry"
 import { reviewDiffDirectory, reviewDiffNeedsLoad, reviewRootDirectory } from "@/pages/session/v2/review-diff-kinds"
 import { resolveReviewFilePath } from "@/pages/session/review-file-path"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
@@ -860,6 +861,16 @@ export default function Page() {
   const turnTracked = () => turnQuery.isFetched && !turnQuery.isError
   const reviewCount = () => reviewDiffs().length
   const hasReview = () => reviewCount() > 0
+  const reviewEntry = createReviewEntry({
+    workspace: () => ({
+      key: [...vcsKey(), serverSDK().scope],
+      git: !!params.id && sync().project?.vcs === "git",
+      client: sdk().client,
+    }),
+    reviewCount,
+    turnCount: () => (turnTracked() ? list(turnQuery.data).length : 0),
+    setMode: (mode) => view().review.setMode(mode),
+  })
   const reviewReady = () => {
     if (reviewMode() === "git" || reviewMode() === "branch") return !vcsQuery.isPending
     return !turnQuery.isPending || turnQuery.fetchStatus === "idle"
@@ -2277,7 +2288,7 @@ export default function Page() {
   const panelControls = () => (
     <Show when={params.id}>
       <SessionPanelControls
-        hasChanges={hasReview() || (turnTracked() && list(turnQuery.data).length > 0)}
+        hasChanges={reviewEntry.hasChanges()}
         terminal
         opened={view().reviewPanel.opened()}
         onFiles={() => {
@@ -2285,7 +2296,7 @@ export default function Page() {
           openSideTab(SESSION_OPEN_FILE_TAB)
         }}
         onChanges={() => {
-          if (!hasReview() && turnTracked() && list(turnQuery.data).length > 0) view().review.setMode("turn")
+          reviewEntry.select()
           openSideTab("review")
         }}
         onContext={() => openSideTab("context")}
@@ -2548,6 +2559,8 @@ export default function Page() {
                 diffsReady={reviewReady}
                 empty={reviewEmptyText}
                 hasReview={hasReview}
+                hasChanges={reviewEntry.hasChanges}
+                onReview={reviewEntry.select}
                 reviewHasFocusableContent={() => hasReview() || reviewV2State.sidebarOpened()}
                 reviewCount={reviewCount}
                 reviewPanel={newSessionDesign() ? reviewPanelV2 : reviewPanel}
@@ -2625,6 +2638,8 @@ export default function Page() {
               diffsReady={reviewReady}
               empty={reviewEmptyText}
               hasReview={hasReview}
+              hasChanges={reviewEntry.hasChanges}
+              onReview={reviewEntry.select}
               reviewHasFocusableContent={hasReview}
               reviewCount={reviewCount}
               reviewPanel={reviewPanel}
@@ -2646,6 +2661,8 @@ export default function Page() {
                       diffsReady={reviewReady}
                       empty={reviewEmptyText}
                       hasReview={hasReview}
+                      hasChanges={reviewEntry.hasChanges}
+                      onReview={reviewEntry.select}
                       reviewHasFocusableContent={() => hasReview() || reviewV2State.sidebarOpened()}
                       reviewCount={reviewCount}
                       reviewPanel={reviewPanelV2}
