@@ -609,6 +609,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         .filter(
           (message) =>
             message.role === "user" &&
+            !data.part[message.id]?.some((part) => part.type === "text" && part.synthetic) &&
             !admitted.get(sessionID)?.get(message.id) &&
             (message.time.created < oldest.time.created ||
               (message.time.created === oldest.time.created && message.id <= oldest.id)),
@@ -616,13 +617,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         .sort(cmpMessage)
         .at(-1)?.id
     let cursor = first.cursor.next
-    for (
-      let page = first;
-      !cachedParent &&
-      !page.data.some((item) => item.type === "user" || item.type === "shell" || item.type === "synthetic") &&
-      cursor;
-
-    ) {
+    for (let page = first; !cachedParent && !page.data.some((item) => item.type === "user") && cursor; ) {
       page = await loadPage(cursor)
       cursor = page.cursor.next
     }

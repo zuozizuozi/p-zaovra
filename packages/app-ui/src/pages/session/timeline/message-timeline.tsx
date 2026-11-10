@@ -94,7 +94,7 @@ import { turnPartFoldable } from "./turn-part-visibility"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
-import { filterVirtualIndexes, shouldAdjustTimelineSize } from "./virtual-items"
+import { bindTimelineRows, filterVirtualIndexes, shouldAdjustTimelineSize } from "./virtual-items"
 import { TurnProcessSummary, settledTurnStatus, hasTurnProcessContent } from "./turn-process-summary"
 
 const emptyMessages: MessageType[] = []
@@ -711,10 +711,11 @@ export function MessageTimeline(props: {
     if (props.shouldAnchorBottom()) return false
     return shouldAdjustTimelineSize(item, virtualizer)
   }
-  const virtualItemByKey = createMemo(
-    () => new Map(virtualizer.getVirtualItems().map((item) => [item.key, item] as const)),
+  const virtualRows = createMemo<ReturnType<typeof bindTimelineRows>>(
+    (previous) => bindTimelineRows(virtualizer.getVirtualItems(), timelineRowByKey(), previous),
+    new Map<string, { item: VirtualItem; row: TimelineRow.TimelineRow }>(),
   )
-  const virtualRowKeys = createMemo(() => virtualizer.getVirtualItems().map((item) => item.key as string))
+  const virtualRowKeys = createMemo(() => [...virtualRows().keys()])
   createEffect(() => {
     props.setRevealMessage?.((id) => {
       const index = messageRowIndex().get(id)
@@ -1735,10 +1736,10 @@ export function MessageTimeline(props: {
 
   function VirtualTimelineRow(props: { rowKey: string }) {
     let element: HTMLDivElement
-    const initialItem = virtualItemByKey().get(props.rowKey)!
-    const initialRow = timelineRowByKey().get(props.rowKey)!
-    const item = createMemo(() => virtualItemByKey().get(props.rowKey) ?? initialItem)
-    const row = createMemo(() => timelineRowByKey().get(props.rowKey) ?? initialRow)
+    const initial = virtualRows().get(props.rowKey)!
+    const initialItem = initial.item
+    const item = createMemo(() => virtualRows().get(props.rowKey)?.item ?? initialItem)
+    const row = createMemo(() => virtualRows().get(props.rowKey)?.row ?? initial.row)
     const tool = () => {
       const value = row()
       if (value._tag !== "AssistantPart" || value.group.type !== "part") return
