@@ -2582,14 +2582,18 @@ export default function Page() {
         </Show>
         <div
           ref={panelRow}
-          class="flex-1 min-h-0 flex flex-col md:flex-row"
+          class="flex-1 min-h-0 flex"
           classList={{
+            "flex-row": isDesktop(),
+            "flex-col": !isDesktop(),
             "gap-2 p-2": settings.general.newLayoutDesigns(),
           }}
         >
           <div
             classList={{
-              "@container relative shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none transition-[width]": true,
+              "@container relative shrink-0 flex flex-col min-h-0 transition-[width]": true,
+              "h-full flex-none": isDesktop(),
+              "flex-1": !isDesktop(),
               "duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
                 !size.active() && !ui.reviewSnap && !desktopInlineTerminalOnlyOpen(),
             }}
@@ -2651,7 +2655,10 @@ export default function Page() {
           </Show>
           <Show when={newSessionDesign()}>
             <Show when={isDesktop() ? desktopV2PanelLayout().visible : terminalOpen()}>
-              <div class="min-w-0 h-full flex flex-1 flex-col">
+              <div
+                class="min-w-0 flex flex-col"
+                classList={{ "h-full flex-1": isDesktop(), "w-full shrink-0": !isDesktop() }}
+              >
                 <Show when={isDesktop() && (desktopV2ReviewOpen() || desktopFileTreeOpen())}>
                   <div class="min-h-0 flex-1">
                     <SessionSidePanel
@@ -2701,12 +2708,13 @@ export default function Page() {
                 </Show>
                 <Show when={terminalOpen()}>
                   <div
+                    class="flex flex-col"
                     classList={{
                       "min-h-0 shrink-0": desktopV2PanelLayout().stacked,
                       "min-h-0 flex-1": !desktopV2PanelLayout().stacked,
                     }}
                   >
-                    <TerminalPanelV2 stacked={desktopV2PanelLayout().stacked} />
+                    <TerminalPanelV2 desktop={isDesktop()} stacked={desktopV2PanelLayout().stacked} />
                   </div>
                 </Show>
               </div>

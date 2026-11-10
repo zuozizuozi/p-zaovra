@@ -1,7 +1,13 @@
 import type { Message, Part } from "@zaovra-ai/sdk/v2"
 import { artifactPath } from "./artifact-path"
 
-export type TurnDeliverable = { target: string; kind: "file" | "link"; source: "tool" | "reply" }
+export type TurnDeliverable = {
+  target: string
+  kind: "file" | "link"
+  source: "tool" | "reply"
+  // A reply alone is a candidate until an exact, safe file inspection proves this turn changed it.
+  after?: number
+}
 
 // Derive from one admitted human turn, never from a workspace inventory or file watcher.
 export function turnDeliverables(input: {
@@ -15,18 +21,32 @@ export function turnDeliverables(input: {
   const outputs = new Map<string, TurnDeliverable>()
   const declared = new Set<string>()
   const produced = new Set<string>()
+  const logs = new Set<string>()
   const normalize = (target: string) => artifactPath(target, input.directory, /^file:\/\//i.test(target))?.path
-  for (const message of input.messages.slice(start + 1)) {
+  const following = input.messages.slice(start + 1)
+  const end = following.findIndex(
+    (message) =>
+      message.role === "user" &&
+      !(input.parts[message.id] ?? []).some((part) => part.type === "text" && part.synthetic),
+  )
+  const turn = end < 0 ? following : following.slice(0, end)
+  const final = turn.findLast((message) => message.role === "assistant" && message.time.completed)?.id
+  for (const message of turn) {
     if (message.role === "user") {
       if (!(input.parts[message.id] ?? []).some((part) => part.type === "text" && part.synthetic)) break
       continue
     }
     if (message.role !== "assistant" || !message.time.completed) continue
     for (const part of input.parts[message.id] ?? []) {
-      if (part.type === "text" && !part.synthetic && !part.ignored) {
-        // Only explicit Markdown links and path code spans count as declared outputs.
-        for (const match of part.text.matchAll(/\[[^\]\n]*\]\(<?([^\s)>]+)>?\)|`([^`\n]+)`/g)) {
-          const target = match[1] ?? match[2]
+      if (message.id === final && part.type === "text" && !part.synthetic && !part.ignored) {
+        const markup = /\[[^\]\n]*\]\((?:<([^>\n]+)>|([^\s)]+))\)|`([^`\n]+)`/g
+        const named = [...part.text.matchAll(markup)].map((match) => match[1] ?? match[2] ?? match[3])
+        const bare = part.text
+          .replace(markup, " ")
+          .matchAll(
+            /(?<![\p{L}\p{N}_/:.@])((?:[a-z]:[\\/])?[\p{L}\p{N}_./\\-]+\.(?:html?|md|pdf|png|jpe?g|gif|webp|svg|csv|json|docx?|xlsx?|pptx?|txt))(?![\p{L}\p{N}_])/giu,
+          )
+        for (const target of [...named, ...[...bare].map((match) => match[1])]) {
           if (/^https?:\/\//i.test(target)) {
             if (!URL.canParse(target)) continue
             const url = new URL(target)
@@ -64,12 +84,12 @@ export function turnDeliverables(input: {
           if (path) produced.add(path)
         }
       }
-      // Retained command logs are candidates only when the final reply explicitly names them.
+      // These paths carry command output logs, not the files a script created.
       const paths: unknown = state.metadata.zaovraOutputPaths
       if (Array.isArray(paths))
         for (const target of paths as unknown[]) {
           const path = typeof target === "string" ? normalize(target) : undefined
-          if (path) produced.add(path)
+          if (path) logs.add(path)
         }
       for (const attachment of state.attachments ?? []) {
         const path = normalize(attachment.url)
@@ -77,7 +97,38 @@ export function turnDeliverables(input: {
       }
     }
   }
-  for (const target of declared)
-    if (produced.has(target)) outputs.set(target, { target, kind: "file", source: "reply" })
+  for (const target of declared) {
+    if (outputs.has(target)) continue
+    if (produced.has(target)) {
+      outputs.set(target, { target, kind: "file", source: "reply" })
+      continue
+    }
+    if (logs.has(target)) continue
+    const after = input.messages[start].time.created
+    if (Number.isFinite(after) && after > 0) outputs.set(target, { target, kind: "file", source: "reply", after })
+  }
   return [...outputs.values()]
+}
+
+export async function inspectTurnDeliverables(
+  items: readonly TurnDeliverable[],
+  inspect: (target: string) => Promise<{ created?: number; modified?: number } | undefined>,
+) {
+  return Object.fromEntries(
+    await Promise.all(
+      items
+        .filter((item) => item.kind === "file")
+        .map(async (item) => [
+          item.target,
+          await inspect(item.target).then(
+            (info) =>
+              item.after === undefined ||
+              [info?.created, info?.modified].some(
+                (time) => typeof time === "number" && Number.isFinite(time) && time >= item.after!,
+              ),
+            () => false,
+          ),
+        ]),
+    ),
+  ) as Record<string, boolean>
 }

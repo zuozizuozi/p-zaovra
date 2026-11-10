@@ -35,7 +35,11 @@ test("Save As writes actual binary bytes, verifies the destination and preserves
   expect(await readFile(destination)).toEqual(bytes)
   expect(await readFile(path.join(input.directory, input.target))).toEqual(bytes)
   expect(await readdir(path.dirname(destination))).toEqual(["副本.pdf"])
-  expect(await inspectArtifactFile(input)).toEqual({ bytes: bytes.length })
+  expect(await inspectArtifactFile(input)).toMatchObject({
+    bytes: bytes.length,
+    created: expect.any(Number),
+    modified: expect.any(Number),
+  })
 })
 
 test("cancel is write-free; a changed source during the dialog is rejected before writing", async () => {
@@ -68,7 +72,7 @@ test("missing, outside and linked sources never open the picker; empty files rem
   }
   expect(pickers).toBe(0)
   await writeFile(path.join(input.directory, "empty.txt"), "")
-  expect(await inspectArtifactFile({ ...input, target: "empty.txt" })).toEqual({ bytes: 0 })
+  expect(await inspectArtifactFile({ ...input, target: "empty.txt" })).toMatchObject({ bytes: 0 })
 })
 
 test("confirmed overwrite replaces bytes, while same source and symlink destinations stay intact", async () => {

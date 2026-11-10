@@ -27,7 +27,7 @@ import { createSizing, focusTerminalById } from "@/pages/session/helpers"
 import { getTerminalHandoff, setTerminalHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 
-export function TerminalPanelV2(props: { stacked?: boolean } = {}) {
+export function TerminalPanelV2(props: { stacked?: boolean; desktop?: boolean } = {}) {
   const layout = useLayout()
   const terminal = useTerminal()
   const sdk = useSDK()
@@ -36,7 +36,8 @@ export function TerminalPanelV2(props: { stacked?: boolean } = {}) {
   const settings = useSettings()
   const { workspaceKey, view } = useSessionLayout()
 
-  const isDesktop = createMediaQuery("(min-width: 768px)")
+  const viewportDesktop = createMediaQuery("(min-width: 768px)")
+  const isDesktop = () => props.desktop ?? viewportDesktop()
   const newLayout = createMemo(() => settings.general.newLayoutDesigns())
   const opened = createMemo(() => view().terminal.opened())
   const size = createSizing()
@@ -183,7 +184,7 @@ export function TerminalPanelV2(props: { stacked?: boolean } = {}) {
       }}
       style={{ height: panelHeight() }}
     >
-      <div classList={{ "md:hidden": !stacked(), hidden: stacked() }} onPointerDown={() => size.start()}>
+      <div classList={{ hidden: isDesktop() }} onPointerDown={() => size.start()}>
         <ResizeHandle
           classList={{
             "-top-1": newLayout(),

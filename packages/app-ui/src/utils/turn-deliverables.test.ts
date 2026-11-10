@@ -55,7 +55,7 @@ test("actual output carriers produce cards; source edits and implicit retained l
   expect(derive([tool("read", "old.pdf")])).toEqual([])
 })
 
-test("a final reply can name produced text files and safe links; claims about preexisting files do not become files", () => {
+test("final file declarations without a trusted carrier require this turn's file metadata", () => {
   expect(
     derive([
       tool("write", "report.csv"),
@@ -68,6 +68,8 @@ test("a final reply can name produced text files and safe links; claims about pr
   ).toEqual([
     { target: "https://example.com/demo", kind: "link", source: "reply" },
     { target: "report.csv", kind: "file", source: "reply" },
+    { target: "existing.pdf", kind: "file", source: "reply", after: 1 },
+    { target: "src/app.ts", kind: "file", source: "reply", after: 1 },
   ])
 })
 
@@ -107,4 +109,16 @@ test("only the requested admitted turn is collected on reload or session change"
       directory: "/project",
     }),
   ).toEqual([])
+})
+
+test("plain final file names are candidates but retained command logs are never promoted", () => {
+  expect(
+    derive([
+      tool("bash", "ignored", ["/project/command.txt"]),
+      { id: "final", type: "text", text: "Created report.pdf and images/chart.png; log: `command.txt`." },
+    ]),
+  ).toEqual([
+    { target: "report.pdf", kind: "file", source: "reply", after: 1 },
+    { target: "images/chart.png", kind: "file", source: "reply", after: 1 },
+  ])
 })

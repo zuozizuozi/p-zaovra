@@ -7,7 +7,10 @@ export function artifactViewer(target: string) {
 }
 export type ArtifactState = { title: string; url: string; loading: boolean; error?: string; zoom: number }
 export type ArtifactPreviewAPI = {
-  inspectFile?(input: { target: string; directory: string }): Promise<{ bytes: number }>
+  inspectFile?(input: {
+    target: string
+    directory: string
+  }): Promise<{ bytes: number; created?: number; modified?: number }>
   saveFile?(input: {
     target: string
     directory: string

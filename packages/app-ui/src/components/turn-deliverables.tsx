@@ -1,11 +1,11 @@
-import { createResource, For, Show } from "solid-js"
+import { createMemo, createResource, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Icon } from "@zaovra-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { artifactPreviewable } from "@/utils/artifact-path"
-import type { TurnDeliverable } from "@/utils/turn-deliverables"
+import { inspectTurnDeliverables, type TurnDeliverable } from "@/utils/turn-deliverables"
 
 export function TurnDeliverables(props: {
   items: TurnDeliverable[]
@@ -29,21 +29,14 @@ export function TurnDeliverables(props: {
   }
   const [availability, { refetch }] = createResource(
     () => ({ directory: props.directory, items: props.items }),
-    async (input) =>
-      Object.fromEntries(
-        await Promise.all(
-          input.items
-            .filter((item) => item.kind === "file")
-            .map(async (item) => {
-              const available = await inspect(item.target).then(
-                () => true,
-                () => false,
-              )
-              return [item.target, available]
-            }),
-        ),
-      ),
+    async (input) => ({ ...input, files: await inspectTurnDeliverables(input.items, inspect) }),
   )
+  // Do not carry a previous turn's file verification into a new turn or directory.
+  const files = () => {
+    const value = availability()
+    return value?.directory === props.directory && value.items === props.items ? value.files : undefined
+  }
+  const items = createMemo(() => props.items.filter((item) => item.after === undefined || files()?.[item.target]))
   const perform = async (item: TurnDeliverable, action: "preview" | "open" | "save") => {
     if (state.pending) return
     setState({ pending: item.target, error: "", saved: "" })
@@ -70,20 +63,20 @@ export function TurnDeliverables(props: {
     }
   }
   return (
-    <Show when={props.items.length}>
+    <Show when={items().length}>
       <section
         data-component="turn-deliverables"
         aria-label={language.t("artifact.delivery.title")}
         class="mb-3 max-h-60 w-[calc(100%-24px)] max-w-200 shrink-0 self-center overflow-auto rounded-xl border border-border-weak-base bg-background-base p-3 text-xs"
       >
         <strong class="block pb-2 text-text-strong">{language.t("artifact.delivery.title")}</strong>
-        <Show when={props.items.some((item) => item.kind === "file") && !platform.artifactPreview?.saveFile}>
+        <Show when={items().some((item) => item.kind === "file") && !platform.artifactPreview?.saveFile}>
           <p class="pb-2 text-text-weak">{language.t("artifact.delivery.desktopActions")}</p>
         </Show>
         <ul class="flex flex-col gap-2">
-          <For each={props.items}>
+          <For each={items()}>
             {(item) => {
-              const unavailable = () => item.kind === "file" && availability()?.[item.target] !== true
+              const unavailable = () => item.kind === "file" && files()?.[item.target] !== true
               return (
                 <li class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-background-weak px-3 py-2">
                   <Icon name={item.kind === "link" ? "square-arrow-top-right" : "open-file"} />
