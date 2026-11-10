@@ -1,6 +1,7 @@
 import path from "node:path"
 import { realpath, readFile, stat } from "node:fs/promises"
 import { createServer } from "node:http"
+import { createHash } from "node:crypto"
 
 const types: Record<string, string> = {
   ".html": "text/html",
@@ -75,46 +76,68 @@ export function previewURL(target: string) {
   throw new Error("请使用 HTTPS 网站或本机开发服务地址")
 }
 
-export async function serveArtifact(target: string, directory: string) {
+export async function artifactSource(target: string, directory: string) {
   const root = await realpath(directory)
   const file = await realpath(path.resolve(root, target))
   const relative = path.relative(root, file)
   if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("请选择当前项目中的成果文件")
   if (!types[path.extname(file).toLowerCase()]) throw new Error("此格式请使用文件查看器打开")
+  // Reuse the app's standard `oc` scheme, in a project-only session. Neither
+  // the origin nor storage identity depends on a port, view, or owner window.
+  const host = `artifact-${createHash("sha256")
+    .update(process.platform === "win32" ? root.toLowerCase() : root)
+    .digest("hex")}`
+  const origin = `oc://${host}`
+  const accepts = (target: string) => {
+    const url = new URL(target)
+    return url.protocol === "oc:" && url.host === host && !url.username && !url.password
+  }
+  return {
+    url: `${origin}/${relative.split(path.sep).map(encodeURIComponent).join("/")}`,
+    partition: `persist:${host}`,
+    accepts,
+    async respond(request: Pick<Request, "url" | "method"> & { initiatorOrigin?: string }) {
+      try {
+        if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 })
+        if (!accepts(request.url) || (request.initiatorOrigin && request.initiatorOrigin !== origin))
+          return new Response(null, { status: 403 })
+        const pathname = decodeURIComponent(new URL(request.url).pathname)
+        if (pathname.split("/").some((part) => part.startsWith("."))) return new Response(null, { status: 403 })
+        const resolved = await realpath(path.resolve(root, `.${pathname}`))
+        const relative = path.relative(root, resolved)
+        const mime = types[path.extname(resolved).toLowerCase()]
+        if (relative.startsWith("..") || path.isAbsolute(relative) || !mime) return new Response(null, { status: 403 })
+        const info = await stat(resolved)
+        if (!info.isFile() || info.size > 100 * 1024 * 1024) return new Response(null, { status: 413 })
+        return new Response(request.method === "HEAD" ? null : new Uint8Array(await readFile(resolved)), {
+          headers: {
+            "Content-Type": mime,
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+          },
+        })
+      } catch {
+        return new Response("File unavailable", { status: 404 })
+      }
+    },
+  }
+}
+
+export async function serveArtifact(target: string, directory: string) {
+  const source = await artifactSource(target, directory)
   const server = createServer(async (request, response) => {
+    const address = server.address()
+    if (!address || typeof address === "string" || request.headers.host !== `127.0.0.1:${address.port}`) {
+      response.writeHead(403).end()
+      return
+    }
     try {
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        response.writeHead(405).end()
-        return
-      }
-      const address = server.address()
-      if (!address || typeof address === "string" || request.headers.host !== `127.0.0.1:${address.port}`) {
-        response.writeHead(403).end()
-        return
-      }
-      const pathname = decodeURIComponent(new URL(request.url ?? "/", "http://local").pathname)
-      if (pathname.split("/").some((part) => part.startsWith("."))) {
-        response.writeHead(403).end()
-        return
-      }
-      const resolved = await realpath(path.resolve(root, `.${pathname}`))
-      const relative = path.relative(root, resolved)
-      const mime = types[path.extname(resolved).toLowerCase()]
-      if (relative.startsWith("..") || path.isAbsolute(relative) || !mime) {
-        response.writeHead(403).end()
-        return
-      }
-      const info = await stat(resolved)
-      if (!info.isFile() || info.size > 100 * 1024 * 1024) {
-        response.writeHead(413).end()
-        return
-      }
-      response.writeHead(200, {
-        "Content-Type": mime,
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "no-store",
+      const result = await source.respond({
+        url: new URL(request.url ?? "/", source.url).href,
+        method: request.method ?? "GET",
       })
-      response.end(request.method === "HEAD" ? undefined : await readFile(resolved))
+      response.writeHead(result.status, Object.fromEntries(result.headers))
+      response.end(Buffer.from(await result.arrayBuffer()))
     } catch {
       response.writeHead(404).end("File unavailable")
     }
@@ -126,7 +149,7 @@ export async function serveArtifact(target: string, directory: string) {
   const address = server.address()
   if (!address || typeof address === "string") throw new Error("无法创建本地预览")
   return {
-    url: `http://127.0.0.1:${address.port}/${relative.split(path.sep).map(encodeURIComponent).join("/")}`,
+    url: `http://127.0.0.1:${address.port}${new URL(source.url).pathname}`,
     close: () => {
       server.closeAllConnections()
       server.close()

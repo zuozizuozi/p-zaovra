@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, writeFile, rm, mkdir, symlink } from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "node:os"
-import { previewURL, serveArtifact, artifactFileAction } from "./artifact-server"
+import { previewURL, serveArtifact, artifactSource, artifactFileAction } from "./artifact-server"
 const cleanup: (() => Promise<unknown> | void)[] = []
 test("549 unsupported native file actions use only fresh canonical files in the project, with no browser download", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "zaovra-native-result-"))
@@ -41,6 +41,59 @@ test("549 unsupported native file actions use only fresh canonical files in the 
 })
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
+})
+
+test("817 project origin and persistent storage identity survive fresh sources, target changes and canonical aliases", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "zaovra-stable-origin-"))
+  cleanup.push(() => rm(dir, { recursive: true, force: true }))
+  await mkdir(path.join(dir, "project"))
+  await writeFile(path.join(dir, "project", "index.html"), "first version")
+  await writeFile(path.join(dir, "project", "other.html"), "second target")
+  await symlink(path.join(dir, "project"), path.join(dir, "alias"), process.platform === "win32" ? "junction" : "dir")
+  const first = await artifactSource("index.html", path.join(dir, "project"))
+  await writeFile(path.join(dir, "project", "index.html"), "updated version")
+  const reopened = await artifactSource("index.html", path.join(dir, "alias"))
+  const other = await artifactSource("other.html", path.join(dir, "project"))
+  expect(reopened.url).toBe(first.url)
+  expect(reopened.partition).toBe(first.partition)
+  expect(first.partition.startsWith("persist:artifact-")).toBe(true)
+  expect(new URL(other.url).host).toBe(new URL(first.url).host)
+  expect(other.partition).toBe(first.partition)
+  const response = await reopened.respond(new Request(reopened.url))
+  expect(await response.text()).toBe("updated version")
+  expect(response.headers.get("cache-control")).toBe("no-store")
+})
+
+test("817 protocol responses isolate projects and reject foreign initiators, hidden files and escaping links", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "zaovra-origin-boundary-"))
+  cleanup.push(() => rm(dir, { recursive: true, force: true }))
+  await mkdir(path.join(dir, "first"))
+  await mkdir(path.join(dir, "second"))
+  await writeFile(path.join(dir, "first", "index.html"), "first project")
+  await writeFile(path.join(dir, "first", ".hidden.json"), "hidden")
+  await writeFile(path.join(dir, "second", "index.html"), "second project")
+  await symlink(
+    path.join(dir, "second"),
+    path.join(dir, "first", "linked"),
+    process.platform === "win32" ? "junction" : "dir",
+  )
+  const first = await artifactSource("index.html", path.join(dir, "first"))
+  const second = await artifactSource("index.html", path.join(dir, "second"))
+  expect(first.partition).not.toBe(second.partition)
+  expect(new URL(first.url).host).not.toBe(new URL(second.url).host)
+  expect((await first.respond(new Request(second.url))).status).toBe(403)
+  expect((await first.respond({ url: first.url, method: "GET", initiatorOrigin: "https://example.com" })).status).toBe(
+    403,
+  )
+  expect(
+    (await first.respond({ url: first.url, method: "GET", initiatorOrigin: `oc://${new URL(second.url).host}` }))
+      .status,
+  ).toBe(403)
+  expect((await first.respond(new Request(new URL("/.hidden.json", first.url)))).status).toBe(403)
+  expect((await first.respond(new Request(new URL("/linked/index.html", first.url)))).status).toBe(403)
+  expect((await first.respond(new Request(first.url, { method: "POST" }))).status).toBe(405)
+  expect(await (await first.respond(new Request(first.url, { method: "HEAD" }))).text()).toBe("")
+  expect(await (await second.respond(new Request(second.url))).text()).toBe("second project")
 })
 test("serves an HTML artifact and its relative assets, without exposing dotfiles", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "zaovra-artifact-test-"))

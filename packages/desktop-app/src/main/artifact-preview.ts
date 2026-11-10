@@ -1,35 +1,29 @@
 import { BrowserWindow, WebContentsView, session } from "electron"
-import type { WebContents } from "electron"
+import type { Session, WebContents } from "electron"
 import type { ArtifactPreviewAPI, ArtifactState } from "@zaovra-ai/app/artifact-preview"
-import { previewURL, serveArtifact, readArtifactPDF } from "./artifact-server"
+import { previewURL, artifactSource, readArtifactPDF } from "./artifact-server"
 
 export function createArtifactPreview(owner: WebContents) {
-  let current: { id: string; view: WebContentsView; state: ArtifactState; closeServer?: () => void } | undefined
+  let current: { id: string; view: WebContentsView; state: ArtifactState } | undefined
   let requested: string | undefined
   let opening: object | undefined
-  const browsing = session.fromPartition(`artifact-${owner.id}`)
-  browsing.setSpellCheckerEnabled(false)
-  browsing.setSpellCheckerLanguages([])
-  browsing.setSpellCheckerDictionaryDownloadURL("http://127.0.0.1:9/dictionaries/")
-  browsing.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-  browsing.setPermissionCheckHandler(() => false)
+  const sessions = new Set<Session>()
   const download = (event: Electron.Event) => {
     event.preventDefault()
     if (current) current.state.error = "请在外部浏览器中下载文件"
   }
-  browsing.on("will-download", download)
   const close = () => {
     const task = current
     current = undefined
     if (!task) return
     BrowserWindow.fromWebContents(owner)?.contentView.removeChildView(task.view)
     if (!task.view.webContents.isDestroyed()) task.view.webContents.close()
-    task.closeServer?.()
   }
   owner.once("destroyed", () => {
     requested = undefined
     opening = undefined
-    browsing.removeListener("will-download", download)
+    for (const browsing of sessions) browsing.removeListener("will-download", download)
+    sessions.clear()
     close()
   })
   const api: ArtifactPreviewAPI = {
@@ -39,17 +33,27 @@ export function createArtifactPreview(owner: WebContents) {
       opening = request
       requested = input.id
       close()
-      const local = /^https?:\/\//i.test(input.target) ? undefined : await serveArtifact(input.target, input.directory)
+      const local = /^https?:\/\//i.test(input.target) ? undefined : await artifactSource(input.target, input.directory)
       if (opening !== request || requested !== input.id || owner.isDestroyed()) {
-        local?.close()
         return
       }
       const url = local?.url ?? previewURL(input.target)
       const window = BrowserWindow.fromWebContents(owner)
       if (!window) {
-        local?.close()
         throw new Error("预览窗口不可用")
       }
+      const partition = local?.partition ?? `artifact-${owner.id}`
+      const browsing = session.fromPartition(partition)
+      if (!sessions.has(browsing)) {
+        browsing.setSpellCheckerEnabled(false)
+        browsing.setSpellCheckerLanguages([])
+        browsing.setSpellCheckerDictionaryDownloadURL("http://127.0.0.1:9/dictionaries/")
+        browsing.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+        browsing.setPermissionCheckHandler(() => false)
+        browsing.on("will-download", download)
+        sessions.add(browsing)
+      }
+      if (local && !browsing.protocol.isProtocolHandled("oc")) browsing.protocol.handle("oc", local.respond)
       const view = new WebContentsView({
         webPreferences: {
           spellcheck: false,
@@ -57,19 +61,20 @@ export function createArtifactPreview(owner: WebContents) {
           backgroundThrottling: false,
           contextIsolation: true,
           nodeIntegration: false,
-          partition: `artifact-${owner.id}`,
+          partition,
           webSecurity: true,
         },
       })
       const contents = view.webContents
       const state: ArtifactState = { url, title: input.target, loading: true, zoom: 1 }
-      current = { id: input.id, view, state, closeServer: local?.close }
+      current = { id: input.id, view, state }
       contents.setWindowOpenHandler(() => {
         state.error = "该链接需要新窗口，请在外部浏览器中打开"
         return { action: "deny" }
       })
       contents.on("will-navigate", (event, next) => {
         try {
+          if (local?.accepts(next)) return
           previewURL(next)
         } catch {
           event.preventDefault()
@@ -78,6 +83,7 @@ export function createArtifactPreview(owner: WebContents) {
       })
       contents.on("will-redirect", (event, next) => {
         try {
+          if (local?.accepts(next)) return
           previewURL(next)
         } catch {
           event.preventDefault()
