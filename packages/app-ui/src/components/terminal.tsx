@@ -4,7 +4,7 @@ import { resolveThemeVariant } from "@zaovra-ai/ui/theme/resolve"
 import { resolveThemeVariantV2 } from "@zaovra-ai/ui/theme/v2/resolve"
 import type { HexColor, ResolvedV2Theme } from "@zaovra-ai/ui/theme/types"
 import { showToast } from "@/utils/toast"
-import type { FitAddon, Ghostty, Terminal as Term } from "ghostty-web"
+import type { Ghostty, Terminal as Term } from "ghostty-web"
 import { type ComponentProps, createEffect, createMemo, onCleanup, onMount, splitProps } from "solid-js"
 import { SerializeAddon } from "@/addons/serialize"
 import { matchKeybind, parseKeybind } from "@/context/command"
@@ -17,6 +17,7 @@ import type { LocalPTY } from "@/context/terminal"
 import { disposeIfDisposable, getHoveredLinkText, setOptionIfSupported } from "@/utils/runtime-adapters"
 import { terminalWriter } from "@/utils/terminal-writer"
 import { terminalWebSocketURL } from "@/utils/terminal-websocket-url"
+import { observeTerminalFit } from "./terminal-fit"
 
 const TOGGLE_TERMINAL_ID = "terminal.toggle"
 const DEFAULT_TOGGLE_TERMINAL_KEYBIND = "ctrl+`"
@@ -212,9 +213,7 @@ export const Terminal = (props: TerminalProps) => {
   let term: Term | undefined
   let _ghostty: Ghostty
   let serializeAddon: SerializeAddon
-  let fitAddon: FitAddon
-  let handleResize: () => void
-  let fitFrame: number | undefined
+  let fitting: ReturnType<typeof observeTerminalFit> | undefined
   let sizeTimer: ReturnType<typeof setTimeout> | undefined
   let pendingSize: { cols: number; rows: number } | undefined
   let lastSize: { cols: number; rows: number } | undefined
@@ -279,15 +278,7 @@ export const Terminal = (props: TerminalProps) => {
   const terminalColors = createMemo(getTerminalColors)
 
   const scheduleFit = () => {
-    if (disposed) return
-    if (!fitAddon) return
-    if (fitFrame !== undefined) return
-
-    fitFrame = requestAnimationFrame(() => {
-      fitFrame = undefined
-      if (disposed) return
-      fitAddon.fit()
-    })
+    fitting?.schedule()
   }
 
   const scheduleSize = (cols: number, rows: number) => {
@@ -422,7 +413,6 @@ export const Terminal = (props: TerminalProps) => {
       cleanups.push(() => disposeIfDisposable(fit))
       t.loadAddon(serializer)
       t.loadAddon(fit)
-      fitAddon = fit
       serializeAddon = serializer
 
       const active = document.activeElement
@@ -471,12 +461,12 @@ export const Terminal = (props: TerminalProps) => {
       })
       cleanups.push(() => disposeIfDisposable(onKey))
 
-      const startResize = () => {
-        fit.observeResize()
-        handleResize = scheduleFit
-        window.addEventListener("resize", handleResize)
-        cleanups.push(() => window.removeEventListener("resize", handleResize))
-      }
+      const sizing = observeTerminalFit(container, () => {
+        fit.fit()
+        scheduleSize(t.cols, t.rows)
+      })
+      fitting = sizing
+      cleanups.push(sizing.dispose)
 
       const write = (data: string) =>
         new Promise<void>((resolve) => {
@@ -490,18 +480,16 @@ export const Terminal = (props: TerminalProps) => {
 
       if (restore && restoreSize) {
         await write(restore)
-        fit.fit()
-        scheduleSize(t.cols, t.rows)
+        sizing.fit()
         if (scrollY !== undefined) t.scrollToLine(scrollY)
-        startResize()
+        sizing.schedule()
       } else {
-        fit.fit()
-        scheduleSize(t.cols, t.rows)
+        sizing.fit()
         if (restore) {
           await write(restore)
           if (scrollY !== undefined) t.scrollToLine(scrollY)
         }
-        startResize()
+        sizing.schedule()
       }
 
       const once = { value: false }
@@ -673,7 +661,7 @@ export const Terminal = (props: TerminalProps) => {
 
   onCleanup(() => {
     disposed = true
-    if (fitFrame !== undefined) cancelAnimationFrame(fitFrame)
+    fitting?.dispose()
     if (sizeTimer !== undefined) clearTimeout(sizeTimer)
     if (reconn !== undefined) clearTimeout(reconn)
     drop?.()

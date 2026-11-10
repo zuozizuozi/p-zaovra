@@ -6,12 +6,13 @@ import { artifactFileAction } from "./artifact-server"
 type Input = { target: string; directory: string }
 
 export async function inspectArtifactFile(input: Input) {
-  let bytes: number | undefined
+  let info: { bytes: number; created: number; modified: number } | undefined
   await artifactFileAction({ ...input, action: "reveal" }, async (file) => {
-    bytes = (await stat(file)).size
+    const metadata = await stat(file)
+    info = { bytes: metadata.size, created: metadata.birthtimeMs, modified: metadata.mtimeMs }
   })
-  if (bytes === undefined) throw new Error("文件不可用")
-  return { bytes }
+  if (!info) throw new Error("文件不可用")
+  return info
 }
 
 export async function saveArtifactFile(input: Input, choose: (name: string) => Promise<string | undefined>) {
