@@ -68,8 +68,8 @@ test("final file declarations without a trusted carrier require this turn's file
   ).toEqual([
     { target: "https://example.com/demo", kind: "link", source: "reply" },
     { target: "report.csv", kind: "file", source: "reply" },
-    { target: "existing.pdf", kind: "file", source: "reply", after: 1 },
-    { target: "src/app.ts", kind: "file", source: "reply", after: 1 },
+    { target: "existing.pdf", kind: "file", source: "reply", after: 1, before: 3 },
+    { target: "src/app.ts", kind: "file", source: "reply", after: 1, before: 3 },
   ])
 })
 
@@ -118,7 +118,7 @@ test("plain final file names are candidates but retained command logs are never 
       { id: "final", type: "text", text: "Created report.pdf and images/chart.png; log: `command.txt`." },
     ]),
   ).toEqual([
-    { target: "report.pdf", kind: "file", source: "reply", after: 1 },
-    { target: "images/chart.png", kind: "file", source: "reply", after: 1 },
+    { target: "report.pdf", kind: "file", source: "reply", after: 1, before: 3 },
+    { target: "images/chart.png", kind: "file", source: "reply", after: 1, before: 3 },
   ])
 })

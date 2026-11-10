@@ -7,6 +7,7 @@ export type TurnDeliverable = {
   source: "tool" | "reply"
   // A reply alone is a candidate until an exact, safe file inspection proves this turn changed it.
   after?: number
+  before?: number
 }
 
 // Derive from one admitted human turn, never from a workspace inventory or file watcher.
@@ -31,6 +32,8 @@ export function turnDeliverables(input: {
   )
   const turn = end < 0 ? following : following.slice(0, end)
   const final = turn.findLast((message) => message.role === "assistant" && message.time.completed)?.id
+  // A completed provider message is not the end while a later assistant is still streaming.
+  const before = turn.findLast((message) => message.role === "assistant")?.time.completed
   for (const message of turn) {
     if (message.role === "user") {
       if (!(input.parts[message.id] ?? []).some((part) => part.type === "text" && part.synthetic)) break
@@ -105,7 +108,8 @@ export function turnDeliverables(input: {
     }
     if (logs.has(target)) continue
     const after = input.messages[start].time.created
-    if (Number.isFinite(after) && after > 0) outputs.set(target, { target, kind: "file", source: "reply", after })
+    if (Number.isFinite(after) && after > 0)
+      outputs.set(target, { target, kind: "file", source: "reply", after, ...(before ? { before } : {}) })
   }
   return [...outputs.values()]
 }
@@ -121,11 +125,15 @@ export async function inspectTurnDeliverables(
         .map(async (item) => [
           item.target,
           await inspect(item.target).then(
-            (info) =>
-              item.after === undefined ||
-              [info?.created, info?.modified].some(
-                (time) => typeof time === "number" && Number.isFinite(time) && time >= item.after!,
-              ),
+            (info) => {
+              if (item.after === undefined) return true
+              const changed = Math.max(
+                ...[info?.created, info?.modified].filter(
+                  (time): time is number => typeof time === "number" && Number.isFinite(time),
+                ),
+              )
+              return changed >= item.after && (item.before === undefined || changed <= item.before)
+            },
             () => false,
           ),
         ]),

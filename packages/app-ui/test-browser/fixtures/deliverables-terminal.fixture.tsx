@@ -81,6 +81,7 @@ async function fixture() {
   expect(await child.exited, await new Response(child.stderr).text()).toBe(0)
   await writeFile(path.join(root, "modified.csv"), "new")
   await utimes(path.join(root, "modified.csv"), new Date(started + 1000), new Date(started + 1000))
+  const finished = Math.max(Date.now(), started + 2000)
   const session: SessionV2Info = {
     id: "session811",
     projectID: "project",
@@ -97,7 +98,7 @@ async function fixture() {
       id: "bash",
       type: "tool",
       name: "bash",
-      time: { created: started, ran: started, completed: started + 2000 },
+      time: { created: started, ran: started, completed: finished },
       state: {
         status: "completed",
         input: { command: "script generated binary files" },
@@ -119,7 +120,7 @@ async function fixture() {
       type: "assistant",
       agent: "build",
       model: session.model!,
-      time: { created: started + 1, completed: started + 2000 },
+      time: { created: started + 1, completed: finished },
       content,
     },
   ])
