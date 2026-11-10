@@ -1,5 +1,5 @@
 import { BrowserWindow, WebContentsView, session } from "electron"
-import type { Session, WebContents } from "electron"
+import type { DownloadItem, Session, WebContents } from "electron"
 import type { ArtifactPreviewAPI, ArtifactState } from "@zaovra-ai/app/artifact-preview"
 import { previewURL, artifactSource, readArtifactPDF } from "./artifact-server"
 
@@ -8,9 +8,21 @@ export function createArtifactPreview(owner: WebContents) {
   let requested: string | undefined
   let opening: object | undefined
   const sessions = new Set<Session>()
-  const download = (event: Electron.Event) => {
-    event.preventDefault()
-    if (current) current.state.error = "请在外部浏览器中下载文件"
+  const owned = new WeakSet<WebContents>()
+  const download = (event: Electron.Event, item: DownloadItem, contents: WebContents) => {
+    // A project session can be shared by previews in different owner windows.
+    if (!owned.has(contents)) return
+    const task = current
+    if (!task || task.view.webContents !== contents || contents.isDestroyed() || !item.hasUserGesture()) {
+      event.preventDefault()
+      if (task?.view.webContents === contents) task.state.error = "请点击页面中的下载按钮后选择保存位置"
+      return
+    }
+    // Leaving savePath unset keeps Electron's native save dialog and cancellation.
+    item.setSaveDialogOptions({ title: "另存为", properties: ["createDirectory", "showOverwriteConfirmation"] })
+    item.once("done", (_event, state) => {
+      if (state === "interrupted" && current === task) task.state.error = "下载未完成，请重试"
+    })
   }
   const close = () => {
     const task = current
@@ -66,6 +78,7 @@ export function createArtifactPreview(owner: WebContents) {
         },
       })
       const contents = view.webContents
+      owned.add(contents)
       const state: ArtifactState = { url, title: input.target, loading: true, zoom: 1 }
       current = { id: input.id, view, state }
       contents.setWindowOpenHandler(() => {

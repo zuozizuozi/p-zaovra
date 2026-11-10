@@ -84,6 +84,83 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
+function download(view: PreviewView, gesture = true) {
+  const event = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true
+    },
+  }
+  const item = Object.assign(new EventEmitter(), {
+    hasUserGesture: () => gesture,
+    setSaveDialogOptions: mock((_options: object) => {}),
+    setSavePath: mock((_path: string) => {}),
+  })
+  sessions.get(view.options.webPreferences.partition)!.emit("will-download", event, item, view.webContents)
+  return { event, item }
+}
+
+test("819 user downloads use the native save dialog without fixed paths; cancellation is not a failure", async () => {
+  const api = preview()
+  await api.open({ id: "export", target: "https://example.com/export", directory: "" })
+  const result = download(views[0])
+  expect(result.event.prevented).toBe(false)
+  expect(result.item.setSaveDialogOptions).toHaveBeenCalledWith({
+    title: "另存为",
+    properties: ["createDirectory", "showOverwriteConfirmation"],
+  })
+  expect(result.item.setSavePath).not.toHaveBeenCalled()
+  result.item.emit("done", {}, "cancelled")
+  expect((await api.state("export"))?.error).toBeUndefined()
+  const completed = download(views[0])
+  completed.item.emit("done", {}, "completed")
+  expect((await api.state("export"))?.error).toBeUndefined()
+  expect(completed.item.setSavePath).not.toHaveBeenCalled()
+  const interrupted = download(views[0])
+  interrupted.item.emit("done", {}, "interrupted")
+  expect((await api.state("export"))?.error).toBe("下载未完成，请重试")
+})
+
+test("819 background and closed preview downloads stay blocked; stale results do not affect a replacement", async () => {
+  const api = preview()
+  await api.open({ id: "first", target: "https://example.com/", directory: "" })
+  const background = download(views[0], false)
+  expect(background.event.prevented).toBe(true)
+  expect(background.item.setSaveDialogOptions).not.toHaveBeenCalled()
+  expect(background.item.setSavePath).not.toHaveBeenCalled()
+  const pending = download(views[0])
+  await api.open({ id: "next", target: "https://example.com/next", directory: "" })
+  const stale = download(views[0])
+  expect(stale.event.prevented).toBe(true)
+  expect(stale.item.setSaveDialogOptions).not.toHaveBeenCalled()
+  pending.item.emit("done", {}, "interrupted")
+  expect((await api.state("next"))?.error).toBeUndefined()
+  await api.action({ id: "next", action: "close" })
+  expect(download(views[1]).event.prevented).toBe(true)
+})
+
+test("819 shared project sessions route downloads only to their owning preview, not the main attachment renderer", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "zaovra-preview-download-"))
+  directories.push(directory)
+  await writeFile(path.join(directory, "index.html"), "export")
+  const first = preview()
+  const second = preview()
+  await first.open({ id: "first", target: "index.html", directory })
+  await second.open({ id: "second", target: "index.html", directory })
+  expect(views[0].options.webPreferences.partition).toBe(views[1].options.webPreferences.partition)
+  const result = download(views[1])
+  expect(result.event.prevented).toBe(false)
+  expect(result.item.setSaveDialogOptions).toHaveBeenCalledTimes(1)
+  const blocked = download(views[0], false)
+  expect(blocked.event.prevented).toBe(true)
+  expect((await second.state("second"))?.error).toBeUndefined()
+  const foreign = { preventDefault: mock(() => {}) }
+  sessions.get(views[0].options.webPreferences.partition)!.emit("will-download", foreign, {}, owners[0])
+  expect(foreign.preventDefault).not.toHaveBeenCalled()
+  owners[0].emit("destroyed")
+  expect(download(views[1]).event.prevented).toBe(false)
+})
+
 test("817 actual preview controller reopens edited files and replacement owner windows with the same origin and partition", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "zaovra-preview-reopen-"))
   directories.push(directory)
