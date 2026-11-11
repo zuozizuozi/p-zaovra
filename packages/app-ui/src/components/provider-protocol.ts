@@ -1,5 +1,6 @@
 import type { Config } from "@zaovra-ai/sdk/v2/client"
 import { providerProtocols } from "../provider-discovery"
+import { imageInput } from "./model-images"
 
 export type ProtocolProvider = NonNullable<Config["provider"]>[string]
 export type ProtocolChoice = "openai" | "responses"
@@ -52,11 +53,11 @@ export function protocolPatch(
   for (const [id, enabled] of Object.entries(images)) {
     const model = provider.models?.[id]
     if (!model) continue
-    const input = model.modalities?.input ?? ["text"]
-    if (input.includes("image") === enabled) continue
+    const input = imageInput(model, enabled)!
+    if (model.modalities?.input && JSON.stringify(model.modalities.input) === JSON.stringify(input)) continue
     overrides[id] = {
       ...overrides[id],
-      modalities: { input: enabled ? [...input, "image"] : input.filter((value) => value !== "image") },
+      modalities: { input },
     }
   }
   for (const [id, fields] of Object.entries(prices)) {

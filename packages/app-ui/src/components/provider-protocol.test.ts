@@ -101,7 +101,9 @@ test("image capability edits patch only input modalities and preserve other capa
       c: { modalities: { input: ["text", "image"] } },
     },
   })
-  expect(protocolPatch(provider, "responses", {}, { a: false, b: true, c: false })).toEqual({})
+  expect(protocolPatch(provider, "responses", {}, { a: false, b: true, c: false })).toEqual({
+    models: { c: { modalities: { input: ["text"] } } },
+  })
   expect(protocolPatch(provider, "responses", { a: "openai" }, { a: true })).toEqual({
     models: {
       a: { provider: { npm: "@ai-sdk/openai-compatible" }, modalities: { input: ["text", "audio", "image"] } },

@@ -825,6 +825,9 @@ export const dict = {
   "provider.custom.field.apiKey.placeholder": "API 密钥",
   "provider.custom.field.apiKey.description": "可选。如果你通过请求头管理认证，可留空。",
   "provider.custom.models.images": "图片输入",
+  "provider.models.imageHint": "未开启时附件里的图片不会发给模型。",
+  "provider.models.imageReference":
+    "目录参考：{{provider}} 的同一模型 ID 标注支持图片输入。中转线路可能不同，请确认后手动开启。",
   "provider.custom.models.label": "模型",
   "provider.custom.models.id.label": "ID",
   "provider.custom.models.id.placeholder": "model-id",

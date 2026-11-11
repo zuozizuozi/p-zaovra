@@ -11,6 +11,7 @@ import { providerProtocols, type ProviderProtocol } from "@/provider-discovery"
 import { isProviderAutoModel } from "@/context/model-choice"
 import { manualProviderModels, providerModelsPatch, providerModelsReady } from "./provider-model-config"
 import { refreshSavedProviderModels } from "@/utils/saved-provider-models"
+import { ModelImageInput } from "./model-image-input"
 
 export function ProviderModelFields(props: {
   value: string
@@ -78,6 +79,7 @@ export function ProviderModelsForm(props: {
     error: "",
     added: "",
     notice: "",
+    images: {} as Record<string, boolean>,
   })
   const save = async (refresh = false) => {
     if (state.pending) return
@@ -112,6 +114,7 @@ export function ProviderModelsForm(props: {
         models,
         target.data.config.provider?.[providerID],
         refresh ? undefined : state.protocol,
+        refresh ? {} : state.images,
       )
       const selected = parseModelKey(target.data.config.model ?? "")
       if (!refresh)
@@ -186,6 +189,29 @@ export function ProviderModelsForm(props: {
           onProtocol={(value) => setState("protocol", value)}
         />
       </details>
+      <For
+        each={[
+          ...new Set(
+            [state.value, state.added]
+              .join("\n")
+              .split(/[\n,]/)
+              .map((id) => id.trim())
+              .filter((id) => id && !isProviderAutoModel(id)),
+          ),
+        ]}
+      >
+        {(id) => (
+          <ModelImageInput
+            modelID={id}
+            checked={
+              state.images[id] ??
+              sync().data.config.provider?.[props.providerID]?.models?.[id]?.modalities?.input?.includes("image")
+            }
+            disabled={state.pending}
+            onChange={(checked) => setState("images", id, checked)}
+          />
+        )}
+      </For>
       <p role="status" class="text-12-regular text-text-weak">
         {state.notice}
       </p>

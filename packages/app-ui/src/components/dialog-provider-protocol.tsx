@@ -7,6 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
 import { protocolChoice, protocolPatch, priceErrors, type ProtocolChoice } from "./provider-protocol"
+import { ModelImageInput } from "./model-image-input"
 
 export function DialogProviderProtocol(props: { providerID: string }) {
   const language = useLanguage()
@@ -20,12 +21,7 @@ export function DialogProviderProtocol(props: { providerID: string }) {
     models: Object.fromEntries(
       Object.entries(initial.models ?? {}).map(([id, model]) => [id, protocolChoice(model.provider?.npm) ?? ""]),
     ),
-    images: Object.fromEntries(
-      Object.entries(initial.models ?? {}).map(([id, model]) => [
-        id,
-        model.modalities?.input?.includes("image") ?? false,
-      ]),
-    ),
+    images: {} as Record<string, boolean>,
     pending: false,
     prices: Object.fromEntries(
       Object.entries(initial.models ?? {}).map(([id, model]) => [
@@ -126,14 +122,12 @@ export function DialogProviderProtocol(props: { providerID: string }) {
                     <option value="responses">Responses</option>
                   </select>
                 </Show>
-                <label class="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={state.images[id]}
-                    onChange={(event) => setState("images", id, event.currentTarget.checked)}
-                  />
-                  <span>{language.t("provider.protocol.imageInput")}</span>
-                </label>
+                <ModelImageInput
+                  modelID={id}
+                  checked={state.images[id] ?? model.modalities?.input?.includes("image")}
+                  disabled={state.pending}
+                  onChange={(checked) => setState("images", id, checked)}
+                />
                 <details open={Object.keys(state.fieldErrors[id] ?? {}).length > 0 ? true : undefined}>
                   <summary>{language.t("usage.priceSettings")}</summary>
                   <p class="text-12-regular text-text-weak">{language.t("usage.priceHint")}</p>

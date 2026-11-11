@@ -2,6 +2,7 @@ import type { Config } from "@zaovra-ai/sdk/v2/types"
 import { isProviderAutoModel, primaryProviderModel } from "@/context/model-choice"
 import { providerModelType, providerProtocols, type ProviderProtocol } from "@/provider-discovery"
 import { parseModelKey } from "@/utils/model-key"
+import { imageInput } from "./model-images"
 
 export function providerModelsReady(providerID: string, config: Config, available: Record<string, unknown>) {
   const ids = Object.keys(config.provider?.[providerID]?.models ?? {}).filter((id) => !isProviderAutoModel(id))
@@ -30,6 +31,7 @@ export function providerModelsPatch(
   models: Array<{ id: string; name: string; type?: string }>,
   before: NonNullable<Config["provider"]>[string] | undefined,
   protocol?: ProviderProtocol,
+  images: Record<string, boolean> = {},
 ) {
   const concrete = models.filter((model) => !isProviderAutoModel(model.id))
   const primary = primaryProviderModel(concrete)
@@ -44,7 +46,18 @@ export function providerModelsPatch(
         models: {
           ...before?.models,
           ...Object.fromEntries(
-            concrete.map((model) => [model.id, { name: model.name, ...before?.models?.[model.id] }]),
+            concrete.map((model) => {
+              const previous = before?.models?.[model.id]
+              const input = imageInput(previous, images[model.id])
+              return [
+                model.id,
+                {
+                  name: model.name,
+                  ...previous,
+                  ...(input ? { modalities: { ...previous?.modalities, input } } : {}),
+                },
+              ]
+            }),
           ),
         },
       },

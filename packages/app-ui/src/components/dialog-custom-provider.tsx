@@ -28,6 +28,8 @@ import {
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
+import { ModelImageInput } from "./model-image-input"
+import { imageInput } from "./model-images"
 import { providerOperation, reconnectDisabledProviders, resolveProviderIntegration } from "@/utils/provider-integration"
 import {
   type FormState,
@@ -293,7 +295,20 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       const before = result.sync.data.config.provider?.[result.providerID]
       if (result.protocol === undefined && before?.npm) result.config.npm = before.npm
       result.config.models = Object.fromEntries(
-        Object.entries(result.config.models).map(([id, model]) => [id, { ...before?.models?.[id], ...model }]),
+        Object.entries(result.config.models).map(([id, model]) => {
+          const previous = before?.models?.[id]
+          const images = result.models.find((row) => row.id.trim() === id)?.images
+          return [
+            id,
+            {
+              ...previous,
+              ...model,
+              ...(previous && images !== undefined
+                ? { modalities: { ...previous.modalities, input: imageInput(previous, images) } }
+                : {}),
+            },
+          ]
+        }),
       )
       if (!result.current()) return
       const primary = primaryProviderModel(result.models)
@@ -501,6 +516,21 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
             </section>
           </Show>
 
+          <For each={form.models}>
+            {(model, index) => (
+              <ModelImageInput
+                modelID={model.id.trim() || language.t("provider.custom.models.id.label")}
+                checked={
+                  model.images ??
+                  serverSync().data.config.provider?.[automatic().providerID]?.models?.[
+                    model.id.trim()
+                  ]?.modalities?.input?.includes("image")
+                }
+                disabled={discovery.pending || saveMutation.isPending}
+                onChange={(checked) => setForm("models", index(), "images", checked)}
+              />
+            )}
+          </For>
           <Show
             when={
               discovery.advanced &&
