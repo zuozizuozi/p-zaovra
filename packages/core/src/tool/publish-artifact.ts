@@ -2,13 +2,14 @@ export * as PublishArtifactTool from "./publish-artifact"
 
 import path from "node:path"
 import { createHash } from "node:crypto"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import { ToolFailure } from "@zaovra-ai/llm"
 import { makeLocationNode } from "../effect/app-node"
 import { Database } from "../database/database"
 import { FileMutation } from "../file-mutation"
 import { FileBackup } from "../file-backup"
 import { FSUtil } from "../fs-util"
+import { Location } from "../location"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
 import { SessionOutcome } from "../session/outcome"
@@ -36,13 +37,14 @@ const layer = Layer.effectDiscard(
     const files = yield* FileMutation.Service
     const fs = yield* FSUtil.Service
     const database = yield* Database.Service
+    const location = yield* Location.Service
     const permission = yield* PermissionV2.Service
     yield* tools
       .register({
         publish_artifact: Tool.withPermission(
           Tool.make({
             description:
-              "Atomically publish a validated candidate file in the same directory as the final artifact. Requires a current passing task check on the candidate; this is file delivery only, never deployment or sending. Keeps immutable old bytes at <final>.verified-<sha256>.bak before replacement. Candidate, final and backup must remain unchanged. No formatting is performed after validation.",
+              "Atomically publish a validated candidate file in the same directory as the final artifact, consuming the candidate by rename. A passing check may cover several candidates published sequentially with the same callID; completed publications must retain their checked bytes. This is file delivery only, never deployment or sending. Keeps immutable old bytes at <final>.verified-<sha256>.bak before replacement. Candidate, final and backup must remain unchanged. No formatting is performed after validation.",
             input: Input,
             output: Schema.Struct({
               path: Schema.String,
@@ -67,7 +69,7 @@ const layer = Layer.effectDiscard(
                   candidate.canonical === target.canonical
                 )
                   return yield* new ToolFailure({
-                    message: "Use distinct candidate and final files in the same workspace directory.",
+                    message: `Candidate ${input.candidate} and final ${input.path} must be different files in the same workspace directory. For example, use gpt/guide.pdf.candidate → gpt/guide.pdf, not gpt/.publish-candidates/guide.pdf → gpt/guide.pdf. Move the candidate first, then rerun its check at the new path.`,
                   })
                 if (input.expectedDigest !== null && !/^[a-f0-9]{64}$/.test(input.expectedDigest))
                   return yield* new ToolFailure({ message: "expectedDigest must be an observed SHA256 or null." })
@@ -117,12 +119,69 @@ const layer = Layer.effectDiscard(
                     message:
                       "Unverified candidate: supply a passing task-specific check with candidate in verification_targets and explicit verification_requirements.",
                   })
-                const targets = yield* SessionOutcome.fingerprint(
-                  fs,
-                  [...(check.targets ?? []), ...(check.assertions ?? [])].map((file) => file.path),
+                // Publishing consumes a candidate by rename. Only a later, durable successful
+                // publication under this exact check can explain that change; rehash its final.
+                const parts = history.flatMap((message) => (message.type === "assistant" ? message.content : []))
+                const checked = parts.findIndex((part) => part.type === "tool" && part.id === check.callID)
+                const receipts = parts.slice(checked + 1).flatMap((part) => {
+                  if (
+                    checked < 0 ||
+                    part.type !== "tool" ||
+                    part.name !== "publish_artifact" ||
+                    part.provider?.executed ||
+                    part.state.status !== "completed"
+                  )
+                    return []
+                  const previous = Schema.decodeUnknownOption(Input)(part.state.input)
+                  const output = Schema.decodeUnknownOption(
+                    Schema.Struct({ path: Schema.String, digest: Schema.String }),
+                  )(part.state.structured)
+                  if (Option.isNone(previous) || Option.isNone(output) || previous.value.check !== check.callID)
+                    return []
+                  const source = path.resolve(location.directory, previous.value.candidate)
+                  const final = path.resolve(location.directory, previous.value.path)
+                  if (
+                    source === final ||
+                    path.dirname(source) !== path.dirname(final) ||
+                    path.resolve(location.directory, output.value.path) !== final ||
+                    !check.targets?.some((file) => file.path === source && file.digest === output.value.digest)
+                  )
+                    return []
+                  return [{ source, final, digest: output.value.digest, expected: previous.value.expectedDigest }]
+                })
+                const targets = yield* SessionOutcome.fingerprint(fs, [
+                  ...[...(check.targets ?? []), ...(check.assertions ?? [])].map((file) => file.path),
+                  ...receipts.map((receipt) => receipt.final),
+                ])
+                const missing = yield* Effect.forEach(receipts, (receipt) =>
+                  fs.stat(receipt.source).pipe(
+                    Effect.as(false),
+                    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(true)),
+                    Effect.map((absent) => (absent ? receipt.source : undefined)),
+                  ),
                 )
+                const freshness = SessionOutcome.checkFreshness(
+                  check,
+                  targets.map((current) => {
+                    const original = check.targets?.find((file) => file.path === current.path)
+                    if (!original?.digest || current.digest === original.digest) return current
+                    const published = receipts.some(
+                      (receipt) =>
+                        targets.some((file) => file.path === receipt.final && file.digest === receipt.digest) &&
+                        ((current.path === receipt.source &&
+                          missing.includes(receipt.source) &&
+                          !current.digest &&
+                          original.digest === receipt.digest) ||
+                          (current.path === receipt.final && original.digest === receipt.expected)),
+                    )
+                    return published ? { ...current, digest: original.digest } : current
+                  }),
+                )
+                if (!freshness.fresh)
+                  return yield* new ToolFailure({
+                    message: `Check ${input.check} is stale: ${freshness.changedTargets.join(", ")}. Rerun the full check with the current candidate and all original dependencies, then use its new callID. For example, check gpt/garden.png.candidate before publishing it to gpt/garden.png; do not drop changed targets from the check.`,
+                  })
                 if (
-                  !SessionOutcome.checkFreshness(check, targets).fresh ||
                   preliminary.checks.some(
                     (failed) =>
                       failed.exit !== 0 &&
@@ -131,7 +190,7 @@ const layer = Layer.effectDiscard(
                   )
                 )
                   return yield* new ToolFailure({
-                    message: "Candidate evidence is stale or a relevant failure is still unresolved.",
+                    message: `An unresolved failed check still covers ${input.candidate}. Fix that failure and rerun the same verification scope before publishing; for example, rerun the failed PNG integrity check on gpt/garden.png.candidate, then use the passing callID. A narrower unrelated check does not resolve it.`,
                   })
                 const info = yield* fs.stat(candidate.canonical)
                 if (info.type !== "File" || info.size > 64 * 1024 * 1024)
@@ -183,5 +242,13 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/publish-artifact",
   layer,
-  deps: [ToolRegistry.node, FileMutation.node, FSUtil.node, LocationMutation.node, Database.node, PermissionV2.node],
+  deps: [
+    Location.node,
+    ToolRegistry.node,
+    FileMutation.node,
+    FSUtil.node,
+    LocationMutation.node,
+    Database.node,
+    PermissionV2.node,
+  ],
 })
