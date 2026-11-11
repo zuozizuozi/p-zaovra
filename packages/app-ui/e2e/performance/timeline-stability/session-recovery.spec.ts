@@ -17,6 +17,7 @@ async function stopped(
     failed?: boolean
     budgetFailure?: boolean
     locale?: string
+    seedHistory?: boolean
     budget?: {
       limits: { tokens?: number; durationMs?: number }
       used: { tokens: number; durationMs: number }
@@ -27,6 +28,7 @@ async function stopped(
   const assistant = assistantMessage([textPart("prt_retained", "Retained partial work")])
   await setupTimeline(page, {
     locale: options.locale,
+    seedHistory: options.seedHistory,
     messages: [
       userMessage(),
       { ...assistant, info: { ...assistant.info, finish: options.failed ? "error" : "stopped" } },
@@ -201,4 +203,56 @@ test("a failed continue can be retried explicitly", async ({ page }) => {
   await expect(page.locator('[data-component="session-recovery"] [role="alert"]')).toBeVisible()
   await button.click()
   await expect.poll(() => calls.length).toBe(1)
+})
+
+test("pending recovery queries keep the virtual timeline and composer connected", async ({ page }) => {
+  await stopped(page, { failed: true, seedHistory: true })
+  await page.route(`**/api/session/${sessionID}/outcome*`, (route) =>
+    route.fulfill({ status: 503, json: { error: "Fixture outcome unavailable" } }),
+  )
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await page.getByRole("button", { name: "Jump to latest", exact: true }).click()
+  const recovery = page.locator('[data-component="session-recovery"]')
+  const retry = recovery.getByRole("button", { name: "common.retry", exact: true })
+  await expect(retry).toBeVisible()
+  const editor = page.locator('[data-component="prompt-input"][contenteditable="true"]')
+  await editor.fill("Keep this draft through the recovery request")
+  const editorNode = await editor.elementHandle()
+  const viewportNode = await page.locator('[data-component="session-panel"] .scroll-view__viewport').elementHandle()
+  expect(editorNode).not.toBeNull()
+  expect(viewportNode).not.toBeNull()
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  await page.route(`**/api/session/${sessionID}/outcome*`, async (route) => {
+    started.resolve()
+    await release.promise
+    await route.fulfill({
+      json: {
+        data: {
+          state: "failed",
+          messageID: assistantID,
+          termination: { category: "network", message: "Fixture 429" },
+          outcomeUnknown: false,
+          checks: [],
+          missing: [],
+        },
+      },
+    })
+  })
+  try {
+    await retry.click()
+    await started.promise
+    await expect(editor).toBeVisible()
+    expect(await editorNode!.evaluate((node) => node.isConnected)).toBe(true)
+    expect(await viewportNode!.evaluate((node) => node.isConnected)).toBe(true)
+    await editor.fill("Typing remains available while recovery is pending")
+    await expect(editor).toHaveText("Typing remains available while recovery is pending")
+    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+  } finally {
+    release.resolve()
+  }
+  await expect(recovery.getByRole("button", { name: "Continue", exact: true })).toBeEnabled()
+  await expect(editor).toHaveText("Typing remains available while recovery is pending")
+  expect(await editorNode!.evaluate((node) => node.isConnected)).toBe(true)
+  expect(await viewportNode!.evaluate((node) => node.isConnected)).toBe(true)
 })

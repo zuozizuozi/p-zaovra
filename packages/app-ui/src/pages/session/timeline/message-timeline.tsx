@@ -13,6 +13,7 @@ import {
   onCleanup,
   onMount,
   Show,
+  Suspense,
   type Accessor,
   type JSX,
 } from "solid-js"
@@ -1707,20 +1708,23 @@ export function MessageTimeline(props: {
           const current = messageByID().get(recoveryRow().messageID)
           return current?.role === "assistant" ? current : undefined
         }
+        // Recovery queries must not suspend the scroll viewport or composer.
         return (
           <TimelineRowFrame row={recoveryRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <Show when={message()} keyed>
                 {(message) => (
-                  <SessionRecovery
-                    message={message}
-                    active={
-                      sessionStatus().type === "idle" &&
-                      sessionMessages().at(-1)?.id === message.id &&
-                      serverSync().session.history.complete(sessionID() ?? "") &&
-                      !info()?.time.archived
-                    }
-                  />
+                  <Suspense>
+                    <SessionRecovery
+                      message={message}
+                      active={
+                        sessionStatus().type === "idle" &&
+                        sessionMessages().at(-1)?.id === message.id &&
+                        serverSync().session.history.complete(sessionID() ?? "") &&
+                        !info()?.time.archived
+                      }
+                    />
+                  </Suspense>
                 )}
               </Show>
             </div>
