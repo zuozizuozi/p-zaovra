@@ -890,7 +890,7 @@ const layer = Layer.effectDiscard(
                   Effect.flatMap((output) => {
                     const text = `${output.output}\n${modelOutput(output)}`
                     return "timeout" in output || output.exit !== 0
-                      ? Effect.fail(new Error(text))
+                      ? Effect.fail(new BashJob.CommandFailed({ output: text }))
                       : Effect.succeed(text)
                   }),
                 ),
