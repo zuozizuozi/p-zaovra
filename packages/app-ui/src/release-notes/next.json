@@ -1,30 +1,38 @@
 {
   "zh": [
     {
-      "title": "出错后可以继续输入",
-      "description": "请求被限流或出错并停止后，输入框不再卡住，对话区不再闪烁"
+      "title": "GLM 可以正常调用工具",
+      "description": "通过中转使用 GLM 时，读文件、改文件等操作不再因格式问题报错中断"
     },
     {
-      "title": "一次交付多个文件",
-      "description": "同一轮里的图片、PDF、网页等多个成果都能正常交付并出现在成果卡里"
+      "title": "很长的命令也能运行",
+      "description": "模型把整段脚本写进一条命令时，Windows 上不再启动失败"
     },
     {
-      "title": "图片输入开关",
-      "description": "在模型设置里为每个模型单独打开或关闭图片输入，中转站的模型也能发图"
+      "title": "重试时不再误报失败",
+      "description": "网络或限流出错后自动重试期间只显示重试提示；连续失败会停下并说明原因，不再无休止重试"
+    },
+    {
+      "title": "过程中的失败提示更轻",
+      "description": "任务还在进行时，中途的操作失败只显示一行提示；后台命令失败不再显示内部报错"
     }
   ],
   "en": [
     {
-      "title": "Keep typing after an error",
-      "description": "After a rate-limited or failed request is stopped, the composer stays usable and the conversation no longer flickers"
+      "title": "GLM can use tools",
+      "description": "Reading and editing files with GLM through a gateway no longer stops on a format error"
     },
     {
-      "title": "Deliver several files at once",
-      "description": "Images, PDFs, web pages and other results from the same turn are all delivered and shown as artifacts"
+      "title": "Very long commands run",
+      "description": "A command that carries a whole script no longer fails to start on Windows"
     },
     {
-      "title": "Image input switch",
-      "description": "Turn image input on or off per model in model settings, including models served through a gateway"
+      "title": "Retries no longer look like failures",
+      "description": "While a network or rate-limit error is retried you see a retry hint; repeated failures stop with an explanation instead of retrying without end"
+    },
+    {
+      "title": "Quieter mid-task failures",
+      "description": "A failed step in a running task shows one line; a failed background command no longer shows internal errors"
     }
   ]
 }
