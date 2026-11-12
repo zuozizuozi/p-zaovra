@@ -5,6 +5,9 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { CrossSpawnSpawner } from "./cross-spawn-spawner"
 import { ShellIdentity } from "./shell-identity"
 import { randomUUID } from "node:crypto"
+import { writeFileSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { makeGlobalNode } from "./effect/app-node"
 import { PreviewProcess } from "./preview-process"
 
@@ -92,6 +95,9 @@ export const resolveShell = (configured?: string) => {
   return ShellIdentity.resolve(configured).path
 }
 
+// Leaves room for the PowerShell wrapper, executable path and argument quoting.
+const inlineScriptLimit = 24_000
+
 export const shellCommand = (command: string, cwd: string, shell?: string, env?: NodeJS.ProcessEnv) => {
   const executable = resolveShell(shell)
   const powershell = /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(executable)
@@ -103,9 +109,19 @@ export const shellCommand = (command: string, cwd: string, shell?: string, env?:
     const body = Buffer.from(`${command}\nif (-not $? -and $LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 1 }`).toString(
       "base64",
     )
+    // Windows caps one command line at 32,767 characters and base64 grows the script by a third.
+    // A longer script travels in a private temp file that PowerShell deletes before running it.
+    const file =
+      body.length > inlineScriptLimit ? path.join(os.tmpdir(), `zaovra-shell-${randomUUID()}.txt`) : undefined
+    if (file) writeFileSync(file, body, { mode: 0o600 })
+    const literal = file?.replaceAll("'", "''")
+    const source = literal
+      ? `try { $zaovraBody = [System.IO.File]::ReadAllText('${literal}') } catch { [Console]::Error.WriteLine($_.ToString()); exit 1 } finally { Remove-Item -LiteralPath '${literal}' -Force -ErrorAction SilentlyContinue };`
+      : `$zaovraBody = '${body}';`
     const script = `# ${marker}
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; $ProgressPreference = 'SilentlyContinue'; $global:LASTEXITCODE = 0; $Error.Clear();
-try { $zaovraScript = [scriptblock]::Create([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${body}'))) } catch { [Console]::Error.WriteLine($_.ToString()); [Console]::Error.WriteLine('${marker}syntax-incompatible'); exit 1 }
+${source}
+try { $zaovraScript = [scriptblock]::Create([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($zaovraBody))) } catch { [Console]::Error.WriteLine($_.ToString()); [Console]::Error.WriteLine('${marker}syntax-incompatible'); exit 1 }
 & {
 & $zaovraScript
 if (-not $? -and $LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 1 } } | Out-Default; if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }; exit $LASTEXITCODE`
