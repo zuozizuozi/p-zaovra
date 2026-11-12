@@ -1,3 +1,4 @@
 [test]
 root = "./src"
-preload = ["./happydom.ts"]
+# Solid TSX must go through Solid's DOM compiler; Bun's default JSX transform cannot load it.
+preload = ["./happydom.ts", "./test-browser/fixtures/solid-preload.ts"]

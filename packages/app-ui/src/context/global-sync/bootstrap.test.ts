@@ -316,7 +316,7 @@ describe("query keys", () => {
         provider: {
           list: async () => ({
             data: {
-              data: connected.map((id) => ({ id, name: id })),
+              data: connected.map((id) => ({ id, name: id, api: { url: "https://provider.test/v1" } })),
             },
           }),
         },

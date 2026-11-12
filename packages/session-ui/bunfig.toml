@@ -1,0 +1,3 @@
+[test]
+# FileReader and document come from the shared happy-dom registration used by app-ui.
+preload = ["../app-ui/happydom.ts"]

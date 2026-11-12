@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { unwrap } from "solid-js/store"
 import type {
   QuestionView,
   SessionInputAdmitted,
@@ -129,7 +130,7 @@ test("177 source order survives ID lookup, deltas, removal and history reload", 
       delta: " appended",
     },
   })
-  expect(ctx.store.data.part.msg_answer.find((part) => part.id === "msg_answer:text-10")).toMatchObject({
+  expect(unwrap(ctx.store.data.part.msg_answer.find((part) => part.id === "msg_answer:text-10"))).toMatchObject({
     text: "After 10 appended",
   })
   ctx.store.apply({
@@ -271,8 +272,8 @@ describe("V2 server session store", () => {
     expect(ctx.store.data.part.msg_host).toBeUndefined()
     returned.resolve()
     for (let index = 0; index < 50 && !ctx.store.data.part.msg_host; index++) await Bun.sleep(10)
-    expect(ctx.store.data.part.msg_host).toMatchObject([{ text: "Task completed", synthetic: true }])
-    expect(ctx.store.data.part.msg_user).toMatchObject([{ text: "Original task" }])
+    expect(unwrap(ctx.store.data.part.msg_host)).toMatchObject([{ text: "Task completed", synthetic: true }])
+    expect(unwrap(ctx.store.data.part.msg_user)).toMatchObject([{ text: "Original task" }])
   })
 
   test("a late provider start during final history reconciliation is checked again", async () => {
@@ -317,8 +318,8 @@ describe("V2 server session store", () => {
     ctx.store.set("session_status", "ses_child", { type: "busy" })
     await ctx.store.watchExecution("ses_child")
     expect(ctx.store.data.session_working("ses_child")).toBe(false)
-    expect(ctx.store.data.part.msg_answer[0]).toMatchObject({ text: "READY" })
-    expect(ctx.store.data.message.ses_child.find((m) => m.id === "msg_answer")?.time).toMatchObject({ completed: 3 })
+    expect(unwrap(ctx.store.data.part.msg_answer[0])).toMatchObject({ text: "READY" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((m) => m.id === "msg_answer")?.time)).toMatchObject({ completed: 3 })
   })
   test("distinguishes backend-confirmed history from an unacknowledged optimistic message", async () => {
     const ctx = setup({ pages: [{ data: [user("msg_persisted", "Already sent", 1)] }] })
@@ -367,7 +368,7 @@ describe("V2 server session store", () => {
     })
     returned.resolve()
     await reading
-    expect(ctx.store.data.part["msg_first"]?.[0]).toMatchObject({ text: "hello world" })
+    expect(unwrap(ctx.store.data.part["msg_first"]?.[0])).toMatchObject({ text: "hello world" })
   })
 
   test("retains a delta received before the snapshot supplies its missing prefix", async () => {
@@ -394,7 +395,7 @@ describe("V2 server session store", () => {
     })
     returned.resolve()
     await reading
-    expect(ctx.store.data.part["msg_first"]?.[0]).toMatchObject({ text: "hello world" })
+    expect(unwrap(ctx.store.data.part["msg_first"]?.[0])).toMatchObject({ text: "hello world" })
   })
   test("does not append an in-flight delta already included in the active snapshot", async () => {
     const ctx = setup({
@@ -415,7 +416,7 @@ describe("V2 server session store", () => {
         delta: " world",
       },
     })
-    expect(ctx.store.data.part["msg_first"]?.[0]).toMatchObject({ text: "hello world" })
+    expect(unwrap(ctx.store.data.part["msg_first"]?.[0])).toMatchObject({ text: "hello world" })
   })
   test("isolates repeated provider text IDs across historical and streaming messages", async () => {
     const first: SessionMessage = {
@@ -437,7 +438,7 @@ describe("V2 server session store", () => {
     })
     expect(ctx.store.data.part_text_accum_delta[oldPart.id]).toBeUndefined()
     expect(ctx.store.data.part_text_accum_delta[newPart.id]).toBe("New response")
-    expect(ctx.store.data.part.msg_first).toMatchObject([{ text: "History stays unchanged" }])
+    expect(unwrap(ctx.store.data.part.msg_first)).toMatchObject([{ text: "History stays unchanged" }])
   })
   test("refreshes a new empty session with an admissible history page size", async () => {
     const ctx = setup({
@@ -445,7 +446,7 @@ describe("V2 server session store", () => {
     })
     await ctx.store.sync("ses_child")
     await ctx.store.sync("ses_child", { force: true })
-    expect(ctx.store.data.part.msg_002).toMatchObject([{ type: "text", text: "answer" }])
+    expect(unwrap(ctx.store.data.part.msg_002)).toMatchObject([{ type: "text", text: "answer" }])
     expect(ctx.requests.limits).toEqual([20, 20])
   })
 
@@ -490,7 +491,7 @@ describe("V2 server session store", () => {
       "msg_003",
       "msg_004",
     ])
-    expect(ctx.store.data.message.ses_child.find((message) => message.id === "msg_002")).toMatchObject({
+    expect(unwrap(ctx.store.data.message.ses_child.find((message) => message.id === "msg_002"))).toMatchObject({
       parentID: "msg_001",
     })
   })
@@ -506,7 +507,7 @@ describe("V2 server session store", () => {
     await ctx.store.sync("ses_child")
     await ctx.store.history.loadMore("ses_child")
     expect(ctx.requests.messages.length).toBe(3)
-    expect(ctx.store.data.message.ses_child.find((message) => message.id === "msg_002")).toMatchObject({
+    expect(unwrap(ctx.store.data.message.ses_child.find((message) => message.id === "msg_002"))).toMatchObject({
       parentID: "msg_001",
     })
   })
@@ -527,7 +528,7 @@ describe("V2 server session store", () => {
     await ctx.store.sync("ses_child")
     expect(ctx.store.data.pending_input.ses_child[0].id).toBe("msg_queue")
     expect(ctx.store.data.message.ses_child).toHaveLength(1)
-    expect(ctx.store.data.part.msg_queue).toMatchObject([{ metadata: { zaovraDelivery: "queue" } }])
+    expect(unwrap(ctx.store.data.part.msg_queue)).toMatchObject([{ metadata: { zaovraDelivery: "queue" } }])
     ctx.store.apply({
       type: "session.next.prompted",
       properties: {
@@ -600,7 +601,7 @@ describe("V2 server session store", () => {
       "msg_5",
       "msg_6",
     ])
-    expect(ctx.store.data.message.ses_child[5]).toMatchObject({ parentID: "msg_1" })
+    expect(unwrap(ctx.store.data.message.ses_child[5])).toMatchObject({ parentID: "msg_1" })
   })
 
   test("retains the durable revert boundary on cold resolution", async () => {
@@ -627,8 +628,8 @@ describe("V2 server session store", () => {
     await ctx.store.sync("ses_child")
 
     expect(ctx.store.data.message.ses_child.map((message) => message.id)).toEqual(["msg_001", "msg_002"])
-    expect(ctx.store.data.message.ses_child[1]).toMatchObject({ role: "assistant", parentID: "msg_001" })
-    expect(ctx.store.data.part.msg_002).toMatchObject([{ type: "text", text: "answer" }])
+    expect(unwrap(ctx.store.data.message.ses_child[1])).toMatchObject({ role: "assistant", parentID: "msg_001" })
+    expect(unwrap(ctx.store.data.part.msg_002)).toMatchObject([{ type: "text", text: "answer" }])
   })
 
   test("restores durably admitted inputs that have not entered the transcript", async () => {
@@ -648,8 +649,8 @@ describe("V2 server session store", () => {
     await ctx.store.sync("ses_child")
 
     expect(ctx.requests.pending).toEqual(["ses_child"])
-    expect(ctx.store.data.message.ses_child).toMatchObject([{ id: "msg_pending", role: "user" }])
-    expect(ctx.store.data.part.msg_pending).toMatchObject([{ type: "text", text: "new requirement" }])
+    expect(unwrap(ctx.store.data.message.ses_child)).toMatchObject([{ id: "msg_pending", role: "user" }])
+    expect(unwrap(ctx.store.data.part.msg_pending)).toMatchObject([{ type: "text", text: "new requirement" }])
   })
 
   test("uses the opaque V2 cursor to prepend older history", async () => {
@@ -733,8 +734,8 @@ describe("V2 server session store", () => {
       },
     })
 
-    expect(ctx.store.data.message.ses_child).toMatchObject([{ id: "msg_001", role: "user" }])
-    expect(ctx.store.data.part.msg_001).toMatchObject([{ type: "text", text: "new requirement" }])
+    expect(unwrap(ctx.store.data.message.ses_child)).toMatchObject([{ id: "msg_001", role: "user" }])
+    expect(unwrap(ctx.store.data.part.msg_001)).toMatchObject([{ type: "text", text: "new requirement" }])
     expect(ctx.store.data.session_status.ses_child).toEqual({ type: "busy" })
   })
 
@@ -763,8 +764,8 @@ describe("V2 server session store", () => {
       },
     })
 
-    expect(ctx.store.data.message.ses_child).toMatchObject([{ id: "msg_001", role: "user" }])
-    expect(ctx.store.data.part.msg_001).toMatchObject([{ type: "text", text: "new requirement" }])
+    expect(unwrap(ctx.store.data.message.ses_child)).toMatchObject([{ id: "msg_001", role: "user" }])
+    expect(unwrap(ctx.store.data.part.msg_001)).toMatchObject([{ type: "text", text: "new requirement" }])
   })
 
   test("streams V2 assistant text deltas into the existing timeline state", () => {
@@ -818,8 +819,8 @@ describe("V2 server session store", () => {
       },
     })
 
-    expect(ctx.store.data.message.ses_child[1]).toMatchObject({ id: "msg_002", parentID: "msg_001" })
-    expect(ctx.store.data.part.msg_002).toMatchObject([{ id: "msg_002:text_1", text: "hello" }])
+    expect(unwrap(ctx.store.data.message.ses_child[1])).toMatchObject({ id: "msg_002", parentID: "msg_001" })
+    expect(unwrap(ctx.store.data.part.msg_002)).toMatchObject([{ id: "msg_002:text_1", text: "hello" }])
     ctx.store.apply({
       type: "session.next.text.ended",
       properties: {
@@ -831,7 +832,7 @@ describe("V2 server session store", () => {
         superseded: true,
       },
     })
-    expect(ctx.store.data.part.msg_002).toMatchObject([
+    expect(unwrap(ctx.store.data.part.msg_002)).toMatchObject([
       { text: "[被替代的未完成输出]\nhello", metadata: { superseded: true } },
     ])
   })
@@ -868,7 +869,7 @@ test("a recovery Synthetic event refreshes durable history while the session sta
   await refreshed.promise
   // Let the queued history response finish adapting into the same store.
   await new Promise((resolve) => setTimeout(resolve, 0))
-  expect(ctx.store.data.part.msg_recovery).toMatchObject([{ text: "恢复记录：重试2次" }])
+  expect(unwrap(ctx.store.data.part.msg_recovery)).toMatchObject([{ text: "恢复记录：重试2次" }])
   expect(ctx.store.data.session_working("ses_child")).toBe(true)
 })
 
@@ -894,7 +895,7 @@ test("Stop wait settling cannot clear the new task's busy state and its final ta
   current.resolve()
   await watching
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
-  expect(ctx.store.data.part.msg_new[0]).toMatchObject({ text: "NEW_TAIL_中文🙂" })
+  expect(unwrap(ctx.store.data.part.msg_new[0])).toMatchObject({ text: "NEW_TAIL_中文🙂" })
 })
 
 test("shell liveness is connection-local and ends without waiting for history refresh", () => {
@@ -1068,7 +1069,7 @@ test("700 terminal text is visible immediately when its start event was missed",
       text: "我是当前选择的模型。",
     },
   })
-  expect(ctx.store.data.part.msg_700_answer).toMatchObject([
+  expect(unwrap(ctx.store.data.part.msg_700_answer)).toMatchObject([
     { id: "msg_700_answer:text_0", type: "text", text: "我是当前选择的模型。" },
   ])
 })
@@ -1100,7 +1101,7 @@ test("701 silent current-view resync clears stale busy and stale permissions and
   await ctx.store.resyncSilent()
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
   expect(ctx.store.data.permission.ses_child).toEqual([])
-  expect(ctx.store.data.part.msg_final).toMatchObject([{ text: "final without SSE" }])
+  expect(unwrap(ctx.store.data.part.msg_final)).toMatchObject([{ text: "final without SSE" }])
   ctx.store.unpin("ses_child")
 })
 test("701 admitted queue is immediately visible and does not make an idle session busy", async () => {
@@ -1117,7 +1118,7 @@ test("701 admitted queue is immediately visible and does not make an idle sessio
     },
   })
   expect(ctx.store.data.message.ses_child).toContainEqual(expect.objectContaining({ id: "msg_queue", role: "user" }))
-  expect(ctx.store.data.part.msg_queue).toMatchObject([{ text: "after task", metadata: { zaovraDelivery: "queue" } }])
+  expect(unwrap(ctx.store.data.part.msg_queue)).toMatchObject([{ text: "after task", metadata: { zaovraDelivery: "queue" } }])
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
 })
 
@@ -1135,7 +1136,7 @@ test("701 reconnect refreshes pinned current history without switching windows",
   ctx.store.apply({ type: "server.connected", properties: {} })
   await loaded.promise
   await new Promise((resolve) => setTimeout(resolve, 0))
-  expect(ctx.store.data.part.msg_reconnected).toMatchObject([{ text: "answer after reconnect" }])
+  expect(unwrap(ctx.store.data.part.msg_reconnected)).toMatchObject([{ text: "answer after reconnect" }])
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
   ctx.store.unpin("ses_child")
 })
@@ -1191,7 +1192,7 @@ for (const delivery of ["queue", "steer"] as const) {
         },
       })
     step("msg_a1")
-    expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a1")).toMatchObject({ parentID: "msg_u1" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a1"))).toMatchObject({ parentID: "msg_u1" })
     ctx.store.apply({
       type: "session.next.prompt.admitted",
       properties: { sessionID: "ses_child", messageID: "msg_u4", delivery, timestamp: 4, prompt: { text: "later" } },
@@ -1218,13 +1219,13 @@ for (const delivery of ["queue", "steer"] as const) {
       ],
     })
     step("msg_a2")
-    expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a2")).toMatchObject({ parentID: "msg_u1" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a2"))).toMatchObject({ parentID: "msg_u1" })
     ctx.store.apply({
       type: "session.next.prompted",
       properties: { sessionID: "ses_child", messageID: "msg_u2", delivery, timestamp: 11, prompt: { text: "next 2" } },
     })
     step("msg_a3")
-    expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a3")).toMatchObject({ parentID: "msg_u2" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a3"))).toMatchObject({ parentID: "msg_u2" })
     const refreshed = setup({
       pending: pending.slice(1),
       pages: [
@@ -1239,7 +1240,7 @@ for (const delivery of ["queue", "steer"] as const) {
       ],
     })
     await refreshed.store.sync("ses_child")
-    expect(refreshed.store.data.message.ses_child.find((item) => item.id === "msg_a3")).toMatchObject({
+    expect(unwrap(refreshed.store.data.message.ses_child.find((item) => item.id === "msg_a3"))).toMatchObject({
       parentID: "msg_u2",
     })
   })
@@ -1331,7 +1332,7 @@ test("707 pending HTTP admission remains excluded when unrelated SSE arrives dur
       model: { id: "m", providerID: "p" },
     },
   })
-  expect(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a")).toMatchObject({ parentID: "msg_u1" })
+  expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a"))).toMatchObject({ parentID: "msg_u1" })
 })
 
 test("742 background completion recovers after its final ownership check disconnects", async () => {
@@ -1358,7 +1359,7 @@ test("742 background completion recovers after its final ownership check disconn
   expect(ctx.store.data.session_working("ses_child")).toBe(true)
   await ctx.store.resyncSilent(Date.now() + 1000)
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
-  expect(ctx.store.data.part.msg_done).toMatchObject([{ text: "background final" }])
+  expect(unwrap(ctx.store.data.part.msg_done)).toMatchObject([{ text: "background final" }])
 })
 
 test("742 recovery leaves an owned continuing task busy and does not duplicate its wait", async () => {

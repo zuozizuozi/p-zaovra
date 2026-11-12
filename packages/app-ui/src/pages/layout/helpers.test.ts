@@ -223,7 +223,9 @@ describe("layout workspace helpers", () => {
   test("formats fallback project display name", () => {
     expect(displayName({ worktree: "/tmp/app" })).toBe("app")
     expect(displayName({ worktree: "/tmp/app", name: "My App" })).toBe("My App")
-    expect(displayName({ worktree: "/" })).toBe("/")
+    // A project without a folder name falls back to the localized default project label.
+    expect(displayName({ worktree: "/" })).toBe("Default project")
+    expect(displayName({ worktree: "/" }, { t: () => "默认项目" })).toBe("默认项目")
   })
 
   test("scopes home project selection by server", () => {

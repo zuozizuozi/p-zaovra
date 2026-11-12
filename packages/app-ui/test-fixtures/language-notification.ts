@@ -65,7 +65,11 @@ try {
             },
           },
         },
-        sync: { ensureDirSyncContext: () => ({ session: { get: () => ({ title: "Task" }) } }) },
+        sync: {
+          // The unread-recovery effect reads live session state; this fixture has no running sessions.
+          session: { data: { session_status: {}, info: {} } },
+          ensureDirSyncContext: () => ({ session: { get: () => ({ title: "Task" }) } }),
+        },
       }),
     }),
   }))
