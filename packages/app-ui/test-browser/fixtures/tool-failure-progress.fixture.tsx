@@ -34,7 +34,7 @@ const first: AssistantMessage = {
 }
 const last: AssistantMessage = { ...first, id: "last", time: { created: 4 } }
 
-function mount(tool: string) {
+function mount(tool: string, error = "Offline operation failed: original detail") {
   const failure: ToolPart = {
     id: "failure",
     callID: "failed-call",
@@ -45,7 +45,7 @@ function mount(tool: string) {
     state: {
       status: "error",
       input: { target: "index.html", action: "update" },
-      error: "Offline operation failed: original detail",
+      error,
       time: { start: 2, end: 3 },
     },
   }
@@ -123,7 +123,7 @@ function expectLight(host: HTMLElement) {
   expect(host.textContent).not.toContain(dict["ui.toolErrorCard.feedback"])
 }
 
-test.each(["browser", "apply_patch"])(
+test.each(["browser", "apply_patch", "question"])(
   "%s failure stays light during same-turn retry and successful continuation",
   async (tool) => {
     const view = mount(tool)
@@ -145,6 +145,18 @@ test.each(["browser", "apply_patch"])(
     }
   },
 )
+
+test("a user-dismissed question keeps its dismissal acknowledgement during the turn", () => {
+  const view = mount("question", "Error: The user dismissed this question")
+  try {
+    expect(view.host.textContent).toBe(dict["ui.messagePart.questions.dismissed"])
+    expect(view.host.querySelector("[data-component=tool-recovery-summary]")).toBeNull()
+    expect(view.host.querySelector("[data-kind=tool-error-card]")).toBeNull()
+    expect(view.feedback).toEqual([])
+  } finally {
+    view.dispose()
+  }
+})
 
 test.each(["stop", "stopped", "interrupted"])(
   "unrecovered failure gains its full card and exact feedback after %s",

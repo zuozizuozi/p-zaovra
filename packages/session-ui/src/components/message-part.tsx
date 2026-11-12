@@ -1531,19 +1531,21 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   })
 
   const render = createMemo(() => ToolRegistry.render(part().tool) ?? GenericTool)
-  const pendingFailure = createMemo(
-    () =>
+  const pendingFailure = createMemo(() => {
+    const failed = part()
+    return (
       !props.quietFailure &&
-      part().state.status === "error" &&
-      part().tool !== "question" &&
+      failed.state.status === "error" &&
+      !(failed.tool === "question" && failed.state.error.replace("Error: ", "").includes("dismissed this question")) &&
       props.message.role === "assistant" &&
       toolFailureInProgress({
         message: props.message,
         messages: data.store.message[part().sessionID] ?? [props.message],
         parts: data.store.part,
         working: (data.store.session_status[part().sessionID]?.type ?? "idle") !== "idle",
-      }),
-  )
+      })
+    )
+  })
   const recovered = createMemo(() =>
     !props.quietFailure && !pendingFailure() && part().state.status === "error" && props.message.role === "assistant"
       ? recoveredToolFailures({
