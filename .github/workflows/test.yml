@@ -56,6 +56,7 @@ jobs:
           # Desktop UI state, composer and timeline logic. These suites guard the main conversation path.
           (cd packages/session-ui && bun run test)
           (cd packages/app-ui && bun run test:unit)
+          (cd packages/app-ui && bun run test:browser)
           # Recorded real sessions replayed through the desktop sync layer (specs/v2/desktop-sync.md).
           (cd packages/app-ui && bun run test:replay)
       - name: Preserve ZA test inventories and results

@@ -83,6 +83,8 @@ test("queue admission sends a stable ID, shows a pending bubble and does not cha
     const content = "/inspect\nbranch feature"
     input.draft.prompt = [{ type: "text", content, start: 0, end: content.length }]
     input.draft.variant = "previous-model-variant"
+    // A sent draft keeps its prepared admission for exact retries; a changed draft is prepared again.
+    input.draft.admission = undefined
     input.sync.data.command = [
       {
         name: "inspect",
@@ -101,6 +103,7 @@ test("queue admission sends a stable ID, shows a pending bubble and does not cha
     })
     expect(requests.at(-1)?.prompt.text).toBe("Inspect branch feature")
     input.sync.data.command[0].subtask = true
+    input.draft.admission = undefined
     expect(await sendFollowupDraft({ ...input, messageID: "msg_child_command" })).toBe(true)
     expect(requests.at(-1)?.prompt.selection).toEqual({
       agent: "build",
@@ -141,6 +144,7 @@ test("queue admission sends a stable ID, shows a pending bubble and does not cha
         subtask: true,
       }),
     ]
+    input.draft.admission = undefined
     const frozen = prepareFollowupDraft(input)
     dropNextPrompt = true
     await expect(sendFollowupDraft({ ...input, draft: frozen, messageID: "msg_frozen" })).rejects.toThrow()
