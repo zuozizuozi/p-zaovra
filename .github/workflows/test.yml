@@ -53,6 +53,9 @@ jobs:
             (cd "packages/$package" && bun run test)
           done
           (cd packages/server && bun test src/routes-customization.test.ts)
+          # Desktop UI state, composer and timeline logic. These suites guard the main conversation path.
+          (cd packages/session-ui && bun run test)
+          (cd packages/app-ui && bun run test:unit)
       - name: Preserve ZA test inventories and results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
