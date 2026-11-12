@@ -18,7 +18,13 @@ export function activeTurnMessage(
   )
   if (!current) return
   const latest = chronological.findLast((message) => message.role === "assistant" && message.parentID === current.id)
-  if (latest?.role === "assistant" && typeof latest.time.completed === "number" && latest.finish !== "tool-calls")
+  // While a retry is pending the kernel will send the request again: the failed step did not end the turn.
+  if (
+    status.type !== "retry" &&
+    latest?.role === "assistant" &&
+    typeof latest.time.completed === "number" &&
+    latest.finish !== "tool-calls"
+  )
     return
   return current.id
 }

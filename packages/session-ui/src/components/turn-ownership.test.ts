@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { AssistantMessage, Message, Part, UserMessage } from "@zaovra-ai/sdk/v2"
-import { displayTurnOwners } from "./turn-ownership"
+import { activeTurnMessage, displayTurnOwners } from "./turn-ownership"
 
 const user = (id: string, created: number): UserMessage => ({
   id,
@@ -86,4 +86,17 @@ test("unhydrated roots and cross-session sources never lend a newer owner", () =
       id === "followup" ? [text(id, "alien")] : [human(id)],
     ).get("followup"),
   ).toBe("followup")
+})
+
+test("a turn waiting for an automatic retry is still the active turn", () => {
+  const failed = { ...answer("msg_2_failed", "msg_1_human", 2), finish: "error" } as AssistantMessage
+  const messages: Message[] = [user("msg_1_human", 1), failed]
+  const parts = (id: string) => (id === "msg_1_human" ? [human(id)] : [])
+  // The kernel will send the request again: the failed step did not end the turn.
+  expect(activeTurnMessage(messages, parts, { type: "retry", attempt: 1, message: "retrying", next: 10 })).toBe(
+    "msg_1_human",
+  )
+  // The same history with no retry pending is a settled turn.
+  expect(activeTurnMessage(messages, parts, { type: "busy" })).toBeUndefined()
+  expect(activeTurnMessage(messages, parts, { type: "idle" })).toBeUndefined()
 })
