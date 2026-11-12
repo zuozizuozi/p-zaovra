@@ -15,6 +15,9 @@ export type Input = {
   cancelled: boolean
 }
 
+/** Automatic retries of a transient failure in a session with no wall-clock budget: about five minutes. */
+export const interactiveAttempts = 8
+
 /** Recovery is session-owned; a timeout alone is not evidence of a transient connection failure. */
 export function decide(input: Input) {
   if (input.cancelled) return { action: "stop" as const, category: "cancelled", message: "已停止重试。" }
@@ -53,6 +56,14 @@ export function decide(input: Input) {
       action: "stop" as const,
       category: "environment",
       message: "同类错误已探测三次，等待环境或请求修正；可核对原因后继续。",
+    }
+  // Without a wall-clock budget nothing else ends the loop: an unreachable service would be
+  // retried every minute until the user noticed. A budgeted run is bounded by that budget.
+  if (input.remainingMs === undefined && input.attempt >= interactiveAttempts)
+    return {
+      action: "stop" as const,
+      category: "network",
+      message: `连续 ${interactiveAttempts} 次重试仍未成功，已停止自动重试。请检查网络或模型服务后发送“继续”。`,
     }
   const delayMs = Math.max(
     [5_000, 10_000, 20_000, 40_000, 60_000][Math.min(input.attempt, 4)],

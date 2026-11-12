@@ -89,3 +89,22 @@ function providerError(body: unknown, status: number) {
     Effect.flip,
   )
 }
+
+// A wrong base URL or a gateway that stays down must not retry every minute forever.
+it.effect("an interactive session stops retrying a transient failure after a bounded number of attempts", () =>
+  Effect.gen(function* () {
+    const error = yield* providerError(throttle, 429)
+    const input = { error, committed: false, operations: "settled" as const, cancelled: false }
+    expect(SessionRetry.decide({ ...input, attempt: SessionRetry.interactiveAttempts - 1 })).toMatchObject({
+      action: "retry",
+    })
+    expect(SessionRetry.decide({ ...input, attempt: SessionRetry.interactiveAttempts })).toMatchObject({
+      action: "stop",
+      category: "network",
+    })
+    // A run with an explicit wall-clock budget keeps retrying until that budget, as before.
+    expect(
+      SessionRetry.decide({ ...input, attempt: SessionRetry.interactiveAttempts + 5, remainingMs: 3_600_000 }),
+    ).toMatchObject({ action: "retry" })
+  }),
+)
