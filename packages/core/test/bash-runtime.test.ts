@@ -18,6 +18,9 @@ import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { BackgroundJob } from "@zaovra-ai/core/background-job"
 import { SessionOutcome } from "@zaovra-ai/core/session/outcome"
 import { SessionMessage } from "@zaovra-ai/core/session/message"
+import { Model } from "@zaovra-ai/llm"
+import { route } from "@zaovra-ai/llm/protocols/openai-chat"
+import { toLLMMessages } from "@zaovra-ai/core/session/runner/to-llm-message"
 import { DateTime } from "effect"
 import { Database } from "@zaovra-ai/core/database/database"
 import { EventV2 } from "@zaovra-ai/core/event"
@@ -1050,6 +1053,134 @@ it.live("retains bytes beyond the shell preview cap in the registry-owned log", 
       expect(yield* Effect.promise(() => Bun.file(result.outputPaths![0]).text())).toBe(content)
     }),
   ),
+)
+
+for (const fixture of [
+  { name: "output", text: "visible stdout831\n", stderr: "visible stderr831\n" },
+  { name: "empty", text: "", stderr: "" },
+  {
+    name: "truncated",
+    text: `kept-prefix831${"x".repeat(BashTool.MAX_CAPTURE_BYTES + 4096)}kept-tail831\n`,
+    stderr: "",
+  },
+]) {
+  it.live(`831 background nonzero ${fixture.name} keeps output and exit without internal stacks`, () =>
+    withRuntime((directory, sessions, registry) =>
+      Effect.gen(function* () {
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const database = yield* Database.Service
+        const events = yield* EventV2.Service
+        const admitted = yield* sessions.prompt({
+          sessionID: session.id,
+          prompt: { text: "Check the local failing command fixture." },
+          resume: false,
+        })
+        yield* SessionInput.promoteSteers(database.db, events, session.id, admitted.admittedSeq)
+        const script = path.join(directory, "failed.cjs")
+        yield* Effect.promise(() =>
+          Bun.write(
+            script,
+            `const fs = require('node:fs'); fs.writeSync(1, ${JSON.stringify(fixture.text)}); fs.writeSync(2, ${JSON.stringify(fixture.stderr)}); process.exit(7)`,
+          ),
+        )
+        const started = yield* settleToolApproved(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: {
+            type: "tool-call",
+            id: "failed831",
+            name: "bash",
+            input: {
+              command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`,
+              run_in_background: true,
+            },
+          },
+        })
+        const job = (started.output?.structured as { job_id: string }).job_id
+        for (const action of ["wait", "get"]) {
+          const result = yield* settleToolApproved(registry, {
+            sessionID: session.id,
+            ...toolIdentity,
+            call: { type: "tool-call", id: `${action}831`, name: "bash_job", input: { job_id: job, action } },
+          })
+          expect(result.output?.structured).toMatchObject({ status: "error", exit: 7 })
+          const text = result.output?.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n")
+          expect(text).toContain("Command exited with code 7.")
+          expect(text).not.toMatch(/(?:^|\n)\s+at /)
+          expect(text).not.toContain("bash-job.ts:")
+        }
+        const record = yield* sessions.message({ sessionID: session.id, messageID: SessionMessage.ID.make(job) })
+        expect(record?.type).toBe("shell")
+        if (record?.type !== "shell") throw new Error("Missing durable shell result")
+        expect(record.executionRecord?.exit).toBe(7)
+        expect(record.output).toContain("Command exited with code 7.")
+        expect(record.output).not.toMatch(/(?:^|\n)\s+at /)
+        if (fixture.name === "output") {
+          expect(record.output).toContain(fixture.text)
+          expect(record.output).toContain(fixture.stderr)
+        }
+        if (fixture.name === "empty") expect(record.output).toContain("(no output)")
+        if (fixture.name === "truncated") {
+          expect(record.output).toContain("kept-tail831")
+          expect(record.output).toContain("kept-prefix831")
+          expect(record.output).toContain("[in-memory preview truncated; consult the command log for captured bytes]")
+          expect(record.output.length).toBeLessThan(BashTool.MAX_CAPTURE_BYTES + 4096)
+          expect((yield* Effect.promise(() => Bun.file(started.outputPaths![0]).text())).length).toBe(
+            fixture.text.length,
+          )
+        }
+        const completion = yield* SessionInput.find(database.db, SessionMessage.ID.make(`${job}_completed`))
+        expect(completion?.prompt.text).toContain("exit=7")
+        expect(completion?.prompt.text).not.toMatch(/(?:^|\n)\s+at /)
+        expect(completion?.prompt.text).not.toContain("bash-job.ts:")
+        yield* SessionInput.promoteNextQueued(database.db, events, session.id)
+        const context = JSON.stringify(
+          toLLMMessages(
+            yield* sessions.messages({ sessionID: session.id }),
+            Object.assign(Model.make({ id: "fixture831", provider: "fixture", route }), { inputModalities: ["text"] }),
+          ),
+        )
+        expect(context).toContain("exit=7")
+        expect(context).not.toContain("bash-job.ts:")
+        expect(context).not.toMatch(/\\n\s+at /)
+      }),
+    ).pipe(Effect.provide(Logger.layer([]))),
+  )
+}
+
+it.live("831 unexpected background failure keeps diagnostics outside history and tool context", () =>
+  Effect.gen(function* () {
+    const logs: unknown[] = []
+    yield* withRuntime((directory, sessions, registry, jobs) =>
+      Effect.gen(function* () {
+        const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+        const bash = yield* BashJob.Service
+        const job = yield* bash.start(
+          "unexpected failure fixture",
+          Effect.fail(new Error("internal-diagnostic831")),
+          { sessionID: session.id, ...toolIdentity, toolCallID: "unexpected831" },
+          Effect.void,
+        )
+        yield* jobs.wait({ id: job, timeout: 5000 })
+        const result = yield* settleToolApproved(registry, {
+          sessionID: session.id,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "get-unexpected831", name: "bash_job", input: { job_id: job, action: "get" } },
+        })
+        expect(result.output?.structured).toMatchObject({ status: "error" })
+        expect(JSON.stringify(result.output?.content)).not.toContain("internal-diagnostic831")
+        const record = yield* sessions.message({ sessionID: session.id, messageID: SessionMessage.ID.make(job) })
+        expect(record?.type).toBe("shell")
+        if (record?.type !== "shell") throw new Error("Missing durable shell result")
+        expect(record.output).not.toContain("internal-diagnostic831")
+        expect(record.output).not.toMatch(/(?:^|\n)\s+at /)
+        expect(JSON.stringify(logs)).toContain("internal-diagnostic831")
+      }),
+    ).pipe(Effect.provide(Logger.layer([Logger.make((entry) => logs.push(entry.message))])))
+  }),
 )
 
 it.live("background commands settle durably, enforce ownership, and stop with their Session", () =>

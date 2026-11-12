@@ -25,6 +25,15 @@ import { ToolRegistry } from "./registry"
 import { Tools } from "./tools"
 import type { ToolOutputStore } from "../tool-output-store"
 
+// Only producer-bounded command output may become conversation or model text.
+export class CommandFailed extends Schema.TaggedErrorClass<CommandFailed>()("BashJob.CommandFailed", {
+  output: Schema.String,
+}) {
+  override get message() {
+    return this.output
+  }
+}
+
 export class Service extends Context.Service<
   Service,
   {
@@ -207,32 +216,42 @@ const layer = Layer.effect(
               },
               run: restore(run).pipe(
                 Effect.onExit((exit) =>
-                  events
-                    .publish(SessionEvent.Shell.Ended, {
-                      sessionID: context.sessionID,
-                      callID: id,
-                      output: Exit.isSuccess(exit)
-                        ? exit.value
-                        : Cause.hasInterrupts(exit.cause)
-                          ? "Background command cancelled. Its effects may be partial; inspect the command log before retrying."
-                          : `Background command failed: ${Cause.pretty(exit.cause)}`,
-                      timestamp: DateTime.nowUnsafe(),
-                      executionRecord: results.get(id)?.executionRecord,
-                      checks:
-                        results.get(id)?.verifications ??
-                        (results.get(id)?.verification ? [results.get(id)!.verification!] : []),
-                    })
-                    .pipe(
-                      Effect.andThen(
-                        Effect.gen(function* () {
-                          if (Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)) {
-                            watched.delete(id)
-                            return
-                          }
-                          yield* notify(id)
-                        }),
-                      ),
-                    ),
+                  Effect.gen(function* () {
+                    const failure = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+                    if (Exit.isFailure(exit) && !Cause.hasInterrupts(exit.cause))
+                      yield* Effect.logError("Background command failed", {
+                        jobID: id,
+                        cause: Cause.pretty(exit.cause),
+                      })
+                    yield* events
+                      .publish(SessionEvent.Shell.Ended, {
+                        sessionID: context.sessionID,
+                        callID: id,
+                        output: Exit.isSuccess(exit)
+                          ? exit.value
+                          : Cause.hasInterrupts(exit.cause)
+                            ? "Background command cancelled. Its effects may be partial; inspect the command log before retrying."
+                            : failure instanceof CommandFailed
+                              ? failure.output
+                              : `Command failed (exit unknown).\n${observations.get(id)?.().output.slice(-8192) || "(no output)"}`,
+                        timestamp: DateTime.nowUnsafe(),
+                        executionRecord: results.get(id)?.executionRecord,
+                        checks:
+                          results.get(id)?.verifications ??
+                          (results.get(id)?.verification ? [results.get(id)!.verification!] : []),
+                      })
+                      .pipe(
+                        Effect.andThen(
+                          Effect.gen(function* () {
+                            if (Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)) {
+                              watched.delete(id)
+                              return
+                            }
+                            yield* notify(id)
+                          }),
+                        ),
+                      )
+                  }),
                 ),
                 Effect.ensuring(
                   Effect.sync(() => {
@@ -402,6 +421,8 @@ const layer = Layer.effect(
                       : job
                 const evidence = result && result.status !== "running" ? results.get(input.job_id) : undefined
                 const observation = observations.get(input.job_id)?.()
+                const failed =
+                  result?.status === "error" ? yield* sessions.message(SessionMessage.ID.make(input.job_id)) : undefined
                 return {
                   executionRecord: evidence?.executionRecord,
                   ...(evidence?.verification ? { verification: evidence.verification } : {}),
@@ -419,10 +440,14 @@ const layer = Layer.effect(
                   kind: typeof result?.metadata?.kind === "string" ? result.metadata.kind : undefined,
                   workdir: typeof result?.metadata?.workdir === "string" ? result.metadata.workdir : undefined,
                   output:
-                    result?.output ??
-                    result?.error ??
-                    observation?.output ??
-                    "Still running. Read the command log or wait for completion.",
+                    result?.status === "error"
+                      ? failed?.message.type === "shell"
+                        ? failed.message.output
+                        : "Background command failed. Inspect internal diagnostics."
+                      : (result?.output ??
+                        result?.error ??
+                        observation?.output ??
+                        "Still running. Read the command log or wait for completion."),
                 }
               }),
           }),
