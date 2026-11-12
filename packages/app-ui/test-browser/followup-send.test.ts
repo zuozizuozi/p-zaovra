@@ -6,7 +6,7 @@ import { adaptCommand } from "../src/context/global-sync/utils"
 import { adaptSessionInput } from "../src/context/v2-session-adapter"
 import { extractPromptFromParts } from "../src/utils/prompt"
 
-test("queue admission sends a stable ID and does not project a user turn or change busy state", async () => {
+test("queue admission sends a stable ID, shows a pending bubble and does not change busy state", async () => {
   const requests: {
     id: string
     delivery: string
@@ -78,7 +78,8 @@ test("queue admission sends a stable ID and does not project a user turn or chan
       { id: "msg_retry", delivery: "queue", text: "Later" },
       { id: "msg_retry", delivery: "queue", text: "Later" },
     ])
-    expect(effects).toEqual([])
+    // A queued follow-up shows as a pending bubble at once, but never marks the session busy.
+    expect(effects).toEqual(["add", "add"])
     const content = "/inspect\nbranch feature"
     input.draft.prompt = [{ type: "text", content, start: 0, end: content.length }]
     input.draft.variant = "previous-model-variant"

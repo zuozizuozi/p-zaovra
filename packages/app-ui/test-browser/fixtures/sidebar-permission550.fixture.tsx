@@ -101,6 +101,14 @@ const tabs = {
 const layout = {
   route: () => route,
   home: { selection: () => selection, setSelection: (value: typeof selection) => setSelection(value) },
+  // This fixture keeps the default order and has no pinned conversations.
+  sidebar: {
+    projectOrder: () => [] as string[],
+    sessionOrder: () => [] as string[],
+    setProjectOrder: () => {},
+    setSessionOrder: () => {},
+  },
+  pins: { list: () => [], has: () => false, remove: () => {}, reorder: () => {} },
 }
 mock.module("@/context/language", () => ({ useLanguage: () => language }))
 mock.module("@solidjs/router", () => ({

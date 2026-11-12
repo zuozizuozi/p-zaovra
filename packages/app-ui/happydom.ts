@@ -2,6 +2,17 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 
 GlobalRegistrator.register()
 
+// A failed assertion prints its received value. Printing a DOM node walks the whole document
+// and window graph, which has exhausted memory before the failure was ever shown.
+Object.defineProperty(Node.prototype, Symbol.for("nodejs.util.inspect.custom"), {
+  configurable: true,
+  value(this: Node) {
+    if (!(this instanceof Element)) return this.nodeName
+    const attributes = Array.from(this.attributes, (item) => ` ${item.name}="${item.value.slice(0, 60)}"`).join("")
+    return `<${this.localName}${attributes}>`
+  },
+})
+
 const originalGetContext = HTMLCanvasElement.prototype.getContext
 // @ts-expect-error - we're overriding with a simplified mock
 HTMLCanvasElement.prototype.getContext = function (contextType: string, _options?: unknown) {

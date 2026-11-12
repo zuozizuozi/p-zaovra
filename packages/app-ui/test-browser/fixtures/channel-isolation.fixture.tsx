@@ -27,7 +27,8 @@ mock.module("@/hooks/use-providers", () => ({
   popularProviders: [],
   useProviders: () => ({ connected: () => [item], popular: () => [] }),
 }))
-mock.module("@/context/server-sdk", () => ({ useServerSDK: () => () => ({ client: {} }) }))
+// Model-service preferences are stored per server scope.
+mock.module("@/context/server-sdk", () => ({ useServerSDK: () => () => ({ client: {}, scope: "local" }) }))
 mock.module("@/context/server-sync", () => ({
   useServerSync: () => () => ({ data: { config: { provider: {} } }, providerVerified: () => state.verified }),
 }))

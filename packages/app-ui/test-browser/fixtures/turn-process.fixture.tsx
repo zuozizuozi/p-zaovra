@@ -150,7 +150,8 @@ test("normal completion folds exploratory failure into a neutral count, and expa
   before.dispose()
   const fixture = mount()
   try {
-    expect(fixture.host.querySelector("[data-slot=process-counts]")).toBeNull()
+    // Folded, the heading already names what happened and how many attempts failed.
+    expect(fixture.host.querySelector("[data-slot=process-counts]")?.textContent).toBe("编辑 1 项、另外1项操作（1个失败）")
     expect(fixture.host.textContent).toContain("用时 4 秒")
     expect(fixture.host.querySelector("[data-slot=turn-terminal-status]")).toBeNull()
     expect(fixture.host.textContent).not.toContain("当前未执行")
@@ -223,7 +224,9 @@ test("English terminal headings render stopped and interrupted without an idle l
     setState("status", "interrupted")
     expect(host.textContent).toContain("Interrupted")
     setState("status", undefined)
-    expect(host.textContent).toBe("Took 4s ⌄")
+    // A turn with nothing to expand shows its duration without a toggle.
+    expect(host.textContent).toBe("Took 4s")
+    expect(host.querySelector("button") === null).toBe(true)
     expect(host.textContent).not.toContain("Not executing")
   } finally {
     dispose()
@@ -241,8 +244,8 @@ test("uncertain effects explain that current state must be checked before retryi
     host,
   )
   try {
-    expect(host.textContent).toContain("操作结果还不确定")
-    expect(host.textContent).toContain("请先核对当前现场")
+    expect(host.textContent).toContain("操作结果尚未确认")
+    expect(host.textContent).toContain("请检查文件或输出后再决定是否重试")
   } finally {
     dispose()
   }
