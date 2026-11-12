@@ -528,11 +528,12 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     if (toolDeltas.length) lifecycle = Lifecycle.reasoningEnd(lifecycle, events, "reasoning-0", metadata)
 
     for (const tool of toolDeltas) {
+      // Compatible providers may repeat empty identity placeholders on later indexed deltas.
       const result = ToolStream.appendOrStart(
         ADAPTER,
         tools,
         tool.index,
-        { id: tool.id ?? undefined, name: tool.function?.name ?? undefined, text: tool.function?.arguments ?? "" },
+        { id: tool.id || undefined, name: tool.function?.name || undefined, text: tool.function?.arguments ?? "" },
         "OpenAI Chat tool call delta is missing id or name",
       )
       if (ToolStream.isError(result)) return yield* result
