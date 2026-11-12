@@ -34,6 +34,14 @@ export class CommandFailed extends Schema.TaggedErrorClass<CommandFailed>()("Bas
   }
 }
 
+// A launch failure has no command output. Its errno name (ENOENT, ENAMETOOLONG) lets the model
+// change approach; arbitrary error text stays in diagnostics because it may carry payloads.
+function systemErrorCode(error: unknown, depth = 0): string | undefined {
+  if (!error || typeof error !== "object" || depth > 4) return
+  if ("code" in error && typeof error.code === "string" && /^E[A-Z0-9_]{2,24}$/.test(error.code)) return error.code
+  return systemErrorCode("cause" in error ? error.cause : undefined, depth + 1)
+}
+
 export class Service extends Context.Service<
   Service,
   {
@@ -233,7 +241,7 @@ const layer = Layer.effect(
                             ? "Background command cancelled. Its effects may be partial; inspect the command log before retrying."
                             : failure instanceof CommandFailed
                               ? failure.output
-                              : `Command failed (exit unknown).\n${observations.get(id)?.().output.slice(-8192) || "(no output)"}`,
+                              : `Command failed (exit unknown${systemErrorCode(failure) ? `, ${systemErrorCode(failure)}` : ""}).\n${observations.get(id)?.().output.slice(-8192) || "(no output)"}`,
                         timestamp: DateTime.nowUnsafe(),
                         executionRecord: results.get(id)?.executionRecord,
                         checks:

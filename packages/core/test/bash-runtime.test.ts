@@ -1183,6 +1183,29 @@ it.live("831 unexpected background failure keeps diagnostics outside history and
   }),
 )
 
+it.live("a launch failure reports its errno name without the internal error text", () =>
+  withRuntime((directory, sessions, _registry, jobs) =>
+    Effect.gen(function* () {
+      const session = yield* sessions.create({ location: { directory: AbsolutePath.make(directory) } })
+      const bash = yield* BashJob.Service
+      const job = yield* bash.start(
+        "launch failure fixture",
+        Effect.fail(
+          new Error("wrapper", { cause: Object.assign(new Error("secret-launch-detail"), { code: "ENAMETOOLONG" }) }),
+        ),
+        { sessionID: session.id, ...toolIdentity, toolCallID: "launch-failure" },
+        Effect.void,
+      )
+      yield* jobs.wait({ id: job, timeout: 5000 })
+      const record = yield* sessions.message({ sessionID: session.id, messageID: SessionMessage.ID.make(job) })
+      if (record?.type !== "shell") throw new Error("Missing durable shell result")
+      expect(record.output).toContain("ENAMETOOLONG")
+      expect(record.output).not.toContain("secret-launch-detail")
+      expect(record.output).not.toMatch(/(?:^|\n)\s+at /)
+    }),
+  ),
+)
+
 it.live("background commands settle durably, enforce ownership, and stop with their Session", () =>
   withRuntime((directory, sessions, registry) =>
     Effect.gen(function* () {

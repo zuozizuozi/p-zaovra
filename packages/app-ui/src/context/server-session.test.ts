@@ -319,7 +319,9 @@ describe("V2 server session store", () => {
     await ctx.store.watchExecution("ses_child")
     expect(ctx.store.data.session_working("ses_child")).toBe(false)
     expect(unwrap(ctx.store.data.part.msg_answer[0])).toMatchObject({ text: "READY" })
-    expect(unwrap(ctx.store.data.message.ses_child.find((m) => m.id === "msg_answer")?.time)).toMatchObject({ completed: 3 })
+    expect(unwrap(ctx.store.data.message.ses_child.find((m) => m.id === "msg_answer")?.time)).toMatchObject({
+      completed: 3,
+    })
   })
   test("distinguishes backend-confirmed history from an unacknowledged optimistic message", async () => {
     const ctx = setup({ pages: [{ data: [user("msg_persisted", "Already sent", 1)] }] })
@@ -1118,7 +1120,9 @@ test("701 admitted queue is immediately visible and does not make an idle sessio
     },
   })
   expect(ctx.store.data.message.ses_child).toContainEqual(expect.objectContaining({ id: "msg_queue", role: "user" }))
-  expect(unwrap(ctx.store.data.part.msg_queue)).toMatchObject([{ text: "after task", metadata: { zaovraDelivery: "queue" } }])
+  expect(unwrap(ctx.store.data.part.msg_queue)).toMatchObject([
+    { text: "after task", metadata: { zaovraDelivery: "queue" } },
+  ])
   expect(ctx.store.data.session_working("ses_child")).toBe(false)
 })
 
@@ -1192,7 +1196,9 @@ for (const delivery of ["queue", "steer"] as const) {
         },
       })
     step("msg_a1")
-    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a1"))).toMatchObject({ parentID: "msg_u1" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a1"))).toMatchObject({
+      parentID: "msg_u1",
+    })
     ctx.store.apply({
       type: "session.next.prompt.admitted",
       properties: { sessionID: "ses_child", messageID: "msg_u4", delivery, timestamp: 4, prompt: { text: "later" } },
@@ -1219,13 +1225,17 @@ for (const delivery of ["queue", "steer"] as const) {
       ],
     })
     step("msg_a2")
-    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a2"))).toMatchObject({ parentID: "msg_u1" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a2"))).toMatchObject({
+      parentID: "msg_u1",
+    })
     ctx.store.apply({
       type: "session.next.prompted",
       properties: { sessionID: "ses_child", messageID: "msg_u2", delivery, timestamp: 11, prompt: { text: "next 2" } },
     })
     step("msg_a3")
-    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a3"))).toMatchObject({ parentID: "msg_u2" })
+    expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a3"))).toMatchObject({
+      parentID: "msg_u2",
+    })
     const refreshed = setup({
       pending: pending.slice(1),
       pages: [
@@ -1332,7 +1342,9 @@ test("707 pending HTTP admission remains excluded when unrelated SSE arrives dur
       model: { id: "m", providerID: "p" },
     },
   })
-  expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a"))).toMatchObject({ parentID: "msg_u1" })
+  expect(unwrap(ctx.store.data.message.ses_child.find((item) => item.id === "msg_a"))).toMatchObject({
+    parentID: "msg_u1",
+  })
 })
 
 test("742 background completion recovers after its final ownership check disconnects", async () => {
@@ -1419,7 +1431,11 @@ describe("live text stream marker", () => {
   }
 
   test("a completed snapshot clears the marker while ownership stays busy", async () => {
-    const ctx = setup({ wait: hold, pages: [{ data: [] }, page(true)], active: () => ({ ses_child: { type: "running" } }) })
+    const ctx = setup({
+      wait: hold,
+      pages: [{ data: [] }, page(true)],
+      active: () => ({ ses_child: { type: "running" } }),
+    })
     await live(ctx)
     await ctx.store.resync("ses_child")
     expect(ctx.store.data.session_status.ses_child).toEqual({ type: "busy" })
@@ -1477,7 +1493,11 @@ describe("live text stream marker", () => {
   })
 
   test("an unfinished live snapshot keeps the marker", async () => {
-    const ctx = setup({ wait: hold, pages: [{ data: [] }, page(false)], active: () => ({ ses_child: { type: "running" } }) })
+    const ctx = setup({
+      wait: hold,
+      pages: [{ data: [] }, page(false)],
+      active: () => ({ ses_child: { type: "running" } }),
+    })
     await live(ctx)
     await ctx.store.resync("ses_child")
     expect(ctx.store.data.session_status.ses_child).toEqual({ type: "busy" })
@@ -1501,7 +1521,13 @@ describe("live text stream marker", () => {
     await live(ctx)
     ctx.store.apply({
       type: "session.next.text.ended",
-      properties: { sessionID: "ses_child", timestamp: 3, assistantMessageID: "msg_answer", textID: "text-0", text: "Writ" },
+      properties: {
+        sessionID: "ses_child",
+        timestamp: 3,
+        assistantMessageID: "msg_answer",
+        textID: "text-0",
+        text: "Writ",
+      },
     })
     expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
     ctx.store.apply(delta("More", "text-1"))
