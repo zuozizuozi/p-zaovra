@@ -24,7 +24,7 @@ export function toolExecutionInterrupted(message: Pick<AssistantMessage, "finish
   )
 }
 
-function settledTools(input: RecoveryInput) {
+function toolFailureTurn(input: RecoveryInput) {
   const messages = input.messages
     .filter((message) => message.sessionID === input.message.sessionID)
     .toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))
@@ -34,9 +34,21 @@ function settledTools(input: RecoveryInput) {
   })
   const request = owners.get(input.message.id)
   const active = messages.findLast((message) => message.role === "assistant")
-  if (!request || (input.working && active && owners.get(active.id) === request)) return
-  const turn = messages.filter(
-    (message): message is AssistantMessage => message.role === "assistant" && owners.get(message.id) === request,
+  if (!request) return
+  return { messages, owners, request, working: !!(input.working && active && owners.get(active.id) === request) }
+}
+
+/** Pending evidence is a light process entry, not a claim that the failed operation recovered. */
+export function toolFailureInProgress(input: RecoveryInput) {
+  return input.working && (toolFailureTurn(input)?.working ?? false)
+}
+
+function settledTools(input: RecoveryInput) {
+  const scope = toolFailureTurn(input)
+  if (!scope || scope.working) return
+  const turn = scope.messages.filter(
+    (message): message is AssistantMessage =>
+      message.role === "assistant" && scope.owners.get(message.id) === scope.request,
   )
   const last = turn.at(-1)
   if (typeof last?.time.completed !== "number" || !last.finish || last.finish === "tool-calls") return
@@ -44,7 +56,7 @@ function settledTools(input: RecoveryInput) {
     .flatMap((message) => input.parts[message.id] ?? [])
     .filter((part): part is ToolPart => part.type === "tool")
   if (tools.some((part) => part.state.status === "pending" || part.state.status === "running")) return
-  return { tools, last, request, messages }
+  return { tools, last, request: scope.request, messages: scope.messages }
 }
 
 export function recoveredToolFailures(input: RecoveryInput) {

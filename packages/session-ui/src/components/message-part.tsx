@@ -71,7 +71,7 @@ import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
 import { BrowserScreenshot } from "./browser-screenshot"
-import { recoveredToolFailures, toolExecutionInterrupted } from "./tool-recovery"
+import { recoveredToolFailures, toolExecutionInterrupted, toolFailureInProgress } from "./tool-recovery"
 import { ToolRecoverySummary } from "./tool-recovery-summary"
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -1531,8 +1531,23 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   })
 
   const render = createMemo(() => ToolRegistry.render(part().tool) ?? GenericTool)
+  const pendingFailure = createMemo(() => {
+    const failed = part()
+    return (
+      !props.quietFailure &&
+      failed.state.status === "error" &&
+      !(failed.tool === "question" && failed.state.error.replace("Error: ", "").includes("dismissed this question")) &&
+      props.message.role === "assistant" &&
+      toolFailureInProgress({
+        message: props.message,
+        messages: data.store.message[part().sessionID] ?? [props.message],
+        parts: data.store.part,
+        working: (data.store.session_status[part().sessionID]?.type ?? "idle") !== "idle",
+      })
+    )
+  })
   const recovered = createMemo(() =>
-    !props.quietFailure && part().state.status === "error" && props.message.role === "assistant"
+    !props.quietFailure && !pendingFailure() && part().state.status === "error" && props.message.role === "assistant"
       ? recoveredToolFailures({
           message: props.message,
           messages: data.store.message[part().sessionID] ?? [props.message],
@@ -1554,7 +1569,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
     >
       <div data-component="tool-part-wrapper" data-timeline-part-id={part().id}>
         <Switch>
-          <Match when={props.quietFailure}>
+          <Match when={props.quietFailure || pendingFailure()}>
             <ToolRecoverySummary parts={[part()]} recovered={false} onSizeChange={props.onContentRendered} />
           </Match>
           <Match when={recoveredPart()}>
