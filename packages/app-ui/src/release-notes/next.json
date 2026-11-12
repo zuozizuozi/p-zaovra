@@ -1,62 +1,30 @@
 {
   "zh": [
     {
-      "title": "更清楚的版本号",
-      "description": "版本统一显示为 Beta 0.2.0，后续更新按 0.2.1、0.2.2 递增"
+      "title": "出错后可以继续输入",
+      "description": "请求被限流或出错并停止后，输入框不再卡住，对话区不再闪烁"
     },
     {
-      "title": "更顺手的首页",
-      "description": "首页直接编写新对话，专注在你要做的事"
+      "title": "一次交付多个文件",
+      "description": "同一轮里的图片、PDF、网页等多个成果都能正常交付并出现在成果卡里"
     },
     {
-      "title": "项目和对话排列",
-      "description": "选择项目不再新建空对话；项目、对话和置顶区支持保存排序"
-    },
-    {
-      "title": "自定义 MCP 和技能",
-      "description": "添加、开关和删除 MCP，管理技能，在输入框用斜杠调用"
-    },
-    {
-      "title": "更整洁的对话菜单",
-      "description": "视图、成果和审查入口集中到对话标题菜单"
-    },
-    {
-      "title": "反馈更方便",
-      "description": "提交反馈时可预览、删除或重新截图，失败后保留已填内容"
-    },
-    {
-      "title": "模型发现与恢复",
-      "description": "更稳定地发现已连接服务的模型；部分加密推理错误可在输出前自动恢复一次"
+      "title": "图片输入开关",
+      "description": "在模型设置里为每个模型单独打开或关闭图片输入，中转站的模型也能发图"
     }
   ],
   "en": [
     {
-      "title": "Clearer version numbers",
-      "description": "Versions now appear as Beta 0.2.0, followed by 0.2.1, 0.2.2 and later updates"
+      "title": "Keep typing after an error",
+      "description": "After a rate-limited or failed request is stopped, the composer stays usable and the conversation no longer flickers"
     },
     {
-      "title": "Start from the home page",
-      "description": "Compose a new conversation directly on the home page"
+      "title": "Deliver several files at once",
+      "description": "Images, PDFs, web pages and other results from the same turn are all delivered and shown as artifacts"
     },
     {
-      "title": "Organize projects and conversations",
-      "description": "Selecting a project no longer creates an empty conversation; project, conversation and pinned ordering is saved"
-    },
-    {
-      "title": "Manage MCP and skills",
-      "description": "Add, toggle and remove MCP servers, manage skills, and use them from slash commands"
-    },
-    {
-      "title": "A tidier conversation menu",
-      "description": "View options, artifacts and review are grouped in the conversation title menu"
-    },
-    {
-      "title": "Easier feedback",
-      "description": "Preview, remove or retake a screenshot, and keep your feedback if submission fails"
-    },
-    {
-      "title": "Model discovery and recovery",
-      "description": "More reliable discovery for connected providers, with one automatic recovery attempt for certain encrypted reasoning errors before output starts"
+      "title": "Image input switch",
+      "description": "Turn image input on or off per model in model settings, including models served through a gateway"
     }
   ]
 }
