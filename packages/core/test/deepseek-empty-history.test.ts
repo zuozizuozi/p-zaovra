@@ -130,12 +130,11 @@ for (const fixture of [
       const result = yield* LLMClient.prepare<OpenAIChatBody>(
         LLM.request({ model, tools, messages: toLLMMessages(history, model) }),
       ).pipe(Effect.exit)
-      expect(Exit.isSuccess(result)).toBe(fixture.allowed === true)
       expect(JSON.stringify(history)).toBe(original)
-      if (Exit.isFailure(result)) {
-        expect(String(result.cause)).toContain("reasoning_content")
-        return
-      }
+      if (Exit.isFailure(result)) throw new Error(String(result.cause))
+      // A turn this model cannot vouch for is continued without thinking instead of being refused.
+      expect(result.value.body.thinking).toEqual({ type: fixture.allowed === true ? "enabled" : "disabled" })
+      if (fixture.allowed !== true) return
       expect(result.value.body.messages.find((message) => message.role === "assistant")).toMatchObject({
         reasoning_content: "",
         tool_calls: [{ id: "call-1" }],

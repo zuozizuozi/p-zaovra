@@ -11,6 +11,12 @@ afterEach(() =>
     .forEach((stop) => stop()),
 )
 
+// The fit runs on a 75ms timer plus one animation frame; a loaded machine can take longer than any fixed wait.
+async function fitted(calls: unknown[], count: number) {
+  const deadline = Date.now() + 5000
+  while (calls.length < count && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20))
+}
+
 function fixture() {
   const element = document.createElement("div")
   document.body.append(element)
@@ -55,7 +61,7 @@ test("hidden initial terminal does not fit or publish a tiny PTY; visible narrow
   f.geometry.width = 600
   f.geometry.height = 240
   f.fitting.schedule()
-  await new Promise((resolve) => setTimeout(resolve, 120))
+  await fitted(f.calls, 1)
   expect(f.terminal.cols).toBeGreaterThan(50)
   expect(f.terminal.rows).toBeGreaterThan(10)
   expect(f.calls).toHaveLength(1)
@@ -69,7 +75,7 @@ test("grow during Ghostty's resize suppression is retried after layout settles",
   expect(f.terminal.cols).toBeLessThan(5)
   f.geometry.width = 465
   window.dispatchEvent(new Event("resize"))
-  await new Promise((resolve) => setTimeout(resolve, 120))
+  await fitted(f.calls, 2)
   expect(f.terminal.cols).toBeGreaterThan(45)
   expect(f.calls).toHaveLength(2)
 })
@@ -83,7 +89,7 @@ test("font/zoom fits coalesce and cleanup cancels queued fits", async () => {
   f.geometry.width = 820
   f.fitting.schedule()
   f.fitting.schedule()
-  await new Promise((resolve) => setTimeout(resolve, 120))
+  await fitted(f.calls, 2)
   expect(f.terminal.cols).toBeGreaterThan(85)
   expect(f.calls).toHaveLength(2)
   f.fitting.schedule()
@@ -121,7 +127,7 @@ test("container-only ResizeObserver changes refit without a window resize", asyn
   f.fitting.fit()
   f.geometry.width = 820
   notify()
-  await new Promise((resolve) => setTimeout(resolve, 120))
+  await fitted(f.calls, 2)
   expect(f.terminal.cols).toBeGreaterThan(85)
   f.fitting.dispose()
   expect(disconnected).toBe(true)

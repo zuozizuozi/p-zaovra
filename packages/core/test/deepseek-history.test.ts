@@ -134,11 +134,12 @@ for (const fixture of [
       ).pipe(Effect.exit)
       expect(JSON.stringify(history)).toBe(original)
       if (!fixture.allowed) {
-        expect(Exit.isFailure(result)).toBe(true)
-        if (Exit.isSuccess(result)) throw new Error("Missing reasoning was silently accepted")
-        expect(String(result.cause)).toContain("reasoning_content")
-        expect(String(result.cause)).toContain("new session")
-        if (fixture.calls) expect(JSON.stringify(messages)).toContain("retained tool result")
+        // The API refuses thinking mode with tools unless every earlier turn carries its reasoning,
+        // so the request goes out with thinking off instead of failing the conversation.
+        if (Exit.isFailure(result)) throw new Error(String(result.cause))
+        expect(result.value.body.thinking).toEqual({ type: "disabled" })
+        expect(result.value.body.reasoning_effort).toBeUndefined()
+        if (fixture.calls) expect(JSON.stringify(result.value.body.messages)).toContain("retained tool result")
         return
       }
       if (Exit.isFailure(result)) throw new Error(String(result.cause))
