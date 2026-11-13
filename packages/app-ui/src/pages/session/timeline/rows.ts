@@ -19,7 +19,7 @@ export type TimelineRowMap = {
   AssistantHeading: { userMessageID: string }
   TurnDivider: {
     userMessageID: string
-    label: "compaction" | "interrupted" | "stopped"
+    label: "compaction" | "interrupted" | "stopped" | "declined"
   }
   AssistantPart: {
     userMessageID: string
@@ -34,6 +34,16 @@ export type TimelineRowMap = {
 }
 
 /** This message gets an interruption divider at its position in the conversation. */
+/** The user said no to a permission request, which pauses the turn until they say what to do instead. */
+const declinedByUser = (message: AssistantMessage | undefined) => {
+  const structured = message?.structured
+  if (!structured || typeof structured !== "object" || !("zaovraTermination" in structured)) return false
+  const termination = structured.zaovraTermination
+  return (
+    !!termination && typeof termination === "object" && "source" in termination && termination.source === "permission"
+  )
+}
+
 export const endsWithInterruption = (message: AssistantMessage) =>
   message.error?.name === "MessageAbortedError" || message.finish === "interrupted" || message.finish === "stopped"
 
@@ -125,7 +135,11 @@ export namespace Timeline {
         rows.push(
           new TimelineRow.TurnDivider({
             userMessageID: userMessage.id,
-            label: assistantMessages[interruptedMessageIndex]?.finish === "stopped" ? "stopped" : "interrupted",
+            label: declinedByUser(assistantMessages[interruptedMessageIndex])
+              ? "declined"
+              : assistantMessages[interruptedMessageIndex]?.finish === "stopped"
+                ? "stopped"
+                : "interrupted",
           }),
         )
         return

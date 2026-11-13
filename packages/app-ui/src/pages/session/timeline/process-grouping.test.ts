@@ -47,6 +47,23 @@ test("759 active interruption keeps shells on both sides as resident part rows",
   expect(result.filter((row) => row._tag === "TurnDivider").map((row) => row.label)).toEqual(["interrupted"])
 })
 
+test("a turn paused because the user declined a permission says so instead of just 'interrupted'", () => {
+  const user = { id: "msg_user", role: "user" } as UserMessage
+  const declined = {
+    id: "msg_a",
+    role: "assistant",
+    finish: "interrupted",
+    structured: { zaovraTermination: { category: "interrupted", source: "permission" } },
+  } as AssistantMessage
+  const stopped = { ...declined, structured: { zaovraTermination: { category: "interrupted", source: "user" } } }
+  const label = (assistant: AssistantMessage) =>
+    Timeline.constructMessageRows(user, () => [], [assistant], 0, true, "idle", false, false)
+      .filter((row) => row._tag === "TurnDivider")
+      .map((row) => row.label)
+  expect(label(declined)).toEqual(["declined"])
+  expect(label(stopped)).toEqual(["interrupted"])
+})
+
 test("759 idle interruption keeps terminal groups separated by the divider", () => {
   const result = rows("idle", true, true)
   expect(result.map((row) => row._tag)).toEqual([

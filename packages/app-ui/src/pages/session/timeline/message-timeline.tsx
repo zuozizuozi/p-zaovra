@@ -1494,7 +1494,9 @@ export function MessageTimeline(props: {
                       ? "ui.messagePart.compaction"
                       : turnDividerRow().label === "stopped"
                         ? "session.outcome.stopped"
-                        : "ui.message.interrupted",
+                        : turnDividerRow().label === "declined"
+                          ? "session.turn.declined"
+                          : "ui.message.interrupted",
                   )}
                 />
               </div>

@@ -261,6 +261,14 @@ function adaptSessionMessage(
         },
         variant: item.model.variant,
         finish: item.finish,
+        // Why the step ended early, for the timeline to say more than "interrupted".
+        ...(item.termination
+          ? {
+              structured: {
+                zaovraTermination: { category: item.termination.category, source: item.termination.source },
+              },
+            }
+          : {}),
       },
       parts: item.content.flatMap((content): Part[] => {
         if (content.type === "text")
