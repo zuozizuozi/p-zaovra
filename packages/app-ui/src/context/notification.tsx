@@ -21,6 +21,7 @@ import { ServerConnection, useServer } from "./server"
 import { type DraftTab, useTabs } from "./tabs"
 import { requireServerKey } from "@/utils/session-route"
 import type { ServerScope } from "@/utils/server-scope"
+import { newestMessage } from "./newest-message"
 
 type NotificationBase = {
   directory?: string
@@ -440,7 +441,7 @@ export function createServerNotificationState(input: {
     const session = serverSync().session
     const status = session.data.session_status[sessionID]?.type
     const messages = session.data.message[sessionID]
-    const latest = messages?.at(-1)
+    const latest = newestMessage(messages)
     const version = completionVersions.get(sessionID)
     if (recovering.has(sessionID) || (status !== undefined && status !== "idle")) return
     // A followed session applies its events in order, so its history is already there when it turns idle.
@@ -470,7 +471,7 @@ export function createServerNotificationState(input: {
     }
     if (message.role !== "assistant" || !message.time.completed) return
     const valid = () => {
-      const latest = session.data.message[sessionID]?.at(-1)
+      const latest = newestMessage(session.data.message[sessionID])
       return (
         !meta.disposed &&
         completionVersions.get(sessionID) === version &&
