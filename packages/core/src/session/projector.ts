@@ -10,6 +10,7 @@ import { SessionV1 } from "../v1/session"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
+import { SessionMessageTurn } from "./message-turn"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
 import { SessionContextEpoch } from "./context-epoch"
@@ -143,6 +144,9 @@ function run(db: DatabaseService, event: SessionEvent.Event) {
             Effect.orDie,
             Effect.map((row) => (row ? decodeRow(row).turn : undefined)),
           )
+      },
+      getTurnOf(messageID) {
+        return SessionMessageTurn.of(db, event.data.sessionID, messageID)
       },
       getCurrentAssistant() {
         return Effect.gen(function* () {

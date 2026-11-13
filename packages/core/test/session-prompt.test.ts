@@ -201,6 +201,43 @@ describe("SessionV2.prompt", () => {
       expect(SessionOutcome.requested(history).sourceMessageID).toBe(original.id)
     }),
   )
+  it.effect("a promoted completion names the turn of its source, not the newest turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const original = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Task A" }), resume: false })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, original.admittedSeq)
+      const notice = yield* SessionInput.admit(database.db, events, {
+        id: SessionMessage.ID.create(),
+        sessionID,
+        prompt: Prompt.make({ text: "Continue Task A" }),
+        delivery: "queue",
+        completion: { type: "bash-completion", sourceMessageID: original.id, jobID: "job" },
+      })
+      // The user says "continue": a newer turn of the same task.
+      const next = yield* sessions.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, next.admittedSeq)
+      expect(yield* SessionInput.promoteNextQueued(database.db, events, sessionID)).toBe(true)
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+      expect(messages.map((message) => [message.id, message.turn])).toEqual([
+        [original.id, original.id],
+        [next.id, next.id],
+        [notice.id, original.id],
+      ])
+      // The event itself carries the turn, for readers that do not hold the source message.
+      const promoted = yield* database.db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.Prompted.type, 1)))
+        .orderBy(asc(EventTable.seq))
+        .all()
+        .pipe(Effect.orDie)
+      expect(promoted.map((event) => event.data.turn)).toEqual([undefined, undefined, original.id])
+    }),
+  )
+
   it.effect("S1 host completion preserves original clauses, authorization and durable evidence", () =>
     Effect.gen(function* () {
       yield* setup

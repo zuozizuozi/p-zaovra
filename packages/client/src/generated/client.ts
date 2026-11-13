@@ -11,6 +11,7 @@ import type {
   SessionsUsageInput,
   SessionsUsageOutput,
   SessionsActiveOutput,
+  SessionsExecutionOutput,
   SessionsScreenshotInput,
   SessionsScreenshotOutput,
   SessionsGetInput,
@@ -416,7 +417,7 @@ export function make(options: ClientOptions) {
           requestOptions,
         ).then((value) => value.data),
       active: (requestOptions?: RequestOptions) =>
-        request<SessionsActiveOutput>(
+        request<{ readonly data: SessionsActiveOutput }>(
           {
             method: "GET",
             path: `/api/session/active`,
@@ -425,7 +426,18 @@ export function make(options: ClientOptions) {
             empty: false,
           },
           requestOptions,
-        ),
+        ).then((value) => value.data),
+      execution: (requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsExecutionOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/execution`,
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
       screenshot: (input: SessionsScreenshotInput, requestOptions?: RequestOptions) =>
         request<SessionsScreenshotOutput>(
           {

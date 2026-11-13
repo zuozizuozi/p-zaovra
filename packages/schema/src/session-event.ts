@@ -37,6 +37,9 @@ const PromptFields = {
   prompt: Prompt,
   delivery: Delivery,
   completion: SessionMessage.HostCompletion.pipe(optional),
+  // For a promoted background completion: the turn of its source message. Recorded here so a
+  // reader that does not hold that message places the completion the same way.
+  turn: SessionMessage.ID.pipe(optional),
 }
 
 const options = {

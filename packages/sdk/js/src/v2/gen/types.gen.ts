@@ -913,6 +913,7 @@ export type GlobalEvent = {
           prompt: Prompt
           delivery: "steer" | "queue"
           completion?: SessionHostCompletion
+          turn?: string
         }
       }
     | {
@@ -925,6 +926,7 @@ export type GlobalEvent = {
           prompt: Prompt
           delivery: "steer" | "queue"
           completion?: SessionHostCompletion
+          turn?: string
         }
       }
     | {
@@ -2985,6 +2987,12 @@ export type SessionActive = {
   type: "running"
 }
 
+export type SessionExecutionStatus = {
+  epoch: number
+  revision: number
+  active: Array<string>
+}
+
 export type SessionNotFoundError = {
   _tag: "SessionNotFoundError"
   sessionID: string
@@ -4287,6 +4295,7 @@ export type SyncEventSessionNextPrompted = {
       prompt: Prompt
       delivery: "steer" | "queue"
       completion?: SessionHostCompletion
+      turn?: string
     }
   }
 }
@@ -4306,6 +4315,7 @@ export type SyncEventSessionNextPromptAdmitted = {
       prompt: Prompt
       delivery: "steer" | "queue"
       completion?: SessionHostCompletion
+      turn?: string
     }
   }
 }
@@ -6082,6 +6092,7 @@ export type SessionNextPrompted = {
     prompt: Prompt
     delivery: "steer" | "queue"
     completion?: SessionHostCompletion
+    turn?: string
   }
 }
 
@@ -6104,6 +6115,7 @@ export type SessionNextPromptAdmitted = {
     prompt: Prompt
     delivery: "steer" | "queue"
     completion?: SessionHostCompletion
+    turn?: string
   }
 }
 
@@ -9385,6 +9397,7 @@ export type EventSessionNextPrompted = {
     prompt: Prompt
     delivery: "steer" | "queue"
     completion?: SessionHostCompletion
+    turn?: string
   }
 }
 
@@ -9398,6 +9411,7 @@ export type EventSessionNextPromptAdmitted = {
     prompt: Prompt
     delivery: "steer" | "queue"
     completion?: SessionHostCompletion
+    turn?: string
   }
 }
 
@@ -13516,12 +13530,41 @@ export type V2SessionActiveResponses = {
     data: {
       [key: string]: unknown | SessionActive
     }
-    epoch?: number
-    revision?: number
   }
 }
 
 export type V2SessionActiveResponse = V2SessionActiveResponses[keyof V2SessionActiveResponses]
+
+export type V2SessionExecutionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/session/execution"
+}
+
+export type V2SessionExecutionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2SessionExecutionError = V2SessionExecutionErrors[keyof V2SessionExecutionErrors]
+
+export type V2SessionExecutionResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SessionExecutionStatus
+  }
+}
+
+export type V2SessionExecutionResponse = V2SessionExecutionResponses[keyof V2SessionExecutionResponses]
 
 export type V2SessionScreenshotData = {
   body?: never

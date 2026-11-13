@@ -247,9 +247,9 @@ export function createKernel(fixture: Fixture) {
           }),
         pendingInputs: () => request("pending", () => ({ data: { data: admitted() } })),
         active: () =>
-          request("active", () => ({
-            data: { data: active ? { [fixture.sessionID]: { type: "running" } } : {}, epoch, revision },
-          })),
+          request("active", () => ({ data: { data: active ? { [fixture.sessionID]: { type: "running" } } : {} } })),
+        execution: () =>
+          request("active", () => ({ data: { data: { epoch, revision, active: active ? [fixture.sessionID] : [] } } })),
         wait: async () => {
           counts.wait++
           if (active) await new Promise<void>((resolve) => waiters.add(resolve))

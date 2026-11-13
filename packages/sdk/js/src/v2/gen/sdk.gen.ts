@@ -262,6 +262,8 @@ import type {
   V2SessionCreateResponses,
   V2SessionEventsErrors,
   V2SessionEventsResponses,
+  V2SessionExecutionErrors,
+  V2SessionExecutionResponses,
   V2SessionGetErrors,
   V2SessionGetResponses,
   V2SessionHistoryErrors,
@@ -3653,6 +3655,18 @@ export class Session extends HeyApiClient {
   public active<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<V2SessionActiveResponses, V2SessionActiveErrors, ThrowOnError>({
       url: "/api/session/active",
+      ...options,
+    })
+  }
+
+  /**
+   * Read execution status
+   *
+   * The Sessions this process is working on, with the version that orders this answer against `session.execution.status` events: `epoch` is the process start time and `revision` counts its status changes. Sessions absent from `active` were idle at that version.
+   */
+  public execution<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2SessionExecutionResponses, V2SessionExecutionErrors, ThrowOnError>({
+      url: "/api/session/execution",
       ...options,
     })
   }

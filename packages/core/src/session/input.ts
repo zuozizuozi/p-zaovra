@@ -11,6 +11,7 @@ import { Prompt } from "./prompt"
 import { SessionSchema } from "./schema"
 import { SessionOutcome } from "./outcome"
 import { SessionInputTable, SessionMessageTable } from "./sql"
+import { SessionMessageTurn } from "./message-turn"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -301,6 +302,9 @@ const publish = Effect.fn("SessionInput.publish")(function* (
   let promoted = 0
   for (const row of rows) {
     const id = SessionMessage.ID.make(row.id)
+    const turn = row.completion
+      ? yield* SessionMessageTurn.of(db, sessionID, SessionMessage.ID.make(row.completion.sourceMessageID))
+      : undefined
     const completed = yield* events
       .publish(SessionEvent.Prompted, {
         sessionID,
@@ -309,6 +313,7 @@ const publish = Effect.fn("SessionInput.publish")(function* (
         prompt: decodePrompt(row.prompt),
         delivery: row.delivery,
         completion: row.completion ?? undefined,
+        ...(turn ? { turn } : {}),
       })
       .pipe(
         Effect.as(true),

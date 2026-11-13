@@ -20,7 +20,7 @@ Notification order is not guaranteed to match sequence order when two publishers
 
 The global event stream carries every event as `{ id, type, properties }`. Each durable event is followed by a second entry, `{ type: "sync", syncEvent: { id, type, seq, aggregateID, data } }`, where `type` is the versioned type and `data` is the stored form. The client builds transcripts only from the `sync` entries and from stream fragments. It ignores the first copy of a durable `session.next.*` event for transcript purposes.
 
-On connect the server sends `server.connected` with `sync: 1`. Without it the client falls back to re-reading pages, which is how it worked before this document.
+On connect the server sends `server.connected` with `sync: 1`. Without it the client falls back to re-reading pages, which is how it worked before this document. A session may be opened before the stream connects; when the announcement arrives, every request made the old way is retired so that none of its late answers can write, and open sessions are read again as snapshots.
 
 ## Rules
 
@@ -84,7 +84,9 @@ After a reconnect that could not replay what was missed, the client reads `sessi
 
 ### Turn ownership
 
-`turn` is the user message a message was produced for. A user message is its own turn. A background completion belongs to the turn of the assistant message that launched the command. Anything else continues the turn of the message before it. The value is written once, when the message is created, and never changes. Messages written before this field existed have none and are not backfilled.
+`turn` is the user message a message was produced for. A user message is its own turn. A background completion belongs to the turn of the message it names as its source, which is the task it reports on. Anything else continues the turn of the message before it. The value is written once, when the message is created, and never changes. Messages written before this field existed have none and are not backfilled.
+
+The client usually holds only the newest messages, so it cannot always look a source up. The promotion event of a completion therefore carries `turn` itself. If an event from an older kernel does not, and the source is not held, the client does not guess: it reads a new snapshot.
 
 `turn` is display ownership. It does not give a session drain a durable identity.
 
@@ -92,15 +94,17 @@ In the UI a reply's parent is the nearest preceding user message, shell record o
 
 ### Busy and idle
 
-The kernel's run coordinator publishes a live `session.execution.status` event whenever a session enters or leaves its set of active sessions. Each report carries `epoch` (the start time of the reporting process) and `revision` (a counter of status changes in that process). A message page and `session.active` return the same pair with the current value.
+The kernel's run coordinator publishes a live `session.execution.status` event whenever a session enters or leaves its set of active sessions. Each report carries `epoch` (the start time of the reporting process) and `revision` (a counter of status changes in that process). A message page and `session.execution` return the same pair with the current value.
 
 The client keeps, per session, the highest `(epoch, revision)` it has seen. An event applies only if it is higher. An answer to a request also applies when it is equal, because it reflects every change up to its revision. A slow answer therefore cannot overwrite a newer event, and a restarted process outranks the one before it.
 
-A crashed process never reports that it stopped, so the client asks `session.active` when the event stream reconnects, and once when a session has claimed to be working for 30 seconds without any event. It does not poll otherwise. A queued input that has not started does not make a session busy.
+An answer from `session.execution` speaks for every session, including the ones it does not list: they were idle at that version. The client keeps that version as a floor for all sessions, so a start report that was overtaken by the answer cannot turn an idle session busy.
+
+A crashed process never reports that it stopped, so the client asks `session.execution` when the event stream reconnects, and once when a session has claimed to be working for 30 seconds without any event. It does not poll otherwise. A queued input that has not started does not make a session busy.
 
 ### Reconnect
 
-On `server.connected` the client asks `session.active`. If the server could not replay the missed events (`replay` is not `applied`), each followed session reads `session.history(after = applied)` and the text of messages that are still streaming. Open views also re-read their permission requests and questions, which are not sequenced.
+On `server.connected` the client asks `session.execution`. If the server could not replay the missed events (`replay` is not `applied`), each followed session reads `session.history(after = applied)` and the text of messages that are still streaming. Open views also re-read their permission requests and questions, which are not sequenced.
 
 ### Pending inputs
 

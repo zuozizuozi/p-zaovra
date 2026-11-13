@@ -60,14 +60,21 @@ test("postbuild resolves hoisted Schema with private unversioned and manifest-hi
     JSON.stringify({ name: "effect", version: "4.0.0-beta.83", license: "MIT" }),
   )
   await Bun.write(path.join(fixture.fixture, "node_modules/effect/LICENSE"), "MIT effect license")
+  await Bun.write(
+    path.join(fixture.fixture, "node_modules/immer/package.json"),
+    JSON.stringify({ name: "immer", version: "11.1.4", license: "MIT" }),
+  )
+  await Bun.write(path.join(fixture.fixture, "node_modules/immer/LICENSE"), "MIT immer license")
   const result = await notices(fixture.root)
   expect(result.stderr).toBe("")
   expect(result.exit).toBe(0)
   const output = await Bun.file(path.join(fixture.root, "resources/THIRD_PARTY_NOTICES.txt")).text()
   expect(output).toContain("@zaovra-ai/schema workspace")
   expect(output).toContain("effect 4.0.0-beta.83")
+  expect(output).toContain("immer 11.1.4")
   expect(output).toContain("MIT workspace license")
   expect(output).toContain("MIT effect license")
+  expect(output).toContain("MIT immer license")
   expect(output).not.toContain("undefined")
 })
 

@@ -10,6 +10,8 @@ export type MemoryState = {
 export interface Adapter {
   /** The turn of the newest message, which the next non-user message continues. */
   readonly getTurn: () => Effect.Effect<SessionMessage.ID | undefined>
+  /** The turn a given message belongs to. A user message is its own turn, recorded or not. */
+  readonly getTurnOf: (messageID: SessionMessage.ID) => Effect.Effect<SessionMessage.ID | undefined>
   readonly getCurrentAssistant: () => Effect.Effect<SessionMessage.Assistant | undefined>
   readonly getAssistant: (messageID: SessionMessage.ID) => Effect.Effect<SessionMessage.Assistant | undefined>
   readonly getCurrentShell: (callID: string) => Effect.Effect<SessionMessage.Shell | undefined>
@@ -29,6 +31,12 @@ export function memory(state: MemoryState): Adapter {
   return {
     getTurn() {
       return Effect.sync(() => state.messages.at(-1)?.turn)
+    },
+    getTurnOf(messageID) {
+      return Effect.sync(() => {
+        const message = state.messages.findLast((item) => item.id === messageID)
+        return message?.turn ?? (message?.type === "user" ? message.id : undefined)
+      })
     },
     getCurrentAssistant() {
       return Effect.sync(() => {
@@ -82,15 +90,17 @@ export function memory(state: MemoryState): Adapter {
 
 export function update(source: Adapter, event: SessionEvent.Event) {
   // Every new message records where it sits in the transcript and which user message it belongs to.
-  // A user message starts its own turn; a background completion returns to the turn that launched
-  // it; anything else continues the turn of the message before it.
+  // A user message starts its own turn; a background completion returns to the turn of the message
+  // it names as its source (the task it reports on); anything else continues the turn of the
+  // message before it.
   const adapter: Adapter = {
     ...source,
     appendMessage: (message) =>
       Effect.gen(function* () {
         const launched =
           message.type === "synthetic" && message.completion
-            ? (yield* source.getAssistant(message.completion.sourceMessageID))?.turn
+            ? ((event.type === "session.next.prompted" ? event.data.turn : undefined) ??
+              (yield* source.getTurnOf(message.completion.sourceMessageID)))
             : undefined
         const turn = message.type === "user" ? message.id : (launched ?? (yield* source.getTurn()))
         yield* source.appendMessage({

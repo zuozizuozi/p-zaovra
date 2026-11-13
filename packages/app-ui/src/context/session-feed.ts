@@ -151,6 +151,17 @@ export function createSessionFeed(
         } as SessionInputAdmitted)
       if ((decoded.type === "session.next.prompted" || decoded.type === "session.next.prompt.cancelled") && messageID)
         pending.delete(messageID)
+      // A background completion belongs to the turn that launched its command. When the event does
+      // not say which (an older kernel) and the launching message is not held, guessing would file
+      // it under the newest turn for good. The kernel knows; ask it.
+      const completion =
+        decoded.type === "session.next.prompted" ? (raw.completion as { sourceMessageID?: string }) : undefined
+      if (
+        completion &&
+        typeof raw.turn !== "string" &&
+        !state.messages.some((message) => message.id === completion.sourceMessageID)
+      )
+        return abandon()
       if (decoded.type === "session.next.retried") {
         const error = raw.error as { message?: string; metadata?: Record<string, string> } | undefined
         const delay = Number(error?.metadata?.delayMs ?? 0)

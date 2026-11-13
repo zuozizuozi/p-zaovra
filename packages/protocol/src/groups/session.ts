@@ -165,18 +165,31 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     )
     .add(
       HttpApiEndpoint.get("session.active", "/api/session/active", {
-        success: Schema.Struct({
-          data: Schema.Record(Session.ID, SessionActive),
-          // Orders this answer against `session.execution.status` events (specs/v2/desktop-sync.md).
-          epoch: Schema.Finite.pipe(Schema.optional),
-          revision: Schema.Int.pipe(Schema.optional),
-        }),
+        success: Schema.Struct({ data: Schema.Record(Session.ID, SessionActive) }),
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.active",
           summary: "List active sessions",
           description:
             "Retrieve foreground Session drains currently owned by this Zaovra process. Sessions absent from the result are inactive.",
+        }),
+      ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.execution", "/api/session/execution", {
+        success: Schema.Struct({
+          data: Schema.Struct({
+            epoch: Schema.Finite,
+            revision: Schema.Int,
+            active: Schema.Array(Session.ID),
+          }).annotate({ identifier: "SessionExecutionStatus" }),
+        }),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.execution",
+          summary: "Read execution status",
+          description:
+            "The Sessions this process is working on, with the version that orders this answer against `session.execution.status` events: `epoch` is the process start time and `revision` counts its status changes. Sessions absent from `active` were idle at that version.",
         }),
       ),
     )

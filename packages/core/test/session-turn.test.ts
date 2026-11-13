@@ -77,6 +77,28 @@ test("a background completion returns to the turn that launched it, not the newe
   ])
 })
 
+test("a completion that names a user message as its source belongs to that user message", () => {
+  const messages = project([
+    prompted("task"),
+    step("a1"),
+    prompted("continue"),
+    prompted("done", { completion: { type: "bash-completion", sourceMessageID: id("task"), jobID: "job" } }),
+    step("after"),
+  ])
+  expect(messages.slice(-2).map((message) => message.turn)).toEqual([id("task"), id("task")])
+})
+
+test("a completion's turn recorded on the event wins over anything looked up", () => {
+  const messages = project([
+    prompted("newest"),
+    prompted("done", {
+      completion: { type: "bash-completion", sourceMessageID: id("not-held"), jobID: "job" },
+      turn: id("elsewhere"),
+    }),
+  ])
+  expect(messages.at(-1)?.turn).toBe(id("elsewhere"))
+})
+
 test("history without a recorded turn leaves later messages unowned until the next user message", () => {
   const state: SessionMessageUpdater.MemoryState = {
     messages: [

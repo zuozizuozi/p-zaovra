@@ -370,3 +370,86 @@ describe("snapshots", () => {
     expect(shape(feed)[1]!.done).toBe(false)
   })
 })
+
+describe("background completions", () => {
+  // A command launched in the first turn finishes after the user has moved on to a second turn.
+  const background = (turn?: string) => {
+    const log = script()
+    log.prompt("msg_first")
+    log.step("msg_launcher")
+    log.end("msg_launcher")
+    log.prompt("msg_second")
+    log.step("msg_reply")
+    log.end("msg_reply")
+    const held = log.events.length
+    const done = {
+      id: "evt_done",
+      type: versions.get("session.next.prompted")!,
+      seq: held,
+      data: {
+        timestamp: 2_000,
+        sessionID,
+        messageID: "msg_done",
+        prompt: { text: "done", files: [], agents: [] },
+        delivery: "queue",
+        completion: { type: "bash-completion", sourceMessageID: "msg_launcher", jobID: "job" },
+        ...(turn ? { turn } : {}),
+      },
+    }
+    log.events.push(done)
+    const after = log.step("msg_after")
+    return { log, held, done, after }
+  }
+  const turns = (feed: ReturnType<typeof createSessionFeed>) =>
+    (feed.messages() as { id: string; turn?: string }[]).flatMap((message) =>
+      message.id === "msg_done" || message.id === "msg_after" ? [[message.id, message.turn]] : [],
+    )
+  const expected = [
+    ["msg_done", "msg_first"],
+    ["msg_after", "msg_first"],
+  ]
+
+  test("belong to the turn the event names, even when the launching message is not held", () => {
+    const { log, held, done, after } = background("msg_first")
+    const feed = createSessionFeed(sessionID)
+    // Only the second turn is on the newest page.
+    feed.open(page(log.events, held, (ids) => ids.slice(-2)))
+    const generation = feed.generation
+    feed.durable(done)
+    feed.durable(after)
+    expect(feed.stale).toBe(false)
+    expect(turns(feed)).toEqual(expected)
+    // Reading the launching turn later changes nothing, and the whole equals a full read.
+    expect(
+      feed.prepend(
+        page(log.events, held, (ids) => ids.slice(0, 2)),
+        generation,
+      ),
+    ).toBe("merged")
+    expect(turns(feed)).toEqual(expected)
+    expect(feed.messages()).toEqual(page(log.events, log.events.length).data)
+  })
+
+  test("from a kernel that does not name the turn are placed by the launching message when it is held", () => {
+    const { log, held, done, after } = background()
+    const feed = createSessionFeed(sessionID)
+    feed.open(page(log.events, held))
+    feed.durable(done)
+    feed.durable(after)
+    expect(feed.stale).toBe(false)
+    expect(turns(feed)).toEqual(expected)
+  })
+
+  test("are never guessed: without a named turn or the launching message, the kernel is asked", () => {
+    const { log, held, done, after } = background()
+    const feed = createSessionFeed(sessionID)
+    feed.open(page(log.events, held, (ids) => ids.slice(-2)))
+    feed.durable(done)
+    feed.durable(after)
+    expect([feed.stale, feed.ready]).toEqual([true, false])
+    // Nothing was filed under the newest turn in the meantime.
+    expect(turns(feed)).toEqual([])
+    feed.open(page(log.events, log.events.length, (ids) => ids.slice(-4)))
+    expect(turns(feed)).toEqual(expected)
+  })
+})

@@ -898,6 +898,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const inputCache = new WeakMap<SessionInputAdmitted, { key: string; value: Adapted }>()
   const written = new Map<string, Map<string, Adapted>>()
   const executions = new Map<string, { epoch: number; revision: number }>()
+  // The newest answer to "which sessions are active". It speaks for every session, including the
+  // ones it does not list, so a report older than it is stale for all of them.
+  const answered = { epoch: -Infinity, revision: -Infinity }
   const catchUps = new Map<string, Promise<void>>()
   const gapTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let activeAt = 0
@@ -949,12 +952,14 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     version: { epoch: number; revision: number },
     answer: boolean,
   ) => {
-    const seen = executions.get(sessionID)
+    const own = executions.get(sessionID)
+    const seen =
+      own && (own.epoch > answered.epoch || (own.epoch === answered.epoch && own.revision >= answered.revision))
+        ? own
+        : answered
     if (
-      seen &&
-      (version.epoch < seen.epoch ||
-        (version.epoch === seen.epoch &&
-          (answer ? version.revision < seen.revision : version.revision <= seen.revision)))
+      version.epoch < seen.epoch ||
+      (version.epoch === seen.epoch && (answer ? version.revision < seen.revision : version.revision <= seen.revision))
     )
       return
     executions.set(sessionID, { epoch: version.epoch, revision: version.revision })
@@ -962,16 +967,19 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   }
 
   const refreshActive = async () => {
-    const result = await client.v2.session.active({ throwOnError: true, signal: AbortSignal.timeout(10_000) })
-    const epoch = result.data.epoch
-    const revision = result.data.revision
-    if (epoch === undefined || revision === undefined) return
+    const result = await client.v2.session.execution({ throwOnError: true, signal: AbortSignal.timeout(10_000) })
+    const epoch = result.data.data.epoch
+    const revision = result.data.data.revision
+    const active = new Set(result.data.data.active)
+    // An answer that was itself overtaken by a newer one says nothing.
+    if (epoch < answered.epoch || (epoch === answered.epoch && revision < answered.revision)) return
     const working = Object.entries(data.session_status).flatMap(([id, status]) => (status.type === "idle" ? [] : [id]))
     batch(() =>
-      new Set([...Object.keys(result.data.data), ...working]).forEach((id) =>
-        setExecution(id, result.data.data[id] !== undefined, { epoch, revision }, true),
-      ),
+      new Set([...active, ...working]).forEach((id) => setExecution(id, active.has(id), { epoch, revision }, true)),
     )
+    // Sessions the answer does not list were idle at this version. Remember that for all of them.
+    answered.epoch = epoch
+    answered.revision = revision
   }
 
   /** Writes the feed's current transcript to the store, touching only what changed. */
@@ -1326,10 +1334,14 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       event.type === "server.connected" &&
       (event.properties as { sync?: number } | undefined)?.sync === 1
     ) {
-      // A session read before the stream connected was read the old way. Abandon those reads; the
-      // feed reads every open session again below.
+      // A session read before the stream connected was read the old way. Every request of that
+      // kind checks its session's generation before it writes, so retiring the generations turns
+      // all of their late answers into no-ops; the feed reads every open session again below.
+      generations.clear()
       messageLoads.clear()
       inflight.clear()
+      executionWaits.clear()
+      setMeta("loading", reconcile({}))
       capable = true
     }
     if (capable && (event.type === "server.connected" || event.type === "global.disposed")) {

@@ -500,11 +500,11 @@ export type SessionsUsageOutput = {
   }
 }["data"]
 
-export type SessionsActiveOutput = {
-  readonly data: { readonly [x: string]: { readonly type: "running" } }
-  readonly epoch?: number | undefined
-  readonly revision?: number | undefined
-}
+export type SessionsActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
+
+export type SessionsExecutionOutput = {
+  readonly data: { readonly epoch: number; readonly revision: number; readonly active: ReadonlyArray<string> }
+}["data"]
 
 export type SessionsScreenshotInput = {
   readonly sessionID: { readonly sessionID: string; readonly reference: string }["sessionID"]
@@ -1623,6 +1623,7 @@ export type SessionsHistoryOutput = {
             readonly sourceMessageID: string
             readonly jobID: string
           }
+          readonly turn?: string
         }
       }
     | {
@@ -1692,6 +1693,7 @@ export type SessionsHistoryOutput = {
             readonly sourceMessageID: string
             readonly jobID: string
           }
+          readonly turn?: string
         }
       }
     | {
@@ -2501,6 +2503,7 @@ export type SessionsEventsOutput =
           readonly sourceMessageID: string
           readonly jobID: string
         }
+        readonly turn?: string
       }
     }
   | {
@@ -2570,6 +2573,7 @@ export type SessionsEventsOutput =
           readonly sourceMessageID: string
           readonly jobID: string
         }
+        readonly turn?: string
       }
     }
   | {
