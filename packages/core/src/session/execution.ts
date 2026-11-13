@@ -21,6 +21,8 @@ export interface Interface {
     operation: Effect.Effect<void>,
   ) => Effect.Effect<void, SessionRunner.RunError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+  /** `active` together with the version readers use to order it against status events. */
+  readonly status?: Effect.Effect<{ epoch: number; revision: number; active: ReadonlySet<SessionSchema.ID> }>
   /** Without a claim, starts or observes execution. A claim starts an exclusively owned drain whose caller must await cleanup. */
   readonly resume: (
     sessionID: SessionSchema.ID,

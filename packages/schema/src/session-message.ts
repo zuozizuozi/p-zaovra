@@ -34,6 +34,11 @@ const Base = {
   id: ID,
   metadata: Schema.Record(Schema.String, Schema.Unknown).pipe(optional),
   time: Schema.Struct({ created: DateTimeUtcFromMillis }),
+  // Sequence of the durable event that created this message; the transcript order.
+  // Rows that predate the event log (imported or forked history) may carry negative sequences.
+  seq: Schema.Int.pipe(optional),
+  // The user message this message was produced for. Absent when it cannot be known.
+  turn: ID.pipe(optional),
 }
 
 export interface AgentSwitched extends Schema.Schema.Type<typeof AgentSwitched> {}

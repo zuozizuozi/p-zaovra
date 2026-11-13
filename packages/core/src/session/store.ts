@@ -57,7 +57,7 @@ const layer = Layer.effect(
           ? {
               sessionID: SessionSchema.ID.make(row.session_id),
               message: restore([
-                yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
+                yield* decodeMessage({ ...row.data, id: row.id, type: row.type, seq: row.seq }).pipe(Effect.orDie),
               ])[0]!,
             }
           : undefined

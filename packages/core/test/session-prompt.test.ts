@@ -567,6 +567,42 @@ describe("SessionV2.prompt", () => {
     }),
   )
 
+  it.effect("a message page reports the sequence it reflects, pending inputs and execution status", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      const first = SessionMessage.ID.create()
+      const queued = SessionMessage.ID.create()
+      const admitted = yield* session.prompt({
+        sessionID,
+        id: first,
+        prompt: Prompt.make({ text: "First" }),
+        resume: false,
+      })
+      yield* SessionInput.promoteSteers(database.db, events, sessionID, admitted.admittedSeq)
+      yield* session.prompt({
+        sessionID,
+        id: queued,
+        prompt: Prompt.make({ text: "Later" }),
+        delivery: "queue",
+        resume: false,
+      })
+      const page = yield* session.page({ sessionID })
+      expect(page.messages.map((message) => [message.id, message.turn, message.seq])).toEqual([
+        [first, first, page.messages[0].seq],
+      ])
+      expect(page.watermark).toBe(yield* EventV2.latestSequence(database.db, sessionID))
+      expect(page.watermark).toBeGreaterThan(page.messages[0].seq!)
+      expect(page.pending.map((input) => input.id)).toEqual([queued])
+      expect(page.execution).toEqual({ epoch: 0, revision: 0, active: false })
+      activeSessions.add(sessionID)
+      expect((yield* session.page({ sessionID })).execution.active).toBe(true)
+      activeSessions.delete(sessionID)
+    }),
+  )
+
   it.effect("rejects cancelling an input that already entered the transcript", () =>
     Effect.gen(function* () {
       yield* setup

@@ -13,7 +13,8 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "immer": "11.1.4"
   },
   "devDependencies": {
     "@tsconfig/bun": "catalog:",

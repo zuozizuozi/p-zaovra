@@ -501,6 +501,7 @@
       "name": "@zaovra-ai/schema",
       "dependencies": {
         "effect": "catalog:",
+        "immer": "11.1.4",
       },
       "devDependencies": {
         "@tsconfig/bun": "catalog:",

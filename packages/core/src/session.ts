@@ -172,6 +172,19 @@ export interface Interface {
       direction: "previous" | "next"
     }
   }) => Effect.Effect<SessionMessage.Message[], NotFoundError | MessageDecodeError>
+  /**
+   * One message page plus what a reader needs to follow the Session from there: the page reflects
+   * exactly the durable events up to `watermark`, read in one transaction (specs/v2/desktop-sync.md).
+   */
+  readonly page: (input: Parameters<Interface["messages"]>[0]) => Effect.Effect<
+    {
+      messages: SessionMessage.Message[]
+      watermark: number
+      execution: { epoch: number; revision: number; active: boolean }
+      pending: ReadonlyArray<SessionInput.Admitted>
+    },
+    NotFoundError | MessageDecodeError
+  >
   readonly message: (input: {
     sessionID: SessionSchema.ID
     messageID: SessionMessage.ID
@@ -224,6 +237,8 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<boolean, NotFoundError | SessionRunner.RunError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+  /** `active` with the version that orders it against `session.execution.status` events. */
+  readonly status: Effect.Effect<{ epoch: number; revision: number; active: ReadonlySet<SessionSchema.ID> }>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly revert: {
@@ -281,7 +296,7 @@ const layer = Layer.effect(
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const decode = (row: typeof SessionMessageTable.$inferSelect) =>
-      decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(
+      decodeMessage({ ...row.data, id: row.id, type: row.type, seq: row.seq }).pipe(
         Effect.mapError(
           () =>
             new MessageDecodeError({
@@ -330,6 +345,37 @@ const layer = Layer.effect(
           return { ...current, title }
         }),
       )
+    })
+    const readMessages = Effect.fnUntraced(function* (input: Parameters<Interface["messages"]>[0]) {
+      const direction = input.cursor?.direction ?? "next"
+      const requestedOrder = input.order ?? "desc"
+      const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
+      const anchor = input.cursor
+        ? yield* db
+            .select({ seq: SessionMessageTable.seq })
+            .from(SessionMessageTable)
+            .where(
+              and(eq(SessionMessageTable.session_id, input.sessionID), eq(SessionMessageTable.id, input.cursor.id)),
+            )
+            .get()
+            .pipe(Effect.orDie)
+        : undefined
+      if (input.cursor && !anchor) return []
+      const boundary = anchor
+        ? order === "asc"
+          ? gt(SessionMessageTable.seq, anchor.seq)
+          : lt(SessionMessageTable.seq, anchor.seq)
+        : undefined
+      const where = boundary
+        ? and(eq(SessionMessageTable.session_id, input.sessionID), boundary)
+        : eq(SessionMessageTable.session_id, input.sessionID)
+      const query = db
+        .select()
+        .from(SessionMessageTable)
+        .where(where)
+        .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
+      const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(Effect.orDie)
+      return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
     })
     const result = Service.of({
       usage: (sessionID) =>
@@ -752,41 +798,34 @@ const layer = Layer.effect(
       messages: Effect.fn("V2Session.messages")(function* (input) {
         const restore = live.capture()
         yield* result.get(input.sessionID)
-        const direction = input.cursor?.direction ?? "next"
-        const requestedOrder = input.order ?? "desc"
-        const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
-        const anchor = input.cursor
-          ? yield* db
-              .select({ seq: SessionMessageTable.seq })
-              .from(SessionMessageTable)
-              .where(
-                and(eq(SessionMessageTable.session_id, input.sessionID), eq(SessionMessageTable.id, input.cursor.id)),
-              )
-              .get()
-              .pipe(Effect.orDie)
-          : undefined
-        if (input.cursor && !anchor) return []
-        const boundary = anchor
-          ? order === "asc"
-            ? gt(SessionMessageTable.seq, anchor.seq)
-            : lt(SessionMessageTable.seq, anchor.seq)
-          : undefined
-        const where = boundary
-          ? and(eq(SessionMessageTable.session_id, input.sessionID), boundary)
-          : eq(SessionMessageTable.session_id, input.sessionID)
-        const query = db
-          .select()
-          .from(SessionMessageTable)
-          .where(where)
-          .orderBy(order === "asc" ? asc(SessionMessageTable.seq) : desc(SessionMessageTable.seq))
-        const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
-          Effect.orDie,
-        )
-        return restore(yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode))
+        return restore(yield* readMessages(input))
+      }),
+      page: Effect.fn("V2Session.page")(function* (input) {
+        const restore = live.capture()
+        yield* result.get(input.sessionID)
+        const read = yield* db
+          .transaction(() =>
+            Effect.gen(function* () {
+              return {
+                messages: yield* readMessages(input),
+                watermark: yield* EventV2.latestSequence(db, input.sessionID),
+                pending: yield* SessionInput.pending(db, input.sessionID),
+              }
+            }),
+          )
+          .pipe(Effect.catchTag("SqlError", Effect.die))
+        const status = yield* result.status
+        return {
+          ...read,
+          messages: restore(read.messages),
+          execution: { epoch: status.epoch, revision: status.revision, active: status.active.has(input.sessionID) },
+        }
       }),
       message: Effect.fn("V2Session.message")(function* (input) {
+        const restore = live.capture()
         const stored = yield* store.message(input.messageID)
-        return stored?.sessionID === input.sessionID ? stored.message : undefined
+        // Like a page read, this includes text that is still streaming.
+        return stored?.sessionID === input.sessionID ? restore([stored.message])[0] : undefined
       }),
       context: Effect.fn("V2Session.context")(function* (sessionID) {
         yield* result.get(sessionID)
@@ -1059,6 +1098,7 @@ const layer = Layer.effect(
         return yield* execution.wait?.(sessionID) ?? Effect.void
       }),
       active: execution.active,
+      status: execution.status ?? execution.active.pipe(Effect.map((active) => ({ epoch: 0, revision: 0, active }))),
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {
         yield* result.get(sessionID)
         const claim = yield* SessionOwnership.Current

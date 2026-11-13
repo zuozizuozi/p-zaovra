@@ -1,5 +1,6 @@
 import { Session } from "@zaovra-ai/schema/session"
 import { SessionMessage } from "@zaovra-ai/schema/session-message"
+import { SessionInput } from "@zaovra-ai/schema/session-input"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { InvalidCursorError, SessionNotFoundError, UnknownError } from "../errors"
@@ -32,6 +33,14 @@ export const MessageGroup = HttpApiGroup.make("server.message")
           previous: Schema.String.pipe(Schema.optional),
           next: Schema.String.pipe(Schema.optional),
         }),
+        // The page reflects exactly the durable events up to this sequence (specs/v2/desktop-sync.md).
+        watermark: Schema.Int.pipe(Schema.optional),
+        execution: Schema.Struct({
+          epoch: Schema.Finite,
+          revision: Schema.Int,
+          active: Schema.Boolean,
+        }).pipe(Schema.optional),
+        pending: Schema.Array(SessionInput.Admitted).pipe(Schema.optional),
       }).annotate({ identifier: "SessionMessagesResponse" }),
       error: [InvalidCursorError, SessionNotFoundError, UnknownError],
     }).annotateMerge(

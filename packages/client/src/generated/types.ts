@@ -500,7 +500,11 @@ export type SessionsUsageOutput = {
   }
 }["data"]
 
-export type SessionsActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
+export type SessionsActiveOutput = {
+  readonly data: { readonly [x: string]: { readonly type: "running" } }
+  readonly epoch?: number | undefined
+  readonly revision?: number | undefined
+}
 
 export type SessionsScreenshotInput = {
   readonly sessionID: { readonly sessionID: string; readonly reference: string }["sessionID"]
@@ -1044,6 +1048,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "agent-switched"
         readonly agent: string
       }
@@ -1051,6 +1057,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "model-switched"
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
       }
@@ -1058,6 +1066,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly text: string
         readonly executionContract?: {
           readonly version: 1
@@ -1113,6 +1123,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly sessionID: string
         readonly text: string
         readonly completion?: {
@@ -1133,6 +1145,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "system"
         readonly text: string
       }
@@ -1140,6 +1154,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "shell"
         readonly origin?: "tool" | "manual"
         readonly executionRecord?: {
@@ -1304,6 +1320,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "assistant"
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -1424,6 +1442,8 @@ export type SessionsContextOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
       }
   >
 }["data"]
@@ -3920,6 +3940,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "agent-switched"
         readonly agent: string
       }
@@ -3927,6 +3949,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "model-switched"
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
       }
@@ -3934,6 +3958,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly text: string
         readonly executionContract?: {
           readonly version: 1
@@ -3989,6 +4015,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly sessionID: string
         readonly text: string
         readonly completion?: {
@@ -4009,6 +4037,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "system"
         readonly text: string
       }
@@ -4016,6 +4046,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "shell"
         readonly origin?: "tool" | "manual"
         readonly executionRecord?: {
@@ -4180,6 +4212,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "assistant"
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -4300,6 +4334,8 @@ export type SessionsMessageOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
       }
 }["data"]
 
@@ -6908,6 +6944,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "agent-switched"
         readonly agent: string
       }
@@ -6915,6 +6953,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "model-switched"
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
       }
@@ -6922,6 +6962,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly text: string
         readonly executionContract?: {
           readonly version: 1
@@ -6977,6 +7019,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly sessionID: string
         readonly text: string
         readonly completion?: {
@@ -6997,6 +7041,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "system"
         readonly text: string
       }
@@ -7004,6 +7050,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "shell"
         readonly origin?: "tool" | "manual"
         readonly executionRecord?: {
@@ -7168,6 +7216,8 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number; readonly completed?: number }
+        readonly seq?: number
+        readonly turn?: string
         readonly type: "assistant"
         readonly agent: string
         readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -7288,9 +7338,66 @@ export type MessagesListOutput = {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
+        readonly seq?: number
+        readonly turn?: string
       }
   >
   readonly cursor: { readonly previous?: string | null; readonly next?: string | null }
+  readonly watermark?: number | null
+  readonly execution?: { readonly epoch: number; readonly revision: number; readonly active: boolean } | null
+  readonly pending?: ReadonlyArray<{
+    readonly admittedSeq: number
+    readonly id: string
+    readonly sessionID: string
+    readonly prompt: {
+      readonly text: string
+      readonly executionContract?: {
+        readonly version: 1
+        readonly entry?: string
+        readonly cwd?: string
+        readonly runtime?: string
+        readonly timeout?: string
+        readonly samples?: ReadonlyArray<string>
+        readonly environment?: {
+          readonly OMP_NUM_THREADS?: string
+          readonly MKL_NUM_THREADS?: string
+          readonly OPENBLAS_NUM_THREADS?: string
+          readonly NUMEXPR_NUM_THREADS?: string
+          readonly VECLIB_MAXIMUM_THREADS?: string
+          readonly BLIS_NUM_THREADS?: string
+        }
+      }
+      readonly runPolicy?:
+        | { readonly mode: "interactive" | "unattended"; readonly deadline: number; readonly closingReserveMs?: number }
+        | { readonly mode: "interactive" | "unattended"; readonly deadline?: never; readonly closingReserveMs?: never }
+      readonly invocation?: string
+      readonly files?: ReadonlyArray<{
+        readonly uri: string
+        readonly mime: string
+        readonly name?: string
+        readonly description?: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly agents?: ReadonlyArray<{
+        readonly name: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly selection?: {
+        readonly agent: string
+        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+      }
+      readonly subtask?: {
+        readonly command: string
+        readonly agent: string
+        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+      }
+    }
+    readonly delivery: "steer" | "queue"
+    readonly completion?: { readonly type: "bash-completion"; readonly sourceMessageID: string; readonly jobID: string }
+    readonly timeCreated: number
+    readonly promotedSeq?: number
+    readonly cancelledSeq?: number
+  }> | null
 }
 
 export type ModelsListInput = {

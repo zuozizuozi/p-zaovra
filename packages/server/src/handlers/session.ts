@@ -117,10 +117,13 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.active",
         Effect.fn(function* () {
+          const status = yield* session.status
           return {
             data: Object.fromEntries(
-              Array.from(yield* session.active, (sessionID) => [sessionID, { type: "running" as const }]),
+              Array.from(status.active, (sessionID) => [sessionID, { type: "running" as const }]),
             ),
+            epoch: status.epoch,
+            revision: status.revision,
           }
         }),
       )

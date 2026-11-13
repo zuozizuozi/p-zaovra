@@ -36,6 +36,8 @@ type Entry<E> = {
 
 export const make = <Key, E>(options: {
   readonly drain: (key: Key, force: boolean, claim?: SessionOwnership.Claim) => Effect.Effect<void, E>
+  /** Called synchronously whenever a key enters or leaves `active`. */
+  readonly onChange?: (key: Key, active: boolean) => void
 }): Effect.Effect<Coordinator<Key, E>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const active = new Map<Key, Entry<E>>()
@@ -46,6 +48,15 @@ export const make = <Key, E>(options: {
       { done: Deferred.Deferred<void>; started: boolean; intent: boolean; resume: boolean; successor?: Entry<E> }
     >()
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
+    const reported = new Set<Key>()
+    // Call after every change to `active` or `stopping`; reports only real transitions.
+    const report = (key: Key) => {
+      const now = active.has(key) || stopping.has(key)
+      if (now === reported.has(key)) return
+      if (now) reported.add(key)
+      else reported.delete(key)
+      options.onChange?.(key, now)
+    }
 
     const makeEntry = (): Entry<E> => ({
       done: Deferred.makeUnsafe<void, E>(),
@@ -88,6 +99,7 @@ export const make = <Key, E>(options: {
         active.set(key, successor)
         start(key, successor, false, true)
       }
+      report(key)
       Deferred.doneUnsafe(entry.done, exit)
       Deferred.doneUnsafe(entry.observed, Effect.succeed(exit))
     }
@@ -112,6 +124,7 @@ export const make = <Key, E>(options: {
         const next = makeEntry()
         stopped.delete(key)
         active.set(key, next)
+        report(key)
         start(key, next, true)
         return restore(Deferred.await(next.done))
       })
@@ -129,6 +142,7 @@ export const make = <Key, E>(options: {
           stopped.delete(key)
           entry.claim = claim
           active.set(key, entry)
+          report(key)
           start(key, entry, true)
           return yield* restore(Deferred.await(entry.done)).pipe(
             Effect.onInterrupt(() =>
@@ -169,6 +183,7 @@ export const make = <Key, E>(options: {
 
         const next = makeEntry()
         active.set(key, next)
+        report(key)
         start(key, next, false, false, operation)
         return restore(Deferred.await(next.done))
       })
@@ -185,6 +200,7 @@ export const make = <Key, E>(options: {
 
         const next = makeEntry()
         active.set(key, next)
+        report(key)
         start(key, next, false)
       })
 
@@ -194,6 +210,7 @@ export const make = <Key, E>(options: {
         generations.set(key, (generations.get(key) ?? 0) + 1)
         stopping.set(key, { done: Deferred.makeUnsafe<void>(), started: false, intent: false, resume: false })
         stopped.add(key)
+        report(key)
         const entry = active.get(key)
         if (!entry) return
         entry.stopping = true
@@ -221,6 +238,7 @@ export const make = <Key, E>(options: {
                       active.set(key, next)
                       start(key, next, stop.resume, true)
                     }
+                    report(key)
                     Deferred.doneUnsafe(stop.done, exit)
                   }),
                 ),

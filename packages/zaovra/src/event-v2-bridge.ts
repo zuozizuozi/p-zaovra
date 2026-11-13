@@ -7,7 +7,8 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { Location } from "@zaovra-ai/core/location"
 import { Project } from "@zaovra-ai/core/project"
 import { AbsolutePath } from "@zaovra-ai/core/schema"
-import { Context, Effect, Layer } from "effect"
+import { Durable } from "@zaovra-ai/schema/durable-event-manifest"
+import { Context, Effect, Layer, Schema } from "effect"
 
 export class Service extends Context.Service<Service, EventV2.Interface>()("@zaovra/EventV2Bridge") {}
 
@@ -43,6 +44,8 @@ const layer = Layer.effect(
           payload: { id: event.id, type: event.type, properties: event.data },
         })
         if (event.durable === undefined) return
+        const versioned = EventV2.versionedType(event.type, event.durable.version)
+        const definition = Durable.get(versioned)
         GlobalBus.emit("event", {
           directory: event.location?.directory ?? ctx?.directory,
           project: ctx?.project.id,
@@ -51,10 +54,13 @@ const layer = Layer.effect(
             type: "sync",
             syncEvent: {
               id: event.id,
-              type: EventV2.versionedType(event.type, event.durable.version),
+              type: versioned,
               seq: event.durable.seq,
               aggregateID: event.durable.aggregateID,
-              data: event.data,
+              // The stored form, which is what replay and the desktop's ordered feed decode.
+              data: definition
+                ? (Schema.encodeUnknownSync(definition.data)(event.data) as Record<string, unknown>)
+                : event.data,
             },
           },
         })

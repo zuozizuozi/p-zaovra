@@ -725,3 +725,48 @@ it.effect("an invalid owner cannot start a drain", () =>
     }),
   ),
 )
+
+it.effect("reports each real change of `active` once, and always matches the `active` snapshot", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const changes: boolean[] = []
+      const mismatches: boolean[] = []
+      const runs: boolean[] = []
+      const holder: { active?: Effect.Effect<ReadonlySet<string>> } = {}
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({
+        drain: (_key, force) =>
+          Effect.sync(() => runs.push(force)).pipe(
+            Effect.andThen(
+              Effect.suspend(() =>
+                runs.length === 1
+                  ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                  : Effect.void,
+              ),
+            ),
+          ),
+        onChange: (key, active) => {
+          changes.push(active)
+          if (holder.active && Effect.runSync(holder.active).has(key) !== active) mismatches.push(active)
+        },
+      })
+      holder.active = coordinator.active
+      yield* coordinator.wake("session")
+      yield* Deferred.await(started)
+      // A wake that joins the running drain is not a change.
+      yield* coordinator.wake("session")
+      expect(changes).toEqual([true])
+      yield* Deferred.succeed(release, undefined)
+      yield* coordinator.wait("session")
+      yield* Effect.yieldNow
+      // The coalesced follow-up drain ran without the key ever leaving `active`.
+      expect(runs).toEqual([false, false])
+      expect(changes).toEqual([true, false])
+      // Stopping an idle key holds it in `active` until cleanup ends.
+      yield* coordinator.interrupt("session")
+      expect(changes).toEqual([true, false, true, false])
+      expect(mismatches).toEqual([])
+    }),
+  ),
+)

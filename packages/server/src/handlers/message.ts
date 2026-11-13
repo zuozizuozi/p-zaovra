@@ -38,8 +38,8 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
           catch: () => new InvalidCursorError({ message: "Invalid cursor" }),
         })
         const order = decoded?.order ?? ctx.query.order ?? "desc"
-        const messages = yield* session
-          .messages({
+        const page = yield* session
+          .page({
             sessionID: ctx.params.sessionID,
             limit: ctx.query.limit ?? DefaultMessagesLimit,
             order,
@@ -66,14 +66,17 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
               )
             }),
           )
-        const first = messages[0]
-        const last = messages.at(-1)
+        const first = page.messages[0]
+        const last = page.messages.at(-1)
         return {
-          data: messages,
+          data: page.messages,
           cursor: {
             previous: first ? cursor.encode(first, order, "previous") : undefined,
             next: last ? cursor.encode(last, order, "next") : undefined,
           },
+          watermark: page.watermark,
+          execution: page.execution,
+          pending: page.pending,
         }
       }),
     )

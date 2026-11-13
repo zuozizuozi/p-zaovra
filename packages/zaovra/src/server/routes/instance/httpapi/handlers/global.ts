@@ -57,7 +57,9 @@ export function globalEventStream(lastEventID?: string) {
       payload: {
         id: EventV2.ID.create(),
         type: "server.connected",
-        properties: { replay: complete ? "applied" : lastEventID ? "reset" : "initial" },
+        // `sync: 1` tells the desktop that durable Session events arrive with sequence numbers
+        // (the `sync` twin) and message pages carry a watermark (specs/v2/desktop-sync.md).
+        properties: { replay: complete ? "applied" : lastEventID ? "reset" : "initial", sync: 1 },
       },
     }).pipe(Stream.concat(Stream.fromQueue(queue)))
   })

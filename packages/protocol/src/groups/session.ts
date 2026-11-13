@@ -165,7 +165,12 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     )
     .add(
       HttpApiEndpoint.get("session.active", "/api/session/active", {
-        success: Schema.Struct({ data: Schema.Record(Session.ID, SessionActive) }),
+        success: Schema.Struct({
+          data: Schema.Record(Session.ID, SessionActive),
+          // Orders this answer against `session.execution.status` events (specs/v2/desktop-sync.md).
+          epoch: Schema.Finite.pipe(Schema.optional),
+          revision: Schema.Int.pipe(Schema.optional),
+        }),
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.active",

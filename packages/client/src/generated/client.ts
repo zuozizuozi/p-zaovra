@@ -416,7 +416,7 @@ export function make(options: ClientOptions) {
           requestOptions,
         ).then((value) => value.data),
       active: (requestOptions?: RequestOptions) =>
-        request<{ readonly data: SessionsActiveOutput }>(
+        request<SessionsActiveOutput>(
           {
             method: "GET",
             path: `/api/session/active`,
@@ -425,7 +425,7 @@ export function make(options: ClientOptions) {
             empty: false,
           },
           requestOptions,
-        ).then((value) => value.data),
+        ),
       screenshot: (input: SessionsScreenshotInput, requestOptions?: RequestOptions) =>
         request<SessionsScreenshotOutput>(
           {

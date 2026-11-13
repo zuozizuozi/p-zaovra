@@ -621,6 +621,8 @@ describe("SessionProjector", () => {
           model,
           content: [SessionMessage.AssistantText.make({ type: "text", id: "text-stale", text: "" })],
           time: { created: DateTime.makeUnsafe(1), completed: DateTime.makeUnsafe(2) },
+          // Projected from an event, so it records that event's sequence.
+          seq: 1,
         }),
         SessionMessage.Assistant.make({
           id: SessionMessage.ID.make("msg_assistant_stale"),

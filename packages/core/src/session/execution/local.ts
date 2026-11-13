@@ -1,5 +1,5 @@
 import { SessionOwnership } from "../ownership"
-import { Cause, DateTime, Effect, Layer, Schema } from "effect"
+import { Cause, DateTime, Effect, FiberSet, Layer, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import { EventV2 } from "../../event"
 import { SessionEvent } from "../event"
@@ -11,6 +11,7 @@ import { SessionRunner } from "../runner"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { SessionExecution } from "../execution"
+import { SessionExecutionStatus } from "../execution-status"
 import { LLMError } from "@zaovra-ai/llm"
 
 /** Current-process routing for implicit-local Locations. Future remote placement belongs here. */
@@ -20,7 +21,17 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const events = yield* EventV2.Service
+    const announce = yield* FiberSet.makeRuntime<never, void, never>()
+    const version = { epoch: Date.now(), revision: 0 }
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError>({
+      onChange: (sessionID, active) => {
+        version.revision++
+        announce(
+          events
+            .publish(SessionExecutionStatus.Changed, { sessionID, active, ...version })
+            .pipe(Effect.ignore, Effect.asVoid),
+        )
+      },
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force, claim) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
@@ -43,6 +54,7 @@ const layer = Layer.effect(
 
     return SessionExecution.Service.of({
       active: coordinator.active,
+      status: coordinator.active.pipe(Effect.map((active) => ({ ...version, active }))),
       exclusive: coordinator.exclusive,
       interrupt: coordinator.interrupt,
       freezeWake: coordinator.freezeWake,

@@ -112,7 +112,7 @@ function applyUsage(
 function run(db: DatabaseService, event: SessionEvent.Event) {
   return Effect.gen(function* () {
     const decodeRow = (row: typeof SessionMessageTable.$inferSelect) =>
-      decodeMessage({ ...row.data, id: row.id, type: row.type })
+      decodeMessage({ ...row.data, id: row.id, type: row.type, seq: row.seq })
     const updateMessage = (message: SessionMessage.Message) => {
       if (event.durable === undefined) return Effect.die("Durable Session event is missing aggregate sequence")
       const encoded = encodeMessage(message)
@@ -131,6 +131,19 @@ function run(db: DatabaseService, event: SessionEvent.Event) {
     }
     const appendMessage = (message: SessionMessage.Message) => insertMessage(db, event, message)
     const adapter: SessionMessageUpdater.Adapter = {
+      getTurn() {
+        return db
+          .select()
+          .from(SessionMessageTable)
+          .where(eq(SessionMessageTable.session_id, event.data.sessionID))
+          .orderBy(desc(SessionMessageTable.seq))
+          .limit(1)
+          .get()
+          .pipe(
+            Effect.orDie,
+            Effect.map((row) => (row ? decodeRow(row).turn : undefined)),
+          )
+      },
       getCurrentAssistant() {
         return Effect.gen(function* () {
           // A newer turn supersedes stale incomplete rows; never resume an older assistant projection.
@@ -221,12 +234,16 @@ const layer = Layer.effectDiscard(
             project_id: event.data.projectID,
             workspace_id: event.data.location.workspaceID ?? null,
             parent_id: event.data.parentID,
-            metadata: event.data.budgetMode ? {
-              budgetMode: event.data.budgetMode,
-              ...(event.data.budgetPolicy ? { budgetPolicy: event.data.budgetPolicy } : {}),
-              ...(event.data.budget ? { creationBudget: event.data.budget } : {}),
-              ...(event.data.inheritedDeadline === undefined ? {} : { inheritedDeadline: event.data.inheritedDeadline }),
-            } : undefined,
+            metadata: event.data.budgetMode
+              ? {
+                  budgetMode: event.data.budgetMode,
+                  ...(event.data.budgetPolicy ? { budgetPolicy: event.data.budgetPolicy } : {}),
+                  ...(event.data.budget ? { creationBudget: event.data.budget } : {}),
+                  ...(event.data.inheritedDeadline === undefined
+                    ? {}
+                    : { inheritedDeadline: event.data.inheritedDeadline }),
+                }
+              : undefined,
             slug: event.data.slug,
             directory: event.data.location.directory,
             path: event.data.subpath,
@@ -300,9 +317,11 @@ const layer = Layer.effectDiscard(
         .update(SessionTable)
         .set({
           ...(event.data.title === undefined ? {} : { title: event.data.title }),
-            ...(event.data.inheritedDeadline === undefined ? {} : {
-              metadata: sql`json_set(coalesce(${SessionTable.metadata}, '{}'), '$.inheritedDeadline', ${event.data.inheritedDeadline}, '$.deadlinePolicy', 1)`,
-            }),
+          ...(event.data.inheritedDeadline === undefined
+            ? {}
+            : {
+                metadata: sql`json_set(coalesce(${SessionTable.metadata}, '{}'), '$.inheritedDeadline', ${event.data.inheritedDeadline}, '$.deadlinePolicy', 1)`,
+              }),
           ...(event.data.archived === undefined
             ? {}
             : { time_archived: event.data.archived ? DateTime.toEpochMillis(event.data.timestamp) : null }),

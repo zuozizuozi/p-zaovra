@@ -92,10 +92,7 @@ const Endpoint3_2 = (raw: RawClient["server.session"]) => (input?: Endpoint3_2In
   )
 
 const Endpoint3_3 = (raw: RawClient["server.session"]) => () =>
-  raw["session.active"]({}).pipe(
-    Effect.mapError(mapClientError),
-    Effect.map((value) => value.data),
-  )
+  raw["session.active"]({}).pipe(Effect.mapError(mapClientError))
 
 type Endpoint3_4Request = Parameters<RawClient["server.session"]["session.screenshot"]>[0]
 type Endpoint3_4Input = {

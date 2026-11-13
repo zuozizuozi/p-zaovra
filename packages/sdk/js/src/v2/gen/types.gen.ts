@@ -3173,6 +3173,13 @@ export type SessionMessagesResponse = {
     previous?: string
     next?: string
   }
+  watermark?: number
+  execution?: {
+    epoch: number
+    revision: number
+    active: boolean
+  }
+  pending?: Array<SessionInputAdmitted>
 }
 
 export type ProviderNotFoundError = {
@@ -5665,6 +5672,8 @@ export type SessionMessageAgentSwitched = {
   time: {
     created: number
   }
+  seq?: number
+  turn?: string
   type: "agent-switched"
   agent: string
 }
@@ -5677,6 +5686,8 @@ export type SessionMessageModelSwitched = {
   time: {
     created: number
   }
+  seq?: number
+  turn?: string
   type: "model-switched"
   model: ModelRef
 }
@@ -5689,6 +5700,8 @@ export type SessionMessageUser = {
   time: {
     created: number
   }
+  seq?: number
+  turn?: string
   text: string
   executionContract?: SessionOutcomeExecutionContract
   runPolicy?: SessionOutcomeRunPolicy
@@ -5708,6 +5721,8 @@ export type SessionMessageSynthetic = {
   time: {
     created: number
   }
+  seq?: number
+  turn?: string
   sessionID: string
   text: string
   completion?: SessionHostCompletion
@@ -5723,6 +5738,8 @@ export type SessionMessageSystem = {
   time: {
     created: number
   }
+  seq?: number
+  turn?: string
   type: "system"
   text: string
 }
@@ -5736,6 +5753,8 @@ export type SessionMessageShell = {
     created: number
     completed?: number
   }
+  seq?: number
+  turn?: string
   type: "shell"
   origin?: "tool" | "manual"
   executionRecord?: SessionOutcomeExecutionRecord
@@ -5838,6 +5857,8 @@ export type SessionMessageAssistant = {
     created: number
     completed?: number
   }
+  seq?: number
+  turn?: string
   type: "assistant"
   agent: string
   model: ModelRef
@@ -5876,6 +5897,8 @@ export type SessionMessageCompaction = {
   time: {
     created: number
   }
+  seq?: number
+  turn?: string
 }
 
 export type SessionMessage =
@@ -13493,6 +13516,8 @@ export type V2SessionActiveResponses = {
     data: {
       [key: string]: unknown | SessionActive
     }
+    epoch?: number
+    revision?: number
   }
 }
 
