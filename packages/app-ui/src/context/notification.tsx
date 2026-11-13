@@ -443,7 +443,8 @@ export function createServerNotificationState(input: {
     const latest = messages?.at(-1)
     const version = completionVersions.get(sessionID)
     if (recovering.has(sessionID) || (status !== undefined && status !== "idle")) return
-    if (!refreshed || status === undefined || !messages) {
+    // A followed session applies its events in order, so its history is already there when it turns idle.
+    if (!(refreshed || session.ordered()) || status === undefined || !messages) {
       // Idle ownership may arrive before its history. Join that resync before
       // consuming a persisted candidate, including after notification recreation.
       recovering.add(sessionID)
