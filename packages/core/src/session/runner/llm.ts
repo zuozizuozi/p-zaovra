@@ -25,6 +25,7 @@ import {
 } from "@zaovra-ai/llm"
 import { providerProgress } from "./provider-progress"
 import { RequestExecutor } from "@zaovra-ai/llm/route"
+import { OpenAIChat } from "@zaovra-ai/llm/protocols/openai-chat"
 import {
   Cause,
   Clock,
@@ -1205,6 +1206,20 @@ const layer = Layer.effect(
         : maxTokens === undefined
           ? baseRequest
           : LLM.updateRequest(baseRequest, { generation: { maxTokens } })
+      // DeepSeek cannot continue, in thinking mode, a history that holds turns it did not reason
+      // through (another model's, or its own without thinking). The request goes out without
+      // thinking; tell the user once, because the answers that follow are of a different kind.
+      const thinkingNotice = "思考模式说明："
+      if (
+        OpenAIChat.thinkingUnavailable(request) &&
+        !context.some((message) => message.type === "synthetic" && message.text.startsWith(thinkingNotice))
+      )
+        yield* events.publish(SessionEvent.Synthetic, {
+          sessionID: session.id,
+          timestamp: yield* DateTime.now,
+          messageID: SessionMessage.ID.create(),
+          text: `${thinkingNotice}这段对话里有不是 DeepSeek 思考模式生成的回复，DeepSeek 无法在思考模式下接着这段历史。本对话改用非思考模式继续；新建对话可恢复思考模式。`,
+        })
       const recordOperation = (
         operationID: string,
         fingerprint: string,

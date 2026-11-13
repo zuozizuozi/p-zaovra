@@ -560,9 +560,16 @@ for (const scenario of ["same", "changed", "missing"] as const) {
         ).toMatchObject({ reasoning_content: "original private reasoning", tool_calls: [{ id: "already-echoed" }] })
       }
       if (scenario !== "same") {
-        expect(Exit.isFailure(result)).toBe(true)
-        expect(String(result)).toContain("reasoning_content")
-        expect(replayBodies).toHaveLength(0)
+        // A turn DeepSeek did not produce the reasoning for cannot be continued in thinking mode.
+        // The conversation goes on without thinking, and says so once.
+        expect(Exit.isSuccess(result)).toBe(true)
+        expect(replayBodies).toHaveLength(1)
+        expect(JSON.parse(replayBodies[0]!).thinking).toEqual({ type: "disabled" })
+        expect(
+          (yield* session.context(sessionID)).filter(
+            (message) => message.type === "synthetic" && message.text.includes("思考模式"),
+          ),
+        ).toHaveLength(1)
       }
       const retained = (yield* session.context(sessionID)).find((message) => message.id === history[1]!.id)
       expect(retained).toEqual(history[1])

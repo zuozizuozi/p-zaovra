@@ -334,6 +334,41 @@ const hasEmptyReasoningOrigin = (message: OpenAIChatRequestMessage, request: LLM
     )
   })
 
+/**
+ * Whether this history cannot be continued in DeepSeek's thinking mode. With tools, DeepSeek
+ * refuses a thinking request unless every earlier assistant turn carries the reasoning it produced,
+ * which a turn answered by another model, or without thinking, never can.
+ */
+export const lacksReplayableReasoning = (request: LLMRequest) =>
+  request.messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      !message.content.some((part) => part.type === "reasoning" && part.text.trim()) &&
+      !openAICompatibleField(message.native?.openaiCompatible, "reasoning_content")?.trim() &&
+      !hasEmptyReasoningOrigin(message, request),
+  )
+
+/**
+ * Whether the request will be sent without thinking although it asked for it, because its history
+ * cannot be continued in thinking mode. Callers use this to tell the user.
+ */
+export const thinkingUnavailable = (request: LLMRequest) => {
+  // The same precedence the client applies when it compiles the request: request, model, route.
+  const options = [
+    request.providerOptions?.deepseek,
+    request.model.defaults?.providerOptions?.deepseek,
+    request.model.route.defaults.providerOptions?.deepseek,
+  ].filter((item) => item !== undefined)
+  const thinking = options.find((item) => item.thinking !== undefined)?.thinking
+  return (
+    options.length > 0 &&
+    DeepSeekOptions.matches(request.model.provider, request.model.id) &&
+    (thinking === undefined || (Schema.is(DeepSeekOptions.Thinking)(thinking) && thinking.type === "enabled")) &&
+    request.tools.length > 0 &&
+    lacksReplayableReasoning(request)
+  )
+}
+
 const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: LLMRequest, requireReasoning: boolean) {
   const system: OpenAIChatMessage[] =
     request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
@@ -406,11 +441,14 @@ const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (request: LLMR
   const outputParameter = request.providerOptions?.openai?.maxTokensParameter ?? "max_tokens"
   if (outputParameter !== "max_tokens" && outputParameter !== "max_completion_tokens")
     return yield* invalid("OpenAI Chat maxTokensParameter must be max_tokens or max_completion_tokens")
-  const options = yield* lowerOptions(request)
-  const messages = yield* lowerMessages(
-    request,
-    "thinking" in options && options.thinking?.type === "enabled" && request.tools.length > 0,
-  )
+  const requested = yield* lowerOptions(request)
+  const thinking = "thinking" in requested && requested.thinking?.type === "enabled" && request.tools.length > 0
+  // A conversation DeepSeek cannot continue in thinking mode continues without it. Refusing would
+  // leave the user no way forward but a new conversation.
+  const downgraded = thinking && lacksReplayableReasoning(request)
+  const { reasoning_effort: _effort, ...rest } = requested as typeof requested & { reasoning_effort?: unknown }
+  const options = downgraded ? { ...rest, thinking: { type: "disabled" as const } } : requested
+  const messages = yield* lowerMessages(request, thinking && !downgraded)
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
   return {
     model: request.model.id,

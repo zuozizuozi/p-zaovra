@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
 import { Effect, Exit } from "effect"
 import { LLM, Message, ToolDefinition } from "../../src"
+import { OpenAIChat } from "../../src/protocols/openai-chat"
 import type { OpenAIChatBody } from "../../src/protocols/openai-chat"
 import { OpenAICompatibleChat } from "../../src/protocols/openai-compatible-chat"
 import { LLMClient } from "../../src/route"
@@ -95,23 +96,72 @@ for (const fixture of [
     Effect.gen(function* () {
       const response = yield* emptyTurn(fixture.source, fixture.thinking)
       const original = JSON.stringify(response.message)
-      const result = yield* LLMClient.prepare<OpenAIChatBody>(
-        LLM.request({
-          model,
-          tools,
-          providerOptions: options,
-          messages: [response.message, Message.tool({ id: "call_1", name: "lookup", result: "found" })],
-        }),
-      ).pipe(Effect.exit)
-      expect(Exit.isSuccess(result)).toBe(fixture.allowed === true)
+      const request = LLM.request({
+        model,
+        tools,
+        providerOptions: options,
+        messages: [response.message, Message.tool({ id: "call_1", name: "lookup", result: "found" })],
+      })
+      const prepared = yield* LLMClient.prepare<OpenAIChatBody>(request)
       expect(JSON.stringify(response.message)).toBe(original)
-      if (Exit.isFailure(result)) {
-        expect(String(result.cause)).toContain("reasoning_content")
-        expect(String(result.cause)).toContain("new session")
-      }
+      // A turn whose empty reasoning this model did not vouch for cannot be continued in thinking
+      // mode. The request goes out without thinking rather than being refused.
+      expect(OpenAIChat.thinkingUnavailable(request)).toBe(fixture.allowed !== true)
+      expect(prepared.body.thinking).toEqual({ type: fixture.allowed === true ? "enabled" : "disabled" })
+      expect("reasoning_effort" in prepared.body && prepared.body.reasoning_effort !== undefined).toBe(
+        fixture.allowed === true,
+      )
     }),
   )
 }
+
+it.effect("continues without thinking a conversation that another model took part in", () =>
+  Effect.gen(function* () {
+    const request = LLM.request({
+      model,
+      tools,
+      providerOptions: options,
+      messages: [
+        Message.user("Lookup"),
+        Message.assistant([{ type: "tool-call", id: "call_0", name: "lookup", input: {} }]),
+        Message.tool({ id: "call_0", name: "lookup", result: "found" }),
+        Message.assistant([{ type: "text", text: "Found it." }]),
+        Message.user("Now look again"),
+      ],
+    })
+    expect(OpenAIChat.thinkingUnavailable(request)).toBe(true)
+    const prepared = yield* LLMClient.prepare<OpenAIChatBody>(request)
+    expect(prepared.body.thinking).toEqual({ type: "disabled" })
+    expect(prepared.body.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+    ])
+  }),
+)
+
+it.effect("keeps thinking when every earlier turn carries its reasoning", () =>
+  Effect.gen(function* () {
+    const request = LLM.request({
+      model,
+      tools,
+      providerOptions: options,
+      messages: [
+        Message.user("Lookup"),
+        Message.assistant([
+          { type: "reasoning", text: "I should look." },
+          { type: "text", text: "Found it." },
+        ]),
+        Message.user("Now look again"),
+      ],
+    })
+    expect(OpenAIChat.thinkingUnavailable(request)).toBe(false)
+    const prepared = yield* LLMClient.prepare<OpenAIChatBody>(request)
+    expect(prepared.body.thinking).toEqual({ type: "enabled" })
+  }),
+)
 
 it.effect("retains original reasoning verbatim beside a trusted empty turn", () =>
   Effect.gen(function* () {
@@ -156,10 +206,11 @@ for (const reasoning of ["", " \n", "native original"]) {
         content: "Retained text",
         reasoning_content: reasoning,
       })
-      const guarded = yield* LLMClient.prepare(LLM.request({ model, tools, providerOptions: options, messages })).pipe(
-        Effect.exit,
+      // With tools, a blank that nobody vouched for is not reasoning: thinking is given up for the request.
+      const guarded = yield* LLMClient.prepare<OpenAIChatBody>(
+        LLM.request({ model, tools, providerOptions: options, messages }),
       )
-      expect(Exit.isSuccess(guarded)).toBe(reasoning.trim().length > 0)
+      expect(guarded.body.thinking).toEqual({ type: reasoning.trim().length > 0 ? "enabled" : "disabled" })
     }),
   )
 }
@@ -167,7 +218,7 @@ for (const reasoning of ["", " \n", "native original"]) {
 it.effect("does not bless a host closing note or unknown historical assistant", () =>
   Effect.gen(function* () {
     const response = yield* emptyTurn()
-    const result = yield* LLMClient.prepare(
+    const result = yield* LLMClient.prepare<OpenAIChatBody>(
       LLM.request({
         model,
         tools,
@@ -178,8 +229,8 @@ it.effect("does not bless a host closing note or unknown historical assistant", 
           Message.assistant("Host closing note"),
         ],
       }),
-    ).pipe(Effect.exit)
-    expect(Exit.isFailure(result)).toBe(true)
+    )
+    expect(result.body.thinking).toEqual({ type: "disabled" })
   }),
 )
 
