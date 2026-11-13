@@ -1,6 +1,8 @@
 import { describe, expect } from "bun:test"
+import { existsSync } from "node:fs"
 import fs from "node:fs/promises"
 import os from "node:os"
+import path from "node:path"
 import { Effect } from "effect"
 import { AppProcess } from "@zaovra-ai/core/process"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
@@ -44,6 +46,30 @@ describe.skipIf(process.platform !== "win32")("Windows long commands", () => {
         { combineOutput: true },
       )
       expect(missing.reason).toBe("command-not-found")
+    }),
+    30000,
+  )
+
+  // Git Bash, wherever Git is installed. The bash.exe in System32 is the WSL launcher, not a shell.
+  const git = Bun.which("git")
+  const bash = [
+    // git.exe sits one or two directories below the installation root, depending on which one is on PATH.
+    ...(git ? [path.resolve(git, "../../bin/bash.exe"), path.resolve(git, "../../../bin/bash.exe")] : []),
+    "C:/Program Files/Git/bin/bash.exe",
+  ].find((candidate) => existsSync(candidate))
+
+  ;(bash ? it.live : it.live.skip)(
+    "runs a Git Bash command longer than the command-line limit and removes its script file",
+    Effect.gen(function* () {
+      const service = yield* AppProcess.Service
+      const before = yield* Effect.promise(scripts)
+      const lines = Array.from({ length: 700 }, (_, index) => `: '填充行 ${index} ${"x".repeat(30)}'`)
+      const command = [...lines, 'echo "LONG_BASH_SENTINEL_中文 $((6 * 7))"', "exit 5"].join("\n")
+      expect(Buffer.byteLength(command)).toBeGreaterThan(30_000)
+      const result = yield* service.run(AppProcess.shellCommand(command, process.cwd(), bash!), { combineOutput: true })
+      expect(result.output?.toString()).toContain("LONG_BASH_SENTINEL_中文 42")
+      expect(result.exitCode).toBe(5)
+      expect(yield* Effect.promise(scripts)).toEqual(before)
     }),
     30000,
   )

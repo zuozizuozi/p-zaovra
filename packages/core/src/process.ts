@@ -137,14 +137,25 @@ if (-not $? -and $LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 1 } } | Out-Defau
       forceKillAfter: Duration.seconds(3),
     })
   }
-  return ChildProcess.make(command, [], {
-    cwd,
-    ...(env ? { env, extendEnv: false } : {}),
-    shell: executable,
-    stdin: "ignore",
-    detached: process.platform !== "win32",
-    forceKillAfter: Duration.seconds(3),
-  })
+  // The same Windows limit applies to a POSIX shell such as Git Bash. A longer script is read from a
+  // private temp file, which the shell deletes before it evaluates the script.
+  const posix = /(?:^|[\\/])(?:ba|z|da)?sh(?:\.exe)?$/i.test(executable)
+  const long = process.platform === "win32" && posix && Buffer.byteLength(command) > inlineScriptLimit
+  const file = long ? path.join(os.tmpdir(), `zaovra-shell-${randomUUID()}.sh`) : undefined
+  if (file) writeFileSync(file, command, { mode: 0o600 })
+  const quoted = file?.replaceAll("\\", "/").replaceAll("'", "'\\''")
+  return ChildProcess.make(
+    quoted ? `zaovra_script=$(cat '${quoted}') || exit 1; rm -f '${quoted}'; eval "$zaovra_script"` : command,
+    [],
+    {
+      cwd,
+      ...(env ? { env, extendEnv: false } : {}),
+      shell: executable,
+      stdin: "ignore",
+      detached: process.platform !== "win32",
+      forceKillAfter: Duration.seconds(3),
+    },
+  )
 }
 
 export const requireSuccess = (result: RunResult): Effect.Effect<RunResult, AppProcessError> =>
