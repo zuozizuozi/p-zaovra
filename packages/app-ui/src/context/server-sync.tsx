@@ -388,6 +388,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     return promise
   }
 
+  onCleanup(serverSDK.event.ordered((event) => session.apply(event)))
+
   const unsub = serverSDK.event.listen((e) => {
     const directory = e.name
     const key = directoryKey(directory)

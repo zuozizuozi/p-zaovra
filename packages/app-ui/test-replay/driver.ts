@@ -8,7 +8,7 @@ import { createKernel, wire, type Fixture, type Wire } from "./kernel"
 export type Delivery =
   | { event: Wire }
   /** The stream dropped and came back; `replayed` says whether the server could resend what was missed. */
-  | { reconnect: true }
+  | { reconnect: true; replayed: boolean }
 
 export type Plan = {
   /** Commit index at which the user opens the session; earlier history arrives only by snapshot. */
@@ -17,6 +17,11 @@ export type Plan = {
   deliver?: (events: Wire[]) => Delivery[][]
   /** Page size used when opening, as the app does. */
   window?: number
+  /**
+   * Also compare after every single event, including stream fragments, without waiting. With
+   * in-order delivery the client needs no request to stay equal, so it must be equal at once.
+   */
+  dense?: boolean
 }
 
 const work = /^session\.next\.(prompted|step\.|tool\.|text\.|reasoning\.|shell\.|retried|compaction\.)/
@@ -72,6 +77,23 @@ export async function replay(fixture: Fixture, plan: Plan = {}) {
   const deliveries = plan.deliver?.(events) ?? events.map((event): Delivery[] => [{ event }])
   const store = createServerSession(kernel.client as unknown as ZaovraClient)
   const sessionID = fixture.sessionID
+  // What the event stream carries: every event as itself, and each durable one again with its sequence.
+  const deliver = (event: Wire) => {
+    store.apply({ id: event.id, type: event.type, properties: event.data })
+    if (event.kind === "durable")
+      store.apply({
+        id: event.id,
+        type: "sync",
+        syncEvent: {
+          id: event.id,
+          type: event.versioned,
+          seq: event.seq,
+          aggregateID: sessionID,
+          data: event.data,
+        },
+      } as Parameters<typeof store.apply>[0])
+  }
+  store.apply({ type: "server.connected", properties: { replay: "initial", sync: 1 } })
   // One entry per broken rule: how often, and the first occurrence.
   const violations: Record<string, { count: number; first: string }> = {}
   const owners = new Map<string, string>()
@@ -82,6 +104,8 @@ export async function replay(fixture: Fixture, plan: Plan = {}) {
   let opened = false
   let baseline = { ...kernel.counts }
   let checks = 0
+  // A step ended on the kernel but the client has not been handed everything up to it yet.
+  let due = false
 
   const settle = async () => {
     const total = () => Object.values(kernel.counts).reduce((sum, value) => sum + value, 0)
@@ -140,7 +164,7 @@ export async function replay(fixture: Fixture, plan: Plan = {}) {
 
   for (let index = 0; index < events.length; index++) {
     kernel.commit(events[index]!)
-    kernel.setActive(busy[index]!)
+    const status = kernel.setActive(busy[index]!)
     if (!opened) {
       if (index < (plan.openAt ?? 0)) continue
       store.pin(sessionID)
@@ -152,11 +176,22 @@ export async function replay(fixture: Fixture, plan: Plan = {}) {
       continue
     }
     for (const delivery of deliveries[index] ?? []) {
-      if ("reconnect" in delivery) store.apply({ type: "server.connected", properties: {} })
-      else store.apply({ id: delivery.event.id, type: delivery.event.type, properties: delivery.event.data })
+      if ("reconnect" in delivery)
+        store.apply({
+          type: "server.connected",
+          properties: { replay: delivery.replayed ? "applied" : "reset", sync: 1 },
+        })
+      else deliver(delivery.event)
     }
+    // Status is a live event: it is lost with everything else while the stream is down.
+    if (status && deliveries[index]?.length) store.apply(status)
     const type = events[index]!.type
-    if (type !== "session.next.step.ended" && type !== "session.next.step.failed") continue
+    if (plan.dense && kernel.inflight() === 0) check(index)
+    if (type === "session.next.step.ended" || type === "session.next.step.failed") due = true
+    // While the stream is down or an event is still in transit the client cannot know better.
+    // The comparison waits until the stream has handed over everything committed so far.
+    if (!due || !deliveries[index]?.length) continue
+    due = false
     await settle()
     check(index)
   }
@@ -203,7 +238,7 @@ export const dropped = (every: number, count: number, resend: boolean) => (event
     const missed = events.slice(start, start + count)
     for (let index = start; index < start + count; index++) result[index] = []
     result[start + count] = [
-      { reconnect: true },
+      { reconnect: true, replayed: resend },
       ...(resend ? missed.map((event): Delivery => ({ event })) : []),
       { event: events[start + count]! },
     ]
@@ -217,6 +252,7 @@ export async function pageThrough(fixture: Fixture, window = 20) {
   for (const event of wire(fixture)) kernel.commit(event)
   const store = createServerSession(kernel.client as unknown as ZaovraClient)
   const sessionID = fixture.sessionID
+  store.apply({ type: "server.connected", properties: { replay: "initial", sync: 1 } })
   store.pin(sessionID)
   await store.sync(sessionID, { messageLimit: window })
   for (let pages = 0; store.history.more(sessionID) && pages < 500; pages++)

@@ -9,7 +9,6 @@ const fixtures = readdirSync(directory)
   .toSorted()
 // Disturbed delivery multiplies run time; two sessions with failures and retries cover it.
 const disturbed = new Set(["deepseek-error-turns.json", "timeline-crash-session.json"])
-// Until messages record their turn, ownership is re-derived from timestamps on every read.
 const ownership = (rule: string) => rule.startsWith("I3 owner") || rule.startsWith("I6")
 
 for (const name of fixtures) {
@@ -51,23 +50,25 @@ for (const name of fixtures) {
       })
     }, 300_000)
 
-    // Invariant 1. Remove `.failing` once durable events are applied instead of re-reading pages.
-    test.failing(
-      "followed live: never re-reads history pages",
-      async () => {
-        expect((await run("requests")).requests.messages).toBe(0)
-      },
-      300_000,
-    )
+    // Invariant 1: following a session costs no history reads, however many tools it calls.
+    test("followed live: never re-reads history pages", async () => {
+      const result = await run("requests")
+      expect({ messages: result.requests.messages, history: result.requests.history }).toEqual({
+        messages: 0,
+        history: 0,
+      })
+    }, 300_000)
 
-    // Invariant 6. Remove `.failing` once messages carry their turn.
-    test.failing(
-      "followed live: a reply never moves to another turn",
-      async () => {
-        expect((await run("ownership")).ownership).toEqual({})
-      },
-      300_000,
-    )
+    test("followed live: equal to kernel history after every event, mid-step and mid-sentence", async () => {
+      const result = await run("dense", { dense: true })
+      expect(result.checks).toBeGreaterThan(result.events / 2)
+      expect(result.violations).toEqual({})
+    }, 300_000)
+
+    // Invariant 6.
+    test("followed live: a reply never moves to another turn", async () => {
+      expect((await run("ownership")).ownership).toEqual({})
+    }, 300_000)
 
     if (!disturbed.has(name)) return
 

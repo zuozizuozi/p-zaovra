@@ -100,3 +100,13 @@ test("a turn waiting for an automatic retry is still the active turn", () => {
   expect(activeTurnMessage(messages, parts, { type: "busy" })).toBeUndefined()
   expect(activeTurnMessage(messages, parts, { type: "idle" })).toBeUndefined()
 })
+
+test("a record with a kernel-recorded turn belongs to it, whatever the clock says", () => {
+  // Two human messages share a timestamp and a notice follows: time alone cannot place the notice.
+  const messages = [user("first", 1), user("second", 1), user("notice", 2), answer("reply", "notice", 3)]
+  const parts = (id: string): Part[] =>
+    id === "notice" ? [{ ...text(id), metadata: { zaovraTurn: "first" } }] : id === "reply" ? [] : [human(id)]
+  expect(displayTurnOwners(messages, parts).get("notice")).toBe("first")
+  // Until the page holding that user message is read, the notice is placed as before.
+  expect(displayTurnOwners(messages.slice(1), parts).get("notice")).toBe("second")
+})

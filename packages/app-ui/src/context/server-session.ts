@@ -25,8 +25,10 @@ import {
   adaptSession,
   adaptSessionInput,
   adaptSessionMessages,
+  type AdaptCache,
   type SessionView,
 } from "./v2-session-adapter"
+import { createSessionFeed, type FeedEvent, type SessionFeed } from "./session-feed"
 import { adaptPermissionRequest } from "./global-sync/utils"
 import { adaptServerEvent } from "./server-event"
 
@@ -53,6 +55,8 @@ type OptimisticItem = {
   confirmedParts?: Part[]
   confirmedMessage?: boolean
 }
+
+type Adapted = { message: Message; parts: Part[] }
 
 type MessagePage = {
   session: Message[]
@@ -190,6 +194,9 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const questionVersions = new Map<string, number>()
   const admitted = new Map<string, Map<string, false | "steer" | "queue">>()
   let silentAt = 0
+  // The server sequences durable Session events and stamps message pages (specs/v2/desktop-sync.md).
+  // Until it says so, the page re-reading path below is the only way to stay current.
+  let capable = false
   const eventAt = new Map<string, number>()
   const eventVersion = new Map<string, object>()
   // Bumped per text delta so a snapshot requested before a delta cannot end the stream that delta proves is alive.
@@ -222,6 +229,19 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const watchExecution = (sessionID: string) =>
     runInflight(executionWaits, sessionID, async () => {
       const active = generation(sessionID)
+      // Status changes arrive as events. This only resolves when the work is over, for callers that wait on it.
+      while (capable && generations.get(sessionID) === active) {
+        const failure = await client.v2.session.wait({ sessionID }, { throwOnError: true }).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        await refreshActive()
+        if (!data.session_working(sessionID)) return
+        if (failure) throw failure
+        // Still working: a new drain took over. Never spin if the answers stop making sense.
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      if (capable) return
       // A provider step may finish while tools, another turn, or queued inputs
       // still belong to the same drain. Only process ownership establishes idle.
       while (generations.get(sessionID) === active) {
@@ -318,7 +338,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         v2Info.set(sessionID, result.data.data)
         const session = adaptSession(result.data.data)
         if (generations.get(sessionID) !== active) return session
-        return remember(session)
+        const remembered = remember(session)
+        // User messages show the session's agent and model when they carry none of their own.
+        if (capable) flush(sessionID)
+        return remembered
       })
     requests.set(sessionID, request)
     const cleanup = () => {
@@ -484,6 +507,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       requests.delete(sessionID)
       v2Info.delete(sessionID)
       unresolvedHistory.delete(sessionID)
+      dropFeed(sessionID)
       inflight.delete(sessionID)
       inflightDiff.delete(sessionID)
       inflightTodo.delete(sessionID)
@@ -785,9 +809,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
         (oldest, message) => (!oldest || cmpMessage(message, oldest) < 0 ? message : oldest),
         undefined,
       )
-      if (generations.get(sessionID) !== active) return
-
-      if (generations.get(sessionID) !== active) return
+      // The ordered feed took over while this request was in flight; its state is the newer one.
+      if (generations.get(sessionID) !== active || capable) return
       const preserveUnfetched =
         mode === "prepend" || (!page.complete && (!first || ((message: Message) => cmpMessage(message, first) < 0)))
       applyMessagePage(
@@ -824,6 +847,20 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const sync = (sessionID: string, options?: { force?: boolean; messageLimit?: number }) => {
     touch(sessionID)
     return runInflight(inflight, sessionID, async () => {
+      if (capable) {
+        // `force` asks for current state. A feed that is already following only needs what it missed.
+        const following = feeds.get(sessionID)?.ready === true
+        if (following && data.info[sessionID] && !options?.force) return
+        await Promise.all([
+          resolve(sessionID, options),
+          following
+            ? options?.force
+              ? catchUp(sessionID)
+              : undefined
+            : readSnapshot(sessionID, options?.messageLimit ?? meta.limit[sessionID] ?? initialMessagePageSize),
+        ])
+        return
+      }
       const cached = data.message[sessionID] !== undefined && meta.limit[sessionID] !== undefined
       if (cached && data.info[sessionID] && !options?.force) return
       await Promise.all([
@@ -838,12 +875,421 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const prefetch = async (sessionID: string, limit: number) => {
     touch(sessionID)
     await inflight.get(sessionID)
+    if (capable) {
+      if (feeds.get(sessionID)?.ready) return
+      await runInflight(inflight, sessionID, () => readSnapshot(sessionID, limit))
+      return
+    }
     if (
       Date.now() - (meta.at[sessionID] ?? 0) <= 15_000 &&
       (meta.complete[sessionID] || (data.message[sessionID]?.length ?? 0) >= limit)
     )
       return
     await runInflight(inflight, sessionID, () => loadMessages(sessionID, limit))
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Ordered feed (specs/v2/desktop-sync.md). Active once the server announces `sync` on connect.
+  // A session is read as one snapshot, then kept current by applying durable events in sequence.
+  // Nothing below re-reads a message page because an event arrived.
+  // ---------------------------------------------------------------------------------------------
+  const feeds = new Map<string, SessionFeed>()
+  const adaptCaches = new Map<string, AdaptCache>()
+  const inputCache = new WeakMap<SessionInputAdmitted, { key: string; value: Adapted }>()
+  const written = new Map<string, Map<string, Adapted>>()
+  const executions = new Map<string, { epoch: number; revision: number }>()
+  const catchUps = new Map<string, Promise<void>>()
+  const gapTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  let activeAt = 0
+
+  const feedFor = (sessionID: string) => {
+    const existing = feeds.get(sessionID)
+    if (existing) return existing
+    const created = createSessionFeed(sessionID, (type, event) => {
+      if (type === "session.next.step.ended" || type === "session.next.step.failed")
+        setData("streaming_text", sessionID, undefined)
+      if (
+        type === "session.next.text.ended" &&
+        data.streaming_text[sessionID] === adaptPartID(String(event.assistantMessageID), String(event.textID))
+      )
+        setData("streaming_text", sessionID, undefined)
+    })
+    feeds.set(sessionID, created)
+    return created
+  }
+
+  const dropFeed = (sessionID: string) => {
+    feeds.delete(sessionID)
+    adaptCaches.delete(sessionID)
+    written.delete(sessionID)
+    catchUps.delete(sessionID)
+    const timer = gapTimers.get(sessionID)
+    if (timer) clearTimeout(timer)
+    gapTimers.delete(sessionID)
+  }
+
+  const showExecution = (sessionID: string, active: boolean) => {
+    if (!active) {
+      setData("session_status", sessionID, reconcile({ type: "idle" }))
+      setData("streaming_text", sessionID, undefined)
+      return
+    }
+    const retrying = feeds.get(sessionID)?.retry
+    setData("session_status", sessionID, reconcile(retrying ? { type: "retry", ...retrying } : { type: "busy" }))
+  }
+
+  /**
+   * Status reports are ordered by the reporting process's start time and its change counter. An
+   * event applies only if it is newer than what was seen; a request's answer also applies when it
+   * is exactly as new, because it reflects every change up to its counter.
+   */
+  const setExecution = (
+    sessionID: string,
+    active: boolean,
+    version: { epoch: number; revision: number },
+    answer: boolean,
+  ) => {
+    const seen = executions.get(sessionID)
+    if (
+      seen &&
+      (version.epoch < seen.epoch ||
+        (version.epoch === seen.epoch &&
+          (answer ? version.revision < seen.revision : version.revision <= seen.revision)))
+    )
+      return
+    executions.set(sessionID, { epoch: version.epoch, revision: version.revision })
+    showExecution(sessionID, active)
+  }
+
+  const refreshActive = async () => {
+    const result = await client.v2.session.active({ throwOnError: true, signal: AbortSignal.timeout(10_000) })
+    const epoch = result.data.epoch
+    const revision = result.data.revision
+    if (epoch === undefined || revision === undefined) return
+    const working = Object.entries(data.session_status).flatMap(([id, status]) => (status.type === "idle" ? [] : [id]))
+    batch(() =>
+      new Set([...Object.keys(result.data.data), ...working]).forEach((id) =>
+        setExecution(id, result.data.data[id] !== undefined, { epoch, revision }, true),
+      ),
+    )
+  }
+
+  /** Writes the feed's current transcript to the store, touching only what changed. */
+  const flush = (sessionID: string) => {
+    const feed = feeds.get(sessionID)
+    const session = v2Info.get(sessionID)
+    if (!feed?.ready || !session) return
+    const cache = adaptCaches.get(sessionID) ?? new WeakMap()
+    adaptCaches.set(sessionID, cache)
+    const adapted = adaptSessionMessages(session, feed.messages() as SessionMessage[], undefined, cache)
+    const known = new Set(adapted.map((item) => item.message.id))
+    const inputs = feed.pending()
+    const context = [session.agent, session.model?.providerID, session.model?.id, session.model?.variant].join("|")
+    // Inputs the kernel admitted but has not promoted yet. Background completions are the kernel's
+    // own inputs and only appear once promoted, as process records.
+    const waiting = inputs.flatMap((input) => {
+      if (input.completion || known.has(input.id)) return []
+      known.add(input.id)
+      const hit = inputCache.get(input)
+      if (hit?.key === context) return [hit.value]
+      const value = adaptSessionInput(session, input)
+      inputCache.set(input, { key: context, value })
+      return [value]
+    })
+    // The local copy of a just-sent message gives way as soon as the kernel's own record of it applies.
+    const local = optimistic.get(sessionID)
+    if (local) {
+      for (const id of [...local.keys()]) if (known.has(id)) local.delete(id)
+      if (local.size === 0) optimistic.delete(sessionID)
+    }
+    const unconfirmed = [...(optimistic.get(sessionID)?.values() ?? [])]
+    const items: Adapted[] = [
+      ...adapted,
+      ...waiting,
+      ...unconfirmed.map((item) => ({ message: item.message, parts: item.parts })),
+    ]
+    const previous = written.get(sessionID) ?? new Map<string, Adapted>()
+    const next = new Map(items.map((item) => [item.message.id, item] as const))
+    const unconfirmedIDs = new Set(unconfirmed.map((item) => item.message.id))
+    batch(() => {
+      const restructured =
+        data.message[sessionID] === undefined ||
+        previous.size !== next.size ||
+        [...next.keys()].some((id) => !previous.has(id))
+      if (restructured)
+        setData(
+          "message",
+          sessionID,
+          reconcile(
+            items.map((item) => cleanMessage(item.message)).sort((a, b) => cmp(a.id, b.id)),
+            { key: "id" },
+          ),
+        )
+      for (const item of items) {
+        const id = item.message.id
+        // Local copies are rebuilt on every pass; their content cannot change after they are sent.
+        if (previous.get(id) === item || (unconfirmedIDs.has(id) && previous.has(id))) continue
+        if (!restructured) {
+          const found = Binary.search(data.message[sessionID] ?? [], id, (message) => message.id)
+          if (found.found) setData("message", sessionID, found.index, reconcile(cleanMessage(item.message)))
+        }
+        const parts = item.parts.filter((part) => !!part.id && !SKIP_PARTS.has(part.type))
+        if (parts.length) setData("part", id, reconcile(parts, { key: "id" }))
+        if (!parts.length) setData(produce((draft) => deleteMessageParts(draft, id)))
+      }
+      for (const id of previous.keys()) if (!next.has(id)) setData(produce((draft) => deleteMessageParts(draft, id)))
+      setData("pending_input", sessionID, reconcile(inputs, { key: "id" }))
+      setMeta("limit", sessionID, items.length)
+      setMeta("at", sessionID, Date.now())
+    })
+    written.set(sessionID, next)
+  }
+
+  const pageLimit = (limit: number) => Math.min(100, Math.max(initialMessagePageSize, limit))
+
+  /** Reads `session.history` from the feed's sequence until nothing is missing. */
+  const catchUp = (sessionID: string) =>
+    runInflight(catchUps, sessionID, async () => {
+      const feed = feeds.get(sessionID)
+      if (!feed?.ready) return
+      for (let more = true; more && feeds.get(sessionID) === feed && feed.ready; ) {
+        const response = await client.v2.session.history(
+          { sessionID, after: feed.applied < 0 ? undefined : feed.applied, limit: 100 },
+          { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+        )
+        feed.history(
+          response.data.data.flatMap((event) =>
+            event.durable
+              ? [
+                  {
+                    id: event.id,
+                    type: event.type + "." + event.durable.version,
+                    seq: event.durable.seq,
+                    data: event.data,
+                  },
+                ]
+              : [],
+          ),
+        )
+        more = response.data.hasMore
+      }
+      if (feeds.get(sessionID) === feed) settle(sessionID)
+    })
+
+  /** After the feed changed: show it, and arrange for whatever it still needs. */
+  const settle = (sessionID: string) => {
+    const feed = feeds.get(sessionID)
+    if (!feed) return
+    if (feed.stale) {
+      // Read a new snapshot once whatever request is already running for this session has finished.
+      void (inflight.get(sessionID) ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => (feeds.get(sessionID)?.stale ? sync(sessionID) : undefined))
+        .catch(() => {})
+      return
+    }
+    flush(sessionID)
+    if (data.session_working(sessionID)) showExecution(sessionID, true)
+    if (!feed.gap || gapTimers.has(sessionID)) return
+    // Neighbouring events can arrive swapped; only a gap that stays open is worth a request.
+    gapTimers.set(
+      sessionID,
+      setTimeout(() => {
+        gapTimers.delete(sessionID)
+        if (feeds.get(sessionID)?.gap) void catchUp(sessionID).catch(() => {})
+      }, 150),
+    )
+  }
+
+  /** Adds one older page. Returns whether history grew. */
+  const readOlder = async (sessionID: string, count: number) => {
+    const feed = feeds.get(sessionID)
+    const cursor = meta.cursor[sessionID]
+    if (!feed?.ready || !cursor || meta.loading[sessionID]) return false
+    const active = generation(sessionID)
+    setMeta("loading", sessionID, true)
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const revision = feed.generation
+        const response = await (options?.retry ?? retry)(() =>
+          client.v2.session.messages({ sessionID, limit: pageLimit(count), cursor }),
+        )
+        const page = response.data
+        if (!page || page.watermark === undefined) throw new Error("Unable to load messages: " + sessionID)
+        if (generations.get(sessionID) !== active || feeds.get(sessionID) !== feed) return false
+        const input = { data: page.data, watermark: page.watermark }
+        // The page may have seen events this feed has not applied yet. Apply them first.
+        if (feed.behind(input)) await catchUp(sessionID).catch(() => {})
+        if (generations.get(sessionID) !== active || feeds.get(sessionID) !== feed) return false
+        if (feed.prepend(input, revision) === "merged") {
+          batch(() => {
+            setMeta("cursor", sessionID, page.cursor.next)
+            setMeta("complete", sessionID, !page.cursor.next)
+            flush(sessionID)
+          })
+          return true
+        }
+        // History was rewritten under the request: the cursor no longer means what it did.
+        if (feed.generation !== revision) return false
+      }
+      return false
+    } finally {
+      if (generations.get(sessionID) === active) setMeta("loading", sessionID, false)
+    }
+  }
+
+  /** A turn cut by the page boundary stays hidden until its user message is read. Read a little further. */
+  const completeFirstTurn = async (sessionID: string) => {
+    for (let pages = 0; pages < 5; pages++) {
+      const feed = feeds.get(sessionID)
+      if (!feed?.ready || feed.rooted() || !meta.cursor[sessionID]) return
+      if (!(await readOlder(sessionID, 50))) return
+    }
+  }
+
+  const readSnapshot = async (sessionID: string, limit: number) => {
+    const active = generation(sessionID)
+    // The feed exists before the request leaves, so events that arrive while it is in flight wait for it.
+    const feed = feedFor(sessionID)
+    setMeta("loading", sessionID, true)
+    try {
+      const [info, response] = await Promise.all([
+        v2Info.get(sessionID) ??
+          (options?.retry ?? retry)(() => client.v2.session.get({ sessionID })).then((result) => result.data?.data),
+        (options?.retry ?? retry)(() =>
+          client.v2.session.messages({ sessionID, limit: pageLimit(limit), order: "desc" }),
+        ),
+      ])
+      if (!info) throw sessionNotFoundError(sessionID)
+      const page = response.data
+      if (!page || page.watermark === undefined) throw new Error("Unable to load messages: " + sessionID)
+      if (generations.get(sessionID) !== active || feeds.get(sessionID) !== feed) return
+      v2Info.set(sessionID, info)
+      // Another server process may hold a different history; only then may a page move the feed back.
+      const seen = executions.get(sessionID)?.epoch
+      const restarted = !!page.execution && seen !== undefined && page.execution.epoch !== seen
+      const opened = feed.open({ data: page.data, watermark: page.watermark, pending: page.pending }, restarted)
+      batch(() => {
+        if (opened) {
+          setMeta("cursor", sessionID, page.cursor.next)
+          setMeta("complete", sessionID, !page.cursor.next)
+        }
+        if (page.execution) setExecution(sessionID, page.execution.active, page.execution, true)
+        settle(sessionID)
+      })
+    } finally {
+      if (generations.get(sessionID) === active) setMeta("loading", sessionID, false)
+    }
+    await completeFirstTurn(sessionID)
+  }
+
+  /** After the stream was interrupted: read what was missed, and the text that is still being written. */
+  const recover = async (sessionID: string) => {
+    await catchUp(sessionID)
+    const feed = feeds.get(sessionID)
+    if (!feed?.ready) return
+    await Promise.all(
+      feed
+        .streaming()
+        .slice(-2)
+        .map(async (messageID) => {
+          const response = await client.v2.session.message(
+            { sessionID, messageID },
+            { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+          )
+          const message = response.data.data
+          if (message.type !== "assistant") return
+          for (const part of message.content)
+            if (part.type === "text" || part.type === "reasoning") feed.extend(messageID, part.type, part.id, part.text)
+        }),
+    )
+    if (feeds.get(sessionID) === feed) settle(sessionID)
+  }
+
+  const applyOrdered = (event: { type: string; properties?: unknown; syncEvent?: unknown }, eventID?: string) => {
+    if (event.type === "sync") {
+      const item = event.syncEvent as FeedEvent & { aggregateID: string }
+      eventAt.set(item.aggregateID, Date.now())
+      const feed = feeds.get(item.aggregateID)
+      if (!feed) return
+      feed.durable(item)
+      settle(item.aggregateID)
+      return
+    }
+    if (event.type === "session.execution.status") {
+      const props = event.properties as { sessionID: string; active: boolean; epoch: number; revision: number }
+      setExecution(props.sessionID, props.active, props, false)
+      return
+    }
+    if (event.type === "session.next.text.delta" || event.type === "session.next.reasoning.delta") {
+      const props = event.properties as {
+        sessionID: string
+        assistantMessageID: string
+        textID?: string
+        reasoningID?: string
+        delta: string
+        offset?: number
+      }
+      const id = props.textID ?? props.reasoningID
+      const feed = feeds.get(props.sessionID)
+      if (!id || !feed) return
+      const kind = props.textID === undefined ? "reasoning" : "text"
+      const text = feed.fragment({
+        messageID: props.assistantMessageID,
+        kind,
+        id,
+        delta: props.delta,
+        offset: props.offset,
+      })
+      if (text === undefined) return
+      const partID = adaptPartID(props.assistantMessageID, id)
+      const index = data.part[props.assistantMessageID]?.findIndex((part) => part.id === partID) ?? -1
+      if (index < 0) return flush(props.sessionID)
+      batch(() => {
+        setData(
+          "part",
+          props.assistantMessageID,
+          index,
+          produce((part) => {
+            if (part.type === "text" || part.type === "reasoning") part.text = text
+          }),
+        )
+        if (kind === "text") setData("streaming_text", props.sessionID, partID)
+      })
+      return
+    }
+    if (!eventID) return
+    if (event.type === "session.next.deleted") {
+      infoSeen.delete(eventID)
+      evict([eventID])
+      return
+    }
+    // Everything else about the transcript arrives through the sequenced copy of the same event.
+    const selection =
+      event.type === "session.next.prompted" &&
+      !!(event.properties as { prompt?: { selection?: unknown } }).prompt?.selection
+    if (
+      selection ||
+      event.type === "session.next.updated" ||
+      event.type === "session.next.revert.staged" ||
+      event.type === "session.next.revert.cleared" ||
+      event.type === "session.next.revert.committed"
+    )
+      void resolve(eventID, { force: true }).catch(() => {})
+  }
+
+  const reconnectOrdered = (replayed: boolean) => {
+    setData("live_shell", reconcile({}))
+    if (!replayed) setData("streaming_text", reconcile({}))
+    void refreshActive().catch(() => {})
+    for (const sessionID of new Set([...feeds.keys(), ...pinned.keys()])) {
+      // Requests and questions are not sequenced, so an open view always re-reads them.
+      if (pinned.has(sessionID)) {
+        void resync(sessionID).catch(() => {})
+        continue
+      }
+      if (!replayed) void recover(sessionID).catch(() => {})
+    }
   }
 
   const eventSessionID = (event: { type: string; properties?: unknown }) => {
@@ -875,6 +1321,23 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const apply = (event: { type: string; properties?: unknown }): void => {
     const normalized = adaptServerEvent(event as Event)
     if (normalized !== event) return apply(normalized)
+    if (
+      !capable &&
+      event.type === "server.connected" &&
+      (event.properties as { sync?: number } | undefined)?.sync === 1
+    ) {
+      // A session read before the stream connected was read the old way. Abandon those reads; the
+      // feed reads every open session again below.
+      messageLoads.clear()
+      inflight.clear()
+      capable = true
+    }
+    if (capable && (event.type === "server.connected" || event.type === "global.disposed")) {
+      reconnectOrdered(
+        event.type === "server.connected" && (event.properties as { replay?: string }).replay === "applied",
+      )
+      return
+    }
     if (event.type === "server.connected" || event.type === "global.disposed") {
       setData("live_shell", reconcile({}))
       setData("streaming_text", reconcile({}))
@@ -905,6 +1368,12 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       )
         void resolve(eventID).catch(() => {})
     }
+    if (
+      capable &&
+      (event.type === "sync" || event.type === "session.execution.status" || event.type.startsWith("session.next."))
+    )
+      return applyOrdered(event, eventID)
+    if (event.type === "sync") return
     const refreshV2 = (sessionID: string) => {
       const active = generation(sessionID)
       const pending = v2Refreshes.get(sessionID)
@@ -1625,6 +2094,31 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       const active = generation(sessionID)
       const version = eventVersion.get(sessionID)
       const session = await resolve(sessionID, { force: true })
+      if (capable) {
+        // Questions and permission requests are not sequenced, so they are read again. The transcript
+        // only needs what it missed, and status is ordered by its own version.
+        const [, permissions] = await Promise.all([
+          syncQuestions(session.directory).catch(() => undefined),
+          client.v2.permission.request
+            .list(
+              { location: { directory: session.directory } },
+              { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+            )
+            .catch(() => undefined),
+          refreshActive().catch(() => undefined),
+          feeds.get(sessionID)?.ready ? recover(sessionID) : sync(sessionID),
+        ])
+        if (generations.get(sessionID) !== active || eventVersion.get(sessionID) !== version || !permissions) return
+        setData(
+          "permission",
+          sessionID,
+          reconcile(
+            permissions.data.data.map(adaptPermissionRequest).filter((item) => item.sessionID === sessionID),
+            { key: "id" },
+          ),
+        )
+        return
+      }
       const [, ownership, permissions] = await Promise.all([
         syncQuestions(session.directory).catch(() => undefined),
         client.v2.session.active({ throwOnError: true, signal: AbortSignal.timeout(10_000) }).catch(() => undefined),
@@ -1660,7 +2154,17 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     data,
     resync,
     questions: { sync: syncQuestions },
-    resyncSilent(now = Date.now()) {
+    resyncSilent(now = Date.now()): Promise<unknown> {
+      if (capable) {
+        // A session that claims to be working but has been silent for a while is asked about once.
+        // Nothing is re-read; the answer is ordered against status events by its version.
+        const silent = Object.entries(data.session_status).some(
+          ([id, status]) => status.type !== "idle" && now - (eventAt.get(id) ?? 0) >= 30_000,
+        )
+        if (!silent || now - activeAt < 30_000) return Promise.resolve()
+        activeAt = now
+        return refreshActive()
+      }
       const refreshViews = now - silentAt >= 15_000
       if (refreshViews) silentAt = now
       const views = refreshViews ? [...pinned.keys()].filter((id) => now - (eventAt.get(id) ?? 0) >= 15_000) : []
@@ -1709,6 +2213,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     messageConfirmed: (sessionID: string, messageID: string) =>
       !!data.message[sessionID]?.some((message) => message.id === messageID) &&
       (!optimistic.get(sessionID)?.has(messageID) || !!optimistic.get(sessionID)?.get(messageID)?.confirmedMessage),
+    /** Whether the server sequences Session events, so this store follows sessions without re-reading pages. */
+    ordered: () => capable,
     remember,
     resolve,
     lineage: {
@@ -1723,6 +2229,14 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     pendingDelivery(sessionID: string, messageID: string) {
       const inputs = data.pending_input[sessionID] ?? []
       const parts = data.part[messageID] ?? []
+      if (capable) {
+        // Admitted inputs come from the kernel; a message it has not confirmed yet is still local.
+        const admittedDelivery = inputs.find((input) => input.id === messageID)?.delivery
+        if (admittedDelivery) return admittedDelivery
+        if (!optimistic.get(sessionID)?.has(messageID)) return
+        const local = parts.find((part) => part.type === "text")?.metadata?.zaovraDelivery
+        return local === "steer" || local === "queue" ? local : undefined
+      }
       const known = admitted.get(sessionID)?.get(messageID)
       if (known === false) return
       if (known) return known
@@ -1733,12 +2247,15 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     },
     prefetch,
     shouldPrefetch(sessionID: string, limit: number) {
+      if (capable) return !feeds.get(sessionID)?.ready
       if (data.message[sessionID] === undefined) return true
       if (Date.now() - (meta.at[sessionID] ?? 0) > 15_000) return true
       if (meta.complete[sessionID]) return false
       return (meta.limit[sessionID] ?? 0) <= limit
     },
     fresh(sessionID: string, ttl: number) {
+      // A followed session is current by construction, however long ago it last changed.
+      if (capable && feeds.get(sessionID)?.ready) return true
       return Date.now() - (meta.at[sessionID] ?? 0) <= ttl
     },
     optimistic: {
@@ -1750,6 +2267,18 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
           admitted.set(input.sessionID, pending)
         }
         const parts = input.parts.filter((part) => !!part?.id && !SKIP_PARTS.has(part.type))
+        if (capable) {
+          const items = optimistic.get(input.sessionID) ?? new Map<string, OptimisticItem>()
+          items.set(input.message.id, { message: input.message, parts })
+          optimistic.set(input.sessionID, items)
+          if (feeds.get(input.sessionID)?.ready && v2Info.has(input.sessionID)) return flush(input.sessionID)
+          // Sent before the session was first read: show it now, the first snapshot merges it.
+          setData("message", input.sessionID, (messages = []) =>
+            merge(messages, [input.message]).sort((a, b) => cmp(a.id, b.id)),
+          )
+          setData("part", input.message.id, parts)
+          return
+        }
         const load = messageLoads.get(input.sessionID)
         if (load?.clearedMessageParts.has(input.message.id)) {
           const touched = load.touchedParts.get(input.message.id) ?? new Set<string>()
@@ -1784,6 +2313,15 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       remove(input: { sessionID: string; messageID: string }) {
         const item = optimistic.get(input.sessionID)?.get(input.messageID)
         if (!item) return
+        if (capable) {
+          clearOptimistic(input.sessionID, input.messageID)
+          if (feeds.get(input.sessionID)?.ready && v2Info.has(input.sessionID)) return flush(input.sessionID)
+          setData("message", input.sessionID, (messages) =>
+            messages?.filter((message) => message.id !== input.messageID),
+          )
+          setData(produce((draft) => deleteMessageParts(draft, input.messageID)))
+          return
+        }
         messageLoads.get(input.sessionID)?.optimisticParts.delete(input.messageID)
         clearOptimistic(input.sessionID, input.messageID)
         admitted.get(input.sessionID)?.delete(input.messageID)
@@ -1841,6 +2379,10 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       async loadMore(sessionID: string, count = historyMessagePageSize) {
         touch(sessionID)
         if (meta.loading[sessionID] || meta.complete[sessionID] || !meta.cursor[sessionID]) return
+        if (capable) {
+          if (await readOlder(sessionID, count)) await completeFirstTurn(sessionID)
+          return
+        }
         await loadMessages(sessionID, count, meta.cursor[sessionID], "prepend")
       },
     },

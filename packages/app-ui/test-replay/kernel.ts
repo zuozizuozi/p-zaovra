@@ -77,6 +77,9 @@ export function createKernel(fixture: Fixture) {
   let watermark = -1
   let current = -1
   let active = false
+  // session/execution/local.ts: status reports are ordered by process start and a change counter.
+  const epoch = 1
+  let revision = 0
   let inflight = 0
   let title = fixture.sessionID
   let info: Record<string, unknown> = {}
@@ -157,6 +160,17 @@ export function createKernel(fixture: Fixture) {
       .toSorted((a, b) => b.seq - a.seq)
       .slice(0, limit)
 
+  const admitted = () =>
+    [...pending.entries()].map(([id, input]) => ({
+      admittedSeq: input.seq,
+      id,
+      sessionID: fixture.sessionID,
+      timeCreated: input.data.timestamp,
+      prompt: input.data.prompt,
+      delivery: input.data.delivery ?? "steer",
+      ...(input.data.completion ? { completion: input.data.completion } : {}),
+    }))
+
   const request = async <T>(name: keyof typeof counts, read: () => T) => {
     counts[name]++
     inflight++
@@ -199,6 +213,8 @@ export function createKernel(fixture: Fixture) {
                 data: rows.map((row) => encodeMessage(overlay(row.message))),
                 cursor: { next: more ? String(rows.at(-1)!.seq) : undefined },
                 watermark,
+                execution: { epoch, revision, active },
+                pending: admitted(),
               },
             }
           }),
@@ -209,25 +225,31 @@ export function createKernel(fixture: Fixture) {
           }),
         history: (input: { after?: number; limit?: number }) =>
           request("history", () => {
-            const events = log
-              .filter((event) => event.kind === "durable" && event.seq > (input.after ?? -1))
-              .slice(0, input.limit ?? 256)
-            return { data: { data: events, hasMore: events.length === (input.limit ?? 256) } }
+            const events = log.flatMap((event) =>
+              event.kind === "durable" && event.seq > (input.after ?? -1) ? [event] : [],
+            )
+            const limit = input.limit ?? 50
+            return {
+              data: {
+                data: events.slice(0, limit).map((event) => ({
+                  id: event.id,
+                  type: event.type,
+                  durable: {
+                    aggregateID: fixture.sessionID,
+                    seq: event.seq,
+                    version: Number(event.versioned.slice(event.type.length + 1)),
+                  },
+                  data: event.data,
+                })),
+                hasMore: events.length > limit,
+              },
+            }
           }),
-        pendingInputs: () =>
-          request("pending", () => ({
-            data: {
-              data: [...pending.entries()].map(([id, input]) => ({
-                id,
-                sessionID: fixture.sessionID,
-                timeCreated: input.data.timestamp,
-                prompt: input.data.prompt,
-                delivery: input.data.delivery ?? "steer",
-              })),
-            },
-          })),
+        pendingInputs: () => request("pending", () => ({ data: { data: admitted() } })),
         active: () =>
-          request("active", () => ({ data: { data: active ? { [fixture.sessionID]: { type: "running" } } : {} } })),
+          request("active", () => ({
+            data: { data: active ? { [fixture.sessionID]: { type: "running" } } : {}, epoch, revision },
+          })),
         wait: async () => {
           counts.wait++
           if (active) await new Promise<void>((resolve) => waiters.add(resolve))
@@ -251,11 +273,19 @@ export function createKernel(fixture: Fixture) {
       page(Number.MAX_SAFE_INTEGER)
         .toReversed()
         .map((row) => encodeMessage(overlay(row.message))),
+    /** Returns the status event the kernel publishes when this changes anything. */
     setActive(next: boolean) {
+      if (active === next) return
       active = next
-      if (next) return
-      waiters.forEach((resolve) => resolve())
-      waiters.clear()
+      revision++
+      if (!next) {
+        waiters.forEach((resolve) => resolve())
+        waiters.clear()
+      }
+      return {
+        type: "session.execution.status",
+        properties: { sessionID: fixture.sessionID, active, epoch, revision },
+      }
     },
   }
 }

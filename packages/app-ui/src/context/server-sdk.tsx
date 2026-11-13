@@ -114,6 +114,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
 
   let queue: Queued[] = []
   let buffer: Queued[] = []
+  const ordered = new Set<(payload: Event) => void>()
   let timer: ReturnType<typeof setTimeout> | undefined
   let last = 0
 
@@ -131,7 +132,10 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     last = Date.now()
     const output = coalesceServerEvents(events)
     batch(() => {
-      output.forEach((event) => emitter.emit(event.directory, event.payload))
+      output.forEach((event) => {
+        if ((event.payload.type as string) === "sync") return ordered.forEach((listener) => listener(event.payload))
+        emitter.emit(event.directory, event.payload)
+      })
     })
 
     buffer.length = 0
@@ -203,6 +207,13 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
           for await (const event of events.stream) {
             resetHeartbeat()
             streamErrorLogged = false
+            // Durable Session events with their sequence numbers go only to the session store, which
+            // applies them once and in order (specs/v2/desktop-sync.md). They share the frame queue so
+            // they stay in stream order with the fragments around them.
+            if (event.payload.type === "sync" && event.payload.syncEvent.type.startsWith("session.next.")) {
+              queue.push({ directory: event.directory ?? "global", payload: event.payload as unknown as Event })
+              schedule()
+            }
             if (event.payload.type !== "sync") {
               const directory = event.directory ?? "global"
               const payload = adaptServerEvent(event.payload as Event)
@@ -287,6 +298,11 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     event: {
       on: emitter.on.bind(emitter),
       listen: emitter.listen.bind(emitter),
+      /** Durable Session events (`sync` stream entries), delivered in stream order with everything else. */
+      ordered(listener: (payload: Event) => void) {
+        ordered.add(listener)
+        return () => void ordered.delete(listener)
+      },
       start,
     },
     createClient(opts: Omit<Parameters<typeof createSdkForServer>[0], "server" | "fetch">) {

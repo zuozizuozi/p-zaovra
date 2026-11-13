@@ -81,6 +81,12 @@ export function displayTurnOwners(messages: readonly Message[], parts: (id: stri
     if (!message) return
     if (message.role === "assistant") return resolve(message.parentID, visited)
     if (!isContinuation(parts(id))) return id
+    // The kernel records which user message a shell record or notice was produced for. Older
+    // history has no such record and is placed by the rules below.
+    const turn = parts(id).flatMap((part) =>
+      part.type === "text" && typeof part.metadata?.zaovraTurn === "string" ? [part.metadata.zaovraTurn] : [],
+    )[0]
+    if (turn && turn !== id && byID.get(turn)?.sessionID === message.sessionID) return resolve(turn, visited)
     const source = parts(id).flatMap((part) =>
       part.type === "text" && typeof part.metadata?.zaovraSourceMessageID === "string"
         ? [part.metadata.zaovraSourceMessageID]

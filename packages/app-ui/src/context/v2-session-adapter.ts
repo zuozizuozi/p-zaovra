@@ -94,8 +94,23 @@ export function adaptSessionInput(
   }
 }
 
-export function adaptSessionMessages(session: SessionV2Info, messages: SessionMessage[], parentID?: string) {
-  const result: { message: Message; parts: Part[] }[] = []
+type Adapted = { message: Message; parts: Part[] }
+type Shell = Extract<SessionMessage, { type: "shell" }>
+type Synthetic = Extract<SessionMessage, { type: "synthetic" }>
+
+/**
+ * Remembers each message's adapted form for as long as the message object itself is unchanged, so
+ * following a session re-adapts only what an event touched.
+ */
+export type AdaptCache = WeakMap<SessionMessage, { key: string; deps: readonly unknown[]; value: Adapted }>
+
+export function adaptSessionMessages(
+  session: SessionV2Info,
+  messages: SessionMessage[],
+  parentID?: string,
+  cache?: AdaptCache,
+) {
+  const result: Adapted[] = []
   const state = { parentID }
   const shells = new Map(messages.flatMap((item) => (item.type === "shell" ? [[item.id, item] as const] : [])))
   const completions = new Map(
@@ -103,216 +118,257 @@ export function adaptSessionMessages(session: SessionV2Info, messages: SessionMe
       item.type === "synthetic" && item.completion ? [[item.completion.jobID, item] as const] : [],
     ),
   )
+  // Everything about the session that an adapted message copies.
+  const context = JSON.stringify([session.id, session.agent, session.model, session.location])
+  // The kernel's creation sequence is the transcript order. Data read from an older kernel has none.
+  const ordered = messages.toSorted((a, b) =>
+    a.seq !== undefined && b.seq !== undefined
+      ? a.seq - b.seq
+      : a.time.created - b.time.created || a.id.localeCompare(b.id),
+  )
 
-  for (const item of messages.toSorted((a, b) => a.time.created - b.time.created || a.id.localeCompare(b.id))) {
-    if (item.type === "user") {
-      state.parentID = item.id
-      result.push({
-        message: {
-          id: item.id,
-          sessionID: session.id,
-          role: "user",
-          time: item.time,
-          agent: item.selection?.agent ?? session.agent ?? "build",
-          model: {
-            providerID: item.selection?.model.providerID ?? session.model?.providerID ?? "unknown",
-            modelID: item.selection?.model.id ?? session.model?.id ?? "unknown",
-            variant: item.selection ? item.selection.model.variant : session.model?.variant,
-          },
-        },
-        parts: [
-          ...(item.text
-            ? [
-                {
-                  id: `${item.id}:text`,
-                  sessionID: session.id,
-                  messageID: item.id,
-                  type: "text" as const,
-                  text: item.invocation ?? item.text,
-                  ...(item.invocation || item.subtask
-                    ? {
-                        metadata: {
-                          zaovraRequestText: item.text,
-                          zaovraRequestInvocation: item.invocation,
-                          zaovraRequestSubtask: !!item.subtask,
-                        },
-                      }
-                    : {}),
-                },
-              ]
-            : []),
-          ...(item.files ?? []).map((file, index) => ({
-            id: `${item.id}:file:${index}`,
-            sessionID: session.id,
-            messageID: item.id,
-            type: "file" as const,
-            mime: file.mime,
-            filename: file.name,
-            url: file.uri,
-          })),
-          ...(item.agents ?? []).map((agent, index) => ({
-            id: `${item.id}:agent:${index}`,
-            sessionID: session.id,
-            messageID: item.id,
-            type: "agent" as const,
-            name: agent.name,
-            source: agent.source
-              ? { value: agent.source.text, start: agent.source.start, end: agent.source.end }
-              : undefined,
-          })),
-        ],
-      })
+  for (const item of ordered) {
+    if (item.type !== "user" && item.type !== "assistant" && item.type !== "synthetic" && item.type !== "shell")
+      continue
+    if (item.type === "assistant" && !state.parentID) continue
+    const parent = item.type === "assistant" ? state.parentID : undefined
+    if (item.type !== "assistant") state.parentID = item.id
+    // A background command's tool card also shows the state of its job and its completion notice.
+    const deps =
+      item.type === "assistant"
+        ? item.content.flatMap((content) => {
+            if (content.type !== "tool" || content.name !== "bash" || content.state.status !== "completed") return []
+            const job = String(content.state.structured.job_id ?? "")
+            return [shells.get(job), completions.get(job)]
+          })
+        : []
+    const key = `${parent}|${context}`
+    const hit = cache?.get(item)
+    if (
+      hit &&
+      hit.key === key &&
+      hit.deps.length === deps.length &&
+      hit.deps.every((dep, index) => dep === deps[index])
+    ) {
+      result.push(hit.value)
       continue
     }
-
-    if (item.type === "assistant" && state.parentID) {
-      result.push({
-        message: {
-          id: item.id,
-          sessionID: session.id,
-          role: "assistant",
-          time: item.time,
-          error: item.error
-            ? item.error.metadata
-              ? {
-                  name: "APIError",
-                  data: {
-                    message: item.error.message,
-                    isRetryable: false,
-                    statusCode: Number(item.error.metadata.statusCode) || undefined,
-                    metadata: item.error.metadata,
-                  },
-                }
-              : { name: "UnknownError", data: { message: item.error.message } }
-            : undefined,
-          parentID: state.parentID,
-          modelID: item.model.id,
-          providerID: item.model.providerID,
-          mode: "build",
-          agent: item.agent,
-          path: { cwd: session.location.directory, root: session.location.directory },
-          cost: item.cost ?? 0,
-          tokens: item.tokens ?? {
-            input: 0,
-            output: 0,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
-          variant: item.model.variant,
-          finish: item.finish,
-        },
-        parts: item.content.flatMap((content): Part[] => {
-          if (content.type === "text")
-            return [
-              {
-                id: adaptPartID(item.id, content.id),
-                sessionID: session.id,
-                messageID: item.id,
-                type: "text",
-                text: content.superseded ? `[被替代的未完成输出]\n${content.text}` : content.text,
-                metadata:
-                  content.superseded || typeof item.metadata?.responseModel === "string"
-                    ? {
-                        ...(content.superseded ? { superseded: true } : {}),
-                        ...(typeof item.metadata?.responseModel === "string"
-                          ? { zaovraResponseModel: item.metadata.responseModel }
-                          : {}),
-                      }
-                    : undefined,
-              },
-            ]
-          if (content.type === "reasoning")
-            return [
-              {
-                id: adaptPartID(item.id, content.id),
-                sessionID: session.id,
-                messageID: item.id,
-                type: "reasoning",
-                text: content.superseded ? `[被替代的未完成推理]\n${content.text}` : content.text,
-                metadata: { ...content.providerMetadata, ...(content.superseded ? { superseded: true } : {}) },
-                time: {
-                  start: content.time?.created ?? item.time.created,
-                  end: content.time?.completed,
-                },
-              },
-            ]
-          const part = adaptTool(session.id, item.id, content)
-          if (part.type === "tool" && part.tool === "bash" && part.state.status === "completed") {
-            const job = shells.get(String(part.state.metadata.job_id ?? ""))
-            const completion = completions.get(String(part.state.metadata.job_id ?? ""))
-            const completed = completion?.completion?.sourceMessageID === item.id ? completion : undefined
-            if ((job && (job.origin === "tool" || job.callID === content.id)) || completed) {
-              part.state.metadata = {
-                ...part.state.metadata,
-                zaovraBackgroundState: completed || job?.time.completed !== undefined ? "completed" : "running",
-                zaovraBackgroundOutput: job?.output ?? completed?.text,
-                zaovraBackgroundCompleted: job?.time.completed ?? completed?.time.created,
-              }
-            }
-          }
-          if (
-            part.type === "tool" &&
-            part.state.status === "completed" &&
-            ["write", "edit", "apply_patch", "publish_artifact", "bash"].includes(content.name) &&
-            (!item.snapshot?.start ||
-              (item.time.completed !== undefined && !item.snapshot.end) ||
-              (content.name === "bash" && item.snapshot.start.startsWith("nongit:")) ||
-              unavailableBackup(content))
-          )
-            part.state.metadata = { ...part.state.metadata, zaovraSnapshotUnavailable: true }
-          return [part]
-        }),
-      })
-      continue
-    }
-
-    if (item.type === "synthetic" || item.type === "shell") {
-      state.parentID = item.id
-      result.push({
-        message: {
-          id: item.id,
-          sessionID: session.id,
-          role: "user",
-          time: { created: item.time.created },
-          agent: session.agent ?? "build",
-          model: {
-            providerID: session.model?.providerID ?? "unknown",
-            modelID: session.model?.id ?? "unknown",
-            variant: session.model?.variant,
-          },
-        },
-        parts: [
-          {
-            id: `${item.id}:text`,
-            sessionID: session.id,
-            messageID: item.id,
-            type: "text",
-            text: item.type === "shell" ? `$ ${item.command}\n\n${item.output}` : item.text,
-            synthetic: true,
-            metadata: {
-              ...(item.type === "synthetic" && item.completion
-                ? {
-                    zaovraSourceMessageID: item.completion.sourceMessageID,
-                    zaovraCompletionJobID: item.completion.jobID,
-                  }
-                : {}),
-              ...(item.type === "shell"
-                ? {
-                    zaovraShellPending: item.time.completed === undefined,
-                    zaovraShellJobID: item.id,
-                    zaovraShellCommand: item.command,
-                    zaovraShellOutput: item.output,
-                    zaovraShellCompleted: item.time.completed,
-                  }
-                : {}),
-            },
-          },
-        ],
-      })
-    }
+    const value = adaptSessionMessage(session, item, parent, shells, completions)
+    cache?.set(item, { key, deps, value })
+    result.push(value)
   }
 
   return result
+}
+
+function adaptSessionMessage(
+  session: SessionV2Info,
+  item: Extract<SessionMessage, { type: "user" | "assistant" | "synthetic" | "shell" }>,
+  parentID: string | undefined,
+  shells: ReadonlyMap<string, Shell>,
+  completions: ReadonlyMap<string, Synthetic>,
+): Adapted {
+  if (item.type === "user") {
+    return {
+      message: {
+        id: item.id,
+        sessionID: session.id,
+        role: "user",
+        time: item.time,
+        agent: item.selection?.agent ?? session.agent ?? "build",
+        model: {
+          providerID: item.selection?.model.providerID ?? session.model?.providerID ?? "unknown",
+          modelID: item.selection?.model.id ?? session.model?.id ?? "unknown",
+          variant: item.selection ? item.selection.model.variant : session.model?.variant,
+        },
+      },
+      parts: [
+        ...(item.text
+          ? [
+              {
+                id: `${item.id}:text`,
+                sessionID: session.id,
+                messageID: item.id,
+                type: "text" as const,
+                text: item.invocation ?? item.text,
+                ...(item.invocation || item.subtask
+                  ? {
+                      metadata: {
+                        zaovraRequestText: item.text,
+                        zaovraRequestInvocation: item.invocation,
+                        zaovraRequestSubtask: !!item.subtask,
+                      },
+                    }
+                  : {}),
+              },
+            ]
+          : []),
+        ...(item.files ?? []).map((file, index) => ({
+          id: `${item.id}:file:${index}`,
+          sessionID: session.id,
+          messageID: item.id,
+          type: "file" as const,
+          mime: file.mime,
+          filename: file.name,
+          url: file.uri,
+        })),
+        ...(item.agents ?? []).map((agent, index) => ({
+          id: `${item.id}:agent:${index}`,
+          sessionID: session.id,
+          messageID: item.id,
+          type: "agent" as const,
+          name: agent.name,
+          source: agent.source
+            ? { value: agent.source.text, start: agent.source.start, end: agent.source.end }
+            : undefined,
+        })),
+      ],
+    }
+  }
+
+  if (item.type === "assistant") {
+    return {
+      message: {
+        id: item.id,
+        sessionID: session.id,
+        role: "assistant",
+        time: item.time,
+        error: item.error
+          ? item.error.metadata
+            ? {
+                name: "APIError",
+                data: {
+                  message: item.error.message,
+                  isRetryable: false,
+                  statusCode: Number(item.error.metadata.statusCode) || undefined,
+                  metadata: item.error.metadata,
+                },
+              }
+            : { name: "UnknownError", data: { message: item.error.message } }
+          : undefined,
+        parentID: parentID ?? "",
+        modelID: item.model.id,
+        providerID: item.model.providerID,
+        mode: "build",
+        agent: item.agent,
+        path: { cwd: session.location.directory, root: session.location.directory },
+        cost: item.cost ?? 0,
+        tokens: item.tokens ?? {
+          input: 0,
+          output: 0,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+        },
+        variant: item.model.variant,
+        finish: item.finish,
+      },
+      parts: item.content.flatMap((content): Part[] => {
+        if (content.type === "text")
+          return [
+            {
+              id: adaptPartID(item.id, content.id),
+              sessionID: session.id,
+              messageID: item.id,
+              type: "text",
+              text: content.superseded ? `[被替代的未完成输出]\n${content.text}` : content.text,
+              metadata:
+                content.superseded || typeof item.metadata?.responseModel === "string"
+                  ? {
+                      ...(content.superseded ? { superseded: true } : {}),
+                      ...(typeof item.metadata?.responseModel === "string"
+                        ? { zaovraResponseModel: item.metadata.responseModel }
+                        : {}),
+                    }
+                  : undefined,
+            },
+          ]
+        if (content.type === "reasoning")
+          return [
+            {
+              id: adaptPartID(item.id, content.id),
+              sessionID: session.id,
+              messageID: item.id,
+              type: "reasoning",
+              text: content.superseded ? `[被替代的未完成推理]\n${content.text}` : content.text,
+              metadata: { ...content.providerMetadata, ...(content.superseded ? { superseded: true } : {}) },
+              time: {
+                start: content.time?.created ?? item.time.created,
+                end: content.time?.completed,
+              },
+            },
+          ]
+        const part = adaptTool(session.id, item.id, content)
+        if (part.type === "tool" && part.tool === "bash" && part.state.status === "completed") {
+          const job = shells.get(String(part.state.metadata.job_id ?? ""))
+          const completion = completions.get(String(part.state.metadata.job_id ?? ""))
+          const completed = completion?.completion?.sourceMessageID === item.id ? completion : undefined
+          if ((job && (job.origin === "tool" || job.callID === content.id)) || completed) {
+            part.state.metadata = {
+              ...part.state.metadata,
+              zaovraBackgroundState: completed || job?.time.completed !== undefined ? "completed" : "running",
+              zaovraBackgroundOutput: job?.output ?? completed?.text,
+              zaovraBackgroundCompleted: job?.time.completed ?? completed?.time.created,
+            }
+          }
+        }
+        if (
+          part.type === "tool" &&
+          part.state.status === "completed" &&
+          ["write", "edit", "apply_patch", "publish_artifact", "bash"].includes(content.name) &&
+          (!item.snapshot?.start ||
+            (item.time.completed !== undefined && !item.snapshot.end) ||
+            (content.name === "bash" && item.snapshot.start.startsWith("nongit:")) ||
+            unavailableBackup(content))
+        )
+          part.state.metadata = { ...part.state.metadata, zaovraSnapshotUnavailable: true }
+        return [part]
+      }),
+    }
+  }
+
+  return {
+    message: {
+      id: item.id,
+      sessionID: session.id,
+      role: "user",
+      time: { created: item.time.created },
+      agent: session.agent ?? "build",
+      model: {
+        providerID: session.model?.providerID ?? "unknown",
+        modelID: session.model?.id ?? "unknown",
+        variant: session.model?.variant,
+      },
+    },
+    parts: [
+      {
+        id: `${item.id}:text`,
+        sessionID: session.id,
+        messageID: item.id,
+        type: "text",
+        text: item.type === "shell" ? `$ ${item.command}\n\n${item.output}` : item.text,
+        synthetic: true,
+        metadata: {
+          // The user message this record was produced for, as the kernel recorded it.
+          ...(item.turn ? { zaovraTurn: item.turn } : {}),
+          ...(item.type === "synthetic" && item.completion
+            ? {
+                zaovraSourceMessageID: item.completion.sourceMessageID,
+                zaovraCompletionJobID: item.completion.jobID,
+              }
+            : {}),
+          ...(item.type === "shell"
+            ? {
+                zaovraShellPending: item.time.completed === undefined,
+                zaovraShellJobID: item.id,
+                zaovraShellCommand: item.command,
+                zaovraShellOutput: item.output,
+                zaovraShellCompleted: item.time.completed,
+              }
+            : {}),
+        },
+      },
+    ],
+  }
 }
 
 /** Unfinished history is not proof that a process is still alive after reconnecting. */
