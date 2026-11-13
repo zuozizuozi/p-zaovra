@@ -139,6 +139,50 @@ describe("switching to the ordered feed", () => {
   })
 })
 
+describe("switching to the ordered feed, mid-resync", () => {
+  test("a view that was being resynchronised the old way is read again and keeps receiving messages", async () => {
+    const { kernel, commit, prompt } = server()
+    const gate: { release?: () => void; asked: boolean } = { asked: false }
+    const client = {
+      ...kernel.client,
+      v2: {
+        ...kernel.client.v2,
+        session: {
+          ...kernel.client.v2.session,
+          // Only the old resync asks this; its answer is still on the way when the server announces.
+          active: () => {
+            gate.asked = true
+            return new Promise((resolve) => {
+              gate.release = () => resolve({ data: { data: {} } })
+            })
+          },
+        },
+      },
+    }
+    const store = createServerSession(client as unknown as ZaovraClient)
+    store.pin(sessionID)
+    const early = store.resync(sessionID)
+    for (let spins = 0; spins < 100 && !gate.asked; spins++) await settle()
+    expect(gate.asked).toBe(true)
+    store.apply(connected)
+    await settle()
+    gate.release?.()
+    await early.catch(() => undefined)
+    await settle()
+    await settle()
+    // Nobody asked again, and the session is followed.
+    expect(store.data.message[sessionID]?.map((message) => message.id)).toEqual(["msg_first"])
+    const reads = kernel.counts.messages
+    const next = commit("prompted", prompt("msg_second"))
+    store.apply({
+      type: "sync",
+      syncEvent: { id: next.id, type: next.versioned, seq: next.seq, aggregateID: sessionID, data: next.data },
+    } as Parameters<typeof store.apply>[0])
+    expect(store.data.message[sessionID]?.map((message) => message.id)).toEqual(["msg_first", "msg_second"])
+    expect(kernel.counts.messages).toBe(reads)
+  })
+})
+
 describe("background completions", () => {
   test("a completion whose turn cannot be known is read from the kernel, not guessed", async () => {
     const { kernel, commit, prompt } = server()

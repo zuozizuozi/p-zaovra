@@ -1339,7 +1339,13 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
       // all of their late answers into no-ops; the feed reads every open session again below.
       generations.clear()
       messageLoads.clear()
+      // Forget the retired requests themselves too. Anything that would join one of them instead of
+      // starting again would end with it, having read nothing.
       inflight.clear()
+      resyncs.clear()
+      requests.clear()
+      inflightDiff.clear()
+      inflightTodo.clear()
       executionWaits.clear()
       setMeta("loading", reconcile({}))
       capable = true
