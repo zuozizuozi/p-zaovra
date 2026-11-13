@@ -853,12 +853,28 @@ const layer = Layer.effect(
               .all()
               .pipe(Effect.orDie)
           : []
-      const operationStates = new Map<string, string>()
+      const operationStates = new Map<string, { status: string; callID?: string }>()
       for (const row of operationRows) {
-        const details = row.data.details as { operationID: string; status: string }
-        if (!operationStates.has(details.operationID)) operationStates.set(details.operationID, details.status)
+        const details = row.data.details as { operationID: string; status: string; callID?: string }
+        if (!operationStates.has(details.operationID)) operationStates.set(details.operationID, details)
       }
-      if ([...operationStates.values()].some((status) => status !== "settled")) {
+      // An operation the user cut short by pressing Stop is not a reason to refuse them when they
+      // then ask to go on: they know it was interrupted, and its failed result is in the history
+      // for the model to check. Resuming without a new message from the user still stops here.
+      const acknowledged = (callID?: string) => {
+        const owner = context.findLastIndex(
+          (message) =>
+            message.type === "assistant" && message.content.some((part) => part.type === "tool" && part.id === callID),
+        )
+        const message = context[owner]
+        return (
+          message?.type === "assistant" &&
+          message.termination?.category === "interrupted" &&
+          message.termination.source === "user" &&
+          context.slice(owner + 1).some((later) => later.type === "user")
+        )
+      }
+      if ([...operationStates.values()].some((state) => state.status !== "settled" && !acknowledged(state.callID))) {
         const assistantMessageID = SessionMessage.ID.create()
         yield* events.publish(SessionEvent.Step.Started, {
           sessionID,

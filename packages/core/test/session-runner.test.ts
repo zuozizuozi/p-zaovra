@@ -7902,6 +7902,40 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("continues after the user stopped a running tool and then asks to go on", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Stop me mid-tool" }), resume: false })
+      executions.length = 0
+      toolExecutionGate = yield* Deferred.make<void>()
+      responseStream = Stream.concat(
+        Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "call-stopped", name: "echo", input: { text: "blocked" } }),
+        ]),
+        Stream.never,
+      )
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      while (executions.length === 0) yield* Effect.yieldNow
+      yield* session.interrupt(sessionID)
+      toolExecutionGate = undefined
+      yield* Fiber.await(run)
+
+      requests.length = 0
+      responseStream = undefined
+      responses = [fragmentFixture("text", "after-stop", ["Checked and finished."]).completeEvents]
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "继续" }), resume: false })
+      yield* session.resume(sessionID)
+      // The model is asked again, and it can see that its tool call was interrupted.
+      expect(requests).toHaveLength(1)
+      expect(JSON.stringify(requests[0].messages)).toContain("Tool execution interrupted")
+      const context = yield* session.context(sessionID)
+      expect(JSON.stringify(context)).not.toContain("工具效果不确定")
+      expect(context.at(-1)).toMatchObject({ type: "assistant", finish: "stop" })
+    }),
+  )
+
   it.effect("interrupts a blocked provider turn without local tool execution", () =>
     Effect.gen(function* () {
       yield* setup
