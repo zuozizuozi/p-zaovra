@@ -1,38 +1,46 @@
 {
   "zh": [
     {
-      "title": "对话过程更稳、更省",
-      "description": "任务进行中不再反复重新加载整段对话；内容按顺序逐条更新，工具调用再多也不增加加载次数"
+      "title": "任务完成会提醒了",
+      "description": "对话里只要运行过命令，之前任务完成后不会出现通知、提示音和“待看”标记；现在恢复正常"
     },
     {
-      "title": "回复不再跳到别的轮次",
-      "description": "每条回复、命令记录和后台通知固定归属到它对应的那条用户消息"
+      "title": "中途换模型可以接着聊",
+      "description": "在同一个对话里从别的模型换到 DeepSeek 不再立刻失败；这种情况下 DeepSeek 改用非思考模式继续，并在对话里说明一次"
     },
     {
-      "title": "运行状态更准",
-      "description": "“正在运行”和“已结束”直接来自后台的状态通知，停止后立即恢复可输入"
+      "title": "停止后说“继续”能接着做",
+      "description": "停止时正好打断了一条命令，之后发“继续”不再被拒绝"
     },
     {
-      "title": "切换对话和断线重连更快",
-      "description": "已打开过的对话切回时不再重新加载；断线后只补上错过的部分"
+      "title": "拒绝授权后说明原因",
+      "description": "你拒绝一次操作后，对话里会写明任务已暂停，可以直接告诉它换个做法，不再只显示“已中断”"
+    },
+    {
+      "title": "Git Bash 下很长的命令也能运行",
+      "description": "用 Git Bash 作为命令行时，超长命令不再启动失败"
     }
   ],
   "en": [
     {
-      "title": "Steadier, lighter conversations",
-      "description": "A running task no longer reloads the whole conversation over and over; content updates in order, and more tool calls do not mean more loading"
+      "title": "You are told when a task finishes",
+      "description": "In any conversation that had run a command, a finished task produced no notification, sound or unread marker; it does again"
     },
     {
-      "title": "Replies stay in their turn",
-      "description": "Each reply, command record and background notice stays with the user message it belongs to"
+      "title": "Switch models mid-conversation",
+      "description": "Switching to DeepSeek in a conversation another model answered no longer fails at once; DeepSeek continues without thinking mode and says so once"
     },
     {
-      "title": "More accurate running state",
-      "description": "Running and finished come straight from the backend's status reports; input is available again as soon as you stop"
+      "title": "Continue after stopping",
+      "description": "If stopping cut a command short, sending \"continue\" is no longer refused"
     },
     {
-      "title": "Faster switching and reconnecting",
-      "description": "Switching back to an opened conversation no longer reloads it; after a dropped connection only the missed part is read"
+      "title": "Declined actions explain themselves",
+      "description": "After you decline an action the conversation says the task is paused and that you can tell it what to do instead, rather than only \"Interrupted\""
+    },
+    {
+      "title": "Very long commands run under Git Bash",
+      "description": "With Git Bash as the shell, an overlong command no longer fails to start"
     }
   ]
 }
