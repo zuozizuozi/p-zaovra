@@ -170,6 +170,10 @@ export function passage(text: string, words: ReadonlyArray<string>, width = 240)
 
 const pattern = (word: string) => `%${word.replace(/[\\%_]/g, (character) => `\\${character}`)}%`
 
+const textHash = (text: string) => Hash.fast(text.trim().toLowerCase().replace(/\s+/g, " "))
+// Separate from fact keys: suppressing deleted wording must not overwrite another live note.
+const deletedTextPrefix = "deleted-text:"
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -270,13 +274,26 @@ const layer = Layer.effect(
                     result: "refused: merge target belongs to the user; only the user changes it",
                   }
                 const text = decision.text?.trim()
-                if (text && text.length <= 400)
+                if (text && text.length <= 400) {
+                  const deleted = yield* tx
+                    .select()
+                    .from(MemoryNoteTable)
+                    .where(
+                      and(
+                        eq(MemoryNoteTable.scope, scope),
+                        eq(MemoryNoteTable.key, deletedTextPrefix + textHash(text)),
+                      ),
+                    )
+                    .get()
+                    .pipe(Effect.orDie)
+                  if (deleted) return { id: decision.id, result: "refused: wording was deleted by the user" }
                   yield* change(target.id, {
                     text,
                     hits: target.hits + row.hits,
                     origin: "consolidation",
                     verification: `merged: ${basis}`,
                   })
+                }
                 // The duplicate keeps its key, so the same fact is not recorded again as a separate note.
                 yield* change(row.id, tombstone())
                 return { id: decision.id, result: `merged into ${target.id}` }
@@ -294,76 +311,91 @@ const layer = Layer.effect(
         else silent.delete(scope)
       })
 
-    const observe = Effect.fn("MemoryStore.observe")(function* (input: ObserveInput) {
-      if (silent.has(input.scope)) return undefined
-      const existing = yield* find(input.scope, input.key)
-      if (existing?.time_deleted) return undefined
-      const now = Date.now()
-      if (!existing)
-        return yield* insert({
-          id: Memory.ID.create(),
-          scope: input.scope,
-          key: input.key,
-          kind: input.kind,
-          text: input.text,
-          origin: "program",
-          status: input.settled ? "verified" : "unverified",
-          verification: input.verification,
-          session_id: input.sessionID,
-          seq: input.seq,
-          time_observed: now,
-        })
-      // A person's edit outranks what the host sees later: keep their wording, only count the sighting.
-      const edited = existing.origin !== "program" || protectedByUser(existing)
-      yield* db
-        .update(MemoryNoteTable)
-        .set({
-          hits: existing.hits + 1,
-          time_observed: now,
-          ...(edited
-            ? {}
-            : {
+    const observe = Effect.fn("MemoryStore.observe")((input: ObserveInput) =>
+      db
+        .transaction(() =>
+          Effect.gen(function* () {
+            if (silent.has(input.scope)) return undefined
+            if (input.key.startsWith(deletedTextPrefix)) return undefined
+            if (yield* find(input.scope, deletedTextPrefix + textHash(input.text))) return undefined
+            const existing = yield* find(input.scope, input.key)
+            if (existing?.time_deleted) return undefined
+            const now = Date.now()
+            if (!existing)
+              return yield* insert({
+                id: Memory.ID.create(),
+                scope: input.scope,
+                key: input.key,
+                kind: input.kind,
                 text: input.text,
+                origin: "program",
+                status: input.settled ? "verified" : "unverified",
                 verification: input.verification,
                 session_id: input.sessionID,
                 seq: input.seq,
-                // One success says the command worked once. Seen again in another conversation, it is a practice.
-                status:
-                  input.settled || existing.status === "verified" || existing.session_id !== input.sessionID
-                    ? "verified"
-                    : existing.status,
-              }),
-        })
-        .where(eq(MemoryNoteTable.id, existing.id))
-        .run()
-        .pipe(Effect.orDie)
-      return yield* get(existing.id)
-    })
+                time_observed: now,
+              })
+            // A person's edit outranks what the host sees later: keep their wording, only count the sighting.
+            const edited = existing.origin !== "program" || protectedByUser(existing)
+            yield* db
+              .update(MemoryNoteTable)
+              .set({
+                hits: existing.hits + 1,
+                time_observed: now,
+                ...(edited
+                  ? {}
+                  : {
+                      text: input.text,
+                      verification: input.verification,
+                      session_id: input.sessionID,
+                      seq: input.seq,
+                      // One success says the command worked once. Seen again in another conversation, it is a practice.
+                      status:
+                        input.settled || existing.status === "verified" || existing.session_id !== input.sessionID
+                          ? "verified"
+                          : existing.status,
+                    }),
+              })
+              .where(eq(MemoryNoteTable.id, existing.id))
+              .run()
+              .pipe(Effect.orDie)
+            return yield* get(existing.id)
+          }),
+        )
+        .pipe(Effect.orDie),
+    )
 
-    const write = Effect.fn("MemoryStore.write")(function* (input: WriteInput) {
-      const text = input.text.trim()
-      if (!text) return undefined
-      const key = `text:${Hash.fast(text.toLowerCase().replace(/\s+/g, " "))}`
-      const existing = yield* find(input.scope, key)
-      if (existing?.time_deleted) return undefined
-      if (existing)
-        return input.origin === "user" && !protectedByUser(existing)
-          ? yield* edit(existing.id, { text, kind: input.kind, status: input.status })
-          : note(existing)
-      return yield* insert({
-        id: Memory.ID.create(),
-        scope: input.scope,
-        key,
-        kind: input.kind,
-        text,
-        origin: input.origin,
-        status: input.status,
-        verification: input.verification,
-        session_id: input.sessionID,
-        seq: input.seq,
-        time_observed: Date.now(),
-      })
-    })
+    const write = Effect.fn("MemoryStore.write")((input: WriteInput) =>
+      db
+        .transaction(() =>
+          Effect.gen(function* () {
+            const text = input.text.trim()
+            if (!text) return undefined
+            if (yield* find(input.scope, deletedTextPrefix + textHash(text))) return undefined
+            const key = `text:${textHash(text)}`
+            const existing = yield* find(input.scope, key)
+            if (existing?.time_deleted) return undefined
+            if (existing)
+              return input.origin === "user" && !protectedByUser(existing)
+                ? yield* edit(existing.id, { text, kind: input.kind, status: input.status })
+                : note(existing)
+            return yield* insert({
+              id: Memory.ID.create(),
+              scope: input.scope,
+              key,
+              kind: input.kind,
+              text,
+              origin: input.origin,
+              status: input.status,
+              verification: input.verification,
+              session_id: input.sessionID,
+              seq: input.seq,
+              time_observed: Date.now(),
+            })
+          }),
+        )
+        .pipe(Effect.orDie),
+    )
 
     const edit = Effect.fn("MemoryStore.edit")(function* (id: Memory.ID, input: EditInput) {
       const text = input.text?.trim()
@@ -383,27 +415,52 @@ const layer = Layer.effect(
       return yield* get(id)
     })
 
-    // Deleting keeps the row as a tombstone with its text blanked: the key alone stops the same
-    // fact from being recorded again, and nothing the user removed stays readable.
+    // The original fact key survives; the separate alias also suppresses edited wording.
+    // Both rows keep no readable text or provenance from the removed note.
     const tombstone = () => ({ time_deleted: Date.now(), text: "", verification: null, session_id: null, seq: null })
 
-    const remove = Effect.fn("MemoryStore.remove")(function* (id: Memory.ID) {
-      yield* db
-        .update(MemoryNoteTable)
-        .set(tombstone())
-        .where(and(eq(MemoryNoteTable.id, id), isNull(MemoryNoteTable.time_deleted)))
-        .run()
+    const erase = (condition: ReturnType<typeof eq>) =>
+      db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const rows = yield* tx
+              .select()
+              .from(MemoryNoteTable)
+              .where(and(condition, isNull(MemoryNoteTable.time_deleted)))
+              .all()
+              .pipe(Effect.orDie)
+            yield* Effect.forEach(rows, (row) =>
+              Effect.gen(function* () {
+                if (row.text.trim())
+                  yield* tx
+                    .insert(MemoryNoteTable)
+                    .values({
+                      id: Memory.ID.create(),
+                      scope: row.scope,
+                      key: deletedTextPrefix + textHash(row.text),
+                      kind: row.kind,
+                      origin: "program",
+                      status: "unverified",
+                      time_observed: Date.now(),
+                      ...tombstone(),
+                    })
+                    .onConflictDoNothing()
+                    .run()
+                    .pipe(Effect.orDie)
+                yield* tx
+                  .update(MemoryNoteTable)
+                  .set(tombstone())
+                  .where(eq(MemoryNoteTable.id, row.id))
+                  .run()
+                  .pipe(Effect.orDie)
+              }),
+            )
+          }),
+        )
         .pipe(Effect.orDie)
-    })
 
-    const clear = Effect.fn("MemoryStore.clear")(function* (scope: Memory.Scope) {
-      yield* db
-        .update(MemoryNoteTable)
-        .set(tombstone())
-        .where(and(eq(MemoryNoteTable.scope, scope), isNull(MemoryNoteTable.time_deleted)))
-        .run()
-        .pipe(Effect.orDie)
-    })
+    const remove = Effect.fn("MemoryStore.remove")((id: Memory.ID) => erase(eq(MemoryNoteTable.id, id)))
+    const clear = Effect.fn("MemoryStore.clear")((scope: Memory.Scope) => erase(eq(MemoryNoteTable.scope, scope)))
 
     const search = Effect.fn("MemoryStore.search")(function* (input: SearchInput) {
       const words = terms(input.query)
