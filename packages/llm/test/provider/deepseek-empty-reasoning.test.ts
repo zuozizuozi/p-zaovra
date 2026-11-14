@@ -296,3 +296,47 @@ it.effect("retains provenance for a real thinking text turn without historical c
     expect(prepared.body.messages[0]).toEqual({ role: "assistant", content: "Upstream answer", reasoning_content: "" })
   }),
 )
+
+it.effect("a reply to a request that went out without thinking is not vouched for as a thinking turn", () =>
+  Effect.gen(function* () {
+    const history = [
+      Message.user("Lookup"),
+      Message.assistant([{ type: "tool-call", id: "call_0", name: "lookup", input: {} }]),
+      Message.tool({ id: "call_0", name: "lookup", result: "found" }),
+      Message.user("Now look again"),
+    ]
+    const request = LLM.request({ model, tools, providerOptions: options, messages: history })
+    expect(OpenAIChat.thinkingUnavailable(request)).toBe(true)
+    const response = yield* LLMClient.generate(request).pipe(
+      Effect.provide(
+        fixedResponse(
+          sseEvents(
+            {
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      { index: 0, id: "call_1", type: "function", function: { name: "lookup", arguments: "{}" } },
+                    ],
+                  },
+                },
+              ],
+            },
+            { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+            { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2 } },
+          ),
+        ),
+      ),
+    )
+    expect(JSON.stringify(response.message)).not.toContain("emptyReasoning")
+    // The turn it produced must not make the next request look continuable in thinking mode.
+    const next = LLM.request({
+      model,
+      tools,
+      providerOptions: options,
+      messages: [...history, response.message, Message.tool({ id: "call_1", name: "lookup", result: "found" })],
+    })
+    const prepared = yield* LLMClient.prepare<OpenAIChatBody>(next)
+    expect(prepared.body.thinking).toEqual({ type: "disabled" })
+  }),
+)
