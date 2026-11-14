@@ -17,6 +17,7 @@ import { SettingsServersV2 } from "./servers"
 import { useDialog } from "@zaovra-ai/ui/context/dialog"
 import { UsageDashboard } from "../usage-dashboard"
 import { SettingsAbout } from "./about"
+import { SettingsMemoryV2 } from "./memory"
 
 export const DialogSettings: Component<{
   serverKey?: ServerConnection.Key
@@ -42,6 +43,7 @@ export const DialogSettings: Component<{
         { value: "general", label: "settings.tab.general", icon: "sliders" },
         { value: "appearance", label: "settings.general.section.appearance", icon: "eye" },
         { value: "shortcuts", label: "settings.tab.shortcuts", icon: "keyboard" },
+        { value: "memory", label: "settings.memory.title", icon: "brain" },
       ],
     },
     {
@@ -187,6 +189,9 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="memory" class="settings-v2-panel">
+          <SettingsMemoryV2 directory={props.directory} sessionID={props.sessionID} />
         </TabsV2.Content>
         <TabsV2.Content value="usage" class="settings-v2-panel">
           <UsageDashboard />

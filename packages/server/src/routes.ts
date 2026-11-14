@@ -7,6 +7,7 @@ import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { Credential } from "@zaovra-ai/core/credential"
 import { PermissionSaved } from "@zaovra-ai/core/permission/saved"
+import { MemoryStore } from "@zaovra-ai/core/memory/store"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
@@ -39,6 +40,7 @@ const applicationServices = LayerNode.group([
   TaskTool.node,
   TaskRecovery.startupNode,
   PermissionSaved.node,
+  MemoryStore.node,
   PtyTicket.node,
   Credential.node,
   PtyEnvironment.node,

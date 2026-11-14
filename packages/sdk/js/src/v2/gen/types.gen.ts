@@ -7260,6 +7260,24 @@ export type SkillV2Info = {
   content: string
 }
 
+export type MemoryNote = {
+  id: string
+  scope: string
+  kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+  text: string
+  origin: "program" | "model" | "user" | "consolidation"
+  status: "verified" | "unverified" | "stale"
+  verification?: string
+  sessionID?: string
+  seq?: number
+  hits: number
+  time: {
+    created: number
+    updated: number
+    observed: number
+  }
+}
+
 export type ModelsDevRefreshed = {
   id: string
   metadata?: {
@@ -16668,6 +16686,186 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2MemoryClearData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory"
+}
+
+export type V2MemoryClearErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryClearError = V2MemoryClearErrors[keyof V2MemoryClearErrors]
+
+export type V2MemoryClearResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2MemoryClearResponse = V2MemoryClearResponses[keyof V2MemoryClearResponses]
+
+export type V2MemoryListData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory"
+}
+
+export type V2MemoryListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryListError = V2MemoryListErrors[keyof V2MemoryListErrors]
+
+export type V2MemoryListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<MemoryNote>
+  }
+}
+
+export type V2MemoryListResponse = V2MemoryListResponses[keyof V2MemoryListResponses]
+
+export type V2MemoryCreateData = {
+  body: {
+    layer?: "project" | "user"
+    kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    text: string
+  }
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory"
+}
+
+export type V2MemoryCreateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryCreateError = V2MemoryCreateErrors[keyof V2MemoryCreateErrors]
+
+export type V2MemoryCreateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryNote
+  }
+}
+
+export type V2MemoryCreateResponse = V2MemoryCreateResponses[keyof V2MemoryCreateResponses]
+
+export type V2MemoryRemoveData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/api/memory/{id}"
+}
+
+export type V2MemoryRemoveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryRemoveError = V2MemoryRemoveErrors[keyof V2MemoryRemoveErrors]
+
+export type V2MemoryRemoveResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2MemoryRemoveResponse = V2MemoryRemoveResponses[keyof V2MemoryRemoveResponses]
+
+export type V2MemoryUpdateData = {
+  body: {
+    text?: string
+    kind?: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    status?: "verified" | "unverified" | "stale"
+  }
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/api/memory/{id}"
+}
+
+export type V2MemoryUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryUpdateError = V2MemoryUpdateErrors[keyof V2MemoryUpdateErrors]
+
+export type V2MemoryUpdateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryNote
+  }
+}
+
+export type V2MemoryUpdateResponse = V2MemoryUpdateResponses[keyof V2MemoryUpdateResponses]
 
 export type V2EventSubscribeData = {
   body?: never

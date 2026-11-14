@@ -38,6 +38,7 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { ModelsDev } from "@zaovra-ai/core/models-dev"
 import { Npm } from "@zaovra-ai/core/npm"
 import { PermissionSaved } from "@zaovra-ai/core/permission/saved"
+import { MemoryStore } from "@zaovra-ai/core/memory/store"
 import { ProjectV2 } from "@zaovra-ai/core/project"
 import { ProjectCopy } from "@zaovra-ai/core/project/copy"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
@@ -192,6 +193,7 @@ const app = LayerNode.group([
   Skill.node,
   Discovery.node,
   PermissionSaved.node,
+  MemoryStore.node,
   SessionProjector.node,
   BackgroundJob.node,
   RuntimeFlags.node,

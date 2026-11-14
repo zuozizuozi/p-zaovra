@@ -210,6 +210,16 @@ import type {
   V2McpResourcesResponses,
   V2McpStatusErrors,
   V2McpStatusResponses,
+  V2MemoryClearErrors,
+  V2MemoryClearResponses,
+  V2MemoryCreateErrors,
+  V2MemoryCreateResponses,
+  V2MemoryListErrors,
+  V2MemoryListResponses,
+  V2MemoryRemoveErrors,
+  V2MemoryRemoveResponses,
+  V2MemoryUpdateErrors,
+  V2MemoryUpdateResponses,
   V2ModelListErrors,
   V2ModelListResponses,
   V2PermissionRequestListErrors,
@@ -5829,6 +5839,174 @@ export class Skill extends HeyApiClient {
   }
 }
 
+export class Memory extends HeyApiClient {
+  /**
+   * Clear memory notes
+   *
+   * Delete every note of a project, or every note that follows the user across projects.
+   */
+  public clear<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<V2MemoryClearResponses, V2MemoryClearErrors, ThrowOnError>({
+      url: "/api/memory",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List memory notes
+   *
+   * Retrieve the notes kept for a project, or the notes that follow the user across projects.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2MemoryListResponses, V2MemoryListErrors, ThrowOnError>({
+      url: "/api/memory",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Add a memory note
+   *
+   * Add a note written by the user. Returns null when the same note was deleted before or the text is empty.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+      kind?: "practice" | "convention" | "pitfall" | "preference" | "decision"
+      text?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "layer" },
+            { in: "body", key: "kind" },
+            { in: "body", key: "text" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2MemoryCreateResponses, V2MemoryCreateErrors, ThrowOnError>({
+      url: "/api/memory",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete a memory note
+   *
+   * Delete one note. The same fact is not recorded again.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "id" }] }])
+    return (options?.client ?? this.client).delete<V2MemoryRemoveResponses, V2MemoryRemoveErrors, ThrowOnError>({
+      url: "/api/memory/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Edit a memory note
+   *
+   * Change a note's text, kind or status. Returns null when the note does not exist.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      text?: string
+      kind?: "practice" | "convention" | "pitfall" | "preference" | "decision"
+      status?: "verified" | "unverified" | "stale"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "body", key: "text" },
+            { in: "body", key: "kind" },
+            { in: "body", key: "status" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<V2MemoryUpdateResponses, V2MemoryUpdateErrors, ThrowOnError>({
+      url: "/api/memory/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Event2 extends HeyApiClient {
   /**
    * Subscribe to events
@@ -6344,6 +6522,11 @@ export class V2 extends HeyApiClient {
   private _skill?: Skill
   get skill(): Skill {
     return (this._skill ??= new Skill({ client: this.client }))
+  }
+
+  private _memory?: Memory
+  get memory(): Memory {
+    return (this._memory ??= new Memory({ client: this.client }))
   }
 
   private _event?: Event2

@@ -8299,6 +8299,122 @@ export type SkillsListOutput = {
   }>
 }
 
+export type ServerMemoryListInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type ServerMemoryListOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly scope: string
+    readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    readonly text: string
+    readonly origin: "program" | "model" | "user" | "consolidation"
+    readonly status: "verified" | "unverified" | "stale"
+    readonly verification?: string
+    readonly sessionID?: string
+    readonly seq?: number
+    readonly hits: number
+    readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
+  }>
+}["data"]
+
+export type ServerMemoryCreateInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly layer?: {
+    readonly layer?: "project" | "user" | undefined
+    readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    readonly text: string
+  }["layer"]
+  readonly kind: {
+    readonly layer?: "project" | "user" | undefined
+    readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    readonly text: string
+  }["kind"]
+  readonly text: {
+    readonly layer?: "project" | "user" | undefined
+    readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    readonly text: string
+  }["text"]
+}
+
+export type ServerMemoryCreateOutput = {
+  readonly data: {
+    readonly id: string
+    readonly scope: string
+    readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    readonly text: string
+    readonly origin: "program" | "model" | "user" | "consolidation"
+    readonly status: "verified" | "unverified" | "stale"
+    readonly verification?: string
+    readonly sessionID?: string
+    readonly seq?: number
+    readonly hits: number
+    readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
+  } | null
+}["data"]
+
+export type ServerMemoryUpdateInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly text?: {
+    readonly text?: string | undefined
+    readonly kind?: "practice" | "convention" | "pitfall" | "preference" | "decision" | undefined
+    readonly status?: "verified" | "unverified" | "stale" | undefined
+  }["text"]
+  readonly kind?: {
+    readonly text?: string | undefined
+    readonly kind?: "practice" | "convention" | "pitfall" | "preference" | "decision" | undefined
+    readonly status?: "verified" | "unverified" | "stale" | undefined
+  }["kind"]
+  readonly status?: {
+    readonly text?: string | undefined
+    readonly kind?: "practice" | "convention" | "pitfall" | "preference" | "decision" | undefined
+    readonly status?: "verified" | "unverified" | "stale" | undefined
+  }["status"]
+}
+
+export type ServerMemoryUpdateOutput = {
+  readonly data: {
+    readonly id: string
+    readonly scope: string
+    readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+    readonly text: string
+    readonly origin: "program" | "model" | "user" | "consolidation"
+    readonly status: "verified" | "unverified" | "stale"
+    readonly verification?: string
+    readonly sessionID?: string
+    readonly seq?: number
+    readonly hits: number
+    readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
+  } | null
+}["data"]
+
+export type ServerMemoryRemoveInput = { readonly id: { readonly id: string }["id"] }
+
+export type ServerMemoryRemoveOutput = void
+
+export type ServerMemoryClearInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type ServerMemoryClearOutput = void
+
 export type EventsSubscribeOutput = ZaovraEventEncoded
 
 export type PtysListInput = {

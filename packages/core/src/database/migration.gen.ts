@@ -59,5 +59,6 @@ export const migrations = (
     import("./migration/20261011134600_work-task-isolation"),
     import("./migration/20261022070946_session-host-completion"),
     import("./migration/20261101073309_permission-literal-origin"),
+    import("./migration/20261113202309_agent-memory"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

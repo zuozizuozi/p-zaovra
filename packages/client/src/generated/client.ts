@@ -165,6 +165,16 @@ import type {
   CommandsRenderOutput,
   SkillsListInput,
   SkillsListOutput,
+  ServerMemoryListInput,
+  ServerMemoryListOutput,
+  ServerMemoryCreateInput,
+  ServerMemoryCreateOutput,
+  ServerMemoryUpdateInput,
+  ServerMemoryUpdateOutput,
+  ServerMemoryRemoveInput,
+  ServerMemoryRemoveOutput,
+  ServerMemoryClearInput,
+  ServerMemoryClearOutput,
   EventsSubscribeOutput,
   PtysListInput,
   PtysListOutput,
@@ -1384,6 +1394,68 @@ export function make(options: ClientOptions) {
             successStatus: 200,
             declaredStatuses: [401, 400],
             empty: false,
+          },
+          requestOptions,
+        ),
+    },
+    "server.memory": {
+      list: (input?: ServerMemoryListInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerMemoryListOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory`,
+            query: { location: input?.["location"], layer: input?.["layer"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      create: (input: ServerMemoryCreateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerMemoryCreateOutput }>(
+          {
+            method: "POST",
+            path: `/api/memory`,
+            query: { location: input["location"] },
+            body: { layer: input["layer"], kind: input["kind"], text: input["text"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      update: (input: ServerMemoryUpdateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: ServerMemoryUpdateOutput }>(
+          {
+            method: "PATCH",
+            path: `/api/memory/${encodeURIComponent(input.id)}`,
+            body: { text: input["text"], kind: input["kind"], status: input["status"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      remove: (input: ServerMemoryRemoveInput, requestOptions?: RequestOptions) =>
+        request<ServerMemoryRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/memory/${encodeURIComponent(input.id)}`,
+            successStatus: 204,
+            declaredStatuses: [401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
+      clear: (input?: ServerMemoryClearInput, requestOptions?: RequestOptions) =>
+        request<ServerMemoryClearOutput>(
+          {
+            method: "DELETE",
+            path: `/api/memory`,
+            query: { location: input?.["location"], layer: input?.["layer"] },
+            successStatus: 204,
+            declaredStatuses: [401, 400],
+            empty: true,
           },
           requestOptions,
         ),

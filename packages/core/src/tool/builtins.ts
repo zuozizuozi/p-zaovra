@@ -8,6 +8,7 @@ import { BrowserTool } from "./browser"
 import { VerificationReviewTool } from "./verification-review"
 import { ApplyPatchTool } from "./apply-patch"
 import { EvidenceTool } from "./evidence"
+import { MemoryTool } from "./memory"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
@@ -44,6 +45,7 @@ export const node = makeLocationNode({
     VerificationReviewTool.node,
     EditTool.node,
     EvidenceTool.node,
+    MemoryTool.node,
     GlobTool.node,
     GrepTool.node,
     QuestionTool.node,
