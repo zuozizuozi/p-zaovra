@@ -770,3 +770,83 @@ it.effect("reports each real change of `active` once, and always matches the `ac
     }),
   ),
 )
+
+it.effect("captured Stop survives old completion and a repeated handle cannot stop its successor", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const first = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const second = yield* Deferred.make<void>()
+      let calls = 0
+      let cleaned = 0
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({
+        drain: () =>
+          Effect.gen(function* () {
+            calls++
+            if (calls === 1) {
+              yield* Deferred.succeed(first, undefined)
+              yield* Deferred.await(finish)
+              return
+            }
+            yield* Deferred.succeed(second, undefined)
+            yield* Effect.never
+          }),
+      })
+      yield* coordinator.run("session").pipe(Effect.exit, Effect.forkChild)
+      yield* Deferred.await(first)
+      const handle = yield* coordinator.prepareInterrupt(
+        "session",
+        Effect.sync(() => {
+          cleaned++
+        }),
+      )
+      yield* Deferred.succeed(finish, undefined)
+      yield* Effect.yieldNow
+      yield* coordinator.run("session").pipe(Effect.exit, Effect.forkChild)
+      yield* coordinator.wake("session")
+      yield* Effect.yieldNow
+      expect(calls).toBe(1)
+      yield* handle
+      yield* Deferred.await(second)
+      yield* handle
+      expect(cleaned).toBe(1)
+      expect(calls).toBe(2)
+      expect((yield* coordinator.active).has("session")).toBe(true)
+      yield* coordinator.interrupt("session")
+    }),
+  ),
+)
+
+it.effect("two prepared handles share one barrier and late handles never acquire a later Stop", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let cleaned = 0
+      const coordinator = yield* SessionRunCoordinator.make<string, never>({ drain: () => Effect.never })
+      const a = yield* coordinator.prepareInterrupt(
+        "session",
+        Effect.sync(() => {
+          cleaned++
+        }),
+      )
+      const b = yield* coordinator.prepareInterrupt(
+        "session",
+        Effect.sync(() => {
+          cleaned += 100
+        }),
+      )
+      yield* a
+      const later = yield* coordinator.prepareInterrupt(
+        "session",
+        Effect.sync(() => {
+          cleaned += 10
+        }),
+      )
+      yield* b
+      expect(cleaned).toBe(1)
+      expect((yield* coordinator.active).has("session")).toBe(true)
+      yield* later
+      expect(cleaned).toBe(11)
+      expect((yield* coordinator.active).size).toBe(0)
+    }),
+  ),
+)

@@ -84,6 +84,13 @@ async function withTidy(
                   Effect.sync(() => {
                     state.actions.push("resume")
                   }),
+                prepareInterrupt: (id, cleanup) =>
+                  Effect.succeed(
+                    Effect.gen(function* () {
+                      state.actions.push(`interrupt:${(yield* store.forSession(id))?.state}`)
+                      yield* cleanup ?? Effect.void
+                    }),
+                  ),
                 interrupt: (id, cleanup) =>
                   Effect.gen(function* () {
                     state.actions.push(`interrupt:${(yield* store.forSession(id))?.state}`)

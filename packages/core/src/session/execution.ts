@@ -36,6 +36,11 @@ export interface Interface {
   readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   /** Interrupt active work owned by this process. Idle interruption is a no-op. */
   readonly interrupt: (sessionID: SessionSchema.ID, cleanup?: Effect.Effect<void>) => Effect.Effect<void>
+  /** Freeze a concrete Stop barrier without waiting; callers must await the handle outside DB transactions. */
+  readonly prepareInterrupt?: (
+    sessionID: SessionSchema.ID,
+    cleanup?: Effect.Effect<void>,
+  ) => Effect.Effect<Effect.Effect<void>>
   /** Capture an explicit prompt's Stop generation before durable admission. */
   readonly prepareWake?: (sessionID: SessionSchema.ID) => Effect.Effect<Effect.Effect<void>>
   /** Freeze automatic wakes before publishing Stop or awaiting cleanup. */
@@ -57,5 +62,6 @@ export const noopLayer = Layer.succeed(
     compact: () => Effect.succeed(false),
     wake: () => Effect.void,
     interrupt: (_sessionID, cleanup) => cleanup ?? Effect.void,
+    prepareInterrupt: (_sessionID, cleanup) => Effect.succeed(cleanup ?? Effect.void),
   }),
 )

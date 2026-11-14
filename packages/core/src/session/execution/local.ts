@@ -57,6 +57,7 @@ const layer = Layer.effect(
       status: coordinator.active.pipe(Effect.map((active) => ({ ...version, active }))),
       exclusive: coordinator.exclusive,
       interrupt: coordinator.interrupt,
+      prepareInterrupt: coordinator.prepareInterrupt,
       freezeWake: coordinator.freezeWake,
       prepareWake: coordinator.prepareWake,
       resume: (sessionID, claim) => (claim ? coordinator.owned(sessionID, claim) : coordinator.run(sessionID)),

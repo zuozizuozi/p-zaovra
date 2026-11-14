@@ -1,6 +1,6 @@
 export * as MemoryTidy from "./tidy"
 
-import { Context, Effect, Exit, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
@@ -105,27 +105,12 @@ const layer = Layer.effect(
             // The durable admission sequence distinguishes the original Session
             // even if its ID and prompt ID were both reused after deletion.
             if (!current.run.input) return yield* new MemoryTidyStore.Rejected({ reason: "conflict" })
-            if (!(yield* store.ownsSession(current.run))) return yield* get(id, layer)
-            const pending = yield* sessions.pendingInputs(current.run.session_id).pipe(
-              Effect.catchTag("Session.NotFoundError", () => Effect.succeed([])),
-              Effect.onExit((exit) =>
-                Exit.isFailure(exit) ? sessions.interrupt(current.run.session_id) : Effect.void,
-              ),
-            )
-            if (current.run.state === "cancelled" && pending.length === 0) return yield* get(id, layer)
-            yield* Effect.forEach(
-              pending,
-              (input) =>
-                sessions.cancelInput({
-                  sessionID: current.run.session_id,
-                  messageID: input.id,
-                }),
-              { discard: true },
-            ).pipe(
-              Effect.catchTag("Session.NotFoundError", () => Effect.void),
-              Effect.orDie,
-              Effect.ensuring(sessions.interrupt(current.run.session_id)),
-            )
+            yield* sessions
+              .cancelPending({
+                sessionID: current.run.session_id,
+                expected: current.run.input,
+              })
+              .pipe(Effect.orDie)
             return yield* get(id, layer)
           }),
         ),
