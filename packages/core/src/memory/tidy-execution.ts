@@ -33,6 +33,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const store = yield* MemoryTidyStore.Service
+    const memory = yield* MemoryStore.Service
     const budget = yield* MemoryTidyBudget.Service
     const sessions = yield* SessionStore.Service
     const models = yield* SessionRunnerModel.Service
@@ -47,7 +48,7 @@ const layer = Layer.effect(
       if (
         run.directory !== location.directory ||
         (run.scope !== Memory.Scope.user &&
-          run.scope !== MemoryStore.scope({ project: location.project.id, directory: location.directory }))
+          run.scope !== (yield* memory.scope({ project: location.project.id, directory: location.directory })))
       )
         return yield* denied("整理任务的目录或记忆范围已经改变。")
       const input = {
@@ -134,6 +135,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     MemoryTidyStore.node,
+    MemoryStore.node,
     MemoryTidyBudget.node,
     SessionStore.node,
     SessionRunnerModel.node,

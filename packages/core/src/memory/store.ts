@@ -87,6 +87,8 @@ export interface Interface {
   /** Safe status for hosts, including old tidy-run lifecycle handling. */
   readonly recovery: (place: Place) => Effect.Effect<Memory.Recovery>
   readonly resolveRecovery: (place: Place, choice: Memory.RecoveryChoice) => Effect.Effect<boolean>
+  /** Rechecked inside tidy admission/tool transactions; manual recovery never overrides this. */
+  readonly canAutomate: (scope: Memory.Scope) => Effect.Effect<boolean>
 
   /** Notes of one scope, newest first. Deleted notes are never returned. */
   readonly list: (scope: Memory.Scope) => Effect.Effect<ReadonlyArray<Memory.Note>>
@@ -813,6 +815,12 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
         scope: locate,
         recovery,
         resolveRecovery,
+        canAutomate: (scope) =>
+          frozen(scope).pipe(
+            Effect.flatMap((held) =>
+              held ? Effect.succeed(false) : automaticFrozen(scope).pipe(Effect.map((held) => !held)),
+            ),
+          ),
         list,
         get,
         observe,

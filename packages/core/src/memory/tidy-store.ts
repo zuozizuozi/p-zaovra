@@ -12,6 +12,7 @@ import type { ModelV2 } from "../model"
 import { SessionSchema } from "../session/schema"
 import { SessionInputTable, SessionTable } from "../session/sql"
 import { MemoryTidyAttemptTable, MemoryTidyDayTable, MemoryTidyRunTable } from "./tidy.sql"
+import { MemoryStore } from "./store"
 
 export const defaults = { tokens: 200_000, dailyTokens: 1_000_000 } as const
 export type Run = typeof MemoryTidyRunTable.$inferSelect
@@ -57,6 +58,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const database = yield* Database.Service
+    const memory = yield* MemoryStore.Service
     const db = database.db
     const get = (id: string) => db.select().from(MemoryTidyRunTable).where(eq(MemoryTidyRunTable.id, id)).get()
     const usage = (input: { runID: string } | { day: string }) =>
@@ -89,7 +91,7 @@ const layer = Layer.effect(
 
       if (!run?.input) return yield* new Rejected({ reason: "unauthorized" })
       const session = yield* db
-        .select({ model: SessionTable.model })
+        .select({ model: SessionTable.model, project: SessionTable.project_id, directory: SessionTable.directory })
         .from(SessionTable)
         .innerJoin(
           SessionInputTable,
@@ -104,6 +106,8 @@ const layer = Layer.effect(
 
       if (!session?.model || modelKey(session.model) !== modelKey(run.model))
         return yield* new Rejected({ reason: "unauthorized" })
+      yield* memory.scope(session)
+      if (!(yield* memory.canAutomate(run.scope))) return yield* new Rejected({ reason: "unauthorized" })
       return run
     })
     return Service.of({
@@ -338,7 +342,7 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node] })
+export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node, MemoryStore.node] })
 
 // A competing connection can invalidate a read snapshot before its first write.
 // Reject after rollback; never replay a host callback or a guarded mutation here.

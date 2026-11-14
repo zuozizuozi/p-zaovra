@@ -39,10 +39,40 @@ const layer = Layer.effect(
     const sessions = yield* SessionV2.Service
     const config = yield* Config.Service
     const location = yield* Location.Service
-    const scope = (layer?: "project" | "user") =>
-      layer === "user"
-        ? Memory.Scope.user
-        : MemoryStore.scope({ project: location.project.id, directory: location.directory })
+    const memory = yield* MemoryStore.Service
+    const place = { project: location.project.id, directory: location.directory }
+    const scopes = Effect.fn("MemoryTidy.scopes")(function* (layer?: "project" | "user") {
+      if (layer === "user") return { scope: Memory.Scope.user, legacyScope: undefined }
+      const recovery = yield* memory.recovery(place)
+      if (recovery.legacyScope) {
+        const old = yield* store.list(recovery.legacyScope)
+        // Revoke before cleanup. Never move a grant or its unknown usage to a new
+        // scope, and never interrupt a different directory or a reused Session ID.
+        yield* Effect.forEach(
+          old.filter((run) => run.directory === location.directory),
+          (run) =>
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                if (run.state === "active")
+                  yield* store
+                    .finish(run.id, "cancelled")
+                    .pipe(
+                      Effect.catchTag("MemoryTidy.Rejected", (error) =>
+                        error.reason === "conflict" ? Effect.void : Effect.die(error),
+                      ),
+                    )
+                if (
+                  (run.state === "active" || run.state === "cancelled") &&
+                  run.input &&
+                  (yield* store.ownsSession(run))
+                )
+                  yield* sessions.cancelPending({ sessionID: run.session_id, expected: run.input }).pipe(Effect.orDie)
+              }),
+            ),
+        )
+      }
+      return recovery
+    })
     const view = (run: MemoryTidyStore.Run) =>
       Effect.gen(function* () {
         return {
@@ -52,20 +82,33 @@ const layer = Layer.effect(
         }
       })
     const get = Effect.fn("MemoryTidy.get")(function* (id: string, layer?: "project" | "user") {
+      const allowed = yield* scopes(layer)
       const run = yield* store.get(id)
-      if (!run || run.scope !== scope(layer)) return yield* new MemoryTidyStore.Rejected({ reason: "missing" })
+      if (
+        !run ||
+        (run.scope !== allowed.scope && !(run.scope === allowed.legacyScope && run.directory === location.directory))
+      )
+        return yield* new MemoryTidyStore.Rejected({ reason: "missing" })
       return yield* view(run)
     })
     return Service.of({
       get,
-      list: (layer) => store.list(scope(layer)).pipe(Effect.flatMap((runs) => Effect.forEach(runs, view))),
+      list: Effect.fn("MemoryTidy.list")(function* (layer) {
+        const allowed = yield* scopes(layer)
+        const current = yield* store.list(allowed.scope)
+        const old = allowed.legacyScope ? yield* store.list(allowed.legacyScope) : []
+        return yield* Effect.forEach([...current, ...old.filter((run) => run.directory === location.directory)], view)
+      }),
       prepare: Effect.fn("MemoryTidy.prepare")(function* (input) {
         if (Config.latest(yield* config.entries(), "memory")?.enabled === false)
+          return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
+        const allowed = yield* scopes(input.layer)
+        if (!(yield* memory.canAutomate(allowed.scope)))
           return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
         const run = yield* store.create(
           {
             requestID: input.requestID,
-            scope: scope(input.layer),
+            scope: allowed.scope,
             directory: location.directory,
             model: input.model,
             tokens: input.tokens ?? MemoryTidyStore.defaults.tokens,
@@ -121,5 +164,5 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [MemoryTidyStore.node, SessionV2.node, Config.node, Location.node],
+  deps: [MemoryTidyStore.node, MemoryStore.node, SessionV2.node, Config.node, Location.node],
 })

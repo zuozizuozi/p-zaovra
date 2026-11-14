@@ -1,13 +1,18 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { Effect, Exit, Layer, Scope } from "effect"
+import { eq } from "drizzle-orm"
+import { Memory } from "@zaovra-ai/schema/memory"
 import { Config } from "../src/config"
 import { Database } from "../src/database/database"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
+import { makeGlobalNode } from "../src/effect/app-node"
 import { LayerNode } from "../src/effect/layer-node"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryTidy } from "../src/memory/tidy"
+import { MemoryStore } from "../src/memory/store"
+import { MemoryNoteTable } from "../src/memory/sql"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { MemoryTidyRunTable } from "../src/memory/tidy.sql"
 import { ModelV2 } from "../src/model"
@@ -29,6 +34,8 @@ const setup = Effect.gen(function* () {
     sessions: yield* SessionV2.Service,
     database: yield* Database.Service,
     config: yield* Config.Service,
+    memory: yield* MemoryStore.Service,
+    location: yield* Location.Service,
   }
 })
 
@@ -132,6 +139,7 @@ async function withTidy(
     h: Effect.Success<typeof setup>,
     state: { enabled: boolean; actions: string[] },
   ) => Effect.Effect<void, unknown, Scope.Scope>,
+  platform: NodeJS.Platform = process.platform,
 ) {
   await using tmp = await tmpdir()
   const state = { enabled: true, actions: [] as string[] }
@@ -144,8 +152,24 @@ async function withTidy(
     }).pipe(
       Effect.provide(
         AppNodeBuilder.build(
-          LayerNode.group([MemoryTidy.node, MemoryTidyStore.node, SessionV2.node, Database.node, Config.node]),
+          LayerNode.group([
+            MemoryTidy.node,
+            MemoryTidyStore.node,
+            MemoryStore.node,
+            SessionV2.node,
+            Database.node,
+            Config.node,
+            Location.node,
+          ]),
           [
+            [
+              MemoryStore.node,
+              makeGlobalNode({
+                service: MemoryStore.Service,
+                layer: MemoryStore.layerWith(platform),
+                deps: [Database.node],
+              }),
+            ],
             [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
             [
               Global.node,
@@ -220,4 +244,158 @@ test("failed durable prompt admission rolls back the Session and grant together"
       expect(retry.run.state).toBe("active")
       expect(yield* h.sessions.pendingInputs(retry.run.session_id)).toHaveLength(1)
     }),
+  ))
+
+test("legacy runs remain visible, revoke before cleanup and retain unknown charges and late receipts", () =>
+  withTidy(
+    (h, state) =>
+      Effect.gen(function* () {
+        const run = (yield* h.tidy.prepare(request)).run
+        yield* h.store.reserve({
+          sessionID: run.session_id,
+          scope: run.scope,
+          enabled: true,
+          attemptID: "old-unknown",
+          tokens: 500,
+        })
+        const old = MemoryStore.scope({ project: h.location.project.id, directory: h.location.directory }, "win32")
+        // Simulate a persisted pre-upgrade task, even when its legacy note bucket is empty.
+        yield* h.database.db
+          .update(MemoryTidyRunTable)
+          .set({ scope: old })
+          .where(eq(MemoryTidyRunTable.id, run.id))
+          .run()
+          .pipe(Effect.orDie)
+        expect(
+          (yield* h.store.authorize({ sessionID: run.session_id, scope: old, enabled: true }).pipe(Effect.flip)).reason,
+        ).toBe("unauthorized")
+        const runs = yield* h.tidy.list()
+        expect(runs).toHaveLength(1)
+        expect(runs[0].run.scope).toBe(old)
+        expect(runs[0].run.state).toBe("cancelled")
+        expect(runs[0].usage).toEqual({ known: 0, reserved: 500, charged: 500, unknown: 1 })
+        expect(state.actions).toEqual(["interrupt:cancelled"])
+        expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(0)
+        expect((yield* h.tidy.get(run.id)).run.state).toBe("cancelled")
+        expect(state.actions).toEqual(["interrupt:cancelled"])
+        yield* h.store.settle("old-unknown", 75)
+        expect((yield* h.tidy.get(run.id)).usage).toEqual({ known: 75, reserved: 0, charged: 75, unknown: 0 })
+        const next = yield* h.tidy.prepare({ ...request, requestID: "new-scope-click" })
+        expect(next.run.scope).not.toBe(old)
+        expect((yield* h.tidy.list()).map((view) => view.run.id)).toEqual([next.run.id, run.id])
+      }),
+    "linux",
+  ))
+
+test("pending recovery and opaque deletions deny admission and already admitted tool/request authority", () =>
+  withTidy(
+    (h) =>
+      Effect.gen(function* () {
+        const run = (yield* h.tidy.prepare(request)).run
+        const place = { project: h.location.project.id, directory: h.location.directory }
+        const old = MemoryStore.scope(place, "win32")
+        yield* h.database.db
+          .insert(MemoryNoteTable)
+          .values({
+            id: Memory.ID.make("mem_old_deleted"),
+            scope: old,
+            key: "old-fact-unknown",
+            text: "",
+            kind: "practice",
+            origin: "program",
+            status: "unverified",
+            time_observed: 1,
+            time_deleted: 1,
+          })
+          .run()
+          .pipe(Effect.orDie)
+        const authority = { sessionID: run.session_id, scope: run.scope, enabled: true }
+        expect((yield* h.tidy.prepare({ ...request, requestID: "frozen-click" }).pipe(Effect.flip)).reason).toBe(
+          "unauthorized",
+        )
+        expect(
+          (yield* h.store.reserve({ ...authority, attemptID: "blocked", tokens: 10 }).pipe(Effect.flip)).reason,
+        ).toBe("unauthorized")
+        const touched: string[] = []
+        expect(
+          (yield* h.store
+            .guarded(
+              authority,
+              Effect.sync(() => touched.push("mutated")),
+            )
+            .pipe(Effect.flip)).reason,
+        ).toBe("unauthorized")
+        expect(touched).toEqual([])
+        expect(yield* h.memory.resolveRecovery(place, { decision: "blank", ids: [] })).toBe(true)
+        expect((yield* h.memory.recovery(place)).frozen).toBe(false)
+        expect((yield* h.memory.recovery(place)).automaticFrozen).toBe(true)
+        expect((yield* h.store.authorize(authority).pipe(Effect.flip)).reason).toBe("unauthorized")
+        yield* h.tidy.cancel(run.id)
+        expect((yield* h.tidy.prepare({ ...request, requestID: "still-frozen" }).pipe(Effect.flip)).reason).toBe(
+          "unauthorized",
+        )
+        expect((yield* h.tidy.prepare({ ...request, requestID: "user-independent", layer: "user" })).run.scope).toBe(
+          Memory.Scope.user,
+        )
+      }),
+    "linux",
+  ))
+
+test("legacy reconciliation cannot cancel another directory or a reused admission identity", () =>
+  withTidy(
+    (h, state) =>
+      Effect.gen(function* () {
+        const run = (yield* h.tidy.prepare(request)).run
+        const old = MemoryStore.scope({ project: h.location.project.id, directory: h.location.directory }, "win32")
+        yield* h.database.db
+          .update(MemoryTidyRunTable)
+          .set({ scope: old, directory: h.location.directory + "-other" })
+          .where(eq(MemoryTidyRunTable.id, run.id))
+          .run()
+          .pipe(Effect.orDie)
+        expect(yield* h.tidy.list()).toEqual([])
+        expect((yield* h.store.get(run.id))?.state).toBe("active")
+        expect(state.actions).toEqual([])
+        yield* h.database.db
+          .update(MemoryTidyRunTable)
+          .set({ directory: h.location.directory, input: { id: run.input!.id, seq: run.input!.seq + 1 } })
+          .where(eq(MemoryTidyRunTable.id, run.id))
+          .run()
+          .pipe(Effect.orDie)
+        expect((yield* h.tidy.get(run.id)).run.state).toBe("cancelled")
+        expect(state.actions).toEqual([])
+        expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(1)
+      }),
+    "linux",
+  ))
+
+test("known legacy content can be confirmed blank then a fresh directory task is admitted", () =>
+  withTidy(
+    (h) =>
+      Effect.gen(function* () {
+        const place = { project: h.location.project.id, directory: h.location.directory }
+        yield* h.database.db
+          .insert(MemoryNoteTable)
+          .values({
+            id: Memory.ID.make("mem_old_live"),
+            scope: MemoryStore.scope(place, "win32"),
+            key: "live",
+            text: "old note",
+            kind: "practice",
+            origin: "model",
+            status: "unverified",
+            time_observed: 1,
+          })
+          .run()
+          .pipe(Effect.orDie)
+        expect((yield* h.tidy.prepare(request).pipe(Effect.flip)).reason).toBe("unauthorized")
+        expect(yield* h.database.db.select().from(SessionTable).all().pipe(Effect.orDie)).toEqual([])
+        yield* h.memory.resolveRecovery(place, { decision: "blank", ids: [] })
+        const run = (yield* h.tidy.prepare(request)).run
+        expect(run.state).toBe("active")
+        expect((yield* h.store.authorize({ sessionID: run.session_id, scope: run.scope, enabled: true })).id).toBe(
+          run.id,
+        )
+      }),
+    "linux",
   ))

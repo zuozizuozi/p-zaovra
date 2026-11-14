@@ -26,6 +26,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const store = yield* MemoryTidyStore.Service
+    const memory = yield* MemoryStore.Service
     const config = yield* Config.Service
     const location = yield* Location.Service
     return Service.of({
@@ -35,7 +36,7 @@ const layer = Layer.effect(
         if (
           run.directory !== location.directory ||
           (run.scope !== Memory.Scope.user &&
-            run.scope !== MemoryStore.scope({ project: location.project.id, directory: location.directory }))
+            run.scope !== (yield* memory.scope({ project: location.project.id, directory: location.directory })))
         )
           return denied
         return yield* store
@@ -56,5 +57,5 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [MemoryTidyStore.node, Config.node, Location.node],
+  deps: [MemoryTidyStore.node, MemoryStore.node, Config.node, Location.node],
 })
