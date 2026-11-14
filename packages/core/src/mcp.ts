@@ -455,7 +455,9 @@ const layer = Layer.effect(
               ? listAll((cursor) =>
                   Effect.tryPromise({
                     try: () =>
-                      item.client.listResources(cursor ? { cursor } : undefined, { timeout: defaults?.request }),
+                      item.client.listResources(cursor ? { cursor } : undefined, {
+                        timeout: item.server.timeout?.request ?? defaults?.request ?? DEFAULT_REQUEST_TIMEOUT_MS,
+                      }),
                     catch: normalizeError,
                   }),
                 ).pipe(
@@ -769,7 +771,10 @@ function registerCatalogTools(
               item.client.getServerCapabilities()?.resources
                 ? listAll((cursor) =>
                     Effect.tryPromise({
-                      try: () => item.client.listResources(cursor ? { cursor } : undefined, { timeout }),
+                      try: () =>
+                        item.client.listResources(cursor ? { cursor } : undefined, {
+                          timeout: item.server.timeout?.request ?? timeout ?? DEFAULT_REQUEST_TIMEOUT_MS,
+                        }),
                       catch: normalizeError,
                     }),
                   ).pipe(
@@ -801,7 +806,10 @@ function registerCatalogTools(
               item.client.getServerCapabilities()?.resources
                 ? listAll((cursor) =>
                     Effect.tryPromise({
-                      try: () => item.client.listResourceTemplates(cursor ? { cursor } : undefined, { timeout }),
+                      try: () =>
+                        item.client.listResourceTemplates(cursor ? { cursor } : undefined, {
+                          timeout: item.server.timeout?.request ?? timeout ?? DEFAULT_REQUEST_TIMEOUT_MS,
+                        }),
                       catch: normalizeError,
                     }),
                   ).pipe(
@@ -826,7 +834,11 @@ function registerCatalogTools(
           if (!item) return yield* new Tool.Failure({ message: `MCP server is not connected: ${input.server}` })
           yield* permitted(context, [`mcp:${input.server}:${input.uri}`])
           const result = yield* Effect.tryPromise({
-            try: () => item.client.readResource({ uri: input.uri }, { timeout }),
+            try: () =>
+              item.client.readResource(
+                { uri: input.uri },
+                { timeout: item.server.timeout?.request ?? timeout ?? DEFAULT_REQUEST_TIMEOUT_MS },
+              ),
             catch: (error) => new Tool.Failure({ message: normalizeError(error).message }),
           })
           return JSON.stringify(result, null, 2)
@@ -850,7 +862,10 @@ function registerCatalogTools(
               item.client.getServerCapabilities()?.prompts
                 ? listAll((cursor) =>
                     Effect.tryPromise({
-                      try: () => item.client.listPrompts(cursor ? { cursor } : undefined, { timeout }),
+                      try: () =>
+                        item.client.listPrompts(cursor ? { cursor } : undefined, {
+                          timeout: item.server.timeout?.request ?? timeout ?? DEFAULT_REQUEST_TIMEOUT_MS,
+                        }),
                       catch: normalizeError,
                     }),
                   ).pipe(
@@ -875,7 +890,11 @@ function registerCatalogTools(
           if (!item) return yield* new Tool.Failure({ message: `MCP server is not connected: ${input.server}` })
           yield* permitted(context, [`mcp:${input.server}:prompt:${input.name}`])
           const result = yield* Effect.tryPromise({
-            try: () => item.client.getPrompt({ name: input.name, arguments: input.arguments }, { timeout }),
+            try: () =>
+              item.client.getPrompt(
+                { name: input.name, arguments: input.arguments },
+                { timeout: item.server.timeout?.request ?? timeout ?? DEFAULT_REQUEST_TIMEOUT_MS },
+              ),
             catch: (error) => new Tool.Failure({ message: normalizeError(error).message }),
           })
           return JSON.stringify(result, null, 2)

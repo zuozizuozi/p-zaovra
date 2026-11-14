@@ -82,6 +82,65 @@ function layer(mcp: ConfigMCP.Info) {
   ])
 }
 
+test.each([1000, undefined])("catalog requests honor server timeout before global fallback (%s)", async (request) => {
+  const requests = spyOn(Client.prototype, "request")
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const mcp = yield* MCP.Service
+        const calls = [
+          { name: "list_mcp_resources", input: { server: "fixture" } },
+          { name: "list_mcp_resource_templates", input: { server: "fixture" } },
+          { name: "read_mcp_resource", input: { server: "fixture", uri: "memory://project/facts" } },
+          { name: "list_mcp_prompts", input: { server: "fixture" } },
+          { name: "get_mcp_prompt", input: { server: "fixture", name: "review", arguments: { target: "runtime" } } },
+        ]
+        for (const call of calls) {
+          const result = yield* executeTool(registry, {
+            sessionID: SessionV2.ID.make("ses_mcp_catalog"),
+            ...toolIdentity,
+            call: { type: "tool-call", id: call.name, ...call },
+          })
+          expect(result.type).toBe("text")
+        }
+        yield* mcp.resources()
+        yield* mcp.prompts()
+        yield* mcp.renderPrompt("fixture", "review", { target: "runtime" })
+        for (const method of [
+          "resources/list",
+          "resources/templates/list",
+          "resources/read",
+          "prompts/list",
+          "prompts/get",
+        ]) {
+          const sent = requests.mock.calls.filter(([value]) => value.method === method)
+          expect(sent.length).toBeGreaterThan(0)
+          for (const call of sent) expect(call[2]?.timeout).toBe(request ?? 2000)
+        }
+      }).pipe(
+        Effect.provide(
+          layer(
+            new ConfigMCP.Info({
+              timeout: new ConfigMCP.Timeout({ request: 2000 }),
+              servers: {
+                fixture: new ConfigMCP.Local({
+                  type: "local",
+                  command: [process.execPath, path.join(directory, "mcp-canonical-stdio.ts")],
+                  timeout: new ConfigMCP.Timeout({ request }),
+                }),
+              },
+            }),
+          ),
+        ),
+        Effect.scoped,
+      ),
+    )
+  } finally {
+    requests.mockRestore()
+  }
+})
+
 test("startup deadline closes SSE without an endpoint and reports failed", async () => {
   const state = { opened: false, closed: false }
   const server = Bun.serve({
