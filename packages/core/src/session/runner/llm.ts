@@ -43,6 +43,7 @@ import {
 } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
+import { MemoryTidyTools } from "../../memory/tidy-tools"
 import { ShellIdentity } from "../../shell-identity"
 import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
@@ -161,6 +162,7 @@ const layer = Layer.effect(
     const skillGuidance = yield* SkillGuidance.Service
     const referenceGuidance = yield* ReferenceGuidance.Service
     const config = yield* Config.Service
+    const tidyTools = yield* MemoryTidyTools.Service
     const snapshots = yield* Snapshot.Service
     const fs = yield* FSUtil.Service
     const lsp = yield* LSP.Service
@@ -980,10 +982,13 @@ const layer = Layer.effect(
       }
       const toolMaterialization =
         isLastStep || textOnlyRecovery || deliveryReport ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const tidyAllowed = yield* tidyTools.allowed(session.id)
       const deliveryTools = ToolProfile.select(
-        deliveryReview
-          ? (toolMaterialization?.definitions.filter((tool) => DeliveryContract.repairTools.has(tool.name)) ?? [])
-          : (toolMaterialization?.definitions ?? []),
+        (toolMaterialization?.definitions ?? []).filter(
+          (tool) =>
+            (!deliveryReview || DeliveryContract.repairTools.has(tool.name)) &&
+            (!tidyAllowed || (tidyAllowed.has(tool.name) && !toolMaterialization?.custom?.includes(tool.name))),
+        ),
         {
           model: model.id,
           history: durableHistory,
@@ -1478,18 +1483,34 @@ const layer = Layer.effect(
                   : Effect.uninterruptibleMask((restore) =>
                       Effect.gen(function* () {
                         const execute = restore(
-                          SessionOwnership.check.pipe(
-                            Effect.andThen(
-                              toolMaterialization.settle({
-                                sessionID: session.id,
-                                agent: agent.id,
-                                assistantMessageID,
-                                call: event,
-                                inputModalities: model.inputModalities,
-                                shell: initialized.shell,
-                              }),
-                            ),
-                          ),
+                          Effect.gen(function* () {
+                            yield* SessionOwnership.check
+                            // Check after the tool concurrency permit is acquired:
+                            // a queued call may outlive the advertised grant.
+                            const allowed = yield* tidyTools.allowed(session.id)
+                            if (
+                              allowed &&
+                              (!allowed.has(event.name) ||
+                                toolMaterialization.custom?.includes(event.name) ||
+                                toolMaterialization.effectLocation?.(event) === "remote")
+                            )
+                              return {
+                                inputRejected: true,
+                                errorMetadata: { phase: "input", reason: "memory-tidy-tool-denied" },
+                                result: {
+                                  type: "error" as const,
+                                  value: "Tool not executed: this memory tidy task does not authorize it.",
+                                },
+                              }
+                            return yield* toolMaterialization.settle({
+                              sessionID: session.id,
+                              agent: agent.id,
+                              assistantMessageID,
+                              call: event,
+                              inputModalities: model.inputModalities,
+                              shell: initialized.shell,
+                            })
+                          }),
                         )
                         if (toolMaterialization.observation?.(event)) return yield* execute
                         const fingerprint = createHash("sha256")
@@ -2968,6 +2989,7 @@ export const node = makeLocationNode({
     SkillGuidance.node,
     ReferenceGuidance.node,
     Config.node,
+    MemoryTidyTools.node,
     Snapshot.node,
     FSUtil.node,
     LSP.node,
