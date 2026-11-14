@@ -98,9 +98,9 @@ describe("memory store", () => {
     expect(MemoryStore.scope({ project: repository, directory: "/a" })).toBe(
       MemoryStore.scope({ project: repository, directory: "/a/b" }),
     )
-    const left = MemoryStore.scope({ project: Project.ID.global, directory: "C:\\Users\\me\\报表" })
-    expect(left).toBe(MemoryStore.scope({ project: Project.ID.global, directory: "c:/users/me/报表" }))
-    expect(left).not.toBe(MemoryStore.scope({ project: Project.ID.global, directory: "C:/Users/me/合同" }))
+    const left = MemoryStore.scope({ project: Project.ID.global, directory: "C:\\Users\\me\\报表" }, "win32")
+    expect(left).toBe(MemoryStore.scope({ project: Project.ID.global, directory: "c:/users/me/报表" }, "win32"))
+    expect(left).not.toBe(MemoryStore.scope({ project: Project.ID.global, directory: "C:/Users/me/合同" }, "win32"))
     expect(left).not.toBe(Memory.Scope.user)
   })
 

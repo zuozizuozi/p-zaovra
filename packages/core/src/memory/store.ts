@@ -63,8 +63,11 @@ export interface Place {
  * Every folder that is not a repository shares one project ID, so such a folder is its own
  * scope; otherwise unrelated folders would read each other's notes.
  */
-export function scope(place: Place) {
+export function scope(place: Place, platform: NodeJS.Platform = process.platform) {
   if (place.project !== ProjectV2.ID.global) return Memory.Scope.make(place.project)
+  // Location owns path identity. POSIX case and literal backslashes must survive; the new
+  // namespace must not adopt a legacy bucket whose normalization may have mixed directories.
+  if (platform !== "win32") return Memory.Scope.make(`dir_posix_v2_${Hash.fast(place.directory).slice(0, 24)}`)
   return Memory.Scope.make(`dir_${Hash.fast(place.directory.replaceAll("\\", "/").toLowerCase()).slice(0, 24)}`)
 }
 
