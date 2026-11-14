@@ -149,3 +149,48 @@ export function closingDeadline(deadline: number | undefined, reserve = 0) {
 export function observationDeadline(closingAt: number | undefined, now: number) {
   return closingAt === undefined ? undefined : closingAt - Math.min(30_000, Math.max(0, closingAt - now) / 2)
 }
+
+/** Restore only this budget window's provider stop. Clock sampling stays with the runner. */
+export function stopState(input: {
+  receipt: unknown
+  deadline?: number
+  closingReserveMs?: number
+  providerDeadline?: number
+  stopMessage?: string
+  duration?: number
+  elapsed: number
+}) {
+  const stopped =
+    input.receipt !== null &&
+    typeof input.receipt === "object" &&
+    "providerDeadline" in input.receipt &&
+    typeof input.receipt.providerDeadline === "number" &&
+    "deadline" in input.receipt &&
+    input.receipt.deadline === input.deadline &&
+    "closingReserveMs" in input.receipt &&
+    input.receipt.closingReserveMs === input.closingReserveMs
+      ? input.receipt.providerDeadline
+      : undefined
+  const providerAt = input.providerDeadline ?? stopped
+  return {
+    providerAt,
+    expired:
+      (providerAt === undefined && !!input.stopMessage) ||
+      (input.duration !== undefined && input.elapsed >= input.duration),
+  }
+}
+
+/** Select the next budget action from observed time flags and durable reported usage. */
+export function phase(input: {
+  limit?: number
+  total: number
+  expired: boolean
+  reserveReached: boolean
+  notify: boolean
+}) {
+  if (input.limit === undefined && !input.expired && !input.reserveReached) return "continue"
+  const closing = input.reserveReached && (input.limit === undefined || input.total < input.limit)
+  if (!input.expired && !closing && input.limit !== undefined && input.total < input.limit)
+    return !input.notify || input.total < input.limit * 0.75 ? "continue" : "notice"
+  return closing ? "closing" : "expired"
+}

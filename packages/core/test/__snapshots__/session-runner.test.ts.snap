@@ -35,3 +35,17 @@ exports[`delivery repair experiment preserves prompts and bounds: invalid 1`] = 
   "Delivery contract review: {"request":"request","started":0,"tokens":1024,"decision":"unverified","missing":["requirement 1 (result.json): missing or unreadable required file","requirement 1: missing or unreadable required file","unverified: bounded repair ended; repair budget exhausted"],"reason":"repair budget exhausted","turns":3,"toolCalls":0,"report":false,"allowance":0.09002999999999999,"spent":0.02400000000000002,"cacheRead":58000,"estimatedCost":0.0023699999999999997,"model":"562c7962d5492b3b015ec21e5e7dc23891b98e3e9834750a8a27ee58060fbe89","costs":[{"input":1,"output":2,"cache":{"read":0.1,"write":1}}]}",
 ]
 `;
+
+exports[`SessionRunnerLLM S1 token budget stops without failure and supports live adjustment 1`] = `
+[
+  ""本会话已记录 120 Tokens，达到配置预算 100；已停止发起新的模型请求，已完成的操作已保留。需要明确续授：可在会话界面提高或移除预算后直接继续，无需重启；已保留成果和未完成事项，这不是任务完成。\\n现场摘要：{\\"changes\\":[],\\"checks\\":[]}"",
+]
+`;
+
+exports[`SessionRunnerLLM warns once near the session budget in model history without changing the system prefix 1`] = `
+[
+  "Session token budget notice (limit=1000): 750 tokens have been reported; 250 remain before the next-request stop. This includes cached input and reasoning. This is a session-wide limit, not a per-message allowance. Focus on the requested deliverable and its remaining checks; avoid optional expansion and repeated environment setup. Do not skip necessary validation, manufacture passing reports, or claim unfinished work is complete. If the remaining budget cannot cover completion, preserve the current work and state the specific remaining steps.",
+]
+`;
+
+exports[`490 explicit closing reserve cancels only same-source tasks and retains a durable unverified receipt 1`] = `"[host.run.closing] request:request {"requestID":"request","sourceMessageID":"request","deadline":1000,"closingReserveMs":1500,"state":"stopped_unverified","cancelled":["job-0"],"preserved":["job-1","job-2","job-3","job-4"]}"`;

@@ -327,19 +327,17 @@ const layer = Layer.effect(
             ),
           )
         : undefined
-      const stopped =
-        receipt !== null &&
-        typeof receipt === "object" &&
-        "providerDeadline" in receipt &&
-        typeof receipt.providerDeadline === "number" &&
-        "deadline" in receipt &&
-        receipt.deadline === deadline &&
-        "closingReserveMs" in receipt &&
-        receipt.closingReserveMs === limits.policy?.closingReserveMs
-          ? receipt.providerDeadline
-          : undefined
-      const providerAt = providerDeadline ?? stopped
-      const expired = (providerAt === undefined && !!stopMessage) || (duration !== undefined && elapsed >= duration)
+      const stop = SessionBudget.stopState({
+        receipt,
+        deadline,
+        closingReserveMs: limits.policy?.closingReserveMs,
+        providerDeadline,
+        stopMessage,
+        duration,
+        elapsed,
+      })
+      const providerAt = stop.providerAt
+      const expired = stop.expired
       const reserveReached =
         !expired &&
         ((providerAt !== undefined && (yield* Clock.currentTimeMillis) >= providerAt) ||
@@ -377,10 +375,10 @@ const layer = Layer.effect(
       const usage = yield* SessionUsageQuery.readTotal(session.id).pipe(
         Effect.provideService(Database.Service, database),
       )
-      const closing = reserveReached && (limit === undefined || usage.total < limit)
-      const phase = closing ? ("closing" as const) : ("expired" as const)
-      if (!expired && !closing && limit !== undefined && usage.total < limit) {
-        if (!notify || usage.total < limit * 0.75) return
+      const phase = SessionBudget.phase({ limit, total: usage.total, expired, reserveReached, notify })
+      const closing = phase === "closing"
+      if (phase === "continue") return
+      if (phase === "notice") {
         const prefix = `Session token budget notice (limit=${limit}):`
         const context = yield* getContext(session.id)
         if (context.some((message) => message.type === "synthetic" && message.text.startsWith(prefix))) return
@@ -388,7 +386,7 @@ const layer = Layer.effect(
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text: `${prefix} ${usage.total} tokens have been reported; ${limit - usage.total} remain before the next-request stop. This includes cached input and reasoning.${usage.unreported ? ` ${usage.unreported} requests have incomplete usage, so actual consumption may be higher.` : ""} This is a session-wide limit, not a per-message allowance. Focus on the requested deliverable and its remaining checks; avoid optional expansion and repeated environment setup. Do not skip necessary validation, manufacture passing reports, or claim unfinished work is complete. If the remaining budget cannot cover completion, preserve the current work and state the specific remaining steps.`,
+          text: `${prefix} ${usage.total} tokens have been reported; ${limit! - usage.total} remain before the next-request stop. This includes cached input and reasoning.${usage.unreported ? ` ${usage.unreported} requests have incomplete usage, so actual consumption may be higher.` : ""} This is a session-wide limit, not a per-message allowance. Focus on the requested deliverable and its remaining checks; avoid optional expansion and repeated environment setup. Do not skip necessary validation, manufacture passing reports, or claim unfinished work is complete. If the remaining budget cannot cover completion, preserve the current work and state the specific remaining steps.`,
         })
         return
       }

@@ -9162,6 +9162,7 @@ describe("SessionRunnerLLM", () => {
         (message) => message.type === "synthetic" && message.text.startsWith("Session token budget notice"),
       )
       expect(notices).toHaveLength(1)
+      expect(notices.flatMap((message) => (message.type === "synthetic" ? [message.text] : []))).toMatchSnapshot()
       expect((yield* SessionUsageQuery.read(sessionID)).total).toMatchObject({ total: 790, calls: 3, unreported: 0 })
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Report the current result" }), resume: false })
       responses = undefined
@@ -9346,6 +9347,15 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(1)
       expect(executions).toEqual(["retained"])
       const context = yield* session.context(sessionID)
+      expect(
+        context.flatMap((message) =>
+          message.type === "assistant" && message.termination?.category === "budget"
+            ? message.content.flatMap((part) =>
+                part.type === "text" ? [JSON.stringify(part.text.replace(/msg_[a-zA-Z0-9]+/g, "message"))] : [],
+              )
+            : [],
+        ),
+      ).toMatchSnapshot()
       expect(context.at(-1)).toMatchObject({
         finish: "stopped",
         content: [{ text: expect.stringContaining("达到配置预算 100") }],
@@ -11727,6 +11737,12 @@ it.effect("490 explicit closing reserve cancels only same-source tasks and retai
     if (receipt.type !== "synthetic") throw new Error("Missing host receipt")
     expect(receipt.text).toContain('"state":"stopped_unverified"')
     expect(receipt.text).toContain(owned.id)
+    expect(
+      [owned, foreign, wrongLocation, legacy, preview].reduce(
+        (text, job, index) => text.replaceAll(job.id, `job-${index}`),
+        receipt.text.replaceAll(request.id, "request"),
+      ),
+    ).toMatchSnapshot()
     // Preserved unknown/other jobs can keep the Session runtime running. They do
     // not turn this stopped request into successful delivery.
     const outcome = yield* session.outcome(sessionID)
