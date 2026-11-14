@@ -5,6 +5,7 @@ import { PreviewProcess } from "../../preview-process"
 import { BackgroundJob } from "../../background-job"
 import { EventTable } from "../../event/sql"
 import { SessionBudget } from "../budget"
+import { ClosingReview } from "../closing-review"
 import { SessionRetry } from "../retry"
 import { ProviderDiagnostics } from "../provider-diagnostics"
 import { SessionOwnership } from "../ownership"
@@ -2331,59 +2332,43 @@ const layer = Layer.effect(
                 )
                 .all()
                 .pipe(Effect.orDie)
-              const keys = previous.flatMap((row) =>
-                row.data.category === "closing" &&
-                row.data.details &&
-                typeof row.data.details === "object" &&
-                "key" in row.data.details &&
-                "decision" in row.data.details &&
-                row.data.details.decision === "review" &&
-                typeof row.data.details.key === "string"
-                  ? [row.data.details.key]
-                  : [],
-              )
-              const gaps = SessionProgress.closingGaps(SessionOutcome.requested(messages).entries, outcome)
-              const reviewed = previous.flatMap((row) => {
-                const details = row.data.details
-                return row.data.category === "closing" &&
-                  details &&
-                  typeof details === "object" &&
-                  "decision" in details &&
-                  details.decision === "review" &&
-                  "gaps" in details &&
-                  Array.isArray(details.gaps)
-                  ? details.gaps.filter((gap): gap is string => typeof gap === "string")
-                  : []
-              })
-              const decision = SessionProgress.reviewDecision({
+              const review = ClosingReview.evidenceDecision(
+                SessionOutcome.requested(messages).entries,
+                outcome,
                 key,
-                previous: keys,
-                missing: outcome.missing,
-                verified: outcome.state === "completed_verified" && outcome.review !== undefined,
-                delivered: evidence.delivered,
-                pending: outcome.outcomeUnknown || evidence.pending.length > 0,
-                gaps,
-                reviewed,
-              })
+                evidence.delivered,
+                evidence.pending,
+                previous,
+              )
               yield* SessionProgress.record(events, session.id, "closing", {
                 key,
-                decision,
+                decision: review.decision,
                 reason:
-                  decision === "pending" ? "waiting" : decision === "unverified" ? "blocked" : "candidate-complete",
+                  review.decision === "pending"
+                    ? "waiting"
+                    : review.decision === "unverified"
+                      ? "blocked"
+                      : "candidate-complete",
                 pending: evidence.pending,
-                gaps,
+                gaps: review.gaps,
                 missing: outcome.missing,
                 requirements: SessionOutcome.requested(messages).entries.map((item) => ({
                   id: item.id,
                   sourceMessageID: item.sourceMessageID,
                 })),
               })
-              if (decision === "review" && !outcome.outcomeUnknown) {
+              if (review.decision === "review" && !outcome.outcomeUnknown) {
                 yield* events.publish(SessionEvent.Synthetic, {
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
-                  text: `Verification closing review: evidence key ${key}. Missing: ${JSON.stringify(outcome.missing.filter((_gap, index) => !reviewed.includes(gaps[index])))}. Compare original requirements with current artifacts and actual assertions, including uncovered negative cases. Reopen only checks affected by changed requirements, dependencies, environment or new failures. All green is not proof of full coverage. Preserve failed assertions and report unresolved scope; do not repeat unchanged passing checks.${quality?.independent_review === true ? ` ${SessionProgress.independentReview}` : ""}`,
+                  text: ClosingReview.evidencePrompt(
+                    key,
+                    outcome,
+                    review.gaps,
+                    review.reviewed,
+                    quality?.independent_review === true,
+                  ),
                 })
                 needsContinuation = true
               }
@@ -2431,13 +2416,7 @@ const layer = Layer.effect(
               .all()
               .pipe(Effect.orDie)
             if (
-              (preliminary.checks.length || SessionOutcome.engineeringWork(messages)) &&
-              !reviews.some(
-                (row) =>
-                  "text" in row.data &&
-                  typeof row.data.text === "string" &&
-                  row.data.text.startsWith("Verification closing review:"),
-              )
+              ClosingReview.legacyDue(preliminary.checks.length || SessionOutcome.engineeringWork(messages), reviews)
             ) {
               const required = yield* restore(SessionOutcome.requirements(fs, location.directory))
               const targets = yield* restore(
@@ -2465,19 +2444,7 @@ const layer = Layer.effect(
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
-                  text: `Verification closing review: ${JSON.stringify({
-                    state: outcome.state,
-                    facts: SessionOutcome.deliveryFacts(messages),
-                    missing: outcome.missing,
-                    failed: outcome.checks
-                      .filter((check) => check.exit !== 0 && !check.supersededBy)
-                      .map((check) => ({ kind: check.kind, command: check.command, execution: check.execution })),
-                    coverage: outcome.checks
-                      .filter((check) => check.exit === 0)
-                      .flatMap((check) => check.requirements ?? []),
-                    userRequests: messages.filter((message) => message.type === "user").map((message) => message.text),
-                    requirements: SessionOutcome.requested(messages).entries,
-                  })}\nReview the original visible user requirements and their corrections against the final artifacts, even when all existing tests passed. Identify requirements not covered by the tests, including empty/minimum values, negative/error cases and stated invariants. Inspect the actual assertions, add focused checks for uncovered requirements, and correct concrete defects in this same loop. Use ordinary bash commands with verification_requirements to describe requirements actually asserted; identify verification_assertions and include source and assertion files as verification_targets. Do not output report JSON as a shell command. Preserve failed assertions when repairing implementation. If an assertion is wrong, explain the user requirement supporting the correction and report the original failure as requiring review; changing expectations is not proof of a fix. A self-written green test suite is not independent proof of full acceptance. Preserve valid existing checks, do not run unrelated checks or invent extra deliverables. If evidence remains missing, explicitly report unverified scope and known failures. This automatic closing review occurs at most once for this user request.${quality?.independent_review === true ? ` ${SessionProgress.independentReview}` : ""}`,
+                  text: ClosingReview.legacyPrompt(messages, outcome, quality?.independent_review === true),
                 })
                 needsContinuation = true
               }
