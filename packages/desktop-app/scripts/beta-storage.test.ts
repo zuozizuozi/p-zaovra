@@ -107,18 +107,23 @@ test("780 visible patch sequence includes reservations and immutable directories
       ["beta/0.1.0-beta.99/release.json", "beta/0.1.1-beta.9/installer.exe", "beta/reservations/0.1.1-beta.11.json"],
       "0.1.1-beta.10",
     ),
-  ).toBe("0.2.0-beta.1")
-  expect(nextBetaVersion([], "0.1.1-beta.19")).toBe("0.2.0-beta.1")
-  expect(nextBetaVersion(["beta/reservations/0.2.0-beta.1.json"], "0.1.1-beta.19")).toBe("0.2.1-beta.1")
-  expect(nextBetaVersion(["beta/0.2.1-beta.1/release.json"], "0.2.0-beta.1")).toBe("0.2.2-beta.1")
-  expect(() => nextBetaVersion([], "0.3.0-beta.1")).toThrow()
-  expect(() => nextBetaVersion([], "0.2.65535-beta.1")).toThrow()
+  ).toBe("0.3.0-beta.1")
+  expect(nextBetaVersion([], "0.1.1-beta.19")).toBe("0.3.0-beta.1")
+  // The first release on a new line starts at patch 0 whatever the earlier line reached.
+  expect(nextBetaVersion(["beta/0.2.3-beta.1/release.json", "beta/reservations/0.2.4-beta.1.json"], "0.2.3-beta.1")).toBe(
+    "0.3.0-beta.1",
+  )
+  expect(nextBetaVersion(["beta/reservations/0.3.0-beta.1.json"], "0.2.3-beta.1")).toBe("0.3.1-beta.1")
+  expect(nextBetaVersion(["beta/0.3.1-beta.1/release.json"], "0.3.0-beta.1")).toBe("0.3.2-beta.1")
+  expect(() => nextBetaVersion([], "0.4.0-beta.1")).toThrow()
+  expect(() => nextBetaVersion([], "0.3.65535-beta.1")).toThrow()
   expect(() => nextBetaVersion([], "0.2.0-beta.2")).toThrow()
   expect(() => nextBetaVersion([], "prod")).toThrow()
 })
 
 test("780 manual builds require an explicit canonical reviewed version", () => {
   expect(requireBetaVersion("0.2.0-beta.1")).toBe("0.2.0-beta.1")
+  expect(requireBetaVersion("0.3.0-beta.1")).toBe("0.3.0-beta.1")
   for (const version of [undefined, "0.1.1-beta.20", "0.2.01-beta.1", "0.2.0-beta.2", "0.2.65536-beta.1", "prod"])
     expect(() => requireBetaVersion(version)).toThrow()
 })
@@ -190,7 +195,7 @@ test("646 concurrent HTTP reservations allocate distinct never-reused versions",
       reserveBetaVersion(f.bucket, { ...identity, attempt: "2" }),
     ])
     expect(new Set(versions).size).toBe(2)
-    expect(versions.toSorted()).toEqual(["0.2.0-beta.1", "0.2.1-beta.1"])
+    expect(versions.toSorted()).toEqual(["0.3.0-beta.1", "0.3.1-beta.1"])
   } finally {
     await f.server.stop(true)
   }

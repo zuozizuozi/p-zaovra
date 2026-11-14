@@ -8,9 +8,14 @@ import { BetaError, betaErrorDetails, betaOperation, betaResponseError } from ".
 
 export const versionPattern = /^\d+\.\d+\.\d+-beta\.[1-9]\d*$/
 
+// New Betas are numbered on this line. Earlier lines stay readable so the release before a
+// line change is still a valid predecessor.
+const line = "0.3"
+
 export function requireBetaVersion(version: string | undefined) {
-  const match = /^0\.2\.(0|[1-9]\d*)-beta\.1$/.exec(version ?? "")
-  if (!match || Number(match[1]) > 65535) throw new Error("Expected a reviewed 0.2.x-beta.1 version (patch <= 65535)")
+  const match = /^0\.[23]\.(0|[1-9]\d*)-beta\.1$/.exec(version ?? "")
+  if (!match || Number(match[1]) > 65535)
+    throw new Error("Expected a reviewed 0.2.x-beta.1 or 0.3.x-beta.1 version (patch <= 65535)")
   return version!
 }
 
@@ -25,8 +30,12 @@ export function nextBetaVersion(keys: string[], current?: string) {
   }
   // Legacy releases remain readable; each new release advances the visible patch number.
   const releases = versions.filter((v) => semver.order(v, "0.2.0-beta.1") >= 0).map(requireBetaVersion)
-  const patch = Math.max(-1, ...releases.map((v) => Number(v.split(".")[2].split("-")[0]))) + 1
-  return requireBetaVersion(`0.2.${patch}-beta.1`)
+  const patch =
+    Math.max(
+      -1,
+      ...releases.filter((v) => v.startsWith(line + ".")).map((v) => Number(v.split(".")[2].split("-")[0])),
+    ) + 1
+  return requireBetaVersion(`${line}.${patch}-beta.1`)
 }
 
 export function continuousIdentity(env = process.env) {

@@ -17,9 +17,9 @@ on:
         default: false
         type: boolean
       beta_version:
-        description: Reviewed internal Beta version for a manual build (displayed as Beta 0.2.x)
+        description: Reviewed internal Beta version for a manual build (displayed as Beta 0.3.x)
         required: false
-        default: 0.2.0-beta.1
+        default: 0.3.0-beta.1
         type: string
       unsigned_beta:
         description: Explicit unsigned Beta exception (must match the reviewed artifact on publish)

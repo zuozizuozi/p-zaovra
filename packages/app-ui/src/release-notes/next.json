@@ -1,46 +1,46 @@
 {
   "zh": [
     {
-      "title": "任务完成会提醒了",
-      "description": "对话里只要运行过命令，之前任务完成后不会出现通知、提示音和“待看”标记；现在恢复正常"
+      "title": "记忆：Zaovra 会记住以前对话里的事",
+      "description": "你说过“以后都……”“记住……”的话、项目里跑通过的测试和构建命令，会留到以后的对话里用；模型也可以查到本项目以前的对话。每个项目各记各的"
     },
     {
-      "title": "中途换模型可以接着聊",
-      "description": "在同一个对话里从别的模型换到 DeepSeek 不再立刻失败；这种情况下 DeepSeek 改用非思考模式继续，并在对话里说明一次"
+      "title": "记了什么你都看得到、改得了",
+      "description": "设置里新增“记忆”页：每一条都能改、能删、能清空，删掉的不会再被记回来；不想用可以一键关闭，已有的笔记不会丢"
     },
     {
-      "title": "停止后说“继续”能接着做",
-      "description": "停止时正好打断了一条命令，之后发“继续”不再被拒绝"
+      "title": "整理记忆由你决定",
+      "description": "“现在整理”会开一个普通对话，逐条核对笔记、标出过时的、合并重复的，最多用 30 万 token；你不点它不会运行"
     },
     {
-      "title": "拒绝授权后说明原因",
-      "description": "你拒绝一次操作后，对话里会写明任务已暂停，可以直接告诉它换个做法，不再只显示“已中断”"
+      "title": "补丁格式不完整也能改文件",
+      "description": "模型写补丁时漏掉开头或结尾标记，以前会直接失败，现在能正常应用"
     },
     {
-      "title": "Git Bash 下很长的命令也能运行",
-      "description": "用 Git Bash 作为命令行时，超长命令不再启动失败"
+      "title": "停止标记不再挂错位置",
+      "description": "任务里跑过命令再点停止，“已停止”现在标在你发的那条消息上"
     }
   ],
   "en": [
     {
-      "title": "You are told when a task finishes",
-      "description": "In any conversation that had run a command, a finished task produced no notification, sound or unread marker; it does again"
+      "title": "Memory: Zaovra remembers earlier conversations",
+      "description": "Things you said with \"from now on\" or \"remember\", and the test and build commands that worked in a project, carry into later conversations; the model can also look up earlier conversations in the same project. Each project keeps its own"
     },
     {
-      "title": "Switch models mid-conversation",
-      "description": "Switching to DeepSeek in a conversation another model answered no longer fails at once; DeepSeek continues without thinking mode and says so once"
+      "title": "You can see and change everything it kept",
+      "description": "A new Memory page in Settings lets you edit, delete or clear every note; a deleted note is not recorded again. One switch turns memory off without losing existing notes"
     },
     {
-      "title": "Continue after stopping",
-      "description": "If stopping cut a command short, sending \"continue\" is no longer refused"
+      "title": "Tidying memory is your call",
+      "description": "\"Tidy now\" starts an ordinary conversation that checks each note, marks what is out of date and merges repeats, using at most 300,000 tokens. It never runs unless you press it"
     },
     {
-      "title": "Declined actions explain themselves",
-      "description": "After you decline an action the conversation says the task is paused and that you can tell it what to do instead, rather than only \"Interrupted\""
+      "title": "Patches with a missing marker still apply",
+      "description": "When a model leaves off the opening or closing marker of a patch, the edit used to fail; it now applies"
     },
     {
-      "title": "Very long commands run under Git Bash",
-      "description": "With Git Bash as the shell, an overlong command no longer fails to start"
+      "title": "Stop is shown on the right message",
+      "description": "After a task that ran commands, pressing Stop now marks the message you sent"
     }
   ]
 }
