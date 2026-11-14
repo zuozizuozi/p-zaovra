@@ -1545,3 +1545,20 @@ describe("live text stream marker", () => {
     expect(ctx.store.data.streaming_text.ses_child).toBeUndefined()
   })
 })
+
+test("a server without the ordered feed is re-read on a clock, not once per tool event", async () => {
+  const ctx = setup({ pages: [{ data: [user("msg_user", "go", 1)] }] })
+  await ctx.store.sync("ses_child")
+  const before = ctx.requests.messages.length
+  // Tool calls arrive further apart than any debounce, as they do in a real turn.
+  for (const index of Array.from({ length: 12 }, (_, index) => index)) {
+    for (const type of ["session.next.tool.called", "session.next.tool.success"])
+      ctx.store.apply({ type, properties: { sessionID: "ses_child", callID: `call_${index}`, timestamp: index } })
+    await new Promise((resolve) => setTimeout(resolve, 80))
+  }
+  expect(ctx.requests.messages.length).toBe(before)
+  await new Promise((resolve) => setTimeout(resolve, 2100))
+  expect(ctx.requests.messages.length).toBe(before + 1)
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(ctx.requests.messages.length).toBe(before + 1)
+}, 10000)
