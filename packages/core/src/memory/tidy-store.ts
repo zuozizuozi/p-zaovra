@@ -2,7 +2,9 @@ export * as MemoryTidyStore from "./tidy-store"
 
 import { randomUUID } from "node:crypto"
 import { and, eq, sql } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Schema } from "effect"
+import { Cause, Clock, Context, Effect, Layer, Schema } from "effect"
+import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError"
+import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core/errors"
 import type { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
@@ -25,7 +27,7 @@ export type Request = {
 export type Authority = { sessionID: SessionSchema.ID; scope: Memory.Scope; enabled: boolean }
 
 export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Rejected", {
-  reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing"]),
+  reason: Schema.Literals(["invalid", "conflict", "unauthorized", "limit", "duplicate", "missing", "busy"]),
 }) {}
 
 export interface Interface {
@@ -53,8 +55,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database.Service
     const db = database.db
-    const get = (id: string) =>
-      db.select().from(MemoryTidyRunTable).where(eq(MemoryTidyRunTable.id, id)).get().pipe(Effect.orDie)
+    const get = (id: string) => db.select().from(MemoryTidyRunTable).where(eq(MemoryTidyRunTable.id, id)).get()
     const usage = (input: { runID: string } | { day: string }) =>
       db
         .select({
@@ -68,10 +69,7 @@ const layer = Layer.effect(
           "runID" in input ? eq(MemoryTidyAttemptTable.run_id, input.runID) : eq(MemoryTidyAttemptTable.day, input.day),
         )
         .get()
-        .pipe(
-          Effect.map((row) => row ?? { known: 0, reserved: 0, charged: 0, unknown: 0 }),
-          Effect.orDie,
-        )
+        .pipe(Effect.map((row) => row ?? { known: 0, reserved: 0, charged: 0, unknown: 0 }))
     const authorize = Effect.fn("MemoryTidyStore.authorize")(function* (input: Authority) {
       if (!input.enabled) return yield* new Rejected({ reason: "unauthorized" })
       const run = yield* db
@@ -85,26 +83,26 @@ const layer = Layer.effect(
           ),
         )
         .get()
-        .pipe(Effect.orDie)
+
       if (!run) return yield* new Rejected({ reason: "unauthorized" })
       const session = yield* db
         .select({ model: SessionTable.model })
         .from(SessionTable)
         .where(and(eq(SessionTable.id, run.session_id), eq(SessionTable.directory, run.directory)))
         .get()
-        .pipe(Effect.orDie)
+
       if (!session?.model || modelKey(session.model) !== modelKey(run.model))
         return yield* new Rejected({ reason: "unauthorized" })
       return run
     })
     return Service.of({
-      get,
-      usage,
-      authorize,
+      get: (id) => get(id).pipe(Effect.orDie),
+      usage: (input) => usage(input).pipe(Effect.orDie),
+      authorize: (input) => authorize(input).pipe(Effect.catchTag("EffectDrizzleQueryError", rejectSqlError)),
       guarded: (input, operation) =>
         db
           .transaction(() => authorize(input).pipe(Effect.andThen(operation)))
-          .pipe(Effect.catchTag("SqlError", Effect.die)),
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       create: (input, createSession) =>
         db
           .transaction(() =>
@@ -124,7 +122,7 @@ const layer = Layer.effect(
                 .from(MemoryTidyRunTable)
                 .where(eq(MemoryTidyRunTable.request_id, input.requestID))
                 .get()
-                .pipe(Effect.orDie)
+
               if (previous) {
                 if (
                   previous.scope !== input.scope ||
@@ -140,12 +138,7 @@ const layer = Layer.effect(
               const id = randomUUID()
               const sessionID = SessionSchema.ID.create()
               if (
-                yield* db
-                  .select({ id: SessionTable.id })
-                  .from(SessionTable)
-                  .where(eq(SessionTable.id, sessionID))
-                  .get()
-                  .pipe(Effect.orDie)
+                yield* db.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
               )
                 return yield* new Rejected({ reason: "conflict" })
               // Host callback must create without prompting/waking: both projection and grant commit together.
@@ -166,13 +159,13 @@ const layer = Layer.effect(
                 })
                 .returning()
                 .get()
-                .pipe(Effect.orDie)
+
               if (!run) return yield* Effect.die("Memory tidy grant insert returned no row")
               yield* authorize({ sessionID, scope: input.scope, enabled: true })
               return run
             }),
           )
-          .pipe(Effect.catchTag("SqlError", Effect.die)),
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       reserve: (input) =>
         db
           .transaction(() =>
@@ -186,7 +179,6 @@ const layer = Layer.effect(
                   .from(MemoryTidyAttemptTable)
                   .where(eq(MemoryTidyAttemptTable.id, input.attemptID))
                   .get()
-                  .pipe(Effect.orDie)
               )
                 return yield* new Rejected({ reason: "duplicate" })
               const now = yield* Clock.currentTimeMillis
@@ -199,13 +191,9 @@ const layer = Layer.effect(
                   set: { token_limit: sql`min(${MemoryTidyDayTable.token_limit}, ${run.daily_limit})` },
                 })
                 .run()
-                .pipe(Effect.orDie)
-              const limit = yield* db
-                .select()
-                .from(MemoryTidyDayTable)
-                .where(eq(MemoryTidyDayTable.day, day))
-                .get()
-                .pipe(Effect.orDie)
+
+              const limit = yield* db.select().from(MemoryTidyDayTable).where(eq(MemoryTidyDayTable.day, day)).get()
+
               const total = yield* usage({ runID: run.id })
               const daily = yield* usage({ day })
               if (
@@ -224,10 +212,9 @@ const layer = Layer.effect(
                   time_created: now,
                 })
                 .run()
-                .pipe(Effect.orDie)
             }),
           )
-          .pipe(Effect.catchTag("SqlError", Effect.die)),
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       settle: (attemptID, actual) =>
         db
           .transaction(() =>
@@ -238,7 +225,7 @@ const layer = Layer.effect(
                 .from(MemoryTidyAttemptTable)
                 .where(eq(MemoryTidyAttemptTable.id, attemptID))
                 .get()
-                .pipe(Effect.orDie)
+
               if (!attempt) return yield* new Rejected({ reason: "missing" })
               if (attempt.actual !== null && attempt.actual !== actual)
                 return yield* new Rejected({ reason: "conflict" })
@@ -249,7 +236,7 @@ const layer = Layer.effect(
                 .set({ actual, time_settled: yield* Clock.currentTimeMillis })
                 .where(eq(MemoryTidyAttemptTable.id, attemptID))
                 .run()
-                .pipe(Effect.orDie)
+
               // Never conceal a provider report above its reservation, even after cancellation.
               if (exceeded)
                 yield* db
@@ -257,11 +244,11 @@ const layer = Layer.effect(
                   .set({ state: "failed", time_finished: yield* Clock.currentTimeMillis })
                   .where(eq(MemoryTidyRunTable.id, attempt.run_id))
                   .run()
-                  .pipe(Effect.orDie)
+
               return { exceeded }
             }),
           )
-          .pipe(Effect.catchTag("SqlError", Effect.die)),
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       finish: (id, state) =>
         db
           .transaction(() =>
@@ -277,12 +264,25 @@ const layer = Layer.effect(
                 .set({ state, time_finished: yield* Clock.currentTimeMillis })
                 .where(eq(MemoryTidyRunTable.id, id))
                 .run()
-                .pipe(Effect.orDie)
             }),
           )
-          .pipe(Effect.catchTag("SqlError", Effect.die)),
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
     })
   }),
 )
 
 export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node] })
+
+// A competing connection can invalidate a read snapshot before its first write.
+// Reject after rollback; never replay a host callback or a guarded mutation here.
+function rejectSqlError(error: SqlError | EffectDrizzleQueryError) {
+  const cause = isSqlError(error) ? Cause.fail(error) : error.cause
+  return Cause.isCause(cause) &&
+    cause.reasons.length > 0 &&
+    cause.reasons.every(
+      (reason) =>
+        Cause.isFailReason(reason) && isSqlError(reason.error) && reason.error.reason._tag === "LockTimeoutError",
+    )
+    ? Effect.fail(new Rejected({ reason: "busy" }))
+    : Effect.die(error)
+}

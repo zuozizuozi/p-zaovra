@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { and, eq } from "drizzle-orm"
-import { Clock, DateTime, Effect } from "effect"
+import { Cause, Clock, Context, DateTime, Effect, Exit, Layer } from "effect"
 import { adjust } from "effect/testing/TestClock"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "@zaovra-ai/core/database/database"
@@ -66,6 +66,117 @@ const host = Effect.gen(function* () {
 })
 const authority = (run: MemoryTidyStore.Run) => ({ sessionID: run.session_id, scope, enabled: true })
 
+for (const nested of [false, true])
+  test(`a stale reservation rolls back as busy and a fresh retry rechecks the budget: nested=${nested}`, async () => {
+    await using temporary = await tmpdir()
+    const open = () =>
+      AppNodeBuilder.build(
+        LayerNode.group([Database.node, MemoryTidyStore.node, EventV2.node, SessionProjector.node]),
+        [[Database.node, Database.layerFromPath(path.join(temporary.path, "conflict.sqlite"))]],
+      )
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const first = yield* Layer.build(open())
+        const second = yield* Layer.build(open())
+        const h = yield* host.pipe(Effect.provide(first))
+        const other = Context.get(second, MemoryTidyStore.Service)
+        expect(Context.get(first, Database.Service)).not.toBe(Context.get(second, Database.Service))
+        const run = yield* h.store.create(request, h.create)
+        const clock = yield* Clock.Clock
+        let interleavings = 0
+        let admitted = false
+        // Arrange a real second-connection commit after the first connection's
+        // authorization read. Keep SQL, transactions and wall time unchanged.
+        const scheduled = Object.create(clock, {
+          currentTimeMillis: {
+            value: Effect.promise(() => {
+              interleavings += 1
+              return Effect.runPromise(other.reserve({ ...authority(run), attemptID: "winner", tokens: 150 }))
+            }).pipe(Effect.andThen(clock.currentTimeMillis)),
+          },
+        })
+        const reserve = h.store.reserve({ ...authority(run), attemptID: "loser", tokens: 150 })
+        const attempt = nested
+          ? h.database.db.transaction(() => reserve).pipe(Effect.catchTag("SqlError", Effect.die))
+          : reserve
+        const result = yield* attempt.pipe(
+          Effect.provideService(Clock.Clock, scheduled),
+          Effect.tap(() =>
+            Effect.sync(() => {
+              admitted = true
+            }),
+          ),
+          Effect.exit,
+        )
+        expect(Exit.isFailure(result)).toBe(true)
+        if (Exit.isFailure(result)) {
+          expect(Cause.hasDies(result.cause)).toBe(false)
+          expect(Cause.findErrorOption(result.cause)).toMatchObject({ value: { reason: "busy" } })
+        }
+        expect(admitted).toBe(false)
+        expect(interleavings).toBe(1)
+        expect(yield* h.store.usage({ runID: run.id })).toEqual({ known: 0, reserved: 150, charged: 150, unknown: 1 })
+        expect((yield* reserve.pipe(Effect.flip)).reason).toBe("limit")
+        // The rejected attempt has no row and its ID is safe to use on a fresh request.
+        yield* h.store.reserve({ ...authority(run), attemptID: "loser", tokens: 50 })
+        expect((yield* h.store.usage({ runID: run.id })).charged).toBe(200)
+        yield* other.finish(run.id, "cancelled")
+        expect(
+          (yield* h.store.reserve({ ...authority(run), attemptID: "after-cancel", tokens: 1 }).pipe(Effect.flip))
+            .reason,
+        ).toBe("unauthorized")
+      }).pipe(Effect.scoped),
+    )
+  })
+
+test("a settlement conflict retains unknown usage until an explicit successful settlement", async () => {
+  await using temporary = await tmpdir()
+  const open = () =>
+    AppNodeBuilder.build(LayerNode.group([Database.node, MemoryTidyStore.node, EventV2.node, SessionProjector.node]), [
+      [Database.node, Database.layerFromPath(path.join(temporary.path, "settlement.sqlite"))],
+    ])
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const first = yield* Layer.build(open())
+      const second = yield* Layer.build(open())
+      const h = yield* host.pipe(Effect.provide(first))
+      const other = Context.get(second, MemoryTidyStore.Service)
+      const run = yield* h.store.create(request, h.create)
+      yield* h.store.reserve({ ...authority(run), attemptID: "late", tokens: 150 })
+      const clock = yield* Clock.Clock
+      const scheduled = Object.create(clock, {
+        currentTimeMillis: {
+          value: Effect.promise(() => Effect.runPromise(other.finish(run.id, "cancelled"))).pipe(
+            Effect.andThen(clock.currentTimeMillis),
+          ),
+        },
+      })
+      const result = yield* h.store.settle("late", 30).pipe(Effect.provideService(Clock.Clock, scheduled), Effect.flip)
+      expect(result.reason).toBe("busy")
+      expect(yield* h.store.usage({ runID: run.id })).toEqual({ known: 0, reserved: 150, charged: 150, unknown: 1 })
+      expect(yield* h.store.settle("late", 30)).toEqual({ exceeded: false })
+      expect(yield* h.store.usage({ runID: run.id })).toEqual({ known: 30, reserved: 0, charged: 30, unknown: 0 })
+      expect((yield* h.store.get(run.id))?.state).toBe("cancelled")
+    }).pipe(Effect.scoped),
+  )
+})
+
+it.effect("non-lock database defects remain visible rather than becoming busy", () =>
+  Effect.gen(function* () {
+    const h = yield* host
+    const run = yield* h.store.create(request, h.create)
+    yield* h.database.db.run("drop table memory_tidy_attempt").pipe(Effect.orDie)
+    const result = yield* h.store
+      .reserve({ ...authority(run), attemptID: "broken-schema", tokens: 1 })
+      .pipe(Effect.exit)
+    expect(Exit.isFailure(result)).toBe(true)
+    if (Exit.isFailure(result)) {
+      expect(Cause.hasDies(result.cause)).toBe(true)
+      expect(Cause.hasFails(result.cause)).toBe(false)
+    }
+  }),
+)
+
 test("SessionV2.create and a grant share the real host transaction", async () => {
   await using temporary = await tmpdir()
   await Effect.runPromise(
@@ -82,7 +193,10 @@ test("SessionV2.create and a grant share the real host transaction", async () =>
           })
           .pipe(Effect.asVoid),
       )
-      expect((yield* sessions.get(run.session_id)).model).toEqual({ ...model, variant: ModelV2.VariantID.make("default") })
+      expect((yield* sessions.get(run.session_id)).model).toEqual({
+        ...model,
+        variant: ModelV2.VariantID.make("default"),
+      })
       expect((yield* store.authorize(authority(run))).id).toBe(run.id)
       yield* sessions.remove(run.session_id)
       expect((yield* store.get(run.id))?.state).toBe("cancelled")
