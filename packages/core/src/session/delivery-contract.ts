@@ -111,6 +111,74 @@ export function gaps(
   ]
 }
 
+/** Decide from already observed evidence and pricing; the runner owns effects and receipt timing. */
+export function decide(input: {
+  observed: boolean
+  outcomeUnknown?: boolean
+  pending: boolean
+  turns: number
+  toolCalls: number
+  reviewing: boolean
+  reported: boolean
+  unreported: number
+  previousUnreported: number
+  output: number
+  needsContinuation: boolean
+  hard: readonly string[]
+  missing: readonly string[]
+  spent: number
+  allowance: number
+}) {
+  const report = input.reviewing && !input.hard.length
+  const continuing =
+    input.observed &&
+    !input.outcomeUnknown &&
+    !input.pending &&
+    input.turns < budget.turns &&
+    input.toolCalls < budget.tools &&
+    (!input.reviewing || input.unreported <= input.previousUnreported) &&
+    input.output >= 256 &&
+    (!input.reviewing || !input.reported) &&
+    (input.hard.length > 0 || (input.reviewing && input.needsContinuation))
+  const accountingUnknown = input.reviewing && input.unreported > input.previousUnreported
+  const overBudget = input.spent > input.allowance
+  const exhausted = input.turns >= budget.turns || input.toolCalls >= budget.tools || input.output < 256
+  const reason = !input.observed
+    ? "host inspection budget exhausted"
+    : input.pending
+      ? "unfinished background jobs; no retry"
+      : input.outcomeUnknown
+        ? "unknown effects; no retry"
+        : accountingUnknown
+          ? "unknown repair usage; no further allowance"
+          : overBudget
+            ? "reported repair usage exceeded estimated allowance; no further requests"
+            : exhausted && (input.hard.length || input.needsContinuation)
+              ? "repair budget exhausted"
+              : report
+                ? "deterministic hard gaps closed; report remaining scope"
+                : continuing
+                  ? "one bounded local repair cycle"
+                  : "repair budget exhausted or usage unavailable"
+  return {
+    continuing,
+    decision: continuing
+      ? ("repair" as const)
+      : input.hard.length || accountingUnknown || overBudget || !input.observed
+        ? ("unverified" as const)
+        : ("finished" as const),
+    missing: [
+      ...new Set([...input.hard, ...input.missing]),
+      ...(!input.observed ? ["unverified: host inspection budget exhausted"] : []),
+      ...(accountingUnknown ? ["unverified: repair usage unavailable; allowance remains consumed"] : []),
+      ...(overBudget ? ["unverified: actual repair usage exceeded admission estimate"] : []),
+      ...(!continuing && input.hard.length ? ["unverified: bounded repair ended; " + reason] : []),
+    ],
+    reason,
+    report,
+  }
+}
+
 export const repairTools = new Set([
   "read",
   "write",

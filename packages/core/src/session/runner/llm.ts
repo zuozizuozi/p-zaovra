@@ -2266,40 +2266,23 @@ const layer = Layer.effect(
                   current.cacheRead,
                   { system: baseRequest.system, messages: baseRequest.messages, tools: baseRequest.tools },
                 )
-                const report = deliveryReview && !hard.length
-                const continuing =
-                  Option.isSome(observation) &&
-                  !outcome.outcomeUnknown &&
-                  !pending &&
-                  turns < DeliveryContract.budget.turns &&
-                  toolCalls < DeliveryContract.budget.tools &&
-                  (!deliveryReview || current.unreported <= usage.unreported) &&
-                  estimate.output >= 256 &&
-                  (!deliveryReview || !deliveryReport) &&
-                  (hard.length > 0 || (deliveryReview && needsContinuation))
-                const accountingUnknown = deliveryReview && current.unreported > usage.unreported
-                const overBudget = spent > allowance
-                const exhausted =
-                  turns >= DeliveryContract.budget.turns ||
-                  toolCalls >= DeliveryContract.budget.tools ||
-                  estimate.output < 256
-                const reason = Option.isNone(observation)
-                  ? "host inspection budget exhausted"
-                  : pending
-                    ? "unfinished background jobs; no retry"
-                    : outcome.outcomeUnknown
-                      ? "unknown effects; no retry"
-                      : accountingUnknown
-                        ? "unknown repair usage; no further allowance"
-                        : overBudget
-                          ? "reported repair usage exceeded estimated allowance; no further requests"
-                          : exhausted && (hard.length || needsContinuation)
-                            ? "repair budget exhausted"
-                            : report
-                              ? "deterministic hard gaps closed; report remaining scope"
-                              : continuing
-                                ? "one bounded local repair cycle"
-                                : "repair budget exhausted or usage unavailable"
+                const decision = DeliveryContract.decide({
+                  observed: Option.isSome(observation),
+                  outcomeUnknown: outcome.outcomeUnknown,
+                  pending,
+                  turns,
+                  toolCalls,
+                  reviewing: deliveryReview,
+                  reported: deliveryReport,
+                  unreported: current.unreported,
+                  previousUnreported: usage.unreported,
+                  output: estimate.output,
+                  needsContinuation,
+                  hard,
+                  missing: outcome.missing,
+                  spent,
+                  allowance,
+                })
                 yield* events.publish(SessionEvent.Synthetic, {
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
@@ -2310,24 +2293,12 @@ const layer = Layer.effect(
                       request: requirements.sourceMessageID,
                       started: deliveryReceipt?.started ?? (yield* Clock.currentTimeMillis),
                       tokens: estimate.output,
-                      decision: continuing
-                        ? "repair"
-                        : hard.length || accountingUnknown || overBudget || Option.isNone(observation)
-                          ? "unverified"
-                          : "finished",
-                      missing: [
-                        ...new Set([...hard, ...outcome.missing]),
-                        ...(Option.isNone(observation) ? ["unverified: host inspection budget exhausted"] : []),
-                        ...(accountingUnknown
-                          ? ["unverified: repair usage unavailable; allowance remains consumed"]
-                          : []),
-                        ...(overBudget ? ["unverified: actual repair usage exceeded admission estimate"] : []),
-                        ...(!continuing && hard.length ? ["unverified: bounded repair ended; " + reason] : []),
-                      ],
-                      reason,
+                      decision: decision.decision,
+                      missing: decision.missing,
+                      reason: decision.reason,
                       turns,
                       toolCalls,
-                      report,
+                      report: decision.report,
                       allowance,
                       spent,
                       cacheRead: current.cacheRead,
@@ -2336,7 +2307,7 @@ const layer = Layer.effect(
                       costs: deliveryReceipt?.costs ?? model.pricing?.cost ?? [],
                     }),
                 })
-                needsContinuation = continuing
+                needsContinuation = decision.continuing
               }
             }
           }

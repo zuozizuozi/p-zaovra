@@ -732,6 +732,18 @@ for (const value of [undefined, "on", "off", "invalid"])
         expect(receipt?.turns).toBe(DeliveryContract.budget.turns)
         expect(receipt?.spent).toBeLessThanOrEqual(receipt!.allowance!)
         for (const request of requests.slice(1)) expect(request.generation?.maxTokens).toBeLessThanOrEqual(1024)
+        const requirements = SessionOutcome.requested(history)
+        const receipts = history.flatMap((message) => {
+          if (message.type !== "synthetic" || !message.text.startsWith(DeliveryContract.prefix)) return []
+          return [
+            message.text
+              .replace(JSON.stringify(requirements.sourceMessageID), '"request"')
+              .replace(/"started":\d+/, '"started":0')
+              .replace(/"id":"msg_[^"]+"/g, '"id":"message"'),
+          ]
+        })
+        // Freeze the actual runner's serialized receipts before extracting its decision.
+        expect(receipts).toMatchSnapshot()
       }
     }),
   )
