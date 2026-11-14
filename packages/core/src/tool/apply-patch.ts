@@ -20,9 +20,20 @@ import { safetyFailure } from "./safety-failure"
 
 export const name = "apply_patch"
 
+const format = [
+  "Use this custom patch format, not a unified diff. Send the patch itself as patchText, without Markdown fences.",
+  "Start with *** Begin Patch and finish with *** End Patch. Between them use *** Add File: path, *** Update File: path, or *** Delete File: path.",
+  "For Add, prefix each content line with +. Delete has no content lines.",
+  "For Update, start each chunk with @@ on its own line, or @@ followed by literal existing context text (not unified-diff line numbers). Prefix each content line with + to insert, - to remove, or one space to keep unchanged context. Prefix blank lines too. Use the current file's text for removed/context lines.",
+].join("\n")
+
+const example =
+  "*** Begin Patch\n*** Add File: new.txt\n+hello\n*** Update File: existing.txt\n@@\n keep\n-before\n+after\n*** Delete File: obsolete.txt\n*** End Patch"
+
 export const Input = Schema.Struct({
   patchText: Schema.String.annotate({
-    description: "The full patch text describing add, update, and delete operations",
+    description:
+      "Custom patch text: *** Begin Patch, Add/Update/Delete File sections, then *** End Patch. Update chunks start with @@; content lines start with +, -, or a space. Add content lines start with +. See the tool description for a complete example.",
   }),
 })
 
@@ -91,7 +102,8 @@ const layer = Layer.effectDiscard(
         [name]: Tool.withPermission(
           Tool.make({
             description:
-              "Apply one patch containing add, update, and delete file operations. All targets are resolved and approved before target contents are read. All updates must pass strict UTF-8 preflight before any file is written; do not automatically transcode invalid input. Preserve untouched lines byte-for-byte, including mixed LF/CRLF, and inherit local line endings for changed lines. Operations apply sequentially; if a later operation fails, earlier operations remain applied and the failure reports them explicitly. Moves and atomic rollback are not supported yet.",
+              "Apply one patch containing add, update, and delete file operations. All targets are resolved and approved before target contents are read. All updates must pass strict UTF-8 preflight before any file is written; do not automatically transcode invalid input. Preserve untouched lines byte-for-byte, including mixed LF/CRLF, and inherit local line endings for changed lines. Operations apply sequentially; if a later operation fails, earlier operations remain applied and the failure reports them explicitly. Moves and atomic rollback are not supported yet." +
+              `\n\n${format}\n\nExample (existing.txt contains keep then before; obsolete.txt exists):\n\`\`\`patch\n${example}\n\`\`\``,
             input: Input,
             output: Output,
             toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
@@ -119,12 +131,21 @@ const layer = Layer.effectDiscard(
                   messageID: context.assistantMessageID,
                   callID: context.toolCallID,
                 }
-                if (!input.patchText.trim()) return yield* new ToolFailure({ message: "patchText is required" })
+                if (!input.patchText.trim())
+                  return yield* new ToolFailure({
+                    message: `patchText is required. No patch operations were applied.\n${format}`,
+                  })
                 const hunks = yield* Effect.try({
                   try: () => Patch.parse(input.patchText),
-                  catch: (cause) => new ToolFailure({ message: `apply_patch verification failed: ${String(cause)}` }),
+                  catch: (cause) =>
+                    new ToolFailure({
+                      message: `apply_patch verification failed: ${String(cause)}\nNo patch operations were applied.\n${format}`,
+                    }),
                 })
-                if (hunks.length === 0) return yield* new ToolFailure({ message: "patch rejected: empty patch" })
+                if (hunks.length === 0)
+                  return yield* new ToolFailure({
+                    message: `patch rejected: empty patch. No patch operations were applied.\n${format}`,
+                  })
                 const move = hunks.find((hunk) => hunk.type === "update" && hunk.movePath !== undefined)
                 if (move) return yield* new ToolFailure({ message: "apply_patch moves are not supported yet" })
 

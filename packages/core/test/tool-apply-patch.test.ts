@@ -132,6 +132,124 @@ const exists = (target: string) =>
 const it = testEffect(Layer.empty)
 
 describe("ApplyPatchTool", () => {
+  it.live("format help reaches the real definition and its example executes", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return Effect.promise(() =>
+          Promise.all([
+            fs.writeFile(path.join(tmp.path, "existing.txt"), "keep\nbefore\n"),
+            fs.writeFile(path.join(tmp.path, "obsolete.txt"), "obsolete\n"),
+          ]),
+        ).pipe(
+          Effect.andThen(
+            withTool(tmp.path, (registry) =>
+              Effect.gen(function* () {
+                const definition = (yield* toolDefinitions(registry))[0]!
+                expect(definition.description).toContain("*** Begin Patch")
+                expect(definition.description).toContain("not unified-diff line numbers")
+                expect(definition.description).toContain("strict UTF-8 preflight")
+                expect(definition.description).toContain("earlier operations remain applied")
+                expect(JSON.stringify(definition.inputSchema)).toContain("@@")
+                expect(JSON.stringify(definition.inputSchema)).toContain("*** End Patch")
+                const example = definition.description.match(/```patch\n([\s\S]*?)\n```/)?.[1]
+                expect(example).toBeDefined()
+                const result = yield* executeTool(registry, call(example!))
+                expect(result).toMatchObject({ type: "text" })
+                expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "new.txt"), "utf8"))).toBe("hello\n")
+                expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "existing.txt"), "utf8"))).toBe(
+                  "keep\nafter\n",
+                )
+                expect(yield* exists(path.join(tmp.path, "obsolete.txt"))).toBe(false)
+                expect(readsBeforeEditApproval).toBe(0)
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  for (const [patch, originalError] of [
+    ["", "patchText is required"],
+    ["*** Begin Patch\n*** End Patch", "patch rejected: empty patch"],
+    ["before\nafter", "Invalid patch format"],
+    ["*** Update File: existing.txt\n-before\n+after", "Invalid update file line"],
+    ["*** Begin Patch\n*** Add File: new.txt\nhello\n*** End Patch", "Invalid add file line"],
+    [
+      "*** Begin Patch\n*** Add File: new.txt\n+hello\n*** Update File: existing.txt\n@@\nbefore\n+after\n*** End Patch",
+      "Invalid update chunk line",
+    ],
+  ])
+    it.live(`format help corrects syntax before any side effect: ${originalError}`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          return Effect.promise(() => fs.writeFile(path.join(tmp.path, "existing.txt"), "before\n")).pipe(
+            Effect.andThen(
+              withTool(tmp.path, (registry) =>
+                Effect.gen(function* () {
+                  const result = yield* executeTool(registry, call(patch!))
+                  expect(result).toMatchObject({ type: "error" })
+                  expect(JSON.stringify(result)).toContain(originalError!)
+                  expect(JSON.stringify(result)).toContain("No patch operations were applied.")
+                  expect(JSON.stringify(result)).toContain("@@")
+                  expect(JSON.stringify(result)).toContain("each content line")
+                  expect(assertions).toEqual([])
+                  expect(yield* exists(path.join(tmp.path, "new.txt"))).toBe(false)
+                  expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "existing.txt"), "utf8"))).toBe(
+                    "before\n",
+                  )
+                }),
+              ),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+
+  it.live("format help leaves literal anchors and matching failures unchanged", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return Effect.promise(() => fs.writeFile(path.join(tmp.path, "existing.txt"), "anchor\nbefore\n")).pipe(
+          Effect.andThen(
+            withTool(tmp.path, (registry) =>
+              Effect.gen(function* () {
+                expect(
+                  yield* executeTool(
+                    registry,
+                    call("*** Begin Patch\n*** Update File: existing.txt\n@@ anchor\n-before\n+after\n*** End Patch"),
+                  ),
+                ).toMatchObject({ type: "text" })
+                expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "existing.txt"), "utf8"))).toBe(
+                  "anchor\nafter\n",
+                )
+                expect(
+                  yield* executeTool(
+                    registry,
+                    call(
+                      "*** Begin Patch\n*** Update File: existing.txt\n@@ -1,1 +1,1 @@\n-after\n+wrong\n*** End Patch",
+                    ),
+                  ),
+                ).toEqual({ type: "error", value: "Patch did not match existing.txt. Read the file before retrying." })
+                expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "existing.txt"), "utf8"))).toBe(
+                  "anchor\nafter\n",
+                )
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and sequentially applies add, update, and delete hunks", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
