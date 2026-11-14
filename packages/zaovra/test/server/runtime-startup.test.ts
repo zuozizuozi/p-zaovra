@@ -30,7 +30,7 @@ for (const order of ["runtime-first", "http-first"]) {
         new Response(child.stderr).text(),
       ])
       expect({ code, output: stdout + stderr }).toEqual({ code: 0, output: expect.any(String) })
-      expect(stderr).toContain("15 pass")
+      expect(stderr).toContain("17 pass")
       expect(stderr).toContain("0 fail")
       expect(stdout).toContain("shared-runtime-identity-ok")
     } finally {
