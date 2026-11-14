@@ -1,5 +1,6 @@
 import path from "node:path"
 import { connect } from "node:net"
+import fs from "node:fs/promises"
 
 const server = Bun.serve({
   hostname: process.env.ZAOVRA_FIXTURE_HOST ?? "127.0.0.1",
@@ -8,7 +9,7 @@ const server = Bun.serve({
 })
 const port = server.port!
 if (process.argv[3] !== "git") {
-  await Bun.write(process.argv[2], JSON.stringify({ pid: process.pid, port }))
+  await publish({ pid: process.pid, port })
 }
 if (process.argv[3] === "git") {
   server.stop(true)
@@ -50,6 +51,18 @@ if (process.argv[3] === "git") {
     }
     await Bun.sleep(10)
   }
-  await Bun.write(process.argv[2], JSON.stringify({ pid: process.pid, childPid: daemon.pid, port }))
+  await publish({ pid: process.pid, childPid: daemon.pid, port })
   await daemon.exited
+}
+
+async function publish(value: { pid: number; childPid?: number; port: number }) {
+  const ready = process.argv[2]
+  const temporary = `${ready}.${process.pid}.pending`
+  try {
+    await Bun.write(temporary, JSON.stringify(value))
+    // Consumers wait for existence, so only expose the complete document.
+    await fs.rename(temporary, ready)
+  } finally {
+    await fs.rm(temporary, { force: true })
+  }
 }
