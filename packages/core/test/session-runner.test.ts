@@ -6991,6 +6991,15 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(3)
       expect(JSON.stringify(requests[2]!.messages)).toContain("Verification closing review:")
+      expect(
+        closingSnapshot(
+          (yield* session.context(sessionID)).flatMap((message) =>
+            message.type === "synthetic" && message.text.startsWith("Verification closing review:")
+              ? [message.text]
+              : [],
+          ),
+        ),
+      ).toMatchSnapshot()
       expect(JSON.stringify(requests[2]!.messages)).toContain("empty/minimum values")
       expect(JSON.stringify(requests[2]!.messages)).toContain("Current host verification evidence")
       expect(yield* session.outcome(sessionID)).toMatchObject({ state: "completed_unverified" })
@@ -11104,6 +11113,14 @@ it.live("Q3 Q5 evidence review is bounded without new evidence and names indepen
       .where(eq(EventTable.type, "session.next.quality.progress.1"))
       .all()
       .pipe(Effect.orDie)
+    expect(
+      closingSnapshot({
+        prompts: (yield* session.context(sessionID)).flatMap((message) =>
+          message.type === "synthetic" && message.text.startsWith("Verification closing review:") ? [message.text] : [],
+        ),
+        records: rows.filter((row) => row.data.category === "closing").map((row) => row.data.details),
+      }),
+    ).toMatchSnapshot()
     expect(rows.some((row) => row.data.category === "continuation")).toBe(true)
     expect(rows.some((row) => row.data.category === "closing")).toBe(true)
     expect(JSON.stringify(yield* session.context(sessionID))).not.toContain('"category":"continuation"')
@@ -11534,6 +11551,7 @@ it.live("K2 a new failure reminder omits gaps already explained on an earlier cl
       .filter((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
       .at(-1)
     expect(JSON.stringify(last)).toContain("failed")
+    expect(closingSnapshot(last?.type === "synthetic" ? last.text : undefined)).toMatchSnapshot()
     expect(JSON.stringify(last)).not.toContain("requirements review:")
     expect((yield* session.outcome(sessionID)).state).toBe("failed")
   }),
@@ -12305,3 +12323,15 @@ it.effect("221 persists each renewed provider deadline before another explicit r
     expect(yield* receipts).toEqual(third)
   }),
 )
+
+// Normalize only generated message identities and content-derived keys; preserve
+// repeated-key relationships, payload field order and the complete host wording.
+function closingSnapshot(value: unknown) {
+  const hashes = new Map<string, string>()
+  return JSON.stringify(value)
+    .replace(/msg_[a-zA-Z0-9]+/g, "message")
+    .replace(/[a-f0-9]{64}/g, (hash) => {
+      if (!hashes.has(hash)) hashes.set(hash, `hash-${hashes.size}`)
+      return hashes.get(hash)!
+    })
+}
