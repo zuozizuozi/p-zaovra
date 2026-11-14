@@ -8,6 +8,56 @@ import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 import { it, pollWithTimeout } from "../lib/effect"
 import { waitGlobalBusEvent } from "./global-bus"
 import { Global } from "@zaovra-ai/core/global"
+import { PermissionV2 } from "@zaovra-ai/core/permission"
+
+for (const permission of [
+  { "*": "allow", external_directory: "deny" },
+  { external_directory: "deny", "*": "allow" },
+] as const) {
+  it.live(`global config preserves authored permission priority ${Object.keys(permission).join(" then ")}`, () =>
+    Effect.gen(function* () {
+      const file = Bun.file(path.join(Global.Path.config, "zaovra.jsonc"))
+      const before = yield* Effect.promise(async () => ((await file.exists()) ? file.text() : undefined))
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await (before === undefined ? file.delete() : Bun.write(file, before))
+          await app().request("/global/dispose", { method: "POST" })
+        }),
+      )
+      yield* Effect.promise(() => Bun.write(file, "{}"))
+      const update = yield* Effect.promise(() =>
+        Promise.resolve(
+          app().request("/global/config", {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ permission, agent: { build: { permission } } }),
+          }),
+        ),
+      )
+      expect(update.status).toBe(200)
+      const saved = yield* Effect.promise(async () => JSON.parse(await Bun.file(file.name!).text()))
+      expect(Object.keys(saved.permission)).toEqual(Object.keys(permission))
+      expect(Object.keys(saved.agent.build.permission)).toEqual(Object.keys(permission))
+      const response = yield* Effect.promise(() => update.json())
+      expect(Object.keys(response.permission)).toEqual(Object.keys(permission))
+      expect(Object.keys(response.agent.build.permission)).toEqual(Object.keys(permission))
+      const read = yield* Effect.promise(() => Promise.resolve(app().request("/global/config")))
+      const reread = yield* Effect.promise(() => read.json())
+      expect(Object.keys(reread.permission)).toEqual(Object.keys(permission))
+      expect(Object.keys(reread.agent.build.permission)).toEqual(Object.keys(permission))
+      const directory = yield* tmpdirEffect({})
+      const agents = yield* Effect.promise(() =>
+        Promise.resolve(app().request(`/api/agent?location[directory]=${encodeURIComponent(directory.path)}`)),
+      )
+      expect(agents.status).toBe(200)
+      const data = yield* Effect.promise(() => agents.json())
+      const build = data.data.find((agent: { id: string }) => agent.id === "build")
+      expect(PermissionV2.evaluate("external_directory", "*", build.permissions).effect).toBe(
+        Object.values(permission).at(-1)!,
+      )
+    }),
+  )
+}
 
 it.live("new global custom provider resolves on cold locations and retains key setup after disposal", () =>
   Effect.gen(function* () {
