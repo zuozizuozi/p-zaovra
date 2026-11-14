@@ -66,3 +66,21 @@ describe("Patch", () => {
     )
   })
 })
+
+describe("patch envelope", () => {
+  const body = ["*** Update File: a.txt", "@@", "-old", "+new", "*** Add File: b.txt", "+hello"]
+  const whole = Patch.parse(["*** Begin Patch", ...body, "*** End Patch"].join("\n"))
+
+  test("a patch that starts with a file operation reads the same without its markers", () => {
+    expect(whole).toHaveLength(2)
+    expect(Patch.parse(body.join("\n"))).toEqual(whole)
+    expect(Patch.parse(["*** Begin Patch", ...body].join("\n"))).toEqual(whole)
+    expect(Patch.parse([...body, "*** End Patch"].join("\n"))).toEqual(whole)
+  })
+
+  test("text that does not start with a file operation is refused, with the format spelled out", () => {
+    expect(() => Patch.parse("-old\n+new")).toThrow("*** Update File: <path>")
+    expect(() => Patch.parse("here is the patch\n*** Update File: a.txt\n@@\n-old\n+new")).toThrow("Invalid patch format")
+    expect(() => Patch.parse("")).toThrow("Invalid patch format")
+  })
+})

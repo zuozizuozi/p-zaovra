@@ -26,9 +26,19 @@ export interface FileUpdate {
 
 export function parse(patchText: string): ReadonlyArray<Hunk> {
   const lines = stripHeredoc(patchText.trim()).split("\n")
-  const begin = lines.findIndex((line) => line.trim() === "*** Begin Patch")
-  const end = lines.findIndex((line) => line.trim() === "*** End Patch")
-  if (begin === -1 || end === -1 || begin >= end) throw new Error("Invalid patch format: missing Begin/End markers")
+  const opening = lines.findIndex((line) => line.trim() === "*** Begin Patch")
+  const closing = lines.findIndex((line) => line.trim() === "*** End Patch")
+  // The envelope carries no information, and models leave one or both markers off about one time
+  // in four. A patch that starts with a file operation reads the same without them; anything
+  // else is still refused rather than guessed at.
+  const first = lines.findIndex((line) => line.trim() !== "")
+  const begin =
+    opening !== -1 ? opening : first !== -1 && /^\*\*\* (?:Add|Update|Delete) File:/.test(lines[first]!) ? first - 1 : -2
+  const end = closing === -1 ? lines.length : closing
+  if (begin === -2 || begin >= end)
+    throw new Error(
+      "Invalid patch format. Expected: *** Begin Patch, then one or more sections starting with *** Add File: <path>, *** Update File: <path> or *** Delete File: <path>, then *** End Patch",
+    )
 
   const hunks: Hunk[] = []
   let index = begin + 1
