@@ -40,6 +40,7 @@ const PROTOCOL_BODY_OVERLAY_DENYLIST = new Set([
   "maxTokens",
   "max_tokens",
   "max_completion_tokens",
+  "max_output_tokens",
   "messages",
   "model",
   "presencePenalty",
