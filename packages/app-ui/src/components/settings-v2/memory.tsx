@@ -41,6 +41,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     text: "",
     draft: { project: "", user: "" },
     confirming: undefined as Layer | undefined,
+    tidying: undefined as "starting" | "started" | "failed" | undefined,
   })
   const reload = (layer: Layer) => (layer === "project" ? projectActions.refetch() : userActions.refetch())
 
@@ -64,6 +65,20 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     await memory().create({ location: location(), layer, kind: "preference", text }, { throwOnError: true })
     setState("draft", layer, "")
     await reload(layer)
+  }
+  // Tidying is an ordinary conversation with a fixed request and a token ceiling, so what it
+  // did and what it cost are visible like any other conversation.
+  const tidy = async () => {
+    setState("tidying", "starting")
+    const client = serverSdk().client.v2.session
+    const created = await client
+      .create({ location: location(), budget: { tokens: 300_000 } }, { throwOnError: true })
+      .then((result) => result.data.data)
+    await client.prompt(
+      { sessionID: created.id, prompt: { text: language.t("settings.memory.tidy.prompt") } },
+      { throwOnError: true },
+    )
+    setState("tidying", "started")
   }
   const clear = async (layer: Layer) => {
     await memory().clear({ location: location(), layer }, { throwOnError: true })
@@ -207,6 +222,30 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           </SettingsRowV2>
         </SettingsListV2>
         <Show when={directory()}>{section("project", project)}</Show>
+        <Show when={directory() && (project()?.length ?? 0) > 0}>
+          <SettingsListV2>
+            <SettingsRowV2
+              title={language.t("settings.memory.tidy.title")}
+              description={language.t(
+                state.tidying === "started"
+                  ? "settings.memory.tidy.started"
+                  : state.tidying === "failed"
+                    ? "settings.memory.tidy.failed"
+                    : "settings.memory.tidy.description",
+              )}
+            >
+              <div data-action="settings-memory-tidy">
+                <ButtonV2
+                  variant="neutral"
+                  disabled={state.tidying === "starting" || state.tidying === "started"}
+                  onClick={() => void tidy().catch(() => setState("tidying", "failed"))}
+                >
+                  {language.t("settings.memory.tidy.action")}
+                </ButtonV2>
+              </div>
+            </SettingsRowV2>
+          </SettingsListV2>
+        </Show>
         {section("user", user)}
       </div>
     </>

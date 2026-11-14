@@ -194,9 +194,9 @@ test("541 search for the file activates search capabilities rather than generic 
       const output = (yield* search(registry, sessionID, { query: "search for the file" })).output
         ?.structured as SearchOutput
       expect(output.activated).toContain("grep")
-      expect(output.activated.length).toBeLessThanOrEqual(6)
+      expect(output.activated.length).toBeLessThanOrEqual(7)
       for (const name of output.activated)
-        expect(["evidence_read", "evidence_search", "glob", "grep", "memory_search", "websearch"]).toContain(name)
+        expect(["evidence_read", "evidence_search", "glob", "grep", "memory_review", "memory_search", "websearch"]).toContain(name)
       for (const name of ["bash", "read", "write", "edit", "task", "question", "skill"])
         expect(output.activated).not.toContain(name)
     }),

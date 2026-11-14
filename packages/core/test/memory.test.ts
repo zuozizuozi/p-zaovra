@@ -130,6 +130,81 @@ describe("memory store", () => {
     }),
   )
 
+  it.live("a review checks, retires and merges notes but leaves the user's own alone", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const store = yield* MemoryStore.Service
+      yield* store.clear(project)
+      const guess = yield* store.write({
+        scope: project,
+        kind: "pitfall",
+        text: "构建前要设 BUILD_TARGET",
+        origin: "model",
+        status: "unverified",
+      })
+      const old = yield* store.write({
+        scope: project,
+        kind: "practice",
+        text: "发布脚本是 scripts/release.js",
+        origin: "model",
+        status: "verified",
+      })
+      const twin = yield* store.write({
+        scope: project,
+        kind: "pitfall",
+        text: "不设 BUILD_TARGET 构建会失败",
+        origin: "model",
+        status: "unverified",
+      })
+      const mine = yield* store.write({
+        scope: project,
+        kind: "preference",
+        text: "用 pnpm",
+        origin: "user",
+        status: "verified",
+      })
+      const applied = yield* store.review(project, [
+        { id: guess!.id, action: "verify", basis: "docs/build.md 写明；不设时 node build.js 退出码 2" },
+        { id: old!.id, action: "stale", basis: "scripts/release.js 已不存在，现在是 scripts/publish.js" },
+        {
+          id: twin!.id,
+          action: "merge",
+          into: guess!.id,
+          text: "构建前要设 BUILD_TARGET=web，否则 node build.js 失败",
+          basis: "两条说的是同一件事",
+        },
+        { id: mine!.id, action: "stale", basis: "想当然" },
+        { id: guess!.id, action: "stale", basis: " " },
+        { id: Memory.ID.make("mem_missing"), action: "verify", basis: "x" },
+      ])
+      expect(applied.map((item) => item.result)).toEqual([
+        "verified",
+        "marked out of date",
+        `merged into ${guess!.id}`,
+        "refused: written by the user; only the user changes it",
+        "refused: say what the decision rests on",
+        "not found in this project",
+      ])
+      const notes = yield* store.list(project)
+      expect(notes.map((note) => [note.text, note.status]).toSorted()).toEqual([
+        ["发布脚本是 scripts/release.js", "stale"],
+        ["构建前要设 BUILD_TARGET=web，否则 node build.js 失败", "verified"],
+        ["用 pnpm", "verified"],
+      ])
+      // The merged duplicate is not written again as a separate note.
+      expect(
+        yield* store.write({
+          scope: project,
+          kind: "pitfall",
+          text: "不设 BUILD_TARGET 构建会失败",
+          origin: "model",
+          status: "unverified",
+        }),
+      ).toBeUndefined()
+      yield* store.clear(project)
+    }),
+  )
+
   it.live("a deleted note stays deleted, keeps no text, and is not recorded again", () =>
     Effect.gen(function* () {
       yield* setup

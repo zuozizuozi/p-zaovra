@@ -2,6 +2,7 @@ export * as MemoryTool from "./memory"
 
 import { Effect, Layer, Schema } from "effect"
 import { Config } from "../config"
+import { Memory } from "@zaovra-ai/schema/memory"
 import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
 import { MemoryStore } from "../memory/store"
@@ -99,6 +100,70 @@ const layer = Layer.effectDiscard(
               return note
                 ? { kept: true }
                 : { kept: false, reason: "The user deleted this note before; it stays deleted." }
+            }),
+        }),
+      })
+      .pipe(Effect.orDie)
+    yield* tools
+      .register({
+        memory_review: Tool.make({
+          description:
+            "Go back over this project's kept notes. Call it with no decisions to list every note with its id. Then check notes against the workspace and earlier conversations and call it again with decisions: verify (you confirmed it still holds, say how), stale (the workspace now contradicts it, say what you saw), merge (it repeats another note; give the note that stays and optionally wording that covers both). Only use this when the user asks for memory to be tidied. Notes the user wrote cannot be changed here, and nothing is deleted outright.",
+          input: Schema.Struct({
+            decisions: Schema.optional(
+              Schema.Array(
+                Schema.Struct({
+                  id: Schema.String,
+                  action: Schema.Literals(["verify", "stale", "merge"]),
+                  into: Schema.optional(Schema.String),
+                  text: Schema.optional(Schema.String),
+                  basis: Schema.String.annotate({ description: "What you checked and what you saw" }),
+                }),
+              ),
+            ),
+          }),
+          output: Schema.Struct({
+            notes: Schema.optional(
+              Schema.Array(
+                Schema.Struct({
+                  id: Schema.String,
+                  kind: Schema.String,
+                  text: Schema.String,
+                  status: Schema.String,
+                  origin: Schema.String,
+                  basis: Schema.String,
+                  seen: Schema.Number,
+                  lastSeen: Schema.String,
+                }),
+              ),
+            ),
+            applied: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, result: Schema.String }))),
+          }),
+          execute: (input) =>
+            Effect.gen(function* () {
+              if (!input.decisions?.length)
+                return {
+                  notes: (yield* store.list(scope)).map((note) => ({
+                    id: note.id,
+                    kind: note.kind,
+                    text: note.text,
+                    status: note.status,
+                    origin: note.origin,
+                    basis: note.verification ?? "",
+                    seen: note.hits,
+                    lastSeen: day(note.time.observed),
+                  })),
+                }
+              return {
+                applied: yield* store.review(
+                  scope,
+                  input.decisions.map((decision) => ({
+                    ...decision,
+                    id: Memory.ID.make(decision.id),
+                    into: decision.into ? Memory.ID.make(decision.into) : undefined,
+                  })),
+                ),
+              }
             }),
         }),
       })

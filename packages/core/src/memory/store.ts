@@ -41,6 +41,18 @@ export interface EditInput {
   readonly status?: Memory.Status
 }
 
+/** One outcome of going back over a note: it was checked, it no longer holds, or it repeats another. */
+export interface Decision {
+  readonly id: Memory.ID
+  readonly action: "verify" | "stale" | "merge"
+  /** For a merge: the note that stays. */
+  readonly into?: Memory.ID
+  /** For a merge: wording that covers both, replacing the text of the note that stays. */
+  readonly text?: string
+  /** What the decision rests on, in words a person can check. */
+  readonly basis: string
+}
+
 /** Where a scope's own conversations are found. */
 export interface Place {
   readonly project: ProjectV2.ID
@@ -76,6 +88,14 @@ export interface Interface {
   readonly edit: (id: Memory.ID, input: EditInput) => Effect.Effect<Memory.Note | undefined>
   readonly remove: (id: Memory.ID) => Effect.Effect<void>
   readonly clear: (scope: Memory.Scope) => Effect.Effect<void>
+  /**
+   * Applies the outcome of a review to the notes of one scope. What the user wrote is theirs:
+   * a review never rewords it, retires it or folds it into another note.
+   */
+  readonly review: (
+    scope: Memory.Scope,
+    decisions: ReadonlyArray<Decision>,
+  ) => Effect.Effect<ReadonlyArray<{ readonly id: Memory.ID; readonly result: string }>>
   /** Turns recording for one scope off or back on; what is already kept stays. */
   readonly silence: (scope: Memory.Scope, silent: boolean) => Effect.Effect<void>
   readonly search: (input: SearchInput) => Effect.Effect<{
@@ -171,6 +191,46 @@ const layer = Layer.effect(
         .onConflictDoNothing()
         .run()
         .pipe(Effect.orDie, Effect.andThen(get(values.id)))
+
+    const review = Effect.fn("MemoryStore.review")(function* (scope: Memory.Scope, decisions: ReadonlyArray<Decision>) {
+      const held = (id: Memory.ID) =>
+        db
+          .select()
+          .from(MemoryNoteTable)
+          .where(
+            and(eq(MemoryNoteTable.id, id), eq(MemoryNoteTable.scope, scope), isNull(MemoryNoteTable.time_deleted)),
+          )
+          .get()
+          .pipe(Effect.orDie)
+      const change = (id: Memory.ID, values: Partial<typeof MemoryNoteTable.$inferInsert>) =>
+        db.update(MemoryNoteTable).set(values).where(eq(MemoryNoteTable.id, id)).run().pipe(Effect.orDie)
+      return yield* Effect.forEach(decisions, (decision) =>
+        Effect.gen(function* () {
+          const basis = decision.basis.trim().slice(0, 200)
+          const row = yield* held(decision.id)
+          if (!row) return { id: decision.id, result: "not found in this project" }
+          if (!basis) return { id: decision.id, result: "refused: say what the decision rests on" }
+          if (row.origin === "user")
+            return { id: decision.id, result: "refused: written by the user; only the user changes it" }
+          if (decision.action === "verify") {
+            yield* change(row.id, { status: "verified", verification: `checked: ${basis}` })
+            return { id: decision.id, result: "verified" }
+          }
+          if (decision.action === "stale") {
+            yield* change(row.id, { status: "stale", verification: `out of date: ${basis}` })
+            return { id: decision.id, result: "marked out of date" }
+          }
+          const target = decision.into && decision.into !== row.id ? yield* held(decision.into) : undefined
+          if (!target) return { id: decision.id, result: "refused: the note to merge into was not found" }
+          const text = decision.text?.trim()
+          if (text && text.length <= 400 && target.origin !== "user")
+            yield* change(target.id, { text, hits: target.hits + row.hits })
+          // The duplicate keeps its key, so the same fact is not recorded again as a separate note.
+          yield* change(row.id, tombstone())
+          return { id: decision.id, result: `merged into ${target.id}` }
+        }),
+      )
+    })
 
     const silent = new Set<Memory.Scope>()
     const silence = (scope: Memory.Scope, off: boolean) =>
@@ -346,7 +406,7 @@ const layer = Layer.effect(
       return { notes: notes.map(note), sessions: Array.from(sessions.values()).slice(0, limit) }
     })
 
-    return Service.of({ list, get, observe, write, edit, remove, clear, silence, search })
+    return Service.of({ list, get, observe, write, edit, remove, clear, review, silence, search })
   }),
 )
 
