@@ -55,6 +55,9 @@ const sync = {
     get message() {
       return store.data.message
     },
+    get part() {
+      return store.data.part
+    },
     session_working: (id: string) => store.data.session_working(id),
   },
 }
