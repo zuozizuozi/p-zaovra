@@ -106,9 +106,38 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/MemoryStore") {}
 
-/** Splits a query into the words every match must contain. */
-export function terms(query: string) {
-  return Array.from(new Set(query.toLowerCase().split(/\s+/).filter(Boolean))).slice(0, 6)
+/** The basis recorded for a note taken from the user's own words. */
+export const said = "the user's own words"
+
+export interface Term {
+  readonly text: string
+  /** A whole word says more than two adjacent characters of a language written without spaces. */
+  readonly weight: number
+}
+
+/**
+ * What a query is matched on: its words, and for text written without spaces every pair of
+ * adjacent characters. People and models ask in sentences, so a match needs most of the query,
+ * not all of it.
+ */
+export function terms(query: string): ReadonlyArray<Term> {
+  const lower = query.toLowerCase()
+  const words = (lower.match(/[a-z0-9_][a-z0-9_.\-/]+/g) ?? []).map((text) => ({ text, weight: 2 }))
+  const pairs = (lower.match(/[\u3400-\u9fff]+/g) ?? []).flatMap((run) =>
+    Array.from({ length: Math.max(0, run.length - 1) }, (_, index) => ({
+      text: run.slice(index, index + 2),
+      weight: 1,
+    })),
+  )
+  return Array.from(new Map([...words, ...pairs].map((term) => [term.text, term])).values()).slice(0, 16)
+}
+
+/** How much of the query a text contains; zero unless it holds about half of it. */
+export function relevance(text: string, words: ReadonlyArray<Term>) {
+  const lower = text.toLowerCase()
+  const total = words.reduce((sum, word) => sum + word.weight, 0)
+  const matched = words.reduce((sum, word) => sum + (lower.includes(word.text) ? word.weight : 0), 0)
+  return matched > 0 && matched * 2 >= total ? matched : 0
 }
 
 /** The text a person would recognise as what was said in a stored user or assistant message. */
@@ -349,24 +378,26 @@ const layer = Layer.effect(
       const words = terms(input.query)
       if (words.length === 0) return { notes: [], sessions: [] }
       const limit = Math.max(1, Math.min(input.limit ?? 5, 10))
-      const notes = yield* db
+      const notes = (yield* db
         .select()
         .from(MemoryNoteTable)
         .where(
           and(
             or(eq(MemoryNoteTable.scope, input.scope), eq(MemoryNoteTable.scope, Memory.Scope.user)),
             isNull(MemoryNoteTable.time_deleted),
-            ...words.map((word) => sql`lower(${MemoryNoteTable.text}) LIKE ${pattern(word)} ESCAPE '\\'`),
           ),
         )
-        .orderBy(desc(MemoryNoteTable.time_observed))
-        .limit(limit * 2)
         .all()
-        .pipe(Effect.orDie)
+        .pipe(Effect.orDie))
+        .map((row) => ({ row, score: relevance(row.text, words) }))
+        .filter((item) => item.score > 0)
+        .toSorted((left, right) => right.score - left.score || right.row.time_observed - left.row.time_observed)
+        .slice(0, limit * 2)
+        .map((item) => note(item.row))
       const place = input.place
-      if (!place) return { notes: notes.map(note), sessions: [] }
+      if (!place) return { notes, sessions: [] }
       // The stored JSON also holds tool input and output, so a row that matches here is only a
-      // candidate; what counts is whether the words were actually said.
+      // candidate; what counts is how much of the query was actually said.
       const rows = yield* db
         .select({
           session_id: SessionMessageTable.session_id,
@@ -383,27 +414,62 @@ const layer = Layer.effect(
             ...(place.project === ProjectV2.ID.global ? [eq(SessionTable.directory, place.directory)] : []),
             inArray(SessionMessageTable.type, ["user", "assistant"]),
             ...(input.exclude ? [ne(SessionMessageTable.session_id, input.exclude)] : []),
-            ...words.map((word) => sql`lower(${SessionMessageTable.data}) LIKE ${pattern(word)} ESCAPE '\\'`),
+            or(...words.map((word) => sql`lower(${SessionMessageTable.data}) LIKE ${pattern(word.text)} ESCAPE '\\'`)),
           ),
         )
         .orderBy(desc(SessionMessageTable.time_created))
-        .limit(200)
+        .limit(400)
         .all()
         .pipe(Effect.orDie)
-      const sessions = rows.reduce((found, row) => {
-        const text = spoken(row.type, row.data)
-        const lower = text.toLowerCase()
-        if (!words.every((word) => lower.includes(word))) return found
-        const match = found.get(row.session_id) ?? {
-          sessionID: row.session_id,
-          title: row.title,
-          time: row.time,
-          passages: [] as Array<{ role: string; text: string }>,
-        }
-        if (match.passages.length < 3) match.passages.push({ role: row.type, text: passage(text, words) })
-        return found.set(row.session_id, match)
-      }, new Map<SessionSchema.ID, { sessionID: SessionSchema.ID; title: string; time: number; passages: Array<{ role: string; text: string }> }>())
-      return { notes: notes.map(note), sessions: Array.from(sessions.values()).slice(0, limit) }
+      const sessions = rows.reduce(
+        (found, row) => {
+          const text = spoken(row.type, row.data)
+          const score = relevance(text, words)
+          if (score === 0) return found
+          const match = found.get(row.session_id) ?? {
+            sessionID: row.session_id,
+            title: row.title,
+            time: row.time,
+            score: 0,
+            passages: [] as Array<{ role: string; text: string; score: number }>,
+          }
+          match.score = Math.max(match.score, score)
+          match.passages.push({
+            role: row.type,
+            text: passage(
+              text,
+              words.map((word) => word.text),
+            ),
+            score,
+          })
+          return found.set(row.session_id, match)
+        },
+        new Map<
+          SessionSchema.ID,
+          {
+            sessionID: SessionSchema.ID
+            title: string
+            time: number
+            score: number
+            passages: Array<{ role: string; text: string; score: number }>
+          }
+        >(),
+      )
+      return {
+        notes,
+        sessions: Array.from(sessions.values())
+          .toSorted((left, right) => right.score - left.score || right.time - left.time)
+          .slice(0, limit)
+          .map((match) => ({
+            sessionID: match.sessionID,
+            title: match.title,
+            time: match.time,
+            passages: match.passages
+              .toSorted((left, right) => right.score - left.score)
+              .slice(0, 3)
+              .map((item) => ({ role: item.role, text: item.text })),
+          })),
+      }
     })
 
     return Service.of({ list, get, observe, write, edit, remove, clear, review, silence, search })

@@ -59,7 +59,7 @@ export function practice(input: { command: string; declared?: string; cwd?: stri
 }
 
 const standing =
-  /以后(?:都|不要|别|请|要|只|用|记得)|今后|从现在(?:起|开始)|记住|永远不要|一律|from now on|going forward|remember (?:that|to)\b|\balways (?:use|run|reply|answer|write|ask)\b|\bnever (?:use|run|commit|push|delete)\b|\b(?:do not|don't) ever\b/i
+  /以后[^。！？!?\n]{0,12}?(?:都|不要|别|请|要|只|用|记得|一律)|今后|从现在(?:起|开始)|记住|永远不要|一律|from now on|going forward|remember (?:that|to)\b|\balways (?:use|run|reply|answer|write|ask)\b|\bnever (?:use|run|commit|push|delete)\b|\b(?:do not|don't) ever\b/i
 
 /** Sentences in which the user states how things should be done from here on, word for word. */
 export function standingInstructions(text: string) {
@@ -152,7 +152,7 @@ const layer = Layer.effectDiscard(
               kind: "preference",
               key: `said:${Hash.fast(sentence.toLowerCase().replace(/\s+/g, " "))}`,
               text: sentence,
-              verification: "the user's own words",
+              verification: MemoryStore.said,
               sessionID: event.data.sessionID,
               seq: event.durable?.seq,
               settled: true,

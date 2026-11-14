@@ -265,6 +265,9 @@ describe("memory store", () => {
       expect(found.sessions).toHaveLength(1)
       expect(found.sessions[0]).toMatchObject({ sessionID: first, title: "修登录超时" })
       expect(found.sessions[0].passages[0].text).toContain("连接池上限是 5")
+      // A question asked as a sentence still finds the message that holds most of it.
+      const asked = yield* store.search({ scope: project, place, query: "登录接口 为什么 超时", exclude: second })
+      expect(asked.sessions.map((item) => item.sessionID)).toEqual([first])
       expect((yield* store.search({ scope: project, place, query: "redis" })).sessions).toEqual([])
       expect(
         (yield* store.search({ scope: project, place, query: "登录", exclude: first })).sessions.map(
@@ -301,6 +304,9 @@ describe("memory recorder", () => {
       MemoryRecorder.standingInstructions("From now on reply in Chinese. The button never works on mobile."),
     ).toEqual(["From now on reply in Chinese."])
     expect(MemoryRecorder.standingInstructions("这个按钮不要了，删掉")).toEqual([])
+    expect(MemoryRecorder.standingInstructions("以后回答我都用英文，并且第一行以 SUMMARY: 开头。现在看看目录")).toEqual(
+      ["以后回答我都用英文，并且第一行以 SUMMARY: 开头。"],
+    )
   })
 
   it.live("records a passed check and a standing instruction from the event stream", () =>
@@ -348,7 +354,7 @@ describe("memory recorder", () => {
         ["preference", "记住：提交前先跑类型检查", "verified"],
       ])
       expect(MemoryContext.lines(notes)).toEqual([
-        expect.stringContaining("[preference] 记住：提交前先跑类型检查 (the user's own words; last seen "),
+        expect.stringContaining("[the user asked] 记住：提交前先跑类型检查 ("),
       ])
     }),
   )
