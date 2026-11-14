@@ -2,6 +2,7 @@ import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqli
 import type { Memory } from "@zaovra-ai/schema/memory"
 import type { ModelV2 } from "../model"
 import type { SessionSchema } from "../session/schema"
+import type { SessionMessage } from "../session/message"
 
 // Accounting survives deletion of its Session. No cascading Session foreign key.
 export const MemoryTidyRunTable = sqliteTable(
@@ -10,6 +11,7 @@ export const MemoryTidyRunTable = sqliteTable(
     id: text().primaryKey(),
     request_id: text().notNull().unique(),
     session_id: text().$type<SessionSchema.ID>().notNull(),
+    input: text({ mode: "json" }).$type<{ id: SessionMessage.ID; seq: number }>(),
     scope: text().$type<Memory.Scope>().notNull(),
     directory: text().notNull(),
     model: text({ mode: "json" }).$type<ModelV2.Ref>().notNull(),

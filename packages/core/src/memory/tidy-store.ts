@@ -10,7 +10,7 @@ import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import type { ModelV2 } from "../model"
 import { SessionSchema } from "../session/schema"
-import { SessionTable } from "../session/sql"
+import { SessionInputTable, SessionTable } from "../session/sql"
 import { MemoryTidyAttemptTable, MemoryTidyDayTable, MemoryTidyRunTable } from "./tidy.sql"
 
 export const defaults = { tokens: 200_000, dailyTokens: 1_000_000 } as const
@@ -33,11 +33,12 @@ export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Re
 export interface Interface {
   readonly create: (
     input: Request,
-    createSession: (id: SessionSchema.ID) => Effect.Effect<void>,
+    createSession: (id: SessionSchema.ID) => Effect.Effect<void | NonNullable<Run["input"]>>,
   ) => Effect.Effect<Run, Rejected>
   readonly get: (id: string) => Effect.Effect<Run | undefined>
   readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<Run | undefined>
   readonly list: (scope: Memory.Scope) => Effect.Effect<Run[]>
+  readonly ownsSession: (run: Run) => Effect.Effect<boolean>
   readonly authorize: (input: Authority) => Effect.Effect<Run, Rejected>
   readonly guarded: <A>(input: Authority, operation: Effect.Effect<A>) => Effect.Effect<A, Rejected>
   readonly reserve: (input: Authority & { attemptID: string; tokens: number }) => Effect.Effect<void, Rejected>
@@ -99,6 +100,24 @@ const layer = Layer.effect(
     })
     return Service.of({
       get: (id) => get(id).pipe(Effect.orDie),
+      ownsSession: (run) =>
+        run.input
+          ? db
+              .select({ id: SessionInputTable.id })
+              .from(SessionInputTable)
+              .where(
+                and(
+                  eq(SessionInputTable.session_id, run.session_id),
+                  eq(SessionInputTable.id, run.input.id),
+                  eq(SessionInputTable.admitted_seq, run.input.seq),
+                ),
+              )
+              .get()
+              .pipe(
+                Effect.map((row) => row !== undefined),
+                Effect.orDie,
+              )
+          : Effect.succeed(false),
       forSession: (sessionID) =>
         db
           .select()
@@ -134,6 +153,14 @@ const layer = Layer.effect(
                 input.dailyTokens === 0
               )
                 return yield* new Rejected({ reason: "invalid" })
+              // Acquire the SQLite writer role before entering the trusted host
+              // callback, whose Session APIs turn their SQL errors into defects.
+              // This no-row write also protects a nested, deferred transaction.
+              yield* db
+                .update(MemoryTidyRunTable)
+                .set({ state: sql`${MemoryTidyRunTable.state}` })
+                .where(sql`0`)
+                .run()
               const previous = yield* db
                 .select()
                 .from(MemoryTidyRunTable)
@@ -152,9 +179,8 @@ const layer = Layer.effect(
                 // An exact retry returns the same task, including its terminal state. It never restarts it.
                 return previous
               }
-              // Keep the check and grant in the same write transaction. Another
-              // connection that wins after this read makes our snapshot busy;
-              // it must never replay the Session-creation callback automatically.
+              // The writer role serializes this check with the grant. Never
+              // replay the Session-creation callback on a lock failure.
               if (
                 yield* db
                   .select({ id: MemoryTidyRunTable.id })
@@ -170,13 +196,14 @@ const layer = Layer.effect(
               )
                 return yield* new Rejected({ reason: "conflict" })
               // Host callback must create without prompting/waking: both projection and grant commit together.
-              yield* createSession(sessionID)
+              const inputBinding = yield* createSession(sessionID)
               const run = yield* db
                 .insert(MemoryTidyRunTable)
                 .values({
                   id,
                   request_id: input.requestID,
                   session_id: sessionID,
+                  input: inputBinding ?? null,
                   scope: input.scope,
                   directory: input.directory,
                   model: input.model,

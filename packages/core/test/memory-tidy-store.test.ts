@@ -485,3 +485,26 @@ test("two database connections cannot commit simultaneous writers for one scope"
     }).pipe(Effect.scoped),
   )
 })
+
+it.effect("taking the writer role does not replay or disguise a non-SQL host defect", () =>
+  Effect.gen(function* () {
+    const h = yield* host
+    const defect = new Error("host programming failure")
+    let called = 0
+    const result = yield* h.store
+      .create(request, () =>
+        Effect.sync(() => {
+          called++
+        }).pipe(Effect.andThen(Effect.die(defect))),
+      )
+      .pipe(Effect.exit)
+    expect(called).toBe(1)
+    expect(Exit.isFailure(result)).toBe(true)
+    if (Exit.isFailure(result)) {
+      expect(Cause.squash(result.cause)).toBe(defect)
+      expect(Cause.hasFails(result.cause)).toBe(false)
+    }
+    expect(yield* h.store.list(request.scope)).toEqual([])
+    expect(yield* h.database.db.select().from(SessionTable).all().pipe(Effect.orDie)).toEqual([])
+  }),
+)

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "50855fc5-3548-45ed-b7a8-e05010ca5b65",
+  "id": "6df981cf-86c1-49dd-b477-bd6ed079d4e8",
   "prevIds": [
-    "137a9f1a-5b3d-4ac7-bb99-8c358d6822ae"
+    "50855fc5-3548-45ed-b7a8-e05010ca5b65"
   ],
   "ddl": [
     {
@@ -383,6 +383,16 @@
       "default": null,
       "generated": null,
       "name": "session_id",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "input",
       "entityType": "columns",
       "table": "memory_tidy_run"
     },

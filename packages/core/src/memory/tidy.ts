@@ -1,6 +1,6 @@
 export * as MemoryTidy from "./tidy"
 
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Exit, Layer } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
@@ -79,7 +79,7 @@ const layer = Layer.effect(
                 location: { directory: location.directory, workspaceID: location.workspaceID },
                 budget: { tokens: input.tokens ?? MemoryTidyStore.defaults.tokens },
               })
-              yield* sessions
+              const admitted = yield* sessions
                 .prompt({
                   sessionID: id,
                   resume: false,
@@ -88,6 +88,7 @@ const layer = Layer.effect(
                   },
                 })
                 .pipe(Effect.orDie)
+              return { id: admitted.id, seq: admitted.admittedSeq }
             }),
         )
         return yield* view(run)
@@ -96,27 +97,33 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           Effect.gen(function* () {
             const current = yield* get(id, layer)
-            if (current.run.state !== "active") return current
+            if (current.run.state !== "active" && current.run.state !== "cancelled") return current
             // Revoke first: in-flight tools and future requests lose their authority
             // before waiting for the Session's process-local interruption to finish.
-            yield* store.finish(id, "cancelled").pipe(
-              Effect.andThen(
-                sessions.pendingInputs(current.run.session_id).pipe(
-                  Effect.flatMap((pending) =>
-                    Effect.forEach(
-                      pending,
-                      (input) =>
-                        sessions.cancelInput({
-                          sessionID: current.run.session_id,
-                          messageID: input.id,
-                        }),
-                      { discard: true },
-                    ),
-                  ),
-                  Effect.catchTag("Session.NotFoundError", () => Effect.void),
-                  Effect.orDie,
-                ),
+            if (current.run.state === "active") yield* store.finish(id, "cancelled")
+            // A cancelled task can still need cleanup after a storage failure.
+            // The durable admission sequence distinguishes the original Session
+            // even if its ID and prompt ID were both reused after deletion.
+            if (!current.run.input) return yield* new MemoryTidyStore.Rejected({ reason: "conflict" })
+            if (!(yield* store.ownsSession(current.run))) return yield* get(id, layer)
+            const pending = yield* sessions.pendingInputs(current.run.session_id).pipe(
+              Effect.catchTag("Session.NotFoundError", () => Effect.succeed([])),
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) ? sessions.interrupt(current.run.session_id) : Effect.void,
               ),
+            )
+            if (current.run.state === "cancelled" && pending.length === 0) return yield* get(id, layer)
+            yield* Effect.forEach(
+              pending,
+              (input) =>
+                sessions.cancelInput({
+                  sessionID: current.run.session_id,
+                  messageID: input.id,
+                }),
+              { discard: true },
+            ).pipe(
+              Effect.catchTag("Session.NotFoundError", () => Effect.void),
+              Effect.orDie,
               Effect.ensuring(sessions.interrupt(current.run.session_id)),
             )
             return yield* get(id, layer)

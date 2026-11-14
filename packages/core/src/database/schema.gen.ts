@@ -47,6 +47,7 @@ export default {
           \`id\` text PRIMARY KEY,
           \`request_id\` text NOT NULL UNIQUE,
           \`session_id\` text NOT NULL,
+          \`input\` text,
           \`scope\` text NOT NULL,
           \`directory\` text NOT NULL,
           \`model\` text NOT NULL,
