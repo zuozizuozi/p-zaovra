@@ -6,6 +6,7 @@ import { Config } from "../src/config"
 import { Database } from "../src/database/database"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
+import { EventV2 } from "../src/event"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryTidy } from "../src/memory/tidy"
@@ -16,6 +17,7 @@ import { AbsolutePath } from "../src/schema"
 import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
 import { SessionRunCoordinator } from "../src/session/run-coordinator"
+import { SessionInput } from "../src/session/input"
 import { SessionTable } from "../src/session/sql"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
@@ -29,6 +31,7 @@ const setup = Effect.gen(function* () {
     sessions: yield* SessionV2.Service,
     database: yield* Database.Service,
     execution: yield* SessionExecution.Service,
+    events: yield* EventV2.Service,
   }
 })
 type State = {
@@ -80,6 +83,7 @@ async function withHost(body: (h: Effect.Success<typeof setup>, state: State) =>
               Database.node,
               Config.node,
               SessionExecution.node,
+              EventV2.node,
             ]),
             [
               [Database.node, Database.layerFromPath(path.join(tmp.path, "host.sqlite"))],
@@ -214,5 +218,50 @@ test("binding read and PromptCancelled projection hold one writer against anothe
       expect(checked).toBe(true)
       expect((yield* h.sessions.get(run.session_id)).id).toBe(run.session_id)
       expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(0)
+    }),
+  ))
+
+// Independent integration review: running tidy sessions have already promoted
+// the admission used as their identity; pending-only coverage misses this case.
+test("bound cancellation stops a running session after its original input was promoted", () =>
+  withHost((h, state) =>
+    Effect.gen(function* () {
+      const run = (yield* h.tidy.prepare(request)).run
+      expect(yield* SessionInput.promoteSteers(h.database.db, h.events, run.session_id, run.input!.seq)).toBe(1)
+      expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(0)
+      yield* h.execution.resume(run.session_id).pipe(Effect.exit, Effect.forkChild)
+      yield* Deferred.await(state.started[0]!)
+      yield* h.tidy.cancel(run.id)
+      expect(state.finished).toEqual([0])
+      expect((yield* h.execution.active).size).toBe(0)
+      const admission = yield* SessionInput.find(h.database.db, run.input!.id)
+      expect(admission?.promotedSeq).toBeDefined()
+      expect(admission?.cancelledSeq).toBeUndefined()
+      expect((yield* h.tidy.get(run.id)).run.state).toBe("cancelled")
+    }),
+  ))
+
+test("a late cancellation projection failure rolls back the whole pending batch before retry", () =>
+  withHost((h) =>
+    Effect.gen(function* () {
+      const run = (yield* h.tidy.prepare(request)).run
+      const later = yield* h.sessions.prompt({
+        sessionID: run.session_id,
+        resume: false,
+        prompt: { text: "second pending input" },
+      })
+      yield* h.database.db
+        .run(
+          `CREATE TRIGGER fail_later_cancel BEFORE UPDATE OF cancelled_seq ON session_input WHEN OLD.id = '${later.id.replaceAll("'", "''")}' BEGIN SELECT RAISE(ABORT, 'late cancel failure'); END`,
+        )
+        .pipe(Effect.orDie)
+      expect(Exit.isFailure(yield* h.tidy.cancel(run.id).pipe(Effect.exit))).toBe(true)
+      expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(2)
+      expect((yield* SessionInput.find(h.database.db, run.input!.id))?.cancelledSeq).toBeUndefined()
+      expect((yield* h.tidy.get(run.id)).run.state).toBe("cancelled")
+      yield* h.database.db.run("DROP TRIGGER fail_later_cancel").pipe(Effect.orDie)
+      yield* h.tidy.cancel(run.id)
+      expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(0)
+      expect((yield* h.execution.active).size).toBe(0)
     }),
   ))
