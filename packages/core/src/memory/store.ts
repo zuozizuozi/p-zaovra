@@ -109,6 +109,11 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/v2/M
 /** The basis recorded for a note taken from the user's own words. */
 export const said = "the user's own words"
 
+/** Free-form model evidence is not provenance. Only a host quote or explicit user action owns a note. */
+export function protectedByUser(note: { origin: Memory.Origin; verification?: string | null }) {
+  return note.origin === "user" || (note.origin === "program" && note.verification === said)
+}
+
 export interface Term {
   readonly text: string
   /** A whole word says more than two adjacent characters of a language written without spaces. */
@@ -222,43 +227,64 @@ const layer = Layer.effect(
         .pipe(Effect.orDie, Effect.andThen(get(values.id)))
 
     const review = Effect.fn("MemoryStore.review")(function* (scope: Memory.Scope, decisions: ReadonlyArray<Decision>) {
-      const held = (id: Memory.ID) =>
-        db
-          .select()
-          .from(MemoryNoteTable)
-          .where(
-            and(eq(MemoryNoteTable.id, id), eq(MemoryNoteTable.scope, scope), isNull(MemoryNoteTable.time_deleted)),
-          )
-          .get()
-          .pipe(Effect.orDie)
-      const change = (id: Memory.ID, values: Partial<typeof MemoryNoteTable.$inferInsert>) =>
-        db.update(MemoryNoteTable).set(values).where(eq(MemoryNoteTable.id, id)).run().pipe(Effect.orDie)
-      return yield* Effect.forEach(decisions, (decision) =>
-        Effect.gen(function* () {
-          const basis = decision.basis.trim().slice(0, 200)
-          const row = yield* held(decision.id)
-          if (!row) return { id: decision.id, result: "not found in this project" }
-          if (!basis) return { id: decision.id, result: "refused: say what the decision rests on" }
-          if (row.origin === "user")
-            return { id: decision.id, result: "refused: written by the user; only the user changes it" }
-          if (decision.action === "verify") {
-            yield* change(row.id, { status: "verified", verification: `checked: ${basis}` })
-            return { id: decision.id, result: "verified" }
-          }
-          if (decision.action === "stale") {
-            yield* change(row.id, { status: "stale", verification: `out of date: ${basis}` })
-            return { id: decision.id, result: "marked out of date" }
-          }
-          const target = decision.into && decision.into !== row.id ? yield* held(decision.into) : undefined
-          if (!target) return { id: decision.id, result: "refused: the note to merge into was not found" }
-          const text = decision.text?.trim()
-          if (text && text.length <= 400 && target.origin !== "user")
-            yield* change(target.id, { text, hits: target.hits + row.hits })
-          // The duplicate keeps its key, so the same fact is not recorded again as a separate note.
-          yield* change(row.id, tombstone())
-          return { id: decision.id, result: `merged into ${target.id}` }
-        }),
-      )
+      // Keep source/target protection and both writes in one snapshot, including against user edits.
+      return yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const held = (id: Memory.ID) =>
+              tx
+                .select()
+                .from(MemoryNoteTable)
+                .where(
+                  and(
+                    eq(MemoryNoteTable.id, id),
+                    eq(MemoryNoteTable.scope, scope),
+                    isNull(MemoryNoteTable.time_deleted),
+                  ),
+                )
+                .get()
+                .pipe(Effect.orDie)
+            const change = (id: Memory.ID, values: Partial<typeof MemoryNoteTable.$inferInsert>) =>
+              tx.update(MemoryNoteTable).set(values).where(eq(MemoryNoteTable.id, id)).run().pipe(Effect.orDie)
+            return yield* Effect.forEach(decisions, (decision) =>
+              Effect.gen(function* () {
+                const basis = decision.basis.trim().slice(0, 200)
+                const row = yield* held(decision.id)
+                if (!row) return { id: decision.id, result: "not found in this project" }
+                if (!basis) return { id: decision.id, result: "refused: say what the decision rests on" }
+                if (protectedByUser(row))
+                  return { id: decision.id, result: "refused: written by the user; only the user changes it" }
+                if (decision.action === "verify") {
+                  yield* change(row.id, { status: "verified", verification: `checked: ${basis}` })
+                  return { id: decision.id, result: "verified" }
+                }
+                if (decision.action === "stale") {
+                  yield* change(row.id, { status: "stale", verification: `out of date: ${basis}` })
+                  return { id: decision.id, result: "marked out of date" }
+                }
+                const target = decision.into && decision.into !== row.id ? yield* held(decision.into) : undefined
+                if (!target) return { id: decision.id, result: "refused: the note to merge into was not found" }
+                if (protectedByUser(target))
+                  return {
+                    id: decision.id,
+                    result: "refused: merge target belongs to the user; only the user changes it",
+                  }
+                const text = decision.text?.trim()
+                if (text && text.length <= 400)
+                  yield* change(target.id, {
+                    text,
+                    hits: target.hits + row.hits,
+                    origin: "consolidation",
+                    verification: `merged: ${basis}`,
+                  })
+                // The duplicate keeps its key, so the same fact is not recorded again as a separate note.
+                yield* change(row.id, tombstone())
+                return { id: decision.id, result: `merged into ${target.id}` }
+              }),
+            )
+          }),
+        )
+        .pipe(Effect.orDie)
     })
 
     const silent = new Set<Memory.Scope>()
@@ -288,7 +314,7 @@ const layer = Layer.effect(
           time_observed: now,
         })
       // A person's edit outranks what the host sees later: keep their wording, only count the sighting.
-      const edited = existing.origin !== "program"
+      const edited = existing.origin !== "program" || protectedByUser(existing)
       yield* db
         .update(MemoryNoteTable)
         .set({
@@ -319,7 +345,11 @@ const layer = Layer.effect(
       if (!text) return undefined
       const key = `text:${Hash.fast(text.toLowerCase().replace(/\s+/g, " "))}`
       const existing = yield* find(input.scope, key)
-      if (existing) return existing.time_deleted ? undefined : note(existing)
+      if (existing?.time_deleted) return undefined
+      if (existing)
+        return input.origin === "user" && !protectedByUser(existing)
+          ? yield* edit(existing.id, { text, kind: input.kind, status: input.status })
+          : note(existing)
       return yield* insert({
         id: Memory.ID.create(),
         scope: input.scope,
@@ -340,8 +370,9 @@ const layer = Layer.effect(
       yield* db
         .update(MemoryNoteTable)
         .set({
-          ...(text
-            ? { text, origin: "user" as const, status: "verified" as const, verification: "edited by the user" }
+          ...(text ? { text, status: "verified" as const } : {}),
+          ...(text || input.status === "verified"
+            ? { origin: "user" as const, verification: text ? "edited by the user" : "confirmed by the user" }
             : {}),
           ...(input.kind ? { kind: input.kind } : {}),
           ...(input.status ? { status: input.status } : {}),

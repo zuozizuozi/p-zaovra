@@ -33,7 +33,7 @@ export function lines(notes: ReadonlyArray<Memory.Note>) {
     )
     .map((note) =>
       // What the user asked for in their own words is a standing request, not an observation.
-      note.kind === "preference" && (note.origin === "user" || note.verification === MemoryStore.said)
+      note.kind === "preference" && MemoryStore.protectedByUser(note)
         ? `- [the user asked] ${note.text.replace(/\s+/g, " ")} (${day(note.time.observed)})`
         : `- [${note.kind}] ${note.text.replace(/\s+/g, " ")} (${note.verification ?? note.origin}; last seen ${day(note.time.observed)})`,
     )
