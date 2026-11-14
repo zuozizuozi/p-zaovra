@@ -3,6 +3,7 @@ export * as SessionProjector from "./projector"
 import { and, desc, eq, gt, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
+import { MemoryTidyRunTable } from "../memory/tidy.sql"
 import { EventV2 } from "../event"
 import { makeGlobalNode } from "../effect/app-node"
 import { SessionEvent } from "./event"
@@ -335,12 +336,19 @@ const layer = Layer.effectDiscard(
         .run()
         .pipe(Effect.orDie),
     )
-    yield* events.project(SessionEvent.Deleted, (event) =>
-      db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
-    )
-    yield* events.project(SessionV1.Event.Deleted, (event) =>
-      db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
-    )
+    const removeSession = (sessionID: typeof SessionTable.$inferSelect.id) =>
+      Effect.gen(function* () {
+        // Preserve its accounting but invalidate authority before a deleted ID can be reused.
+        yield* db
+          .update(MemoryTidyRunTable)
+          .set({ state: "cancelled", time_finished: Date.now() })
+          .where(and(eq(MemoryTidyRunTable.session_id, sessionID), eq(MemoryTidyRunTable.state, "active")))
+          .run()
+          .pipe(Effect.orDie)
+        yield* db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+      })
+    yield* events.project(SessionEvent.Deleted, (event) => removeSession(event.data.sessionID))
+    yield* events.project(SessionV1.Event.Deleted, (event) => removeSession(event.data.sessionID))
     yield* events.project(SessionV1.Event.MessageUpdated, (event) =>
       Effect.gen(function* () {
         const time_created = event.data.info.time.created

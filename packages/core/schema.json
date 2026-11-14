@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "137a9f1a-5b3d-4ac7-bb99-8c358d6822ae",
+  "id": "50855fc5-3548-45ed-b7a8-e05010ca5b65",
   "prevIds": [
-    "e4a7bd12-cb34-4b4c-8b5a-1a8c8d59e5ab"
+    "137a9f1a-5b3d-4ac7-bb99-8c358d6822ae"
   ],
   "ddl": [
     {
@@ -12,6 +12,18 @@
     },
     {
       "name": "data_migration",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_tidy_attempt",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_tidy_day",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_tidy_run",
       "entityType": "tables"
     },
     {
@@ -253,6 +265,206 @@
       "name": "time_completed",
       "entityType": "columns",
       "table": "data_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "day",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reserved",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "actual",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_settled",
+      "entityType": "columns",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "day",
+      "entityType": "columns",
+      "table": "memory_tidy_day"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_limit",
+      "entityType": "columns",
+      "table": "memory_tidy_day"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_limit",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "daily_limit",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_finished",
+      "entityType": "columns",
+      "table": "memory_tidy_run"
     },
     {
       "type": "integer",
@@ -3651,6 +3863,36 @@
     },
     {
       "columns": [
+        "run_id"
+      ],
+      "tableTo": "memory_tidy_run",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_memory_tidy_attempt_run_id_memory_tidy_run_id_fk",
+      "entityType": "fks",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "columns": [
+        "day"
+      ],
+      "tableTo": "memory_tidy_day",
+      "columnsTo": [
+        "day"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_memory_tidy_attempt_day_memory_tidy_day_day_fk",
+      "entityType": "fks",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "columns": [
         "active_account_id"
       ],
       "tableTo": "account",
@@ -4288,6 +4530,33 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "memory_tidy_attempt_pk",
+      "table": "memory_tidy_attempt",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "day"
+      ],
+      "nameExplicit": false,
+      "name": "memory_tidy_day_pk",
+      "table": "memory_tidy_day",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "memory_tidy_run_pk",
+      "table": "memory_tidy_run",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "account_state_pk",
       "table": "account_state",
       "entityType": "pks"
@@ -4543,6 +4812,48 @@
       "name": "work_worker_pk",
       "table": "work_worker",
       "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_tidy_attempt_run_idx",
+      "entityType": "indexes",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "columns": [
+        {
+          "value": "day",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_tidy_attempt_day_idx",
+      "entityType": "indexes",
+      "table": "memory_tidy_attempt"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "memory_tidy_run_session_idx",
+      "entityType": "indexes",
+      "table": "memory_tidy_run"
     },
     {
       "columns": [
@@ -5405,6 +5716,15 @@
       "name": "work_worker_expires_idx",
       "entityType": "indexes",
       "table": "work_worker"
+    },
+    {
+      "columns": [
+        "request_id"
+      ],
+      "nameExplicit": false,
+      "name": "memory_tidy_run_request_id_unique",
+      "entityType": "uniques",
+      "table": "memory_tidy_run"
     }
   ],
   "renames": []
