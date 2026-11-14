@@ -74,6 +74,18 @@ async function mount() {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/recovery")
+        return Response.json({
+          data: {
+            scope: "test",
+            directory: "/tidy-project",
+            frozen: false,
+            automaticFrozen: false,
+            state: "none",
+            deleted: 0,
+            notes: [],
+          },
+        })
       if (request.method === "GET" && path === "/api/memory")
         return Response.json({
           data: [

@@ -22,7 +22,7 @@ const layer = Layer.effectDiscard(
     const config = yield* Config.Service
     if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
     const place = { project: location.project.id, directory: location.directory }
-    const scope = MemoryStore.scope(place)
+    const scope = yield* store.scope(place)
     yield* tools
       .register({
         memory_search: Tool.make({
@@ -101,7 +101,11 @@ const layer = Layer.effectDiscard(
               })
               return note
                 ? { kept: true }
-                : { kept: false, reason: "The user deleted this note before; it stays deleted." }
+                : {
+                    kept: false,
+                    reason:
+                      "Memory was not saved: legacy recovery may be pending, or this content was deleted. Check Memory settings; do not retry automatically.",
+                  }
             }),
         }),
       })

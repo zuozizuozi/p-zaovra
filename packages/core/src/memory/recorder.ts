@@ -129,7 +129,7 @@ const layer = Layer.effectDiscard(
           if (!found) return
           yield* store.observe({
             ...found,
-            scope: MemoryStore.scope(row),
+            scope: yield* store.scope(row),
             sessionID: event.data.sessionID,
             seq: event.durable?.seq,
           })
@@ -146,9 +146,10 @@ const layer = Layer.effectDiscard(
           const row = yield* session(event.data.sessionID)
           // A subtask's prompt was written by a model, not by the user.
           if (!row || row.parent) return
+          const scope = yield* store.scope(row)
           yield* Effect.forEach(sentences, (sentence) =>
             store.observe({
-              scope: MemoryStore.scope(row),
+              scope,
               kind: "preference",
               key: `said:${Hash.fast(sentence.toLowerCase().replace(/\s+/g, " "))}`,
               text: sentence,

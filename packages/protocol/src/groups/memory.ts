@@ -9,6 +9,33 @@ const Query = Schema.Struct({ ...LocationQuery.fields, layer: Schema.optional(La
 
 export const MemoryGroup = HttpApiGroup.make("server.memory")
   .add(
+    HttpApiEndpoint.get("memory.recovery", "/api/memory/recovery", {
+      query: LocationQuery,
+      success: Schema.Struct({ data: Memory.Recovery }),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.recovery",
+          summary: "View and export legacy memory for explicit recovery",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.post("memory.resolveRecovery", "/api/memory/recovery", {
+      query: LocationQuery,
+      payload: Memory.RecoveryChoice,
+      success: Schema.Struct({ accepted: Schema.Boolean, data: Memory.Recovery }),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.resolveRecovery",
+          summary: "Confirm selected legacy notes or start this directory blank",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.get("memory.list", "/api/memory", {
       query: Query,
       success: Schema.Struct({ data: Schema.Array(Memory.Note) }),
@@ -34,7 +61,7 @@ export const MemoryGroup = HttpApiGroup.make("server.memory")
           identifier: "v2.memory.create",
           summary: "Add a memory note",
           description:
-            "Add a note written by the user. Returns null when the same note was deleted before or the text is empty.",
+            "Add a note written by the user. Returns null while legacy recovery is pending, when deletion protection matches, or when the text is empty.",
         }),
       ),
   )
@@ -51,7 +78,8 @@ export const MemoryGroup = HttpApiGroup.make("server.memory")
       OpenApi.annotations({
         identifier: "v2.memory.update",
         summary: "Edit a memory note",
-        description: "Change a note's text, kind or status. Returns null when the note does not exist.",
+        description:
+          "Change a note's text, kind or status. Returns null when the note does not exist, is a read-only legacy original, or recovery/deletion protection blocks the change.",
       }),
     ),
   )

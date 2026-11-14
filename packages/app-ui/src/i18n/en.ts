@@ -1774,7 +1774,28 @@ export const dict = {
   "settings.mcp.description": "MCP settings will be configurable here.",
 
   "settings.memory.title": "Memory",
-  "settings.memory.description": "What Zaovra keeps from earlier conversations. Notes it has checked are given to every new conversation as background; your instructions always come first. You can edit or delete any of them, and a deleted note is not recorded again.",
+  "settings.memory.recovery.automaticFrozen":
+    "Old deletion records no longer identify their original wording. Automatic recording and model reviews remain paused, even after confirmation. You can still explicitly recover or manually add notes; known deleted content remains protected.",
+  "settings.memory.recovery.title": "Review legacy memory",
+  "settings.memory.recovery.warning":
+    "These notes may mix several directories. A source path is only a clue, not proof of ownership. Select only notes you confirm belong to this directory. Originals and deletion records are preserved.",
+  "settings.memory.recovery.frozen": "Automatic recording and memory changes are paused until you make a choice.",
+  "settings.memory.recovery.ready":
+    "Your choice is saved. Legacy deletion records still conservatively suppress matching content.",
+  "settings.memory.recovery.export": "Export legacy notes (JSON)",
+  "settings.memory.recovery.unknown": "Source directory unknown",
+  "settings.memory.recovery.processed":
+    "Already assigned by the user; it will not be copied to another directory or restored again after deletion.",
+  "settings.memory.recovery.readonly": "Read only: deleted wording or content that cannot be safely restored.",
+  "settings.memory.recovery.deleted": "Preserved deletion records:",
+  "settings.memory.recovery.failed":
+    "Recovery could not be completed. Your choice was not confirmed; reload and review the notes again.",
+  "settings.memory.recovery.restore": "Confirm selected notes belong here and restore",
+  "settings.memory.recovery.blank": "Start this directory blank",
+  "settings.memory.recovery.confirmBlank": "Confirm: do not copy old notes; keep deletion protection",
+  "settings.memory.recovery.retry": "Reload recovery status",
+  "settings.memory.description":
+    "What Zaovra keeps from earlier conversations. Notes it has checked are given to every new conversation as background; your instructions always come first. You can edit or delete any of them, and a deleted note is not recorded again.",
   "settings.memory.project.title": "This project",
   "settings.memory.project.description": "Used only in conversations in this project.",
   "settings.memory.project.add": "Add a note for this project",
@@ -1784,15 +1805,19 @@ export const dict = {
   "settings.memory.add": "Add",
   "settings.memory.use": "Use it",
   "settings.memory.enabled.title": "Keep notes across conversations",
-  "settings.memory.enabled.description": "When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
+  "settings.memory.enabled.description":
+    "When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
   "settings.memory.tidy.title": "Tidy this project's notes",
-  "settings.memory.tidy.description": "Starts a conversation that checks each note against the project, marks what no longer holds and merges repeats. Choose a model for this run or keep the default. It stops at 300,000 tokens and only runs when you press the button.",
-  "settings.memory.tidy.started": "Started. It appears in the conversation list as a new conversation; open it to see what it checked and changed.",
+  "settings.memory.tidy.description":
+    "Starts a conversation that checks each note against the project, marks what no longer holds and merges repeats. Choose a model for this run or keep the default. It stops at 300,000 tokens and only runs when you press the button.",
+  "settings.memory.tidy.started":
+    "Started. It appears in the conversation list as a new conversation; open it to see what it checked and changed.",
   "settings.memory.tidy.failed": "Could not start. Check that a model is set up, then try again.",
   "settings.memory.tidy.model": "Model for this tidy",
   "settings.memory.tidy.default": "Use default",
   "settings.memory.tidy.action": "Tidy now",
-  "settings.memory.tidy.prompt": "Tidy this project's memory. First call memory_review with no decisions to list every note. Check each note against the files as they are now and against earlier conversations (memory_search, reading files and read-only commands are fine). Then call memory_review again with your decisions: verify what still holds, stale for what the project now contradicts, merge for repeats. Leave alone anything you could not check. Do not change any project file. Finish with a few sentences on what you checked and what you changed.",
+  "settings.memory.tidy.prompt":
+    "Tidy this project's memory. First call memory_review with no decisions to list every note. Check each note against the files as they are now and against earlier conversations (memory_search, reading files and read-only commands are fine). Then call memory_review again with your decisions: verify what still holds, stale for what the project now contradicts, merge for repeats. Leave alone anything you could not check. Do not change any project file. Finish with a few sentences on what you checked and what you changed.",
   "settings.memory.clear": "Clear all",
   "settings.memory.clear.confirm": "Delete every note here?",
   "settings.memory.empty": "Nothing kept yet.",

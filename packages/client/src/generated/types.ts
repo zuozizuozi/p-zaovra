@@ -8299,6 +8299,83 @@ export type SkillsListOutput = {
   }>
 }
 
+export type MemoryRecoveryInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type MemoryRecoveryOutput = {
+  readonly data: {
+    readonly scope: string
+    readonly legacyScope?: string
+    readonly directory: string
+    readonly frozen: boolean
+    readonly automaticFrozen: boolean
+    readonly state: "none" | "pending" | "restored" | "blank"
+    readonly deleted: number
+    readonly notes: ReadonlyArray<{
+      readonly note: {
+        readonly id: string
+        readonly scope: string
+        readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+        readonly text: string
+        readonly origin: "program" | "model" | "user" | "consolidation"
+        readonly status: "verified" | "unverified" | "stale"
+        readonly verification?: string
+        readonly sessionID?: string
+        readonly seq?: number
+        readonly hits: number
+        readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
+      }
+      readonly sourceDirectory?: string
+      readonly restorable: boolean
+      readonly restored: boolean
+      readonly reason: string
+    }>
+  }
+}["data"]
+
+export type MemoryResolveRecoveryInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly decision: { readonly decision: "restore" | "blank"; readonly ids: ReadonlyArray<string> }["decision"]
+  readonly ids: { readonly decision: "restore" | "blank"; readonly ids: ReadonlyArray<string> }["ids"]
+}
+
+export type MemoryResolveRecoveryOutput = {
+  readonly accepted: boolean
+  readonly data: {
+    readonly scope: string
+    readonly legacyScope?: string
+    readonly directory: string
+    readonly frozen: boolean
+    readonly automaticFrozen: boolean
+    readonly state: "none" | "pending" | "restored" | "blank"
+    readonly deleted: number
+    readonly notes: ReadonlyArray<{
+      readonly note: {
+        readonly id: string
+        readonly scope: string
+        readonly kind: "practice" | "convention" | "pitfall" | "preference" | "decision"
+        readonly text: string
+        readonly origin: "program" | "model" | "user" | "consolidation"
+        readonly status: "verified" | "unverified" | "stale"
+        readonly verification?: string
+        readonly sessionID?: string
+        readonly seq?: number
+        readonly hits: number
+        readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
+      }
+      readonly sourceDirectory?: string
+      readonly restorable: boolean
+      readonly restored: boolean
+      readonly reason: string
+    }>
+  }
+}
+
 export type MemoryListInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined

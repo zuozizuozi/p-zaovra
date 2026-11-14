@@ -29,6 +29,8 @@ const first = SessionV2.ID.make("ses_memory_first")
 const second = SessionV2.ID.make("ses_memory_second")
 
 const setup = Effect.gen(function* () {
+  const store = yield* MemoryStore.Service
+  yield* store.scope(place)
   const { db } = yield* Database.Service
   yield* db
     .insert(ProjectTable)

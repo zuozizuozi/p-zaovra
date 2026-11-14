@@ -87,6 +87,7 @@ import type {
   LocationRef,
   LspStatusErrors,
   LspStatusResponses,
+  MemoryRecoveryChoice,
   ModelRef,
   MoveSessionDestination,
   PathGetErrors,
@@ -216,8 +217,12 @@ import type {
   V2MemoryCreateResponses,
   V2MemoryListErrors,
   V2MemoryListResponses,
+  V2MemoryRecoveryErrors,
+  V2MemoryRecoveryResponses,
   V2MemoryRemoveErrors,
   V2MemoryRemoveResponses,
+  V2MemoryResolveRecoveryErrors,
+  V2MemoryResolveRecoveryResponses,
   V2MemoryUpdateErrors,
   V2MemoryUpdateResponses,
   V2ModelListErrors,
@@ -5841,6 +5846,66 @@ export class Skill extends HeyApiClient {
 
 export class Memory extends HeyApiClient {
   /**
+   * View and export legacy memory for explicit recovery
+   */
+  public recovery<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<V2MemoryRecoveryResponses, V2MemoryRecoveryErrors, ThrowOnError>({
+      url: "/api/memory/recovery",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Confirm selected legacy notes or start this directory blank
+   */
+  public resolveRecovery<ThrowOnError extends boolean = false>(
+    parameters: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      memoryRecoveryChoice: MemoryRecoveryChoice
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { key: "memoryRecoveryChoice", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2MemoryResolveRecoveryResponses,
+      V2MemoryResolveRecoveryErrors,
+      ThrowOnError
+    >({
+      url: "/api/memory/recovery",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Clear memory notes
    *
    * Delete every note of a project, or every note that follows the user across projects.
@@ -5909,7 +5974,7 @@ export class Memory extends HeyApiClient {
   /**
    * Add a memory note
    *
-   * Add a note written by the user. Returns null when the same note was deleted before or the text is empty.
+   * Add a note written by the user. Returns null while legacy recovery is pending, when deletion protection matches, or when the text is empty.
    */
   public create<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -5970,7 +6035,7 @@ export class Memory extends HeyApiClient {
   /**
    * Edit a memory note
    *
-   * Change a note's text, kind or status. Returns null when the note does not exist.
+   * Change a note's text, kind or status. Returns null when the note does not exist, is a read-only legacy original, or recovery/deletion protection blocks the change.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters: {

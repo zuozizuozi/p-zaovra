@@ -63,7 +63,7 @@ const layer = Layer.effectDiscard(
     const store = yield* MemoryStore.Service
     const events = yield* EventV2.Service
     const config = yield* Config.Service
-    const scope = MemoryStore.scope({ project: location.project.id, directory: location.directory })
+    const scope = yield* store.scope({ project: location.project.id, directory: location.directory })
     const off = Config.latest(yield* config.entries(), "memory")?.enabled === false
     yield* store.silence(scope, off)
     if (off) return

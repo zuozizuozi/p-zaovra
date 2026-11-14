@@ -19,7 +19,11 @@ import { Hash } from "@zaovra-ai/core/util/hash"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { testEffect } from "./lib/effect"
 
-const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, MemoryStore.node])))
+const it = testEffect(
+  AppNodeBuilder.build(LayerNode.group([Database.node, MemoryStore.node]), [
+    [MemoryStore.node, MemoryStore.layerWith("linux")],
+  ]),
+)
 const content = { kind: "practice" as const, origin: "model" as const, status: "verified" as const }
 
 test("POSIX directory identity preserves case and backslashes in a new namespace", () => {
@@ -71,9 +75,29 @@ it.live("new POSIX scopes neither read nor mutate legacy notes and tombstones", 
     const store = yield* MemoryStore.Service
     const database = yield* Database.Service
     const old = Memory.Scope.make(`dir_${Hash.fast("/workspace/alpha").slice(0, 24)}`)
-    yield* store.write({ ...content, scope: old, text: "legacy living evidence" })
-    const erased = (yield* store.write({ ...content, scope: old, text: "legacy erased evidence" }))!
-    yield* store.remove(erased.id)
+    yield* database.db
+      .insert(MemoryNoteTable)
+      .values([
+        {
+          ...content,
+          id: Memory.ID.create(),
+          scope: old,
+          key: "old-live",
+          text: "legacy living evidence",
+          time_observed: 1,
+        },
+        {
+          ...content,
+          id: Memory.ID.create(),
+          scope: old,
+          key: `text:${Hash.fast("legacy erased evidence")}`,
+          text: "",
+          time_observed: 1,
+          time_deleted: 1,
+        },
+      ])
+      .run()
+      .pipe(Effect.orDie)
     const before = yield* database.db
       .select()
       .from(MemoryNoteTable)
@@ -82,11 +106,11 @@ it.live("new POSIX scopes neither read nor mutate legacy notes and tombstones", 
       .pipe(Effect.orDie)
     expect(before.some((row) => row.time_deleted !== null)).toBe(true)
     for (const directory of ["/workspace/Alpha", "/workspace/alpha"]) {
-      const scope = MemoryStore.scope({ project: Project.ID.global, directory }, "linux")
+      const scope = yield* store.scope({ project: Project.ID.global, directory })
       expect(yield* store.list(scope)).toEqual([])
       expect((yield* store.search({ scope, query: "legacy" })).notes).toEqual([])
-      // Old suppression cannot be attributed to either new scope. No migration is implied.
-      expect(yield* store.write({ ...content, scope, text: "legacy erased evidence" })).toBeDefined()
+      // The linked legacy bucket freezes writes until explicit recovery.
+      expect(yield* store.write({ ...content, scope, text: "legacy erased evidence" })).toBeUndefined()
       yield* store.clear(scope)
     }
     expect(
@@ -122,7 +146,7 @@ function isolation(directories: string[], platform: NodeJS.Platform = process.pl
       .run()
       .pipe(Effect.orDie)
     const places = directories.map((directory) => ({ project: Project.ID.global, directory }))
-    const scopes = places.map((place) => MemoryStore.scope(place, platform))
+    const scopes = yield* Effect.forEach(places, (place) => store.scope(place))
     const sessions = directories.map((directory) => SessionSchema.ID.make(`ses_scope_${Hash.fast(directory)}`))
     yield* database.db
       .insert(SessionTable)

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "6df981cf-86c1-49dd-b477-bd6ed079d4e8",
+  "id": "a80ef508-dc6d-42b9-b701-79e7fc0d5d6e",
   "prevIds": [
-    "50855fc5-3548-45ed-b7a8-e05010ca5b65"
+    "94bf8e94-e965-43da-9147-81c24abdd08e"
   ],
   "ddl": [
     {
@@ -52,6 +52,14 @@
     },
     {
       "name": "memory_note",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_recovery_claim",
+      "entityType": "tables"
+    },
+    {
+      "name": "memory_recovery",
       "entityType": "tables"
     },
     {
@@ -985,6 +993,116 @@
       "name": "time_updated",
       "entityType": "columns",
       "table": "memory_note"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "note_id",
+      "entityType": "columns",
+      "table": "memory_recovery_claim"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "memory_recovery_claim"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "restored_id",
+      "entityType": "columns",
+      "table": "memory_recovery_claim"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "memory_recovery_claim"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "memory_recovery_claim"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "scope",
+      "entityType": "columns",
+      "table": "memory_recovery"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "legacy_scope",
+      "entityType": "columns",
+      "table": "memory_recovery"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "directory",
+      "entityType": "columns",
+      "table": "memory_recovery"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'pending'",
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "memory_recovery"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "memory_recovery"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "memory_recovery"
     },
     {
       "type": "text",
@@ -4614,6 +4732,24 @@
       "nameExplicit": false,
       "name": "memory_note_pk",
       "table": "memory_note",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "note_id"
+      ],
+      "nameExplicit": false,
+      "name": "memory_recovery_claim_pk",
+      "table": "memory_recovery_claim",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "scope"
+      ],
+      "nameExplicit": false,
+      "name": "memory_recovery_pk",
+      "table": "memory_recovery",
       "entityType": "pks"
     },
     {

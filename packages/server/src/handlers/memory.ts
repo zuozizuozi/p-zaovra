@@ -9,11 +9,31 @@ const scope = (layer: "project" | "user" | undefined) =>
   layer === "user"
     ? Effect.succeed(Memory.Scope.user)
     : Location.Service.use((location) =>
-        Effect.succeed(MemoryStore.scope({ project: location.project.id, directory: location.directory })),
+        MemoryStore.Service.use((store) =>
+          store.scope({ project: location.project.id, directory: location.directory }),
+        ),
       )
 
 export const MemoryHandler = HttpApiBuilder.group(Api, "server.memory", (handlers) =>
   handlers
+    .handle(
+      "memory.recovery",
+      Effect.fn(function* () {
+        const store = yield* MemoryStore.Service
+        const location = yield* Location.Service
+        return { data: yield* store.recovery({ project: location.project.id, directory: location.directory }) }
+      }),
+    )
+    .handle(
+      "memory.resolveRecovery",
+      Effect.fn(function* (ctx) {
+        const store = yield* MemoryStore.Service
+        const location = yield* Location.Service
+        const place = { project: location.project.id, directory: location.directory }
+        const accepted = yield* store.resolveRecovery(place, ctx.payload)
+        return { accepted, data: yield* store.recovery(place) }
+      }),
+    )
     .handle(
       "memory.list",
       Effect.fn(function* (ctx) {

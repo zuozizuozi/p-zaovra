@@ -30,3 +30,20 @@ export const MemoryNoteTable = sqliteTable(
     index("memory_note_scope_time_updated_idx").on(table.scope, table.time_updated),
   ],
 )
+
+/** A directory's explicit recovery choice; old buckets remain immutable. */
+export const MemoryRecoveryTable = sqliteTable("memory_recovery", {
+  scope: text().$type<Memory.Scope>().primaryKey(),
+  legacy_scope: text().$type<Memory.Scope>().notNull(),
+  directory: text().notNull(),
+  state: text().$type<"pending" | "restored" | "blank">().notNull().default("pending"),
+  ...Timestamps,
+})
+
+/** One explicit destination per old note; retries and subsequent deletion never copy it again. */
+export const MemoryRecoveryClaimTable = sqliteTable("memory_recovery_claim", {
+  note_id: text().$type<Memory.ID>().primaryKey(),
+  scope: text().$type<Memory.Scope>().notNull(),
+  restored_id: text().$type<Memory.ID>().notNull(),
+  ...Timestamps,
+})

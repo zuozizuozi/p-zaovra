@@ -7281,6 +7281,28 @@ export type MemoryNote = {
   }
 }
 
+export type MemoryRecovery = {
+  scope: string
+  legacyScope?: string
+  directory: string
+  frozen: boolean
+  automaticFrozen: boolean
+  state: "none" | "pending" | "restored" | "blank"
+  deleted: number
+  notes: Array<{
+    note: MemoryNote
+    sourceDirectory?: string
+    restorable: boolean
+    restored: boolean
+    reason: string
+  }>
+}
+
+export type MemoryRecoveryChoice = {
+  decision: "restore" | "blank"
+  ids: Array<string>
+}
+
 export type ModelsDevRefreshed = {
   id: string
   metadata?: {
@@ -16689,6 +16711,79 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2MemoryRecoveryData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory/recovery"
+}
+
+export type V2MemoryRecoveryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryRecoveryError = V2MemoryRecoveryErrors[keyof V2MemoryRecoveryErrors]
+
+export type V2MemoryRecoveryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryRecovery
+  }
+}
+
+export type V2MemoryRecoveryResponse = V2MemoryRecoveryResponses[keyof V2MemoryRecoveryResponses]
+
+export type V2MemoryResolveRecoveryData = {
+  body: MemoryRecoveryChoice
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/memory/recovery"
+}
+
+export type V2MemoryResolveRecoveryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryResolveRecoveryError = V2MemoryResolveRecoveryErrors[keyof V2MemoryResolveRecoveryErrors]
+
+export type V2MemoryResolveRecoveryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    accepted: boolean
+    data: MemoryRecovery
+  }
+}
+
+export type V2MemoryResolveRecoveryResponse = V2MemoryResolveRecoveryResponses[keyof V2MemoryResolveRecoveryResponses]
 
 export type V2MemoryClearData = {
   body?: never

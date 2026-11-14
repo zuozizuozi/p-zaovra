@@ -141,6 +141,25 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`memory_recovery_claim\` (
+          \`note_id\` text PRIMARY KEY,
+          \`scope\` text NOT NULL,
+          \`restored_id\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`memory_recovery\` (
+          \`scope\` text PRIMARY KEY,
+          \`legacy_scope\` text NOT NULL,
+          \`directory\` text NOT NULL,
+          \`state\` text DEFAULT 'pending' NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`permission\` (
           \`id\` text PRIMARY KEY,
           \`project_id\` text NOT NULL,

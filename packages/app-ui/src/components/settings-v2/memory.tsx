@@ -12,6 +12,7 @@ import { useServerSync } from "@/context/server-sync"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
+import { MemoryRecoveryPanel } from "./memory-recovery"
 
 type Layer = "project" | "user"
 
@@ -32,6 +33,25 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     memory()
       .list({ location: location(), layer }, { throwOnError: true })
       .then((result) => result.data.data)
+  const [recovery, recoveryActions] = createResource(
+    () => (directory() ? ([serverSdk().scope, directory()] as const) : undefined),
+    async () => (await memory().recovery({ location: location() }, { throwOnError: true })).data.data,
+  )
+  const frozen = () =>
+    !!directory() && (recovery.loading || !!recovery.error || !recovery() || recovery()?.frozen === true)
+  const resolveRecovery = async (decision: "restore" | "blank", ids: string[]) => {
+    const target = directory()
+    const server = serverSdk().scope
+    const result = await memory().resolveRecovery(
+      { location: location(), memoryRecoveryChoice: { decision, ids } },
+      { throwOnError: true },
+    )
+    if (target === directory() && server === serverSdk().scope) {
+      recoveryActions.mutate(result.data.data)
+      await projectActions.refetch()
+    }
+    return result.data.accepted
+  }
   const [project, projectActions] = createResource(
     () => (directory() ? [serverSdk().scope, directory()] : undefined),
     () => read("project"),
@@ -107,6 +127,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     }
   }
   const tidy = async () => {
+    if (frozen() || recovery()?.automaticFrozen) return
     if (state.tidying === "starting" || state.tidying === "started") return
     if (!state.request && state.model && !selected()) return
     setState("tidying", "starting")
@@ -261,7 +282,18 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
             </div>
           </SettingsRowV2>
         </SettingsListV2>
-        <Show when={directory()}>{section("project", project)}</Show>
+        <Show when={directory()}>
+          <Show when={recovery.error}>
+            <p role="alert">{language.t("settings.memory.recovery.failed")}</p>
+            <ButtonV2 variant="neutral" onClick={() => void recoveryActions.refetch()}>
+              {language.t("settings.memory.recovery.retry")}
+            </ButtonV2>
+          </Show>
+          <Show when={!recovery.loading && !recovery.error && recovery()?.state !== "none" && recovery()} keyed>
+            {(data) => <MemoryRecoveryPanel data={data} resolve={resolveRecovery} />}
+          </Show>
+          <fieldset disabled={frozen()}>{section("project", project)}</fieldset>
+        </Show>
         <Show when={directory() && (project()?.length ?? 0) > 0}>
           <SettingsListV2>
             <SettingsRowV2
@@ -295,6 +327,8 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
                 <ButtonV2
                   variant="neutral"
                   disabled={
+                    frozen() ||
+                    recovery()?.automaticFrozen ||
                     state.tidying === "starting" ||
                     state.tidying === "started" ||
                     (!state.request && !!state.model && !selected())

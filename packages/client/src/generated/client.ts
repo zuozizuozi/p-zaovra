@@ -165,6 +165,10 @@ import type {
   CommandsRenderOutput,
   SkillsListInput,
   SkillsListOutput,
+  MemoryRecoveryInput,
+  MemoryRecoveryOutput,
+  MemoryResolveRecoveryInput,
+  MemoryResolveRecoveryOutput,
   MemoryListInput,
   MemoryListOutput,
   MemoryCreateInput,
@@ -1399,6 +1403,31 @@ export function make(options: ClientOptions) {
         ),
     },
     memory: {
+      recovery: (input?: MemoryRecoveryInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryRecoveryOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory/recovery`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      resolveRecovery: (input: MemoryResolveRecoveryInput, requestOptions?: RequestOptions) =>
+        request<MemoryResolveRecoveryOutput>(
+          {
+            method: "POST",
+            path: `/api/memory/recovery`,
+            query: { location: input["location"] },
+            body: { decision: input["decision"], ids: input["ids"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       list: (input?: MemoryListInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: MemoryListOutput }>(
           {

@@ -62,3 +62,30 @@ export const SessionMatch = Schema.Struct({
   passages: Schema.Array(Schema.Struct({ role: Schema.String, text: Schema.String })),
 }).annotate({ identifier: "Memory.SessionMatch" })
 export interface SessionMatch extends Schema.Schema.Type<typeof SessionMatch> {}
+
+/** Explicitly viewed legacy material is never automatically added to model context. */
+export const Recovery = Schema.Struct({
+  scope: Scope,
+  legacyScope: Scope.pipe(optional),
+  directory: Schema.String,
+  frozen: Schema.Boolean,
+  automaticFrozen: Schema.Boolean,
+  state: Schema.Literals(["none", "pending", "restored", "blank"]),
+  deleted: Schema.Int,
+  notes: Schema.Array(
+    Schema.Struct({
+      note: Note,
+      sourceDirectory: Schema.String.pipe(optional),
+      restorable: Schema.Boolean,
+      restored: Schema.Boolean,
+      reason: Schema.String,
+    }),
+  ),
+}).annotate({ identifier: "Memory.Recovery" })
+export interface Recovery extends Schema.Schema.Type<typeof Recovery> {}
+
+export const RecoveryChoice = Schema.Struct({
+  decision: Schema.Literals(["restore", "blank"]),
+  ids: Schema.Array(ID),
+}).annotate({ identifier: "Memory.RecoveryChoice" })
+export interface RecoveryChoice extends Schema.Schema.Type<typeof RecoveryChoice> {}

@@ -1596,7 +1596,25 @@ export const dict = {
   "settings.mcp.description": "MCP 设置将在此处可配置。",
 
   "settings.memory.title": "记忆",
-  "settings.memory.description": "Zaovra 从以往对话里留下来的内容。核对过的笔记会作为背景带进每个新对话；你的指令永远优先。每一条都可以改、可以删，删掉的不会再被记回来。",
+  "settings.memory.recovery.automaticFrozen":
+    "旧删除记录已无法识别原文。即使确认后，自动记录和模型整理仍会暂停。你仍可明确恢复或手动添加笔记；已知删除内容继续受到保护。",
+  "settings.memory.recovery.title": "核对旧记忆",
+  "settings.memory.recovery.warning":
+    "这些笔记可能混有多个目录的资料。来源路径仅是线索，不能证明归属。请只选择你确认属于当前目录的笔记。旧原件与删除记录会保留。",
+  "settings.memory.recovery.frozen": "确认前已暂停自动记录和记忆修改。",
+  "settings.memory.recovery.ready": "选择已保存。旧删除记录仍会保守阻止匹配内容重新写入。",
+  "settings.memory.recovery.export": "导出旧资料（JSON）",
+  "settings.memory.recovery.unknown": "来源目录不明",
+  "settings.memory.recovery.processed": "用户已确认归属；不会复制到另一目录，删除后也不会再次恢复。",
+  "settings.memory.recovery.readonly": "仅供查看：涉及删除内容或无法安全恢复的资料。",
+  "settings.memory.recovery.deleted": "保留的删除记录数：",
+  "settings.memory.recovery.failed": "未能完成恢复确认。请重新加载并核对资料。",
+  "settings.memory.recovery.restore": "确认所选属于当前目录并恢复",
+  "settings.memory.recovery.blank": "当前目录从空白开始",
+  "settings.memory.recovery.confirmBlank": "确认不复制旧笔记，并保留删除保护",
+  "settings.memory.recovery.retry": "重新加载恢复状态",
+  "settings.memory.description":
+    "Zaovra 从以往对话里留下来的内容。核对过的笔记会作为背景带进每个新对话；你的指令永远优先。每一条都可以改、可以删，删掉的不会再被记回来。",
   "settings.memory.project.title": "本项目",
   "settings.memory.project.description": "只在这个项目的对话里使用。",
   "settings.memory.project.add": "给这个项目加一条笔记",
@@ -1606,15 +1624,18 @@ export const dict = {
   "settings.memory.add": "添加",
   "settings.memory.use": "采用",
   "settings.memory.enabled.title": "跨对话保留笔记",
-  "settings.memory.enabled.description": "关闭后不再记录新内容，新对话也不会带上笔记。已经留下的笔记仍保留在这里，直到你删除。",
+  "settings.memory.enabled.description":
+    "关闭后不再记录新内容，新对话也不会带上笔记。已经留下的笔记仍保留在这里，直到你删除。",
   "settings.memory.tidy.title": "整理本项目的笔记",
-  "settings.memory.tidy.description": "开一个对话，逐条对照项目核对笔记，过时的标出来，重复的合并。可为本次整理选择模型，也可沿用默认；最多用30万token，只有点击才会运行。",
+  "settings.memory.tidy.description":
+    "开一个对话，逐条对照项目核对笔记，过时的标出来，重复的合并。可为本次整理选择模型，也可沿用默认；最多用30万token，只有点击才会运行。",
   "settings.memory.tidy.started": "已开始。它会作为一个新对话出现在对话列表里，打开可以看到核对了什么、改了哪些。",
   "settings.memory.tidy.failed": "没能开始。请确认已配置模型后再试。",
   "settings.memory.tidy.model": "本次整理模型",
   "settings.memory.tidy.default": "沿用默认",
   "settings.memory.tidy.action": "现在整理",
-  "settings.memory.tidy.prompt": "整理这个项目的记忆。先不带决定调用 memory_review，列出全部笔记。逐条对照现在的文件和以前的对话核对（可以用 memory_search、读文件、跑只读命令）。然后再调用 memory_review 提交决定：仍然成立的标 verify，现场已经不符的标 stale，重复的 merge。核对不了的保持原样。不要改任何项目文件。最后用几句话告诉我你核对了什么、改了哪些。",
+  "settings.memory.tidy.prompt":
+    "整理这个项目的记忆。先不带决定调用 memory_review，列出全部笔记。逐条对照现在的文件和以前的对话核对（可以用 memory_search、读文件、跑只读命令）。然后再调用 memory_review 提交决定：仍然成立的标 verify，现场已经不符的标 stale，重复的 merge。核对不了的保持原样。不要改任何项目文件。最后用几句话告诉我你核对了什么、改了哪些。",
   "settings.memory.clear": "全部清空",
   "settings.memory.clear.confirm": "删除这里的全部笔记？",
   "settings.memory.empty": "还没有留下任何内容。",
