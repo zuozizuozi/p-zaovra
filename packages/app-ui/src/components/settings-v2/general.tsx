@@ -215,7 +215,10 @@ export const SettingsGeneralV2: Component<{
     setPinchZoom(checked)
     const update = platform.setPinchZoomEnabled?.(checked)
     if (!update) return
-    void update.catch(() => setPinchZoom(!checked))
+    void update.catch((error) => {
+      setPinchZoom(!checked)
+      showToast({ title: language.t("settings.network.saveError"), description: String(error) })
+    })
   }
 
   const colorSchemeOptions = createMemo((): { value: ColorScheme; label: string }[] => [
