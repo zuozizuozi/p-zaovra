@@ -8299,7 +8299,7 @@ export type SkillsListOutput = {
   }>
 }
 
-export type ServerMemoryListInput = {
+export type MemoryListInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
     readonly layer?: "project" | "user" | undefined
@@ -8310,7 +8310,7 @@ export type ServerMemoryListInput = {
   }["layer"]
 }
 
-export type ServerMemoryListOutput = {
+export type MemoryListOutput = {
   readonly data: ReadonlyArray<{
     readonly id: string
     readonly scope: string
@@ -8326,7 +8326,7 @@ export type ServerMemoryListOutput = {
   }>
 }["data"]
 
-export type ServerMemoryCreateInput = {
+export type MemoryCreateInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]
@@ -8347,7 +8347,7 @@ export type ServerMemoryCreateInput = {
   }["text"]
 }
 
-export type ServerMemoryCreateOutput = {
+export type MemoryCreateOutput = {
   readonly data: {
     readonly id: string
     readonly scope: string
@@ -8363,7 +8363,7 @@ export type ServerMemoryCreateOutput = {
   } | null
 }["data"]
 
-export type ServerMemoryUpdateInput = {
+export type MemoryUpdateInput = {
   readonly id: { readonly id: string }["id"]
   readonly text?: {
     readonly text?: string | undefined
@@ -8382,7 +8382,7 @@ export type ServerMemoryUpdateInput = {
   }["status"]
 }
 
-export type ServerMemoryUpdateOutput = {
+export type MemoryUpdateOutput = {
   readonly data: {
     readonly id: string
     readonly scope: string
@@ -8398,11 +8398,11 @@ export type ServerMemoryUpdateOutput = {
   } | null
 }["data"]
 
-export type ServerMemoryRemoveInput = { readonly id: { readonly id: string }["id"] }
+export type MemoryRemoveInput = { readonly id: { readonly id: string }["id"] }
 
-export type ServerMemoryRemoveOutput = void
+export type MemoryRemoveOutput = void
 
-export type ServerMemoryClearInput = {
+export type MemoryClearInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
     readonly layer?: "project" | "user" | undefined
@@ -8413,7 +8413,7 @@ export type ServerMemoryClearInput = {
   }["layer"]
 }
 
-export type ServerMemoryClearOutput = void
+export type MemoryClearOutput = void
 
 export type EventsSubscribeOutput = ZaovraEventEncoded
 

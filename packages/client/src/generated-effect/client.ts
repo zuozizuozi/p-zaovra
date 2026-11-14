@@ -1279,7 +1279,7 @@ const adaptClient = (raw: RawClient) => ({
   files: adaptGroup13(raw["server.fs"]),
   commands: adaptGroup14(raw["server.command"]),
   skills: adaptGroup15(raw["server.skill"]),
-  "server.memory": adaptGroup16(raw["server.memory"]),
+  memory: adaptGroup16(raw["server.memory"]),
   events: adaptGroup17(raw["server.event"]),
   ptys: adaptGroup18(raw["server.pty"]),
   questions: adaptGroup19(raw["server.question"]),

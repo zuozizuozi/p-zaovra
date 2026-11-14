@@ -21,6 +21,7 @@ test("exposes every standard HTTP API group", () => {
     "files",
     "commands",
     "skills",
+    "memory",
     "events",
     "ptys",
     "questions",

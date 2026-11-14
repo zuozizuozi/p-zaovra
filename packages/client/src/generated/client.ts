@@ -165,16 +165,16 @@ import type {
   CommandsRenderOutput,
   SkillsListInput,
   SkillsListOutput,
-  ServerMemoryListInput,
-  ServerMemoryListOutput,
-  ServerMemoryCreateInput,
-  ServerMemoryCreateOutput,
-  ServerMemoryUpdateInput,
-  ServerMemoryUpdateOutput,
-  ServerMemoryRemoveInput,
-  ServerMemoryRemoveOutput,
-  ServerMemoryClearInput,
-  ServerMemoryClearOutput,
+  MemoryListInput,
+  MemoryListOutput,
+  MemoryCreateInput,
+  MemoryCreateOutput,
+  MemoryUpdateInput,
+  MemoryUpdateOutput,
+  MemoryRemoveInput,
+  MemoryRemoveOutput,
+  MemoryClearInput,
+  MemoryClearOutput,
   EventsSubscribeOutput,
   PtysListInput,
   PtysListOutput,
@@ -1398,9 +1398,9 @@ export function make(options: ClientOptions) {
           requestOptions,
         ),
     },
-    "server.memory": {
-      list: (input?: ServerMemoryListInput, requestOptions?: RequestOptions) =>
-        request<{ readonly data: ServerMemoryListOutput }>(
+    memory: {
+      list: (input?: MemoryListInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryListOutput }>(
           {
             method: "GET",
             path: `/api/memory`,
@@ -1411,8 +1411,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
-      create: (input: ServerMemoryCreateInput, requestOptions?: RequestOptions) =>
-        request<{ readonly data: ServerMemoryCreateOutput }>(
+      create: (input: MemoryCreateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryCreateOutput }>(
           {
             method: "POST",
             path: `/api/memory`,
@@ -1424,8 +1424,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
-      update: (input: ServerMemoryUpdateInput, requestOptions?: RequestOptions) =>
-        request<{ readonly data: ServerMemoryUpdateOutput }>(
+      update: (input: MemoryUpdateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryUpdateOutput }>(
           {
             method: "PATCH",
             path: `/api/memory/${encodeURIComponent(input.id)}`,
@@ -1436,8 +1436,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
-      remove: (input: ServerMemoryRemoveInput, requestOptions?: RequestOptions) =>
-        request<ServerMemoryRemoveOutput>(
+      remove: (input: MemoryRemoveInput, requestOptions?: RequestOptions) =>
+        request<MemoryRemoveOutput>(
           {
             method: "DELETE",
             path: `/api/memory/${encodeURIComponent(input.id)}`,
@@ -1447,8 +1447,8 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
-      clear: (input?: ServerMemoryClearInput, requestOptions?: RequestOptions) =>
-        request<ServerMemoryClearOutput>(
+      clear: (input?: MemoryClearInput, requestOptions?: RequestOptions) =>
+        request<MemoryClearOutput>(
           {
             method: "DELETE",
             path: `/api/memory`,
