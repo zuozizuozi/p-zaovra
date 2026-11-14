@@ -9,6 +9,7 @@ import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { newestPrompt } from "@/context/newest-message"
 import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 import { todoDeliveryComplete } from "./todo-delivery"
 
@@ -90,7 +91,7 @@ export function createSessionComposerController() {
     (sync().data.message[params.id ?? ""] ?? []).findLast((message) => message.role === "assistant"),
   )
   const lastUser = createMemo(() =>
-    (sync().data.message[params.id ?? ""] ?? []).findLast((message) => message.role === "user"),
+    newestPrompt(sync().data.message[params.id ?? ""], (id) => sync().data.part[id]),
   )
   const delivered = createMemo(() =>
     todoDeliveryComplete({
