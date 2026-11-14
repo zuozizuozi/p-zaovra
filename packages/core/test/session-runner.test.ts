@@ -678,6 +678,122 @@ const repairCall = (id: string, name: string, input: Record<string, unknown>, us
   LLMEvent.finish({ reason: "tool-calls" }),
 ]
 
+const repairEnvironment = (value: string | undefined) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = process.env.ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR
+      if (value === undefined) delete process.env.ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR
+      if (value !== undefined) process.env.ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR = value
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR
+        if (previous !== undefined) process.env.ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR = previous
+      }),
+  )
+
+for (const value of [undefined, "on", "off", "invalid"])
+  it.live(`delivery repair experiment preserves prompts and bounds: ${value ?? "default"}`, () =>
+    Effect.gen(function* () {
+      yield* repairEnvironment(value)
+      yield* setup
+      verificationEnabled = false
+      deliveryEnabled = undefined
+      currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+        pricing: repairPricing,
+      })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+      responses = [
+        repairStop("primary", {
+          ...repairUsage,
+          inputTokens: 600_000,
+          nonCachedInputTokens: 600_000,
+          cacheReadInputTokens: 0,
+        }),
+        repairStop("repair-1"),
+        repairStop("repair-2"),
+        repairStop("repair-3"),
+      ]
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(value === "off" ? 1 : 4)
+      const system = requests[0].system.map((part) => part.text)
+      expect(system).toContain(AccuracyGuidance.general)
+      expect(system).toContain(AccuracyGuidance.delivery)
+      expect(system).toContain(AccuracyGuidance.lifecycle)
+      for (const request of requests) expect(request.system.map((part) => part.text)).toEqual(system)
+      const history = yield* session.context(sessionID)
+      const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
+      if (value === "off") expect(receipt).toBeUndefined()
+      if (value !== "off") {
+        expect(receipt?.decision).toBe("unverified")
+        expect(receipt?.turns).toBe(DeliveryContract.budget.turns)
+        expect(receipt?.spent).toBeLessThanOrEqual(receipt!.allowance!)
+        for (const request of requests.slice(1)) expect(request.generation?.maxTokens).toBeLessThanOrEqual(1024)
+      }
+    }),
+  )
+
+for (const value of ["off", "on"])
+  for (const expired of [false, true])
+    it.live(`delivery repair experiment gates saved receipts: ${value}/${expired ? "expired" : "active"}`, () =>
+      Effect.gen(function* () {
+        yield* repairEnvironment(value)
+        yield* setup
+        verificationEnabled = false
+        deliveryEnabled = undefined
+        currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+          pricing: repairPricing,
+        })
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+        response = repairStop("seed")
+        yield* session.resume(sessionID)
+        const source = SessionOutcome.requested(yield* session.context(sessionID)).sourceMessageID!
+        const events = yield* EventV2.Service
+        const started = (yield* Clock.currentTimeMillis) - (expired ? DeliveryContract.budget.durationMs + 1000 : 0)
+        yield* events.publish(SessionEvent.Synthetic, {
+          sessionID,
+          timestamp: yield* DateTime.now,
+          messageID: SessionMessage.ID.create(),
+          text:
+            DeliveryContract.prefix +
+            JSON.stringify({
+              request: source,
+              started,
+              tokens: 1024,
+              decision: "repair",
+              missing: ["required file missing"],
+              allowance: 1,
+              spent: 0,
+              turns: 0,
+              costs: repairPricing.cost,
+              model: SessionOutputRecovery.identity(model),
+            }),
+        })
+        requests.length = 0
+        responses = Array.from({ length: 4 }, (_, index) => repairStop(`resume-${index}`))
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(value === "off" ? 1 : expired ? 0 : 3)
+        const receipt = DeliveryContract.receipt(yield* session.context(sessionID), source)
+        expect(receipt?.started).toBe(started)
+        if (value === "off") {
+          expect(receipt?.decision).toBe("repair")
+          expect(receipt?.turns).toBe(0)
+          expect(
+            requests[0].messages.some((message) =>
+              JSON.stringify(message.content).includes("One bounded delivery repair cycle"),
+            ),
+          ).toBe(false)
+          expect(requests[0].system.map((part) => part.text)).toContain(AccuracyGuidance.delivery)
+          expect(requests[0].system.map((part) => part.text)).toContain(AccuracyGuidance.lifecycle)
+        }
+        if (value === "on" && !expired) expect(receipt?.turns).toBe(3)
+        if (value === "on" && expired) expect(receipt?.decision).toBe("unverified")
+      }),
+    )
+
 it.effect("371 cold initialization waits for agent system steps and skills", () =>
   Effect.gen(function* () {
     yield* setup

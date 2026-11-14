@@ -766,10 +766,13 @@ const layer = Layer.effect(
       const configuration = yield* config.entries()
       const verificationEnabled = Config.latest(configuration, "experimental")?.verification === true
       const deliveryEnabled = Config.latest(configuration, "experimental")?.delivery_contract !== false
+      // Keep guidance identical for the repair-only experiment; unknown values preserve the default.
+      const deliveryRepairEnabled = deliveryEnabled && process.env.ZAOVRA_EXPERIMENTAL_DELIVERY_REPAIR !== "off"
       // Bind only after safe promotion, before host setup can block. Same-request
       // continuation keeps the durable start; a new task or mode inherits no cap.
       if (budgetStop) {
-        const history = deliveryEnabled && !verificationEnabled ? yield* SessionOutcome.history(db, sessionID) : []
+        const history =
+          deliveryRepairEnabled && !verificationEnabled ? yield* SessionOutcome.history(db, sessionID) : []
         const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
         yield* Deferred.succeed(budgetStop.repairScope, receipt?.decision === "repair" ? receipt : undefined)
       }
@@ -954,7 +957,7 @@ const layer = Layer.effect(
         durableHistory,
         SessionOutcome.requested(durableHistory).sourceMessageID,
       )
-      const deliveryReview = deliveryEnabled && !verificationEnabled && deliveryReceipt?.decision === "repair"
+      const deliveryReview = deliveryRepairEnabled && !verificationEnabled && deliveryReceipt?.decision === "repair"
       const deliveryReport = deliveryReview && deliveryReceipt.report === true
       const deliveryRemaining = deliveryReview
         ? DeliveryContract.budget.durationMs - ((yield* Clock.currentTimeMillis) - deliveryReceipt.started)
@@ -2154,7 +2157,7 @@ const layer = Layer.effect(
             }
           }
           if (
-            deliveryEnabled &&
+            deliveryRepairEnabled &&
             !verificationEnabled &&
             !isLastStep &&
             (deliveryReview ||
