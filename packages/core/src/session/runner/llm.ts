@@ -2074,53 +2074,22 @@ const layer = Layer.effect(
                   )
                 : []
             for (const part of observations) {
-              if (part.type !== "tool" || (part.state.status !== "error" && part.state.status !== "completed")) continue
-              const input = part.state.input
-              const error =
-                part.state.status === "error"
-                  ? part.state.error.message
-                  : part.state.content
-                      .filter((item) => item.type === "text")
-                      .map((item) => (item.type === "text" ? item.text : ""))
-                      .join("\n")
-              const failed =
-                part.state.status === "error" ||
-                part.state.structured.timeout === true ||
-                (typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)
-              const read = failed
-                ? undefined
-                : SessionProgress.readEvidence(part.name, input, part.state.structured, error, location.directory)
-              if (!failed && !read) continue
-              const current = {
-                category: !failed
-                  ? "read-only"
-                  : part.state.status === "error"
-                    ? "tool-error"
-                    : part.state.structured.timeout === true
-                      ? "timeout"
-                      : `exit-${part.state.structured.exit}`,
-                error: failed ? error.trim().slice(0, 512) : "",
-                cwd:
-                  part.state.status === "completed" && typeof part.state.structured.workdir === "string"
-                    ? part.state.structured.workdir
-                    : typeof input.workdir === "string"
-                      ? input.workdir
-                      : location.directory,
-                environment: initialized.shell.identity ? JSON.stringify(initialized.shell.identity) : undefined,
-                artifact: (yield* restore(snapshots.capture())) ?? undefined,
-                hypothesis: typeof input.progress_hypothesis === "string" ? input.progress_hypothesis : undefined,
-                expectedEvidence:
-                  typeof input.progress_expected_evidence === "string" ? input.progress_expected_evidence : undefined,
-                evidence: read ?? createHash("sha256").update(error).digest("hex"),
-              }
+              const prepared = SessionProgress.prepareObservation(part, location.directory)
+              if (!prepared) continue
+              const current = SessionProgress.completeObservation(
+                prepared,
+                initialized.shell.identity ? JSON.stringify(initialized.shell.identity) : undefined,
+                (yield* restore(snapshots.capture())) ?? undefined,
+              )
               const previous = yield* SessionProgress.recentObservations(db, session.id)
-              const diagnostic =
-                quality?.stagnation_reminder === true && needsContinuation && !isLastStep
-                  ? SessionProgress.diagnostic(previous, current)
-                  : undefined
-              const prefix = `Stagnation diagnostic ${messages.findLast((message) => message.type === "user")?.id}:${diagnostic}:`
+              const diagnosis = SessionProgress.diagnosticMessage(previous, current, {
+                enabled: quality?.stagnation_reminder === true,
+                continuing: needsContinuation,
+                last: isLastStep,
+                userID: messages.findLast((message) => message.type === "user")?.id,
+              })
               const reminded =
-                diagnostic &&
+                diagnosis.key &&
                 (yield* db
                   .select({ seq: EventTable.seq })
                   .from(EventTable)
@@ -2129,19 +2098,19 @@ const layer = Layer.effect(
                       eq(EventTable.aggregate_id, session.id),
                       eq(EventTable.type, "session.next.quality.progress.1"),
                       sql`json_extract(${EventTable.data}, '$.category') = 'stagnation'`,
-                      sql`json_extract(${EventTable.data}, '$.details.diagnosticKey') = ${prefix}`,
+                      sql`json_extract(${EventTable.data}, '$.details.diagnosticKey') = ${diagnosis.prefix}`,
                       sql`json_extract(${EventTable.data}, '$.details.intervention') = 1`,
                     ),
                   )
                   .limit(1)
                   .get()
                   .pipe(Effect.orDie))
-              if (diagnostic && !reminded)
+              if (diagnosis.key && !reminded)
                 yield* events.publish(SessionEvent.Synthetic, {
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
-                  text: `${prefix} ${SessionProgress.diagnosticReminder}`,
+                  text: diagnosis.text,
                 })
               const observation = Object.fromEntries(
                 Object.entries(current).filter((entry) => entry[1] !== undefined),
@@ -2150,8 +2119,8 @@ const layer = Layer.effect(
                 callID: part.id,
                 observation,
                 ...SessionProgress.observe(previous, current),
-                intervention: Boolean(diagnostic && !reminded),
-                ...(diagnostic ? { diagnosticKey: prefix } : {}),
+                intervention: Boolean(diagnosis.key && !reminded),
+                ...(diagnosis.key ? { diagnosticKey: diagnosis.prefix } : {}),
               })
             }
           }

@@ -11595,6 +11595,15 @@ for (const enabled of [false, true])
       ).toHaveLength(enabled ? 1 : 0)
       expect(JSON.stringify(requests[2])).not.toContain(SessionProgress.diagnosticReminder)
       expect(JSON.stringify(requests[3]).includes(SessionProgress.diagnosticReminder)).toBe(enabled)
+      const db = (yield* Database.Service).db
+      const rows = yield* db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, sessionID))
+        .orderBy(asc(EventTable.seq))
+        .all()
+        .pipe(Effect.orDie)
+      expect(stagnationSnapshot(rows.map((row) => ({ type: row.type, data: row.data })))).toMatchSnapshot()
     }),
   )
 
@@ -12335,3 +12344,85 @@ function closingSnapshot(value: unknown) {
       return hashes.get(hash)!
     })
 }
+
+// Shell identity is machine-specific. Keep its presence and signature position;
+// all other details and synthetic/quality event ordering remain observable.
+function stagnationSnapshot(rows: readonly { type: string; data: Record<string, unknown> }[]) {
+  const selected = rows
+    .filter(
+      (row) =>
+        row.data.category === "stagnation" ||
+        (typeof row.data.text === "string" && row.data.text.startsWith("Stagnation diagnostic")),
+    )
+    .map((row) =>
+      row.data.category === "stagnation"
+        ? { type: row.type, details: row.data.details }
+        : { type: row.type, text: row.data.text },
+    )
+  return closingSnapshot(
+    JSON.stringify(selected, (key, value) => {
+      if (key === "environment" && typeof value === "string") return "shell-identity"
+      if (key === "signature" && typeof value === "string") {
+        const signature = JSON.parse(value) as unknown[]
+        if (signature[3] !== null) signature[3] = "shell-identity"
+        return JSON.stringify(signature)
+      }
+      return value
+    }),
+  )
+}
+
+it.live("stagnation multipart keeps per-part history and reminder before its quality record", () =>
+  Effect.gen(function* () {
+    yield* setup
+    verificationEnabled = false
+    qualityProgress = { facts: false, stagnation_log: false, stagnation_reminder: true }
+    fixtureSnapshot = Snapshot.ID.make("unchanged")
+    const registry = yield* ToolRegistry.Service
+    const session = yield* SessionV2.Service
+    yield* registry.register({
+      bash: Tool.make({
+        description: "read fixture",
+        input: Schema.Struct({ command: Schema.String, progress_hypothesis: Schema.String }),
+        output: Schema.Struct({ exit: Schema.Number }),
+        execute: () => Effect.succeed({ exit: 0 }),
+        toModelOutput: () => [{ type: "text", text: "same source" }],
+      }),
+    })
+    yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Inspect the source" }), resume: false })
+    responses = [
+      [
+        LLMEvent.stepStart({ index: 0 }),
+        ...Array.from({ length: 3 }, (_, index) =>
+          LLMEvent.toolCall({
+            id: `multi-${index}`,
+            name: "bash",
+            input: { command: `cat ${" ".repeat(index)}source.ts`, progress_hypothesis: "entry mismatch" },
+          }),
+        ),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ],
+      fragmentFixture("text", "done", ["Done"]).completeEvents,
+    ]
+    yield* session.resume(sessionID)
+    expect(requests).toHaveLength(2)
+    const db = (yield* Database.Service).db
+    const rows = yield* db
+      .select()
+      .from(EventTable)
+      .where(eq(EventTable.aggregate_id, sessionID))
+      .orderBy(asc(EventTable.seq))
+      .all()
+      .pipe(Effect.orDie)
+    const observations = rows.filter((row) => row.data.category === "stagnation")
+    expect(observations).toHaveLength(3)
+    expect(observations.map((row) => (row.data.details as { intervention: boolean }).intervention)).toEqual([
+      false,
+      false,
+      true,
+    ])
+    expect(JSON.stringify(requests[1])).toContain(SessionProgress.diagnosticReminder)
+    expect(stagnationSnapshot(rows.map((row) => ({ type: row.type, data: row.data })))).toMatchSnapshot()
+  }),
+)

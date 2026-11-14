@@ -12,6 +12,7 @@ import { EventV2 } from "../event"
 import { EventTable } from "../event/sql"
 import { HostHints } from "../system-context/host-hints"
 import { SessionEvent } from "./event"
+import type { SessionMessage } from "./message"
 
 export const State = Schema.Struct({
   activeMs: Schema.Number,
@@ -333,6 +334,77 @@ export type Failure = {
   hypothesis?: string
   expectedEvidence?: string
   evidence?: string
+}
+
+// Qualification precedes the runner's snapshot capture. Successful polling or
+// unrecognized commands must not acquire an observation merely by returning.
+export function prepareObservation(part: SessionMessage.AssistantContent, directory: string) {
+  if (part.type !== "tool" || (part.state.status !== "error" && part.state.status !== "completed")) return
+  const input = part.state.input
+  const error =
+    part.state.status === "error"
+      ? part.state.error.message
+      : part.state.content
+          .filter((item) => item.type === "text")
+          .map((item) => (item.type === "text" ? item.text : ""))
+          .join("\n")
+  const failed =
+    part.state.status === "error" ||
+    part.state.structured.timeout === true ||
+    (typeof part.state.structured.exit === "number" && part.state.structured.exit !== 0)
+  const read = failed ? undefined : readEvidence(part.name, input, part.state.structured, error, directory)
+  if (!failed && !read) return
+  return {
+    category: !failed
+      ? "read-only"
+      : part.state.status === "error"
+        ? "tool-error"
+        : part.state.structured.timeout === true
+          ? "timeout"
+          : `exit-${part.state.structured.exit}`,
+    error: failed ? error.trim().slice(0, 512) : "",
+    cwd:
+      part.state.status === "completed" && typeof part.state.structured.workdir === "string"
+        ? part.state.structured.workdir
+        : typeof input.workdir === "string"
+          ? input.workdir
+          : directory,
+    input,
+    read,
+    rawError: error,
+  }
+}
+
+// Environment is observed before the snapshot; the runner supplies both at
+// their original effect sites. Hash the complete error, not its display slice.
+export function completeObservation(
+  prepared: NonNullable<ReturnType<typeof prepareObservation>>,
+  environment: string | undefined,
+  artifact: string | undefined,
+) {
+  return {
+    category: prepared.category,
+    error: prepared.error,
+    cwd: prepared.cwd,
+    environment,
+    artifact,
+    hypothesis: typeof prepared.input.progress_hypothesis === "string" ? prepared.input.progress_hypothesis : undefined,
+    expectedEvidence:
+      typeof prepared.input.progress_expected_evidence === "string"
+        ? prepared.input.progress_expected_evidence
+        : undefined,
+    evidence: prepared.read ?? createHash("sha256").update(prepared.rawError).digest("hex"),
+  }
+}
+
+export function diagnosticMessage(
+  history: readonly Failure[],
+  current: Failure,
+  input: { enabled: boolean; continuing: boolean; last: boolean; userID?: string },
+) {
+  const key = input.enabled && input.continuing && !input.last ? diagnostic(history, current) : undefined
+  const prefix = `Stagnation diagnostic ${input.userID}:${key}:`
+  return { key, prefix, text: `${prefix} ${diagnosticReminder}` }
 }
 
 export function stagnation(previous: Failure | undefined, current: Failure) {
