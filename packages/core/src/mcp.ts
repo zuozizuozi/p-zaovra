@@ -340,7 +340,15 @@ const layer = Layer.effect(
               credentialID ? (value) => runPromise(credentials.update(credentialID, { value })) : undefined,
             )
           : undefined
-      const connected = yield* connectServer(location, server, defaults?.startup, authProvider).pipe(Effect.exit)
+      const startup = server.timeout?.startup ?? defaults?.startup ?? DEFAULT_STARTUP_TIMEOUT_MS
+      const connected = yield* connectServer(location, server, defaults?.startup, authProvider).pipe(
+        // The SDK deadline starts after transport.start(); include transport setup and fallback too.
+        Effect.timeoutOrElse({
+          duration: startup,
+          orElse: () => Effect.fail(new Error(`MCP startup timed out after ${startup} ms`)),
+        }),
+        Effect.exit,
+      )
       if (Exit.isFailure(connected)) {
         const error = normalizeError(Cause.squash(connected.cause))
         statuses[name] =
