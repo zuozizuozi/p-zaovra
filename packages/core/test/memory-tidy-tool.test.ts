@@ -41,7 +41,14 @@ const setup = Effect.gen(function* () {
         tokens: 200,
         dailyTokens: 300,
       },
-      (id) => create(id).pipe(Effect.asVoid),
+      (id) =>
+        Effect.gen(function* () {
+          yield* create(id)
+          const admitted = yield* sessions
+            .prompt({ sessionID: id, resume: false, prompt: { text: "Tidy" } })
+            .pipe(Effect.orDie)
+          return { id: admitted.id, seq: admitted.admittedSeq }
+        }),
     )
   const review = (sessionID: SessionV2.ID, input: Record<string, unknown> = {}) =>
     captured.settle({

@@ -19,6 +19,8 @@ import { SessionEvent } from "@zaovra-ai/core/session/event"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { SessionProjector } from "@zaovra-ai/core/session/projector"
+import { SessionInput } from "@zaovra-ai/core/session/input"
+import { SessionMessage } from "@zaovra-ai/core/session/message"
 import { SessionSchema } from "@zaovra-ai/core/session/schema"
 import { SessionTable } from "@zaovra-ai/core/session/sql"
 import { testEffect } from "./lib/effect"
@@ -61,7 +63,17 @@ const host = Effect.gen(function* () {
         version: "test",
         model,
       })
-      .pipe(Effect.asVoid)
+      .pipe(
+        Effect.andThen(
+          SessionInput.admit(database.db, events, {
+            id: SessionMessage.ID.create(),
+            sessionID,
+            prompt: { text: "Tidy" },
+            delivery: "steer",
+          }),
+        ),
+        Effect.map((input) => ({ id: input.id, seq: input.admittedSeq })),
+      )
   return { store, create, database, events }
 })
 const authority = (run: MemoryTidyStore.Run) => ({ sessionID: run.session_id, scope: run.scope, enabled: true })
@@ -185,13 +197,13 @@ test("SessionV2.create and a grant share the real host transaction", async () =>
       const store = yield* MemoryTidyStore.Service
       const input = { ...request, directory: temporary.path }
       const run = yield* store.create(input, (id) =>
-        sessions
-          .create({
-            id,
-            model,
-            location: { directory: AbsolutePath.make(temporary.path) },
-          })
-          .pipe(Effect.asVoid),
+        Effect.gen(function* () {
+          yield* sessions.create({ id, model, location: { directory: AbsolutePath.make(temporary.path) } })
+          const admitted = yield* sessions
+            .prompt({ sessionID: id, resume: false, prompt: { text: "Tidy" } })
+            .pipe(Effect.orDie)
+          return { id: admitted.id, seq: admitted.admittedSeq }
+        }),
       )
       expect((yield* sessions.get(run.session_id)).model).toEqual({
         ...model,

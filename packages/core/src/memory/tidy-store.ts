@@ -33,7 +33,7 @@ export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryTidy.Re
 export interface Interface {
   readonly create: (
     input: Request,
-    createSession: (id: SessionSchema.ID) => Effect.Effect<void | NonNullable<Run["input"]>>,
+    createSession: (id: SessionSchema.ID) => Effect.Effect<NonNullable<Run["input"]>>,
   ) => Effect.Effect<Run, Rejected>
   readonly get: (id: string) => Effect.Effect<Run | undefined>
   readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<Run | undefined>
@@ -87,10 +87,18 @@ const layer = Layer.effect(
         )
         .get()
 
-      if (!run) return yield* new Rejected({ reason: "unauthorized" })
+      if (!run?.input) return yield* new Rejected({ reason: "unauthorized" })
       const session = yield* db
         .select({ model: SessionTable.model })
         .from(SessionTable)
+        .innerJoin(
+          SessionInputTable,
+          and(
+            eq(SessionInputTable.session_id, SessionTable.id),
+            eq(SessionInputTable.id, run.input.id),
+            eq(SessionInputTable.admitted_seq, run.input.seq),
+          ),
+        )
         .where(and(eq(SessionTable.id, run.session_id), eq(SessionTable.directory, run.directory)))
         .get()
 
@@ -134,7 +142,10 @@ const layer = Layer.effect(
           .all()
           .pipe(Effect.orDie),
       usage: (input) => usage(input).pipe(Effect.orDie),
-      authorize: (input) => authorize(input).pipe(Effect.catchTag("EffectDrizzleQueryError", rejectSqlError)),
+      authorize: (input) =>
+        db
+          .transaction(() => authorize(input))
+          .pipe(Effect.catchTags({ SqlError: rejectSqlError, EffectDrizzleQueryError: rejectSqlError })),
       guarded: (input, operation) =>
         db
           .transaction(() => authorize(input).pipe(Effect.andThen(operation)))
@@ -195,7 +206,8 @@ const layer = Layer.effect(
                 yield* db.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
               )
                 return yield* new Rejected({ reason: "conflict" })
-              // Host callback must create without prompting/waking: both projection and grant commit together.
+              // The host durably admits without waking and returns the original input identity.
+              // The final authorization check rejects a missing or mismatched binding before commit.
               const inputBinding = yield* createSession(sessionID)
               const run = yield* db
                 .insert(MemoryTidyRunTable)
@@ -203,7 +215,7 @@ const layer = Layer.effect(
                   id,
                   request_id: input.requestID,
                   session_id: sessionID,
-                  input: inputBinding ?? null,
+                  input: inputBinding,
                   scope: input.scope,
                   directory: input.directory,
                   model: input.model,

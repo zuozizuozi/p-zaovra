@@ -15,6 +15,8 @@ import { Project } from "../src/project"
 import { ProjectTable } from "../src/project/sql"
 import { ProviderV2 } from "../src/provider"
 import { AbsolutePath, RelativePath } from "../src/schema"
+import { SessionInput } from "../src/session/input"
+import { SessionMessage } from "../src/session/message"
 import { SessionEvent } from "../src/session/event"
 import { SessionProjector } from "../src/session/projector"
 import { testEffect } from "./lib/effect"
@@ -147,7 +149,17 @@ const host = Effect.gen(function* () {
           version: "test",
           model,
         })
-        .pipe(Effect.asVoid),
+        .pipe(
+          Effect.andThen(
+            SessionInput.admit(database.db, events, {
+              id: SessionMessage.ID.create(),
+              sessionID,
+              prompt: { text: "Tidy" },
+              delivery: "steer",
+            }),
+          ),
+          Effect.map((input) => ({ id: input.id, seq: input.admittedSeq })),
+        ),
   )
   return { store, budget, run, authority: { sessionID: run.session_id, scope: run.scope, enabled: true } }
 })
