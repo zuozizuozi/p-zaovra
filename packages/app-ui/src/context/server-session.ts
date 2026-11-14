@@ -189,6 +189,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
   const orphanParts = new Map<string, Set<string>>()
   const removedMessages = new Map<string, Set<string>>()
   const v2Refreshes = new Map<string, ReturnType<typeof setTimeout>>()
+  const legacyRefreshInterval = 2000
   const resyncs = new Map<string, Promise<void>>()
   const questionLoads = new Map<string, Promise<void>>()
   const questionVersions = new Map<string, number>()
@@ -1392,10 +1393,12 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     )
       return applyOrdered(event, eventID)
     if (event.type === "sync") return
+    // Only a server too old to announce the ordered feed gets this far. Its events say that
+    // something changed, not what, so the page is read again, but on a clock rather than per
+    // event: however many tool events arrive, a session is read at most once per interval.
     const refreshV2 = (sessionID: string) => {
+      if (v2Refreshes.has(sessionID)) return
       const active = generation(sessionID)
-      const pending = v2Refreshes.get(sessionID)
-      if (pending) clearTimeout(pending)
       v2Refreshes.set(
         sessionID,
         setTimeout(() => {
@@ -1405,7 +1408,7 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
             if (generations.get(sessionID) !== active) return
             await sync(sessionID, { force: true })
           })().catch(() => {})
-        }, 50),
+        }, legacyRefreshInterval),
       )
     }
     if (event.type === "session.next.prompt.cancelled") {
