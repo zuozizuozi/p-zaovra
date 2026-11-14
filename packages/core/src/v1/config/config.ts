@@ -36,6 +36,9 @@ export const Info = Schema.Struct({
     description: "JSON schema reference for configuration validation",
   }),
   shell: Schema.optional(Schema.String).annotate({ description: "Default shell to use for terminal and bash tool" }),
+  memory: Schema.optional(Schema.Struct({ enabled: Schema.optional(Schema.Boolean) })).annotate({
+    description: "Notes kept across conversations; enabled false turns them off without deleting any",
+  }),
   logLevel: Schema.optional(LogLevelRef).annotate({ description: "Log level" }),
   server: Schema.optional(ConfigServerV1.Server).annotate({
     description: "Server configuration for zaovra serve and web commands",

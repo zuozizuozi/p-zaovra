@@ -39,6 +39,7 @@ export function migrate(info: typeof ConfigV1.Info.Type) {
     session_duration_ms: info.session_duration_ms,
     $schema: info.$schema,
     shell: info.shell,
+    memory: info.memory,
     model: info.model,
     default_agent: info.default_agent,
     autoupdate: info.autoupdate,

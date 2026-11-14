@@ -37,6 +37,12 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   shell: Schema.String.pipe(Schema.optional).annotate({
     description: "Default shell to use for terminal and shell tool execution",
   }),
+  memory: Schema.Struct({ enabled: Schema.Boolean.pipe(Schema.optional) })
+    .pipe(Schema.optional)
+    .annotate({
+      description:
+        "Notes kept across conversations. Set enabled to false to stop recording them, giving them to new conversations, and offering the memory tools; existing notes are kept.",
+    }),
   session_token_budget: Schema.NullOr(PositiveInt).pipe(Schema.optional).annotate({
     description:
       "Cumulative reported token limit per session (ordinary interaction defaults to no token ceiling; delegated/WorkGraph Sessions default to 30000000; null explicitly disables), including cache and compaction. Unreported in-flight usage may exceed it. Not a monetary or cross-session budget. Session budget updates replace these defaults without restarting.",

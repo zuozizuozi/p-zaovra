@@ -1,4 +1,5 @@
 import { ButtonV2 } from "@zaovra-ai/ui/v2/button-v2"
+import { Switch } from "@zaovra-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { type Component, For, Show, createMemo, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -6,6 +7,7 @@ import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { SettingsListV2 } from "./parts/list"
+import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
 
 type Layer = "project" | "user"
@@ -188,6 +190,22 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
       </div>
       <div class="settings-v2-tab-body flex flex-col gap-8">
         <p class="text-xs text-v2-text-text-muted">{language.t("settings.memory.description")}</p>
+        <SettingsListV2>
+          <SettingsRowV2
+            title={language.t("settings.memory.enabled.title")}
+            description={language.t("settings.memory.enabled.description")}
+          >
+            <div data-action="settings-memory-enabled">
+              <Switch
+                hideLabel
+                checked={serverSync().data.config.memory?.enabled !== false}
+                onChange={(enabled) => void serverSync().updateConfig({ memory: { enabled } })}
+              >
+                {language.t("settings.memory.enabled.title")}
+              </Switch>
+            </div>
+          </SettingsRowV2>
+        </SettingsListV2>
         <Show when={directory()}>{section("project", project)}</Show>
         {section("user", user)}
       </div>

@@ -117,6 +117,19 @@ describe("memory store", () => {
     }),
   )
 
+  it.live("nothing is recorded for a scope that is turned off, and what was kept stays", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const store = yield* MemoryStore.Service
+      const kept = yield* store.observe({ ...check, key: "check:test::before-off", sessionID: first })
+      yield* store.silence(project, true)
+      expect(yield* store.observe({ ...check, key: "check:test::while-off", sessionID: first })).toBeUndefined()
+      expect((yield* store.list(project)).map((note) => note.id)).toContain(kept!.id)
+      yield* store.silence(project, false)
+      expect(yield* store.observe({ ...check, key: "check:test::while-off", sessionID: first })).toBeDefined()
+    }),
+  )
+
   it.live("a deleted note stays deleted, keeps no text, and is not recorded again", () =>
     Effect.gen(function* () {
       yield* setup

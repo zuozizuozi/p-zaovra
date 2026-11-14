@@ -2,6 +2,7 @@ export * as MemoryContext from "./context"
 
 import { Effect, Layer, Ref, Schema, Stream } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
+import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { Location } from "../location"
@@ -59,7 +60,11 @@ const layer = Layer.effectDiscard(
     const registry = yield* SystemContextRegistry.Service
     const store = yield* MemoryStore.Service
     const events = yield* EventV2.Service
+    const config = yield* Config.Service
     const scope = MemoryStore.scope({ project: location.project.id, directory: location.directory })
+    const off = Config.latest(yield* config.entries(), "memory")?.enabled === false
+    yield* store.silence(scope, off)
+    if (off) return
     const read = Effect.all([store.list(scope), store.list(Memory.Scope.user)]).pipe(
       Effect.map(([project, user]) => lines([...user, ...project])),
     )
@@ -89,5 +94,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "memory-context",
   layer,
-  deps: [Location.node, SystemContextRegistry.node, MemoryStore.node, MemoryRecorder.node, EventV2.node],
+  deps: [Location.node, Config.node, SystemContextRegistry.node, MemoryStore.node, MemoryRecorder.node, EventV2.node],
 })

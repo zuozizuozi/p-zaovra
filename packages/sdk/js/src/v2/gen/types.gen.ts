@@ -2447,6 +2447,9 @@ export type Config = {
   session_duration_ms?: number | null
   $schema?: string
   shell?: string
+  memory?: {
+    enabled?: boolean
+  }
   logLevel?: LogLevel
   server?: ServerConfig
   command?: {

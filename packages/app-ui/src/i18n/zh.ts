@@ -1605,6 +1605,8 @@ export const dict = {
   "settings.memory.user.add": "加一条偏好，例如：用中文回答",
   "settings.memory.add": "添加",
   "settings.memory.use": "采用",
+  "settings.memory.enabled.title": "跨对话保留笔记",
+  "settings.memory.enabled.description": "关闭后不再记录新内容，新对话也不会带上笔记。已经留下的笔记仍保留在这里，直到你删除。",
   "settings.memory.clear": "全部清空",
   "settings.memory.clear.confirm": "删除这里的全部笔记？",
   "settings.memory.empty": "还没有留下任何内容。",

@@ -1783,6 +1783,8 @@ export const dict = {
   "settings.memory.user.add": "Add a preference, for example: reply in Chinese",
   "settings.memory.add": "Add",
   "settings.memory.use": "Use it",
+  "settings.memory.enabled.title": "Keep notes across conversations",
+  "settings.memory.enabled.description": "When off, nothing new is recorded and new conversations do not receive notes. Notes already kept stay here until you delete them.",
   "settings.memory.clear": "Clear all",
   "settings.memory.clear.confirm": "Delete every note here?",
   "settings.memory.empty": "Nothing kept yet.",

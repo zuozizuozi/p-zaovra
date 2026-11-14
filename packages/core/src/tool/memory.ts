@@ -1,6 +1,7 @@
 export * as MemoryTool from "./memory"
 
 import { Effect, Layer, Schema } from "effect"
+import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
 import { MemoryStore } from "../memory/store"
@@ -15,6 +16,8 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const store = yield* MemoryStore.Service
     const location = yield* Location.Service
+    const config = yield* Config.Service
+    if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
     const place = { project: location.project.id, directory: location.directory }
     const scope = MemoryStore.scope(place)
     yield* tools
@@ -106,5 +109,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/memory",
   layer,
-  deps: [ToolRegistry.node, MemoryStore.node, Location.node],
+  deps: [ToolRegistry.node, MemoryStore.node, Location.node, Config.node],
 })

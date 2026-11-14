@@ -76,6 +76,8 @@ export interface Interface {
   readonly edit: (id: Memory.ID, input: EditInput) => Effect.Effect<Memory.Note | undefined>
   readonly remove: (id: Memory.ID) => Effect.Effect<void>
   readonly clear: (scope: Memory.Scope) => Effect.Effect<void>
+  /** Turns recording for one scope off or back on; what is already kept stays. */
+  readonly silence: (scope: Memory.Scope, silent: boolean) => Effect.Effect<void>
   readonly search: (input: SearchInput) => Effect.Effect<{
     readonly notes: ReadonlyArray<Memory.Note>
     readonly sessions: ReadonlyArray<Memory.SessionMatch>
@@ -170,7 +172,15 @@ const layer = Layer.effect(
         .run()
         .pipe(Effect.orDie, Effect.andThen(get(values.id)))
 
+    const silent = new Set<Memory.Scope>()
+    const silence = (scope: Memory.Scope, off: boolean) =>
+      Effect.sync(() => {
+        if (off) silent.add(scope)
+        else silent.delete(scope)
+      })
+
     const observe = Effect.fn("MemoryStore.observe")(function* (input: ObserveInput) {
+      if (silent.has(input.scope)) return undefined
       const existing = yield* find(input.scope, input.key)
       if (existing?.time_deleted) return undefined
       const now = Date.now()
@@ -336,7 +346,7 @@ const layer = Layer.effect(
       return { notes: notes.map(note), sessions: Array.from(sessions.values()).slice(0, limit) }
     })
 
-    return Service.of({ list, get, observe, write, edit, remove, clear, search })
+    return Service.of({ list, get, observe, write, edit, remove, clear, silence, search })
   }),
 )
 
