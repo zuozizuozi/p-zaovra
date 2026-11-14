@@ -1,8 +1,12 @@
 export * as MemoryTidyBudget from "./tidy-budget"
 
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { eq } from "drizzle-orm"
-import { InvalidRequestReason, LLMError, QuotaExceededReason, type Usage } from "@zaovra-ai/llm"
+import type { HttpClientRequest } from "effect/unstable/http"
+import { InvalidRequestReason, LLMError, QuotaExceededReason, type LLMRequest, type Usage } from "@zaovra-ai/llm"
+import { OpenAIChat } from "@zaovra-ai/llm/protocols/openai-chat"
+import { OpenAICompatibleChat } from "@zaovra-ai/llm/protocols/openai-compatible-chat"
+import { OpenAIResponses } from "@zaovra-ai/llm/protocols/openai-responses"
 import type { CompletedAttempt } from "@zaovra-ai/llm/route"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
@@ -10,6 +14,21 @@ import { MemoryTidyStore } from "./tidy-store"
 import { MemoryTidyAttemptTable } from "./tidy.sql"
 
 export interface Interface {
+  /**
+   * Reserve the entire validated provider input limit plus this wire's output
+   * ceiling. inputLimit is a provider contract, never a character estimate or
+   * the remaining run budget. The host must bind the resolved request to the
+   * grant's selected catalog model, validate its input-limit contract, and
+   * disable redirects before each physical request. This leaf is not the host.
+   */
+  readonly admit: (input: {
+    authority: MemoryTidyStore.Authority
+    id: string
+    request: LLMRequest
+    wire: HttpClientRequest.HttpClientRequest
+    inputLimit: number
+    outputLimit: number
+  }) => Effect.Effect<void, LLMError>
   /** A completed parser receipt can settle only its own admitted physical attempt. */
   readonly complete: (runID: string, receipt: CompletedAttempt) => Effect.Effect<"settled" | "unknown", LLMError>
 }
@@ -22,6 +41,36 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const store = yield* MemoryTidyStore.Service
     return Service.of({
+      admit: Effect.fn("MemoryTidyBudget.admit")(function* (input) {
+        const bounded = wireLimit(input.request, input.wire, input.outputLimit)
+        if (!bounded || !token(input.inputLimit) || input.inputLimit === 0 || !token(input.inputLimit + bounded))
+          return yield* new LLMError({
+            module: "MemoryTidyBudget",
+            method: "admit",
+            reason: new InvalidRequestReason({ message: "整理请求没有可核对的输入上界或单次输出上限。" }),
+          })
+        yield* store
+          .reserve({
+            ...input.authority,
+            attemptID: input.id,
+            tokens: input.inputLimit + bounded,
+          })
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new LLMError({
+                  module: "MemoryTidyBudget",
+                  method: "admit",
+                  reason:
+                    error.reason === "limit"
+                      ? new QuotaExceededReason({
+                          message: "剩余整理预算不足以覆盖本次请求的输入和输出上界，未发送请求。",
+                        })
+                      : new InvalidRequestReason({ message: `整理请求未获预算授权：${error.reason}。` }),
+                }),
+            ),
+          )
+      }),
       complete: Effect.fn("MemoryTidyBudget.complete")(function* (runID, receipt) {
         const attempt = yield* database.db
           .select({ runID: MemoryTidyAttemptTable.run_id })
@@ -62,6 +111,53 @@ const layer = Layer.effect(
 )
 
 export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node, MemoryTidyStore.node] })
+
+/** Validate final encoded bytes, not request defaults which overlays may change. */
+export function wireLimit(request: LLMRequest, wire: HttpClientRequest.HttpClientRequest, ceiling: number) {
+  if (!token(ceiling) || ceiling === 0 || wire.method !== "POST" || wire.body._tag !== "Uint8Array") return
+  // Effect may keep these separately from `url`; checking its string alone
+  // would miss query parameters appended by later transport transformations.
+  if (wire.urlParams.params.length || Option.isSome(wire.hash)) return
+  const route = request.model.route
+  const responses = route.protocol === "openai-responses"
+  if (
+    responses
+      ? route.transport !== OpenAIResponses.httpTransport
+      : route.protocol !== "openai-chat" ||
+        (route.transport !== OpenAIChat.httpTransport && route.transport !== OpenAICompatibleChat.route.transport)
+  )
+    return
+  const native = responses ? OpenAIResponses.route : OpenAIChat.route
+  if (route.body !== native.body) return
+  if (typeof route.endpoint.path !== "string" || !route.endpoint.baseURL) return
+  const endpoint = route.endpoint.baseURL.replace(/\/+$/, "") + route.endpoint.path
+  if (!URL.canParse(wire.url) || !URL.canParse(endpoint)) return
+  const target = new URL(wire.url)
+  if (
+    !["http:", "https:"].includes(target.protocol) ||
+    target.username ||
+    target.password ||
+    target.search ||
+    target.hash
+  )
+    return
+  if (target.href !== new URL(endpoint).href) return
+  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(new TextDecoder().decode(wire.body.body))
+  if (Option.isNone(parsed) || !record(parsed.value)) return
+  const body = parsed.value
+  if (body.model !== request.model.id || body.stream !== true) return
+  // Validate *after* HTTP overlays. Unknown server-side work/history/multiple
+  // completions are not part of this local, single-request budget contract.
+  if (Option.isNone(Schema.decodeUnknownOption(native.body.schema, { onExcessProperty: "error" })(body))) return
+  const names = responses ? ["max_output_tokens"] : ["max_tokens", "max_completion_tokens"]
+  const present = ["max_tokens", "max_completion_tokens", "max_output_tokens"].filter(
+    (name) => body[name] !== undefined,
+  )
+  if (present.length !== 1 || !names.includes(present[0]!)) return
+  const output = body[present[0]!]
+  if (!token(output) || output === 0 || output > ceiling) return
+  return output
+}
 
 /** Inclusive native input/output counts; cache and reasoning are subsets. */
 export function reported(protocol: string, usage: Usage | undefined) {
