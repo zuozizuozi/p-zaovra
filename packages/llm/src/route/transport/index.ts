@@ -6,7 +6,7 @@ import type { Interface as WebSocketExecutorInterface } from "./websocket"
 import type { LLMError, LLMRequest } from "../../schema"
 
 export interface TransportRuntime {
-  readonly http: RequestExecutorInterface
+  readonly http: Pick<RequestExecutorInterface, "executeAttempt">
   readonly webSocket?: WebSocketExecutorInterface
 }
 
@@ -18,6 +18,12 @@ export interface Transport<Body, Prepared, Frame> {
     request: LLMRequest,
     runtime: TransportRuntime,
   ) => Stream.Stream<Frame, LLMError>
+  /** A physical request receipt paired with its own frames, when supported. */
+  readonly open?: (
+    prepared: Prepared,
+    request: LLMRequest,
+    runtime: TransportRuntime,
+  ) => Effect.Effect<{ readonly id: string; readonly frames: Stream.Stream<Frame, LLMError> }, LLMError>
 }
 
 export interface TransportPrepareInput<Body> {

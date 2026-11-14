@@ -13,7 +13,7 @@ import { WebSocketExecutor } from "./transport"
 import type { Protocol } from "./protocol"
 import { applyCachePolicy } from "../cache-policy"
 import * as ProviderShared from "../protocols/shared"
-import type { LLMError, LLMEvent, PreparedRequestOf, ProtocolID, ProviderOptions } from "../schema"
+import type { LLMError, LLMEvent, PreparedRequestOf, ProtocolID, ProviderOptions, Usage } from "../schema"
 import {
   GenerationOptions,
   HttpOptions,
@@ -281,19 +281,52 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
         }),
       streamPrepared: (prepared: Prepared, request: LLMRequest, runtime: TransportRuntime) => {
         const route = `${request.model.provider}/${request.model.route.id}`
-        const events = routeInput.transport
-          .frames(prepared, request, runtime)
-          .pipe(
+        const parse = (frames: Stream.Stream<Frame, LLMError>) =>
+          frames.pipe(
             Stream.mapEffect(decodeEvent(route)),
             protocol.stream.terminal ? Stream.takeUntil(protocol.stream.terminal) : (stream) => stream,
+            Stream.mapAccumEffect(
+              () => protocol.stream.initial(request),
+              protocol.stream.step,
+              protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
+            ),
+            Stream.catchCause((cause) => Stream.fail(streamError(route, `Failed to read ${route} stream`, cause))),
           )
-        return events.pipe(
-          Stream.mapAccumEffect(
-            () => protocol.stream.initial(request),
-            protocol.stream.step,
-            protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
-          ),
-          Stream.catchCause((cause) => Stream.fail(streamError(route, `Failed to read ${route} stream`, cause))),
+        const open = routeInput.transport.open
+        if (!open) return parse(routeInput.transport.frames(prepared, request, runtime))
+        return Stream.unwrap(
+          Effect.gen(function* () {
+            const attempt = yield* open(prepared, request, runtime)
+            const complete = yield* RequestExecutor.RequestCompletion
+            let usage: Usage | undefined
+            let finished = false
+            let failed = false
+            return parse(attempt.frames).pipe(
+              Stream.tap((event) =>
+                Effect.sync(() => {
+                  if (event.type === "step-finish" || event.type === "finish") usage = event.usage ?? usage
+                  if (event.type === "finish") finished = true
+                  if (event.type === "provider-error") failed = true
+                }),
+              ),
+              // Complete only after parsing drains normally. A failure, early take,
+              // or cancellation leaves this attempt's reservation unknown. This
+              // closure is recreated for every retry, including encrypted recovery.
+              Stream.concat(
+                Stream.fromEffect(
+                  Effect.suspend(() =>
+                    !finished || failed
+                      ? Effect.void
+                      : complete({
+                          id: attempt.id,
+                          request,
+                          usage,
+                        }),
+                  ),
+                ).pipe(Stream.drain),
+              ),
+            )
+          }),
         )
       },
     } satisfies Route<Body, Prepared>

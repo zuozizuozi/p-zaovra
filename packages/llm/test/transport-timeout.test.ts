@@ -43,7 +43,9 @@ for (const chat of [OpenAIChat.route, OpenRouter.route, OpenAICompatibleChat.rou
         const prepared = yield* selected.route.prepareTransport(body, llm)
         const run = yield* selected.route
           .streamPrepared(prepared, llm, {
-            http: { execute: () => Effect.sleep("100 seconds").pipe(Effect.as(response)) },
+            http: {
+              executeAttempt: () => Effect.sleep("100 seconds").pipe(Effect.as({ id: "timeout-fixture", response })),
+            },
           })
           .pipe(Stream.runCollect, Effect.flip, Effect.forkChild)
         yield* adjust("100 seconds")
@@ -98,7 +100,7 @@ it.effect("allows long encrypted-only OpenRouter reasoning while fragments keep 
     const prepared = yield* llm.model.route.prepareTransport(yield* llm.model.route.body.from(llm), llm)
     const run = yield* llm.model.route
       .streamPrepared(prepared, llm, {
-        http: { execute: () => Effect.succeed(response) },
+        http: { executeAttempt: () => Effect.succeed({ id: "timeout-fixture", response }) },
       })
       .pipe(Stream.runCollect, Effect.forkChild)
     yield* adjust("450 seconds")
@@ -114,7 +116,9 @@ it.effect("does not charge slow downstream consumption to the provider timeout",
     const response = HttpClientResponse.fromWeb(request, new Response("data: first\n\ndata: second\n\n"))
     const run = yield* HttpTransport.sseJson
       .with()
-      .frames({ request, framing: Framing.sse }, input, { http: { execute: () => Effect.succeed(response) } })
+      .frames({ request, framing: Framing.sse }, input, {
+        http: { executeAttempt: () => Effect.succeed({ id: "timeout-fixture", response }) },
+      })
       .pipe(
         Stream.tap(() => Deferred.succeed(consuming, undefined)),
         Stream.mapEffect((frame) => Effect.sleep("200 seconds").pipe(Effect.as(frame))),
@@ -132,7 +136,9 @@ it.effect("rejects an empty successful HTTP body instead of completing silently"
     const response = HttpClientResponse.fromWeb(request, new Response(": processing\n\ndata: [DONE]\n\n"))
     const error = yield* HttpTransport.sseJson
       .with()
-      .frames({ request, framing: Framing.sse }, input, { http: { execute: () => Effect.succeed(response) } })
+      .frames({ request, framing: Framing.sse }, input, {
+        http: { executeAttempt: () => Effect.succeed({ id: "timeout-fixture", response }) },
+      })
       .pipe(Stream.runCollect, Effect.flip)
     expect(error.reason).toMatchObject({ _tag: "InvalidProviderOutput" })
   }),
@@ -156,7 +162,9 @@ for (const heartbeat of [false, true]) {
       const run = yield* HttpTransport.sseJson
         .with()
         .frames({ request, framing: Framing.sse }, input, {
-          http: { execute: () => Effect.sleep("100 seconds").pipe(Effect.as(response)) },
+          http: {
+            executeAttempt: () => Effect.sleep("100 seconds").pipe(Effect.as({ id: "timeout-fixture", response })),
+          },
         })
         .pipe(Stream.runCollect, Effect.flip, Effect.forkChild)
       yield* adjust("100 seconds")
@@ -184,7 +192,9 @@ it.effect("cancels waiting response consumption and releases the body", () =>
     const response = HttpClientResponse.fromWeb(request, new Response(body))
     const run = yield* HttpTransport.sseJson
       .with()
-      .frames({ request, framing: Framing.sse }, input, { http: { execute: () => Effect.succeed(response) } })
+      .frames({ request, framing: Framing.sse }, input, {
+        http: { executeAttempt: () => Effect.succeed({ id: "timeout-fixture", response }) },
+      })
       .pipe(
         Stream.tap(() => Deferred.succeed(reading, undefined)),
         Stream.runCollect,
@@ -215,10 +225,10 @@ it.effect("stream read failures retain HTTP status and never retry accepted resp
       .with()
       .frames({ request, framing: Framing.sse }, input, {
         http: {
-          execute: () =>
+          executeAttempt: () =>
             Effect.sync(() => {
               calls++
-              return response
+              return { id: "timeout-fixture", response }
             }),
         },
       })

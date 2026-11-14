@@ -16,6 +16,8 @@ import {
   LLMError,
   type LLMEvent,
   TransportReason,
+  type LLMRequest,
+  type Usage,
 } from "../schema"
 import { isQuotaExceeded, reasoningParameterConstraint, providerFailure } from "../provider-error"
 
@@ -23,6 +25,9 @@ export interface Interface {
   readonly execute: (
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError>
+  readonly executeAttempt: (
+    request: HttpClientRequest.HttpClientRequest,
+  ) => Effect.Effect<{ readonly id: string; readonly response: HttpClientResponse.HttpClientResponse }, LLMError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@zaovra/LLM/RequestExecutor") {}
@@ -54,6 +59,28 @@ export const RequestAdmission = Context.Reference<
     readonly request: HttpClientRequest.HttpClientRequest
   }) => Effect.Effect<void, LLMError>
 >("@zaovra/LLM/RequestAdmission", { defaultValue: () => () => Effect.void })
+
+export interface CompletedAttempt {
+  readonly id: string
+  readonly request: LLMRequest
+  readonly usage?: Usage
+}
+
+/**
+ * One callback after a receipt-bearing parser has emitted finish and drained
+ * normally without provider-error. The ID
+ * belongs to that response, never to an earlier failed retry. Usage is reported
+ * evidence, not a guarantee of complete billing (even finish can be synthesized
+ * at EOF): hosts must validate its raw provider fields. Failed, incomplete,
+ * interrupted, or partially consumed streams do not call
+ * this hook and their admitted attempts must remain unknown.
+ *
+ * Callback failures stop consumption; they must not resend provider work.
+ */
+export const RequestCompletion = Context.Reference<(input: CompletedAttempt) => Effect.Effect<void, LLMError>>(
+  "@zaovra/LLM/RequestCompletion",
+  { defaultValue: () => () => Effect.void },
+)
 
 const BODY_LIMIT = 16_384
 const MAX_RETRIES = 5
@@ -506,14 +533,17 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
               status: "http" in error.reason ? error.reason.http?.response?.status : undefined,
             }),
           ),
+          Effect.map((response) => ({ id, response })),
         )
       })
+    const executeAttempt = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.gen(function* () {
+        const budget = (yield* RetryBudget) ?? { used: 0 }
+        return yield* retryStatusFailures(executeOnce(request), budget)
+      })
     return Service.of({
-      execute: (request) =>
-        Effect.gen(function* () {
-          const budget = (yield* RetryBudget) ?? { used: 0 }
-          return yield* retryStatusFailures(executeOnce(request), budget)
-        }),
+      execute: (request) => executeAttempt(request).pipe(Effect.map((attempt) => attempt.response)),
+      executeAttempt,
     })
   }),
 )
