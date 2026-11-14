@@ -19,6 +19,8 @@ export interface Coordinator<Key, E> {
   readonly wake: (key: Key) => Effect.Effect<void>
   /** Stops active execution and waits for its cleanup. */
   readonly interrupt: (key: Key, cleanup?: Effect.Effect<void>) => Effect.Effect<void>
+  /** Freeze and capture this Stop barrier; the returned wait never targets a replacement. */
+  readonly prepareInterrupt: (key: Key, cleanup?: Effect.Effect<void>) => Effect.Effect<Effect.Effect<void>>
   /** Freeze automatic wakes synchronously before publishing Stop. */
   readonly freezeWake: (key: Key) => Effect.Effect<void>
   /** Captures explicit intent before admission; a later Stop invalidates it. */
@@ -204,50 +206,53 @@ export const make = <Key, E>(options: {
         start(key, next, false)
       })
 
-    const freezeWake = (key: Key) =>
+    const freeze = (key: Key) => {
+      if (stopping.has(key)) return
+      generations.set(key, (generations.get(key) ?? 0) + 1)
+      stopping.set(key, { done: Deferred.makeUnsafe<void>(), started: false, intent: false, resume: false })
+      stopped.add(key)
+      report(key)
+      const entry = active.get(key)
+      if (!entry) return
+      entry.stopping = true
+      entry.pendingWake = false
+    }
+    const freezeWake = (key: Key) => Effect.sync(() => freeze(key))
+
+    const prepareInterrupt = (key: Key, cleanup = Effect.void): Effect.Effect<Effect.Effect<void>> =>
       Effect.sync(() => {
-        if (stopping.has(key)) return
-        generations.set(key, (generations.get(key) ?? 0) + 1)
-        stopping.set(key, { done: Deferred.makeUnsafe<void>(), started: false, intent: false, resume: false })
-        stopped.add(key)
-        report(key)
+        freeze(key)
+        const stop = stopping.get(key)!
         const entry = active.get(key)
-        if (!entry) return
-        entry.stopping = true
-        entry.pendingWake = false
+        return Effect.uninterruptible(
+          Effect.suspend(() => {
+            // A saved handle may be awaited again after a new execution started.
+            if (stop.started) return Deferred.await(stop.done)
+            stop.started = true
+            return (entry?.owner ? Fiber.interrupt(entry.owner) : Effect.void).pipe(
+              Effect.andThen(cleanup),
+              Effect.onExit((exit) =>
+                Effect.sync(() => {
+                  stopping.delete(key)
+                  if (Exit.isSuccess(exit) && (stop.intent || stop.resume)) {
+                    stopped.delete(key)
+                    const next = makeEntry()
+                    stop.successor = next
+                    active.set(key, next)
+                    start(key, next, stop.resume, true)
+                  }
+                  report(key)
+                  Deferred.doneUnsafe(stop.done, exit)
+                }),
+              ),
+              Effect.asVoid,
+            )
+          }),
+        )
       })
 
     const interrupt = (key: Key, cleanup = Effect.void): Effect.Effect<void> =>
-      Effect.uninterruptible(
-        freezeWake(key).pipe(
-          Effect.andThen(
-            Effect.suspend(() => {
-              const stop = stopping.get(key)!
-              if (stop.started) return Deferred.await(stop.done)
-              stop.started = true
-              const entry = active.get(key)
-              return (entry?.owner ? Fiber.interrupt(entry.owner) : Effect.void).pipe(
-                Effect.andThen(cleanup),
-                Effect.onExit((exit) =>
-                  Effect.sync(() => {
-                    stopping.delete(key)
-                    if (Exit.isSuccess(exit) && (stop.intent || stop.resume)) {
-                      stopped.delete(key)
-                      const next = makeEntry()
-                      stop.successor = next
-                      active.set(key, next)
-                      start(key, next, stop.resume, true)
-                    }
-                    report(key)
-                    Deferred.doneUnsafe(stop.done, exit)
-                  }),
-                ),
-                Effect.asVoid,
-              )
-            }),
-          ),
-        ),
-      )
+      Effect.uninterruptible(prepareInterrupt(key, cleanup).pipe(Effect.flatten))
 
     return {
       active: Effect.sync(() => new Set([...active.keys(), ...stopping.keys()])),
@@ -257,6 +262,7 @@ export const make = <Key, E>(options: {
       exclusive,
       wake,
       interrupt,
+      prepareInterrupt,
       freezeWake,
       prepareWake: (key) =>
         Effect.sync(() => {

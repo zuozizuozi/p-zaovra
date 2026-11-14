@@ -7,7 +7,7 @@ import { SessionOutcome } from "./session/outcome"
 import type { Info } from "@zaovra-ai/schema/session-outcome"
 import { Config } from "./config"
 import { ListAnchor } from "@zaovra-ai/schema/session"
-import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNull, like, lt, or, sql, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -221,6 +221,11 @@ export interface Interface {
     sessionID: SessionSchema.ID
     messageID: SessionMessage.ID
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  /** Cancel only the Session incarnation identified by its original durable admission. */
+  readonly cancelPending: (input: {
+    sessionID: SessionSchema.ID
+    expected: { id: SessionMessage.ID; seq: number }
+  }) => Effect.Effect<void>
   readonly todos: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<SessionTodo.Info>, NotFoundError>
   readonly shell: (input: {
     id?: EventV2.ID
@@ -377,6 +382,40 @@ const layer = Layer.effect(
       const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(Effect.orDie)
       return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
     })
+    const interruptResources = (sessionID: SessionSchema.ID) =>
+      Effect.all(
+        [
+          interruptShells(sessionID),
+          Effect.gen(function* () {
+            const session = yield* store.get(sessionID)
+            if (!session || !(yield* RcMap.has(locations.rcMap, session.location))) return
+            yield* BrowserSession.Service.pipe(
+              Effect.flatMap((browser) => browser.close(sessionID)),
+              Effect.provide(locations.get(session.location)),
+            )
+          }).pipe(Effect.orDie),
+          jobs.list().pipe(
+            Effect.flatMap((items) =>
+              Effect.forEach(
+                items.filter(
+                  (job) =>
+                    job.type === "bash" &&
+                    job.metadata?.sessionID === sessionID &&
+                    job.status === "running" &&
+                    job.metadata?.kind !== "preview",
+                ),
+                (job) => jobs.cancel(job.id),
+                { discard: true },
+              ),
+            ),
+          ),
+        ],
+        {
+          concurrency: "unbounded",
+          discard: true,
+        },
+      )
+
     const result = Service.of({
       usage: (sessionID) =>
         SessionUsageQuery.read(sessionID, (ids) =>
@@ -963,6 +1002,50 @@ const layer = Layer.effect(
         if (!cancelled) return yield* new PromptConflictError(input)
         return cancelled
       }),
+      cancelPending: Effect.fn("V2Session.cancelPending")((input) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            if (!execution.prepareInterrupt)
+              return yield* Effect.die("Bound cancellation requires execution.prepareInterrupt")
+            const prepare = execution.prepareInterrupt
+            const stop = { wait: Effect.void }
+            yield* db
+              .transaction(() =>
+                Effect.gen(function* () {
+                  // Take the writer before reading identity. Deletion/recreation and
+                  // PromptCancelled projection cannot interleave with this transaction.
+                  yield* db
+                    .update(SessionInputTable)
+                    .set({ admitted_seq: sql`${SessionInputTable.admitted_seq}` })
+                    .where(sql`0`)
+                    .run()
+                  const bound = yield* SessionInput.find(db, input.expected.id)
+                  if (bound?.sessionID !== input.sessionID || bound.admittedSeq !== input.expected.seq) return
+                  const pending = yield* SessionInput.pending(db, input.sessionID)
+                  if (pending.length === 0 && !(yield* execution.active).has(input.sessionID)) return
+                  // Capture/freeze only; never wait for execution cleanup under the DB lock.
+                  stop.wait = yield* prepare(input.sessionID, interruptResources(input.sessionID))
+                  yield* events.publish(SessionExecution.Stopped, { sessionID: input.sessionID })
+                  yield* Effect.forEach(
+                    pending,
+                    (item) =>
+                      result.cancelInput({
+                        sessionID: input.sessionID,
+                        messageID: item.id,
+                      }),
+                    { discard: true },
+                  )
+                }),
+              )
+              .pipe(
+                Effect.orDie,
+                // Also release the barrier when projection/commit fails, allowing a
+                // later cancel to retry durable cleanup without retaining a DB lock.
+                Effect.ensuring(Effect.suspend(() => stop.wait)),
+              )
+          }),
+        ),
+      ),
       todos: Effect.fn("V2Session.todos")(function* (sessionID) {
         const session = yield* result.get(sessionID)
         return yield* SessionTodo.Service.use((todos) => todos.get(sessionID)).pipe(
@@ -1108,43 +1191,7 @@ const layer = Layer.effect(
         Effect.uninterruptible(
           (execution.freezeWake?.(sessionID) ?? Effect.void).pipe(
             Effect.andThen(events.publish(SessionExecution.Stopped, { sessionID })),
-            Effect.andThen(
-              execution.interrupt(
-                sessionID,
-                Effect.all(
-                  [
-                    interruptShells(sessionID),
-                    Effect.gen(function* () {
-                      const session = yield* store.get(sessionID)
-                      if (!session || !(yield* RcMap.has(locations.rcMap, session.location))) return
-                      yield* BrowserSession.Service.pipe(
-                        Effect.flatMap((browser) => browser.close(sessionID)),
-                        Effect.provide(locations.get(session.location)),
-                      )
-                    }).pipe(Effect.orDie),
-                    jobs.list().pipe(
-                      Effect.flatMap((items) =>
-                        Effect.forEach(
-                          items.filter(
-                            (job) =>
-                              job.type === "bash" &&
-                              job.metadata?.sessionID === sessionID &&
-                              job.status === "running" &&
-                              job.metadata?.kind !== "preview",
-                          ),
-                          (job) => jobs.cancel(job.id),
-                          { discard: true },
-                        ),
-                      ),
-                    ),
-                  ],
-                  {
-                    concurrency: "unbounded",
-                    discard: true,
-                  },
-                ),
-              ),
-            ),
+            Effect.andThen(execution.interrupt(sessionID, interruptResources(sessionID))),
           ),
         ),
       ),
