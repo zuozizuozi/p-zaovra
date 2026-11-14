@@ -42,7 +42,7 @@ function migrateFile(datPath: string, filename: string) {
     data = JSON.parse(readFileSync(datPath, "utf-8"))
   } catch (err) {
     log.warn("tauri migration: failed to parse", filename, err)
-    return
+    return false
   }
 
   // zaovra.settings.dat → the electron settings store ("zaovra.settings").
@@ -64,6 +64,7 @@ function migrateFile(datPath: string, filename: string) {
   }
 
   log.log("tauri migration: migrated", filename, "→", storeName, { migrated, skipped })
+  return true
 }
 
 export function migrate() {
@@ -84,9 +85,12 @@ export function migrate() {
     return
   }
 
-  for (const filename of readdirSync(dir)) {
-    if (!filename.endsWith(".dat")) continue
-    migrateFile(join(dir, filename), filename)
+  const failed = readdirSync(dir)
+    .filter((filename) => filename.endsWith(".dat"))
+    .filter((filename) => !migrateFile(join(dir, filename), filename))
+  if (failed.length) {
+    log.warn("tauri migration: incomplete, retrying on next startup", { files: failed })
+    return
   }
 
   log.log("tauri migration: complete")
