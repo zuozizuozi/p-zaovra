@@ -44,6 +44,7 @@ import {
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { MemoryTidyTools } from "../../memory/tidy-tools"
+import { MemoryTidyExecution } from "../../memory/tidy-execution"
 import { ShellIdentity } from "../../shell-identity"
 import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
@@ -163,6 +164,7 @@ const layer = Layer.effect(
     const referenceGuidance = yield* ReferenceGuidance.Service
     const config = yield* Config.Service
     const tidyTools = yield* MemoryTidyTools.Service
+    const tidyExecution = yield* MemoryTidyExecution.Service
     const snapshots = yield* Snapshot.Service
     const fs = yield* FSUtil.Service
     const lsp = yield* LSP.Service
@@ -173,6 +175,7 @@ const layer = Layer.effect(
       db,
       events,
       llm,
+      wrap: tidyExecution.wrap,
       config: yield* config.entries(),
       canRetry: (input) =>
         Effect.gen(function* () {
@@ -1375,7 +1378,7 @@ const layer = Layer.effect(
               LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
               LLMEvent.finish({ reason: "tool-calls" }),
             ])
-          : SessionCache.track(llm.stream(request), {
+          : SessionCache.track(tidyExecution.wrap(session.id, request, llm.stream(request)), {
               request,
               epoch: system.baselineSeq,
               purpose: "execution",
@@ -2990,6 +2993,7 @@ export const node = makeLocationNode({
     ReferenceGuidance.node,
     Config.node,
     MemoryTidyTools.node,
+    MemoryTidyExecution.node,
     Snapshot.node,
     FSUtil.node,
     LSP.node,

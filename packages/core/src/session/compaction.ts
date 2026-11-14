@@ -155,6 +155,11 @@ type Dependencies<E = never> = {
   readonly llm: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
   }
+  readonly wrap?: (
+    sessionID: SessionSchema.ID,
+    request: LLMRequest,
+    stream: Stream.Stream<LLMEvent, LLMError>,
+  ) => Stream.Stream<LLMEvent, LLMError>
   readonly config: readonly Config.Entry[]
   readonly canRetry?: (input: Input) => Effect.Effect<boolean, E>
 }
@@ -395,8 +400,11 @@ export const make = <E = never>(dependencies: Dependencies<E>) => {
       let toolCall = false
       let retryAfter: number | undefined
       yield* SessionOwnership.check
+      const stream = dependencies.llm.stream(request)
       const summarized = yield* SessionCache.track(
-        dependencies.llm.stream(request).pipe(Stream.provideService(RequestExecutor.AutomaticRetries, false)),
+        (dependencies.wrap ? dependencies.wrap(input.sessionID, request, stream) : stream).pipe(
+          Stream.provideService(RequestExecutor.AutomaticRetries, false),
+        ),
         {
           purpose: "summary",
           durableMessages: 0,

@@ -12,6 +12,7 @@ import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryTidy } from "../src/memory/tidy"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
+import { MemoryTidyExecution } from "../src/memory/tidy-execution"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
 import { PermissionV2 } from "../src/permission"
@@ -182,6 +183,12 @@ for (const boundary of ["active", "cancelled", "disabled", "model", "remote", "c
                 }),
               ],
               [LayerNodePlatform.llmClient, client],
+              // These tests exercise tool dispatch with scripted events, not a
+              // provider transport. The real HTTP budget path has its own tests.
+              [
+                MemoryTidyExecution.node,
+                Layer.succeed(MemoryTidyExecution.Service, { wrap: (_id, _request, stream) => stream }),
+              ],
               [SessionRunnerModel.node, SessionRunnerModel.layerWith(() => Effect.succeed(model))],
               [SessionExecution.node, SessionExecution.noopLayer],
               [PluginV2.node, Layer.mock(PluginV2.Service, { wait: () => Effect.void })],
