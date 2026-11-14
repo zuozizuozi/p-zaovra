@@ -10,6 +10,7 @@ import { SessionTable } from "./sql"
 import { SessionSchema } from "./schema"
 import { EventV2 } from "../event"
 import { EventTable } from "../event/sql"
+import { HostHints } from "../system-context/host-hints"
 import { SessionEvent } from "./event"
 
 export const State = Schema.Struct({
@@ -179,7 +180,7 @@ export function facts(input: FactsInput) {
       ...(input.advisoryDeadline === undefined
         ? {}
         : { advisoryRemainingMs: Math.max(0, input.advisoryDeadline - input.now), advisoryOnly: true }),
-    })}${input.executionDeadline === undefined ? "" : "\nexecutableRemainingMs ends provider/tool admission before the host cleanup reserve. remainingMs includes that reserve; finish necessary checks and report actual job states before executionDeadline. Never restart running or unknown jobs."}${input.advisoryDeadline === undefined ? "" : "\nThe advisory deadline is a planning reminder, not a stop condition. remainingMs, when present, is the enforced wall-clock budget."}${reminder ? "\nPreserve the current runnable artifact and address the smallest acceptance gap first. Do not omit requirements or necessary validation." : ""}`
+    })}${input.executionDeadline === undefined ? "" : "\n" + HostHints.executionFacts()}${input.advisoryDeadline === undefined ? "" : "\n" + HostHints.advisoryFacts()}${reminder ? "\n" + HostHints.gapFacts() : ""}`
   )
 }
 

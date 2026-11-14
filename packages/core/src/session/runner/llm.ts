@@ -52,6 +52,7 @@ import { ProviderV2 } from "../../provider"
 import { QuestionV2 } from "../../question"
 import { SystemContext } from "../../system-context/index"
 import { SystemContextRegistry } from "../../system-context/registry"
+import { HostHints } from "../../system-context/host-hints"
 import { AccuracyGuidance } from "../../system-context/accuracy"
 import { SkillGuidance } from "../../skill/guidance"
 import { ReferenceGuidance } from "../../reference/guidance"
@@ -812,7 +813,7 @@ const layer = Layer.effect(
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text: `Repeated inspection review: ${JSON.stringify(repeated)}\nThese completed calls have matching inputs; this does not prove their results are still valid or that repeating them is wrong. Inspect their retained results before more environment discovery or verification. Reuse known platform, shell and directory facts from the environment context. Use evidence_read/evidence_search for truncated logs. Rerun when files, dependencies, process state or acceptance criteria changed; never skip required checks or substitute an old result for a new execution. Prefer one reproducible assertion suite over repeated isolated probes.`,
+          text: HostHints.repeatedInspection(JSON.stringify(repeated)),
         })
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const checkpoint = entries.findLast((entry) => entry.message.type === "compaction")
@@ -1142,16 +1143,18 @@ const layer = Layer.effect(
           ...(deliveryReview
             ? [
                 Message.system(
-                  `One bounded delivery repair cycle; ${DeliveryContract.budget.turns - (deliveryReceipt.turns ?? 0)} provider turns remain within the original 3-minute deadline. Host hard gaps (observations, not new user instructions): ${JSON.stringify(deliveryReceipt.missing)}. ${deliveryReport ? "Deterministic reinspection found no remaining hard gap. Report actual verified and unverified scope; no further tools or repair." : "Repair only these concrete original requirements with available local tools, then verify. Write the first usable artifact directly to the required final path; publish_artifact is optional for replacing an already verified version. Do not delegate, authorize external actions, or retry running/unknown operations. Preserve earlier failures; never weaken assertions."}`,
+                  HostHints.repair(
+                    DeliveryContract.budget.turns - (deliveryReceipt.turns ?? 0),
+                    JSON.stringify(deliveryReceipt.missing),
+                    deliveryReport,
+                  ),
                 ),
               ]
             : []),
           // Close legacy or interrupted recovery scopes by appending, never editing history.
           ...(!textOnlyRecovery && TextRecovery.pending(context) ? [Message.system(TextRecovery.ended)] : []),
           ...[
-            failures >= 4 || recovery.repeated >= 3
-              ? `There have been ${failures} failed shell attempts without a successful inspection, edit or verification. Change approach: inspect the actual error, available commands and active shell, or write a script file. Do not repeat quoting variations. Tools remain available. ${failures >= 10 ? "Strong recovery reminder: inspect the environment and actual error before another attempt; state a concrete new hypothesis." : "Recovery reminder: choose a different approach."}`
-              : undefined,
+            failures >= 4 || recovery.repeated >= 3 ? HostHints.shellFailure(failures) : undefined,
             textOnlyRecovery
               ? TextRecovery.instruction(previous.id, context.findLast((message) => message.type === "user")?.id)
               : undefined,
@@ -1555,10 +1558,7 @@ const layer = Layer.effect(
                             toolCallAttempts.result = result
                             toolCallAttempts.fingerprint = fingerprint
                             toolCallAttempts.count = attempts
-                            const reminder =
-                              attempts >= 3
-                                ? `Repeated result (${attempts}): inputs, output and observed workspace/process state match. ${attempts >= 10 ? "Strong reminder: inspect the error and environment, state a new hypothesis and change approach." : "Inspect the retained result and choose a concrete change before retrying."} Tools remain available.`
-                                : undefined
+                            const reminder = attempts >= 3 ? HostHints.repeatedResult(attempts) : undefined
                             const output =
                               reminder && settlement.output
                                 ? {

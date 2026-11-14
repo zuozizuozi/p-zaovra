@@ -88,6 +88,7 @@ import {
 import { SessionStore } from "@zaovra-ai/core/session/store"
 import { SystemContext } from "@zaovra-ai/core/system-context"
 import { SystemContextRegistry } from "@zaovra-ai/core/system-context/registry"
+import { HostHints } from "@zaovra-ai/core/system-context/host-hints"
 import { AccuracyGuidance } from "@zaovra-ai/core/system-context/accuracy"
 import { SkillGuidance } from "@zaovra-ai/core/skill/guidance"
 import { ReferenceGuidance } from "@zaovra-ai/core/reference/guidance"
@@ -2459,6 +2460,106 @@ for (const general of [undefined, "on", "off", "invalid"])
           })
         }),
     )
+
+for (const style of ["original", "short"])
+  for (const language of ["en", "zh"]) {
+    it.effect(`host hint runner preserves failure triggers and identities: ${style}/${language}`, () =>
+      Effect.gen(function* () {
+        yield* accuracyEnvironment("ZAOVRA_EXPERIMENTAL_HOST_HINT_STYLE", style)
+        yield* accuracyEnvironment("ZAOVRA_EXPERIMENTAL_HOST_HINT_LANGUAGE", language)
+        yield* setup
+        verificationEnabled = false
+        const session = yield* SessionV2.Service
+        const registry = yield* ToolRegistry.Service
+        yield* registry.register({
+          bash: Tool.make({
+            description: "Stable shell failure",
+            input: Schema.Struct({ command: Schema.String }),
+            output: Schema.Struct({ exit: Schema.Number }),
+            structured: Schema.Struct({ exit: Schema.Number }),
+            toStructuredOutput: ({ output }) => output,
+            execute: () => Effect.succeed({ exit: 1 }),
+          }),
+        })
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Diagnose this failure" }), resume: false })
+        qualityProgress = {
+          facts: true,
+          deadline: DateTime.toEpochMillis((yield* session.get(sessionID)).time.created) + 30000,
+        }
+        responses = [
+          ...Array.from({ length: 12 }, (_, i) => repairCall(`host-fail-${i}`, "bash", { command: "bad-command" })),
+          repairStop("host-failed"),
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(13)
+        expect(requests[12].tools.length).toBeGreaterThan(0)
+        expect(JSON.stringify(requests[3].messages)).not.toContain(HostHints.shellFailure(4))
+        expect(JSON.stringify(requests[4].messages)).toContain(HostHints.shellFailure(4))
+        expect(JSON.stringify(requests[10].messages)).toContain(HostHints.shellFailure(10))
+        const history = yield* session.context(sessionID)
+        const repeated = history.filter(
+          (message): message is SessionMessage.Synthetic =>
+            message.type === "synthetic" && message.text.startsWith("Repeated inspection review:"),
+        )
+        expect(repeated).toHaveLength(1)
+        expect(repeated[0].text).toBe(
+          HostHints.repeatedInspection(repeated[0].text.split("\n")[0].slice("Repeated inspection review: ".length)),
+        )
+        expect(JSON.stringify(history)).toContain(HostHints.repeatedResult(3))
+        expect(JSON.stringify(history)).toContain(HostHints.repeatedResult(10))
+        const facts = history.filter(
+          (message) => message.type === "system" && message.text.startsWith("Current task facts"),
+        )
+        expect(facts.length).toBeGreaterThan(0)
+        expect(JSON.stringify(facts)).toContain(HostHints.advisoryFacts())
+        expect(history.at(-1)).toMatchObject({ finish: "stop" })
+      }),
+    )
+    it.live(`host hint runner preserves repair receipt and bounded requests: ${style}/${language}`, () =>
+      Effect.gen(function* () {
+        yield* accuracyEnvironment("ZAOVRA_EXPERIMENTAL_HOST_HINT_STYLE", style)
+        yield* accuracyEnvironment("ZAOVRA_EXPERIMENTAL_HOST_HINT_LANGUAGE", language)
+        yield* repairEnvironment("on")
+        yield* setup
+        verificationEnabled = false
+        deliveryEnabled = undefined
+        currentModel = Object.assign(Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route }), {
+          pricing: repairPricing,
+        })
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "交付 result.json。" }), resume: false })
+        responses = [
+          repairStop("primary", {
+            ...repairUsage,
+            inputTokens: 600_000,
+            nonCachedInputTokens: 600_000,
+            cacheReadInputTokens: 0,
+          }),
+          repairStop("one"),
+          repairStop("two"),
+          repairStop("three"),
+        ]
+        yield* session.resume(sessionID)
+        expect(requests).toHaveLength(4)
+        const history = yield* session.context(sessionID)
+        const receipt = DeliveryContract.receipt(history, SessionOutcome.requested(history).sourceMessageID)
+        expect(receipt).toMatchObject({ decision: "unverified", turns: 3 })
+        expect(receipt!.spent).toBeLessThanOrEqual(receipt!.allowance!)
+        const initial = history.flatMap((message) => {
+          const value = DeliveryContract.receipt([message], receipt!.request)
+          return value?.decision === "repair" && value.turns === 0 ? [value] : []
+        })[0]
+        expect(initial.started).toBe(receipt!.started)
+        expect(JSON.stringify(requests[1].messages)).toContain(
+          JSON.stringify(HostHints.repair(3, JSON.stringify(initial.missing), false)).slice(1, -1),
+        )
+        expect(
+          history.filter((message) => message.type === "synthetic" && message.text.startsWith(DeliveryContract.prefix))
+            .length,
+        ).toBeGreaterThan(0)
+      }),
+    )
+  }
 
 for (const enabled of [false, true])
   it.effect(
