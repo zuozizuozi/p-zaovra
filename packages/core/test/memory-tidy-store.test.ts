@@ -64,7 +64,7 @@ const host = Effect.gen(function* () {
       .pipe(Effect.asVoid)
   return { store, create, database, events }
 })
-const authority = (run: MemoryTidyStore.Run) => ({ sessionID: run.session_id, scope, enabled: true })
+const authority = (run: MemoryTidyStore.Run) => ({ sessionID: run.session_id, scope: run.scope, enabled: true })
 
 for (const nested of [false, true])
   test(`a stale reservation rolls back as busy and a fresh retry rechecks the budget: nested=${nested}`, async () => {
@@ -245,7 +245,10 @@ it.effect("a later task cannot increase an already used daily limit", () =>
     const h = yield* host
     const first = yield* h.store.create({ ...request, dailyTokens: 150 }, h.create)
     yield* h.store.reserve({ ...authority(first), attemptID: "one", tokens: 100 })
-    const second = yield* h.store.create({ ...request, requestID: "higher", dailyTokens: 1000 }, h.create)
+    const second = yield* h.store.create(
+      { ...request, scope: Memory.Scope.user, requestID: "higher", dailyTokens: 1000 },
+      h.create,
+    )
     expect(
       (yield* h.store.reserve({ ...authority(second), attemptID: "two", tokens: 100 }).pipe(Effect.flip)).reason,
     ).toBe("limit")
@@ -338,7 +341,7 @@ it.effect("daily allowance spans runs; crossing UTC day never releases a run's u
   Effect.gen(function* () {
     const h = yield* host
     const first = yield* h.store.create(request, h.create)
-    const second = yield* h.store.create({ ...request, requestID: "second" }, h.create)
+    const second = yield* h.store.create({ ...request, scope: Memory.Scope.user, requestID: "second" }, h.create)
     const day = new Date(yield* Clock.currentTimeMillis).toISOString().slice(0, 10)
     yield* h.store.reserve({ ...authority(first), attemptID: "first", tokens: 160 })
     expect(
@@ -428,3 +431,57 @@ it.effect("a guarded change cannot run after cancellation", () =>
     expect(session?.title).toBe("Tidy")
   }),
 )
+
+it.effect("one active writer per scope; exact retries and terminal history stay addressable", () =>
+  Effect.gen(function* () {
+    const h = yield* host
+    const first = yield* h.store.create(request, h.create)
+    const rejected = yield* h.store
+      .create({ ...request, requestID: "another-window" }, () =>
+        Effect.die("must reject before creating another session"),
+      )
+      .pipe(Effect.flip)
+    expect(rejected.reason).toBe("busy")
+    expect((yield* h.store.create(request, () => Effect.die("must not duplicate"))).id).toBe(first.id)
+    expect((yield* h.store.forSession(first.session_id))?.id).toBe(first.id)
+    expect(yield* h.store.forSession(SessionSchema.ID.create())).toBeUndefined()
+    expect((yield* h.store.list(request.scope)).map((run) => run.id)).toEqual([first.id])
+    expect(yield* h.store.list(Memory.Scope.user)).toEqual([])
+    yield* h.store.finish(first.id, "cancelled")
+    const next = yield* h.store.create({ ...request, requestID: "another-window" }, h.create)
+    expect(next.id).not.toBe(first.id)
+    expect((yield* h.store.list(request.scope)).map((run) => run.state).sort()).toEqual(["active", "cancelled"])
+    expect((yield* h.store.forSession(first.session_id))?.state).toBe("cancelled")
+  }),
+)
+
+test("two database connections cannot commit simultaneous writers for one scope", async () => {
+  await using temporary = await tmpdir()
+  const open = () =>
+    AppNodeBuilder.build(LayerNode.group([Database.node, MemoryTidyStore.node, EventV2.node, SessionProjector.node]), [
+      [Database.node, Database.layerFromPath(path.join(temporary.path, "writers.sqlite"))],
+    ])
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const first = yield* Layer.build(open())
+      const second = yield* Layer.build(open())
+      const a = yield* host.pipe(Effect.provide(first))
+      const b = yield* host.pipe(Effect.provide(second))
+      const results = yield* Effect.all(
+        [a.store.create(request, a.create), b.store.create({ ...request, requestID: "other-window" }, b.create)].map(
+          (operation) =>
+            operation.pipe(
+              Effect.map((run) => ({ state: "accepted", id: run.id })),
+              Effect.catchTag("MemoryTidy.Rejected", (error) => Effect.succeed({ state: error.reason, id: "" })),
+            ),
+        ),
+        { concurrency: "unbounded" },
+      )
+      expect(results.filter((result) => result.state === "accepted")).toHaveLength(1)
+      expect(results.filter((result) => result.state === "busy")).toHaveLength(1)
+      expect(yield* a.store.list(request.scope)).toHaveLength(1)
+      const sessions = yield* a.database.db.select().from(SessionTable).all().pipe(Effect.orDie)
+      expect(sessions).toHaveLength(1)
+    }).pipe(Effect.scoped),
+  )
+})

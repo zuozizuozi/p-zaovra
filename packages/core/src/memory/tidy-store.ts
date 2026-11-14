@@ -1,7 +1,7 @@
 export * as MemoryTidyStore from "./tidy-store"
 
 import { randomUUID } from "node:crypto"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { Cause, Clock, Context, Effect, Layer, Schema } from "effect"
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError"
 import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core/errors"
@@ -36,6 +36,8 @@ export interface Interface {
     createSession: (id: SessionSchema.ID) => Effect.Effect<void>,
   ) => Effect.Effect<Run, Rejected>
   readonly get: (id: string) => Effect.Effect<Run | undefined>
+  readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<Run | undefined>
+  readonly list: (scope: Memory.Scope) => Effect.Effect<Run[]>
   readonly authorize: (input: Authority) => Effect.Effect<Run, Rejected>
   readonly guarded: <A>(input: Authority, operation: Effect.Effect<A>) => Effect.Effect<A, Rejected>
   readonly reserve: (input: Authority & { attemptID: string; tokens: number }) => Effect.Effect<void, Rejected>
@@ -97,6 +99,21 @@ const layer = Layer.effect(
     })
     return Service.of({
       get: (id) => get(id).pipe(Effect.orDie),
+      forSession: (sessionID) =>
+        db
+          .select()
+          .from(MemoryTidyRunTable)
+          .where(eq(MemoryTidyRunTable.session_id, sessionID))
+          .get()
+          .pipe(Effect.orDie),
+      list: (scope) =>
+        db
+          .select()
+          .from(MemoryTidyRunTable)
+          .where(eq(MemoryTidyRunTable.scope, scope))
+          .orderBy(desc(MemoryTidyRunTable.time_created), desc(MemoryTidyRunTable.id))
+          .all()
+          .pipe(Effect.orDie),
       usage: (input) => usage(input).pipe(Effect.orDie),
       authorize: (input) => authorize(input).pipe(Effect.catchTag("EffectDrizzleQueryError", rejectSqlError)),
       guarded: (input, operation) =>
@@ -135,6 +152,17 @@ const layer = Layer.effect(
                 // An exact retry returns the same task, including its terminal state. It never restarts it.
                 return previous
               }
+              // Keep the check and grant in the same write transaction. Another
+              // connection that wins after this read makes our snapshot busy;
+              // it must never replay the Session-creation callback automatically.
+              if (
+                yield* db
+                  .select({ id: MemoryTidyRunTable.id })
+                  .from(MemoryTidyRunTable)
+                  .where(and(eq(MemoryTidyRunTable.scope, input.scope), eq(MemoryTidyRunTable.state, "active")))
+                  .get()
+              )
+                return yield* new Rejected({ reason: "busy" })
               const id = randomUUID()
               const sessionID = SessionSchema.ID.create()
               if (
