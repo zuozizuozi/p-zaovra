@@ -133,6 +133,9 @@ describe("provider tool wire compatibility", () => {
         const lowered = loweredTools(route.pkg, body)
         expect(lowered.map((tool) => tool.name)).toEqual(tools.map((tool) => tool.name))
         for (const tool of lowered) {
+          const original = tools.find((definition) => definition.name === tool.name)!
+          expect(tool.description).toBe(original.description)
+          expect(descriptions(tool.schema)).toEqual(expect.arrayContaining(descriptions(original.inputSchema)))
           expect(tool.name).toMatch(NAME)
           if (route.pkg === "@ai-sdk/google") {
             expect(geminiViolations(tool.schema ?? { type: "object" }, tool.name)).toEqual([])
@@ -141,6 +144,12 @@ describe("provider tool wire compatibility", () => {
           expect({ name: tool.name, type: tool.schema?.type }).toEqual({ name: tool.name, type: "object" })
         }
         const byName = Object.fromEntries(lowered.map((tool) => [tool.name, tool.schema]))
+        expect(byName.read?.properties?.offset?.description).toBe(
+          "The 1-based directory entry or text line offset to start reading from",
+        )
+        expect(byName.read?.properties?.limit?.description).toBe(
+          "The maximum number of directory entries or text lines to read",
+        )
         // Root unions keep every branch argument visible after the object projection.
         expect(Object.keys(byName.browser?.properties ?? {})).toEqual(
           expect.arrayContaining(["action", "url", "x", "y", "actions"]),
@@ -167,8 +176,11 @@ describe("provider tool wire compatibility", () => {
       )
       expect(specs.map((spec) => spec.name)).toEqual(tools.map((tool) => tool.name))
       for (const spec of specs) {
+        const original = tools.find((definition) => definition.name === spec.name)!
         expect(spec.name).toMatch(NAME)
         expect(spec.description.length).toBeGreaterThan(0)
+        expect(spec.description).toBe(original.description)
+        expect(descriptions(spec.inputSchema.json)).toEqual(expect.arrayContaining(descriptions(original.inputSchema)))
         expect({ name: spec.name, type: spec.inputSchema.json.type }).toEqual({ name: spec.name, type: "object" })
       }
     }),
@@ -346,23 +358,43 @@ describe("545 text-only provider wire", () => {
 
 function loweredTools(pkg: string, body: Record<string, unknown>) {
   if (pkg === "@ai-sdk/anthropic")
-    return (body.tools as { name: string; input_schema: JsonNode }[]).map((tool) => ({
+    return (body.tools as { name: string; description: string; input_schema: JsonNode }[]).map((tool) => ({
       name: tool.name,
+      description: tool.description,
       schema: tool.input_schema,
     }))
   if (pkg === "@ai-sdk/google")
-    return (body.tools as { functionDeclarations: { name: string; parameters?: JsonNode }[] }[]).flatMap((group) =>
-      group.functionDeclarations.map((tool) => ({ name: tool.name, schema: tool.parameters })),
+    return (
+      body.tools as { functionDeclarations: { name: string; description: string; parameters?: JsonNode }[] }[]
+    ).flatMap((group) =>
+      group.functionDeclarations.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        schema: tool.parameters,
+      })),
     )
   if (pkg === "@ai-sdk/openai")
-    return (body.tools as { name: string; parameters: JsonNode }[]).map((tool) => ({
+    return (body.tools as { name: string; description: string; parameters: JsonNode }[]).map((tool) => ({
       name: tool.name,
+      description: tool.description,
       schema: tool.parameters,
     }))
-  return (body.tools as { function: { name: string; parameters: JsonNode } }[]).map((tool) => ({
+  return (body.tools as { function: { name: string; description: string; parameters: JsonNode } }[]).map((tool) => ({
     name: tool.function.name,
+    description: tool.function.description,
     schema: tool.function.parameters,
   }))
+}
+
+// Object-root and Gemini projections reshape unions and inline definitions.
+// Compare annotation text independently of that shape, then assert critical
+// parameter placement above so equal prose on the wrong field cannot satisfy it.
+function descriptions(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(descriptions)
+  if (!value || typeof value !== "object") return []
+  return Object.entries(value).flatMap(([key, child]) =>
+    key === "description" && typeof child === "string" ? [child] : descriptions(child),
+  )
 }
 
 function geminiViolations(schema: JsonNode, path: string): string[] {
