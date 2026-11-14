@@ -42,6 +42,19 @@ export const AttemptObserver = Context.Reference<(input: Attempt) => Effect.Effe
   { defaultValue: () => () => Effect.void },
 )
 
+/**
+ * Host admission runs before each executor attempt, including retries. Errors
+ * follow the existing retry policy; a quota rejection must be non-retryable.
+ * A host enforcing per-request limits must also disable transport redirects:
+ * fetch can follow a redirect without returning through this executor.
+ */
+export const RequestAdmission = Context.Reference<
+  (input: {
+    readonly id: string
+    readonly request: HttpClientRequest.HttpClientRequest
+  }) => Effect.Effect<void, LLMError>
+>("@zaovra/LLM/RequestAdmission", { defaultValue: () => () => Effect.void })
+
 const BODY_LIMIT = 16_384
 const MAX_RETRIES = 5
 const REQUEST_TIMEOUT = "120 seconds"
@@ -467,6 +480,8 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
         const redactedNames = yield* Headers.CurrentRedactedNames
         const started = Date.now()
         const id = randomUUID()
+        const admit = yield* RequestAdmission
+        yield* admit({ id, request })
         const observe = yield* AttemptObserver
         yield* observe({ id, phase: "start" })
         yield* Effect.logInfo("provider.request.start", { host: new URL(request.url).hostname })
