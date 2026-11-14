@@ -15,6 +15,7 @@ import type {
   Todo,
 } from "@zaovra-ai/sdk/v2/client"
 import { batch } from "solid-js"
+import { newestPrompt } from "./newest-message"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { diffs as cleanDiffs, message as cleanMessage } from "@/utils/diffs"
 import { sessionNotFoundError } from "@/utils/server-errors"
@@ -2201,9 +2202,8 @@ export function createServerSession(client: ZaovraClient, options?: { retry?: ty
     async interrupt(sessionID: string) {
       const active = generation(sessionID)
       const messages = data.message[sessionID] ?? []
-      const user = data.session_working(sessionID)
-        ? messages.toSorted(cmpMessage).findLast((message) => message.role === "user")
-        : undefined
+      // The turn being stopped is the user's last prompt, not a command record that came after it.
+      const user = data.session_working(sessionID) ? newestPrompt(messages, (id) => data.part[id]) : undefined
       await client.v2.session.interrupt({ sessionID }, { throwOnError: true })
       // A missed start event or failed earlier watch must not leave a confirmed Stop busy forever.
       void watchExecution(sessionID).catch(() => {})

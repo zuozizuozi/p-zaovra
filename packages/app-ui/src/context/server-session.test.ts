@@ -1562,3 +1562,22 @@ test("a server without the ordered feed is re-read on a clock, not once per tool
   await new Promise((resolve) => setTimeout(resolve, 300))
   expect(ctx.requests.messages.length).toBe(before + 1)
 }, 10000)
+
+test("Stop marks the user's prompt, not a command record that came after it", async () => {
+  const ctx = setup({
+    pages: [
+      {
+        data: [
+          user("msg_first", "Task", 1),
+          // A command record: stored as a user-side message whose ID sorts after every reply.
+          { id: "msg_zz_shell", type: "shell", command: "ls", output: "", time: { created: 2, completed: 3 } } as never,
+        ],
+      },
+    ],
+  })
+  await ctx.store.sync("ses_child")
+  ctx.store.set("session_status", "ses_child", { type: "busy" })
+  await ctx.store.interrupt("ses_child")
+  expect(ctx.store.stopped("msg_zz_shell")).toBe(false)
+  expect(ctx.store.stopped("msg_first")).toBe(true)
+})
