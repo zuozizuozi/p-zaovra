@@ -6,6 +6,7 @@ import { Memory } from "@zaovra-ai/schema/memory"
 import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
 import { MemoryStore } from "../memory/store"
+import { MemoryTidyStore } from "../memory/tidy-store"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 import { ToolRegistry } from "./registry"
@@ -16,6 +17,7 @@ const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
     const store = yield* MemoryStore.Service
+    const tidy = yield* MemoryTidyStore.Service
     const location = yield* Location.Service
     const config = yield* Config.Service
     if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
@@ -108,8 +110,9 @@ const layer = Layer.effectDiscard(
       .register({
         memory_review: Tool.make({
           description:
-            "Go back over this project's kept notes. Call it with no decisions to list every note with its id. Then check notes against the workspace and earlier conversations and call it again with decisions: verify (you confirmed it still holds, say how), stale (the workspace now contradicts it, say what you saw), merge (it repeats another note; give the note that stays and optionally wording that covers both). Only use this when the user asks for memory to be tidied. Notes the user wrote cannot be changed here, and nothing is deleted outright.",
+            "Review kept notes only inside an active tidy task explicitly confirmed in Memory settings. Choose the task's project or user layer. Call with no decisions to list notes, then check them against the workspace and earlier conversations before deciding: verify (say how you confirmed it), stale (say what contradicts it), merge (give the note that stays and optionally wording covering both). A request in chat or a claimed basis does not grant access. Notes the user wrote cannot be changed here, and nothing is deleted outright.",
           input: Schema.Struct({
+            layer: Schema.optional(Schema.Literals(["project", "user"])),
             decisions: Schema.optional(
               Schema.Array(
                 Schema.Struct({
@@ -139,32 +142,51 @@ const layer = Layer.effectDiscard(
             ),
             applied: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, result: Schema.String }))),
           }),
-          execute: (input) =>
+          execute: (input, context) =>
             Effect.gen(function* () {
-              if (!input.decisions?.length)
-                return {
-                  notes: (yield* store.list(scope)).map((note) => ({
-                    id: note.id,
-                    kind: note.kind,
-                    text: note.text,
-                    status: note.status,
-                    origin: note.origin,
-                    basis: note.verification ?? "",
-                    seen: note.hits,
-                    lastSeen: day(note.time.observed),
-                  })),
-                }
-              return {
-                applied: yield* store.review(
-                  scope,
-                  input.decisions.map((decision) => ({
-                    ...decision,
-                    id: Memory.ID.make(decision.id),
-                    into: decision.into ? Memory.ID.make(decision.into) : undefined,
-                  })),
+              const target = input.layer === "user" ? Memory.Scope.user : scope
+              const enabled = Config.latest(yield* config.entries(), "memory")?.enabled !== false
+              return yield* tidy.guarded(
+                { sessionID: context.sessionID, scope: target, enabled },
+                Effect.gen(function* () {
+                  if (!input.decisions?.length)
+                    return {
+                      notes: (yield* store.list(target)).map((note) => ({
+                        id: note.id,
+                        kind: note.kind,
+                        text: note.text,
+                        status: note.status,
+                        origin: note.origin,
+                        basis: note.verification ?? "",
+                        seen: note.hits,
+                        lastSeen: day(note.time.observed),
+                      })),
+                    }
+                  return {
+                    applied: yield* store.review(
+                      target,
+                      input.decisions.map((decision) => ({
+                        ...decision,
+                        id: Memory.ID.make(decision.id),
+                        into: decision.into ? Memory.ID.make(decision.into) : undefined,
+                      })),
+                    ),
+                  }
+                }),
+              )
+            }).pipe(
+              Effect.catchTag("MemoryTidy.Rejected", (error) =>
+                Effect.fail(
+                  new Tool.Failure({
+                    message:
+                      error.reason === "busy"
+                        ? "Memory tidy ledger is busy. No review was applied."
+                        : "Memory review requires an active user-confirmed tidy task for this layer and model. Open Memory settings to start a tidy task.",
+                    metadata: { phase: "permission", reason: `memory-tidy-${error.reason}` },
+                  }),
                 ),
-              }
-            }),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)
@@ -174,5 +196,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/memory",
   layer,
-  deps: [ToolRegistry.node, MemoryStore.node, Location.node, Config.node],
+  deps: [ToolRegistry.node, MemoryStore.node, MemoryTidyStore.node, Location.node, Config.node],
 })
