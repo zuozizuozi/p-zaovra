@@ -3,6 +3,9 @@ import { Switch } from "@zaovra-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@zaovra-ai/ui/v2/text-input-v2"
 import { type Component, For, Show, createMemo, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
+import { ModelSelectorPopoverV2 } from "@/components/dialog-select-model"
+import { useModels, type ModelKey } from "@/context/models"
+import { Identifier } from "@/utils/id"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
@@ -18,6 +21,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
   const language = useLanguage()
   const serverSdk = useServerSDK()
   const serverSync = useServerSync()
+  const models = useModels()
   // Opened from a conversation, the project is that conversation's, as in the other settings pages.
   const directory = createMemo(() =>
     props.sessionID ? serverSync().session.lineage.peek(props.sessionID)?.session.directory : props.directory,
@@ -41,6 +45,9 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     text: "",
     draft: { project: "", user: "" },
     confirming: undefined as Layer | undefined,
+    model: undefined as ModelKey | undefined,
+    request: undefined as ReturnType<typeof makeTidyRequest> | undefined,
+    created: false,
     tidying: undefined as "starting" | "started" | "failed" | undefined,
   })
   const reload = (layer: Layer) => (layer === "project" ? projectActions.refetch() : userActions.refetch())
@@ -68,16 +75,49 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
   }
   // Tidying is an ordinary conversation with a fixed request and a token ceiling, so what it
   // did and what it cost are visible like any other conversation.
+  const available = createMemo(() =>
+    models.list().filter((item) => models.type({ providerID: item.provider.id, modelID: item.id }) === "chat"),
+  )
+  const selected = createMemo(() =>
+    available().find((item) => item.id === state.model?.modelID && item.provider.id === state.model?.providerID),
+  )
+  const selection = {
+    list: available,
+    visible: models.visible,
+    current: selected,
+    set: (value: ModelKey | undefined) => {
+      if (!state.request) setState("model", value)
+    },
+  }
+  const makeTidyRequest = (model: ModelKey | undefined) => {
+    const id = Identifier.ascending("session")
+    return {
+      client: serverSdk().client.v2.session,
+      create: {
+        id,
+        location: location(),
+        budget: { tokens: 300_000 },
+        ...(model ? { model: { id: model.modelID, providerID: model.providerID } } : {}),
+      },
+      prompt: {
+        sessionID: id,
+        id: Identifier.ascending("message"),
+        prompt: { text: language.t("settings.memory.tidy.prompt") },
+      },
+    }
+  }
   const tidy = async () => {
+    if (state.tidying === "starting" || state.tidying === "started") return
+    if (!state.request && state.model && !selected()) return
     setState("tidying", "starting")
-    const client = serverSdk().client.v2.session
-    const created = await client
-      .create({ location: location(), budget: { tokens: 300_000 } }, { throwOnError: true })
-      .then((result) => result.data.data)
-    await client.prompt(
-      { sessionID: created.id, prompt: { text: language.t("settings.memory.tidy.prompt") } },
-      { throwOnError: true },
-    )
+    if (!state.request) setState("request", makeTidyRequest(state.model))
+    const request = state.request!
+    // Retries keep both identities and the captured selection, including after a lost response.
+    if (!state.created) {
+      await request.client.create(request.create, { throwOnError: true })
+      setState("created", true)
+    }
+    await request.client.prompt(request.prompt, { throwOnError: true })
     setState("tidying", "started")
   }
   const clear = async (layer: Layer) => {
@@ -234,10 +274,31 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
                     : "settings.memory.tidy.description",
               )}
             >
-              <div data-action="settings-memory-tidy">
+              <div data-action="settings-memory-tidy" class="flex flex-wrap items-center gap-2">
+                <ModelSelectorPopoverV2
+                  configuredOnly
+                  model={selection}
+                  triggerAs={ButtonV2}
+                  triggerProps={{
+                    variant: "neutral",
+                    disabled: !!state.request,
+                    "aria-label": language.t("settings.memory.tidy.model"),
+                  }}
+                >
+                  {selected()?.name ?? state.model?.modelID ?? language.t("settings.memory.tidy.default")}
+                </ModelSelectorPopoverV2>
+                <Show when={state.model && !state.request}>
+                  <ButtonV2 variant="neutral" onClick={() => setState("model", undefined)}>
+                    {language.t("settings.memory.tidy.default")}
+                  </ButtonV2>
+                </Show>
                 <ButtonV2
                   variant="neutral"
-                  disabled={state.tidying === "starting" || state.tidying === "started"}
+                  disabled={
+                    state.tidying === "starting" ||
+                    state.tidying === "started" ||
+                    (!state.request && !!state.model && !selected())
+                  }
                   onClick={() => void tidy().catch(() => setState("tidying", "failed"))}
                 >
                   {language.t("settings.memory.tidy.action")}

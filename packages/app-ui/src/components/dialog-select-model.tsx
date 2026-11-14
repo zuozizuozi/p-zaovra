@@ -215,18 +215,19 @@ export function ModelSelectorPopover(props: {
 
 export function ModelSelectorPopoverV2(props: {
   provider?: string
-  model?: ModelState
+  model?: Pick<ModelState, "list" | "current" | "visible" | "set">
+  configuredOnly?: boolean
   children?: JSX.Element
   triggerAs?: ValidComponent
   triggerProps?: ModelSelectorTriggerProps
   onClose?: () => void
 }) {
-  const model = props.model ?? useLocal().model
+  const local = props.configuredOnly ? undefined : useLocal()
+  const model = props.model ?? local!.model
   const modelCatalog = useModels()
   const catalog = modelCatalog.catalog
   const language = useLanguage()
   const dialog = useDialog()
-  const local = useLocal()
   const [store, setStore] = createStore({ open: false, search: "", active: "", source: "own" as const })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
@@ -247,7 +248,10 @@ export function ModelSelectorPopoverV2(props: {
 
     return [...filtered].sort((a, b) => a.name.localeCompare(b.name))
   })
-  const keys = () => [...models().map(modelKey), ...(store.source === "own" ? [manageKey] : [])]
+  const keys = () => [
+    ...models().map(modelKey),
+    ...(!props.configuredOnly && store.source === "own" ? [manageKey] : []),
+  ]
   const current = () => {
     const value = model.current()
     return value ? modelKey(value) : undefined
@@ -304,6 +308,7 @@ export function ModelSelectorPopoverV2(props: {
     afterClose(() => select(item))
   }
   const manage = () => {
+    if (!local) return
     restoreTrigger = false
     setOpen(false)
     afterClose(() => {
@@ -498,7 +503,7 @@ export function ModelSelectorPopoverV2(props: {
               </Show>
             </div>
           </ScrollView>
-          <Show when={store.source === "own"}>
+          <Show when={!props.configuredOnly && store.source === "own"}>
             <div class="h-px bg-v2-border-border-muted" />
             <div class="flex flex-col p-0.5">
               <Button size="small" variant="ghost" disabled={catalog.loading()} onClick={() => void catalog.refresh()}>
