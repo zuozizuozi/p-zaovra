@@ -2377,6 +2377,89 @@ const setupOverflowRecovery = Effect.gen(function* () {
   return session
 })
 
+const accuracyEnvironment = (key: string, value: string | undefined) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = process.env[key]
+      if (value === undefined) delete process.env[key]
+      if (value !== undefined) process.env[key] = value
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env[key]
+        if (previous !== undefined) process.env[key] = previous
+      }),
+  )
+
+for (const general of [undefined, "on", "off", "invalid"])
+  for (const scale of [undefined, "on", "off", "invalid"])
+    it.effect(
+      `accuracy ab switches isolate guidance and clock boundaries: ${general ?? "default"}/${scale ?? "default"}`,
+      () =>
+        Effect.gen(function* () {
+          yield* accuracyEnvironment("ZAOVRA_EXPERIMENTAL_ACCURACY_GENERAL", general)
+          yield* accuracyEnvironment("ZAOVRA_EXPERIMENTAL_ACCURACY_SCALE", scale)
+          yield* setup
+          verificationEnabled = false
+          deliveryEnabled = undefined
+          const session = yield* SessionV2.Service
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue the task" }), resume: false })
+          yield* session.update({ sessionID, budget: { durationMs: 1000 } })
+          const created = DateTime.toEpochMillis((yield* session.get(sessionID)).time.created)
+          const base =
+            "Wall-clock delivery checkpoint: 500ms remain. Save a version that meets basic requested acceptance before improving it."
+          const full =
+            base +
+            " Choose training or build scale from the remaining time, preserve necessary validation, and do not label a partial artifact complete."
+          expect(AccuracyGuidance.checkpoint({ elapsed: 499, limit: 1000 })).toBeUndefined()
+          expect(AccuracyGuidance.checkpoint({ elapsed: 500, limit: 1000 })).toBe(scale === "off" ? base : full)
+          expect(AccuracyGuidance.checkpoint({ elapsed: 999, limit: 1000 })).toBe(
+            (scale === "off" ? base : full).replace("500ms", "1ms"),
+          )
+          expect(AccuracyGuidance.checkpoint({ elapsed: 1000, limit: 1000 })).toBeUndefined()
+          expect(AccuracyGuidance.checkpoint({ elapsed: 1001, limit: 1000 })).toBeUndefined()
+          response = fragmentFixture("text", "accuracy-before", ["Continuing"]).completeEvents
+          yield* setTime(created + 499)
+          yield* session.resume(sessionID)
+          expect(requests).toHaveLength(1)
+          const system = requests[0].system.map((part) => part.text)
+          expect(system.includes(AccuracyGuidance.general)).toBe(general !== "off")
+          expect(system).toContain(AccuracyGuidance.delivery)
+          expect(system).toContain(AccuracyGuidance.lifecycle)
+          expect(JSON.stringify(requests[0].messages)).not.toContain("Wall-clock delivery checkpoint")
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+          yield* setTime(created + 500)
+          response = fragmentFixture("text", "accuracy-half", ["Continuing"]).completeEvents
+          yield* session.resume(sessionID)
+          expect(requests).toHaveLength(2)
+          expect(requests[1].system.map((part) => part.text)).toEqual(system)
+          expect(JSON.stringify(requests[1].messages)).toContain(scale === "off" ? base : full)
+          if (scale === "off")
+            expect(JSON.stringify(requests[1].messages)).not.toContain("Choose training or build scale")
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+          yield* setTime(created + 501)
+          response = fragmentFixture("text", "accuracy-after", ["Continuing"]).completeEvents
+          yield* session.resume(sessionID)
+          expect(requests).toHaveLength(3)
+          const history = yield* session.context(sessionID)
+          const checkpoints = history.filter(
+            (message) => message.type === "synthetic" && message.text.startsWith("Wall-clock delivery checkpoint"),
+          )
+          expect(checkpoints).toHaveLength(1)
+          expect(history.filter((message) => message.type === "user")).toHaveLength(3)
+          expect(JSON.stringify(history)).not.toContain(AccuracyGuidance.general)
+          yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Continue" }), resume: false })
+          yield* setTime(created + 1000)
+          yield* session.resume(sessionID)
+          expect(requests).toHaveLength(3)
+          expect(yield* session.outcome(sessionID)).toMatchObject({
+            state: "stopped",
+            termination: { category: "budget" },
+          })
+        }),
+    )
+
 for (const enabled of [false, true])
   it.effect(
     `331 accuracy guidance reaches the provider without extra calls or fabricated history: verification=${enabled}`,

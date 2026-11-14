@@ -24,5 +24,10 @@ export function checkpoint(input: { elapsed: number; limit?: number }) {
   )
     return undefined
   if (input.elapsed >= input.limit) return undefined
-  return `Wall-clock delivery checkpoint: ${Math.max(0, input.limit - input.elapsed)}ms remain. Save a version that meets basic requested acceptance before improving it. Choose training or build scale from the remaining time, preserve necessary validation, and do not label a partial artifact complete.`
+  return (
+    `Wall-clock delivery checkpoint: ${Math.max(0, input.limit - input.elapsed)}ms remain. Save a version that meets basic requested acceptance before improving it.` +
+    (process.env.ZAOVRA_EXPERIMENTAL_ACCURACY_SCALE === "off"
+      ? ""
+      : " Choose training or build scale from the remaining time, preserve necessary validation, and do not label a partial artifact complete.")
+  )
 }
