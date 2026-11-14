@@ -707,7 +707,9 @@ export const protocol = Protocol.make({
         reasoningOrigin:
           request.providerOptions?.deepseek !== undefined &&
           DeepSeekOptions.matches(request.model.provider, request.model.id) &&
-          (thinking === undefined || (Schema.is(DeepSeekOptions.Thinking)(thinking) && thinking.type === "enabled"))
+          (thinking === undefined || (Schema.is(DeepSeekOptions.Thinking)(thinking) && thinking.type === "enabled")) &&
+          // What the reply is vouched for is the mode the request actually went out in.
+          !thinkingUnavailable(request)
             ? { provider: request.model.provider, model: request.model.id, thinking: true as const }
             : undefined,
       }
