@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import path from "path"
 import { Effect, Exit, Layer } from "effect"
 import { Config } from "@zaovra-ai/core/config"
@@ -13,8 +14,51 @@ import { AbsolutePath } from "@zaovra-ai/core/schema"
 import { ToolOutputStore } from "@zaovra-ai/core/tool-output-store"
 import { ApplicationTools } from "@zaovra-ai/core/tool/application-tools"
 import { ToolRegistry } from "@zaovra-ai/core/tool/registry"
+import { SessionV2 } from "@zaovra-ai/core/session"
+import { executeTool, toolIdentity } from "./lib/tool"
 
 const directory = AbsolutePath.make(path.resolve(import.meta.dirname, "fixture"))
+
+test.each([100, 120_000])("progress renews the idle deadline but has a total cap (request=%d)", async (timeout) => {
+  // Calls through to the real SDK and stdio server; inspect the actual dispatch options without a ten-minute test.
+  const requests = spyOn(Client.prototype, "request")
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const result = yield* executeTool(registry, {
+          sessionID: SessionV2.ID.make("ses_mcp_deadline"),
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-deadline", name: "mcp_fixture_echo", input: { text: "ok" } },
+        })
+        expect(result.type).toBe("text")
+        const sent = requests.mock.calls.findLast(([request]) => request.method === "tools/call")
+        expect(sent?.[2]).toMatchObject({
+          timeout,
+          resetTimeoutOnProgress: true,
+          maxTotalTimeout: Math.max(timeout * 10, 600_000),
+        })
+      }).pipe(
+        Effect.provide(
+          layer(
+            new ConfigMCP.Info({
+              servers: {
+                fixture: new ConfigMCP.Local({
+                  type: "local",
+                  command: [process.execPath, path.join(directory, "mcp-canonical-stdio.ts")],
+                  timeout: new ConfigMCP.Timeout({ request: timeout }),
+                }),
+              },
+            }),
+          ),
+        ),
+        Effect.scoped,
+      ),
+    )
+  } finally {
+    requests.mockRestore()
+  }
+})
 function layer(mcp: ConfigMCP.Info) {
   return AppNodeBuilder.build(LayerNode.group([ApplicationTools.node, ToolRegistry.node, MCP.node]), [
     [

@@ -640,6 +640,8 @@ function canonicalTool(
           return yield* new Tool.Failure({
             message: `Tool "${definition.name}" requires task-based execution. Use the experimental tasks API instead.`,
           })
+        const timeout = server.timeout?.request ?? fallback ?? DEFAULT_REQUEST_TIMEOUT_MS
+        const maxTotalTimeout = Math.max(timeout * 10, 600_000)
         const result = yield* Effect.tryPromise({
           try: (signal) =>
             client.request(
@@ -647,13 +649,20 @@ function canonicalTool(
               CallToolResultSchema,
               {
                 signal,
-                timeout: server.timeout?.request ?? fallback ?? DEFAULT_REQUEST_TIMEOUT_MS,
+                timeout,
+                maxTotalTimeout,
                 resetTimeoutOnProgress: true,
                 onprogress: () => {},
               },
             ),
           catch: (error) => new Tool.Failure({ message: normalizeError(error).message }),
-        })
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: maxTotalTimeout,
+            orElse: () =>
+              Effect.fail(new Tool.Failure({ message: `MCP request timed out after ${maxTotalTimeout} ms` })),
+          }),
+        )
         if (result.isError) return yield* new Tool.Failure({ message: errorContent(result.content) })
         const outputSchemaDiagnostic = !validateOutput
           ? undefined
