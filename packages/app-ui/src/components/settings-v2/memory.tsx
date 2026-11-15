@@ -246,7 +246,8 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           {(target) => (
             <MemoryTidyPanel
               directory={target.directory}
-              disabled={frozen() || !!recovery()?.automaticFrozen || serverSync().data.config.memory?.enabled === false}
+              disabled={serverSync().data.config.memory?.enabled === false}
+              projectFrozen={frozen() || !!recovery()?.automaticFrozen}
             />
           )}
         </Show>

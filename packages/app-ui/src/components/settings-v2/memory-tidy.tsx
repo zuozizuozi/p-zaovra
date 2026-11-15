@@ -10,7 +10,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { Identifier } from "@/utils/id"
 
 /** Mounted per server/directory: a confirmation never follows a later settings target. */
-export function MemoryTidyPanel(props: { directory: string; disabled: boolean }) {
+export function MemoryTidyPanel(props: { directory: string; disabled: boolean; projectFrozen: boolean }) {
   const language = useLanguage()
   const models = useModels()
   const client = useServerSDK()().client.v2.memory
@@ -62,8 +62,10 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean })
     tokens: Number(state.tokens),
     dailyTokens: Number(state.dailyTokens),
   })
+  const blocked = (layer: "project" | "user" = "project") =>
+    props.disabled || (layer === "project" && props.projectFrozen)
   const submit = async () => {
-    if (state.busy || !state.request || props.disabled) return
+    if (state.busy || !state.request || blocked(state.request.layer)) return
     const request = state.request
     setState({ busy: true, error: false, sent: true })
     await client
@@ -79,7 +81,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean })
     setState("busy", false)
   }
   const act = async (task: MemoryTidyTask, action: "start" | "cancel") => {
-    if (state.busy || (action === "start" && props.disabled)) return
+    if (state.busy || (action === "start" && blocked(task.layer))) return
     setState({ busy: true, error: false })
     const input = { location, layer: task.layer, id: task.id }
     await (
@@ -157,7 +159,11 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean })
               · {state.request?.tokens} / {state.request?.dailyTokens} tokens
             </p>
             <div class="flex gap-2">
-              <ButtonV2 variant="neutral" disabled={state.busy || props.disabled} onClick={() => void submit()}>
+              <ButtonV2
+                variant="neutral"
+                disabled={state.busy || blocked(state.request?.layer)}
+                onClick={() => void submit()}
+              >
                 {language.t(state.sent ? "settings.memory.task.retry" : "settings.memory.task.start")}
               </ButtonV2>
               <Show when={!state.sent}>
@@ -172,7 +178,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean })
         <ButtonV2
           variant="neutral"
           disabled={
-            props.disabled ||
+            blocked(state.layer) ||
             state.busy ||
             !valid() ||
             tasks.loading ||
@@ -229,7 +235,7 @@ export function MemoryTidyPanel(props: { directory: string; disabled: boolean })
                 <Show when={!task.executing}>
                   <ButtonV2
                     variant="neutral"
-                    disabled={state.busy || props.disabled || task.directory !== props.directory}
+                    disabled={state.busy || blocked(task.layer) || task.directory !== props.directory}
                     onClick={() => void act(task, "start")}
                   >
                     {language.t("settings.memory.task.continue")}
