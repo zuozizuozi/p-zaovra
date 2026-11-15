@@ -134,6 +134,7 @@ let replaySummaryCalls = 0
 const replayBodies: string[] = []
 let streamGate: Deferred.Deferred<void> | undefined
 let streamStarted: Deferred.Deferred<void> | undefined
+let streamSubscribed: ((request: LLMRequest) => Effect.Effect<void>) | undefined
 let streamFailure: LLMError | undefined
 let toolExecutionGate: Deferred.Deferred<void> | undefined
 let toolExecutionsStarted: Deferred.Deferred<void> | undefined
@@ -195,13 +196,15 @@ const client = Layer.succeed(
         : next instanceof LLMError
           ? Stream.fail(next)
           : Stream.fromIterable(next)
-      if (!streamGate) return events
-      return Stream.unwrap(
-        (streamStarted ? Deferred.succeed(streamStarted, undefined) : Effect.void).pipe(
-          Effect.andThen(Deferred.await(streamGate)),
-          Effect.as(events),
-        ),
-      )
+      const stream = streamGate
+        ? Stream.unwrap(
+            (streamStarted ? Deferred.succeed(streamStarted, undefined) : Effect.void).pipe(
+              Effect.andThen(Deferred.await(streamGate)),
+              Effect.as(events),
+            ),
+          )
+        : events
+      return streamSubscribed ? Stream.unwrap(streamSubscribed(request).pipe(Effect.as(stream))) : stream
     }) as unknown as LLMClientShape["stream"],
     generate: () => Effect.die("unused"),
   }),
@@ -633,6 +636,7 @@ const setup = Effect.gen(function* () {
   responseStream = undefined
   streamGate = undefined
   streamStarted = undefined
+  streamSubscribed = undefined
   toolExecutionGate = undefined
   toolExecutionsStarted = undefined
   toolExecutionsReady = 5
@@ -3735,7 +3739,12 @@ describe("SessionRunnerLLM", () => {
       streamStarted = undefined
       response = []
 
+      const subscribed = yield* Deferred.make<void>()
+      streamSubscribed = () => Deferred.succeed(subscribed, undefined).pipe(Effect.asVoid)
+
       const message = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Run automatically" }) })
+      // Admission schedules an advisory wake; it does not promise synchronous provider entry.
+      yield* Deferred.await(subscribed).pipe(Effect.timeout("2 seconds"))
 
       expect(requests).toHaveLength(1)
       expect(yield* session.messages({ sessionID })).toMatchObject([
@@ -3838,7 +3847,10 @@ describe("SessionRunnerLLM", () => {
       ).toBeUndefined()
 
       systemUnavailable = false
+      const subscribed = yield* Deferred.make<void>()
+      streamSubscribed = () => Deferred.succeed(subscribed, undefined).pipe(Effect.asVoid)
       yield* session.prompt({ id: messageID, sessionID, prompt: Prompt.make({ text: "First" }) })
+      yield* Deferred.await(subscribed).pipe(Effect.timeout("2 seconds"))
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.messages.map((message) => message.role)).toEqual(["user"])
@@ -6434,11 +6446,17 @@ describe("SessionRunnerLLM", () => {
       response = []
       streamGate = yield* Deferred.make<void>()
       streamStarted = yield* Deferred.make<void>()
+      const secondSubscribed = yield* Deferred.make<void>()
+      streamSubscribed = (request) =>
+        request.providerOptions?.openai?.promptCacheKey === otherSessionID
+          ? Deferred.succeed(secondSubscribed, undefined).pipe(Effect.asVoid)
+          : Effect.void
 
       const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(streamStarted)
       const second = yield* session.resume(otherSessionID).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
+      // The first stream's gate stays closed until the second actually subscribes.
+      yield* Deferred.await(secondSubscribed).pipe(Effect.timeout("2 seconds"))
 
       expect(requests).toHaveLength(2)
       expect(requests.map((request) => request.providerOptions?.openai?.promptCacheKey)).toEqual([
