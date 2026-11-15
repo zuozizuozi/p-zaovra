@@ -10032,6 +10032,8 @@ export type MemoryRecoveryOutput = {
         readonly sessionID?: string
         readonly seq?: number
         readonly hits: number
+        readonly fileRevision?: number
+        readonly files?: JsonValue
         readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
       }
       readonly sourceDirectory?: string
@@ -10072,6 +10074,8 @@ export type MemoryResolveRecoveryOutput = {
         readonly sessionID?: string
         readonly seq?: number
         readonly hits: number
+        readonly fileRevision?: number
+        readonly files?: JsonValue
         readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
       }
       readonly sourceDirectory?: string
@@ -10105,6 +10109,8 @@ export type MemoryListOutput = {
     readonly sessionID?: string
     readonly seq?: number
     readonly hits: number
+    readonly fileRevision?: number
+    readonly files?: JsonValue
     readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
   }>
 }["data"]
@@ -10142,6 +10148,8 @@ export type MemoryCreateOutput = {
     readonly sessionID?: string
     readonly seq?: number
     readonly hits: number
+    readonly fileRevision?: number
+    readonly files?: JsonValue
     readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
   } | null
 }["data"]
@@ -10177,6 +10185,8 @@ export type MemoryUpdateOutput = {
     readonly sessionID?: string
     readonly seq?: number
     readonly hits: number
+    readonly fileRevision?: number
+    readonly files?: JsonValue
     readonly time: { readonly created: number; readonly updated: number; readonly observed: number }
   } | null
 }["data"]

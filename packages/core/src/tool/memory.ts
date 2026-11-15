@@ -13,6 +13,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { Location } from "../location"
 import { MemoryStore } from "../memory/store"
 import { MemoryPages } from "../memory/pages"
+import { MemoryFileEvidence } from "../memory/file-evidence"
 import { MemoryTidyStore } from "../memory/tidy-store"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -56,6 +57,7 @@ const layer = Layer.effectDiscard(
                 kind: Schema.String,
                 text: Schema.String,
                 status: Schema.String,
+                files: Schema.Literals(["untracked", "unknown", "current", "changed", "missing"]),
                 basis: Schema.String,
                 lastSeen: Schema.String,
               }),
@@ -93,6 +95,7 @@ const layer = Layer.effectDiscard(
                   kind: note.kind,
                   text: note.text,
                   status: note.status,
+                  files: MemoryFileEvidence.state(note),
                   basis: note.verification ?? note.origin,
                   lastSeen: day(note.time.observed),
                 })),

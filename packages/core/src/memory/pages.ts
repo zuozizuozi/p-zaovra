@@ -1,7 +1,7 @@
 export * as MemoryPages from "./pages"
 
 import { and, desc, eq, inArray, isNull } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
@@ -9,6 +9,7 @@ import { Hash } from "../util/hash"
 import { MemoryPageTable, MemoryPageTombstoneTable } from "./pages.sql"
 import { MemoryStore } from "./store"
 import { MemoryTidyStore } from "./tidy-store"
+import { MemoryFileEvidence } from "./file-evidence"
 
 export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryPages.Rejected", {
   reason: Schema.Literals(["invalid", "source", "deleted", "conflict", "limit", "missing", "protected"]),
@@ -46,6 +47,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@zaovra/MemoryPages") {}
 
 export function source(note: Memory.Note): Memory.PageSource {
+  const dependencies = MemoryFileEvidence.decode(note.files)
   return {
     id: note.id,
     digest: Hash.sha256(
@@ -59,6 +61,13 @@ export function source(note: Memory.Note): Memory.PageSource {
         note.verification,
         note.sessionID,
         note.seq,
+        ...(note.files === undefined
+          ? []
+          : [
+              Option.isSome(dependencies)
+                ? [dependencies.value.version, dependencies.value.files, dependencies.value.state]
+                : note.files,
+            ]),
       ]),
     ),
     ...(note.sessionID ? { sessionID: note.sessionID } : {}),
@@ -90,7 +99,9 @@ const layer = Layer.effect(
         .list(scope)
         .pipe(
           Effect.map((notes) =>
-            notes.filter((note) => note.status === "verified").map((note) => ({ note, source: source(note) })),
+            notes
+              .filter((note) => note.status === "verified" && MemoryFileEvidence.usable(note))
+              .map((note) => ({ note, source: source(note) })),
           ),
         )
     const view = (row: typeof MemoryPageTable.$inferSelect, notes: ReadonlyMap<Memory.ID, string>): Memory.Page => ({

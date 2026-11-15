@@ -7579,6 +7579,8 @@ export type MemoryNote = {
   sessionID?: string
   seq?: number
   hits: number
+  fileRevision?: number
+  files?: unknown
   time: {
     created: number
     updated: number

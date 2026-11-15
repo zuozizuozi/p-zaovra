@@ -64,9 +64,13 @@ export function compare(value: unknown, results: Check["results"]): Memory.FileL
 
 /** L2/context may use this only for eligibility, never to authorize a file read. */
 export function usable(note: Memory.Note) {
-  if (note.files === undefined) return true
+  return state(note) === "untracked" || state(note) === "current"
+}
+
+export function state(note: Memory.Note) {
+  if (note.files === undefined) return "untracked" as const
   const parsed = decode(note.files)
-  return Option.isSome(parsed) && parsed.value.state === "current"
+  return Option.isSome(parsed) ? parsed.value.state : ("unknown" as const)
 }
 
 /** A wording edit invalidates a formerly current association, not an existing alert. */

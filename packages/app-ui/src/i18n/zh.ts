@@ -1620,6 +1620,10 @@ export const dict = {
   "settings.mcp.description": "MCP 设置将在此处可配置。",
 
   "settings.memory.title": "记忆",
+  "settings.memory.files.current": "上次核对时，关联文件未变化。",
+  "settings.memory.files.unknown": "关联文件尚未核验，依赖此笔记前请核对现场。",
+  "settings.memory.files.changed": "关联文件已变化，此笔记待复核；人工原文保留。",
+  "settings.memory.files.missing": "关联文件已缺失，此笔记待复核；人工原文保留。",
   "settings.memory.source": "打开来源会话",
   "settings.memory.source.failed": "无法打开来源会话。",
   "settings.memory.pages.title": "知识页",

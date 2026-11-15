@@ -150,6 +150,13 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
                           {" · "}
                           {new Date(note.time.observed).toLocaleDateString()}
                         </span>
+                        <Show when={fileState(note.files)} keyed>
+                          {(status) => (
+                            <span class="text-xs text-v2-text-text-muted">
+                              {language.t(`settings.memory.files.${status}`)}
+                            </span>
+                          )}
+                        </Show>
                         <Show when={note.sessionID} keyed>
                           {(sessionID) => <MemorySourceLink sessionID={sessionID} seq={note.seq} />}
                         </Show>
@@ -267,4 +274,11 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
       </div>
     </>
   )
+}
+
+function fileState(value: unknown) {
+  if (value === undefined) return
+  if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1 || !("state" in value))
+    return "unknown"
+  return value.state === "current" || value.state === "changed" || value.state === "missing" ? value.state : "unknown"
 }

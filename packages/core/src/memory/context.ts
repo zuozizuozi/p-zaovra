@@ -10,6 +10,7 @@ import { SystemContextRegistry } from "../system-context/registry"
 import { MemoryRecorder } from "./recorder"
 import { MemoryStore } from "./store"
 import { MemoryPages } from "./pages"
+import { MemoryFileEvidence } from "./file-evidence"
 
 /** The index is carried by every request, and a long one is obeyed less; a full index means tidy up, not raise the cap. */
 export const maxLines = 60
@@ -23,7 +24,7 @@ const day = (time: number) => new Date(time).toISOString().slice(0, 10)
 export function lines(notes: ReadonlyArray<Memory.Note>) {
   return bounded(
     notes
-      .filter((note) => note.status === "verified")
+      .filter((note) => note.status === "verified" && MemoryFileEvidence.usable(note))
       .toSorted(
         (left, right) =>
           order.indexOf(left.kind) - order.indexOf(right.kind) ||

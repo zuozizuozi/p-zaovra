@@ -10,12 +10,14 @@ import { Tools } from "../tool/tools"
 import { ToolRegistry } from "../tool/registry"
 import { MemoryPages } from "./pages"
 import { MemoryStore } from "./store"
+import { MemoryTidyStore } from "./tidy-store"
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
     const pages = yield* MemoryPages.Service
     const memory = yield* MemoryStore.Service
+    const tidy = yield* MemoryTidyStore.Service
     const config = yield* Config.Service
     const location = yield* Location.Service
     if (Config.latest(yield* config.entries(), "memory")?.enabled === false) return
@@ -85,7 +87,25 @@ const layer = Layer.effectDiscard(
               if (input.action === "sources") {
                 if (!input.notes?.length)
                   return yield* new Tool.Failure({ message: "Choose up to 20 note IDs from memory_review." })
-                return { sources: (yield* pages.sources(target)).filter((item) => input.notes!.includes(item.note.id)) }
+                return {
+                  sources: yield* tidy
+                    .guarded(
+                      { sessionID: context.sessionID, scope: target, enabled: true },
+                      pages
+                        .sources(target)
+                        .pipe(Effect.map((sources) => sources.filter((item) => input.notes!.includes(item.note.id)))),
+                    )
+                    .pipe(
+                      Effect.catchTag("MemoryTidy.Rejected", () =>
+                        Effect.fail(
+                          new Tool.Failure({
+                            message:
+                              "Source fingerprints require an active user-confirmed tidy task for this exact layer and model.",
+                          }),
+                        ),
+                      ),
+                    ),
+                }
               }
               if (!input.title || !input.summary || !input.body || !input.sources)
                 return yield* new Tool.Failure({
@@ -131,5 +151,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/memory-page",
   layer,
-  deps: [ToolRegistry.node, MemoryPages.node, MemoryStore.node, Config.node, Location.node],
+  deps: [ToolRegistry.node, MemoryPages.node, MemoryStore.node, MemoryTidyStore.node, Config.node, Location.node],
 })

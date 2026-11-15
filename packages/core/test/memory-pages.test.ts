@@ -180,6 +180,65 @@ it.live("knowledge pages reject unchecked, cross-scope, changed and duplicate so
   }),
 )
 
+it.live("file dependency warnings invalidate pages without rewriting the user's note; check time alone does not", () =>
+  Effect.gen(function* () {
+    const h = yield* setup
+    const files = [
+      {
+        path: "test/config.ts",
+        directory: "/memory-pages",
+        identity: "fixture-only",
+        digest: "a".repeat(64),
+        bytes: 20,
+        sessionID: h.run.session_id,
+        seq: 1,
+      },
+    ]
+    yield* h.memory.bindFiles({
+      scope: h.authority.scope,
+      id: h.note.id,
+      expectedRevision: h.note.fileRevision ?? 0,
+      files,
+    })
+    const bound = yield* h.memory.get(h.note.id)
+    if (!bound) throw new Error("bound source missing")
+    expect(yield* h.pages.sources(h.authority.scope)).toEqual([])
+    expect(MemoryContext.lines([bound])).toEqual([])
+    yield* h.memory.checkFiles({
+      scope: h.authority.scope,
+      id: bound.id,
+      expectedRevision: bound.fileRevision!,
+      results: [{ path: files[0].path, state: "unchanged" }],
+    })
+    const checked = yield* h.memory.get(bound.id)
+    if (!checked) throw new Error("checked source missing")
+    const page = yield* h.pages.publish(h.authority, { ...h.input, sources: [MemoryPages.source(checked)] })
+    yield* h.memory.checkFiles({
+      scope: h.authority.scope,
+      id: checked.id,
+      expectedRevision: checked.fileRevision!,
+      results: [{ path: files[0].path, state: "unchanged" }],
+    })
+    const rechecked = yield* h.memory.get(checked.id)
+    if (!rechecked) throw new Error("rechecked source missing")
+    expect(MemoryPages.source(rechecked)).toEqual(MemoryPages.source(checked))
+    expect((yield* h.pages.get(h.authority.scope, page.id))?.status).toBe("current")
+    yield* h.memory.checkFiles({
+      scope: h.authority.scope,
+      id: rechecked.id,
+      expectedRevision: rechecked.fileRevision!,
+      results: [{ path: files[0].path, state: "changed" }],
+    })
+    const changed = yield* h.memory.get(checked.id)
+    if (!changed) throw new Error("changed source missing")
+    expect(changed.status).toBe("verified")
+    expect(changed.origin).toBe("user")
+    expect(changed.text).toBe(h.note.text)
+    expect(MemoryContext.lines([changed])).toEqual([])
+    expect((yield* h.pages.get(h.authority.scope, page.id))?.status).toBe("stale")
+  }),
+)
+
 it.live("manual edits are scope-bound, compare revisions and remain protected when their sources change", () =>
   Effect.gen(function* () {
     const h = yield* setup

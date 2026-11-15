@@ -1798,6 +1798,10 @@ export const dict = {
   "settings.mcp.description": "MCP settings will be configurable here.",
 
   "settings.memory.title": "Memory",
+  "settings.memory.files.current": "Linked files were unchanged at the last check.",
+  "settings.memory.files.unknown": "Linked files have not been verified. Check them before relying on this note.",
+  "settings.memory.files.changed": "Linked files changed. This note needs review; your wording is preserved.",
+  "settings.memory.files.missing": "A linked file is missing. This note needs review; your wording is preserved.",
   "settings.memory.source": "Open source conversation",
   "settings.memory.source.failed": "The source conversation could not be opened.",
   "settings.memory.pages.title": "Knowledge pages",

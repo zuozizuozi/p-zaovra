@@ -211,6 +211,38 @@ test("page tools publish only within a live confirmed scope, then support ordina
     }),
   ))
 
+for (const boundary of ["ordinary", "cancel", "model", "disabled", "layer"] as const)
+  test(`page source receipts recheck ${boundary} at execution`, () =>
+    withMemory((h, settings) =>
+      Effect.gen(function* () {
+        const run = yield* h.grant()
+        const note = yield* h.store.write({
+          scope: h.project,
+          origin: "user",
+          status: "verified",
+          kind: "practice",
+          text: "source receipt fixture",
+        })
+        if (!note) throw new Error("source fixture missing")
+        expect((yield* h.page(run.session_id, { action: "sources", notes: [note.id] })).result.type).not.toBe("error")
+        if (boundary === "cancel") yield* h.tidy.finish(run.id, "cancelled")
+        if (boundary === "model")
+          yield* h.sessions.switchModel({
+            sessionID: run.session_id,
+            model: { ...model, id: ModelV2.ID.make("another-model") },
+          })
+        if (boundary === "disabled") settings.enabled = false
+        const sessionID = boundary === "ordinary" ? (yield* h.create()).id : run.session_id
+        const result = yield* h.page(sessionID, {
+          action: "sources",
+          notes: [note.id],
+          layer: boundary === "layer" ? "user" : "project",
+        })
+        expect(result.result.type).toBe("error")
+        expect(JSON.stringify(result.output?.structured ?? {})).not.toContain(note.text)
+      }),
+    ))
+
 async function withMemory(
   body: (h: Effect.Success<typeof setup>, settings: { enabled: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
 ) {
