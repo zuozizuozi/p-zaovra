@@ -165,6 +165,14 @@ import type {
   CommandsRenderOutput,
   SkillsListInput,
   SkillsListOutput,
+  MemoryListPagesInput,
+  MemoryListPagesOutput,
+  MemoryGetPageInput,
+  MemoryGetPageOutput,
+  MemoryUpdatePageInput,
+  MemoryUpdatePageOutput,
+  MemoryRemovePageInput,
+  MemoryRemovePageOutput,
   MemoryPrepareTidyInput,
   MemoryPrepareTidyOutput,
   MemoryListTidyInput,
@@ -1413,6 +1421,55 @@ export function make(options: ClientOptions) {
         ),
     },
     memory: {
+      listPages: (input?: MemoryListPagesInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryListPagesOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory/pages`,
+            query: { location: input?.["location"], layer: input?.["layer"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      getPage: (input: MemoryGetPageInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryGetPageOutput }>(
+          {
+            method: "GET",
+            path: `/api/memory/pages/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"], layer: input["layer"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      updatePage: (input: MemoryUpdatePageInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: MemoryUpdatePageOutput }>(
+          {
+            method: "PATCH",
+            path: `/api/memory/pages/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"], layer: input["layer"] },
+            body: { summary: input["summary"], body: input["body"], expected: input["expected"] },
+            successStatus: 200,
+            declaredStatuses: [409, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      removePage: (input: MemoryRemovePageInput, requestOptions?: RequestOptions) =>
+        request<MemoryRemovePageOutput>(
+          {
+            method: "DELETE",
+            path: `/api/memory/pages/${encodeURIComponent(input.id)}`,
+            query: { location: input["location"], layer: input["layer"] },
+            successStatus: 204,
+            declaredStatuses: [401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
       prepareTidy: (input: MemoryPrepareTidyInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: MemoryPrepareTidyOutput }>(
           {

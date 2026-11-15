@@ -218,9 +218,13 @@ import type {
   V2MemoryClearResponses,
   V2MemoryCreateErrors,
   V2MemoryCreateResponses,
+  V2MemoryGetPageErrors,
+  V2MemoryGetPageResponses,
   V2MemoryGetTidyErrors,
   V2MemoryGetTidyResponses,
   V2MemoryListErrors,
+  V2MemoryListPagesErrors,
+  V2MemoryListPagesResponses,
   V2MemoryListResponses,
   V2MemoryListTidyErrors,
   V2MemoryListTidyResponses,
@@ -229,12 +233,16 @@ import type {
   V2MemoryRecoveryErrors,
   V2MemoryRecoveryResponses,
   V2MemoryRemoveErrors,
+  V2MemoryRemovePageErrors,
+  V2MemoryRemovePageResponses,
   V2MemoryRemoveResponses,
   V2MemoryResolveRecoveryErrors,
   V2MemoryResolveRecoveryResponses,
   V2MemoryStartTidyErrors,
   V2MemoryStartTidyResponses,
   V2MemoryUpdateErrors,
+  V2MemoryUpdatePageErrors,
+  V2MemoryUpdatePageResponses,
   V2MemoryUpdateResponses,
   V2ModelListErrors,
   V2ModelListResponses,
@@ -5856,6 +5864,149 @@ export class Skill extends HeyApiClient {
 }
 
 export class Memory extends HeyApiClient {
+  /**
+   * Read topic pages and source freshness
+   */
+  public listPages<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2MemoryListPagesResponses, V2MemoryListPagesErrors, ThrowOnError>({
+      url: "/api/memory/pages",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete a topic page while retaining suppression hashes
+   */
+  public removePage<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<V2MemoryRemovePageResponses, V2MemoryRemovePageErrors, ThrowOnError>(
+      {
+        url: "/api/memory/pages/{id}",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  /**
+   * Read a topic page in the selected layer
+   */
+  public getPage<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2MemoryGetPageResponses, V2MemoryGetPageErrors, ThrowOnError>({
+      url: "/api/memory/pages/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Edit and protect a topic page from automatic rewriting
+   */
+  public updatePage<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      layer?: "project" | "user"
+      summary?: string
+      body?: string
+      expected?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "location" },
+            { in: "query", key: "layer" },
+            { in: "body", key: "summary" },
+            { in: "body", key: "body" },
+            { in: "body", key: "expected" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<V2MemoryUpdatePageResponses, V2MemoryUpdatePageErrors, ThrowOnError>({
+      url: "/api/memory/pages/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   /**
    * Read memory tasks and retained usage without resuming them
    */

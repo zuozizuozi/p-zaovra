@@ -1798,6 +1798,22 @@ export const dict = {
   "settings.mcp.description": "MCP settings will be configurable here.",
 
   "settings.memory.title": "Memory",
+  "settings.memory.source": "Open source conversation",
+  "settings.memory.source.failed": "The source conversation could not be opened.",
+  "settings.memory.pages.title": "Knowledge pages",
+  "settings.memory.pages.description":
+    "Topic pages created during memory organization. Check their sources before relying on them. Your edits are protected from automatic replacement.",
+  "settings.memory.pages.layer": "Knowledge page scope",
+  "settings.memory.pages.refresh": "Refresh pages",
+  "settings.memory.pages.current": "Sources unchanged",
+  "settings.memory.pages.stale": "Needs review",
+  "settings.memory.pages.empty": "No knowledge pages in this scope yet.",
+  "settings.memory.pages.protected": "Edited by you. Organization will not overwrite this page.",
+  "settings.memory.pages.summary": "One-sentence summary",
+  "settings.memory.pages.body": "Page content",
+  "settings.memory.pages.delete": "Delete this page? Organization will not recreate the same content.",
+  "settings.memory.pages.failed":
+    "Could not load or save the page. Refresh and reopen it before retrying; another edit may have changed it.",
   "settings.memory.recovery.automaticFrozen":
     "Old deletion records no longer identify their original wording. Automatic recording and model reviews remain paused, even after confirmation. You can still explicitly recover or manually add notes; known deleted content remains protected.",
   "settings.memory.recovery.title": "Review legacy memory",

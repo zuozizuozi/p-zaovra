@@ -33,6 +33,7 @@ export default {
           \`body\` text NOT NULL,
           \`sources\` text NOT NULL,
           \`revision\` text NOT NULL,
+          \`origin\` text DEFAULT 'consolidation' NOT NULL,
           \`aliases\` text NOT NULL,
           \`time_deleted\` integer,
           \`time_created\` integer NOT NULL,

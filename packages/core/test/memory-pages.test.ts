@@ -6,10 +6,12 @@ import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "../src/database/database"
 import { DatabaseMigration } from "../src/database/migration"
 import migration from "../src/database/migration/20261115181429_memory-pages"
+import ownerMigration from "../src/database/migration/20261115182803_memory-page-owner"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
 import { EventV2 } from "../src/event"
 import { MemoryPages } from "../src/memory/pages"
+import { MemoryContext } from "../src/memory/context"
 import { MemoryPageTable } from "../src/memory/pages.sql"
 import { MemoryStore } from "../src/memory/store"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
@@ -178,6 +180,67 @@ it.live("knowledge pages reject unchecked, cross-scope, changed and duplicate so
   }),
 )
 
+it.live("manual edits are scope-bound, compare revisions and remain protected when their sources change", () =>
+  Effect.gen(function* () {
+    const h = yield* setup
+    const page = yield* h.pages.publish(h.authority, h.input)
+    const edit = { summary: "My summary", body: "My corrected instructions", expected: page.revision }
+    expect(Exit.isFailure(yield* h.pages.edit(Memory.Scope.make("other"), page.id, edit).pipe(Effect.exit))).toBe(true)
+    const saved = yield* h.pages.edit(h.authority.scope, page.id, edit)
+    expect(saved.origin).toBe("user")
+    expect(saved.revision).not.toBe(page.revision)
+    expect(yield* h.pages.edit(h.authority.scope, page.id, edit)).toEqual(saved)
+    expect(
+      Exit.isFailure(
+        yield* h.pages.edit(h.authority.scope, page.id, { ...edit, body: "A stale editor" }).pipe(Effect.exit),
+      ),
+    ).toBe(true)
+    expect(
+      Exit.isFailure(
+        yield* h.pages
+          .publish(h.authority, { ...h.input, expected: saved.revision, body: "Model replacement" })
+          .pipe(Effect.exit),
+      ),
+    ).toBe(true)
+    yield* h.memory.edit(h.note.id, { text: "A changed source" })
+    const stale = yield* h.pages.get(h.authority.scope, page.id)
+    expect(stale?.status).toBe("stale")
+    expect(stale?.body).toBe(edit.body)
+    expect(stale?.origin).toBe("user")
+    yield* h.pages.remove(h.authority.scope, page.id)
+    expect(
+      Exit.isFailure(
+        yield* h.pages.edit(h.authority.scope, page.id, { ...edit, expected: saved.revision }).pipe(Effect.exit),
+      ),
+    ).toBe(true)
+  }),
+)
+
+it.live("the startup index keeps user words, uses only current pages and caps the entire UTF-8 block", () =>
+  Effect.gen(function* () {
+    const h = yield* setup
+    const page = yield* h.pages.publish(h.authority, h.input)
+    const lines = MemoryContext.index([h.note], [page])
+    expect(lines.join("\n")).toContain(h.note.text)
+    expect(lines.join("\n")).toContain(page.summary)
+    expect(lines.join("\n")).not.toContain(page.body)
+    expect(lines.join("\n")).toContain(page.id)
+    yield* h.memory.edit(h.note.id, { text: "The latest user words" })
+    const current = MemoryContext.index(yield* h.memory.list(h.authority.scope), yield* h.pages.list(h.authority.scope))
+    expect(current.join("\n")).not.toContain(page.id)
+    expect(current.join("\n")).toContain("The latest user words")
+    for (const text of ["a", "知识页汉字", "🙂"]) {
+      const rendered = MemoryContext.render(
+        "Project memory",
+        Array.from({ length: 250 }, (_, i) => `${i} ${text.repeat(80)}`),
+      )
+      expect(Buffer.byteLength(rendered)).toBeLessThanOrEqual(4096)
+      expect(rendered.split("\n").length).toBeLessThanOrEqual(60)
+      expect(rendered.endsWith("</memory>")).toBe(true)
+    }
+  }),
+)
+
 it.live("same-content retries are idempotent, concurrent replacements require the current revision", () =>
   Effect.gen(function* () {
     const h = yield* setup
@@ -302,11 +365,13 @@ it.live("the additive page migration preserves existing notes and can be reopene
     const h = yield* setup
     yield* h.database.db.run("DROP TABLE memory_page_tombstone").pipe(Effect.orDie)
     yield* h.database.db.run("DROP TABLE memory_page").pipe(Effect.orDie)
-    yield* h.database.db.run("DELETE FROM migration WHERE id = '20261115181429_memory-pages'").pipe(Effect.orDie)
-    yield* DatabaseMigration.applyOnly(h.database.db, [migration]).pipe(Effect.orDie)
+    yield* h.database.db
+      .run("DELETE FROM migration WHERE id IN ('20261115181429_memory-pages', '20261115182803_memory-page-owner')")
+      .pipe(Effect.orDie)
+    yield* DatabaseMigration.applyOnly(h.database.db, [migration, ownerMigration]).pipe(Effect.orDie)
     expect(yield* h.memory.get(h.note.id)).toEqual(h.note)
     const page = yield* h.pages.publish(h.authority, h.input)
-    yield* DatabaseMigration.applyOnly(h.database.db, [migration]).pipe(Effect.orDie)
+    yield* DatabaseMigration.applyOnly(h.database.db, [migration, ownerMigration]).pipe(Effect.orDie)
     expect(yield* h.pages.get(h.authority.scope, page.id)).toEqual(page)
     expect(yield* h.memory.get(h.note.id)).toEqual(h.note)
   }),

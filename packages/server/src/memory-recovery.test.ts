@@ -6,6 +6,7 @@ import { MemoryGroup } from "@zaovra-ai/protocol/groups/memory"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "@zaovra-ai/core/database/database"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
 import { SessionV2 } from "@zaovra-ai/core/session"
@@ -29,7 +30,14 @@ test("actual memory HTTP and generated SDK recover explicitly and preserve delet
   const place = { project: Project.ID.global, directory: "/http/Alpha" }
   const runtime = ManagedRuntime.make(
     AppNodeBuilder.build(
-      LayerNode.group([MemoryStore.node, Database.node, MemoryTidyStore.node, MemoryTidyTasks.node, SessionV2.node]),
+      LayerNode.group([
+        MemoryStore.node,
+        MemoryPages.node,
+        Database.node,
+        MemoryTidyStore.node,
+        MemoryTidyTasks.node,
+        SessionV2.node,
+      ]),
       [
         [
           MemoryStore.node,
@@ -46,7 +54,12 @@ test("actual memory HTTP and generated SDK recover explicitly and preserve delet
   )
   const context = await runtime.runPromise(
     Effect.context<
-      MemoryStore.Service | Database.Service | MemoryTidyStore.Service | MemoryTidyTasks.Service | SessionV2.Service
+      | MemoryStore.Service
+      | MemoryPages.Service
+      | Database.Service
+      | MemoryTidyStore.Service
+      | MemoryTidyTasks.Service
+      | SessionV2.Service
     >(),
   )
   await runtime.runPromise(

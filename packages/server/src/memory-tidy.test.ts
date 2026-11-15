@@ -11,6 +11,7 @@ import { MemoryTidy } from "@zaovra-ai/core/memory/tidy"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { SessionV2 } from "@zaovra-ai/core/session"
 import { SessionExecution } from "@zaovra-ai/core/session/execution"
 import { SessionRunCoordinator } from "@zaovra-ai/core/session/run-coordinator"
@@ -39,6 +40,7 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
         Config.node,
         MemoryTidyStore.node,
         MemoryStore.node,
+        MemoryPages.node,
         SessionV2.node,
         Location.node,
         Database.node,
@@ -111,6 +113,8 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
       | MemoryTidyTasks.Service
       | Config.Service
       | MemoryStore.Service
+      | MemoryPages.Service
+      | Database.Service
       | SessionV2.Service
       | Location.Service
     >(),
@@ -167,6 +171,57 @@ test("memory task HTTP and generated client preserve confirmation, stop and scop
     expect((await client.v2.memory.listTidy({}, { throwOnError: true })).data.data.map((run) => run.id)).toEqual([
       prepared.id,
     ])
+    const page = await runtime.runPromise(
+      Effect.gen(function* () {
+        const pages = yield* MemoryPages.Service
+        const memory = yield* MemoryStore.Service
+        const tidy = yield* MemoryTidyStore.Service
+        const run = yield* tidy.get(prepared.id)
+        if (!run) throw new Error("confirmed task missing")
+        const note = yield* memory.write({
+          scope: run.scope,
+          origin: "user",
+          status: "verified",
+          kind: "practice",
+          text: "HTTP page source",
+        })
+        if (!note) throw new Error("source missing")
+        return yield* pages.publish(
+          { sessionID: run.session_id, scope: run.scope, enabled: true },
+          {
+            title: "HTTP guide",
+            summary: "A tested guide",
+            body: "Initial guide body",
+            sources: [MemoryPages.source(note)],
+          },
+        )
+      }),
+    )
+    const view = { ...page, sources: [...page.sources] }
+    expect((await client.v2.memory.listPages({}, { throwOnError: true })).data.data).toEqual([view])
+    expect((await client.v2.memory.getPage({ id: page.id }, { throwOnError: true })).data.data).toEqual(view)
+    expect(
+      (await client.v2.memory.getPage({ id: page.id, layer: "user" }, { throwOnError: true })).data.data,
+    ).toBeNull()
+    const edited = (
+      await client.v2.memory.updatePage(
+        { id: page.id, summary: "My guide", body: "Corrected guide", expected: page.revision },
+        { throwOnError: true },
+      )
+    ).data.data
+    expect(edited.origin).toBe("user")
+    const staleEdit = await fetch(new URL(`/api/memory/pages/${page.id}`, server.url), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ summary: "stale", body: "stale overwrite", expected: page.revision }),
+    })
+    expect(staleEdit.status).toBe(409)
+    expect((await staleEdit.json()).reason).toBe("conflict")
+    await client.v2.memory.removePage({ id: page.id, layer: "user" }, { throwOnError: true })
+    expect((await client.v2.memory.getPage({ id: page.id }, { throwOnError: true })).data.data).toEqual(edited)
+    await client.v2.memory.clear({}, { throwOnError: true })
+    expect((await client.v2.memory.listPages({}, { throwOnError: true })).data.data).toEqual([])
+    expect((await client.v2.memory.list({}, { throwOnError: true })).data.data).toEqual([])
     state.enabled = false
     const disabled = await fetch(new URL(`/api/memory/tidy/${prepared.id}/start`, server.url), { method: "POST" })
     expect(disabled.status).toBe(409)

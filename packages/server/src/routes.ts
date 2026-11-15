@@ -8,6 +8,7 @@ import { EventV2 } from "@zaovra-ai/core/event"
 import { Credential } from "@zaovra-ai/core/credential"
 import { PermissionSaved } from "@zaovra-ai/core/permission/saved"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
 import { PtyTicket } from "@zaovra-ai/core/pty/ticket"
@@ -43,6 +44,7 @@ const applicationServices = LayerNode.group([
   TaskRecovery.startupNode,
   PermissionSaved.node,
   MemoryStore.node,
+  MemoryPages.node,
   MemoryTidyStore.node,
   MemoryTidyTasks.node,
   PtyTicket.node,

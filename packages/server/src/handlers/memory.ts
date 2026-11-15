@@ -1,7 +1,9 @@
 import { Location } from "@zaovra-ai/core/location"
+import { Database } from "@zaovra-ai/core/database/database"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { MemoryTidy } from "@zaovra-ai/core/memory/tidy"
-import { MemoryTidyError } from "@zaovra-ai/protocol/groups/memory"
+import { MemoryPageError, MemoryTidyError } from "@zaovra-ai/protocol/groups/memory"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Context, Effect, Layer } from "effect"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
@@ -39,6 +41,44 @@ export const MemoryHandler = HttpApiBuilder.group(Api, "server.memory", (handler
       ),
     )
     return handlers
+      .handle(
+        "memory.listPages",
+        Effect.fn(function* (ctx) {
+          const pages = yield* MemoryPages.Service
+          return { data: yield* pages.list(yield* scope(ctx.query.layer)) }
+        }),
+      )
+      .handle(
+        "memory.getPage",
+        Effect.fn(function* (ctx) {
+          const pages = yield* MemoryPages.Service
+          return { data: (yield* pages.get(yield* scope(ctx.query.layer), ctx.params.id)) ?? null }
+        }),
+      )
+      .handle(
+        "memory.updatePage",
+        Effect.fn(function* (ctx) {
+          const pages = yield* MemoryPages.Service
+          return {
+            data: yield* pages
+              .edit(yield* scope(ctx.query.layer), ctx.params.id, ctx.payload)
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new MemoryPageError({ reason: error.reason, message: `Page was not updated: ${error.reason}` }),
+                ),
+              ),
+          }
+        }),
+      )
+      .handle(
+        "memory.removePage",
+        Effect.fn(function* (ctx) {
+          const pages = yield* MemoryPages.Service
+          yield* pages.remove(yield* scope(ctx.query.layer), ctx.params.id)
+          return HttpApiSchema.NoContent.make()
+        }),
+      )
       .handle(
         "memory.prepareTidy",
         Effect.fn(function* (ctx) {
@@ -133,7 +173,12 @@ export const MemoryHandler = HttpApiBuilder.group(Api, "server.memory", (handler
         "memory.clear",
         Effect.fn(function* (ctx) {
           const store = yield* MemoryStore.Service
-          yield* store.clear(yield* scope(ctx.query.layer))
+          const pages = yield* MemoryPages.Service
+          const database = yield* Database.Service
+          const target = yield* scope(ctx.query.layer)
+          yield* database.db
+            .transaction(() => store.clear(target).pipe(Effect.andThen(pages.clear(target))))
+            .pipe(Effect.orDie)
           return HttpApiSchema.NoContent.make()
         }),
       )

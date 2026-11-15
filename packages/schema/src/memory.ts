@@ -78,6 +78,7 @@ export const Page = Schema.Struct({
   body: Schema.String,
   sources: Schema.Array(PageSource),
   revision: Schema.String,
+  origin: Schema.Literals(["consolidation", "user"]),
   /** Current means sources still match, not that a model's summary is an instruction. */
   status: Schema.Literals(["current", "stale"]),
   time: Schema.Struct({ created: Schema.Finite, updated: Schema.Finite }),

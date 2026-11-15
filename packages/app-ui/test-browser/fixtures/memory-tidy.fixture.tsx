@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test"
 import { render } from "solid-js/web"
+import { MemoryRouter, Route } from "@solidjs/router"
 import { createSignal } from "solid-js"
 import type { MemoryTidyTask } from "@zaovra-ai/sdk/v2/client"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
@@ -82,6 +83,7 @@ async function mount(initial: MemoryTidyTask[] = []) {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/pages") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery")
         return Response.json({
           data: {
@@ -166,7 +168,9 @@ async function mount(initial: MemoryTidyTask[] = []) {
     () => (
       <I18nProvider value={language}>
         <DialogProvider>
-          <SettingsMemoryV2 directory={directory()} />
+          <MemoryRouter>
+            <Route path="*" component={() => <SettingsMemoryV2 directory={directory()} />} />
+          </MemoryRouter>
         </DialogProvider>
       </I18nProvider>
     ),

@@ -2,6 +2,7 @@ import { afterEach, expect, mock, test, spyOn } from "bun:test"
 import { render } from "solid-js/web"
 import { createZaovraClient } from "@zaovra-ai/sdk/v2/client"
 import { DialogProvider } from "@zaovra-ai/ui/context/dialog"
+import { MemoryRouter, Route } from "@solidjs/router"
 import { I18nProvider } from "@zaovra-ai/ui/context/i18n"
 import { dict } from "../../src/i18n/en"
 
@@ -118,6 +119,7 @@ async function mount() {
     throwOnError: true,
     fetch: async (request) => {
       const path = new URL(request.url).pathname
+      if (request.method === "GET" && path === "/api/memory/pages") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/tidy") return Response.json({ data: [] })
       if (request.method === "GET" && path === "/api/memory/recovery") return Response.json({ data: recovery })
       if (request.method === "GET" && path === "/api/memory")
@@ -169,7 +171,9 @@ async function mount() {
     () => (
       <I18nProvider value={language}>
         <DialogProvider>
-          <SettingsMemoryV2 directory="/tidy-project" />
+          <MemoryRouter>
+            <Route path="*" component={() => <SettingsMemoryV2 directory="/tidy-project" />} />
+          </MemoryRouter>
         </DialogProvider>
       </I18nProvider>
     ),

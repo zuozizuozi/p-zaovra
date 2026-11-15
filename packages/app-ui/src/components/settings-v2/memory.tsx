@@ -11,6 +11,7 @@ import { SettingsRowV2 } from "./parts/row"
 import "./settings-v2.css"
 import { MemoryRecoveryPanel } from "./memory-recovery"
 import { MemoryTidyPanel } from "./memory-tidy"
+import { MemoryPagesPanel, MemorySourceLink } from "./memory-pages"
 
 type Layer = "project" | "user"
 
@@ -62,6 +63,7 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
     text: "",
     draft: { project: "", user: "" },
     confirming: undefined as Layer | undefined,
+    pagesRevision: 0,
   })
   const reload = (layer: Layer) => (layer === "project" ? projectActions.refetch() : userActions.refetch())
 
@@ -89,9 +91,11 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
   const tidyTarget = createMemo(() =>
     directory() ? { directory: directory()!, server: serverSdk().scope } : undefined,
   )
+  const pagesTarget = createMemo(() => ({ directory: directory(), server: serverSdk().scope }))
   const clear = async (layer: Layer) => {
     await memory().clear({ location: location(), layer }, { throwOnError: true })
     setState("confirming", undefined)
+    setState("pagesRevision", (value) => value + 1)
     await reload(layer)
   }
 
@@ -146,6 +150,9 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
                           {" · "}
                           {new Date(note.time.observed).toLocaleDateString()}
                         </span>
+                        <Show when={note.sessionID} keyed>
+                          {(sessionID) => <MemorySourceLink sessionID={sessionID} seq={note.seq} />}
+                        </Show>
                       </div>
                       <div class="settings-v2-servers-actions">
                         <Show when={note.status !== "verified"}>
@@ -252,6 +259,11 @@ export const SettingsMemoryV2: Component<{ directory?: string; sessionID?: strin
           )}
         </Show>
         {section("user", user)}
+        <Show when={pagesTarget()} keyed>
+          {(target) => (
+            <MemoryPagesPanel directory={target.directory} refresh={state.pagesRevision} projectFrozen={frozen()} />
+          )}
+        </Show>
       </div>
     </>
   )

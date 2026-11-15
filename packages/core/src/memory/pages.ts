@@ -11,7 +11,7 @@ import { MemoryStore } from "./store"
 import { MemoryTidyStore } from "./tidy-store"
 
 export class Rejected extends Schema.TaggedErrorClass<Rejected>()("MemoryPages.Rejected", {
-  reason: Schema.Literals(["invalid", "source", "deleted", "conflict", "limit"]),
+  reason: Schema.Literals(["invalid", "source", "deleted", "conflict", "limit", "missing", "protected"]),
 }) {}
 
 export interface Publish {
@@ -35,6 +35,11 @@ export interface Interface {
   ) => Effect.Effect<Memory.Page, Rejected | MemoryTidyStore.Rejected>
   /** User-only operations; model tools never expose removal or clearing. */
   readonly remove: (scope: Memory.Scope, id: Memory.PageID) => Effect.Effect<void>
+  readonly edit: (
+    scope: Memory.Scope,
+    id: Memory.PageID,
+    input: { summary: string; body: string; expected: string },
+  ) => Effect.Effect<Memory.Page, Rejected>
   readonly clear: (scope: Memory.Scope) => Effect.Effect<void>
 }
 
@@ -96,6 +101,7 @@ const layer = Layer.effect(
       body: row.body,
       sources: row.sources,
       revision: row.revision,
+      origin: row.origin,
       status:
         row.sources.length > 0 && row.sources.every((item) => notes.get(item.id) === item.digest) ? "current" : "stale",
       time: { created: row.time_created, updated: row.time_updated },
@@ -149,6 +155,45 @@ const layer = Layer.effect(
       get: (scope, id) => list(scope).pipe(Effect.map((pages) => pages.find((page) => page.id === id))),
       remove: erase,
       clear: (scope) => erase(scope),
+      edit: (scope, id, input) =>
+        db
+          .transaction(() =>
+            Effect.gen(function* () {
+              const row = (yield* rows(scope)).find((page) => page.id === id)
+              if (!row) return yield* new Rejected({ reason: "missing" })
+              const summary = input.summary.trim()
+              const body = input.body.trim()
+              if (!summary || Buffer.byteLength(summary) > 512 || !body || Buffer.byteLength(body) > 16_384)
+                return yield* new Rejected({ reason: "invalid" })
+              const notes = new Map((yield* sources(scope)).map((item) => [item.source.id, item.source.digest]))
+              if (row.origin === "user" && row.summary === summary && row.body === body) return view(row, notes)
+              if (row.revision !== input.expected) return yield* new Rejected({ reason: "conflict" })
+              const alias = bodyKey(body)
+              const deleted = yield* db
+                .select()
+                .from(MemoryPageTombstoneTable)
+                .where(and(eq(MemoryPageTombstoneTable.scope, scope), eq(MemoryPageTombstoneTable.key, alias)))
+                .get()
+                .pipe(Effect.orDie)
+              if (deleted) return yield* new Rejected({ reason: "deleted" })
+              const saved = yield* db
+                .update(MemoryPageTable)
+                .set({
+                  summary,
+                  body,
+                  origin: "user",
+                  revision: Hash.sha256(JSON.stringify([row.title, summary, body, row.sources, "user"])),
+                  aliases: Array.from(new Set([...row.aliases, alias])),
+                  time_updated: Date.now(),
+                })
+                .where(eq(MemoryPageTable.id, id))
+                .returning()
+                .get()
+                .pipe(Effect.orDie)
+              return view(saved, notes)
+            }),
+          )
+          .pipe(Effect.catchTag("SqlError", Effect.die)),
       publish: (authority, input) =>
         tidy.guarded(
           authority,
@@ -199,6 +244,7 @@ const layer = Layer.effect(
             const revision = Hash.sha256(JSON.stringify([title, summary, body, captured]))
             if (existing?.revision === revision)
               return view(existing, new Map(captured.map((item) => [item.id, item.digest])))
+            if (existing?.origin === "user") return yield* new Rejected({ reason: "protected" })
             if (existing ? input.expected !== existing.revision : input.expected !== undefined)
               return yield* new Rejected({ reason: "conflict" })
             if (!existing && (yield* rows(authority.scope)).length >= 100)

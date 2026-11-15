@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "02b4818c-473d-45ff-9a7a-c803816ef67e",
+  "id": "72a3fa09-ce01-446a-8c52-18110ca22d22",
   "prevIds": [
-    "a80ef508-dc6d-42b9-b701-79e7fc0d5d6e"
+    "02b4818c-473d-45ff-9a7a-c803816ef67e"
   ],
   "ddl": [
     {
@@ -359,6 +359,16 @@
       "default": null,
       "generated": null,
       "name": "revision",
+      "entityType": "columns",
+      "table": "memory_page"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'consolidation'",
+      "generated": null,
+      "name": "origin",
       "entityType": "columns",
       "table": "memory_page"
     },

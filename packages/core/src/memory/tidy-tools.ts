@@ -19,7 +19,14 @@ export class Service extends Context.Service<Service, Interface>()("@zaovra/Memo
 // Shells, jobs, subagents, remote tools and general writes must not escape the
 // tidy task's grant or its model-request budget. memory_review checks its own
 // authority again inside the write transaction.
-const permitted: ReadonlySet<string> = new Set(["read", "glob", "grep", "memory_search", "memory_review"])
+const permitted: ReadonlySet<string> = new Set([
+  "read",
+  "glob",
+  "grep",
+  "memory_search",
+  "memory_review",
+  "memory_page",
+])
 const denied: ReadonlySet<string> = new Set()
 
 const layer = Layer.effect(

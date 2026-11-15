@@ -9,6 +9,8 @@ import { LayerNode } from "../src/effect/layer-node"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryStore } from "../src/memory/store"
+import { MemoryPages } from "../src/memory/pages"
+import { MemoryPageTool } from "../src/memory/pages-tool"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
@@ -26,6 +28,7 @@ const setup = Effect.gen(function* () {
   const sessions = yield* SessionV2.Service
   const store = yield* MemoryStore.Service
   const tidy = yield* MemoryTidyStore.Service
+  const pages = yield* MemoryPages.Service
   const here = yield* Location.Service
   const registry = yield* ToolRegistry.Service
   const captured = yield* registry.materialize()
@@ -56,7 +59,13 @@ const setup = Effect.gen(function* () {
       ...toolIdentity,
       call: { type: "tool-call", id: randomUUID(), name: "memory_review", input },
     })
-  return { sessions, store, tidy, captured, project, create, grant, review }
+  const page = (sessionID: SessionV2.ID, input: Record<string, unknown>) =>
+    captured.settle({
+      sessionID,
+      ...toolIdentity,
+      call: { type: "tool-call", id: randomUUID(), name: "memory_page", input },
+    })
+  return { sessions, store, tidy, captured, project, create, grant, review, page, pages }
 })
 
 test("ordinary sessions cannot list or modify notes through memory_review or a forged basis", () =>
@@ -154,6 +163,54 @@ for (const boundary of ["cancel", "delete", "model", "disabled"] as const)
       }),
     ))
 
+test("page tools publish only within a live confirmed scope, then support ordinary search and deep reading", () =>
+  withMemory((h, settings) =>
+    Effect.gen(function* () {
+      const ordinary = yield* h.create()
+      const note = yield* h.store.write({
+        scope: h.project,
+        kind: "practice",
+        origin: "user",
+        status: "verified",
+        text: "Use the database harness",
+      })
+      if (!note) throw new Error("fixture note missing")
+      const input = {
+        action: "publish",
+        title: "Database testing",
+        summary: "Use the isolated harness",
+        body: "Run database checks in the isolated harness",
+        sources: [MemoryPages.source(note)],
+      }
+      expect((yield* h.page(ordinary.id, input)).result.type).toBe("error")
+      const run = yield* h.grant()
+      expect(
+        JSON.stringify((yield* h.page(run.session_id, { action: "sources", notes: [note.id] })).output?.structured),
+      ).toContain(MemoryPages.source(note).digest)
+      expect((yield* h.page(run.session_id, { ...input, layer: "user" })).result.type).toBe("error")
+      expect((yield* h.page(run.session_id, input)).result.type).not.toBe("error")
+      const saved = (yield* h.pages.list(h.project))[0]
+      if (!saved) throw new Error("published page missing")
+      const listed = yield* h.page(ordinary.id, { action: "list", query: "database" })
+      expect(JSON.stringify(listed.output?.structured)).toContain(saved.summary)
+      expect(JSON.stringify(listed.output?.structured)).not.toContain(saved.body)
+      expect(
+        JSON.stringify((yield* h.page(ordinary.id, { action: "read", id: saved.id })).output?.structured),
+      ).toContain(saved.body)
+      expect((yield* h.page(ordinary.id, { action: "read", id: saved.id, layer: "user" })).result.type).toBe("error")
+      const searched = yield* h.captured.settle({
+        sessionID: ordinary.id,
+        ...toolIdentity,
+        call: { type: "tool-call", id: randomUUID(), name: "memory_search", input: { query: "database" } },
+      })
+      expect(JSON.stringify(searched.output?.structured)).toContain(saved.id)
+      yield* h.tidy.finish(run.id, "cancelled")
+      expect((yield* h.page(run.session_id, { ...input, title: "Late page" })).result.type).toBe("error")
+      settings.enabled = false
+      expect((yield* h.page(ordinary.id, { action: "read", id: saved.id })).result.type).toBe("error")
+    }),
+  ))
+
 async function withMemory(
   body: (h: Effect.Success<typeof setup>, settings: { enabled: boolean }) => Effect.Effect<void, unknown, Scope.Scope>,
 ) {
@@ -167,6 +224,8 @@ async function withMemory(
         AppNodeBuilder.build(
           LayerNode.group([
             MemoryTool.node,
+            MemoryPageTool.node,
+            MemoryPages.node,
             MemoryStore.node,
             MemoryTidyStore.node,
             SessionV2.node,

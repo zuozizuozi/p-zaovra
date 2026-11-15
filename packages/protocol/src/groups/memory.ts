@@ -16,7 +16,67 @@ export class MemoryTidyError extends Schema.TaggedErrorClass<MemoryTidyError>()(
   { httpApiStatus: 409 },
 ) {}
 
+export class MemoryPageError extends Schema.TaggedErrorClass<MemoryPageError>()(
+  "MemoryPageError",
+  {
+    reason: Schema.Literals(["invalid", "source", "deleted", "conflict", "limit", "missing", "protected"]),
+    message: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {}
+
 export const MemoryGroup = HttpApiGroup.make("server.memory")
+  .add(
+    HttpApiEndpoint.get("memory.listPages", "/api/memory/pages", {
+      query: Query,
+      success: Schema.Struct({ data: Schema.Array(Memory.Page) }),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({ identifier: "v2.memory.listPages", summary: "Read topic pages and source freshness" }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.get("memory.getPage", "/api/memory/pages/:id", {
+      params: { id: Memory.PageID },
+      query: Query,
+      success: Schema.Struct({ data: Schema.NullOr(Memory.Page) }),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({ identifier: "v2.memory.getPage", summary: "Read a topic page in the selected layer" }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.patch("memory.updatePage", "/api/memory/pages/:id", {
+      params: { id: Memory.PageID },
+      query: Query,
+      payload: Schema.Struct({ summary: Schema.String, body: Schema.String, expected: Schema.String }),
+      success: Schema.Struct({ data: Memory.Page }),
+      error: MemoryPageError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.updatePage",
+          summary: "Edit and protect a topic page from automatic rewriting",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.delete("memory.removePage", "/api/memory/pages/:id", {
+      params: { id: Memory.PageID },
+      query: Query,
+      success: HttpApiSchema.NoContent,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.memory.removePage",
+          summary: "Delete a topic page while retaining suppression hashes",
+        }),
+      ),
+  )
   .add(
     HttpApiEndpoint.post("memory.prepareTidy", "/api/memory/tidy", {
       query: LocationQuery,

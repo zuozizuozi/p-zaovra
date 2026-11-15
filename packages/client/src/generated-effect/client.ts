@@ -1021,16 +1021,73 @@ const Endpoint15_0 = (raw: RawClient["server.skill"]) => (input?: Endpoint15_0In
 
 const adaptGroup15 = (raw: RawClient["server.skill"]) => ({ list: Endpoint15_0(raw) })
 
-type Endpoint16_0Request = Parameters<RawClient["server.memory"]["memory.prepareTidy"]>[0]
+type Endpoint16_0Request = Parameters<RawClient["server.memory"]["memory.listPages"]>[0]
 type Endpoint16_0Input = {
   readonly location?: Endpoint16_0Request["query"]["location"]
-  readonly requestID: Endpoint16_0Request["payload"]["requestID"]
-  readonly layer?: Endpoint16_0Request["payload"]["layer"]
-  readonly model: Endpoint16_0Request["payload"]["model"]
-  readonly tokens?: Endpoint16_0Request["payload"]["tokens"]
-  readonly dailyTokens?: Endpoint16_0Request["payload"]["dailyTokens"]
+  readonly layer?: Endpoint16_0Request["query"]["layer"]
 }
-const Endpoint16_0 = (raw: RawClient["server.memory"]) => (input: Endpoint16_0Input) =>
+const Endpoint16_0 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_0Input) =>
+  raw["memory.listPages"]({ query: { location: input?.["location"], layer: input?.["layer"] } }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
+type Endpoint16_1Request = Parameters<RawClient["server.memory"]["memory.getPage"]>[0]
+type Endpoint16_1Input = {
+  readonly id: Endpoint16_1Request["params"]["id"]
+  readonly location?: Endpoint16_1Request["query"]["location"]
+  readonly layer?: Endpoint16_1Request["query"]["layer"]
+}
+const Endpoint16_1 = (raw: RawClient["server.memory"]) => (input: Endpoint16_1Input) =>
+  raw["memory.getPage"]({
+    params: { id: input["id"] },
+    query: { location: input["location"], layer: input["layer"] },
+  }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
+type Endpoint16_2Request = Parameters<RawClient["server.memory"]["memory.updatePage"]>[0]
+type Endpoint16_2Input = {
+  readonly id: Endpoint16_2Request["params"]["id"]
+  readonly location?: Endpoint16_2Request["query"]["location"]
+  readonly layer?: Endpoint16_2Request["query"]["layer"]
+  readonly summary: Endpoint16_2Request["payload"]["summary"]
+  readonly body: Endpoint16_2Request["payload"]["body"]
+  readonly expected: Endpoint16_2Request["payload"]["expected"]
+}
+const Endpoint16_2 = (raw: RawClient["server.memory"]) => (input: Endpoint16_2Input) =>
+  raw["memory.updatePage"]({
+    params: { id: input["id"] },
+    query: { location: input["location"], layer: input["layer"] },
+    payload: { summary: input["summary"], body: input["body"], expected: input["expected"] },
+  }).pipe(
+    Effect.mapError(mapClientError),
+    Effect.map((value) => value.data),
+  )
+
+type Endpoint16_3Request = Parameters<RawClient["server.memory"]["memory.removePage"]>[0]
+type Endpoint16_3Input = {
+  readonly id: Endpoint16_3Request["params"]["id"]
+  readonly location?: Endpoint16_3Request["query"]["location"]
+  readonly layer?: Endpoint16_3Request["query"]["layer"]
+}
+const Endpoint16_3 = (raw: RawClient["server.memory"]) => (input: Endpoint16_3Input) =>
+  raw["memory.removePage"]({
+    params: { id: input["id"] },
+    query: { location: input["location"], layer: input["layer"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint16_4Request = Parameters<RawClient["server.memory"]["memory.prepareTidy"]>[0]
+type Endpoint16_4Input = {
+  readonly location?: Endpoint16_4Request["query"]["location"]
+  readonly requestID: Endpoint16_4Request["payload"]["requestID"]
+  readonly layer?: Endpoint16_4Request["payload"]["layer"]
+  readonly model: Endpoint16_4Request["payload"]["model"]
+  readonly tokens?: Endpoint16_4Request["payload"]["tokens"]
+  readonly dailyTokens?: Endpoint16_4Request["payload"]["dailyTokens"]
+}
+const Endpoint16_4 = (raw: RawClient["server.memory"]) => (input: Endpoint16_4Input) =>
   raw["memory.prepareTidy"]({
     query: { location: input["location"] },
     payload: {
@@ -1045,24 +1102,24 @@ const Endpoint16_0 = (raw: RawClient["server.memory"]) => (input: Endpoint16_0In
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_1Request = Parameters<RawClient["server.memory"]["memory.listTidy"]>[0]
-type Endpoint16_1Input = {
-  readonly location?: Endpoint16_1Request["query"]["location"]
-  readonly layer?: Endpoint16_1Request["query"]["layer"]
+type Endpoint16_5Request = Parameters<RawClient["server.memory"]["memory.listTidy"]>[0]
+type Endpoint16_5Input = {
+  readonly location?: Endpoint16_5Request["query"]["location"]
+  readonly layer?: Endpoint16_5Request["query"]["layer"]
 }
-const Endpoint16_1 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_1Input) =>
+const Endpoint16_5 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_5Input) =>
   raw["memory.listTidy"]({ query: { location: input?.["location"], layer: input?.["layer"] } }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_2Request = Parameters<RawClient["server.memory"]["memory.getTidy"]>[0]
-type Endpoint16_2Input = {
-  readonly id: Endpoint16_2Request["params"]["id"]
-  readonly location?: Endpoint16_2Request["query"]["location"]
-  readonly layer?: Endpoint16_2Request["query"]["layer"]
+type Endpoint16_6Request = Parameters<RawClient["server.memory"]["memory.getTidy"]>[0]
+type Endpoint16_6Input = {
+  readonly id: Endpoint16_6Request["params"]["id"]
+  readonly location?: Endpoint16_6Request["query"]["location"]
+  readonly layer?: Endpoint16_6Request["query"]["layer"]
 }
-const Endpoint16_2 = (raw: RawClient["server.memory"]) => (input: Endpoint16_2Input) =>
+const Endpoint16_6 = (raw: RawClient["server.memory"]) => (input: Endpoint16_6Input) =>
   raw["memory.getTidy"]({
     params: { id: input["id"] },
     query: { location: input["location"], layer: input["layer"] },
@@ -1071,13 +1128,13 @@ const Endpoint16_2 = (raw: RawClient["server.memory"]) => (input: Endpoint16_2In
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_3Request = Parameters<RawClient["server.memory"]["memory.startTidy"]>[0]
-type Endpoint16_3Input = {
-  readonly id: Endpoint16_3Request["params"]["id"]
-  readonly location?: Endpoint16_3Request["query"]["location"]
-  readonly layer?: Endpoint16_3Request["query"]["layer"]
+type Endpoint16_7Request = Parameters<RawClient["server.memory"]["memory.startTidy"]>[0]
+type Endpoint16_7Input = {
+  readonly id: Endpoint16_7Request["params"]["id"]
+  readonly location?: Endpoint16_7Request["query"]["location"]
+  readonly layer?: Endpoint16_7Request["query"]["layer"]
 }
-const Endpoint16_3 = (raw: RawClient["server.memory"]) => (input: Endpoint16_3Input) =>
+const Endpoint16_7 = (raw: RawClient["server.memory"]) => (input: Endpoint16_7Input) =>
   raw["memory.startTidy"]({
     params: { id: input["id"] },
     query: { location: input["location"], layer: input["layer"] },
@@ -1086,13 +1143,13 @@ const Endpoint16_3 = (raw: RawClient["server.memory"]) => (input: Endpoint16_3In
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_4Request = Parameters<RawClient["server.memory"]["memory.cancelTidy"]>[0]
-type Endpoint16_4Input = {
-  readonly id: Endpoint16_4Request["params"]["id"]
-  readonly location?: Endpoint16_4Request["query"]["location"]
-  readonly layer?: Endpoint16_4Request["query"]["layer"]
+type Endpoint16_8Request = Parameters<RawClient["server.memory"]["memory.cancelTidy"]>[0]
+type Endpoint16_8Input = {
+  readonly id: Endpoint16_8Request["params"]["id"]
+  readonly location?: Endpoint16_8Request["query"]["location"]
+  readonly layer?: Endpoint16_8Request["query"]["layer"]
 }
-const Endpoint16_4 = (raw: RawClient["server.memory"]) => (input: Endpoint16_4Input) =>
+const Endpoint16_8 = (raw: RawClient["server.memory"]) => (input: Endpoint16_8Input) =>
   raw["memory.cancelTidy"]({
     params: { id: input["id"] },
     query: { location: input["location"], layer: input["layer"] },
@@ -1101,45 +1158,45 @@ const Endpoint16_4 = (raw: RawClient["server.memory"]) => (input: Endpoint16_4In
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_5Request = Parameters<RawClient["server.memory"]["memory.recovery"]>[0]
-type Endpoint16_5Input = { readonly location?: Endpoint16_5Request["query"]["location"] }
-const Endpoint16_5 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_5Input) =>
+type Endpoint16_9Request = Parameters<RawClient["server.memory"]["memory.recovery"]>[0]
+type Endpoint16_9Input = { readonly location?: Endpoint16_9Request["query"]["location"] }
+const Endpoint16_9 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_9Input) =>
   raw["memory.recovery"]({ query: { location: input?.["location"] } }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_6Request = Parameters<RawClient["server.memory"]["memory.resolveRecovery"]>[0]
-type Endpoint16_6Input = {
-  readonly location?: Endpoint16_6Request["query"]["location"]
-  readonly decision: Endpoint16_6Request["payload"]["decision"]
-  readonly ids: Endpoint16_6Request["payload"]["ids"]
+type Endpoint16_10Request = Parameters<RawClient["server.memory"]["memory.resolveRecovery"]>[0]
+type Endpoint16_10Input = {
+  readonly location?: Endpoint16_10Request["query"]["location"]
+  readonly decision: Endpoint16_10Request["payload"]["decision"]
+  readonly ids: Endpoint16_10Request["payload"]["ids"]
 }
-const Endpoint16_6 = (raw: RawClient["server.memory"]) => (input: Endpoint16_6Input) =>
+const Endpoint16_10 = (raw: RawClient["server.memory"]) => (input: Endpoint16_10Input) =>
   raw["memory.resolveRecovery"]({
     query: { location: input["location"] },
     payload: { decision: input["decision"], ids: input["ids"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint16_7Request = Parameters<RawClient["server.memory"]["memory.list"]>[0]
-type Endpoint16_7Input = {
-  readonly location?: Endpoint16_7Request["query"]["location"]
-  readonly layer?: Endpoint16_7Request["query"]["layer"]
+type Endpoint16_11Request = Parameters<RawClient["server.memory"]["memory.list"]>[0]
+type Endpoint16_11Input = {
+  readonly location?: Endpoint16_11Request["query"]["location"]
+  readonly layer?: Endpoint16_11Request["query"]["layer"]
 }
-const Endpoint16_7 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_7Input) =>
+const Endpoint16_11 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_11Input) =>
   raw["memory.list"]({ query: { location: input?.["location"], layer: input?.["layer"] } }).pipe(
     Effect.mapError(mapClientError),
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_8Request = Parameters<RawClient["server.memory"]["memory.create"]>[0]
-type Endpoint16_8Input = {
-  readonly location?: Endpoint16_8Request["query"]["location"]
-  readonly layer?: Endpoint16_8Request["payload"]["layer"]
-  readonly kind: Endpoint16_8Request["payload"]["kind"]
-  readonly text: Endpoint16_8Request["payload"]["text"]
+type Endpoint16_12Request = Parameters<RawClient["server.memory"]["memory.create"]>[0]
+type Endpoint16_12Input = {
+  readonly location?: Endpoint16_12Request["query"]["location"]
+  readonly layer?: Endpoint16_12Request["payload"]["layer"]
+  readonly kind: Endpoint16_12Request["payload"]["kind"]
+  readonly text: Endpoint16_12Request["payload"]["text"]
 }
-const Endpoint16_8 = (raw: RawClient["server.memory"]) => (input: Endpoint16_8Input) =>
+const Endpoint16_12 = (raw: RawClient["server.memory"]) => (input: Endpoint16_12Input) =>
   raw["memory.create"]({
     query: { location: input["location"] },
     payload: { layer: input["layer"], kind: input["kind"], text: input["text"] },
@@ -1148,14 +1205,14 @@ const Endpoint16_8 = (raw: RawClient["server.memory"]) => (input: Endpoint16_8In
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_9Request = Parameters<RawClient["server.memory"]["memory.update"]>[0]
-type Endpoint16_9Input = {
-  readonly id: Endpoint16_9Request["params"]["id"]
-  readonly text?: Endpoint16_9Request["payload"]["text"]
-  readonly kind?: Endpoint16_9Request["payload"]["kind"]
-  readonly status?: Endpoint16_9Request["payload"]["status"]
+type Endpoint16_13Request = Parameters<RawClient["server.memory"]["memory.update"]>[0]
+type Endpoint16_13Input = {
+  readonly id: Endpoint16_13Request["params"]["id"]
+  readonly text?: Endpoint16_13Request["payload"]["text"]
+  readonly kind?: Endpoint16_13Request["payload"]["kind"]
+  readonly status?: Endpoint16_13Request["payload"]["status"]
 }
-const Endpoint16_9 = (raw: RawClient["server.memory"]) => (input: Endpoint16_9Input) =>
+const Endpoint16_13 = (raw: RawClient["server.memory"]) => (input: Endpoint16_13Input) =>
   raw["memory.update"]({
     params: { id: input["id"] },
     payload: { text: input["text"], kind: input["kind"], status: input["status"] },
@@ -1164,34 +1221,38 @@ const Endpoint16_9 = (raw: RawClient["server.memory"]) => (input: Endpoint16_9In
     Effect.map((value) => value.data),
   )
 
-type Endpoint16_10Request = Parameters<RawClient["server.memory"]["memory.remove"]>[0]
-type Endpoint16_10Input = { readonly id: Endpoint16_10Request["params"]["id"] }
-const Endpoint16_10 = (raw: RawClient["server.memory"]) => (input: Endpoint16_10Input) =>
+type Endpoint16_14Request = Parameters<RawClient["server.memory"]["memory.remove"]>[0]
+type Endpoint16_14Input = { readonly id: Endpoint16_14Request["params"]["id"] }
+const Endpoint16_14 = (raw: RawClient["server.memory"]) => (input: Endpoint16_14Input) =>
   raw["memory.remove"]({ params: { id: input["id"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint16_11Request = Parameters<RawClient["server.memory"]["memory.clear"]>[0]
-type Endpoint16_11Input = {
-  readonly location?: Endpoint16_11Request["query"]["location"]
-  readonly layer?: Endpoint16_11Request["query"]["layer"]
+type Endpoint16_15Request = Parameters<RawClient["server.memory"]["memory.clear"]>[0]
+type Endpoint16_15Input = {
+  readonly location?: Endpoint16_15Request["query"]["location"]
+  readonly layer?: Endpoint16_15Request["query"]["layer"]
 }
-const Endpoint16_11 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_11Input) =>
+const Endpoint16_15 = (raw: RawClient["server.memory"]) => (input?: Endpoint16_15Input) =>
   raw["memory.clear"]({ query: { location: input?.["location"], layer: input?.["layer"] } }).pipe(
     Effect.mapError(mapClientError),
   )
 
 const adaptGroup16 = (raw: RawClient["server.memory"]) => ({
-  prepareTidy: Endpoint16_0(raw),
-  listTidy: Endpoint16_1(raw),
-  getTidy: Endpoint16_2(raw),
-  startTidy: Endpoint16_3(raw),
-  cancelTidy: Endpoint16_4(raw),
-  recovery: Endpoint16_5(raw),
-  resolveRecovery: Endpoint16_6(raw),
-  list: Endpoint16_7(raw),
-  create: Endpoint16_8(raw),
-  update: Endpoint16_9(raw),
-  remove: Endpoint16_10(raw),
-  clear: Endpoint16_11(raw),
+  listPages: Endpoint16_0(raw),
+  getPage: Endpoint16_1(raw),
+  updatePage: Endpoint16_2(raw),
+  removePage: Endpoint16_3(raw),
+  prepareTidy: Endpoint16_4(raw),
+  listTidy: Endpoint16_5(raw),
+  getTidy: Endpoint16_6(raw),
+  startTidy: Endpoint16_7(raw),
+  cancelTidy: Endpoint16_8(raw),
+  recovery: Endpoint16_9(raw),
+  resolveRecovery: Endpoint16_10(raw),
+  list: Endpoint16_11(raw),
+  create: Endpoint16_12(raw),
+  update: Endpoint16_13(raw),
+  remove: Endpoint16_14(raw),
+  clear: Endpoint16_15(raw),
 })
 
 const Endpoint17_0 = (raw: RawClient["server.event"]) => () =>

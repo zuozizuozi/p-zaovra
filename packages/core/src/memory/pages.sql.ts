@@ -13,6 +13,7 @@ export const MemoryPageTable = sqliteTable(
     body: text().notNull(),
     sources: text({ mode: "json" }).$type<ReadonlyArray<Memory.PageSource>>().notNull(),
     revision: text().notNull(),
+    origin: text().$type<"consolidation" | "user">().notNull().default("consolidation"),
     // Only hashes are retained, so deleting a page can suppress every prior wording.
     aliases: text({ mode: "json" }).$type<ReadonlyArray<string>>().notNull(),
     time_deleted: integer(),

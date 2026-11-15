@@ -90,6 +90,14 @@ export type PermissionNotFoundError = {
 export const isPermissionNotFoundError = (value: unknown): value is PermissionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PermissionNotFoundError"
 
+export type MemoryPageError = {
+  readonly _tag: "MemoryPageError"
+  readonly reason: "invalid" | "source" | "deleted" | "conflict" | "limit" | "missing" | "protected"
+  readonly message: string
+}
+export const isMemoryPageError = (value: unknown): value is MemoryPageError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MemoryPageError"
+
 export type MemoryTidyError = {
   readonly _tag: "MemoryTidyError"
   readonly reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy"
@@ -9686,6 +9694,118 @@ export type SkillsListOutput = {
     readonly content: string
   }>
 }
+
+export type MemoryListPagesInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryListPagesOutput = {
+  readonly data: ReadonlyArray<{
+    readonly id: string
+    readonly scope: string
+    readonly title: string
+    readonly summary: string
+    readonly body: string
+    readonly sources: ReadonlyArray<{
+      readonly id: string
+      readonly digest: string
+      readonly sessionID?: string
+      readonly seq?: number
+    }>
+    readonly revision: string
+    readonly origin: "consolidation" | "user"
+    readonly status: "current" | "stale"
+    readonly time: { readonly created: number; readonly updated: number }
+  }>
+}["data"]
+
+export type MemoryGetPageInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryGetPageOutput = {
+  readonly data: {
+    readonly id: string
+    readonly scope: string
+    readonly title: string
+    readonly summary: string
+    readonly body: string
+    readonly sources: ReadonlyArray<{
+      readonly id: string
+      readonly digest: string
+      readonly sessionID?: string
+      readonly seq?: number
+    }>
+    readonly revision: string
+    readonly origin: "consolidation" | "user"
+    readonly status: "current" | "stale"
+    readonly time: { readonly created: number; readonly updated: number }
+  } | null
+}["data"]
+
+export type MemoryUpdatePageInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+  readonly summary: { readonly summary: string; readonly body: string; readonly expected: string }["summary"]
+  readonly body: { readonly summary: string; readonly body: string; readonly expected: string }["body"]
+  readonly expected: { readonly summary: string; readonly body: string; readonly expected: string }["expected"]
+}
+
+export type MemoryUpdatePageOutput = {
+  readonly data: {
+    readonly id: string
+    readonly scope: string
+    readonly title: string
+    readonly summary: string
+    readonly body: string
+    readonly sources: ReadonlyArray<{
+      readonly id: string
+      readonly digest: string
+      readonly sessionID?: string
+      readonly seq?: number
+    }>
+    readonly revision: string
+    readonly origin: "consolidation" | "user"
+    readonly status: "current" | "stale"
+    readonly time: { readonly created: number; readonly updated: number }
+  }
+}["data"]
+
+export type MemoryRemovePageInput = {
+  readonly id: { readonly id: string }["id"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["location"]
+  readonly layer?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+    readonly layer?: "project" | "user" | undefined
+  }["layer"]
+}
+
+export type MemoryRemovePageOutput = void
 
 export type MemoryPrepareTidyInput = {
   readonly location?: {

@@ -3207,6 +3207,12 @@ export type PermissionNotFoundError = {
   message: string
 }
 
+export type MemoryPageError = {
+  _tag: "MemoryPageError"
+  reason: "invalid" | "source" | "deleted" | "conflict" | "limit" | "missing" | "protected"
+  message: string
+}
+
 export type MemoryTidyError = {
   _tag: "MemoryTidyError"
   reason: "invalid" | "conflict" | "unauthorized" | "limit" | "duplicate" | "missing" | "busy"
@@ -7506,6 +7512,29 @@ export type SkillV2Info = {
   disabled?: boolean
   location: string
   content: string
+}
+
+export type MemoryPageSource = {
+  id: string
+  digest: string
+  sessionID?: string
+  seq?: number
+}
+
+export type MemoryPage = {
+  id: string
+  scope: string
+  title: string
+  summary: string
+  body: string
+  sources: Array<MemoryPageSource>
+  revision: string
+  origin: "consolidation" | "user"
+  status: "current" | "stale"
+  time: {
+    created: number
+    updated: number
+  }
 }
 
 export type MemoryTidyRequest = {
@@ -17103,6 +17132,166 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2MemoryListPagesData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/pages"
+}
+
+export type V2MemoryListPagesErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryListPagesError = V2MemoryListPagesErrors[keyof V2MemoryListPagesErrors]
+
+export type V2MemoryListPagesResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: Array<MemoryPage>
+  }
+}
+
+export type V2MemoryListPagesResponse = V2MemoryListPagesResponses[keyof V2MemoryListPagesResponses]
+
+export type V2MemoryRemovePageData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/pages/{id}"
+}
+
+export type V2MemoryRemovePageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryRemovePageError = V2MemoryRemovePageErrors[keyof V2MemoryRemovePageErrors]
+
+export type V2MemoryRemovePageResponses = {
+  /**
+   * <No Content>
+   */
+  204: void
+}
+
+export type V2MemoryRemovePageResponse = V2MemoryRemovePageResponses[keyof V2MemoryRemovePageResponses]
+
+export type V2MemoryGetPageData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/pages/{id}"
+}
+
+export type V2MemoryGetPageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2MemoryGetPageError = V2MemoryGetPageErrors[keyof V2MemoryGetPageErrors]
+
+export type V2MemoryGetPageResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryPage
+  }
+}
+
+export type V2MemoryGetPageResponse = V2MemoryGetPageResponses[keyof V2MemoryGetPageResponses]
+
+export type V2MemoryUpdatePageData = {
+  body: {
+    summary: string
+    body: string
+    expected: string
+  }
+  path: {
+    id: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+    layer?: "project" | "user"
+  }
+  url: "/api/memory/pages/{id}"
+}
+
+export type V2MemoryUpdatePageErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * MemoryPageError
+   */
+  409: MemoryPageError
+}
+
+export type V2MemoryUpdatePageError = V2MemoryUpdatePageErrors[keyof V2MemoryUpdatePageErrors]
+
+export type V2MemoryUpdatePageResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: MemoryPage
+  }
+}
+
+export type V2MemoryUpdatePageResponse = V2MemoryUpdatePageResponses[keyof V2MemoryUpdatePageResponses]
 
 export type V2MemoryListTidyData = {
   body?: never

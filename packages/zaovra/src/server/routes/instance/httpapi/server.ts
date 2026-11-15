@@ -39,6 +39,7 @@ import { ModelsDev } from "@zaovra-ai/core/models-dev"
 import { Npm } from "@zaovra-ai/core/npm"
 import { PermissionSaved } from "@zaovra-ai/core/permission/saved"
 import { MemoryStore } from "@zaovra-ai/core/memory/store"
+import { MemoryPages } from "@zaovra-ai/core/memory/pages"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
 import { MemoryTidyTasks } from "@zaovra-ai/core/memory/tidy-tasks"
 import { ProjectV2 } from "@zaovra-ai/core/project"
@@ -227,6 +228,7 @@ export function createRoutes(
       TaskTool.node,
       TaskRecovery.startupNode,
       MemoryTidyStore.node,
+      MemoryPages.node,
       MemoryTidyTasks.node,
     ]),
     SessionRuntime.replacements,
