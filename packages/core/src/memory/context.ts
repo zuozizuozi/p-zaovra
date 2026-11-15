@@ -1,12 +1,10 @@
 export * as MemoryContext from "./context"
 
-import { Effect, Layer, Ref, Schema, Stream } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
-import { EventV2 } from "../event"
 import { Location } from "../location"
-import { SessionEvent } from "../session/event"
 import { SystemContext } from "../system-context/index"
 import { SystemContextRegistry } from "../system-context/registry"
 import { MemoryRecorder } from "./recorder"
@@ -61,7 +59,6 @@ const layer = Layer.effectDiscard(
     const location = yield* Location.Service
     const registry = yield* SystemContextRegistry.Service
     const store = yield* MemoryStore.Service
-    const events = yield* EventV2.Service
     const config = yield* Config.Service
     const scope = yield* store.scope({ project: location.project.id, directory: location.directory })
     const off = Config.latest(yield* config.entries(), "memory")?.enabled === false
@@ -70,21 +67,16 @@ const layer = Layer.effectDiscard(
     const read = Effect.all([store.list(scope), store.list(Memory.Scope.user)]).pipe(
       Effect.map(([project, user]) => lines([...user, ...project])),
     )
-    // What conversations see changes only when a conversation starts. A note recorded half way
-    // through a task would otherwise rewrite the context of the task that produced it.
-    const published = yield* Ref.make(yield* read)
-    yield* events.subscribe(SessionEvent.Created).pipe(
-      Stream.filter((event) => event.data.projectID === location.project.id && event.data.parentID === undefined),
-      Stream.runForEach(() => read.pipe(Effect.flatMap((index) => Ref.set(published, index)))),
-      Effect.forkScoped({ startImmediately: true }),
-    )
     yield* registry.register({
       key: SystemContext.Key.make("memory/index-source"),
       load: Effect.succeed(
         SystemContext.make({
           key: SystemContext.Key.make("memory/index"),
           codec: Schema.toCodecJson(Schema.Array(Schema.String)),
-          load: Ref.get(published),
+          // SessionContextEpoch owns the admitted snapshot. Another Session must
+          // not refresh this Session's prefix; compaction loads the latest notes.
+          refresh: "generation",
+          load: read,
           baseline: (index) => render("Project memory", index),
           update: (_previous, index) => render("Project memory, replacing the earlier copy", index),
         }),
@@ -96,5 +88,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "memory-context",
   layer,
-  deps: [Location.node, Config.node, SystemContextRegistry.node, MemoryStore.node, MemoryRecorder.node, EventV2.node],
+  deps: [Location.node, Config.node, SystemContextRegistry.node, MemoryStore.node, MemoryRecorder.node],
 })

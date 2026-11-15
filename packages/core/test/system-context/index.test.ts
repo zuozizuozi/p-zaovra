@@ -21,6 +21,40 @@ const stringContext = (input: {
   })
 
 describe("SystemContext", () => {
+  it.effect("generation-scoped sources stay admitted while live sources update", () =>
+    Effect.gen(function* () {
+      const source = (text: string) =>
+        SystemContext.make({
+          key: key("memory/index"),
+          codec: Schema.toCodecJson(Schema.String),
+          refresh: "generation",
+          load: Effect.succeed(text),
+          baseline: String,
+          update: (_previous, current) => current,
+        })
+      const original = yield* SystemContext.initialize(
+        SystemContext.combine([source("original notes"), stringContext({ key: "core/live", value: "before" })]),
+      )
+      const current = SystemContext.combine([
+        source("later notes"),
+        stringContext({ key: "core/live", value: "after" }),
+      ])
+      const updated = yield* SystemContext.reconcile(current, original.snapshot)
+      expect(updated).toEqual({
+        _tag: "Updated",
+        text: "after",
+        snapshot: { "memory/index": { value: "original notes" }, "core/live": { value: "after" } },
+      })
+      expect((yield* SystemContext.initialize(current)).baseline).toBe("later notes\n\nafter")
+      expect(yield* SystemContext.replace(current, original.snapshot)).toMatchObject({
+        _tag: "ReplacementReady",
+        generation: { baseline: "later notes\n\nafter" },
+      })
+      if (updated._tag !== "Updated") throw new Error("live update missing")
+      expect(yield* SystemContext.reconcile(current, updated.snapshot)).toEqual({ _tag: "Unchanged" })
+    }),
+  )
+
   it.effect("stores the canonical JSON encoding of the loaded value", () =>
     Effect.gen(function* () {
       const context = SystemContext.make({

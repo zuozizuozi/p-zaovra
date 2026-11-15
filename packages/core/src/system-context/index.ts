@@ -32,6 +32,8 @@ export type Unavailable = typeof unavailable
 export interface Source<A> {
   readonly key: Key
   readonly codec: Schema.Codec<A, Schema.Json, never, never>
+  /** Keep the admitted value until a new context generation is constructed. */
+  readonly refresh?: "generation"
   readonly load: Effect.Effect<A | Unavailable>
   readonly baseline: (current: A) => string
   readonly update: (previous: A, current: A) => string
@@ -155,7 +157,7 @@ export function make<A>(source: Source<A>): SystemContext {
               Option.match(decode(previous), {
                 onNone: (): Compared => ({ _tag: "Incompatible" }),
                 onSome: (decoded): Compared =>
-                  equivalent(decoded, value)
+                  source.refresh === "generation" || equivalent(decoded, value)
                     ? { _tag: "Unchanged" }
                     : {
                         _tag: "Updated",
