@@ -6,9 +6,11 @@ import { adjust } from "effect/testing/TestClock"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Database } from "@zaovra-ai/core/database/database"
 import { AppNodeBuilder } from "@zaovra-ai/core/effect/app-node-builder"
+import { makeGlobalNode } from "@zaovra-ai/core/effect/app-node"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { EventV2 } from "@zaovra-ai/core/event"
 import { MemoryTidyStore } from "@zaovra-ai/core/memory/tidy-store"
+import { MemoryStore } from "@zaovra-ai/core/memory/store"
 import { MemoryTidyRunTable } from "@zaovra-ai/core/memory/tidy.sql"
 import { ModelV2 } from "@zaovra-ai/core/model"
 import { ProviderV2 } from "@zaovra-ai/core/provider"
@@ -84,7 +86,18 @@ for (const nested of [false, true])
     const open = () =>
       AppNodeBuilder.build(
         LayerNode.group([Database.node, MemoryTidyStore.node, EventV2.node, SessionProjector.node]),
-        [[Database.node, Database.layerFromPath(path.join(temporary.path, "conflict.sqlite"))]],
+        [
+          [Database.node, Database.layerFromPath(path.join(temporary.path, "conflict.sqlite"))],
+          // Exercise the POSIX directory binding even on Windows CI/development.
+          [
+            MemoryStore.node,
+            makeGlobalNode({
+              service: MemoryStore.Service,
+              layer: MemoryStore.layerWith("linux"),
+              deps: [Database.node],
+            }),
+          ],
+        ],
       )
     await Effect.runPromise(
       Effect.gen(function* () {

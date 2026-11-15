@@ -13,6 +13,7 @@ import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
 import { LayerNodePlatform } from "../src/effect/app-node-platform"
 import { EventV2 } from "../src/event"
+import { EventTable } from "../src/event/sql"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryTidy } from "../src/memory/tidy"
@@ -71,6 +72,7 @@ for (const scenario of [
   "runner",
   "runner-unbounded",
   "summary",
+  "summary-revoked",
 ] as const)
   test(`tidy execution uses the real HTTP admission and durable budget: ${scenario}`, async () => {
     await using tmp = await tmpdir()
@@ -231,15 +233,17 @@ for (const scenario of [
               yield* runner.run({ sessionID, force: true })
               return
             }
-            if (scenario === "summary") {
+            if (scenario === "summary" || scenario === "summary-revoked") {
               const database = yield* Database.Service
               const events = yield* EventV2.Service
+              if (scenario === "summary-revoked") yield* store.finish(run!.id, "cancelled")
               const compact = SessionCompaction.make({
                 db: database.db,
                 events,
                 llm,
                 config: entries(),
                 wrap: guard.wrap,
+                prepare: guard.prepare,
               })
               const compacted = yield* compact.compactAfterOverflow({
                 sessionID,
@@ -258,7 +262,19 @@ for (const scenario of [
                   },
                 ],
               })
-              expect(compacted).toBe(true)
+              expect(compacted).toBe(scenario === "summary")
+              if (scenario === "summary-revoked") {
+                const stored = yield* database.db.select().from(EventTable).all().pipe(Effect.orDie)
+                expect(
+                  stored.filter((event) => event.type === EventV2.versionedType("session.next.compaction.started", 1)),
+                ).toHaveLength(1)
+                expect(
+                  stored.filter((event) => event.type === EventV2.versionedType("session.next.compaction.failed", 1)),
+                ).toHaveLength(1)
+                expect(
+                  stored.filter((event) => event.type === EventV2.versionedType("session.next.compaction.ended", 1)),
+                ).toHaveLength(0)
+              }
               return
             }
             yield* guard.wrap(sessionID, request, llm.stream(request)).pipe(Stream.runDrain)
@@ -284,6 +300,7 @@ for (const scenario of [
             "unknown-usage",
             "ordinary",
             "runner",
+            "runner-unbounded",
             "summary",
             "generation-redirect",
             "retry",
@@ -291,12 +308,15 @@ for (const scenario of [
           ].includes(scenario)
           if (scenario === "runner" && Exit.isFailure(outcome)) throw new Error(Cause.pretty(outcome.cause))
           expect(outcome._tag).toBe(
-            sent && scenario !== "generation-redirect" && scenario !== "retry-revoked" ? "Success" : "Failure",
+            scenario === "summary-revoked" ||
+              (sent && scenario !== "generation-redirect" && scenario !== "retry-revoked")
+              ? "Success"
+              : "Failure",
           )
           expect(state.redirects).toBe(0)
           expect(state.generated).toHaveLength(scenario === "retry" ? 2 : sent ? 1 : 0)
           expect(state.counted).toHaveLength(
-            ["ordinary", "unsupported", "remote-image", "overlay", "runner-unbounded"].includes(scenario)
+            ["ordinary", "unsupported", "remote-image", "overlay", "summary-revoked"].includes(scenario)
               ? 0
               : scenario === "retry" || scenario === "retry-revoked"
                 ? 2
@@ -304,6 +324,10 @@ for (const scenario of [
           )
           if (sent)
             expect(state.charges).toEqual(scenario === "retry" ? [132, 264] : [scenario === "ordinary" ? 0 : 132])
+          if (scenario === "runner-unbounded") {
+            expect(state.generated[0]?.max_output_tokens).toBe(32)
+            expect(state.counted[0]?.input).toEqual(state.generated[0]?.input)
+          }
           if (scenario === "success") {
             const generated = state.generated[0]!
             const counted = state.counted[0]!

@@ -187,7 +187,10 @@ for (const boundary of ["active", "cancelled", "disabled", "model", "remote", "c
               // provider transport. The real HTTP budget path has its own tests.
               [
                 MemoryTidyExecution.node,
-                Layer.succeed(MemoryTidyExecution.Service, { wrap: (_id, _request, stream) => stream }),
+                Layer.succeed(MemoryTidyExecution.Service, {
+                  prepare: (_id, request) => Effect.succeed(request),
+                  wrap: (_id, _request, stream) => stream,
+                }),
               ],
               [SessionRunnerModel.node, SessionRunnerModel.layerWith(() => Effect.succeed(model))],
               [SessionExecution.node, SessionExecution.noopLayer],

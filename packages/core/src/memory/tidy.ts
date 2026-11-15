@@ -9,6 +9,7 @@ import type { ModelV2 } from "../model"
 import { SessionV2 } from "../session"
 import { MemoryStore } from "./store"
 import { MemoryTidyStore } from "./tidy-store"
+import { MemoryTidyTasks } from "./tidy-tasks"
 
 export type View = {
   run: MemoryTidyStore.Run
@@ -25,6 +26,7 @@ export type Request = {
 export interface Interface {
   /** Admit once, without starting provider work. The budgeted host owns the later wake. */
   readonly prepare: (input: Request) => Effect.Effect<View, MemoryTidyStore.Rejected>
+  readonly start: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly get: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
   readonly list: (layer?: "project" | "user") => Effect.Effect<View[]>
   readonly cancel: (id: string, layer?: "project" | "user") => Effect.Effect<View, MemoryTidyStore.Rejected>
@@ -40,6 +42,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const location = yield* Location.Service
     const memory = yield* MemoryStore.Service
+    const tasks = yield* MemoryTidyTasks.Service
     const place = { project: location.project.id, directory: location.directory }
     const scopes = Effect.fn("MemoryTidy.scopes")(function* (layer?: "project" | "user") {
       if (layer === "user") return { scope: Memory.Scope.user, legacyScope: undefined }
@@ -78,7 +81,9 @@ const layer = Layer.effect(
         return {
           run,
           usage: yield* store.usage({ runID: run.id }),
-          executing: (yield* sessions.active).has(run.session_id),
+          executing:
+            (yield* tasks.active).has(run.id) ||
+            ((yield* store.ownsSession(run)) && (yield* sessions.active).has(run.session_id)),
         }
       })
     const get = Effect.fn("MemoryTidy.get")(function* (id: string, layer?: "project" | "user") {
@@ -93,6 +98,17 @@ const layer = Layer.effect(
     })
     return Service.of({
       get,
+      start: Effect.fn("MemoryTidy.start")(function* (id, layer) {
+        const current = yield* get(id, layer)
+        if (current.run.state !== "active") return current
+        if (current.run.directory !== location.directory)
+          return yield* new MemoryTidyStore.Rejected({ reason: "unauthorized" })
+        yield* tasks.start(
+          id,
+          config.entries().pipe(Effect.map((entries) => Config.latest(entries, "memory")?.enabled !== false)),
+        )
+        return yield* get(id, layer)
+      }),
       list: Effect.fn("MemoryTidy.list")(function* (layer) {
         const allowed = yield* scopes(layer)
         const current = yield* store.list(allowed.scope)
@@ -164,5 +180,5 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [MemoryTidyStore.node, MemoryStore.node, SessionV2.node, Config.node, Location.node],
+  deps: [MemoryTidyStore.node, MemoryTidyTasks.node, MemoryStore.node, SessionV2.node, Config.node, Location.node],
 })

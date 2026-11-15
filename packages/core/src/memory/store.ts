@@ -219,6 +219,14 @@ export const layerWith = (platform: NodeJS.Platform = process.platform) =>
       const locate = Effect.fn("MemoryStore.scope")(function* (place: Place) {
         const value = scope(place, platform)
         if (platform === "win32" || place.project !== ProjectV2.ID.global) return value
+        const existing = yield* binding(value)
+        if (existing) {
+          if (existing.directory !== place.directory) return yield* Effect.die("Memory directory identity conflict")
+          // Authorization also runs inside deferred read transactions. Even an
+          // INSERT that conflicts would acquire a writer lock and block another
+          // connection before the allowance is reserved.
+          return value
+        }
         yield* db
           .insert(MemoryRecoveryTable)
           .values({

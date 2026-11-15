@@ -160,6 +160,7 @@ type Dependencies<E = never> = {
     request: LLMRequest,
     stream: Stream.Stream<LLMEvent, LLMError>,
   ) => Stream.Stream<LLMEvent, LLMError>
+  readonly prepare?: (sessionID: SessionSchema.ID, request: LLMRequest) => Effect.Effect<LLMRequest, LLMError>
   readonly config: readonly Config.Entry[]
   readonly canRetry?: (input: Input) => Effect.Effect<boolean, E>
 }
@@ -376,7 +377,7 @@ export const make = <E = never>(dependencies: Dependencies<E>) => {
       return false
     }
 
-    const request = summaryRequest({
+    const baseRequest = summaryRequest({
       model: input.model,
       prompt: prepared.prompt,
       maxTokens: summaryOutput,
@@ -400,41 +401,47 @@ export const make = <E = never>(dependencies: Dependencies<E>) => {
       let toolCall = false
       let retryAfter: number | undefined
       yield* SessionOwnership.check
-      const stream = dependencies.llm.stream(request)
-      const summarized = yield* SessionCache.track(
-        (dependencies.wrap ? dependencies.wrap(input.sessionID, request, stream) : stream).pipe(
-          Stream.provideService(RequestExecutor.AutomaticRetries, false),
-        ),
-        {
-          purpose: "summary",
-          durableMessages: 0,
-          request,
-          epoch: -sourceSequence - 1,
-          sessionID: input.sessionID,
-          db: dependencies.db,
-          events: dependencies.events,
-        },
-      ).pipe(
-        Stream.runForEach((event) => {
-          if (LLMEvent.is.providerError(event)) {
-            failure = event.message
-            retryAfter = transientSummaryFailure(event.reason, event.status, event.retryable)
-              ? ((event.reason && "retryAfterMs" in event.reason ? event.reason.retryAfterMs : undefined) ?? 0)
-              : undefined
-          }
-          if (LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputStart(event)) toolCall = true
-          if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
-          if (LLMEvent.is.stepFinish(event)) {
-            usage = event.usage
-            finished = event.reason === "stop"
-          }
-          if (LLMEvent.is.finish(event)) {
-            usage = event.usage ?? usage
-            finished = event.reason === "stop"
-          }
-          return Effect.void
-        }),
-        Effect.as(true),
+      const summarized = yield* Effect.gen(function* () {
+        // Preparation can reject a revoked or exhausted tidy grant. Keep that
+        // failure inside this attempt so Started always gets a Failed receipt.
+        const request = dependencies.prepare ? yield* dependencies.prepare(input.sessionID, baseRequest) : baseRequest
+        const stream = dependencies.llm.stream(request)
+        return yield* SessionCache.track(
+          (dependencies.wrap ? dependencies.wrap(input.sessionID, request, stream) : stream).pipe(
+            Stream.provideService(RequestExecutor.AutomaticRetries, false),
+          ),
+          {
+            purpose: "summary",
+            durableMessages: 0,
+            request,
+            epoch: -sourceSequence - 1,
+            sessionID: input.sessionID,
+            db: dependencies.db,
+            events: dependencies.events,
+          },
+        ).pipe(
+          Stream.runForEach((event) => {
+            if (LLMEvent.is.providerError(event)) {
+              failure = event.message
+              retryAfter = transientSummaryFailure(event.reason, event.status, event.retryable)
+                ? ((event.reason && "retryAfterMs" in event.reason ? event.reason.retryAfterMs : undefined) ?? 0)
+                : undefined
+            }
+            if (LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputStart(event)) toolCall = true
+            if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+            if (LLMEvent.is.stepFinish(event)) {
+              usage = event.usage
+              finished = event.reason === "stop"
+            }
+            if (LLMEvent.is.finish(event)) {
+              usage = event.usage ?? usage
+              finished = event.reason === "stop"
+            }
+            return Effect.void
+          }),
+          Effect.as(true),
+        )
+      }).pipe(
         Effect.timeout(Math.max(0, deadline - (yield* Clock.currentTimeMillis))),
         Effect.catchTag("TimeoutError", () => {
           failure = "Compaction exceeded its 2 minute deadline"

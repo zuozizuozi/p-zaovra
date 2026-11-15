@@ -1,14 +1,16 @@
 // Regression scenarios originally reproduced by the independent task-28 audit.
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { Effect, Exit, Layer, Scope } from "effect"
+import { Deferred, Effect, Exit, Layer, Scope } from "effect"
 import { Config } from "../src/config"
 import { Database } from "../src/database/database"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
+import { makeGlobalNode } from "../src/effect/app-node"
 import { LayerNode } from "../src/effect/layer-node"
 import { Global } from "../src/global"
 import { Location } from "../src/location"
 import { MemoryTidy } from "../src/memory/tidy"
+import { MemoryStore } from "../src/memory/store"
 import { MemoryTidyStore } from "../src/memory/tidy-store"
 import { MemoryTidyRunTable } from "../src/memory/tidy.sql"
 import { ModelV2 } from "../src/model"
@@ -16,6 +18,7 @@ import { ProviderV2 } from "../src/provider"
 import { AbsolutePath } from "../src/schema"
 import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
+import { SessionRunCoordinator } from "../src/session/run-coordinator"
 import { SessionInputTable, SessionTable } from "../src/session/sql"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
@@ -200,6 +203,14 @@ test("audit two host connections serialize writers and exact retry survives reop
       LayerNode.group([MemoryTidy.node, MemoryTidyStore.node, SessionV2.node, Database.node, Config.node]),
       [
         [Database.node, Database.layerFromPath(path.join(tmp.path, "host.sqlite"))],
+        [
+          MemoryStore.node,
+          makeGlobalNode({
+            service: MemoryStore.Service,
+            layer: MemoryStore.layerWith("linux"),
+            deps: [Database.node],
+          }),
+        ],
         [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
         [
           Global.node,
@@ -263,4 +274,101 @@ test("audit two host connections serialize writers and exact retry survives reop
       ).toBe("conflict")
     }).pipe(Effect.provide(open()), Effect.scoped),
   )
+})
+
+test("closing a started host stops its drain and reopening requires explicit start without releasing unknown usage", async () => {
+  await using tmp = await tmpdir()
+  const state = { starts: 0, stopped: 0 }
+  const open = (ready: Deferred.Deferred<void>) =>
+    AppNodeBuilder.build(
+      LayerNode.group([MemoryTidy.node, MemoryTidyStore.node, SessionV2.node, Database.node, Config.node]),
+      [
+        [Database.node, Database.layerFromPath(path.join(tmp.path, "restart.sqlite"))],
+        [Location.node, Layer.succeed(Location.Service, location({ directory: AbsolutePath.make(tmp.path) }))],
+        [
+          Global.node,
+          Global.layerWith({
+            data: path.join(tmp.path, "data"),
+            config: path.join(tmp.path, "config"),
+            state: path.join(tmp.path, "state"),
+          }),
+        ],
+        [
+          Config.node,
+          Layer.succeed(Config.Service, {
+            entries: () =>
+              Effect.succeed([
+                new Config.Document({ type: "document", info: new Config.Info({ memory: { enabled: true } }) }),
+              ]),
+          }),
+        ],
+        [
+          SessionExecution.node,
+          Layer.effect(
+            SessionExecution.Service,
+            Effect.gen(function* () {
+              const coordinator = yield* SessionRunCoordinator.make<SessionV2.ID, never>({
+                drain: (_id, _force, claim) =>
+                  Effect.gen(function* () {
+                    yield* claim?.check ?? Effect.void
+                    state.starts++
+                    yield* Deferred.succeed(ready, undefined)
+                    yield* Effect.never
+                  }).pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        state.stopped++
+                      }),
+                    ),
+                  ),
+              })
+              return SessionExecution.Service.of({
+                active: coordinator.active,
+                resume: (id, claim) => (claim ? coordinator.owned(id, claim) : coordinator.run(id)),
+                wake: () => Effect.void,
+                interrupt: coordinator.interrupt,
+                prepareInterrupt: coordinator.prepareInterrupt,
+              })
+            }),
+          ),
+        ],
+      ],
+    )
+  const firstReady = Deferred.makeUnsafe<void>()
+  const saved = await Effect.runPromise(
+    Effect.gen(function* () {
+      const h = yield* setup
+      const run = (yield* h.tidy.prepare(request)).run
+      yield* h.tidy.start(run.id)
+      yield* Deferred.await(firstReady)
+      yield* h.store.reserve({
+        sessionID: run.session_id,
+        scope: run.scope,
+        enabled: true,
+        attemptID: "unknown-before-shutdown",
+        tokens: 100,
+      })
+      expect((yield* h.tidy.get(run.id)).executing).toBe(true)
+      return run
+    }).pipe(Effect.provide(open(firstReady)), Effect.scoped),
+  )
+  expect(state).toEqual({ starts: 1, stopped: 1 })
+  const secondReady = Deferred.makeUnsafe<void>()
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const h = yield* setup
+      const view = yield* h.tidy.get(saved.id)
+      expect(view.run.state).toBe("active")
+      expect(view.executing).toBe(false)
+      expect(view.usage).toEqual({ known: 0, reserved: 100, charged: 100, unknown: 1 })
+      expect((yield* h.tidy.list()).map((item) => item.run.id)).toEqual([saved.id])
+      expect(state.starts).toBe(1)
+      yield* h.tidy.start(saved.id)
+      yield* Deferred.await(secondReady)
+      expect(state.starts).toBe(2)
+      expect((yield* h.tidy.cancel(saved.id)).run.state).toBe("cancelled")
+      expect((yield* h.tidy.get(saved.id)).usage.reserved).toBe(100)
+    }).pipe(Effect.provide(open(secondReady)), Effect.scoped),
+  )
+  expect(state).toEqual({ starts: 2, stopped: 2 })
 })

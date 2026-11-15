@@ -176,6 +176,7 @@ const layer = Layer.effect(
       events,
       llm,
       wrap: tidyExecution.wrap,
+      prepare: tidyExecution.prepare,
       config: yield* config.entries(),
       canRetry: (input) =>
         Effect.gen(function* () {
@@ -1212,13 +1213,16 @@ const layer = Layer.effect(
         })
         return { needsContinuation: false, step: currentStep }
       }
-      const request = deliveryReview
-        ? LLM.updateRequest(baseRequest, {
-            generation: { maxTokens: deliveryAllowance!.output },
-          })
-        : maxTokens === undefined
-          ? baseRequest
-          : LLM.updateRequest(baseRequest, { generation: { maxTokens } })
+      const request = yield* tidyExecution.prepare(
+        session.id,
+        deliveryReview
+          ? LLM.updateRequest(baseRequest, {
+              generation: { maxTokens: deliveryAllowance!.output },
+            })
+          : maxTokens === undefined
+            ? baseRequest
+            : LLM.updateRequest(baseRequest, { generation: { maxTokens } }),
+      )
       // DeepSeek cannot continue, in thinking mode, a history that holds turns it did not reason
       // through (another model's, or its own without thinking). The request goes out without
       // thinking; tell the user once, because the answers that follow are of a different kind.

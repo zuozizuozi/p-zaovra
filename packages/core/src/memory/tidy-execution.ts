@@ -2,7 +2,14 @@ export * as MemoryTidyExecution from "./tidy-execution"
 
 import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { FetchHttpClient, Headers, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { InvalidRequestReason, LLMError, type LLMEvent, type LLMRequest } from "@zaovra-ai/llm"
+import {
+  InvalidRequestReason,
+  LLM,
+  LLMError,
+  QuotaExceededReason,
+  type LLMEvent,
+  type LLMRequest,
+} from "@zaovra-ai/llm"
 import { RequestExecutor } from "@zaovra-ai/llm/route"
 import { OpenAIResponses } from "@zaovra-ai/llm/protocols/openai-responses"
 import { Memory } from "@zaovra-ai/schema/memory"
@@ -19,6 +26,8 @@ import { MemoryTidyBudget } from "./tidy-budget"
 import { MemoryTidyStore } from "./tidy-store"
 
 export interface Interface {
+  /** Bound actual generation before encoding, leaving ordinary requests unchanged. */
+  readonly prepare: (sessionID: SessionSchema.ID, request: LLMRequest) => Effect.Effect<LLMRequest, LLMError>
   /** Wrap the existing single provider call, including compaction calls. */
   readonly wrap: (
     sessionID: SessionSchema.ID,
@@ -77,6 +86,30 @@ const layer = Layer.effect(
     })
 
     return Service.of({
+      prepare: Effect.fn("MemoryTidyExecution.prepare")(function* (sessionID, request) {
+        const run = yield* store.forSession(sessionID)
+        if (!run) return request
+        yield* authority(run, request)
+        const remaining = run.token_limit - (yield* store.usage({ runID: run.id })).charged
+        if (remaining <= 0)
+          return yield* new LLMError({
+            module: "MemoryTidyExecution",
+            method: "prepare",
+            reason: new QuotaExceededReason({ message: "本次整理预算已用完，未发送请求。" }),
+          })
+        const requested =
+          request.generation?.maxTokens ??
+          request.model.defaults?.generation?.maxTokens ??
+          request.model.route.defaults.generation?.maxTokens ??
+          request.model.route.defaults.limits?.output ??
+          4096
+        if (!Number.isSafeInteger(requested) || requested <= 0) return yield* denied("整理模型的输出上限无效。")
+        // This is an explicit output ceiling, not an estimate of input tokens.
+        // Admission still counts the complete final input and reserves both.
+        return LLM.updateRequest(request, {
+          generation: { ...request.generation, maxTokens: Math.min(requested, remaining) },
+        })
+      }),
       wrap: (sessionID, request, stream) =>
         Stream.unwrap(
           Effect.gen(function* () {

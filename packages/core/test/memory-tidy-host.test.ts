@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { Effect, Exit, Layer, Scope } from "effect"
+import { DateTime, Deferred, Effect, Exit, Layer, Scope } from "effect"
 import { eq } from "drizzle-orm"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { Config } from "../src/config"
@@ -20,6 +20,11 @@ import { ProviderV2 } from "../src/provider"
 import { AbsolutePath } from "../src/schema"
 import { SessionV2 } from "../src/session"
 import { SessionExecution } from "../src/session/execution"
+import { SessionRunCoordinator } from "../src/session/run-coordinator"
+import { EventV2 } from "../src/event"
+import { SessionEvent } from "../src/session/event"
+import { SessionMessage } from "../src/session/message"
+import { SessionInput } from "../src/session/input"
 import { SessionBudget } from "../src/session/budget"
 import { SessionInputTable, SessionTable } from "../src/session/sql"
 import { location } from "./fixture/location"
@@ -36,6 +41,7 @@ const setup = Effect.gen(function* () {
     config: yield* Config.Service,
     memory: yield* MemoryStore.Service,
     location: yield* Location.Service,
+    events: yield* EventV2.Service,
   }
 })
 
@@ -137,12 +143,15 @@ test("conflicting retry parameters fail without altering the original task", () 
 async function withTidy(
   body: (
     h: Effect.Success<typeof setup>,
-    state: { enabled: boolean; actions: string[] },
+    state: { enabled: boolean; actions: string[]; execute?: (id: SessionV2.ID) => Effect.Effect<void> },
   ) => Effect.Effect<void, unknown, Scope.Scope>,
   platform: NodeJS.Platform = process.platform,
 ) {
   await using tmp = await tmpdir()
-  const state = { enabled: true, actions: [] as string[] }
+  const state: { enabled: boolean; actions: string[]; execute?: (id: SessionV2.ID) => Effect.Effect<void> } = {
+    enabled: true,
+    actions: [],
+  }
   let store: MemoryTidyStore.Interface
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -160,6 +169,7 @@ async function withTidy(
             Database.node,
             Config.node,
             Location.node,
+            EventV2.node,
           ]),
           [
             [
@@ -193,29 +203,43 @@ async function withTidy(
             ],
             [
               SessionExecution.node,
-              Layer.succeed(SessionExecution.Service, {
-                active: Effect.succeed(new Set<SessionV2.ID>()),
-                wake: () =>
-                  Effect.sync(() => {
-                    state.actions.push("wake")
-                  }),
-                resume: () =>
-                  Effect.sync(() => {
-                    state.actions.push("resume")
-                  }),
-                prepareInterrupt: (id, cleanup) =>
-                  Effect.succeed(
-                    Effect.gen(function* () {
-                      state.actions.push(`interrupt:${(yield* store.forSession(id))?.state}`)
-                      yield* cleanup ?? Effect.void
-                    }),
-                  ),
-                interrupt: (id, cleanup) =>
-                  Effect.gen(function* () {
-                    state.actions.push(`interrupt:${(yield* store.forSession(id))?.state}`)
-                    yield* cleanup ?? Effect.void
-                  }),
-              }),
+              Layer.effect(
+                SessionExecution.Service,
+                Effect.gen(function* () {
+                  const coordinator = yield* SessionRunCoordinator.make<SessionV2.ID, never>({
+                    drain: (id, _force, claim) =>
+                      Effect.gen(function* () {
+                        yield* claim?.check ?? Effect.void
+                        state.actions.push("resume")
+                        yield* state.execute?.(id) ?? Effect.void
+                      }),
+                  })
+                  return {
+                    active: coordinator.active,
+                    wake: () =>
+                      Effect.sync(() => {
+                        state.actions.push("wake")
+                      }),
+                    resume: (id, claim) => (claim ? coordinator.owned(id, claim) : coordinator.run(id)),
+                    prepareInterrupt: (id, cleanup) =>
+                      coordinator.prepareInterrupt(
+                        id,
+                        Effect.gen(function* () {
+                          state.actions.push(`interrupt:${(yield* store.forSession(id))?.state}`)
+                          yield* cleanup ?? Effect.void
+                        }),
+                      ),
+                    interrupt: (id, cleanup) =>
+                      coordinator.interrupt(
+                        id,
+                        Effect.gen(function* () {
+                          state.actions.push(`interrupt:${(yield* store.forSession(id))?.state}`)
+                          yield* cleanup ?? Effect.void
+                        }),
+                      ),
+                  } satisfies SessionExecution.Interface
+                }),
+              ),
             ],
           ],
         ),
@@ -398,4 +422,104 @@ test("known legacy content can be confirmed blank then a fresh directory task is
         )
       }),
     "linux",
+  ))
+
+test("explicit start is shared by repeated clicks and completes only after the owned drain settles", () =>
+  withTidy((h, state) =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      state.execute = (sessionID) =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(ready, undefined)
+          yield* Deferred.await(release)
+          const pending = yield* h.sessions.pendingInputs(sessionID).pipe(Effect.orDie)
+          yield* SessionInput.promoteSteers(
+            h.database.db,
+            h.events,
+            sessionID,
+            Math.max(...pending.map((input) => input.admittedSeq)),
+          )
+          const assistantMessageID = SessionMessage.ID.create()
+          yield* h.events.publish(SessionEvent.Step.Started, {
+            sessionID,
+            assistantMessageID,
+            model,
+            agent: "build",
+            timestamp: yield* DateTime.now,
+          })
+          yield* h.events.publish(SessionEvent.Step.Ended, {
+            sessionID,
+            assistantMessageID,
+            finish: "stop",
+            cost: 0,
+            tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+            timestamp: yield* DateTime.now,
+          })
+        })
+      const prepared = yield* h.tidy.prepare(request)
+      expect(prepared.executing).toBe(false)
+      const starts = yield* Effect.all([h.tidy.start(prepared.run.id), h.tidy.start(prepared.run.id)], {
+        concurrency: 2,
+      })
+      yield* Deferred.await(ready)
+      expect(starts.every((view) => view.executing)).toBe(true)
+      expect(state.actions).toEqual(["resume"])
+      yield* Deferred.succeed(release, undefined)
+      for (let n = 0; n < 100 && (yield* h.tidy.get(prepared.run.id)).executing; n++) yield* Effect.sleep("5 millis")
+      expect((yield* h.tidy.get(prepared.run.id)).run.state).toBe("completed")
+      expect((yield* h.tidy.start(prepared.run.id)).run.state).toBe("completed")
+      expect(state.actions).toEqual(["resume"])
+    }),
+  ))
+
+test("cancel interrupts an owned started task and repeat start never spends again", () =>
+  withTidy((h, state) =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>()
+      state.execute = () => Deferred.succeed(ready, undefined).pipe(Effect.andThen(Effect.never))
+      const run = (yield* h.tidy.prepare(request)).run
+      yield* h.tidy.start(run.id)
+      yield* Deferred.await(ready)
+      yield* h.store.reserve({
+        sessionID: run.session_id,
+        scope: run.scope,
+        enabled: true,
+        attemptID: "running-unknown",
+        tokens: 100,
+      })
+      const stopped = yield* h.tidy.cancel(run.id)
+      expect(stopped.run.state).toBe("cancelled")
+      expect(stopped.usage.reserved).toBe(100)
+      yield* h.tidy.start(run.id)
+      expect(state.actions.filter((action) => action === "resume")).toHaveLength(1)
+      expect(yield* h.sessions.pendingInputs(run.session_id)).toHaveLength(0)
+    }),
+  ))
+
+test("failed and empty drains are not reported as completed or restarted by reads", () =>
+  withTidy((h, state) =>
+    Effect.gen(function* () {
+      for (const mode of ["failure", "empty"] as const) {
+        state.execute = () => (mode === "failure" ? Effect.die("scripted execution failure") : Effect.void)
+        const run = (yield* h.tidy.prepare({ ...request, requestID: mode })).run
+        yield* h.tidy.start(run.id)
+        for (let n = 0; n < 100 && (yield* h.tidy.get(run.id)).executing; n++) yield* Effect.sleep("5 millis")
+        expect((yield* h.tidy.get(run.id)).run.state).toBe("failed")
+        yield* h.tidy.list()
+        yield* h.tidy.start(run.id)
+      }
+      expect(state.actions).toEqual(["resume", "resume"])
+    }),
+  ))
+
+test("start rechecks configuration after prepare without waking the task", () =>
+  withTidy((h, state) =>
+    Effect.gen(function* () {
+      const run = (yield* h.tidy.prepare(request)).run
+      state.enabled = false
+      expect((yield* h.tidy.start(run.id).pipe(Effect.flip)).reason).toBe("unauthorized")
+      expect((yield* h.tidy.get(run.id)).executing).toBe(false)
+      expect(state.actions).toEqual([])
+    }),
   ))
