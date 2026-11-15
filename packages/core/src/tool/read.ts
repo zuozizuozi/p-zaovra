@@ -121,6 +121,7 @@ const layer = Layer.effectDiscard(
                 const message =
                   error instanceof ReadToolFileSystem.BinaryFileError ||
                   error instanceof ReadToolFileSystem.MalformedUtf8Error ||
+                  error instanceof ReadToolFileSystem.TextGrowthLimitError ||
                   error instanceof Pdf.DecodeError ||
                   error instanceof ReadToolFileSystem.MediaIngestLimitError ||
                   error instanceof Image.DecodeError ||

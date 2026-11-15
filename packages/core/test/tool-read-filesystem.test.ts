@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Effect, FileSystem } from "effect"
+import { Effect, FileSystem, Option } from "effect"
 import { LayerNodePlatform } from "@zaovra-ai/core/effect/app-node-platform"
 import { LayerNode } from "@zaovra-ai/core/effect/layer-node"
 import { FSUtil } from "@zaovra-ai/core/fs-util"
@@ -16,6 +16,92 @@ const fixture = Effect.gen(function* () {
 })
 
 describe("ReadToolFileSystem", () => {
+  for (const initial of [0, 1, ReadToolFileSystem.MAX_READ_BYTES]) {
+    it.effect(`bounds concurrent growth after a ${initial} byte stat to the limit plus one probe`, () =>
+      Effect.gen(function* () {
+        const { fs, files, directory } = yield* fixture
+        const file = path.join(directory, "growing.txt")
+        yield* files.writeFileString(file, "a".repeat(initial))
+        const observed: number[] = []
+        const handles: FileSystem.File[] = []
+        const error = yield* ReadToolFileSystem.read(
+          {
+            ...fs,
+            open: (name, options) =>
+              fs.open(name, options).pipe(
+                Effect.map((opened) => {
+                  handles.push(opened)
+                  return {
+                    ...opened,
+                    stat: opened.stat.pipe(
+                      Effect.tap(() =>
+                        files.writeFileString(file, "a".repeat(ReadToolFileSystem.MAX_READ_BYTES + 4096)),
+                      ),
+                    ),
+                    readAlloc: (size) =>
+                      opened.readAlloc(size).pipe(
+                        Effect.tap((chunk) =>
+                          Effect.sync(() => {
+                            observed.push(Option.isSome(chunk) ? chunk.value.length : 0)
+                          }),
+                        ),
+                      ),
+                  }
+                }),
+              ),
+          },
+          file,
+          "growing.txt",
+        ).pipe(Effect.flip)
+        expect(error).toBeInstanceOf(ReadToolFileSystem.TextGrowthLimitError)
+        expect(error.message).toContain("51200 byte complete-text read limit")
+        expect(observed.reduce((sum, bytes) => sum + bytes, 0)).toBe(ReadToolFileSystem.MAX_READ_BYTES + 1)
+        expect(handles).toHaveLength(1)
+        // The failing read must release the real descriptor, not just stop consuming bytes.
+        const closed = yield* handles[0].stat.pipe(Effect.flip)
+        expect(closed._tag).toBe("PlatformError")
+      }),
+    )
+  }
+
+  for (const size of [0, 1, ReadToolFileSystem.MAX_READ_BYTES]) {
+    it.effect(`preserves complete text output at ${size} bytes`, () =>
+      Effect.gen(function* () {
+        const { fs, files, directory } = yield* fixture
+        const file = path.join(directory, "stable.txt")
+        const content = "a".repeat(size)
+        yield* files.writeFileString(file, content)
+        const result = yield* ReadToolFileSystem.read(fs, file, "stable.txt")
+        expect(result).toMatchObject({ encoding: "utf8", content })
+      }),
+    )
+  }
+
+  it.effect("accepts growth that ends exactly at the complete-text limit", () =>
+    Effect.gen(function* () {
+      const { fs, files, directory } = yield* fixture
+      const file = path.join(directory, "within-limit.txt")
+      yield* files.writeFileString(file, "a")
+      const content = "a".repeat(ReadToolFileSystem.MAX_READ_BYTES)
+      const result = yield* ReadToolFileSystem.read(
+        {
+          ...fs,
+          open: (name, options) =>
+            fs.open(name, options).pipe(
+              Effect.map((opened) => ({
+                ...opened,
+                stat: opened.stat.pipe(Effect.tap(() => files.writeFileString(file, content))),
+                readAlloc: (size) => opened.readAlloc(size),
+              })),
+            ),
+        },
+        file,
+        "within-limit.txt",
+      )
+      expect(result).toMatchObject({ encoding: "utf8", content })
+    }),
+  )
+
   it.effect("fails with a typed filesystem error when a resolved file disappears", () =>
     Effect.gen(function* () {
       const { fs, directory } = yield* fixture

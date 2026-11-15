@@ -43,6 +43,15 @@ export class MalformedUtf8Error extends Schema.TaggedErrorClass<MalformedUtf8Err
   }
 }
 
+export class TextGrowthLimitError extends Schema.TaggedErrorClass<TextGrowthLimitError>()(
+  "ReadTool.TextGrowthLimitError",
+  { resource: Schema.String, maximumBytes: Schema.Number },
+) {
+  override get message() {
+    return `File grew beyond the ${this.maximumBytes} byte complete-text read limit: ${this.resource}`
+  }
+}
+
 export class OffsetOutOfRangeError extends Schema.TaggedErrorClass<OffsetOutOfRangeError>()(
   "ReadTool.OffsetOutOfRangeError",
   { offset: Schema.Number },
@@ -67,6 +76,7 @@ export type ReadError =
   | BinaryFileError
   | MediaIngestLimitError
   | MalformedUtf8Error
+  | TextGrowthLimitError
   | OffsetOutOfRangeError
   | PathKindError
   | Pdf.DecodeError
@@ -242,9 +252,13 @@ export const read = Effect.fn("ReadTool.read")(function* (
         if (binary(resource, first)) return yield* Effect.fail(new BinaryFileError({ resource }))
         const decoder = new TextDecoder("utf-8", { fatal: true })
         const text = [yield* decodeUtf8(resource, decoder, first)]
+        let total = first.length
         while (true) {
-          const chunk = yield* file.readAlloc(64 * 1024)
+          // Initial size chooses this branch; concurrent growth must not make it unbounded.
+          const chunk = yield* file.readAlloc(MAX_READ_BYTES + 1 - total)
           if (Option.isNone(chunk)) break
+          total += chunk.value.length
+          if (total > MAX_READ_BYTES) return yield* new TextGrowthLimitError({ resource, maximumBytes: MAX_READ_BYTES })
           text.push(yield* decodeChunk(resource, decoder, chunk.value))
         }
         text.push(yield* decodeUtf8(resource, decoder))
