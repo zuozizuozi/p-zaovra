@@ -946,6 +946,7 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           text: string
+          host?: SessionStoredHostState
         }
       }
     | {
@@ -956,6 +957,7 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           text: string
+          host?: SessionStoredHostState
           recovery?: SessionRecovery
         }
       }
@@ -3547,6 +3549,141 @@ export type SessionHostCompletion = {
   jobID: string
 }
 
+export type ModelCost = {
+  configured?: {
+    input: boolean
+    output: boolean
+    cacheRead: boolean
+    cacheWrite: boolean
+  }
+  tier?: {
+    type: "context"
+    size: number
+  }
+  input: number
+  output: number
+  cache: {
+    read: number
+    write: number
+  }
+}
+
+export type SessionHostState =
+  | {
+      version: 1
+      kind: "verification-decision"
+      key: string
+      decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+      gaps: Array<string>
+    }
+  | {
+      version: 1
+      kind: "stagnation-observation"
+      observation: {
+        category: string
+        error: string
+        cwd: string
+        environment?: string
+        artifact?: string
+        hypothesis?: string
+        expectedEvidence?: string
+        evidence?: string
+      }
+    }
+  | {
+      version: 1
+      kind: "delivery"
+      receipt: {
+        request: string
+        started: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        tokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+        missing: Array<string>
+        reason?: string
+        turns?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        toolCalls?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        report?: boolean
+        allowance?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        spent?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        cacheRead?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        estimatedCost?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        model?: string
+        costs?: Array<ModelCost>
+        limits?: {
+          turns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          totalTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          outputTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          durationMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          toolChecks: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      }
+    }
+  | {
+      version: 1
+      kind: "budget-closing"
+      receipt: {
+        requestID?: string
+        sourceMessageID?: string
+        deadline?: number
+        closingReserveMs?: number
+        providerDeadline?: number
+        state: "stopped_unverified"
+        cancelled: Array<string>
+        preserved: Array<string>
+      }
+    }
+  | {
+      version: 1
+      kind: "budget-checkpoint"
+    }
+  | {
+      version: 1
+      kind: "budget-notice"
+      limit: number
+    }
+  | {
+      version: 1
+      kind: "verification"
+      request?: string
+      mode: "legacy" | "evidence"
+      key?: string
+      gaps: Array<string>
+    }
+  | {
+      version: 1
+      kind: "stagnation"
+      request?: string
+      key: string
+    }
+  | {
+      version: 1
+      kind: "facts"
+      snapshot: {
+        activeMs?: number
+        remainingTokens?: number
+        remainingTokenUpperBound?: number
+        advisoryOnly?: boolean
+        sourceRequest: string
+        contextEpoch: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        requestElapsedMs: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        providerTurns: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        allowanceTurn: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        allowanceLimit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        knownTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        unreported: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        activeTimeUnknown?: boolean
+        budgetLimit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        hardDeadline?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        executionDeadline?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        advisoryDeadline?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        remainingMs?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        executableRemainingMs?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        advisoryRemainingMs?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+    }
+
+export type SessionStoredHostState = unknown | SessionHostState
+
 export type SessionRecovery = {
   id: string
   started: number
@@ -4352,6 +4489,7 @@ export type SyncEventSessionNextContextUpdated = {
       sessionID: string
       messageID: string
       text: string
+      host?: SessionStoredHostState
     }
   }
 }
@@ -4369,6 +4507,7 @@ export type SyncEventSessionNextSynthetic = {
       sessionID: string
       messageID: string
       text: string
+      host?: SessionStoredHostState
       recovery?: SessionRecovery
     }
   }
@@ -5738,6 +5877,7 @@ export type SessionMessageSynthetic = {
   turn?: string
   sessionID: string
   text: string
+  host?: SessionStoredHostState
   completion?: SessionHostCompletion
   recovery?: SessionRecovery
   type: "synthetic"
@@ -5755,6 +5895,7 @@ export type SessionMessageSystem = {
   turn?: string
   type: "system"
   text: string
+  host?: SessionStoredHostState
 }
 
 export type SessionMessageShell = {
@@ -5941,6 +6082,7 @@ export type SessionNextQualityProgress = {
     sessionID: string
     category: "continuation" | "closing" | "stagnation" | "cache" | "operation" | "recovery"
     details: unknown
+    host?: SessionStoredHostState
   }
 }
 
@@ -6158,6 +6300,7 @@ export type SessionNextContextUpdated = {
     sessionID: string
     messageID: string
     text: string
+    host?: SessionStoredHostState
   }
 }
 
@@ -6178,6 +6321,7 @@ export type SessionNextSynthetic = {
     sessionID: string
     messageID: string
     text: string
+    host?: SessionStoredHostState
     recovery?: SessionRecovery
   }
 }
@@ -6714,6 +6858,120 @@ export type SessionNextRevertCommitted = {
   }
 }
 
+export type SessionHostState1 =
+  | {
+      version: 1
+      kind: "verification-decision"
+      key: string
+      decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+      gaps: Array<string>
+    }
+  | {
+      version: 1
+      kind: "stagnation-observation"
+      observation: {
+        category: string
+        error: string
+        cwd: string
+        environment?: string
+        artifact?: string
+        hypothesis?: string
+        expectedEvidence?: string
+        evidence?: string
+      }
+    }
+  | {
+      version: 1
+      kind: "delivery"
+      receipt: {
+        request: string
+        started: number | "NaN" | "Infinity" | "-Infinity"
+        tokens: number | "NaN" | "Infinity" | "-Infinity"
+        decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+        missing: Array<string>
+        reason?: string
+        turns?: number | "NaN" | "Infinity" | "-Infinity"
+        toolCalls?: number | "NaN" | "Infinity" | "-Infinity"
+        report?: boolean
+        allowance?: number | "NaN" | "Infinity" | "-Infinity"
+        spent?: number | "NaN" | "Infinity" | "-Infinity"
+        cacheRead?: number | "NaN" | "Infinity" | "-Infinity"
+        estimatedCost?: number | "NaN" | "Infinity" | "-Infinity"
+        model?: string
+        costs?: Array<ModelCost>
+        limits?: {
+          turns: number | "NaN" | "Infinity" | "-Infinity"
+          totalTokens: number | "NaN" | "Infinity" | "-Infinity"
+          outputTokens: number | "NaN" | "Infinity" | "-Infinity"
+          durationMs: number | "NaN" | "Infinity" | "-Infinity"
+          toolChecks: number | "NaN" | "Infinity" | "-Infinity"
+        }
+      }
+    }
+  | {
+      version: 1
+      kind: "budget-closing"
+      receipt: {
+        requestID?: string
+        sourceMessageID?: string
+        deadline?: number
+        closingReserveMs?: number
+        providerDeadline?: number
+        state: "stopped_unverified"
+        cancelled: Array<string>
+        preserved: Array<string>
+      }
+    }
+  | {
+      version: 1
+      kind: "budget-checkpoint"
+    }
+  | {
+      version: 1
+      kind: "budget-notice"
+      limit: number
+    }
+  | {
+      version: 1
+      kind: "verification"
+      request?: string
+      mode: "legacy" | "evidence"
+      key?: string
+      gaps: Array<string>
+    }
+  | {
+      version: 1
+      kind: "stagnation"
+      request?: string
+      key: string
+    }
+  | {
+      version: 1
+      kind: "facts"
+      snapshot: {
+        activeMs?: number
+        remainingTokens?: number
+        remainingTokenUpperBound?: number
+        advisoryOnly?: boolean
+        sourceRequest: string
+        contextEpoch: number | "NaN" | "Infinity" | "-Infinity"
+        requestElapsedMs: number | "NaN" | "Infinity" | "-Infinity"
+        providerTurns: number | "NaN" | "Infinity" | "-Infinity"
+        allowanceTurn: number | "NaN" | "Infinity" | "-Infinity"
+        allowanceLimit?: number | "NaN" | "Infinity" | "-Infinity"
+        knownTokens: number | "NaN" | "Infinity" | "-Infinity"
+        unreported: number | "NaN" | "Infinity" | "-Infinity"
+        activeTimeUnknown?: boolean
+        budgetLimit?: number | "NaN" | "Infinity" | "-Infinity"
+        hardDeadline?: number | "NaN" | "Infinity" | "-Infinity"
+        executionDeadline?: number | "NaN" | "Infinity" | "-Infinity"
+        advisoryDeadline?: number | "NaN" | "Infinity" | "-Infinity"
+        remainingMs?: number | "NaN" | "Infinity" | "-Infinity"
+        executableRemainingMs?: number | "NaN" | "Infinity" | "-Infinity"
+        advisoryRemainingMs?: number | "NaN" | "Infinity" | "-Infinity"
+      }
+    }
+
 export type SessionOutcomeExecutionRecord3 = {
   scope: {
     cwd: string
@@ -6966,25 +7224,6 @@ export type ModelCapabilities = {
   interleavedThinking?: boolean
   input: Array<string>
   output: Array<string>
-}
-
-export type ModelCost = {
-  configured?: {
-    input: boolean
-    output: boolean
-    cacheRead: boolean
-    cacheWrite: boolean
-  }
-  tier?: {
-    type: "context"
-    size: number
-  }
-  input: number
-  output: number
-  cache: {
-    read: number
-    write: number
-  }
 }
 
 export type ModelV2Info = {
@@ -9468,6 +9707,120 @@ export type EventSessionNextPromptCancelled = {
   }
 }
 
+export type SessionHostState2 =
+  | {
+      version: 1
+      kind: "verification-decision"
+      key: string
+      decision: "pending" | "sealed" | "unverified" | "review" | "finish"
+      gaps: Array<string>
+    }
+  | {
+      version: 1
+      kind: "stagnation-observation"
+      observation: {
+        category: string
+        error: string
+        cwd: string
+        environment?: string
+        artifact?: string
+        hypothesis?: string
+        expectedEvidence?: string
+        evidence?: string
+      }
+    }
+  | {
+      version: 1
+      kind: "delivery"
+      receipt: {
+        request: string
+        started: number | "NaN" | "Infinity" | "-Infinity"
+        tokens: number | "NaN" | "Infinity" | "-Infinity"
+        decision: "review" | "repair" | "consumed" | "finished" | "unverified"
+        missing: Array<string>
+        reason?: string
+        turns?: number | "NaN" | "Infinity" | "-Infinity"
+        toolCalls?: number | "NaN" | "Infinity" | "-Infinity"
+        report?: boolean
+        allowance?: number | "NaN" | "Infinity" | "-Infinity"
+        spent?: number | "NaN" | "Infinity" | "-Infinity"
+        cacheRead?: number | "NaN" | "Infinity" | "-Infinity"
+        estimatedCost?: number | "NaN" | "Infinity" | "-Infinity"
+        model?: string
+        costs?: Array<ModelCost>
+        limits?: {
+          turns: number | "NaN" | "Infinity" | "-Infinity"
+          totalTokens: number | "NaN" | "Infinity" | "-Infinity"
+          outputTokens: number | "NaN" | "Infinity" | "-Infinity"
+          durationMs: number | "NaN" | "Infinity" | "-Infinity"
+          toolChecks: number | "NaN" | "Infinity" | "-Infinity"
+        }
+      }
+    }
+  | {
+      version: 1
+      kind: "budget-closing"
+      receipt: {
+        requestID?: string
+        sourceMessageID?: string
+        deadline?: number
+        closingReserveMs?: number
+        providerDeadline?: number
+        state: "stopped_unverified"
+        cancelled: Array<string>
+        preserved: Array<string>
+      }
+    }
+  | {
+      version: 1
+      kind: "budget-checkpoint"
+    }
+  | {
+      version: 1
+      kind: "budget-notice"
+      limit: number
+    }
+  | {
+      version: 1
+      kind: "verification"
+      request?: string
+      mode: "legacy" | "evidence"
+      key?: string
+      gaps: Array<string>
+    }
+  | {
+      version: 1
+      kind: "stagnation"
+      request?: string
+      key: string
+    }
+  | {
+      version: 1
+      kind: "facts"
+      snapshot: {
+        activeMs?: number
+        remainingTokens?: number
+        remainingTokenUpperBound?: number
+        advisoryOnly?: boolean
+        sourceRequest: string
+        contextEpoch: number | "NaN" | "Infinity" | "-Infinity"
+        requestElapsedMs: number | "NaN" | "Infinity" | "-Infinity"
+        providerTurns: number | "NaN" | "Infinity" | "-Infinity"
+        allowanceTurn: number | "NaN" | "Infinity" | "-Infinity"
+        allowanceLimit?: number | "NaN" | "Infinity" | "-Infinity"
+        knownTokens: number | "NaN" | "Infinity" | "-Infinity"
+        unreported: number | "NaN" | "Infinity" | "-Infinity"
+        activeTimeUnknown?: boolean
+        budgetLimit?: number | "NaN" | "Infinity" | "-Infinity"
+        hardDeadline?: number | "NaN" | "Infinity" | "-Infinity"
+        executionDeadline?: number | "NaN" | "Infinity" | "-Infinity"
+        advisoryDeadline?: number | "NaN" | "Infinity" | "-Infinity"
+        remainingMs?: number | "NaN" | "Infinity" | "-Infinity"
+        executableRemainingMs?: number | "NaN" | "Infinity" | "-Infinity"
+        advisoryRemainingMs?: number | "NaN" | "Infinity" | "-Infinity"
+      }
+    }
+
 export type EventSessionNextContextUpdated = {
   id: string
   type: "session.next.context.updated"
@@ -9476,6 +9829,7 @@ export type EventSessionNextContextUpdated = {
     sessionID: string
     messageID: string
     text: string
+    host?: SessionStoredHostState
   }
 }
 
@@ -9487,6 +9841,7 @@ export type EventSessionNextSynthetic = {
     sessionID: string
     messageID: string
     text: string
+    host?: SessionStoredHostState
     recovery?: SessionRecovery
   }
 }

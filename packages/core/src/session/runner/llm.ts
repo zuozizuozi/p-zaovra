@@ -5,6 +5,7 @@ import { PreviewProcess } from "../../preview-process"
 import { BackgroundJob } from "../../background-job"
 import { EventTable } from "../../event/sql"
 import { SessionBudget } from "../budget"
+import { SessionHost } from "../host-state"
 import { ClosingReview } from "../closing-review"
 import { SessionRetry } from "../retry"
 import { ProviderDiagnostics } from "../provider-diagnostics"
@@ -286,7 +287,7 @@ const layer = Layer.effect(
 
     const readBudget = Effect.fn("SessionRunner.readBudget")(function* (sessionID: SessionSchema.ID) {
       return {
-        ...(yield* SessionBudget.read(db, config, sessionID)),
+        ...(yield* SessionBudget.read(db, config, sessionID, true)),
         ...(yield* SessionBudget.requestPolicy(db, sessionID)),
       }
     })
@@ -301,38 +302,30 @@ const layer = Layer.effect(
       providerDeadline?: number,
     ) {
       const limits = yield* readBudget(session.id)
+      if (limits.hostRows?.some((row) => SessionHost.invalid(row.data)))
+        return yield* new LLMError({
+          module: "SessionRunner",
+          method: "validateHost",
+          reason: new InvalidRequestReason({
+            message:
+              "会话的宿主持久状态损坏或版本不受支持；请升级或修复状态后再执行。会话仍可读取和导出，未发送模型或工具请求。",
+          }),
+        })
       const limit = limits.limit
       const deadline = SessionBudget.deadline(session, limits.duration, limits.policy?.deadline)
       const duration = deadline === undefined ? undefined : deadline - DateTime.toEpochMillis(session.time.created)
       const elapsed = (yield* Clock.currentTimeMillis) - DateTime.toEpochMillis(session.time.created)
-      const previousProviderStop =
+      const hostRows = (limits.hostRows ?? []).filter((row) => row.type === "session.next.synthetic.1")
+      const receipt =
         limits.policy?.closingReserveMs === undefined
           ? undefined
-          : yield* db
-              .select({ text: sql<string>`json_extract(${EventTable.data}, '$.text')` })
-              .from(EventTable)
-              .where(
-                and(
-                  eq(EventTable.aggregate_id, session.id),
-                  eq(
-                    EventTable.type,
-                    EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
-                  ),
-                  sql`substr(json_extract(${EventTable.data}, '$.text'), 1, 19) = '[host.run.closing] '`,
-                  sql`instr(json_extract(${EventTable.data}, '$.text'), ${":" + limits.requestID + " "}) > 0`,
-                ),
-              )
-              .orderBy(desc(EventTable.seq))
-              .limit(1)
-              .get()
-              .pipe(Effect.orDie)
-      const receipt = previousProviderStop
-        ? Option.getOrUndefined(
-            Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
-              previousProviderStop.text.slice(previousProviderStop.text.indexOf(" ", 19) + 1),
-            ),
-          )
-        : undefined
+          : hostRows
+              .flatMap((row) => {
+                if (typeof row.data.text !== "string") return []
+                const value = SessionHost.closing(row.data as { text: string; host?: unknown }, limits.requestID)
+                return value === undefined ? [] : [value]
+              })
+              .at(0)
       const stop = SessionBudget.stopState({
         receipt,
         deadline,
@@ -353,28 +346,17 @@ const layer = Layer.effect(
       const checkpoint = notify ? AccuracyGuidance.checkpoint({ elapsed, limit: duration }) : undefined
       if (checkpoint) {
         // Durable events survive compaction and explicit resumes: one notice per Session.
-        const previous = yield* db
-          .select({ seq: EventTable.seq })
-          .from(EventTable)
-          .where(
-            and(
-              eq(EventTable.aggregate_id, session.id),
-              eq(
-                EventTable.type,
-                EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
-              ),
-              sql`json_extract(${EventTable.data}, '$.text') like 'Wall-clock delivery checkpoint:%'`,
-            ),
-          )
-          .limit(1)
-          .get()
-          .pipe(Effect.orDie)
+        const previous = hostRows.some(
+          (row) =>
+            typeof row.data.text === "string" && SessionHost.checkpoint(row.data as { text: string; host?: unknown }),
+        )
         if (!previous)
           yield* events.publish(SessionEvent.Synthetic, {
             sessionID: session.id,
             timestamp: yield* DateTime.now,
             messageID: SessionMessage.ID.create(),
             text: checkpoint,
+            host: { version: 1, kind: "budget-checkpoint" },
           })
       }
       if (limit === undefined && !expired && !reserveReached) return
@@ -387,11 +369,12 @@ const layer = Layer.effect(
       if (phase === "notice") {
         const prefix = `Session token budget notice (limit=${limit}):`
         const context = yield* getContext(session.id)
-        if (context.some((message) => message.type === "synthetic" && message.text.startsWith(prefix))) return
+        if (context.some((message) => message.type === "synthetic" && SessionHost.notice(message, limit))) return
         yield* events.publish(SessionEvent.Synthetic, {
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
+          host: { version: 1, kind: "budget-notice", limit: limit! },
           text: `${prefix} ${usage.total} tokens have been reported; ${limit! - usage.total} remain before the next-request stop. This includes cached input and reasoning.${usage.unreported ? ` ${usage.unreported} requests have incomplete usage, so actual consumption may be higher.` : ""} This is a session-wide limit, not a per-message allowance. Focus on the requested deliverable and its remaining checks; avoid optional expansion and repeated environment setup. Do not skip necessary validation, manufacture passing reports, or claim unfinished work is complete. If the remaining budget cannot cover completion, preserve the current work and state the specific remaining steps.`,
         })
         return
@@ -421,28 +404,17 @@ const layer = Layer.effect(
       })
       const prefix = `[host.run.closing] ${source ?? limits.requestID}:${limits.requestID} `
       if (closing) {
-        const previous = yield* db
-          .select({ text: sql<string>`json_extract(${EventTable.data}, '$.text')` })
-          .from(EventTable)
-          .where(
-            and(
-              eq(EventTable.aggregate_id, session.id),
-              eq(
-                EventTable.type,
-                EventV2.versionedType(SessionEvent.Synthetic.type, SessionEvent.Synthetic.durable?.version ?? 1),
-              ),
-              sql`substr(json_extract(${EventTable.data}, '$.text'), 1, ${prefix.length}) = ${prefix}`,
-            ),
-          )
-          .orderBy(desc(EventTable.seq))
-          .limit(1)
-          .get()
-          .pipe(Effect.orDie)
-        const recorded = previous
-          ? Option.getOrUndefined(
-              Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(previous.text.slice(prefix.length)),
+        const recorded = hostRows
+          .flatMap((row) => {
+            if (typeof row.data.text !== "string") return []
+            const value = SessionHost.closing(
+              row.data as { text: string; host?: unknown },
+              limits.requestID,
+              source ?? limits.requestID,
             )
-          : undefined
+            return value === undefined ? [] : [value]
+          })
+          .at(0)
         // Renewed budgets need their own receipt; a previous window cannot seal this one.
         if (
           recorded !== null &&
@@ -453,27 +425,26 @@ const layer = Layer.effect(
           recorded.closingReserveMs === limits.policy?.closingReserveMs
         )
           return phase
+        const closingReceipt = {
+          requestID: limits.requestID,
+          sourceMessageID: source,
+          deadline,
+          closingReserveMs: limits.policy?.closingReserveMs,
+          ...(providerAt === undefined ? {} : { providerDeadline: providerAt }),
+          state: "stopped_unverified",
+          cancelled: cancelled.map((job) => job.id),
+          preserved: jobs
+            .filter(
+              (job) => job.status === "running" && job.metadata?.sessionID === session.id && !cancelled.includes(job),
+            )
+            .map((job) => job.id),
+        } as const
         yield* events.publish(SessionEvent.Synthetic, {
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text:
-            prefix +
-            JSON.stringify({
-              requestID: limits.requestID,
-              sourceMessageID: source,
-              deadline,
-              closingReserveMs: limits.policy?.closingReserveMs,
-              ...(providerAt === undefined ? {} : { providerDeadline: providerAt }),
-              state: "stopped_unverified",
-              cancelled: cancelled.map((job) => job.id),
-              preserved: jobs
-                .filter(
-                  (job) =>
-                    job.status === "running" && job.metadata?.sessionID === session.id && !cancelled.includes(job),
-                )
-                .map((job) => job.id),
-            }),
+          host: { version: 1, kind: "budget-closing", receipt: closingReceipt },
+          text: prefix + JSON.stringify(closingReceipt),
         })
       }
       const message =
@@ -972,14 +943,12 @@ const layer = Layer.effect(
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text:
-            DeliveryContract.prefix +
-            JSON.stringify({
-              ...deliveryReceipt,
-              decision: "unverified",
-              reason: "wall-clock budget exhausted",
-              missing: [...deliveryReceipt!.missing, "unverified: repair wall-clock budget exhausted"],
-            }),
+          ...SessionHost.delivery({
+            ...deliveryReceipt!,
+            decision: "unverified",
+            reason: "wall-clock budget exhausted",
+            missing: [...deliveryReceipt!.missing, "unverified: repair wall-clock budget exhausted"],
+          }),
         })
         return { needsContinuation: false, step: currentStep }
       }
@@ -1022,7 +991,7 @@ const layer = Layer.effect(
               verificationHistory.findLastIndex((message) => message.type === "user"),
             ),
           )
-          .some((message) => message.type === "synthetic" && message.text.startsWith("Verification closing review:"))
+          .some((message) => message.type === "synthetic" && SessionHost.verification(message))
       const evidence = reviewing
         ? yield* Effect.gen(function* () {
             const history = verificationHistory
@@ -1088,8 +1057,11 @@ const layer = Layer.effect(
           factsInput,
           context.findLast(
             (message): message is SessionMessage.System =>
-              message.type === "system" && message.text.startsWith("Current task facts"),
-          )?.text,
+              message.type === "system" &&
+              (message.host !== undefined
+                ? SessionHost.read(message)?.kind === "facts"
+                : message.text.startsWith("Current task facts")),
+          ),
         )
           ? SessionProgress.facts(factsInput)
           : undefined
@@ -1201,14 +1173,12 @@ const layer = Layer.effect(
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text:
-            DeliveryContract.prefix +
-            JSON.stringify({
-              ...deliveryReceipt,
-              decision: "unverified",
-              reason: "repair token allowance exhausted or model changed",
-              missing: [...deliveryReceipt.missing, "unverified: repair budget exhausted"],
-            }),
+          ...SessionHost.delivery({
+            ...deliveryReceipt!,
+            decision: "unverified",
+            reason: "repair token allowance exhausted or model changed",
+            missing: [...deliveryReceipt.missing, "unverified: repair budget exhausted"],
+          }),
         })
         return { needsContinuation: false, step: currentStep }
       }
@@ -1271,9 +1241,11 @@ const layer = Layer.effect(
           sessionID: session.id,
           timestamp: yield* DateTime.now,
           messageID: SessionMessage.ID.create(),
-          text:
-            DeliveryContract.prefix +
-            JSON.stringify({ ...deliveryReceipt, turns: (deliveryReceipt.turns ?? 0) + 1, decision: "consumed" }),
+          ...SessionHost.delivery({
+            ...deliveryReceipt!,
+            turns: (deliveryReceipt.turns ?? 0) + 1,
+            decision: "consumed",
+          }),
         })
       yield* SessionOwnership.check
       // Once sent, host observations are part of the conversation prefix. Keep
@@ -1296,6 +1268,9 @@ const layer = Layer.effect(
                     timestamp: yield* DateTime.now,
                     messageID: SessionMessage.ID.create(),
                     text,
+                    ...(text === progressFacts && factsInput
+                      ? { host: { version: 1, kind: "facts", snapshot: SessionProgress.snapshot(factsInput) } as const }
+                      : {}),
                   })
                 }),
             )
@@ -2120,10 +2095,7 @@ const layer = Layer.effect(
                   .where(
                     and(
                       eq(EventTable.aggregate_id, session.id),
-                      eq(EventTable.type, "session.next.quality.progress.1"),
-                      sql`json_extract(${EventTable.data}, '$.category') = 'stagnation'`,
-                      sql`json_extract(${EventTable.data}, '$.details.diagnosticKey') = ${diagnosis.prefix}`,
-                      sql`json_extract(${EventTable.data}, '$.details.intervention') = 1`,
+                      sql`(( ${EventTable.type} = 'session.next.synthetic.1' AND json_extract(${EventTable.data}, '$.host.kind') = 'stagnation' AND json_extract(${EventTable.data}, '$.host.key') = ${diagnosis.key} AND json_extract(${EventTable.data}, '$.host.request') IS ${messages.findLast((message) => message.type === "user")?.id ?? null}) OR (${EventTable.type} = 'session.next.quality.progress.1' AND json_type(${EventTable.data}, '$.host') IS NULL AND json_extract(${EventTable.data}, '$.category') = 'stagnation' AND json_extract(${EventTable.data}, '$.details.diagnosticKey') = ${diagnosis.prefix} AND json_extract(${EventTable.data}, '$.details.intervention') = 1))`,
                     ),
                   )
                   .limit(1)
@@ -2135,17 +2107,29 @@ const layer = Layer.effect(
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
                   text: diagnosis.text,
+                  host: {
+                    version: 1,
+                    kind: "stagnation",
+                    request: messages.findLast((message) => message.type === "user")?.id,
+                    key: diagnosis.key,
+                  },
                 })
               const observation = Object.fromEntries(
                 Object.entries(current).filter((entry) => entry[1] !== undefined),
               ) as Record<string, string>
-              yield* SessionProgress.record(events, session.id, "stagnation", {
-                callID: part.id,
-                observation,
-                ...SessionProgress.observe(previous, current),
-                intervention: Boolean(diagnosis.key && !reminded),
-                ...(diagnosis.key ? { diagnosticKey: diagnosis.prefix } : {}),
-              })
+              yield* SessionProgress.record(
+                events,
+                session.id,
+                "stagnation",
+                {
+                  callID: part.id,
+                  observation,
+                  ...SessionProgress.observe(previous, current),
+                  intervention: Boolean(diagnosis.key && !reminded),
+                  ...(diagnosis.key ? { diagnosticKey: diagnosis.prefix } : {}),
+                },
+                { version: 1, kind: "stagnation-observation", observation: current },
+              )
             }
           }
           if (
@@ -2279,25 +2263,23 @@ const layer = Layer.effect(
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
-                  text:
-                    DeliveryContract.prefix +
-                    JSON.stringify({
-                      request: requirements.sourceMessageID,
-                      started: deliveryReceipt?.started ?? (yield* Clock.currentTimeMillis),
-                      tokens: estimate.output,
-                      decision: decision.decision,
-                      missing: decision.missing,
-                      reason: decision.reason,
-                      turns,
-                      toolCalls,
-                      report: decision.report,
-                      allowance,
-                      spent,
-                      cacheRead: current.cacheRead,
-                      estimatedCost: estimate.estimatedCost,
-                      model: deliveryReceipt?.model ?? SessionOutputRecovery.identity(model),
-                      costs: deliveryReceipt?.costs ?? model.pricing?.cost ?? [],
-                    }),
+                  ...SessionHost.delivery({
+                    request: requirements.sourceMessageID!,
+                    started: deliveryReceipt?.started ?? (yield* Clock.currentTimeMillis),
+                    tokens: estimate.output,
+                    decision: decision.decision,
+                    missing: decision.missing,
+                    reason: decision.reason,
+                    turns,
+                    toolCalls,
+                    report: decision.report,
+                    allowance,
+                    spent,
+                    cacheRead: current.cacheRead,
+                    estimatedCost: estimate.estimatedCost,
+                    model: deliveryReceipt?.model ?? SessionOutputRecovery.identity(model),
+                    costs: deliveryReceipt?.costs ?? model.pricing?.cost ?? [],
+                  }),
                 })
                 needsContinuation = decision.continuing
               }
@@ -2321,7 +2303,10 @@ const layer = Layer.effect(
                 .select({ data: EventTable.data })
                 .from(EventTable)
                 .where(
-                  and(eq(EventTable.aggregate_id, session.id), eq(EventTable.type, "session.next.quality.progress.1")),
+                  and(
+                    eq(EventTable.aggregate_id, session.id),
+                    sql`${EventTable.type} IN ('session.next.quality.progress.1', 'session.next.synthetic.1')`,
+                  ),
                 )
                 .all()
                 .pipe(Effect.orDie)
@@ -2333,28 +2318,42 @@ const layer = Layer.effect(
                 evidence.pending,
                 previous,
               )
-              yield* SessionProgress.record(events, session.id, "closing", {
-                key,
-                decision: review.decision,
-                reason:
-                  review.decision === "pending"
-                    ? "waiting"
-                    : review.decision === "unverified"
-                      ? "blocked"
-                      : "candidate-complete",
-                pending: evidence.pending,
-                gaps: review.gaps,
-                missing: outcome.missing,
-                requirements: SessionOutcome.requested(messages).entries.map((item) => ({
-                  id: item.id,
-                  sourceMessageID: item.sourceMessageID,
-                })),
-              })
+              yield* SessionProgress.record(
+                events,
+                session.id,
+                "closing",
+                {
+                  key,
+                  decision: review.decision,
+                  reason:
+                    review.decision === "pending"
+                      ? "waiting"
+                      : review.decision === "unverified"
+                        ? "blocked"
+                        : "candidate-complete",
+                  pending: evidence.pending,
+                  gaps: review.gaps,
+                  missing: outcome.missing,
+                  requirements: SessionOutcome.requested(messages).entries.map((item) => ({
+                    id: item.id,
+                    sourceMessageID: item.sourceMessageID,
+                  })),
+                },
+                { version: 1, kind: "verification-decision", key, decision: review.decision, gaps: review.gaps },
+              )
               if (review.decision === "review" && !outcome.outcomeUnknown) {
                 yield* events.publish(SessionEvent.Synthetic, {
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
+                  host: {
+                    version: 1,
+                    kind: "verification",
+                    mode: "evidence",
+                    request: SessionOutcome.requested(messages).sourceMessageID,
+                    key,
+                    gaps: review.gaps,
+                  },
                   text: ClosingReview.evidencePrompt(
                     key,
                     outcome,
@@ -2437,6 +2436,13 @@ const layer = Layer.effect(
                   sessionID: session.id,
                   timestamp: yield* DateTime.now,
                   messageID: SessionMessage.ID.create(),
+                  host: {
+                    version: 1,
+                    kind: "verification",
+                    mode: "legacy",
+                    request: SessionOutcome.requested(messages).sourceMessageID,
+                    gaps: [],
+                  },
                   text: ClosingReview.legacyPrompt(messages, outcome, quality?.independent_review === true),
                 })
                 needsContinuation = true
@@ -2720,14 +2726,12 @@ const layer = Layer.effect(
                 sessionID,
                 timestamp: yield* DateTime.now,
                 messageID: SessionMessage.ID.create(),
-                text:
-                  DeliveryContract.prefix +
-                  JSON.stringify({
-                    ...consumed,
-                    decision: "unverified",
-                    reason: "wall-clock budget exhausted",
-                    missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
-                  }),
+                ...SessionHost.delivery({
+                  ...consumed,
+                  decision: "unverified",
+                  reason: "wall-clock budget exhausted",
+                  missing: [...consumed.missing, "unverified: repair wall-clock budget exhausted"],
+                }),
               })
             }),
           ),
@@ -2896,7 +2900,7 @@ const layer = Layer.effect(
                 ? "pending-queue"
                 : needsContinuation && !result.needsContinuation
                   ? "pending-steer"
-                  : review?.type === "synthetic" && review.text.startsWith("Verification closing review:")
+                  : review?.type === "synthetic" && SessionHost.verification(review)
                     ? "evidence-gap"
                     : result.needsContinuation
                       ? toolResults.length

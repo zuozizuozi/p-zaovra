@@ -1,4 +1,6 @@
 export * as SessionProgress from "./progress"
+import { SessionHost } from "./host-state"
+import { SessionHostState } from "@zaovra-ai/schema/session-host-state"
 
 import { DateTime, Effect, Option, Schema } from "effect"
 import { createHash } from "node:crypto"
@@ -76,31 +78,23 @@ type FactsInput = {
 }
 
 const factsPrefix = "Current task facts (host observations, not new requirements): "
-const FactsSnapshot = Schema.Struct({
-  sourceRequest: Schema.String,
-  contextEpoch: Schema.Number,
-  requestElapsedMs: Schema.Number,
-  providerTurns: Schema.Number,
-  allowanceTurn: Schema.Number,
-  allowanceLimit: Schema.optional(Schema.Number),
-  knownTokens: Schema.Number,
-  unreported: Schema.Number,
-  activeTimeUnknown: Schema.optional(Schema.Boolean),
-  budgetLimit: Schema.optional(Schema.Number),
-  hardDeadline: Schema.optional(Schema.Number),
-  executionDeadline: Schema.optional(Schema.Number),
-  advisoryDeadline: Schema.optional(Schema.Number),
-  remainingMs: Schema.optional(Schema.Number),
-  executableRemainingMs: Schema.optional(Schema.Number),
-  advisoryRemainingMs: Schema.optional(Schema.Number),
-})
+const FactsSnapshot = SessionHostState.Facts
 
 /** Throttle only future observations. Enforcement and previously sent facts are unchanged. */
-export function factsDue(input: FactsInput, previous?: string) {
-  if (input.step === 1 || !previous?.startsWith(factsPrefix)) return true
-  const decoded = Schema.decodeUnknownOption(Schema.UnknownFromJsonString.pipe(Schema.decodeTo(FactsSnapshot)))(
-    previous.slice(factsPrefix.length).split("\n", 1)[0],
-  )
+export function factsDue(input: FactsInput, previous?: string | { text: string; host?: unknown }) {
+  if (input.step === 1) return true
+  const host = typeof previous === "object" && previous.host !== undefined ? SessionHost.read(previous) : undefined
+  const text = typeof previous === "string" ? previous : previous?.text
+  const decoded =
+    typeof previous === "object" && previous.host !== undefined
+      ? host?.kind === "facts"
+        ? Option.some(host.snapshot)
+        : Option.none()
+      : text?.startsWith(factsPrefix)
+        ? Schema.decodeUnknownOption(Schema.UnknownFromJsonString.pipe(Schema.decodeTo(FactsSnapshot)))(
+            text.slice(factsPrefix.length).split("\n", 1)[0],
+          )
+        : Option.none()
   if (Option.isNone(decoded)) return true
   const prior = decoded.value
   if (
@@ -154,34 +148,7 @@ export function facts(input: FactsInput) {
     (input.advisoryDeadline !== undefined && input.advisoryDeadline - input.now <= 60_000)
   return (
     factsPrefix +
-    `${JSON.stringify({
-      sourceRequest: input.state.request,
-      contextEpoch: input.epoch ?? 0,
-      requestElapsedMs: Math.max(0, input.now - input.state.requestStarted),
-      activeMs: input.state.activeMs,
-      ...(input.state.activeTimeUnknown ? { activeTimeUnknown: true } : {}),
-      providerTurns: input.turns,
-      allowanceTurn: input.step,
-      allowanceLimit: input.limit,
-      knownTokens: input.tokens,
-      unreported: input.unreported,
-      ...(input.budget === undefined ? {} : { budgetLimit: input.budget }),
-      ...(input.deadline === undefined ? {} : { hardDeadline: input.deadline }),
-      ...(input.executionDeadline === undefined ? {} : { executionDeadline: input.executionDeadline }),
-      ...(input.advisoryDeadline === undefined ? {} : { advisoryDeadline: input.advisoryDeadline }),
-      ...(input.budget === undefined
-        ? {}
-        : input.unreported
-          ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
-          : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
-      ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
-      ...(input.executionDeadline === undefined
-        ? {}
-        : { executableRemainingMs: Math.max(0, input.executionDeadline - input.now) }),
-      ...(input.advisoryDeadline === undefined
-        ? {}
-        : { advisoryRemainingMs: Math.max(0, input.advisoryDeadline - input.now), advisoryOnly: true }),
-    })}${input.executionDeadline === undefined ? "" : "\n" + HostHints.executionFacts()}${input.advisoryDeadline === undefined ? "" : "\n" + HostHints.advisoryFacts()}${reminder ? "\n" + HostHints.gapFacts() : ""}`
+    `${JSON.stringify(snapshot(input))}${input.executionDeadline === undefined ? "" : "\n" + HostHints.executionFacts()}${input.advisoryDeadline === undefined ? "" : "\n" + HostHints.advisoryFacts()}${reminder ? "\n" + HostHints.gapFacts() : ""}`
   )
 }
 
@@ -272,7 +239,7 @@ export function reviewDecision(input: {
   pending?: boolean
   gaps?: readonly string[]
   reviewed?: readonly string[]
-}) {
+}): "pending" | "sealed" | "unverified" | "review" | "finish" {
   if (input.pending) return "pending"
   if (input.verified && input.delivered && !input.missing.length) return "sealed"
   if (input.gaps?.length && input.gaps.every((gap) => input.reviewed?.includes(gap))) return "unverified"
@@ -314,16 +281,7 @@ export function closingGaps(request: readonly unknown[], outcome: SessionOutcome
   )
 }
 
-export const FailureObservation = Schema.Struct({
-  category: Schema.String,
-  error: Schema.String,
-  cwd: Schema.String,
-  environment: Schema.optional(Schema.String),
-  artifact: Schema.optional(Schema.String),
-  hypothesis: Schema.optional(Schema.String),
-  expectedEvidence: Schema.optional(Schema.String),
-  evidence: Schema.optional(Schema.String),
-})
+export const FailureObservation = SessionHostState.Observation
 
 export type Failure = {
   category: string
@@ -520,8 +478,15 @@ export const record = Effect.fn("SessionProgress.record")(function* (
   sessionID: SessionSchema.ID,
   category: "continuation" | "closing" | "stagnation" | "cache",
   details: Schema.Json,
+  host?: SessionHostState.State,
 ) {
-  yield* events.publish(SessionEvent.QualityProgress, { sessionID, timestamp: yield* DateTime.now, category, details })
+  yield* events.publish(SessionEvent.QualityProgress, {
+    sessionID,
+    timestamp: yield* DateTime.now,
+    category,
+    details,
+    host,
+  })
 })
 
 export const recentObservations = Effect.fn("SessionProgress.recentObservations")(function* (
@@ -543,6 +508,10 @@ export const recentObservations = Effect.fn("SessionProgress.recentObservations"
     .all()
     .pipe(Effect.orDie)
   return rows.flatMap((row) => {
+    if (row.data.host !== undefined) {
+      const host = SessionHost.read(row.data)
+      return host?.kind === "stagnation-observation" ? [host.observation] : []
+    }
     const prior = row.data.category === "stagnation" ? row.data.details : undefined
     if (!prior || typeof prior !== "object" || !("observation" in prior)) return []
     const decoded = Schema.decodeUnknownOption(FailureObservation)(prior.observation)
@@ -553,4 +522,35 @@ export const recentObservations = Effect.fn("SessionProgress.recentObservations"
 // References are tokens; short IDs must not replace letters inside evidence.
 function replaceReference(text: string, id: string, value: string) {
   return text.replace(new RegExp(`(?<![\\w-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "g"), () => value)
+}
+
+export function snapshot(input: FactsInput) {
+  return {
+    sourceRequest: input.state.request,
+    contextEpoch: input.epoch ?? 0,
+    requestElapsedMs: Math.max(0, input.now - input.state.requestStarted),
+    activeMs: input.state.activeMs,
+    ...(input.state.activeTimeUnknown ? { activeTimeUnknown: true } : {}),
+    providerTurns: input.turns,
+    allowanceTurn: input.step,
+    allowanceLimit: input.limit,
+    knownTokens: input.tokens,
+    unreported: input.unreported,
+    ...(input.budget === undefined ? {} : { budgetLimit: input.budget }),
+    ...(input.deadline === undefined ? {} : { hardDeadline: input.deadline }),
+    ...(input.executionDeadline === undefined ? {} : { executionDeadline: input.executionDeadline }),
+    ...(input.advisoryDeadline === undefined ? {} : { advisoryDeadline: input.advisoryDeadline }),
+    ...(input.budget === undefined
+      ? {}
+      : input.unreported
+        ? { remainingTokenUpperBound: Math.max(0, input.budget - input.tokens) }
+        : { remainingTokens: Math.max(0, input.budget - input.tokens) }),
+    ...(input.deadline === undefined ? {} : { remainingMs: Math.max(0, input.deadline - input.now) }),
+    ...(input.executionDeadline === undefined
+      ? {}
+      : { executableRemainingMs: Math.max(0, input.executionDeadline - input.now) }),
+    ...(input.advisoryDeadline === undefined
+      ? {}
+      : { advisoryRemainingMs: Math.max(0, input.advisoryDeadline - input.now), advisoryOnly: true }),
+  }
 }

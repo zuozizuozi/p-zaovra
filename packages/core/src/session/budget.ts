@@ -1,7 +1,7 @@
 export * as SessionBudget from "./budget"
 
 import { DateTime, Effect, Option, Schema } from "effect"
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { SessionOutcome } from "@zaovra-ai/schema/session-outcome"
 import { Config } from "../config"
 import { Database } from "../database/database"
@@ -17,18 +17,26 @@ export const read = Effect.fn("SessionBudget.read")(function* (
   db: Database.Interface["db"],
   config: Config.Interface,
   sessionID: SessionSchema.ID,
+  includeHost = false,
 ) {
   const adjustments = yield* db
-    .select({ data: EventTable.data })
+    .select({ data: EventTable.data, type: EventTable.type })
     .from(EventTable)
     .where(
       and(
         eq(EventTable.aggregate_id, sessionID),
-        eq(
-          EventTable.type,
-          EventV2.versionedType(SessionEvent.Updated.type, SessionEvent.Updated.durable?.version ?? 1),
+        or(
+          and(
+            eq(
+              EventTable.type,
+              EventV2.versionedType(SessionEvent.Updated.type, SessionEvent.Updated.durable?.version ?? 1),
+            ),
+            sql`json_type(${EventTable.data}, '$.budget') = 'object'`,
+          ),
+          includeHost
+            ? sql`(${EventTable.type} = 'session.next.synthetic.1' OR (${EventTable.type} IN ('session.next.context.updated.1', 'session.next.quality.progress.1') AND json_type(${EventTable.data}, '$.host') IS NOT NULL))`
+            : undefined,
         ),
-        sql`json_type(${EventTable.data}, '$.budget') = 'object'`,
       ),
     )
     .orderBy(desc(EventTable.seq))
@@ -61,12 +69,26 @@ export const read = Effect.fn("SessionBudget.read")(function* (
   const initial = Option.getOrUndefined(
     Schema.decodeUnknownOption(SessionOutcome.BudgetUpdate)(owner?.metadata?.creationBudget),
   )
-  const updates = adjustments.map((entry) => Schema.decodeUnknownSync(SessionEvent.Updated.data)(entry.data))
+  const updates = adjustments
+    .filter(
+      (entry) =>
+        entry.type === EventV2.versionedType(SessionEvent.Updated.type, SessionEvent.Updated.durable?.version ?? 1),
+    )
+    .map((entry) => Schema.decodeUnknownSync(SessionEvent.Updated.data)(entry.data))
   const tokenUpdate = updates.find((event) => event.budgetUpdate !== "patch" || Object.hasOwn(event.budget!, "tokens"))
   const durationUpdate = updates.find(
     (event) => event.budgetUpdate !== "patch" || Object.hasOwn(event.budget!, "durationMs"),
   )
   return {
+    ...(includeHost
+      ? {
+          hostRows: adjustments.filter(
+            (entry) =>
+              entry.type !==
+              EventV2.versionedType(SessionEvent.Updated.type, SessionEvent.Updated.durable?.version ?? 1),
+          ),
+        }
+      : {}),
     limit: tokenUpdate
       ? (tokenUpdate.budget?.tokens ?? undefined)
       : initial && Object.hasOwn(initial, "tokens")

@@ -114,3 +114,33 @@ for (const independent of [false, true])
       ClosingReview.evidencePrompt("key", outcome, [], [], independent).includes(SessionProgress.independentReview),
     ).toBe(independent)
   })
+
+test("new diagnostic events cannot consume a prompt that failed to persist", () => {
+  const diagnostic = { version: 1, kind: "verification-decision", key: "current", decision: "review", gaps: [] }
+  const log = {
+    data: { category: "closing", details: { key: "current", decision: "review", gaps: [] }, host: diagnostic },
+  }
+  expect(ClosingReview.evidenceDecision(request, outcome, "current", false, [], [log]).decision).toBe("review")
+  const prompt = {
+    data: {
+      host: { version: 1, kind: "verification", mode: "evidence", key: "current", gaps: [] },
+      text: "translated",
+    },
+  }
+  expect(ClosingReview.evidenceDecision(request, outcome, "current", false, [], [log, prompt]).decision).toBe(
+    "unverified",
+  )
+  expect(ClosingReview.evidenceDecision(request, outcome, "current", false, [], [prompt, prompt]).decision).toBe(
+    "unverified",
+  )
+  expect(
+    ClosingReview.evidenceDecision(
+      request,
+      outcome,
+      "current",
+      false,
+      [],
+      [{ data: { category: "closing", details: { key: "current", decision: "review", gaps: [] } } }],
+    ).decision,
+  ).toBe("unverified")
+})
