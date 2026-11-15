@@ -245,6 +245,15 @@ test("real Recorder and memory_note tool cannot bypass pending legacy recovery",
         .run()
         .pipe(Effect.orDie)
       const captured = yield* registry.materialize()
+      yield* events.publish(SessionEvent.Tool.Called, {
+        sessionID: target,
+        assistantMessageID: toolIdentity.assistantMessageID,
+        timestamp: DateTime.makeUnsafe(1),
+        callID: "blocked-note",
+        tool: "memory_note",
+        input: { kind: "practice", text: "Do not bypass recovery" },
+        provider: { executed: false },
+      })
       const result = yield* captured.settle({
         sessionID: target,
         ...toolIdentity,

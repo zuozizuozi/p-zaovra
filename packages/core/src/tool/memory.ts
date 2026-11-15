@@ -1,6 +1,12 @@
 export * as MemoryTool from "./memory"
 
 import { Effect, Layer, Schema } from "effect"
+import { and, eq, sql } from "drizzle-orm"
+import { Database } from "../database/database"
+import { EventV2 } from "../event"
+import { EventTable } from "../event/sql"
+import { SessionEvent } from "../session/event"
+import { SessionTable } from "../session/sql"
 import { Config } from "../config"
 import { Memory } from "@zaovra-ai/schema/memory"
 import { makeLocationNode } from "../effect/app-node"
@@ -15,6 +21,7 @@ const day = (time: number) => new Date(time).toISOString().slice(0, 10)
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
+    const database = yield* Database.Service
     const tools = yield* Tools.Service
     const store = yield* MemoryStore.Service
     const tidy = yield* MemoryTidyStore.Service
@@ -74,7 +81,7 @@ const layer = Layer.effectDiscard(
       .register({
         memory_note: Tool.make({
           description:
-            "Keep one short note for later conversations in this project. Note only what a later conversation could not read from the repository: a correction the user made, why something was decided, an approach that failed and why, a step that is needed but written nowhere. One or two sentences. Do not note file locations, code structure, or progress on the current task. The note is kept as unchecked until the user or a later check confirms it; the user can see, edit and delete every note.",
+            "Keep one short note for later conversations in this project. Note only what a later conversation could not read from the repository: a correction the user made, why something was decided, an approach that failed and why, a step that is needed but written nowhere. One or two sentences. Do not note file locations, code structure, or progress on the current task. Subtasks must report suggested notes to the parent conversation instead of saving them. The note is kept as unchecked until the user or a later check confirms it; the user can see, edit and delete every note.",
           input: Schema.Struct({
             kind: Schema.Literals(["practice", "convention", "pitfall", "preference", "decision"]).annotate({
               description:
@@ -87,26 +94,74 @@ const layer = Layer.effectDiscard(
           }),
           output: Schema.Struct({ kept: Schema.Boolean, reason: Schema.optional(Schema.String) }),
           execute: (input, context) =>
-            Effect.gen(function* () {
-              if (input.text.trim().length > 400)
-                return { kept: false, reason: "Too long. Keep one fact in one or two sentences." }
-              const note = yield* store.write({
-                scope,
-                kind: input.kind,
-                text: input.text,
-                origin: "model",
-                status: "unverified",
-                verification: input.basis?.trim().slice(0, 200) || undefined,
-                sessionID: context.sessionID,
-              })
-              return note
-                ? { kept: true }
-                : {
-                    kept: false,
-                    reason:
-                      "Memory was not saved: legacy recovery may be pending, or this content was deleted. Check Memory settings; do not retry automatically.",
-                  }
-            }),
+            database.db
+              .transaction(() =>
+                Effect.gen(function* () {
+                  const session = yield* database.db
+                    .select({ parent: SessionTable.parent_id })
+                    .from(SessionTable)
+                    .where(eq(SessionTable.id, context.sessionID))
+                    .get()
+                    .pipe(Effect.orDie)
+                  if (!session || session.parent)
+                    return {
+                      kept: false,
+                      reason:
+                        "Subtasks cannot write memory. Return the suggested note and evidence to the parent conversation.",
+                    }
+                  if (input.text.trim().length > 400)
+                    return { kept: false, reason: "Too long. Keep one fact in one or two sentences." }
+                  // Resolve the host-published call, never an input-supplied sequence or a
+                  // different Session's same call ID. Old notes without seq stay readable.
+                  const source = yield* database.db
+                    .select({ seq: EventTable.seq })
+                    .from(EventTable)
+                    .where(
+                      and(
+                        eq(EventTable.aggregate_id, context.sessionID),
+                        eq(
+                          EventTable.type,
+                          EventV2.versionedType(
+                            SessionEvent.Tool.Called.type,
+                            SessionEvent.Tool.Called.durable?.version ?? 1,
+                          ),
+                        ),
+                        sql`json_extract(${EventTable.data}, '$.sessionID') = ${context.sessionID}`,
+                        sql`json_extract(${EventTable.data}, '$.assistantMessageID') = ${context.assistantMessageID}`,
+                        sql`json_extract(${EventTable.data}, '$.callID') = ${context.toolCallID}`,
+                        sql`json_extract(${EventTable.data}, '$.tool') = 'memory_note'`,
+                        sql`json_extract(${EventTable.data}, '$.input.kind') = ${input.kind}`,
+                        sql`json_extract(${EventTable.data}, '$.input.text') = ${input.text}`,
+                      ),
+                    )
+                    .get()
+                    .pipe(Effect.orDie)
+                  if (!source)
+                    return {
+                      kept: false,
+                      reason:
+                        "Memory was not saved: the original durable tool call could not be verified. Return the suggestion to the main conversation; do not invent a source or retry automatically.",
+                    }
+                  const note = yield* store.write({
+                    scope,
+                    kind: input.kind,
+                    text: input.text,
+                    origin: "model",
+                    status: "unverified",
+                    verification: input.basis?.trim().slice(0, 200) || undefined,
+                    sessionID: context.sessionID,
+                    seq: source.seq,
+                  })
+                  return note
+                    ? { kept: true }
+                    : {
+                        kept: false,
+                        reason:
+                          "Memory was not saved: legacy recovery may be pending, or this content was deleted. Check Memory settings; do not retry automatically.",
+                      }
+                }),
+              )
+              .pipe(Effect.orDie),
         }),
       })
       .pipe(Effect.orDie)
@@ -200,5 +255,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/memory",
   layer,
-  deps: [ToolRegistry.node, MemoryStore.node, MemoryTidyStore.node, Location.node, Config.node],
+  deps: [Database.node, ToolRegistry.node, MemoryStore.node, MemoryTidyStore.node, Location.node, Config.node],
 })

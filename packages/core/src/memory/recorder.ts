@@ -90,25 +90,27 @@ const layer = Layer.effectDiscard(
 
     // Commands of bash calls still running, for checks the model did not label.
     const commands = new Map<string, string>()
+    const callKey = (data: { sessionID: string; assistantMessageID: string; callID: string }) =>
+      JSON.stringify([data.sessionID, data.assistantMessageID, data.callID])
     yield* events.subscribe(SessionEvent.Tool.Called).pipe(
       Stream.runForEach((event) =>
         Effect.sync(() => {
           if (event.data.tool !== "bash" || typeof event.data.input.command !== "string") return
           if (commands.size >= 512) commands.delete(commands.keys().next().value!)
-          commands.set(event.data.callID, event.data.input.command)
+          commands.set(callKey(event.data), event.data.input.command)
         }),
       ),
       Effect.forkScoped({ startImmediately: true }),
     )
     yield* events.subscribe(SessionEvent.Tool.Failed).pipe(
-      Stream.runForEach((event) => Effect.sync(() => commands.delete(event.data.callID))),
+      Stream.runForEach((event) => Effect.sync(() => commands.delete(callKey(event.data)))),
       Effect.forkScoped({ startImmediately: true }),
     )
     yield* events.subscribe(SessionEvent.Tool.Success).pipe(
       Stream.runForEach((event) =>
         Effect.gen(function* () {
-          const command = commands.get(event.data.callID)
-          commands.delete(event.data.callID)
+          const command = commands.get(callKey(event.data))
+          commands.delete(callKey(event.data))
           const structured = event.data.structured
           const check =
             typeof structured.verification === "object" && structured.verification !== null
@@ -119,7 +121,8 @@ const layer = Layer.effectDiscard(
           const text = typeof check?.command === "string" ? check.command : command
           if (!text) return
           const row = yield* session(event.data.sessionID)
-          if (!row) return
+          // Child results are suggestions for the parent, not another memory writer.
+          if (!row || row.parent) return
           const found = practice({
             command: text,
             declared: typeof check?.kind === "string" ? check.kind : undefined,
